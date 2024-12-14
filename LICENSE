@@ -1,0 +1,121 @@
+Version 3, 29 June 2007
+
+Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+
+This version of the GNU Lesser General Public License incorporates
+the terms and conditions of version 3 of the GNU General Public
+License, supplemented by the additional permissions listed below.
+
+0. Additional Definitions.
+
+As used herein, “this License” refers to version 3 of the GNU Lesser
+General Public License, and the “GNU GPL” refers to version 3 of the GNU
+General Public License.
+
+“The Library” refers to a covered work governed by this License, other
+than an Application.
+
+“Application” is defined as any work that makes use of an interface
+provided by the Library, but which is not otherwise based on the Library.
+
+Defining an interface as “a use of an interface” is not intended to
+limit the meaning of the term “interface” as it is used in the GNU GPL.
+
+“Combined Work” is a work produced by combining or linking an
+Application with the Library.  The particular version of the Library
+with which the Combined Work was made is also called the “Linked
+Version”.
+
+The “Minimal Corresponding Source” for a Combined Work means the
+Corresponding Source for the Combined Work, excluding any source code
+for portions that, used in isolation, are based on the Application,
+and not on the Linked Version.
+
+The “Corresponding Application Code” for a Combined Work means the
+object code and/or source code for the Application, including any data
+and utility programs needed for the Combined Work to be installed and
+run correctly, but excluding the Library.
+
+1. Exception to Section 3 of the GNU GPL.
+
+You may convey a covered work that combines the Library with an
+Application (or with a modified version of the Application), and you
+must follow the terms of the GNU GPL for conveying the covered work,
+save that you may convey the Combined Work under terms of your choice
+that, taken together, effectively do not restrict modification of the
+portions of the Combined Work that constitute the Application, and
+reverse engineering for debugging such modifications, if you
+also do each of the following:
+
+a) Give prominent notice with each copy of the Combined Work that the
+   Library is used in it and that the Library and its use are
+   covered by this License.
+b) Accompany the Combined Work with a copy of the GNU GPL and this license
+   document.
+c) For a Combined Work that displays copyright notices during execution,
+   include the copyright notice for the Library among these notices, as
+   well as a reference directing the user to the copies of the GNU GPL and
+   this license document.
+d) Do one of the following:
+    0) Convey the Minimal Corresponding Source under the terms of this
+       License, and the Corresponding Application Code under terms of
+       your choice, or
+    1) Convey the Minimal Corresponding Source as a User Product, and
+       the Corresponding Application Code under terms of your choice, or
+    2) Convey the Minimal Corresponding Source as a User Product, and
+       the Corresponding Application Code as a User Product, and
+       include a prominent notice in the Combined Work that the
+       user is provided with the Minimal Corresponding Source and
+       Corresponding Application Code, and that the user can
+       recombine or relink the Application with a modified version
+       of the Linked Version to produce a modified Combined Work.
+
+2. Exception to Section 6 of the GNU GPL.
+
+You may convey a Combined Work that includes material covered under
+the GNU GPL, but which is not part of the Library, under terms of your
+choice that, taken together, effectively do not restrict modification
+of the portions of the Combined Work that are not part of the Library,
+and reverse engineering for debugging such modifications, if you
+also do each of the following:
+
+a) Give prominent notice with each copy of the Combined Work that the
+   Library is used in it and that the Library and its use are
+   covered by this License.
+b) Accompany the Combined Work with a copy of the GNU GPL and this license
+   document.
+c) For a Combined Work that displays copyright notices during execution,
+   include the copyright notice for the Library among these notices, as
+   well as a reference directing the user to the copies of the GNU GPL and
+   this license document.
+
+3. No Warranty.
+
+THERE IS NO WARRANTY FOR THE LIBRARY, TO THE EXTENT PERMITTED BY
+APPLICABLE LAW.  EXCEPT WHEN OTHERWISE STATED IN WRITING THE COPYRIGHT
+HOLDERS AND/OR OTHER PARTIES PROVIDE THE LIBRARY “AS IS” WITHOUT WARRANTY
+OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+PURPOSE.  THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF THE LIBRARY
+IS WITH YOU.  SHOULD THE LIBRARY PROVE DEFECTIVE, YOU ASSUME THE COST OF
+ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+
+4. Limitation of Liability.
+
+IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING
+WILL ANY COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS
+THE LIBRARY AS PERMITTED ABOVE, BE LIABLE TO YOU FOR DAMAGES, INCLUDING
+ANY GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF
+THE USE OR INABILITY TO USE THE LIBRARY (INCLUDING BUT NOT LIMITED TO LOSS
+OF DATA OR DATA BEING RENDERED INACCURATE OR LOSSES SUSTAINED BY YOU OR
+THIRD PARTIES OR A FAILURE OF THE LIBRARY TO OPERATE WITH ANY OTHER
+PROGRAMS), EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGES.
+
+5. Interpretation of Sections 1 and 2.
+
+If the permissions granted in sections 1 and 2 conflict with the
+conditions set forth in the GNU GPL, the permissions granted in
+sections 1 and 2 shall prevail.
