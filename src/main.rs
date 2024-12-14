@@ -99,13 +99,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.api_key = Some(key.clone());
     }
     
-    if let Some(model) = model_name {
-        config.default_model = Some(model.clone());
-    }
-    
     if let Some(provider) = provider_name {
          config.default_provider = Some(provider.clone());
     }
+
+     let model_name = match model_name {
+        Some(model) => Some(model.clone()),
+        None => config.default_model.clone(),
+    };
+    
+    if let Some(model) = model_name {
+       config.default_model = Some(model.clone());
+    }
+
 
     if list_models {
         list_available_models(&config).await?;
@@ -136,7 +142,7 @@ async fn load_config(config_path: Option<&String>) -> Result<Config, Box<dyn Err
                      map
                 },
                 api_key: None,
-                default_model: None,
+                default_model: Some("gemini-pro".to_string()),
                 default_provider: Some("openai".to_string()),
             }
         }
@@ -194,7 +200,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: C
     let (tx, mut rx): (UnboundedSender<String>, UnboundedReceiver<String>) = mpsc::unbounded_channel();
     
      let api_key = config.api_key.clone().unwrap_or("".to_string());
-    let model_name = config.default_model.clone().unwrap_or("gpt-3.5-turbo".to_string());
+    let model_name = config.default_model.clone().unwrap_or("gemini-pro".to_string());
     let provider = config.default_provider.clone().unwrap_or("openai".to_string());
     
     let provider_url = config.providers.get(&provider).map(|url| url.clone()).unwrap_or("".to_string());
@@ -262,8 +268,8 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: C
                             let tx_clone = tx.clone();
                             let api_url_clone = api_url.clone();
                             let api_key_clone = api_key.clone();
-                            let model_name_clone = model_name.clone();
-                           tokio::spawn(async move {
+                             let model_name_clone = model_name.clone();
+                            tokio::spawn(async move {
                               match stream_chat(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
                                   Ok(res) => {
                                       tx_clone.send(format!("Assistant: {}\n", res)).expect("Failed to send response");
