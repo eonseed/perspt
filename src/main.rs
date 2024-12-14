@@ -442,8 +442,8 @@ async fn send_chat_request(
     });
     log::info!("Request Payload: {}", request_payload.to_string());
 
+    let request_url = format!("{}?key={}", request_url, api_key);
     let request = client.post(request_url)
-        .header(header::AUTHORIZATION, format!("Bearer {}", api_key))
         .header(header::CONTENT_TYPE, "application/json")
         .json(&request_payload);
 
