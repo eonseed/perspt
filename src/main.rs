@@ -437,6 +437,14 @@ async fn send_chat_request(
     api_key: &str
 ) -> Result<String, String> {
     let client = Client::new();
+    log::info!("Request URL: {}", api_url);
+    log::info!("Request Payload: {}", json!({
+        "messages": [{
+            "role": "user",
+            "content": input
+        }],
+         "model": format!("models/{}", _model_name),
+    }).to_string());
     // Adjust the payload for Gemini API
     let request_payload = json!({
         "messages": [{
