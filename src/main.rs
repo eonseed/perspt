@@ -279,7 +279,6 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
                         let style = match msg.message_type {
                             MessageType::User => Span::styled(line, Style::default().fg(Color::Green)),
                             MessageType::Assistant => Span::styled(line, Style::default().fg(Color::Blue)),
-                            MessageType::System => Span::styled(line, Style::default().fg(Color::Gray)),
                             MessageType::Error => Span::styled(line, Style::default().fg(Color::Red)),
                         };
                         style
@@ -368,15 +367,23 @@ async fn handle_events(
                                 let api_url_clone = api_url.to_string();
                                 let api_key_clone = api_key.to_string();
                                 let model_name_clone = model_name.clone();
+                                let input_clone = input.clone();
+                                let mut app_clone = App {
+                                    chat_history: app.chat_history.clone(),
+                                    input_text: String::new(),
+                                    status_message: app.status_message.clone(),
+                                    config: app.config.clone(),
+                                    should_quit: app.should_quit,
+                                };
                                 tokio::spawn(async move {
-                                    match send_chat_request(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
+                                    match send_chat_request(&api_url_clone, &input_clone, &model_name_clone, &api_key_clone).await {
                                         Ok(response) => {
                                             tx_clone.send(response).expect("Failed to send response");
-                                            app.set_status("Response received successfully".to_string(), false);
+                                            app_clone.set_status("Response received successfully".to_string(), false);
                                         },
                                         Err(err) => {
                                              tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
-                                             app.set_status(err.clone(), true);
+                                             app_clone.set_status(err.clone(), true);
                                         }
                                     }
                                 });
