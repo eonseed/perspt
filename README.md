@@ -20,11 +20,11 @@
     -   `-k <API_KEY>` or `--api-key <API_KEY>`: Your secret API key to talk to the AI. Remember to keep it safe, like your favorite socks.
     -   `-m <MODEL>` or `--model-name <MODEL>`: Select the LLM model to use (e.g., `gpt-4`, `gemini-pro`). Think of it as choosing your AI's personality.
     -   `-p <PROVIDER>` or `--provider <PROVIDER>`: Choose the LLM provider (e.g., `openai`, `gemini`). Because sometimes, you just need a change of scenery.
-     -   `--list-models`: List all the models available for the selected provider. For those moments when you can't decide which AI to talk to.
+    -   `--list-models`: List all the models available for the selected provider. For those moments when you can't decide which AI to talk to.
 -   **🛡️ Graceful Error Handling:** Handles network issues, API errors, and JSON parsing like a seasoned diplomat. No meltdowns here!
 -   **🖐️ Sane Keybindings:**
     -   `Enter`: Send your thoughts to the AI and wait for its profound (or occasionally silly) reply.
-    -    `Esc`: Time to leave the tea room, or exit the chat.
+    -   `Esc`: Time to leave the tea room, or exit the chat.
     -   `Ctrl+C`: Another way to say "goodbye for now."
     -   `Ctrl+D`: Or this is another way to exit.
 
@@ -68,13 +68,19 @@ Note: Command-line options always win if there is a conflict.
 
 #### 🗣️ Basic Chat
 
-```bashtarget/release/perspt -m gpt-4 -p openai -k <YOUR_API_KEY>```
+```bash
+target/release/perspt -m gpt-4 -p openai -k <YOUR_API_KEY>
+```
 or
-```bashtarget/release/perspt --config config.json```
+```bash
+target/release/perspt --config config.json
+```
 
 #### 📜 Listing Models
 
-```bashtarget/release/perspt --list-models -p openai -k <YOUR_API_KEY>```
+```bash
+target/release/perspt --list-models -p openai -k <YOUR_API_KEY>
+```
 
 #### 🆘 Command-Line Options
 
