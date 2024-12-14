@@ -42,7 +42,6 @@ struct AppConfig {
 enum MessageType {
     User,
     Assistant,
-    System,
     Error,
 }
 
@@ -56,8 +55,6 @@ struct ChatMessage {
 enum AppEvent {
     Key(crossterm::event::KeyEvent),
     Tick,
-    ApiResponse(String),
-    ApiError(String),
 }
 
 struct App {
@@ -318,17 +315,6 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
             handle_events(&mut app, &tx, &api_url, &api_key, model_name.clone())
         ).await {
             match event {
-                AppEvent::ApiResponse(response) => {
-                   
-                    app.add_message(ChatMessage{
-                        message_type: MessageType::Assistant,
-                        content: response
-                    });
-                     app.set_status("Response received successfully".to_string(), false);
-                },
-                AppEvent::ApiError(error) => {
-                     app.set_status(error.clone(), true);
-                },
                  AppEvent::Key(key_event) => {
                     if key_event.code == KeyCode::Esc {
                         app.should_quit = true;
@@ -386,9 +372,11 @@ async fn handle_events(
                                     match send_chat_request(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
                                         Ok(response) => {
                                             tx_clone.send(response).expect("Failed to send response");
+                                            app.set_status("Response received successfully".to_string(), false);
                                         },
                                         Err(err) => {
                                              tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
+                                             app.set_status(err.clone(), true);
                                         }
                                     }
                                 });
