@@ -162,6 +162,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(model) => model.clone(),
         None => config.default_model.clone().unwrap_or("gemini-pro".to_string()),
     };
+    let api_key = match api_key {
+        Some(key) => key.clone(),
+        None => config.api_key.clone().unwrap_or_default(),
+    };
 
     if list_models {
         list_available_models(&config).await?;
@@ -172,7 +176,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = initialize_terminal()?;
 
     // Run the UI
-    run_ui(&mut terminal, config, model_name).await?;
+    run_ui(&mut terminal, config, model_name, api_key).await?;
     Ok(())
 }
 
@@ -242,10 +246,9 @@ fn initialize_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, Box<d
     Ok(terminal)
 }
 
-async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: AppConfig, model_name: String) -> Result<(), Box<dyn Error>> {
+async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: AppConfig, model_name: String, api_key: String) -> Result<(), Box<dyn Error>> {
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let api_key = app.config.api_key.clone().unwrap_or_default();
     let provider = app.config.default_provider.clone().unwrap_or("gemini".to_string());
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
@@ -253,6 +256,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
     let api_url = format!("{}/openai/chat/completions", provider_url);
     log::info!("API URL: {}", api_url);
     log::info!("Model Name: {}", model_name);
+    log::info!("API Key: {}", api_key);
 
     loop {
         terminal.draw(|f| {
@@ -313,11 +317,11 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
             handle_events(&mut app, &tx, &api_url, &api_key, &model_name)
         ).await {
             match event {
-                 AppEvent::Key(key_event) => {
+                AppEvent::Key(key_event) => {
                     if key_event.code == KeyCode::Esc {
                         app.should_quit = true;
                     }
-                 },
+                },
                 _ => {}
             }
         }
@@ -347,7 +351,7 @@ async fn handle_events(
     app: &mut App,
     tx: &UnboundedSender<String>,
     api_url: &str,
-    api_key: &str,
+    api_key: &String,
     model_name: &String
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
