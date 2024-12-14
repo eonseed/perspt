@@ -26,12 +26,12 @@ use std::fs;
 use log::LevelFilter;
 use log4rs::{
     append::console::ConsoleAppender,
-    config::{Appender, Config, Root},
+    config::{Appender, Config as Log4rsConfig, Root},
     encode::pattern::PatternEncoder,
 };
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Config {
+#[derive(Debug, Clone)]
+struct AppConfig {
     providers: HashMap<String, String>,
     api_key: Option<String>,
     default_model: Option<String>,
@@ -64,12 +64,12 @@ struct App {
     chat_history: Vec<ChatMessage>,
     input_text: String,
     status_message: String,
-    config: Config,
+    config: AppConfig,
     should_quit: bool,
 }
 
 impl App {
-    fn new(config: Config) -> Self {
+    fn new(config: AppConfig) -> Self {
         Self {
             chat_history: Vec::new(),
             input_text: String::new(),
@@ -97,7 +97,7 @@ impl App {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Initialize logging
-    let log_config = Config::builder()
+    let log_config = Log4rsConfig::builder()
         .appender(
             Appender::builder()
                 .build("console", Box::new(ConsoleAppender::builder()
@@ -162,12 +162,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let model_name = match model_name {
-        Some(model) => Some(model.clone()),
-        None => config.default_model.clone(),
+        Some(model) => model.clone(),
+        None => config.default_model.clone().unwrap_or("gemini-pro".to_string()),
     };
-    if let Some(model) = model_name {
-        config.default_model = Some(model.clone());
-    }
 
      if list_models {
         list_available_models(&config).await?;
@@ -182,15 +179,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn load_config(config_path: Option<&String>) -> Result<Config, Box<dyn Error>> {
-    let config: Config = match config_path {
+async fn load_config(config_path: Option<&String>) -> Result<AppConfig, Box<dyn Error>> {
+    let config: AppConfig = match config_path {
         Some(path) => {
             let config_str = fs::read_to_string(path)?;
-            let config: Config = serde_json::from_str(&config_str)?;
+            let config: AppConfig = serde_json::from_str(&config_str)?;
             config
         }
         None => {
-            Config {
+            AppConfig {
                 providers: {
                     let mut map = HashMap::new();
                      map.insert("gemini".to_string(), "https://generativelanguage.googleapis.com/v1beta".to_string());
@@ -248,7 +245,7 @@ fn initialize_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, Box<d
     Ok(terminal)
 }
 
-async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: Config) -> Result<(), Box<dyn Error>> {
+async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: AppConfig) -> Result<(), Box<dyn Error>> {
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let api_key = app.config.api_key.clone().unwrap_or_default();
@@ -384,12 +381,10 @@ async fn handle_events(
                                 let tx_clone = tx.clone();
                                 let api_url_clone = api_url.to_string();
                                 let api_key_clone = api_key.to_string();
-                                let model_name_clone = model_name.to_string();
                                 tokio::spawn(async move {
-                                    match send_chat_request(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
+                                    match send_chat_request(&api_url_clone, &input, &model_name, &api_key_clone).await {
                                         Ok(response) => {
                                             tx_clone.send(response).expect("Failed to send response");
-                                            
                                         },
                                         Err(err) => {
                                              tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
