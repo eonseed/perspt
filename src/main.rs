@@ -330,7 +330,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
             if message.starts_with("Error:") {
                 app.add_message(ChatMessage {
                     message_type: MessageType::Error,
-                    content: message,
+                    content: message.clone(),
                 });
                 app.set_status(message, true);
             } else {
