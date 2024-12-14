@@ -253,7 +253,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
         .unwrap_or_default();
-    let api_url = format!("{}/openai/chat/completions", provider_url);
+    let api_url = format!("{}", provider_url);
     log::info!("API URL: {}", api_url);
     log::info!("Model Name: {}", model_name);
     log::info!("API Key: {}", api_key);
@@ -431,7 +431,8 @@ async fn send_chat_request(
     api_key: &str
 ) -> Result<String, String> {
     let client = Client::new();
-    log::info!("Request URL: {}", api_url);
+    let request_url = format!("{}/chat/completions", api_url);
+    log::info!("Request URL: {}", request_url);
     log::info!("Request Payload: {}", json!({
         "messages": [{
             "role": "user",
@@ -448,7 +449,7 @@ async fn send_chat_request(
          "model": model_name,
     });
 
-    let request = client.post(api_url)
+    let request = client.post(request_url)
         .header(header::AUTHORIZATION, format!("Bearer {}", api_key))
         .header(header::CONTENT_TYPE, "application/json")
         .json(&request_payload);
