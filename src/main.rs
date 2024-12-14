@@ -23,6 +23,12 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::fs;
+use log::LevelFilter;
+use log4rs::{
+    append::console::ConsoleAppender,
+    config::{Appender, Config, Root},
+    encode::pattern::PatternEncoder,
+};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Config {
@@ -90,6 +96,18 @@ impl App {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Initialize logging
+    let log_config = Config::builder()
+        .appender(
+            Appender::builder()
+                .build("console", Box::new(ConsoleAppender::builder()
+                    .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] - {m}\n")))
+                    .build()
+                )),
+        )
+        .build(Root::builder().appender("console").build(LevelFilter::Info))?;
+    log4rs::init_config(log_config)?;
+
     // Parse CLI arguments
     let matches = Command::new("LLM Chat CLI")
         .arg(
@@ -240,6 +258,8 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: C
         .map(|url| url.clone())
         .unwrap_or_default();
     let api_url = format!("{}/chat/completions", provider_url);
+    log::info!("API URL: {}", api_url);
+    log::info!("Model Name: {}", model_name);
 
     loop {
         terminal.draw(|f| {
@@ -347,7 +367,7 @@ async fn handle_events(
     tx: &UnboundedSender<String>,
     api_url: &str,
     api_key: &str,
-    _model_name: &str
+    model_name: &str
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
@@ -364,7 +384,7 @@ async fn handle_events(
                                 let tx_clone = tx.clone();
                                 let api_url_clone = api_url.to_string();
                                 let api_key_clone = api_key.to_string();
-                                let model_name_clone = _model_name.to_string();
+                                let model_name_clone = model_name.to_string();
                                 tokio::spawn(async move {
                                     match send_chat_request(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
                                         Ok(response) => {
@@ -423,7 +443,7 @@ async fn send_chat_request(
             "role": "user",
             "content": input
         }],
-         "model": "gemini-pro",
+         "model": format!("models/{}", _model_name),
     });
 
     let request = client.post(api_url)
@@ -435,9 +455,11 @@ async fn send_chat_request(
     match response {
         Ok(res) => {
             let status = res.status();
+            log::info!("Response Status: {}", status);
             if status.is_success() {
                 let body = res.text().await
                     .map_err(|e| format!("Error reading response: {}", e))?;
+                log::info!("Response Body: {}", body);
                 // Parse Gemini's response JSON
                 let json_val: serde_json::Value = serde_json::from_str(&body)
                     .map_err(|e| format!("Failed to parse JSON: {}", e))?;
