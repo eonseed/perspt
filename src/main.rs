@@ -246,7 +246,10 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let api_key = app.config.api_key.clone().unwrap_or_default();
-    let model_name = app.config.default_model.clone().unwrap_or("gemini-pro".to_string());
+    let model_name =  match model_name {
+        Some(model) => model,
+        None => app.config.default_model.clone().unwrap_or("gemini-pro".to_string()),
+    };
     let provider = app.config.default_provider.clone().unwrap_or("gemini".to_string());
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
