@@ -30,7 +30,7 @@ use log4rs::{
     encode::pattern::PatternEncoder,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 struct AppConfig {
     providers: HashMap<String, String>,
     api_key: Option<String>,
@@ -203,7 +203,7 @@ async fn load_config(config_path: Option<&String>) -> Result<AppConfig, Box<dyn 
     Ok(config)
 }
 
-async fn list_available_models(config: &Config) -> Result<(), Box<dyn Error>> {
+async fn list_available_models(config: &AppConfig) -> Result<(), Box<dyn Error>> {
     if let Some(provider) = &config.default_provider {
         let provider_url = config.providers.get(provider).ok_or("Invalid provider")?;
         let client = Client::new();
@@ -249,7 +249,10 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let api_key = app.config.api_key.clone().unwrap_or_default();
-    let model_name = app.config.default_model.clone().unwrap_or("gemini-pro".to_string());
+    let mut model_name = app.config.default_model.clone().unwrap_or("gemini-pro".to_string());
+    if let Some(model) = model_name {
+        model_name = model;
+    }
     let provider = app.config.default_provider.clone().unwrap_or("gemini".to_string());
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
@@ -364,7 +367,7 @@ async fn handle_events(
     tx: &UnboundedSender<String>,
     api_url: &str,
     api_key: &str,
-    model_name: &str
+    model_name: String
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
@@ -381,8 +384,9 @@ async fn handle_events(
                                 let tx_clone = tx.clone();
                                 let api_url_clone = api_url.to_string();
                                 let api_key_clone = api_key.to_string();
+                                let model_name_clone = model_name.clone();
                                 tokio::spawn(async move {
-                                    match send_chat_request(&api_url_clone, &input, &model_name, &api_key_clone).await {
+                                    match send_chat_request(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
                                         Ok(response) => {
                                             tx_clone.send(response).expect("Failed to send response");
                                         },
@@ -428,7 +432,7 @@ async fn handle_events(
 async fn send_chat_request(
     api_url: &str,
     input: &str,
-    _model_name: &str,
+    model_name: &str,
     api_key: &str
 ) -> Result<String, String> {
     let client = Client::new();
@@ -438,7 +442,7 @@ async fn send_chat_request(
             "role": "user",
             "content": input
         }],
-         "model": format!("models/{}", _model_name),
+         "model": format!("models/{}", model_name),
     }).to_string());
     // Adjust the payload for Gemini API
     let request_payload = json!({
@@ -446,7 +450,7 @@ async fn send_chat_request(
             "role": "user",
             "content": input
         }],
-         "model": format!("models/{}", _model_name),
+         "model": format!("models/{}", model_name),
     });
 
     let request = client.post(api_url)
