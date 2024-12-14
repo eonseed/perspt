@@ -431,25 +431,16 @@ async fn send_chat_request(
     api_key: &str
 ) -> Result<String, String> {
     let client = Client::new();
-    let request_url = format!("{}/chat/completions", api_url);
+    let request_url = format!("{}/models/{}:generateContent", api_url, model_name);
     log::info!("Request URL: {}", request_url);
-    log::info!("Request Payload: {}", json!({
-        "contents": [{
-            "parts": [{
-                "text": input
-            }]
-        }],
-         "model": model_name,
-    }).to_string());
-    // Adjust the payload for Gemini API
     let request_payload = json!({
         "contents": [{
             "parts": [{
                 "text": input
             }]
-        }],
-         "model": model_name,
+        }]
     });
+    log::info!("Request Payload: {}", request_payload.to_string());
 
     let request = client.post(request_url)
         .header(header::AUTHORIZATION, format!("Bearer {}", api_key))
