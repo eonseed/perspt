@@ -158,12 +158,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.default_provider = Some(provider.clone());
     }
 
-    let _model_name = match model_name {
+    let model_name = match model_name {
         Some(model) => model.clone(),
         None => config.default_model.clone().unwrap_or("gemini-pro".to_string()),
     };
 
-     if list_models {
+    if list_models {
         list_available_models(&config).await?;
         return Ok(());
     }
@@ -172,7 +172,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = initialize_terminal()?;
 
     // Run the UI
-    run_ui(&mut terminal, config).await?;
+    run_ui(&mut terminal, config, model_name).await?;
     Ok(())
 }
 
@@ -242,14 +242,10 @@ fn initialize_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, Box<d
     Ok(terminal)
 }
 
-async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: AppConfig) -> Result<(), Box<dyn Error>> {
+async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: AppConfig, model_name: String) -> Result<(), Box<dyn Error>> {
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let api_key = app.config.api_key.clone().unwrap_or_default();
-    let model_name =  match model_name {
-        Some(model) => model,
-        None => app.config.default_model.clone().unwrap_or("gemini-pro".to_string()),
-    };
     let provider = app.config.default_provider.clone().unwrap_or("gemini".to_string());
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
@@ -314,7 +310,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
         // Event handling
         if let Ok(Some(event)) = tokio::time::timeout(
             Duration::from_millis(50),
-            handle_events(&mut app, &tx, &api_url, &api_key, model_name.clone())
+            handle_events(&mut app, &tx, &api_url, &api_key, model_name)
         ).await {
             match event {
                  AppEvent::Key(key_event) => {
