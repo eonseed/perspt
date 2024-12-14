@@ -250,7 +250,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
         .unwrap_or_default();
-    let api_url = format!("{}/chat/completions", provider_url);
+    let api_url = format!("{}/openai/chat/completions", provider_url);
     log::info!("API URL: {}", api_url);
     log::info!("Model Name: {}", model_name);
 
