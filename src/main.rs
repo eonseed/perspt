@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, UnboundedSender, UnboundedReceiver};
 use crossterm::{
-    event::{self, KeyCode, KeyEventKind},
+    event::{self, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -131,7 +131,7 @@ async fn load_config(config_path: Option<&String>) -> Result<Config, Box<dyn Err
            Config {
                 providers: {
                      let mut map = HashMap::new();
-                     map.insert("gemini".to_string(), "https://generativelanguage.googleapis.com/v1beta".to_string());
+                     map.insert("gemini".to_string(), "https://generativelanguage.googleapis.com/v1beta/openai".to_string());
                      map.insert("openai".to_string(), "https://api.openai.com/v1".to_string());
                      map
                 },
@@ -157,10 +157,10 @@ async fn list_available_models(config: &Config) -> Result<(), Box<dyn Error>> {
         if response.status().is_success() {
             let body = response.text().await?;
             let json_value: serde_json::Value = serde_json::from_str(&body)?;
-            if let Some(models) = json_value["data"].as_array() {
+            if let Some(models) = json_value["models"].as_array() {
                 println!("Available models:");
                 for model in models {
-                    if let Some(id) = model["id"].as_str() {
+                    if let Some(id) = model["name"].as_str() {
                        println!("- {}", id);
                     }
                 }
@@ -253,43 +253,61 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: C
             f.render_widget(status_paragraph, layout[2]);
         }).unwrap();
 
-        if let Ok(event::Event::Key(key)) = event::read() {
+       if let Ok(event::Event::Key(key)) = event::read() {
             if key.kind == KeyEventKind::Press {
-                match key.code {
-                    KeyCode::Enter => {
-                        let input = input_text.drain(..).collect::<String>();
-                        chat_history.push(ChatMessage{message_type: MessageType::User, content: format!("User: {}\n", input)});
-                        let tx_clone = tx.clone();
-                        let api_url_clone = api_url.clone();
-                        let api_key_clone = api_key.clone();
-                        let model_name_clone = model_name.clone();
-                        tokio::spawn(async move {
-                            match stream_chat(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
-                                Ok(res) => {
-                                    tx_clone.send(format!("Assistant: {}\n", res)).expect("Failed to send response");
+                  match key.code {
+                        KeyCode::Enter => {
+                            let input = input_text.drain(..).collect::<String>();
+                            chat_history.push(ChatMessage{message_type: MessageType::User, content: format!("User: {}\n", input)});
+                            let tx_clone = tx.clone();
+                            let api_url_clone = api_url.clone();
+                            let api_key_clone = api_key.clone();
+                            let model_name_clone = model_name.clone();
+                           tokio::spawn(async move {
+                              match stream_chat(&api_url_clone, &input, &model_name_clone, &api_key_clone).await {
+                                  Ok(res) => {
+                                      tx_clone.send(format!("Assistant: {}\n", res)).expect("Failed to send response");
+                                  },
+                                  Err(err) => {
+                                       tx_clone.send(format!("Error: {}\n", err)).expect("Failed to send error");
+                                  },
+                              }
+                          });
+                      },
+                      KeyCode::Char(c) => {
+                         if key.modifiers.contains(KeyModifiers::CONTROL) {
+                            match c {
+                                'c' => {
+                                     disable_raw_mode().unwrap();
+                                     execute!(terminal.backend_mut(), LeaveAlternateScreen).unwrap();
+                                    terminal.show_cursor().unwrap();
+                                    break;
                                 },
-                                Err(err) => {
-                                     tx_clone.send(format!("Error: {}\n", err)).expect("Failed to send error");
-                                },
+                                'd' => {
+                                    disable_raw_mode().unwrap();
+                                    execute!(terminal.backend_mut(), LeaveAlternateScreen).unwrap();
+                                   terminal.show_cursor().unwrap();
+                                   break;
+                               },
+                                _ => input_text.push(c),
                             }
-                        });
-                    },
-                    KeyCode::Char(c) => {
-                        input_text.push(c);
-                    },
-                    KeyCode::Backspace => {
-                        input_text.pop();
-                    }
-                    KeyCode::Esc => {
+                           } else {
+                                input_text.push(c);
+                           }
+                      },
+                     KeyCode::Backspace => {
+                         input_text.pop();
+                     },
+                     KeyCode::Esc => {
                          disable_raw_mode().unwrap();
                          execute!(terminal.backend_mut(), LeaveAlternateScreen).unwrap();
                          terminal.show_cursor().unwrap();
                          break;
-                    }
+                    },
                     _ => {}
                 }
-            }
-        }
+           }
+       }
 
         //Handle response message
         match rx.try_recv() {
