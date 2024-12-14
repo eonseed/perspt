@@ -8,7 +8,7 @@ use ratatui::{
     Terminal,
 };
 use reqwest::{Client, header};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -161,7 +161,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.default_provider = Some(provider.clone());
     }
 
-    let model_name = match model_name {
+    let _model_name = match model_name {
         Some(model) => model.clone(),
         None => config.default_model.clone().unwrap_or("gemini-pro".to_string()),
     };
@@ -249,10 +249,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     let api_key = app.config.api_key.clone().unwrap_or_default();
-    let mut model_name = app.config.default_model.clone().unwrap_or("gemini-pro".to_string());
-    if let Some(model) = model_name {
-        model_name = model;
-    }
+    let model_name = app.config.default_model.clone().unwrap_or("gemini-pro".to_string());
     let provider = app.config.default_provider.clone().unwrap_or("gemini".to_string());
     let provider_url = app.config.providers.get(&provider)
         .map(|url| url.clone())
@@ -318,7 +315,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
         // Event handling
         if let Ok(Some(event)) = tokio::time::timeout(
             Duration::from_millis(50),
-            handle_events(&mut app, &tx, &api_url, &api_key, &model_name)
+            handle_events(&mut app, &tx, &api_url, &api_key, model_name.clone())
         ).await {
             match event {
                 AppEvent::ApiResponse(response) => {
