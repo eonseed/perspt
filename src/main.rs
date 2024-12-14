@@ -434,7 +434,7 @@ async fn send_chat_request(
             "role": "user",
             "content": input
         }],
-         "model": format!("models/{}", model_name),
+         "model": model_name,
     }).to_string());
     // Adjust the payload for Gemini API
     let request_payload = json!({
@@ -442,7 +442,7 @@ async fn send_chat_request(
             "role": "user",
             "content": input
         }],
-         "model": format!("models/{}", model_name),
+         "model": model_name,
     });
 
     let request = client.post(api_url)
