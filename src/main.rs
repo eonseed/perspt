@@ -310,7 +310,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
         // Event handling
         if let Ok(Some(event)) = tokio::time::timeout(
             Duration::from_millis(50),
-            handle_events(&mut app, &tx, &api_url, &api_key, model_name)
+            handle_events(&mut app, &tx, &api_url, &api_key, &model_name)
         ).await {
             match event {
                  AppEvent::Key(key_event) => {
@@ -348,7 +348,7 @@ async fn handle_events(
     tx: &UnboundedSender<String>,
     api_url: &str,
     api_key: &str,
-    model_name: String
+    model_name: &String
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
