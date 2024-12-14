@@ -25,7 +25,7 @@ use crossterm::{
 use std::fs;
 use log::LevelFilter;
 use log4rs::{
-    append::console::ConsoleAppender,
+    append::file::FileAppender,
     config::{Appender, Config as Log4rsConfig, Root},
     encode::pattern::PatternEncoder,
 };
@@ -94,15 +94,14 @@ impl App {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Initialize logging
+    let logfile = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] - {m}\n")))
+        .build("perspt.log")?;
+
     let log_config = Log4rsConfig::builder()
-        .appender(
-            Appender::builder()
-                .build("console", Box::new(ConsoleAppender::builder()
-                    .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] - {m}\n")))
-                    .build()
-                )),
-        )
-        .build(Root::builder().appender("console").build(LevelFilter::Info))?;
+        .appender(Appender::builder().build("logfile", Box::new(logfile)))
+        .build(Root::builder().appender("logfile").build(LevelFilter::Info))?;
+
     log4rs::init_config(log_config)?;
 
     // Parse CLI arguments
@@ -327,11 +326,20 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
         }
 
         // Check for response messages
-        while let Ok(message) = rx.try_recv() {
-            app.add_message(ChatMessage{
-                message_type: MessageType::Assistant,
-                content: message
-            });
+         while let Ok(message) = rx.try_recv() {
+            if message.starts_with("Error:") {
+                app.add_message(ChatMessage {
+                    message_type: MessageType::Error,
+                    content: message,
+                });
+                app.set_status(message, true);
+            } else {
+                app.add_message(ChatMessage {
+                    message_type: MessageType::Assistant,
+                    content: message,
+                });
+                app.set_status("Response received successfully".to_string(), false);
+            }
         }
 
         if app.should_quit {
@@ -371,22 +379,18 @@ async fn handle_events(
                                 let api_key_clone = api_key.to_string();
                                 let model_name_clone = model_name.clone();
                                 let input_clone = input.clone();
-                                let mut app_clone = App {
-                                    chat_history: app.chat_history.clone(),
-                                    input_text: String::new(),
-                                    status_message: app.status_message.clone(),
-                                    config: app.config.clone(),
-                                    should_quit: app.should_quit,
-                                };
+                                let input_clone = input.clone();
+                                let tx_clone = tx.clone();
+                                let api_url_clone = api_url.to_string();
+                                let api_key_clone = api_key.to_string();
+                                let model_name_clone = model_name.clone();
                                 tokio::spawn(async move {
                                     match send_chat_request(&api_url_clone, &input_clone, &model_name_clone, &api_key_clone).await {
                                         Ok(response) => {
                                             tx_clone.send(response).expect("Failed to send response");
-                                            app_clone.set_status("Response received successfully".to_string(), false);
                                         },
                                         Err(err) => {
                                              tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
-                                             app_clone.set_status(err.clone(), true);
                                         }
                                     }
                                 });
