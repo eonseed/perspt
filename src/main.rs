@@ -434,17 +434,19 @@ async fn send_chat_request(
     let request_url = format!("{}/chat/completions", api_url);
     log::info!("Request URL: {}", request_url);
     log::info!("Request Payload: {}", json!({
-        "messages": [{
-            "role": "user",
-            "content": input
+        "contents": [{
+            "parts": [{
+                "text": input
+            }]
         }],
          "model": model_name,
     }).to_string());
     // Adjust the payload for Gemini API
     let request_payload = json!({
-        "messages": [{
-            "role": "user",
-            "content": input
+        "contents": [{
+            "parts": [{
+                "text": input
+            }]
         }],
          "model": model_name,
     });
@@ -468,10 +470,12 @@ async fn send_chat_request(
                     .map_err(|e| format!("Failed to parse JSON: {}", e))?;
                 // Extract text from Gemini's response structure
                  let content = json_val
-                    .get("choices")
-                    .and_then(|choices| choices.get(0))
-                    .and_then(|choice| choice.get("message"))
-                    .and_then(|message| message.get("content"))
+                    .get("candidates")
+                    .and_then(|candidates| candidates.get(0))
+                    .and_then(|candidate| candidate.get("content"))
+                     .and_then(|content| content.get("parts"))
+                     .and_then(|parts| parts.get(0))
+                     .and_then(|part| part.get("text"))
                     .and_then(|text| text.as_str())
                     .unwrap_or("No response")
                     .to_string();
