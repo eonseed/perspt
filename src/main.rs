@@ -536,7 +536,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 };
                 current_line.push(Span::styled(" ".to_string(), style));
             }
-           pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading { .. }) => {
+           pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading( _ )) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
