@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
 };
-use reqwest::{Client, header, Response, Error as ReqwestError};
+use reqwest::{Client, header, Response};
 use serde::Deserialize;
 use serde_json::json;
 use std::{
@@ -29,8 +29,8 @@ use log4rs::{
     config::{Appender, Config as Log4rsConfig, Root},
     encode::pattern::PatternEncoder,
 };
-use pulldown_cmark::{Parser, Options, html};
-use futures::{StreamExt, stream};
+use pulldown_cmark::{Parser, Options, HeadingLevel};
+use futures::StreamExt;
 
 #[derive(Debug, Clone, Deserialize)]
 struct AppConfig {
@@ -514,12 +514,12 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
             pulldown_cmark::Event::Code(code) => {
                  current_line.push(Span::styled(code.to_string(), Style::default().fg(Color::Cyan)));
             }
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Paragraph(_)) => {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Paragraph) => {
                 if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph(_)) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -529,14 +529,14 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
                 let style = match level {
-                    1 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    2 => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                    3 => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    pulldown_cmark::HeadingLevel::H1 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    pulldown_cmark::HeadingLevel::H2 => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    pulldown_cmark::HeadingLevel::H3 => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                     _ => Style::default().add_modifier(Modifier::BOLD),
                 };
                 current_line.push(Span::styled(" ".to_string(), style));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading { .. }) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -557,7 +557,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 }
                 current_line.push(Span::raw("- ".to_string()));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Item) => {
+           pulldown_cmark::Event::End(pulldown_cmark::Tag::Item) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -568,7 +568,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 }
                 current_line.push(Span::styled("> ".to_string(), Style::default().fg(Color::Gray)));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote(_)) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
