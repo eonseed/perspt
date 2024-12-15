@@ -2,7 +2,7 @@ use clap::{Arg, Command};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
+    style::{Color, Style, Modifier},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
@@ -40,7 +40,7 @@ struct AppConfig {
     default_provider: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum MessageType {
     User,
     Assistant,
@@ -385,13 +385,8 @@ async fn handle_events(
                                 let api_key_clone = api_key.to_string();
                                 let model_name_clone = model_name.clone();
                                 let input_clone = input.clone();
-                                let input_clone = input.clone();
-                                let tx_clone = tx.clone();
-                                let api_url_clone = api_url.to_string();
-                                let api_key_clone = api_key.to_string();
-                                let model_name_clone = model_name.clone();
                                 tokio::spawn(async move {
-                                    match send_chat_request(&api_url_clone, &input_clone, &model_name_clone, &api_key_clone).await {
+                                    match send_chat_request(&api_url_clone, &input_clone, &model_name_clone, &api_key_clone, &tx_clone).await {
                                         Ok(response) => {
                                             tx_clone.send(response).expect("Failed to send response");
                                         },
@@ -438,12 +433,13 @@ async fn send_chat_request(
     api_url: &str,
     input: &str,
     model_name: &str,
-    api_key: &str
+    api_key: &str,
+    tx: &UnboundedSender<String>
 ) -> Result<String, String> {
     let client = Client::new();
     let request_url = format!("{}/models/{}:generateContent", api_url, model_name);
     log::info!("Request URL: {}", request_url);
-    let request_payload = json!({
+     let request_payload = json!({
         "contents": [{
             "parts": [{
                 "text": input
@@ -463,7 +459,7 @@ async fn send_chat_request(
             let status = res.status();
             log::info!("Response Status: {}", status);
             if status.is_success() {
-                stream_response(res).await
+                stream_response(res, tx).await
             } else {
                 let body = res.text().await.unwrap_or_else(|_| "No body".to_string());
                 Err(format!("API Error: {} {}", status, body))
@@ -473,8 +469,9 @@ async fn send_chat_request(
     }
 }
 
-async fn stream_response(response: Response, tx: &UnboundedSender<String>) -> Result<(), String> {
+async fn stream_response(response: Response, tx: &UnboundedSender<String>) -> Result<String, String> {
     let mut stream = response.bytes_stream();
+    let mut full_content = String::new();
     while let Some(item) = stream.next().await {
         match item {
             Ok(bytes) => {
@@ -492,14 +489,15 @@ async fn stream_response(response: Response, tx: &UnboundedSender<String>) -> Re
                     .and_then(|text| text.as_str())
                     .unwrap_or("No response")
                     .to_string();
-                tx.send(content).expect("Failed to send response chunk");
+                 full_content.push_str(&content);
+                 tx.send(content).expect("Failed to send response chunk");
             }
             Err(e) => {
                 return Err(format!("Error reading response: {}", e));
             }
         }
     }
-    Ok(())
+    Ok(full_content)
 }
 
 
@@ -516,17 +514,17 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
             pulldown_cmark::Event::Code(code) => {
                  current_line.push(Span::styled(code.to_string(), Style::default().fg(Color::Cyan)));
             }
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Paragraph) => {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Paragraph(_)) => {
                 if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Heading(level, _, _)) => {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Heading { level, .. }) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -538,7 +536,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 };
                 current_line.push(Span::styled(" ".to_string(), style));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading(_, _, _)) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading { .. }) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -564,13 +562,13 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-            pulldown_cmark::Event::Start(pulldown_cmark::Tag::BlockQuote) => {
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::BlockQuote(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
                 current_line.push(Span::styled("> ".to_string(), Style::default().fg(Color::Gray)));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
