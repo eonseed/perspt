@@ -4,14 +4,16 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Borders, Paragraph, Wrap, Scrollbar, ScrollbarState},
     Terminal,
+    prelude::Margin,
 };
 use std::{borrow::Cow, io};
 use crate::config::AppConfig;
 use tokio::sync::mpsc;
 use pulldown_cmark::{Parser, Options, Tag, Event as MarkdownEvent, TagEnd};
 use crossterm::event::KeyEvent;
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageType {
@@ -38,21 +40,26 @@ pub struct App {
     pub status_message: String,
     pub config: AppConfig,
     pub should_quit: bool,
+    scroll_state: ScrollbarState,
+    scroll_position: usize,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Self {
-        Self {
+         Self {
             chat_history: Vec::new(),
             input_text: String::new(),
             status_message: "Welcome to LLM Chat CLI".to_string(),
             config,
             should_quit: false,
+            scroll_state: ScrollbarState::default(),
+            scroll_position: 0,
         }
     }
 
     pub fn add_message(&mut self, message: ChatMessage) {
         self.chat_history.push(message);
+        self.scroll_to_bottom();
     }
 
      pub fn set_status(&mut self, message: String, is_error: bool) {
@@ -63,6 +70,41 @@ impl App {
                 content: vec![Line::from(Span::styled(format!("System Error: {}", self.status_message), Style::default().fg(Color::Red)))],
             });
         }
+    }
+
+    pub fn scroll_up(&mut self) {
+         if self.scroll_position > 0 {
+            self.scroll_position -= 1;
+             self.update_scroll_state();
+        }
+    }
+
+    pub fn scroll_down(&mut self) {
+        if self.scroll_position < self.max_scroll() {
+            self.scroll_position += 1;
+             self.update_scroll_state();
+        }
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_position = self.max_scroll();
+        self.update_scroll_state();
+    }
+    fn max_scroll(&self) -> usize {
+         let content_height: usize = self.chat_history
+            .iter()
+            .flat_map(|msg| msg.content.iter())
+            .count();
+        if content_height > 0 {
+            content_height - 1
+        } else {
+            0
+        }
+    }
+
+     fn update_scroll_state(&mut self){
+        let max_scroll = self.max_scroll();
+        self.scroll_state = self.scroll_state.content_length(max_scroll).position(self.scroll_position);
     }
 }
 
@@ -96,16 +138,29 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
             let chat_block = Block::default()
                 .title("Chat History")
                 .borders(Borders::ALL);
-            let chat_lines: Vec<Line> = app.chat_history
+             let chat_lines: Vec<Line> = app.chat_history
                 .iter()
                 .flat_map(|msg| {
                     msg.content.clone()
                 })
-                .collect();
-            let chat_paragraph = Paragraph::new(chat_lines)
+               .collect();
+             let chat_paragraph = Paragraph::new(chat_lines)
                 .block(chat_block)
-                .wrap(Wrap { trim: true });
+                .wrap(Wrap { trim: true })
+                .scroll((app.scroll_position as u16, 0));
+
+
             f.render_widget(chat_paragraph, layout[0]);
+             // Scrollbar
+            let scrollbar = Scrollbar::default()
+                .orientation(ratatui::widgets::ScrollbarOrientation::VerticalRight);
+             f.render_stateful_widget(
+                scrollbar,
+                layout[0].inner(&Margin {horizontal: 0, vertical: 0}),
+                &mut app.scroll_state,
+            );
+
+
 
             // User input
             let input_block = Block::default()
@@ -129,14 +184,24 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
              crate::handle_events(&mut app, &tx, &api_url, &api_key, &model_name)
         ).await {
             match event {
-                AppEvent::Key(key_event) => {
-                    if key_event.code == crossterm::event::KeyCode::Esc {
-                        app.should_quit = true;
+                 AppEvent::Key(key_event) => {
+                    match key_event.code {
+                        crossterm::event::KeyCode::Esc => {
+                            app.should_quit = true;
+                        },
+                        crossterm::event::KeyCode::Up => {
+                            app.scroll_up();
+                        }
+                        crossterm::event::KeyCode::Down => {
+                            app.scroll_down();
+                        }
+                        _=> {}
                     }
                 },
                 _ => {}
             }
         }
+
 
         // Check for response messages
         while let Ok(message) = rx.try_recv() {
@@ -148,7 +213,7 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
                 });
                 app.set_status(message, true);
             } else {
-                if let Some(last_message) = app.chat_history.last_mut() {
+                 if let Some(last_message) = app.chat_history.last_mut() {
                      if last_message.message_type == MessageType::Assistant {
                          let styled_text = markdown_to_lines(&message);
                          last_message.content.extend(styled_text);
@@ -168,7 +233,7 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
                 }
                  app.set_status("Response received successfully".to_string(), false);
             }
-        }
+         }
 
 
         if app.should_quit {
@@ -276,4 +341,3 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     }
     lines
 }
-
