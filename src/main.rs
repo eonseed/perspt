@@ -320,18 +320,31 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
         // Check for response messages
          while let Ok(message) = rx.try_recv() {
             if message.starts_with("Error:") {
-                app.add_message(ChatMessage {
+                 app.add_message(ChatMessage {
                     message_type: MessageType::Error,
                     content: vec![Line::from(Span::styled(message.clone(), Style::default().fg(Color::Red)))],
                 });
                 app.set_status(message, true);
             } else {
-                let styled_text = markdown_to_lines(&message);
-                app.add_message(ChatMessage {
-                    message_type: MessageType::Assistant,
-                    content: styled_text,
-                });
-                app.set_status("Response received successfully".to_string(), false);
+                if let Some(last_message) = app.chat_history.last_mut() {
+                     if last_message.message_type == MessageType::Assistant {
+                        let styled_text = markdown_to_lines(&message);
+                        last_message.content.extend(styled_text);
+                     } else {
+                         let styled_text = markdown_to_lines(&message);
+                         app.add_message(ChatMessage {
+                            message_type: MessageType::Assistant,
+                            content: styled_text,
+                        });
+                     }
+                } else {
+                    let styled_text = markdown_to_lines(&message);
+                    app.add_message(ChatMessage {
+                        message_type: MessageType::Assistant,
+                        content: styled_text,
+                    });
+                }
+                 app.set_status("Response received successfully".to_string(), false);
             }
         }
 
@@ -460,44 +473,124 @@ async fn send_chat_request(
     }
 }
 
-async fn stream_response(response: Response) -> Result<String, String> {
+async fn stream_response(response: Response, tx: &UnboundedSender<String>) -> Result<(), String> {
     let mut stream = response.bytes_stream();
-    let mut full_response = String::new();
     while let Some(item) = stream.next().await {
         match item {
             Ok(bytes) => {
                 let chunk = String::from_utf8_lossy(&bytes).to_string();
-                 let json_val: serde_json::Value = serde_json::from_str(&chunk)
+                log::info!("Response Chunk: {}", chunk);
+                let json_val: serde_json::Value = serde_json::from_str(&chunk)
                     .map_err(|e| format!("Failed to parse JSON: {}", e))?;
-                 let content = json_val
+                let content = json_val
                     .get("candidates")
                     .and_then(|candidates| candidates.get(0))
                     .and_then(|candidate| candidate.get("content"))
-                     .and_then(|content| content.get("parts"))
-                     .and_then(|parts| parts.get(0))
-                     .and_then(|part| part.get("text"))
+                    .and_then(|content| content.get("parts"))
+                    .and_then(|parts| parts.get(0))
+                    .and_then(|part| part.get("text"))
                     .and_then(|text| text.as_str())
                     .unwrap_or("No response")
                     .to_string();
-                full_response.push_str(&content);
+                tx.send(content).expect("Failed to send response chunk");
             }
             Err(e) => {
                 return Err(format!("Error reading response: {}", e));
             }
         }
     }
-    Ok(full_response)
+    Ok(())
 }
 
 
 fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     let parser = Parser::new_ext(markdown, Options::all());
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-
     let mut lines = Vec::new();
-    for line in html_output.lines() {
-        lines.push(Line::from(vec![Span::raw(line.to_string())]));
+    let mut current_line = Vec::new();
+
+    for event in parser {
+        match event {
+            pulldown_cmark::Event::Text(text) => {
+                current_line.push(Span::raw(text.to_string()));
+            }
+            pulldown_cmark::Event::Code(code) => {
+                 current_line.push(Span::styled(code.to_string(), Style::default().fg(Color::Cyan)));
+            }
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Paragraph) => {
+                if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Heading(level, _, _)) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+                let style = match level {
+                    1 => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    2 => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                    3 => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    _ => Style::default().add_modifier(Modifier::BOLD),
+                };
+                current_line.push(Span::styled(" ".to_string(), style));
+            }
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading(_, _, _)) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::List(_)) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+             pulldown_cmark::Event::End(pulldown_cmark::Tag::List(_)) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::Item) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+                current_line.push(Span::raw("- ".to_string()));
+            }
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Item) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::Start(pulldown_cmark::Tag::BlockQuote) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+                current_line.push(Span::styled("> ".to_string(), Style::default().fg(Color::Gray)));
+            }
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote) => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::HardBreak => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+            }
+            pulldown_cmark::Event::Rule => {
+                 if !current_line.is_empty() {
+                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                }
+                lines.push(Line::from(Span::raw("---".to_string())));
+            }
+            _ => {}
+        }
+    }
+     if !current_line.is_empty() {
+        lines.push(Line::from(current_line));
     }
     lines
 }
