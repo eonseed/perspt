@@ -276,3 +276,4 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     }
     lines
 }
+
