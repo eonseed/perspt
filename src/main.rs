@@ -29,7 +29,7 @@ use log4rs::{
     config::{Appender, Config as Log4rsConfig, Root},
     encode::pattern::PatternEncoder,
 };
-use pulldown_cmark::{Parser, Options, HeadingLevel};
+use pulldown_cmark::{Parser, Options};
 use futures::StreamExt;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -519,7 +519,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -536,7 +536,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 };
                 current_line.push(Span::styled(" ".to_string(), style));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading(_)) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Heading { .. }) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -546,7 +546,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-             pulldown_cmark::Event::End(pulldown_cmark::Tag::List) => {
+             pulldown_cmark::Event::End(pulldown_cmark::Tag::List(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
@@ -568,7 +568,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 }
                 current_line.push(Span::styled("> ".to_string(), Style::default().fg(Color::Gray)));
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::BlockQuote(_)) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
