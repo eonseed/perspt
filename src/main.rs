@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Terminal,
 };
-use reqwest::{Client, header};
+use reqwest::{Client, header, Response, Error as ReqwestError};
 use serde::Deserialize;
 use serde_json::json;
 use std::{
@@ -29,6 +29,8 @@ use log4rs::{
     config::{Appender, Config as Log4rsConfig, Root},
     encode::pattern::PatternEncoder,
 };
+use pulldown_cmark::{Parser, Options, html};
+use futures::{StreamExt, stream};
 
 #[derive(Debug, Clone, Deserialize)]
 struct AppConfig {
@@ -48,7 +50,7 @@ enum MessageType {
 #[derive(Debug, Clone)]
 struct ChatMessage {
     message_type: MessageType,
-    content: String,
+    content: Vec<Line<'static>>,
 }
 
 #[derive(Debug)]
@@ -85,7 +87,7 @@ impl App {
         if is_error {
             self.add_message(ChatMessage {
                 message_type: MessageType::Error,
-                content: format!("System Error: {}", self.status_message),
+                content: vec![Line::from(Span::styled(format!("System Error: {}", self.status_message), Style::default().fg(Color::Red)))],
             });
         }
     }
@@ -276,17 +278,7 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
             let chat_lines: Vec<Line> = app.chat_history
                 .iter()
                 .flat_map(|msg| {
-                    let mut lines = Vec::new();
-                    let spans: Vec<Span> = msg.content.lines().map(|line|{
-                        let style = match msg.message_type {
-                            MessageType::User => Span::styled(line, Style::default().fg(Color::Green)),
-                            MessageType::Assistant => Span::styled(line, Style::default().fg(Color::Blue)),
-                            MessageType::Error => Span::styled(line, Style::default().fg(Color::Red)),
-                        };
-                        style
-                    }).collect();
-                    lines.push(Line::from(spans));
-                    lines
+                    msg.content.clone()
                 })
                 .collect();
             let chat_paragraph = Paragraph::new(chat_lines)
@@ -330,13 +322,14 @@ async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: A
             if message.starts_with("Error:") {
                 app.add_message(ChatMessage {
                     message_type: MessageType::Error,
-                    content: message.clone(),
+                    content: vec![Line::from(Span::styled(message.clone(), Style::default().fg(Color::Red)))],
                 });
                 app.set_status(message, true);
             } else {
+                let styled_text = markdown_to_lines(&message);
                 app.add_message(ChatMessage {
                     message_type: MessageType::Assistant,
-                    content: message,
+                    content: styled_text,
                 });
                 app.set_status("Response received successfully".to_string(), false);
             }
@@ -372,7 +365,7 @@ async fn handle_events(
                                 let input = app.input_text.clone();
                                 app.add_message(ChatMessage{
                                     message_type: MessageType::User,
-                                    content: input.clone()
+                                    content: vec![Line::from(Span::styled(input.clone(), Style::default().fg(Color::Green)))]
                                 });
                                 let tx_clone = tx.clone();
                                 let api_url_clone = api_url.to_string();
@@ -457,13 +450,25 @@ async fn send_chat_request(
             let status = res.status();
             log::info!("Response Status: {}", status);
             if status.is_success() {
-                let body = res.text().await
-                    .map_err(|e| format!("Error reading response: {}", e))?;
-                log::info!("Response Body: {}", body);
-                // Parse Gemini's response JSON
-                let json_val: serde_json::Value = serde_json::from_str(&body)
+                stream_response(res).await
+            } else {
+                let body = res.text().await.unwrap_or_else(|_| "No body".to_string());
+                Err(format!("API Error: {} {}", status, body))
+            }
+        },
+        Err(e) => Err(format!("Failed to send request: {}", e)),
+    }
+}
+
+async fn stream_response(response: Response) -> Result<String, String> {
+    let mut stream = response.bytes_stream();
+    let mut full_response = String::new();
+    while let Some(item) = stream.next().await {
+        match item {
+            Ok(bytes) => {
+                let chunk = String::from_utf8_lossy(&bytes).to_string();
+                 let json_val: serde_json::Value = serde_json::from_str(&chunk)
                     .map_err(|e| format!("Failed to parse JSON: {}", e))?;
-                // Extract text from Gemini's response structure
                  let content = json_val
                     .get("candidates")
                     .and_then(|candidates| candidates.get(0))
@@ -474,13 +479,25 @@ async fn send_chat_request(
                     .and_then(|text| text.as_str())
                     .unwrap_or("No response")
                     .to_string();
-
-                Ok(content)
-            } else {
-                let body = res.text().await.unwrap_or_else(|_| "No body".to_string());
-                Err(format!("API Error: {} {}", status, body))
+                full_response.push_str(&content);
             }
-        },
-        Err(e) => Err(format!("Failed to send request: {}", e)),
+            Err(e) => {
+                return Err(format!("Error reading response: {}", e));
+            }
+        }
     }
+    Ok(full_response)
+}
+
+
+fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
+    let parser = Parser::new_ext(markdown, Options::all());
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+
+    let mut lines = Vec::new();
+    for line in html_output.lines() {
+        lines.push(Line::from(vec![Span::raw(line.to_string())]));
+    }
+    lines
 }
