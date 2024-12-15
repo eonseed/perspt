@@ -519,7 +519,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
             }
-            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph(_)) => {
+            pulldown_cmark::Event::End(pulldown_cmark::Tag::Paragraph) => {
                  if !current_line.is_empty() {
                     lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
                 }
