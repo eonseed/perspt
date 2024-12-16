@@ -19,6 +19,7 @@ use crate::config::AppConfig;
 use crate::openai::OpenAIProvider;
 use crate::gemini::GeminiProvider;
 use tokio::sync::watch;
+use std::sync::{Arc, Mutex};
 
 mod ui;
 mod config;
@@ -177,6 +178,7 @@ pub async fn handle_events(
                                 let provider = app.config.default_provider.clone().unwrap_or_else(|| "gemini".to_string());
 
                                 let (interrupt_tx, interrupt_rx) = watch::channel(false);
+                                let app_clone = Arc::new(Mutex::new(app.clone()));
                                 tokio::spawn(async move {
                                     match provider.as_str() {
                                         "openai" => {
@@ -201,6 +203,7 @@ pub async fn handle_events(
                                             tx_clone.send(format!("Error: Unsupported provider: {}", provider)).expect("Failed to send error");
                                         }
                                     }
+                                    let mut app = app_clone.lock().unwrap();
                                     app.is_processing = false;
                                 });
                                 app.input_text.clear();
