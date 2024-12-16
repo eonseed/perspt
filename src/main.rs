@@ -18,7 +18,7 @@ use crate::ui::AppEvent;
 use crate::config::AppConfig;
 use crate::openai::OpenAIProvider;
 use crate::gemini::GeminiProvider;
-
+use tokio::sync::watch;
 
 mod ui;
 mod config;
@@ -174,11 +174,12 @@ pub async fn handle_events(
                                 let input_clone = input.clone();
                                  let provider = app.config.default_provider.clone().unwrap_or_else(|| "gemini".to_string());
 
+                                let (interrupt_tx, interrupt_rx) = watch::channel(false);
                                 tokio::spawn(async move {
                                     match provider.as_str() {
                                         "openai" => {
                                               let openai_provider = OpenAIProvider::new(&api_url_clone, api_key_clone);
-                                              match openai_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone).await {
+                                              match openai_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone, &interrupt_rx).await {
                                                     Ok(_) => {},
                                                     Err(err) => {
                                                         tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
@@ -187,7 +188,7 @@ pub async fn handle_events(
                                         }
                                         "gemini" => {
                                              let gemini_provider = GeminiProvider::new(&api_url_clone, api_key_clone);
-                                             match gemini_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone).await {
+                                             match gemini_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone, &interrupt_rx).await {
                                                     Ok(_) => {},
                                                     Err(err) => {
                                                           tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
@@ -209,6 +210,7 @@ pub async fn handle_events(
                                 match c {
                                     'c' => {
                                         if app.is_processing {
+                                            interrupt_tx.send(true).expect("Failed to send interrupt signal");
                                             app.is_processing = false;
                                             return Some(AppEvent::Tick);
                                         } else {
