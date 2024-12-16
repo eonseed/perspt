@@ -1,4 +1,3 @@
-// src/main.rs
 use clap::{Arg, Command};
 use std::error::Error;
 use std::io;
@@ -161,7 +160,8 @@ pub async fn handle_events(
                 if key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Enter => {
-                            if !app.input_text.is_empty() {
+                            if !app.input_text.is_empty() && !app.is_processing {
+                                app.is_processing = true;
                                 let input = app.input_text.clone();
                                  app.add_message(ui::ChatMessage{
                                     message_type: ui::MessageType::User,
@@ -198,7 +198,7 @@ pub async fn handle_events(
                                             tx_clone.send(format!("Error: Unsupported provider: {}", provider)).expect("Failed to send error");
                                         }
                                     }
-
+                                    app.is_processing = false;
                                 });
                                 app.input_text.clear();
                                 return Some(AppEvent::Tick);
@@ -207,7 +207,16 @@ pub async fn handle_events(
                         KeyCode::Char(c) => {
                             if key.modifiers.contains(KeyModifiers::CONTROL) {
                                 match c {
-                                    'c' | 'd' => {
+                                    'c' => {
+                                        if app.is_processing {
+                                            app.is_processing = false;
+                                            return Some(AppEvent::Tick);
+                                        } else {
+                                            app.should_quit = true;
+                                            return Some(AppEvent::Tick);
+                                        }
+                                    },
+                                    'd' => {
                                         app.should_quit = true;
                                         return Some(AppEvent::Tick);
                                     },

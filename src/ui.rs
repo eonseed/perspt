@@ -1,4 +1,3 @@
-// src/ui.rs
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
@@ -40,6 +39,7 @@ pub struct App {
     pub status_message: String,
     pub config: AppConfig,
     pub should_quit: bool,
+    pub is_processing: bool,
     scroll_state: ScrollbarState,
     scroll_position: usize,
 }
@@ -52,6 +52,7 @@ impl App {
             status_message: "Welcome to LLM Chat CLI".to_string(),
             config,
             should_quit: false,
+            is_processing: false,
             scroll_state: ScrollbarState::default(),
             scroll_position: 0,
         }
@@ -166,8 +167,13 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
             let input_block = Block::default()
                 .title("Input")
                 .borders(Borders::ALL);
-            let input_paragraph = Paragraph::new(app.input_text.clone())
-                .block(input_block);
+            let input_paragraph = if app.is_processing {
+                Paragraph::new("...".to_string())
+                    .block(input_block)
+            } else {
+                Paragraph::new(app.input_text.clone())
+                    .block(input_block)
+            };
             f.render_widget(input_paragraph, layout[1]);
 
             // Status message

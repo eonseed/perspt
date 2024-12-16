@@ -1,9 +1,9 @@
-// src/gemini.rs
 use reqwest::{Client, header, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 use futures::StreamExt;
 use serde_json::Value;
+use tokio::sync::watch;
 
 #[derive(Debug)]
 pub struct GeminiProvider<'a> {
@@ -71,7 +71,8 @@ impl<'a> GeminiProvider<'a> {
         &self,
         input: &str,
         model_name: &str,
-        tx: &UnboundedSender<String>
+        tx: &UnboundedSender<String>,
+        interrupt_rx: &watch::Receiver<bool>
     ) -> Result<(), String> {
          let client = Client::new();
         let request_url = format!("{}models/{}:streamGenerateContent?alt=sse", self.api_url, model_name);
@@ -101,7 +102,7 @@ impl<'a> GeminiProvider<'a> {
                 let status = res.status();
                 log::info!("Response Status: {}", status);
                 if status.is_success() {
-                    self.stream_response(res, tx).await
+                    self.stream_response(res, tx, interrupt_rx).await
                 } else {
                     let body = res.text().await.unwrap_or_else(|_| "No body".to_string());
                     Err(format!("API Error: {} {}", status, body))
@@ -112,9 +113,12 @@ impl<'a> GeminiProvider<'a> {
     }
 
 
-   async fn stream_response(&self, response: Response, tx: &UnboundedSender<String>) -> Result<(), String> {
+   async fn stream_response(&self, response: Response, tx: &UnboundedSender<String>, interrupt_rx: &watch::Receiver<bool>) -> Result<(), String> {
         let mut stream = response.bytes_stream();
         while let Some(item) = stream.next().await {
+            if *interrupt_rx.borrow() {
+                return Err("Request interrupted by user".to_string());
+            }
             match item {
                 Ok(bytes) => {
                     let chunk = String::from_utf8_lossy(&bytes).to_string();
