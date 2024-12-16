@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .value_name("PROVIDER")
                 .help("Choose the LLM provider (e.g., openai, gemini)"),
         )
-         .arg(
+        .arg(
             Arg::new("list-models")
                 .long("list-models")
                 .help("List available models for the provider")
@@ -89,10 +89,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.api_key = Some(key.clone());
     }
     if let Some(provider) = provider_name {
-         config.default_provider = Some(provider.clone());
+        config.default_provider = Some(provider.clone());
     }
     let model_name = match model_name {
-         Some(model) => model.clone(),
+        Some(model) => model.clone(),
         None => config.default_model.clone().unwrap_or("gemini-pro".to_string()),
     };
     let api_key = match &config.api_key {
@@ -109,22 +109,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = initialize_terminal()?;
 
     // Run the UI
-    run_ui(&mut terminal, config, model_name, api_key).await?;
+    let (interrupt_tx, interrupt_rx) = watch::channel(false);
+    run_ui(&mut terminal, config, model_name, api_key, interrupt_tx.clone(), interrupt_rx.clone()).await?;
     Ok(())
 }
 
 async fn list_available_models(config: &AppConfig) -> Result<(), Box<dyn Error>> {
     if let Some(provider) = &config.default_provider {
         let provider_url = config.providers.get(provider).ok_or("Invalid provider")?;
-         let api_key = config.api_key.as_ref().ok_or("API Key is required")?;
+        let api_key = config.api_key.as_ref().ok_or("API Key is required")?;
         match provider.as_str() {
             "openai" => {
                 let openai_provider = OpenAIProvider::new(provider_url, api_key.clone());
                 openai_provider.list_models().await?;
             }
             "gemini" => {
-                 let gemini_provider = GeminiProvider::new(provider_url, api_key.clone());
-                 gemini_provider.list_models().await?;
+                let gemini_provider = GeminiProvider::new(provider_url, api_key.clone());
+                gemini_provider.list_models().await?;
             }
             _ => {
                 println!("Unsupported provider: {}", provider);
@@ -135,7 +136,6 @@ async fn list_available_models(config: &AppConfig) -> Result<(), Box<dyn Error>>
     }
     Ok(())
 }
-
 
 fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>, Box<dyn Error>> {
     enable_raw_mode()?;
@@ -152,7 +152,9 @@ pub async fn handle_events(
     tx: &mpsc::UnboundedSender<String>,
     api_url: &str,
     api_key: &String,
-    model_name: &String
+    model_name: &String,
+    interrupt_tx: &watch::Sender<bool>,
+    interrupt_rx: &watch::Receiver<bool>
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
@@ -163,7 +165,7 @@ pub async fn handle_events(
                             if !app.input_text.is_empty() && !app.is_processing {
                                 app.is_processing = true;
                                 let input = app.input_text.clone();
-                                 app.add_message(ui::ChatMessage{
+                                app.add_message(ui::ChatMessage{
                                     message_type: ui::MessageType::User,
                                     content: vec![ratatui::text::Line::from(ratatui::text::Span::styled(std::borrow::Cow::from(input.clone()), ratatui::style::Style::default().fg(ratatui::style::Color::Green)))]
                                 });
@@ -172,28 +174,28 @@ pub async fn handle_events(
                                 let api_key_clone = api_key.clone();
                                 let model_name_clone = model_name.clone();
                                 let input_clone = input.clone();
-                                 let provider = app.config.default_provider.clone().unwrap_or_else(|| "gemini".to_string());
+                                let provider = app.config.default_provider.clone().unwrap_or_else(|| "gemini".to_string());
 
                                 let (interrupt_tx, interrupt_rx) = watch::channel(false);
                                 tokio::spawn(async move {
                                     match provider.as_str() {
                                         "openai" => {
-                                              let openai_provider = OpenAIProvider::new(&api_url_clone, api_key_clone);
-                                              match openai_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone, &interrupt_rx).await {
-                                                    Ok(_) => {},
-                                                    Err(err) => {
-                                                        tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
-                                                    }
-                                               };
+                                            let openai_provider = OpenAIProvider::new(&api_url_clone, api_key_clone);
+                                            match openai_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone, &interrupt_rx).await {
+                                                Ok(_) => {},
+                                                Err(err) => {
+                                                    tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
+                                                }
+                                            };
                                         }
                                         "gemini" => {
-                                             let gemini_provider = GeminiProvider::new(&api_url_clone, api_key_clone);
-                                             match gemini_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone, &interrupt_rx).await {
-                                                    Ok(_) => {},
-                                                    Err(err) => {
-                                                          tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
-                                                    }
-                                               };
+                                            let gemini_provider = GeminiProvider::new(&api_url_clone, api_key_clone);
+                                            match gemini_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone, &interrupt_rx).await {
+                                                Ok(_) => {},
+                                                Err(err) => {
+                                                    tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
+                                                }
+                                            };
                                         }
                                         _ => {
                                             tx_clone.send(format!("Error: Unsupported provider: {}", provider)).expect("Failed to send error");
@@ -231,15 +233,15 @@ pub async fn handle_events(
                         KeyCode::Backspace => {
                             app.input_text.pop();
                         },
-                         KeyCode::Esc => {
-                             return Some(AppEvent::Key(key));
+                        KeyCode::Esc => {
+                            return Some(AppEvent::Key(key));
                         },
                         _ => {}
                     }
                 }
                 return  Some(AppEvent::Key(key));
             },
-             _ => {}
+            _ => {}
         }
     }
     None
