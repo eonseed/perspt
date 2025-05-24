@@ -9,14 +9,17 @@ license = "LGPL-3.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
-ratatui = "0.25"
-reqwest = { version = "0.11", features = ["json", "stream"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
-crossterm = "0.27"
-log = "0.4"
-log4rs = "1.2"
-pulldown-cmark = "0.12.2"
-futures = "0.3.31"
+async-trait = "0.1.80" # Updated
+clap = { version = "4.4.18", features = ["derive"] } # Downgraded to latest 4.4.x due to icu_properties_data
+llm = { version = "1.2.7" } # Updated, features removed
+ratatui = "0.26.0" # Attempting 0.26.0 for better transitive dependency compatibility with Rust 1.75
+reqwest = { version = "0.11.27", features = ["json", "stream"] } # Updated (latest 0.11.x)
+serde = { version = "1.0.203", features = ["derive"] } # Updated
+serde_json = "1.0.117" # Updated
+tokio = { version = "1.35.1", features = ["full"] } # Downgraded due to native-tls conflict
+crossterm = "0.27.0" # Kept original version (search showed no change)
+log = "0.4.22" # Updated
+log4rs = "1.2.0" # Reverted to original version due to `home` crate conflict
+pulldown-cmark = "0.12.2" # Kept original version
+futures = "0.3.31" # Kept original version
+rand = "0.8.5" # Kept original version

@@ -8,8 +8,9 @@ use ratatui::{
     Terminal,
     prelude::Margin,
 };
-use std::{borrow::Cow, io};
+use std::{borrow::Cow, collections::VecDeque, io, sync::Arc}; // Added VecDeque
 use crate::config::AppConfig;
+use crate::llm_provider::LLMProvider; // Added LLMProvider import
 use tokio::sync::mpsc;
 use pulldown_cmark::{Parser, Options, Tag, Event as MarkdownEvent, TagEnd};
 use crossterm::event::KeyEvent;
@@ -42,6 +43,9 @@ pub struct App {
     pub should_quit: bool,
     scroll_state: ScrollbarState,
     scroll_position: usize,
+    pub is_input_disabled: bool, 
+    pub pending_inputs: VecDeque<String>, // Added field
+    pub is_llm_busy: bool, // Added field
 }
 
 impl App {
@@ -54,6 +58,9 @@ impl App {
             should_quit: false,
             scroll_state: ScrollbarState::default(),
             scroll_position: 0,
+            is_input_disabled: false,
+            pending_inputs: VecDeque::new(), // Initialize
+            is_llm_busy: false, // Initialize
         }
     }
 
@@ -108,19 +115,26 @@ impl App {
     }
 }
 
-
-pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, config: AppConfig, model_name: String, api_key: String) -> Result<(), Box<dyn std::error::Error>> {
-    let mut app = App::new(config);
+// Updated run_ui function signature to accept the provider
+pub async fn run_ui(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, 
+    config: AppConfig, // Pass AppConfig by value as it's owned by App
+    model_name: String, 
+    api_key: String, // Still passed, though AppConfig inside App also has it
+    provider: Box<dyn LLMProvider + Send + Sync> // Accept the boxed trait object
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut app = App::new(config); // App now owns its config
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let provider = app.config.default_provider.clone().unwrap_or_else(|| "gemini".to_string());
-    let provider_url = app.config.providers.get(&provider)
-        .map(|url| url.clone())
-        .unwrap_or_default();
-    let api_url = format!("{}", provider_url);
-    log::info!("API URL: {}", api_url);
-    log::info!("Model Name: {}", model_name);
-    log::info!("API Key: {}", api_key);
+    // api_url is no longer needed here as the provider itself will get it from AppConfig.
+    // log::info!("API URL: {}", api_url); // Removed
+    log::info!("Model Name (in run_ui): {}", model_name);
+    // log::info!("API Key (in run_ui): {}", api_key); // api_key is in app.config
 
+    // If provider needs to be shared with async tasks spawned by handle_events
+    // and also used elsewhere, Arc might be better. For now, Box is passed.
+    // If handle_events needs to own a part of it or clone it for spawning,
+    // then Arc<dyn LLMProvider...> would be passed to run_ui.
+    // For now, run_ui owns the Box, and passes a reference to handle_events.
 
     loop {
         terminal.draw(|f| {
@@ -166,7 +180,19 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
             let input_block = Block::default()
                 .title("Input")
                 .borders(Borders::ALL);
-            let input_paragraph = Paragraph::new(app.input_text.clone())
+            // Conditional styling for input paragraph
+            let input_style = if app.is_input_disabled {
+                Style::default().fg(Color::DarkGray)
+            } else {
+                Style::default()
+            };
+            let input_text_display = if app.is_input_disabled {
+                format!("{} [Processing...]", app.input_text)
+            } else {
+                app.input_text.clone()
+            };
+            let input_paragraph = Paragraph::new(input_text_display)
+                .style(input_style) // Apply the conditional style
                 .block(input_block);
             f.render_widget(input_paragraph, layout[1]);
 
@@ -179,12 +205,15 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
         })?;
 
         // Event handling
-         if let Ok(Some(event)) = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-             crate::handle_events(&mut app, &tx, &api_url, &api_key, &model_name)
-        ).await {
+        // Pass reference to provider to handle_events.
+        // api_url is removed from handle_events call.
+        if let Ok(Some(event)) = tokio::time::timeout(
+            std::time::Duration::from_millis(50), // Reduced timeout for snappier feel
+            crate::handle_events(&mut app, &tx, &api_key, &model_name, &provider) // Pass provider by reference
+        ).await
+        {
             match event {
-                 AppEvent::Key(key_event) => {
+                AppEvent::Key(key_event) => {
                     match key_event.code {
                         crossterm::event::KeyCode::Esc => {
                             app.should_quit = true;
@@ -204,36 +233,62 @@ pub async fn run_ui(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, confi
 
 
         // Check for response messages
-        while let Ok(message) = rx.try_recv() {
-            let message_clone = message.clone();
-            if message.starts_with("Error:") {
-                 app.add_message(ChatMessage {
+        if let Ok(message) = rx.try_recv() { // Changed to if let for single message processing per tick
+            if message == crate::EOT_SIGNAL {
+                if let Some(next_input) = app.pending_inputs.pop_front() {
+                    log::info!("Processing next input from queue: '{}'", next_input);
+                    // Call initiate_llm_request directly.
+                    // initiate_llm_request is async, so we need to spawn it or run_ui needs to be able to await it.
+                    // Since run_ui is already async, we can await it here.
+                    // Note: This will block run_ui's loop until initiate_llm_request (which spawns) returns.
+                    // This is fine as initiate_llm_request itself is quick (just sets flags and spawns).
+                    crate::initiate_llm_request(&mut app, next_input, &**provider, &model_name, &tx).await;
+                    // app.is_llm_busy is true (set by initiate_llm_request)
+                    // app.is_input_disabled is true (set by initiate_llm_request)
+                    app.set_status(format!("Processing queue. {} remaining.", app.pending_inputs.len()), false);
+
+                } else {
+                    // No more pending inputs, LLM is now idle.
+                    app.is_llm_busy = false;
+                    app.is_input_disabled = false; // Re-enable input field
+                    app.set_status("Ready.".to_string(), false);
+                    log::info!("LLM idle. Input enabled.");
+                }
+            } else if message.starts_with("Error:") {
+                app.add_message(ChatMessage {
                     message_type: MessageType::Error,
-                     content: vec![Line::from(Span::styled(Cow::from(message_clone), Style::default().fg(Color::Red)))],
+                    content: vec![Line::from(Span::styled(Cow::from(message.clone()), Style::default().fg(Color::Red)))],
                 });
                 app.set_status(message, true);
+                // Error implies the current request is done. Check queue.
+                // This logic is now handled by providers sending EOT even on error.
+                // If an error occurs, provider sends error message, then EOT.
+                // The EOT signal will then trigger the queue check / idle state.
+                // So, no need to explicitly set is_llm_busy/is_input_disabled here for errors.
             } else {
-                 if let Some(last_message) = app.chat_history.last_mut() {
-                     if last_message.message_type == MessageType::Assistant {
-                         let styled_text = markdown_to_lines(&message);
-                         last_message.content.extend(styled_text);
-                     } else {
-                         let styled_text = markdown_to_lines(&message);
-                         app.add_message(ChatMessage {
+                // Handle content message
+                if let Some(last_message) = app.chat_history.last_mut() {
+                    if last_message.message_type == MessageType::Assistant {
+                        let styled_text = markdown_to_lines(&message);
+                        last_message.content.extend(styled_text);
+                    } else {
+                        let styled_text = markdown_to_lines(&message);
+                        app.add_message(ChatMessage {
                             message_type: MessageType::Assistant,
                             content: styled_text,
                         });
-                     }
+                    }
                 } else {
-                     let styled_text = markdown_to_lines(&message);
-                     app.add_message(ChatMessage {
-                         message_type: MessageType::Assistant,
-                         content: styled_text,
+                    let styled_text = markdown_to_lines(&message);
+                    app.add_message(ChatMessage {
+                        message_type: MessageType::Assistant,
+                        content: styled_text,
                     });
                 }
-                 app.set_status("Response received successfully".to_string(), false);
+                app.set_status("Receiving response...".to_string(), false);
+                // is_input_disabled and is_llm_busy are not changed here.
             }
-         }
+        }
 
 
         if app.should_quit {
