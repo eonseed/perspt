@@ -14,13 +14,14 @@
 -   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui.
 -   **⚡ Streaming Responses:** Real-time streaming of LLM responses for an interactive experience.
 -   **🔀 Multiple Provider Support**: Seamlessly switch between different LLM providers:
-    -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, GPT-4.1-mini)
-    -   **Anthropic** (Claude-3 Opus, Sonnet, Haiku, Claude-3.5 Sonnet, Claude-3.5 Haiku)
-    -   **Google Gemini** (Gemini-1.5-pro, Gemini-1.5-flash, Gemini-2.0-flash)
-    -   **Mistral** (Mistral-tiny, small, medium, large, Mistral-nemo, Mixtral models)
-    -   **Perplexity** (Sonar, Sonar-pro, Sonar-reasoning)
-    -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner)
-    -   **AWS Bedrock** (Amazon Nova models)
+    -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, and more)
+    -   **Anthropic** (Claude-3 Opus, Sonnet, Haiku, Claude-3.5 Sonnet, Claude-3.5 Haiku, and more)
+    -   **Google Gemini** (Gemini-1.5-pro, Gemini-1.5-flash, Gemini-2.0-flash, and more)
+    -   **Mistral** (Mistral-tiny, small, medium, large, Mistral-nemo, Mixtral models, and more)
+    -   **Perplexity** (Sonar, Sonar-pro, Sonar-reasoning, and more)
+    -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner, and more)
+    -   **AWS Bedrock** (Amazon Nova models, and more)
+-   **🚀 Dynamic Model Discovery**: Automatically discovers and validates available models from the allms crate, ensuring you always have access to the latest models without manual updates.
 -   **⚙️ Configurable:** Flexible configuration via JSON files or command-line arguments.
 -   **🔄 Input Queuing:** Type and submit new questions even while the AI is generating a previous response. Your inputs are queued and processed sequentially.
 -   **💅 UI Feedback:** The input field is visually disabled during active LLM processing to prevent accidental submissions.
@@ -169,7 +170,7 @@ target/release/perspt --config my_config.json
 
 ### 🎯 Model Listing
 
-You can list all available models for any provider:
+Perspt uses dynamic model discovery powered by the allms crate, which means it automatically stays up-to-date with the latest models from each provider. You can list all currently available models for any provider:
 
 ```bash
 # List OpenAI models
@@ -180,7 +181,37 @@ target/release/perspt --provider-type anthropic --api-key YOUR_API_KEY --list-mo
 
 # List Google models
 target/release/perspt --provider-type google --api-key YOUR_API_KEY --list-models
+
+# List Mistral models
+target/release/perspt --provider-type mistral --api-key YOUR_API_KEY --list-models
+
+# List Perplexity models
+target/release/perspt --provider-type perplexity --api-key YOUR_API_KEY --list-models
+
+# List DeepSeek models
+target/release/perspt --provider-type deepseek --api-key YOUR_API_KEY --list-models
+
+# List AWS Bedrock models
+target/release/perspt --provider-type aws-bedrock --api-key YOUR_API_KEY --list-models
 ```
+
+The dynamic model discovery feature ensures that:
+- **🔄 Always Current**: New models are automatically available as the allms crate is updated
+- **✅ Validated**: Only models actually supported by the allms crate are shown
+- **🚀 No Maintenance**: No need to manually update model lists in the code
+
+## 🏗️ Architecture & Technical Features
+
+### Dynamic Model Discovery
+
+Perspt leverages the allms crate's type system to provide dynamic model discovery. Instead of maintaining hardcoded model lists, the application:
+
+1. **Dynamic Validation**: Uses the allms crate's `try_from_str()` methods to validate model names against actual supported models
+2. **Automatic Updates**: Benefits from new models and providers added to the allms crate without code changes
+3. **Consistent API**: Provides a unified interface across all supported providers
+4. **Type Safety**: Leverages Rust's type system to ensure only valid models are used
+
+This approach eliminates the maintenance burden of keeping model lists synchronized with provider updates and ensures users always have access to the latest available models.
 
 ## 🖐️ Key Bindings
 
