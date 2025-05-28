@@ -1,22 +1,33 @@
 # Cargo.toml
 [package]
 name = "perspt"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Vikrant Rathore"]
 license = "LGPL-3.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A performant CLI for talking to LLMs using the allms crate with unified API support"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
-ratatui = "0.25"
-reqwest = { version = "0.11", features = ["json", "stream"] }
+# LLM unified interface
+allms = "0.17"
+
+# Core async and traits
+async-trait = "0.1.88"
+tokio = { version = "1.42", features = ["full"] }
+
+# CLI and configuration
+clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1", features = ["full"] }
-crossterm = "0.27"
+
+# UI components
+ratatui = "0.29"
+crossterm = "0.28"
+pulldown-cmark = "0.12"
+
+# Logging
 log = "0.4"
-log4rs = "1.2"
-pulldown-cmark = "0.12.2"
-futures = "0.3.31"
+env_logger = "0.11"
+
+# Utilities
+anyhow = "1.0"

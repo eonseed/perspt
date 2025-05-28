@@ -1,234 +1,296 @@
 // src/main.rs
 use clap::{Arg, Command};
-use std::error::Error;
+use anyhow::{Context, Result};
 use std::io;
+use std::sync::Arc;
 use tokio::sync::mpsc;
+
+// Define EOT_SIGNAL
+pub const EOT_SIGNAL: &str = "<<EOT>>";
+
 use crossterm::{
-    event::{self, KeyCode, KeyEventKind, KeyModifiers, Event},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
+use env_logger;
 use log::LevelFilter;
-use log4rs::{
-    append::file::FileAppender,
-    config::{Appender, Config as Log4rsConfig, Root},
-    encode::pattern::PatternEncoder,
-};
-use crate::ui::run_ui;
-use crate::ui::AppEvent;
+
 use crate::config::AppConfig;
-use crate::openai::OpenAIProvider;
-use crate::gemini::GeminiProvider;
+use crate::llm_provider::{LLMProvider, UnifiedLLMProvider, ProviderType};
+use crate::ui::{run_ui, AppEvent};
 
-
-mod ui;
 mod config;
-mod openai;
-mod gemini;
+mod llm_provider;
+mod ui;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     // Initialize logging
-    let logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] - {m}\n")))
-        .build("perspt.log")?;
-
-    let log_config = Log4rsConfig::builder()
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder().appender("logfile").build(LevelFilter::Info))?;
-
-    log4rs::init_config(log_config)?;
+    env_logger::Builder::from_default_env()
+        .filter_level(LevelFilter::Info)
+        .init();
 
     // Parse CLI arguments
-    let matches = Command::new("LLM Chat CLI")
+    let matches = Command::new("Perspt - Performance LLM Chat CLI")
+        .version("0.4.0")
+        .author("Vikrant Rathore")
+        .about("A performant CLI for talking to LLMs using the allms crate with unified API support")
         .arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
                 .value_name("FILE")
-                .help("Path to the configuration file"),
+                .help("Configuration file path")
         )
         .arg(
             Arg::new("api-key")
                 .short('k')
                 .long("api-key")
-                .value_name("API_KEY")
-                .help("API key to use for the provider"),
+                .value_name("KEY")
+                .help("API key for the LLM provider")
         )
         .arg(
             Arg::new("model-name")
                 .short('m')
-                .long("model-name")
+                .long("model")
                 .value_name("MODEL")
-                .help("Model to use (e.g., gpt-4)"),
+                .help("Model name to use")
+        )
+        .arg(
+            Arg::new("provider-type")
+                .short('p')
+                .long("provider-type")
+                .value_name("TYPE")
+                .help("Provider type: openai, anthropic, google, mistral, perplexity, deepseek, aws-bedrock, azure-openai")
+                .value_parser(["openai", "anthropic", "google", "mistral", "perplexity", "deepseek", "aws-bedrock", "azure-openai"])
         )
         .arg(
             Arg::new("provider")
-                .short('p')
                 .long("provider")
-                .value_name("PROVIDER")
-                .help("Choose the LLM provider (e.g., openai, gemini)"),
+                .value_name("PROFILE")
+                .help("Provider profile name from config")
         )
-         .arg(
+        .arg(
             Arg::new("list-models")
+                .short('l')
                 .long("list-models")
-                .help("List available models for the provider")
+                .help("List available models for the configured provider")
                 .action(clap::ArgAction::SetTrue)
         )
         .get_matches();
 
     let config_path = matches.get_one::<String>("config");
-    let api_key = matches.get_one::<String>("api-key");
-    let model_name = matches.get_one::<String>("model-name");
-    let provider_name = matches.get_one::<String>("provider");
+    let cli_api_key = matches.get_one::<String>("api-key");
+    let cli_model_name = matches.get_one::<String>("model-name");
+    let cli_provider_profile = matches.get_one::<String>("provider");
+    let cli_provider_type = matches.get_one::<String>("provider-type");
     let list_models = matches.get_flag("list-models");
 
     // Load configuration
-    let mut config = config::load_config(config_path).await?;
+    let mut config = config::load_config(config_path).await
+        .context("Failed to load configuration")?;
 
-    if let Some(key) = api_key {
+    // Apply CLI overrides
+    if let Some(key) = cli_api_key {
         config.api_key = Some(key.clone());
     }
-    if let Some(provider) = provider_name {
-         config.default_provider = Some(provider.clone());
+
+    if let Some(ptype) = cli_provider_type {
+        config.provider_type = Some(ptype.clone());
     }
-    let model_name = match model_name {
-         Some(model) => model.clone(),
-        None => config.default_model.clone().unwrap_or("gemini-pro".to_string()),
-    };
-    let api_key = match &config.api_key {
-        Some(key) => key.clone(),
-        None => String::new(),
-    };
+    
+    if let Some(profile_name) = cli_provider_profile {
+        config.default_provider = Some(profile_name.clone());
+    }
+
+    if let Some(model_val) = cli_model_name {
+        config.default_model = Some(model_val.clone());
+    }
+
+    // Get model name for the provider - set defaults based on provider type
+    let model_name_for_provider = config.default_model.clone()
+        .unwrap_or_else(|| {
+            match config.provider_type.as_deref() {
+                Some("openai") => "gpt-3.5-turbo".to_string(),
+                Some("anthropic") => "claude-3-sonnet-20240229".to_string(),
+                Some("google") => "gemini-pro".to_string(),
+                Some("mistral") => "mistral-small".to_string(),
+                Some("perplexity") => "llama-3.1-sonar-small-128k-online".to_string(),
+                Some("deepseek") => "deepseek-chat".to_string(),
+                Some("aws-bedrock") => "anthropic.claude-v2".to_string(),
+                Some("azure-openai") => "gpt-35-turbo".to_string(),
+                _ => "gpt-3.5-turbo".to_string(),
+            }
+        });
+    
+    let api_key_string = config.api_key.clone().unwrap_or_default();
+
+    // Create the unified LLM provider instance
+    let provider_type = ProviderType::from_string(
+        config.provider_type.as_deref().unwrap_or("openai")
+    ).unwrap_or(ProviderType::OpenAI);
+
+    let provider: Arc<dyn LLMProvider + Send + Sync> = Arc::new(
+        UnifiedLLMProvider::new(provider_type)
+    );
+
+    // Validate configuration for the provider
+    if let Err(e) = provider.validate_config(&config).await {
+        log::error!("Configuration validation failed: {}", e);
+        return Err(e);
+    }
 
     if list_models {
-        list_available_models(&config).await?;
+        list_available_models(&provider, &config).await?;
         return Ok(());
     }
 
-    // Initialize Ratatui
-    let mut terminal = initialize_terminal()?;
+    // Initialize terminal
+    let mut terminal = initialize_terminal()
+        .context("Failed to initialize terminal")?;
 
     // Run the UI
-    run_ui(&mut terminal, config, model_name, api_key).await?;
+    run_ui(&mut terminal, config, model_name_for_provider, api_key_string, provider).await
+        .context("UI execution failed")?;
+    
     Ok(())
 }
 
-async fn list_available_models(config: &AppConfig) -> Result<(), Box<dyn Error>> {
-    if let Some(provider) = &config.default_provider {
-        let provider_url = config.providers.get(provider).ok_or("Invalid provider")?;
-         let api_key = config.api_key.as_ref().ok_or("API Key is required")?;
-        match provider.as_str() {
-            "openai" => {
-                let openai_provider = OpenAIProvider::new(provider_url, api_key.clone());
-                openai_provider.list_models().await?;
-            }
-            "gemini" => {
-                 let gemini_provider = GeminiProvider::new(provider_url, api_key.clone());
-                 gemini_provider.list_models().await?;
-            }
-            _ => {
-                println!("Unsupported provider: {}", provider);
+async fn list_available_models(
+    provider: &Arc<dyn LLMProvider + Send + Sync>,
+    _config: &AppConfig,
+) -> Result<()> {
+    match provider.list_models().await {
+        Ok(models) => {
+            println!("Available models for {:?} provider:", provider.provider_type());
+            for model in models {
+                println!("  - {}", model);
             }
         }
-    } else {
-        println!("Please provide provider name");
+        Err(e) => {
+            log::error!("Failed to list models: {}", e);
+            return Err(e);
+        }
     }
     Ok(())
 }
 
-
-fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>, Box<dyn Error>> {
-    enable_raw_mode()?;
+fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>> {
+    enable_raw_mode().context("Failed to enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen).context("Failed to enter alternate screen")?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.clear()?;
+    let mut terminal = ratatui::Terminal::new(backend).context("Failed to create terminal")?;
+    terminal.clear().context("Failed to clear terminal")?;
     Ok(terminal)
+}
+
+async fn initiate_llm_request(
+    app: &mut ui::App,
+    input_to_send: String,
+    provider: Arc<dyn LLMProvider + Send + Sync>, 
+    model_name: &str,
+    tx_llm: &mpsc::UnboundedSender<String>,
+) {
+    app.is_llm_busy = true;
+    app.is_input_disabled = true;
+
+    log::info!("Initiating LLM request for input: '{}'", input_to_send);
+    app.set_status(format!("Sending: {}...", truncate_message(&input_to_send, 20)), false);
+
+    let model_name_clone = model_name.to_string();
+    let config_clone = app.config.clone(); 
+    let tx_clone_for_provider = tx_llm.clone();
+    let input_clone = input_to_send.clone();
+
+    tokio::spawn(async move {
+        let result = provider.send_chat_request(
+            &input_clone,
+            &model_name_clone,
+            &config_clone,
+            &tx_clone_for_provider,
+        ).await;
+
+        if let Err(e) = result {
+            log::error!("LLM request failed: {}", e);
+            let _ = tx_clone_for_provider.send(format!("Error: {}", e));
+            let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+        }
+    });
+}
+
+fn truncate_message(s: &str, max_chars: usize) -> String {
+    if s.len() > max_chars {
+        format!("{}...", &s[..max_chars.saturating_sub(3)])
+    } else {
+        s.to_string()
+    }
 }
 
 pub async fn handle_events(
     app: &mut ui::App,
-    tx: &mpsc::UnboundedSender<String>,
-    api_url: &str,
-    api_key: &String,
-    model_name: &String
+    tx_llm: &mpsc::UnboundedSender<String>, 
+    _api_key: &String,
+    model_name: &String,
+    provider: &Arc<dyn LLMProvider + Send + Sync>, 
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
             Event::Key(key) => {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
+                        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.should_quit = true;
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.should_quit = true;
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Enter => {
-                            if !app.input_text.is_empty() {
-                                let input = app.input_text.clone();
-                                 app.add_message(ui::ChatMessage{
-                                    message_type: ui::MessageType::User,
-                                    content: vec![ratatui::text::Line::from(ratatui::text::Span::styled(std::borrow::Cow::from(input.clone()), ratatui::style::Style::default().fg(ratatui::style::Color::Green)))]
-                                });
-                                let tx_clone = tx.clone();
-                                let api_url_clone = api_url.to_string();
-                                let api_key_clone = api_key.clone();
-                                let model_name_clone = model_name.clone();
-                                let input_clone = input.clone();
-                                 let provider = app.config.default_provider.clone().unwrap_or_else(|| "gemini".to_string());
-
-                                tokio::spawn(async move {
-                                    match provider.as_str() {
-                                        "openai" => {
-                                              let openai_provider = OpenAIProvider::new(&api_url_clone, api_key_clone);
-                                              match openai_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone).await {
-                                                    Ok(_) => {},
-                                                    Err(err) => {
-                                                        tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
-                                                    }
-                                               };
-                                        }
-                                        "gemini" => {
-                                             let gemini_provider = GeminiProvider::new(&api_url_clone, api_key_clone);
-                                             match gemini_provider.send_chat_request(&input_clone, &model_name_clone, &tx_clone).await {
-                                                    Ok(_) => {},
-                                                    Err(err) => {
-                                                          tx_clone.send(format!("Error: {}", err)).expect("Failed to send error");
-                                                    }
-                                               };
-                                        }
-                                        _ => {
-                                            tx_clone.send(format!("Error: Unsupported provider: {}", provider)).expect("Failed to send error");
-                                        }
-                                    }
-
-                                });
+                            if !app.is_input_disabled && !app.input_text.trim().is_empty() {
+                                let input_to_send = app.input_text.trim().to_string();
                                 app.input_text.clear();
-                                return Some(AppEvent::Tick);
+
+                                // Add user message to chat history
+                                app.add_message(ui::ChatMessage {
+                                    message_type: ui::MessageType::User,
+                                    content: vec![ratatui::text::Line::from(input_to_send.clone())],
+                                });
+
+                                // Start LLM request
+                                initiate_llm_request(app, input_to_send, Arc::clone(provider), model_name, tx_llm).await;
                             }
-                        },
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Char(c) => {
-                            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                match c {
-                                    'c' | 'd' => {
-                                        app.should_quit = true;
-                                        return Some(AppEvent::Tick);
-                                    },
-                                    _=> app.input_text.push(c),
-                                }
-                            } else {
+                            if !app.is_input_disabled {
                                 app.input_text.push(c);
                             }
-                        },
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Backspace => {
-                            app.input_text.pop();
-                        },
-                         KeyCode::Esc => {
-                             return Some(AppEvent::Key(key));
-                        },
-                        _ => {}
+                            if !app.is_input_disabled {
+                                app.input_text.pop();
+                            }
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Up => {
+                            app.scroll_up();
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Down => {
+                            app.scroll_down();
+                            return Some(AppEvent::Key(key));
+                        }
+                        _ => {
+                            return Some(AppEvent::Key(key));
+                        }
                     }
                 }
-                return  Some(AppEvent::Key(key));
-            },
-             _ => {}
+            }
+            _ => {}
         }
     }
     None
