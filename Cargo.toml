@@ -1,30 +1,24 @@
 # Cargo.toml
 [package]
 name = "perspt"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 authors = ["Vikrant Rathore"]
 license = "LGPL-3.0"
-description = "A performant CLI for talking to LLMs using the llm crate with modern APIs"
+description = "A performant CLI for talking to LLMs using the allms crate with unified API support"
 
 [dependencies]
+# LLM unified interface
+allms = "0.17"
+
 # Core async and traits
 async-trait = "0.1.88"
 tokio = { version = "1.42", features = ["full"] }
-futures = "0.3.31"
 
 # CLI and configuration
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-
-# LLM support - using candle for local models
-candle-core = "0.9.1"
-candle-nn = "0.9.1"
-candle-transformers = "0.9.1"
-
-# HTTP client for API providers
-reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # UI components
 ratatui = "0.29"
@@ -36,12 +30,4 @@ log = "0.4"
 env_logger = "0.11"
 
 # Utilities
-rand = "0.8"
 anyhow = "1.0"
-thiserror = "1.0"
-num_cpus = "1.16"
-
-[features]
-default = ["local-models", "api-providers"]
-local-models = []
-api-providers = []

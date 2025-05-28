@@ -1,0 +1,15 @@
+{
+  "providers": {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com",
+    "google": "https://generativelanguage.googleapis.com/v1beta/",
+    "mistral": "https://api.mistral.ai/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "deepseek": "https://api.deepseek.com/v1",
+    "aws-bedrock": "https://bedrock.amazonaws.com"
+  },
+  "provider_type": "openai",
+  "default_provider": "openai",
+  "default_model": "gpt-4o-mini",
+  "api_key": "your-api-key-here"
+}

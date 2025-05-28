@@ -17,17 +17,11 @@ use env_logger;
 use log::LevelFilter;
 
 use crate::config::AppConfig;
-use crate::llm_provider::LLMProvider;
-use crate::local_llm_provider::LocalLlmProvider;
-use crate::openai_llm::OpenAIProviderLlm;
-use crate::gemini_llm::GeminiProviderLlm;
+use crate::llm_provider::{LLMProvider, UnifiedLLMProvider, ProviderType};
 use crate::ui::{run_ui, AppEvent};
 
 mod config;
-mod gemini_llm;
 mod llm_provider;
-mod local_llm_provider;
-mod openai_llm;
 mod ui;
 
 #[tokio::main]
@@ -39,9 +33,9 @@ async fn main() -> Result<()> {
 
     // Parse CLI arguments
     let matches = Command::new("Perspt - Performance LLM Chat CLI")
-        .version("0.3.0")
+        .version("0.4.0")
         .author("Vikrant Rathore")
-        .about("A performant CLI for talking to LLMs using modern APIs")
+        .about("A performant CLI for talking to LLMs using the allms crate with unified API support")
         .arg(
             Arg::new("config")
                 .short('c')
@@ -61,15 +55,15 @@ async fn main() -> Result<()> {
                 .short('m')
                 .long("model")
                 .value_name("MODEL")
-                .help("Model name or path to use")
+                .help("Model name to use")
         )
         .arg(
             Arg::new("provider-type")
                 .short('p')
                 .long("provider-type")
                 .value_name("TYPE")
-                .help("Provider type: local, openai, gemini")
-                .value_parser(["local", "openai", "gemini"])
+                .help("Provider type: openai, anthropic, google, mistral, perplexity, deepseek, aws-bedrock, azure-openai")
+                .value_parser(["openai", "anthropic", "google", "mistral", "perplexity", "deepseek", "aws-bedrock", "azure-openai"])
         )
         .arg(
             Arg::new("provider")
@@ -113,37 +107,33 @@ async fn main() -> Result<()> {
     if let Some(model_val) = cli_model_name {
         config.default_model = Some(model_val.clone());
     }
-    
-    // Ensure we have a default provider if local type was set
-    if config.provider_type.as_deref() == Some("local") {
-        if config.default_provider.is_none() {
-            config.default_provider = Some("local".to_string());
-        }
-    }
 
-    // Get model name for the provider
+    // Get model name for the provider - set defaults based on provider type
     let model_name_for_provider = config.default_model.clone()
         .unwrap_or_else(|| {
             match config.provider_type.as_deref() {
                 Some("openai") => "gpt-3.5-turbo".to_string(),
-                Some("gemini") => "gemini-pro".to_string(),
-                Some("local") => "/path/to/model.gguf".to_string(),
+                Some("anthropic") => "claude-3-sonnet-20240229".to_string(),
+                Some("google") => "gemini-pro".to_string(),
+                Some("mistral") => "mistral-small".to_string(),
+                Some("perplexity") => "llama-3.1-sonar-small-128k-online".to_string(),
+                Some("deepseek") => "deepseek-chat".to_string(),
+                Some("aws-bedrock") => "anthropic.claude-v2".to_string(),
+                Some("azure-openai") => "gpt-35-turbo".to_string(),
                 _ => "gpt-3.5-turbo".to_string(),
             }
         });
     
     let api_key_string = config.api_key.clone().unwrap_or_default();
 
-    // Create the LLM provider instance
-    let provider: Arc<dyn LLMProvider + Send + Sync> = match config.provider_type.as_deref() {
-        Some("local") => Arc::new(LocalLlmProvider::new()),
-        Some("openai") => Arc::new(OpenAIProviderLlm::new()),
-        Some("gemini") => Arc::new(GeminiProviderLlm::new()),
-        _ => {
-            log::warn!("Unknown or missing provider type, defaulting to Gemini");
-            Arc::new(GeminiProviderLlm::new())
-        }
-    };
+    // Create the unified LLM provider instance
+    let provider_type = ProviderType::from_string(
+        config.provider_type.as_deref().unwrap_or("openai")
+    ).unwrap_or(ProviderType::OpenAI);
+
+    let provider: Arc<dyn LLMProvider + Send + Sync> = Arc::new(
+        UnifiedLLMProvider::new(provider_type)
+    );
 
     // Validate configuration for the provider
     if let Err(e) = provider.validate_config(&config).await {

@@ -7,16 +7,20 @@
 >  We ponder and chat, with code as our guide,\
 >  Is AI our helper or our human pride?"
 
-**Perspt** (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). It allows you to chat with various AI models, including those from OpenAI, Gemini, and even locally run GGUF-format models, directly in your terminal.
+**Perspt** (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). It allows you to chat with various AI models from multiple providers directly in your terminal using a unified API.
 
 ## ✨ Features
 
 -   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui.
 -   **⚡ Streaming Responses:** Real-time streaming of LLM responses for an interactive experience.
 -   **🔀 Multiple Provider Support**: Seamlessly switch between different LLM providers:
-    -   OpenAI (e.g., GPT-3.5-turbo, GPT-4)
-    -   Gemini (e.g., Gemini Pro)
-    -   Local LLMs (via the `llm` crate, supporting GGUF-format models like Llama, Mistral, etc.)
+    -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, GPT-4.1-mini)
+    -   **Anthropic** (Claude-3 Opus, Sonnet, Haiku, Claude-3.5 Sonnet, Claude-3.5 Haiku)
+    -   **Google Gemini** (Gemini-1.5-pro, Gemini-1.5-flash, Gemini-2.0-flash)
+    -   **Mistral** (Mistral-tiny, small, medium, large, Mistral-nemo, Mixtral models)
+    -   **Perplexity** (Sonar, Sonar-pro, Sonar-reasoning)
+    -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner)
+    -   **AWS Bedrock** (Amazon Nova models)
 -   **⚙️ Configurable:** Flexible configuration via JSON files or command-line arguments.
 -   **🔄 Input Queuing:** Type and submit new questions even while the AI is generating a previous response. Your inputs are queued and processed sequentially.
 -   **💅 UI Feedback:** The input field is visually disabled during active LLM processing to prevent accidental submissions.
@@ -28,9 +32,13 @@
 ### 🛠️ Prerequisites
 
 -   **Rust:** Ensure you have the Rust toolchain installed. Get it from [rustup.rs](https://rustup.rs/).
--   **🔑 LLM API Key (for API providers):** For OpenAI or Gemini, you'll need an API key from the respective provider.
--   **🧠 Local Model File (for local_llm):** For local inference, download a GGUF-format model file. See the "Using Local Models" section below.
--   **C Compiler (potentially for local_llm):** The `llm` crate may require a C compiler (like GCC or Clang) to build its backends (e.g., for `ggml`). Ensure you have one installed if you plan to use local models.
+-   **🔑 LLM API Key:** For API providers, you'll need an API key from the respective provider:
+    -   OpenAI: Get yours at [platform.openai.com](https://platform.openai.com)
+    -   Anthropic: Get yours at [console.anthropic.com](https://console.anthropic.com)
+    -   Google Gemini: Get yours at [aistudio.google.com](https://aistudio.google.com)
+    -   Mistral: Get yours at [console.mistral.ai](https://console.mistral.ai)
+    -   Perplexity: Get yours at [www.perplexity.ai/settings/api](https://www.perplexity.ai/settings/api)
+    -   DeepSeek: Get yours at [platform.deepseek.com](https://platform.deepseek.com)
 
 ### 📦 Installation
 
@@ -52,64 +60,69 @@ Perspt can be configured using a `config.json` file or command-line arguments. C
 
 #### 📝 Config File (`config.json`)
 
-Create a `config.json` in the root directory of the project, or in `~/.config/perspt/config.json`, or specify a custom path using the `-c` CLI argument.
+Create a `config.json` in the root directory of the project, or specify a custom path using the `-c` CLI argument.
 
-**General Structure:**
+**Example `config.json`:**
 
 ```json
 {
-    "providers": {
-        "gemini": "https://generativelanguage.googleapis.com/v1beta",
-        "openai": "https://api.openai.com/v1"
-    },
-    "api_key": "YOUR_API_KEY_IF_SHARED_OR_FOR_DEFAULT_PROVIDER",
-    "default_model": "MODEL_NAME_OR_PATH_TO_LOCAL_MODEL",
-    "default_provider": "PROVIDER_PROFILE_NAME",
-    "provider_type": "openai|gemini|local_llm"
+  "providers": {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com",
+    "google": "https://generativelanguage.googleapis.com/v1beta/",
+    "mistral": "https://api.mistral.ai/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "deepseek": "https://api.deepseek.com/v1",
+    "aws-bedrock": "https://bedrock.amazonaws.com"
+  },
+  "provider_type": "openai",
+  "default_provider": "openai",
+  "default_model": "gpt-4o-mini",
+  "api_key": "your-api-key-here"
 }
 ```
 
--   **`providers`** (Optional): A map of provider profile names to their API base URLs. Useful if you use multiple API endpoints or custom deployments.
-    -   Example: `"openai_custom": "http://localhost:8080/v1"`
--   **`api_key`** (Optional): Your API key. This can be a general key, or you might prefer setting it via CLI for specific providers if you use multiple.
--   **`default_model`**:
-    -   For API providers (OpenAI, Gemini): The model name (e.g., "gpt-3.5-turbo", "gemini-pro").
-    -   For `local_llm`: **The full, absolute path to your local GGUF model file** (e.g., "/path/to/your/model.gguf").
--   **`default_provider`** (Optional): The name of the provider profile from the `providers` map to use by default (e.g., "openai", "gemini"). For `local_llm`, this field is less critical if `provider_type` is set to "local_llm".
--   **`provider_type`**: Specifies the type of LLM provider. This is a key field.
-    -   Valid values: `"openai"`, `"gemini"`, `"local_llm"`.
-    -   If using `local_llm`, ensure `default_model` points to the GGUF file path.
+**Configuration Fields:**
 
-**Example `config.json` for OpenAI:**
+-   **`providers`** (Optional): A map of provider profile names to their API base URLs.
+-   **`provider_type`**: The type of LLM provider to use. 
+    -   Valid values: `"openai"`, `"anthropic"`, `"google"`, `"mistral"`, `"perplexity"`, `"deepseek"`, `"aws-bedrock"`
+-   **`default_provider`** (Optional): The name of the provider profile from the `providers` map to use by default.
+-   **`default_model`**: The model name to use (e.g., "gpt-4o-mini", "claude-3-5-sonnet-20241022", "gemini-1.5-flash").
+-   **`api_key`**: Your API key for the configured provider.
+
+**Example configurations for different providers:**
+
+**OpenAI:**
 ```json
 {
-    "providers": {
-        "openai": "https://api.openai.com/v1"
-    },
-    "api_key": "sk-YOUR_OPENAI_API_KEY",
-    "default_model": "gpt-3.5-turbo",
-    "provider_type": "openai"
+  "provider_type": "openai",
+  "default_model": "gpt-4o-mini",
+  "api_key": "sk-your-openai-api-key"
 }
 ```
 
-**Example `config.json` for Gemini:**
+**Anthropic:**
 ```json
 {
     "providers": {
-        "gemini": "https://generativelanguage.googleapis.com/v1beta"
+        "anthropic": "https://api.anthropic.com"
+    },
+    "api_key": "YOUR_ANTHROPIC_API_KEY",
+    "default_model": "claude-3-5-sonnet-20241022",
+    "provider_type": "anthropic"
+}
+```
+
+**Google Gemini:**
+```json
+{
+    "providers": {
+        "google": "https://generativelanguage.googleapis.com/v1beta/"
     },
     "api_key": "YOUR_GEMINI_API_KEY",
-    "default_model": "gemini-pro",
-    "provider_type": "gemini"
-}
-```
-
-**Example `config.json` for Local LLM:**
-```json
-{
-    "default_model": "/path/to/your/llama-2-7b-chat.Q4_K_M.gguf",
-    "provider_type": "local_llm"
-    // api_key and providers map are not needed for local_llm
+    "default_model": "gemini-1.5-flash",
+    "provider_type": "google"
 }
 ```
 
@@ -118,13 +131,11 @@ Create a `config.json` in the root directory of the project, or in `~/.config/pe
 Key arguments include:
 
 -   `-c <FILE>`, `--config <FILE>`: Path to a custom configuration file.
--   `-t <TYPE>`, `--provider-type <TYPE>`: Specify the provider type (`openai`, `gemini`, `local_llm`). **This is important for choosing the backend.**
--   `-k <API_KEY>`, `--api-key <API_KEY>`: Your API key (for OpenAI/Gemini).
--   `-m <MODEL/PATH>`, `--model-name <MODEL/PATH>`:
-    -   For API providers: The model name (e.g., `gpt-4`, `gemini-pro`).
-    -   For `local_llm`: **The full path to your GGUF model file.**
--   `-p <PROVIDER_PROFILE>`, `--provider <PROVIDER_PROFILE>`: Choose a pre-configured provider profile from your `config.json`'s `providers` map. (Less relevant if directly using `-t local_llm`).
--   `--list-models`: List available models (primarily for API providers, may show placeholder for local).
+-   `-p <TYPE>`, `--provider-type <TYPE>`: Specify the provider type (`openai`, `anthropic`, `google`, `mistral`, `perplexity`, `deepseek`, `aws-bedrock`). 
+-   `-k <API_KEY>`, `--api-key <API_KEY>`: Your API key for the LLM provider.
+-   `-m <MODEL>`, `--model <MODEL>`: The model name (e.g., `gpt-4o-mini`, `claude-3-5-sonnet-20241022`, `gemini-1.5-flash`).
+-   `--provider <PROVIDER_PROFILE>`: Choose a pre-configured provider profile from your `config.json`'s `providers` map.
+-   `--list-models`: List available models for the configured provider.
 
 Run `target/release/perspt --help` for a full list.
 
@@ -132,44 +143,44 @@ Run `target/release/perspt --help` for a full list.
 
 **OpenAI:**
 ```bash
-target/release/perspt -t openai -k YOUR_OPENAI_API_KEY -m gpt-3.5-turbo
+target/release/perspt --provider-type openai --api-key YOUR_OPENAI_API_KEY --model gpt-4o-mini
 ```
 
-**Gemini:**
+**Anthropic:**
 ```bash
-target/release/perspt -t gemini -k YOUR_GEMINI_API_KEY -m gemini-pro
+target/release/perspt --provider-type anthropic --api-key YOUR_ANTHROPIC_API_KEY --model claude-3-5-sonnet-20241022
 ```
 
-**Local LLM (GGUF):**
+**Google Gemini:**
 ```bash
-target/release/perspt -t local_llm -m /path/to/your/model.gguf
+target/release/perspt --provider-type google --api-key YOUR_GEMINI_API_KEY --model gemini-1.5-flash
 ```
-(No API key needed for local models.)
+
+**Mistral:**
+```bash
+target/release/perspt --provider-type mistral --api-key YOUR_MISTRAL_API_KEY --model mistral-nemo
+```
 
 **Using a config file:**
 ```bash
 target/release/perspt --config my_config.json
 ```
-(Ensure `my_config.json` is correctly set up, especially `provider_type` and `default_model`).
+(Ensure `my_config.json` is correctly set up with `provider_type`, `api_key`, and `default_model`).
 
-### 🧠 Using Local Models (GGUF)
+### 🎯 Model Listing
 
-Perspt uses the [`llm`](https://crates.io/crates/llm) crate to run GGUF-format models locally on your CPU (or GPU if supported by the underlying backend and enabled).
+You can list all available models for any provider:
 
-1.  **Download a GGUF Model:**
-    *   You can find GGUF models on Hugging Face (e.g., search for "Llama GGUF", "Mistral GGUF"). Popular sources include TheBloke.
-    *   Choose a quantization level that suits your RAM and performance needs (e.g., Q4_K_M is a common balanced choice).
-    *   Example: `llama-2-7b-chat.Q4_K_M.gguf`
+```bash
+# List OpenAI models
+target/release/perspt --provider-type openai --api-key YOUR_API_KEY --list-models
 
-2.  **Run Perspt with Local Model:**
-    Use the `-t local_llm` and `-m /path/to/model.gguf` arguments:
-    ```bash
-    target/release/perspt -t local_llm -m /path/to/your/llama-2-7b-chat.Q4_K_M.gguf
-    ```
-    Or configure it in `config.json` as shown above.
+# List Anthropic models  
+target/release/perspt --provider-type anthropic --api-key YOUR_API_KEY --list-models
 
-3.  **Compilation Note:**
-    The `llm` crate and its backends (like `ggml`) are compiled when you build Perspt. This process might require a C compiler (like GCC or Clang) and can take some time. If you encounter build issues related to `llm` or `ggml`, ensure you have a working C development toolchain.
+# List Google models
+target/release/perspt --provider-type google --api-key YOUR_API_KEY --list-models
+```
 
 ## 🖐️ Key Bindings
 
