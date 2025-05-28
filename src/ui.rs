@@ -4,17 +4,17 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap, Scrollbar, ScrollbarState},
+    widgets::{Block, Borders, Paragraph, Wrap, ScrollbarState},
     Terminal,
-    prelude::Margin,
 };
-use std::{borrow::Cow, collections::VecDeque, io, sync::Arc}; // Added VecDeque
+use std::{collections::VecDeque, io, time::Duration, sync::Arc};
+use anyhow::Result;
+
 use crate::config::AppConfig;
-use crate::llm_provider::LLMProvider; // Added LLMProvider import
+use crate::llm_provider::LLMProvider;
 use tokio::sync::mpsc;
 use pulldown_cmark::{Parser, Options, Tag, Event as MarkdownEvent, TagEnd};
 use crossterm::event::KeyEvent;
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageType {
@@ -44,13 +44,13 @@ pub struct App {
     scroll_state: ScrollbarState,
     scroll_position: usize,
     pub is_input_disabled: bool, 
-    pub pending_inputs: VecDeque<String>, // Added field
-    pub is_llm_busy: bool, // Added field
+    pub pending_inputs: VecDeque<String>,
+    pub is_llm_busy: bool,
 }
 
 impl App {
     pub fn new(config: AppConfig) -> Self {
-         Self {
+        Self {
             chat_history: Vec::new(),
             input_text: String::new(),
             status_message: "Welcome to LLM Chat CLI".to_string(),
@@ -59,8 +59,8 @@ impl App {
             scroll_state: ScrollbarState::default(),
             scroll_position: 0,
             is_input_disabled: false,
-            pending_inputs: VecDeque::new(), // Initialize
-            is_llm_busy: false, // Initialize
+            pending_inputs: VecDeque::new(),
+            is_llm_busy: false,
         }
     }
 
@@ -69,27 +69,24 @@ impl App {
         self.scroll_to_bottom();
     }
 
-     pub fn set_status(&mut self, message: String, is_error: bool) {
+    pub fn set_status(&mut self, message: String, is_error: bool) {
         self.status_message = message;
         if is_error {
-            self.add_message(ChatMessage {
-                message_type: MessageType::Error,
-                content: vec![Line::from(Span::styled(format!("System Error: {}", self.status_message), Style::default().fg(Color::Red)))],
-            });
+            log::error!("Status error: {}", self.status_message);
         }
     }
 
     pub fn scroll_up(&mut self) {
-         if self.scroll_position > 0 {
+        if self.scroll_position > 0 {
             self.scroll_position -= 1;
-             self.update_scroll_state();
+            self.update_scroll_state();
         }
     }
 
     pub fn scroll_down(&mut self) {
         if self.scroll_position < self.max_scroll() {
             self.scroll_position += 1;
-             self.update_scroll_state();
+            self.update_scroll_state();
         }
     }
 
@@ -97,199 +94,178 @@ impl App {
         self.scroll_position = self.max_scroll();
         self.update_scroll_state();
     }
+
     fn max_scroll(&self) -> usize {
-         let content_height: usize = self.chat_history
+        let content_height: usize = self.chat_history
             .iter()
             .flat_map(|msg| msg.content.iter())
             .count();
         if content_height > 0 {
-            content_height - 1
+            content_height.saturating_sub(1)
         } else {
             0
         }
     }
 
-     fn update_scroll_state(&mut self){
-        let max_scroll = self.max_scroll();
-        self.scroll_state = self.scroll_state.content_length(max_scroll).position(self.scroll_position);
+    fn update_scroll_state(&mut self) {
+        let _max_scroll = self.max_scroll();
+        self.scroll_state = self.scroll_state.position(self.scroll_position);
     }
 }
 
-// Updated run_ui function signature to accept the provider
 pub async fn run_ui(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, 
-    config: AppConfig, // Pass AppConfig by value as it's owned by App
+    config: AppConfig,
     model_name: String, 
-    api_key: String, // Still passed, though AppConfig inside App also has it
-    provider: Box<dyn LLMProvider + Send + Sync> // Accept the boxed trait object
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut app = App::new(config); // App now owns its config
+    api_key: String,
+    provider: Arc<dyn LLMProvider + Send + Sync>
+) -> Result<()> {
+    let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    // api_url is no longer needed here as the provider itself will get it from AppConfig.
-    // log::info!("API URL: {}", api_url); // Removed
-    log::info!("Model Name (in run_ui): {}", model_name);
-    // log::info!("API Key (in run_ui): {}", api_key); // api_key is in app.config
-
-    // If provider needs to be shared with async tasks spawned by handle_events
-    // and also used elsewhere, Arc might be better. For now, Box is passed.
-    // If handle_events needs to own a part of it or clone it for spawning,
-    // then Arc<dyn LLMProvider...> would be passed to run_ui.
-    // For now, run_ui owns the Box, and passes a reference to handle_events.
+    
+    log::info!("Starting UI with model: {}", model_name);
 
     loop {
+        // Draw UI
         terminal.draw(|f| {
-            let size = f.size();
-            let layout = Layout::default()
+            let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(3),
-                    Constraint::Length(1),
+                    Constraint::Min(1),     // Chat area
+                    Constraint::Length(3),  // Input area
+                    Constraint::Length(1),  // Status line
                 ])
-                .split(size);
+                .split(f.area());
 
             // Chat history
-            let chat_block = Block::default()
-                .title("Chat History")
-                .borders(Borders::ALL);
-             let chat_lines: Vec<Line> = app.chat_history
+            let chat_content: Vec<Line> = app.chat_history
                 .iter()
                 .flat_map(|msg| {
-                    msg.content.clone()
+                    let prefix = match msg.message_type {
+                        MessageType::User => "🧑 User: ",
+                        MessageType::Assistant => "🤖 Assistant: ",
+                        MessageType::Error => "❌ Error: ",
+                    };
+                    
+                    let mut lines = vec![Line::from(prefix)];
+                    lines.extend(msg.content.iter().cloned());
+                    lines.push(Line::from(""));
+                    lines
                 })
-               .collect();
-             let chat_paragraph = Paragraph::new(chat_lines)
-                .block(chat_block)
+                .collect();
+
+            let chat_paragraph = Paragraph::new(chat_content)
+                .block(Block::default().borders(Borders::ALL).title("Chat"))
                 .wrap(Wrap { trim: true })
                 .scroll((app.scroll_position as u16, 0));
 
+            f.render_widget(chat_paragraph, chunks[0]);
 
-            f.render_widget(chat_paragraph, layout[0]);
-             // Scrollbar
-            let scrollbar = Scrollbar::default()
-                .orientation(ratatui::widgets::ScrollbarOrientation::VerticalRight);
-             f.render_stateful_widget(
-                scrollbar,
-                layout[0].inner(&Margin {horizontal: 0, vertical: 0}),
-                &mut app.scroll_state,
-            );
-
-
-
-            // User input
-            let input_block = Block::default()
-                .title("Input")
-                .borders(Borders::ALL);
-            // Conditional styling for input paragraph
-            let input_style = if app.is_input_disabled {
-                Style::default().fg(Color::DarkGray)
+            // Input area
+            let input_color = if app.is_input_disabled {
+                Color::DarkGray
             } else {
-                Style::default()
+                Color::White
             };
-            let input_text_display = if app.is_input_disabled {
-                format!("{} [Processing...]", app.input_text)
-            } else {
-                app.input_text.clone()
-            };
-            let input_paragraph = Paragraph::new(input_text_display)
-                .style(input_style) // Apply the conditional style
-                .block(input_block);
-            f.render_widget(input_paragraph, layout[1]);
 
-            // Status message
-            let status_block = Block::default()
-                .borders(Borders::NONE);
-            let status_paragraph = Paragraph::new(app.status_message.clone())
-                .block(status_block);
-            f.render_widget(status_paragraph, layout[2]);
+            let input_paragraph = Paragraph::new(app.input_text.as_str())
+                .block(Block::default().borders(Borders::ALL).title("Input (Enter to send, Ctrl+Q to quit)"))
+                .style(Style::default().fg(input_color))
+                .wrap(Wrap { trim: false });
+
+            f.render_widget(input_paragraph, chunks[1]);
+
+            // Status line
+            let status_color = if app.status_message.contains("Error") {
+                Color::Red
+            } else if app.is_llm_busy {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+
+            let status_paragraph = Paragraph::new(app.status_message.as_str())
+                .style(Style::default().fg(status_color));
+
+            f.render_widget(status_paragraph, chunks[2]);
         })?;
 
-        // Event handling
-        // Pass reference to provider to handle_events.
-        // api_url is removed from handle_events call.
+        // Handle events with timeout
         if let Ok(Some(event)) = tokio::time::timeout(
-            std::time::Duration::from_millis(50), // Reduced timeout for snappier feel
-            crate::handle_events(&mut app, &tx, &api_key, &model_name, &provider) // Pass provider by reference
-        ).await
-        {
+            Duration::from_millis(100),
+            crate::handle_events(&mut app, &tx, &api_key, &model_name, &provider)
+        ).await {
             match event {
-                AppEvent::Key(key_event) => {
-                    match key_event.code {
-                        crossterm::event::KeyCode::Esc => {
-                            app.should_quit = true;
-                        },
-                        crossterm::event::KeyCode::Up => {
-                            app.scroll_up();
-                        }
-                        crossterm::event::KeyCode::Down => {
-                            app.scroll_down();
-                        }
-                        _=> {}
-                    }
-                },
-                _ => {}
+                AppEvent::Key(_) => {
+                    // Event handled in handle_events
+                }
+                AppEvent::Tick => {
+                    // Periodic update
+                }
             }
         }
 
-
-        // Check for response messages
-        if let Ok(message) = rx.try_recv() { // Changed to if let for single message processing per tick
+        // Process LLM responses
+        while let Ok(message) = rx.try_recv() {
             if message == crate::EOT_SIGNAL {
-                if let Some(next_input) = app.pending_inputs.pop_front() {
-                    log::info!("Processing next input from queue: '{}'", next_input);
-                    // Call initiate_llm_request directly.
-                    // initiate_llm_request is async, so we need to spawn it or run_ui needs to be able to await it.
-                    // Since run_ui is already async, we can await it here.
-                    // Note: This will block run_ui's loop until initiate_llm_request (which spawns) returns.
-                    // This is fine as initiate_llm_request itself is quick (just sets flags and spawns).
-                    crate::initiate_llm_request(&mut app, next_input, &**provider, &model_name, &tx).await;
-                    // app.is_llm_busy is true (set by initiate_llm_request)
-                    // app.is_input_disabled is true (set by initiate_llm_request)
-                    app.set_status(format!("Processing queue. {} remaining.", app.pending_inputs.len()), false);
+                // End of response
+                app.is_llm_busy = false;
+                app.is_input_disabled = false;
+                app.set_status("Ready".to_string(), false);
+                
+                // Process any pending inputs
+                if let Some(pending_input) = app.pending_inputs.pop_front() {
+                    log::info!("Processing pending input: {}", pending_input);
+                    
+                    // Add user message to chat history
+                    app.add_message(ChatMessage {
+                        message_type: MessageType::User,
+                        content: vec![Line::from(pending_input.clone())],
+                    });
 
-                } else {
-                    // No more pending inputs, LLM is now idle.
-                    app.is_llm_busy = false;
-                    app.is_input_disabled = false; // Re-enable input field
-                    app.set_status("Ready.".to_string(), false);
-                    log::info!("LLM idle. Input enabled.");
+                    // Start LLM request for pending input
+                    crate::initiate_llm_request(&mut app, pending_input, Arc::clone(&provider), &model_name, &tx).await;
                 }
-            } else if message.starts_with("Error:") {
+            } else if message.starts_with("Error: ") {
+                // Error message
+                let error_content = markdown_to_lines(&message);
                 app.add_message(ChatMessage {
                     message_type: MessageType::Error,
-                    content: vec![Line::from(Span::styled(Cow::from(message.clone()), Style::default().fg(Color::Red)))],
+                    content: error_content,
                 });
-                app.set_status(message, true);
-                // Error implies the current request is done. Check queue.
-                // This logic is now handled by providers sending EOT even on error.
-                // If an error occurs, provider sends error message, then EOT.
-                // The EOT signal will then trigger the queue check / idle state.
-                // So, no need to explicitly set is_llm_busy/is_input_disabled here for errors.
+                app.set_status("Error occurred".to_string(), true);
             } else {
-                // Handle content message
-                if let Some(last_message) = app.chat_history.last_mut() {
-                    if last_message.message_type == MessageType::Assistant {
-                        let styled_text = markdown_to_lines(&message);
-                        last_message.content.extend(styled_text);
-                    } else {
-                        let styled_text = markdown_to_lines(&message);
-                        app.add_message(ChatMessage {
-                            message_type: MessageType::Assistant,
-                            content: styled_text,
-                        });
-                    }
-                } else {
-                    let styled_text = markdown_to_lines(&message);
+                // Regular response token
+                if app.chat_history.is_empty() || 
+                   app.chat_history.last().unwrap().message_type != MessageType::Assistant {
+                    // Start new assistant message
                     app.add_message(ChatMessage {
                         message_type: MessageType::Assistant,
-                        content: styled_text,
+                        content: vec![Line::from("")],
                     });
                 }
+
+                // Append to last assistant message
+                if let Some(last_msg) = app.chat_history.last_mut() {
+                    if last_msg.message_type == MessageType::Assistant {
+                        if let Some(last_line) = last_msg.content.last_mut() {
+                            // Append to existing line
+                            let mut current_text = String::new();
+                            for span in &last_line.spans {
+                                current_text.push_str(&span.content);
+                            }
+                            current_text.push_str(&message);
+                            
+                            // Replace with updated content
+                            *last_line = Line::from(current_text);
+                        }
+                    }
+                }
+                
+                app.scroll_to_bottom();
                 app.set_status("Receiving response...".to_string(), false);
-                // is_input_disabled and is_llm_busy are not changed here.
             }
         }
-
 
         if app.should_quit {
             break;
@@ -304,95 +280,57 @@ pub async fn run_ui(
     Ok(())
 }
 
-
 fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
-     let parser = Parser::new_ext(markdown, Options::all());
+    let parser = Parser::new_ext(markdown, Options::all());
     let mut lines = Vec::new();
     let mut current_line = Vec::new();
 
     for event in parser {
         match event {
-           MarkdownEvent::Text(text) => {
-                current_line.push(Span::raw(Cow::from(text.to_string())));
+            MarkdownEvent::Text(text) => {
+                current_line.push(Span::raw(text.into_string()));
             }
             MarkdownEvent::Code(code) => {
-                 current_line.push(Span::styled(Cow::from(code.to_string()), Style::default().fg(Color::Cyan)));
+                current_line.push(Span::styled(
+                    code.into_string(),
+                    Style::default().fg(Color::Cyan),
+                ));
             }
-           MarkdownEvent::Start(Tag::Paragraph) => {
+            MarkdownEvent::Start(Tag::Strong) => {
+                // Bold text start
+            }
+            MarkdownEvent::End(TagEnd::Strong) => {
+                // Bold text end
+            }
+            MarkdownEvent::Start(Tag::Emphasis) => {
+                // Italic text start
+            }
+            MarkdownEvent::End(TagEnd::Emphasis) => {
+                // Italic text end
+            }
+            MarkdownEvent::SoftBreak | MarkdownEvent::HardBreak => {
                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
+                    lines.push(Line::from(current_line.clone()));
+                    current_line.clear();
+                } else {
+                    lines.push(Line::from(""));
                 }
             }
-            MarkdownEvent::End(TagEnd::Paragraph) => {
-                  if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
+            _ => {
+                // Handle other markdown events as needed
             }
-            MarkdownEvent::Start(Tag::Heading { level, .. }) => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-                let style = match level {
-                    pulldown_cmark::HeadingLevel::H1 => Style::default().fg(Color::Red).add_modifier(ratatui::style::Modifier::BOLD),
-                    pulldown_cmark::HeadingLevel::H2 => Style::default().fg(Color::Green).add_modifier(ratatui::style::Modifier::BOLD),
-                    pulldown_cmark::HeadingLevel::H3 => Style::default().fg(Color::Yellow).add_modifier(ratatui::style::Modifier::BOLD),
-                    _ => Style::default().add_modifier(ratatui::style::Modifier::BOLD),
-                };
-                 current_line.push(Span::styled(Cow::from(" ".to_string()), style));
-            }
-            MarkdownEvent::End(TagEnd::Heading { .. }) => {
-                  if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-            }
-            MarkdownEvent::Start(Tag::List(_)) => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-            }
-            MarkdownEvent::End(TagEnd::List(_)) => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-            }
-            MarkdownEvent::Start(Tag::Item) => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-                current_line.push(Span::raw(Cow::from("- ".to_string())));
-            }
-            MarkdownEvent::End(TagEnd::Item) => {
-                  if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-            }
-             MarkdownEvent::Start(Tag::BlockQuote(_)) => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-                current_line.push(Span::styled(Cow::from("> ".to_string()), Style::default().fg(Color::Gray)));
-            }
-            MarkdownEvent::End(TagEnd::BlockQuote(_)) => {
-                  if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-            }
-            MarkdownEvent::HardBreak => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-            }
-            MarkdownEvent::Rule => {
-                 if !current_line.is_empty() {
-                    lines.push(Line::from(current_line.drain(..).collect::<Vec<_>>()));
-                }
-                lines.push(Line::from(Span::raw(Cow::from("---".to_string()))));
-            }
-            _ => {}
         }
     }
-     if !current_line.is_empty() {
+
+    if !current_line.is_empty() {
         lines.push(Line::from(current_line));
     }
-    lines
+
+    // Convert to 'static
+    lines.into_iter().map(|line| {
+        let spans: Vec<Span<'static>> = line.spans.into_iter().map(|span| {
+            Span::styled(span.content.into_owned(), span.style)
+        }).collect();
+        Line::from(spans)
+    }).collect()
 }

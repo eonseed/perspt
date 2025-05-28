@@ -1,8 +1,8 @@
 // src/config.rs
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs;
+use anyhow::Result;
 
 #[derive(Debug, Clone, Deserialize, PartialEq)] // Added PartialEq for easier assertions in tests
 pub struct AppConfig {
@@ -36,7 +36,7 @@ pub fn process_loaded_config(mut config: AppConfig) -> AppConfig {
 }
 
 
-pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig, Box<dyn Error>> {
+pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
     let config: AppConfig = match config_path {
         Some(path) => {
             let config_str = fs::read_to_string(path)?;

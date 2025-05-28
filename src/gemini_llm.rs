@@ -1,180 +1,211 @@
 // src/gemini_llm.rs
 use async_trait::async_trait;
-use reqwest::{Client, header, Response};
-use serde_json::json; // For request, though Gemini uses specific structs too
+use futures::StreamExt;
+use reqwest::{header, Client, Response};
+use serde_json::{json, Value};
+use std::time::Duration;
 use tokio::sync::mpsc;
-use futures::StreamExt; // Ensure this is in Cargo.toml
-use std::error::Error;
 
 use crate::config::AppConfig;
-use crate::llm_provider::LLMProvider;
+use crate::llm_provider::{LLMProvider, LLMResult, ProviderType};
 
-// Re-define or import necessary structs from old gemini.rs if they are simple enough
-// For brevity, the example below will simplify them or use serde_json::Value
-// Ideally, you'd move the GeminiPart, GeminiContent, GeminiRequest structs here.
-
-pub struct GeminiProviderLlm;
+/// Google Gemini API provider with modern async implementation
+pub struct GeminiProviderLlm {
+    client: Client,
+}
 
 impl GeminiProviderLlm {
     pub fn new() -> Self {
-        GeminiProviderLlm
+        let client = Client::builder()
+            .timeout(Duration::from_secs(300)) // 5 minute timeout
+            .build()
+            .expect("Failed to create HTTP client");
+        
+        Self { client }
     }
 
-    // Helper method for streaming, adapted from old gemini.rs
-    async fn stream_response(&self, response: Response, tx: &mpsc::UnboundedSender<String>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    /// Parse streaming SSE response from Gemini
+    async fn stream_response(
+        &self,
+        response: Response,
+        tx: &mpsc::UnboundedSender<String>,
+    ) -> LLMResult<()> {
         let mut stream = response.bytes_stream();
-        let mut error_occurred_in_stream = false;
+        let mut buffer = String::new();
 
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(bytes) => {
-                    let chunk = String::from_utf8_lossy(&bytes).to_string();
-                    log::debug!("Gemini Response Chunk: {}", chunk);
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&chunk_str);
 
-                    for line in chunk.lines() {
-                        if line.starts_with("data:") {
-                            let json_str = line[5..].trim();
-                            if json_str.is_empty() {
-                                continue;
-                            }
-                            match serde_json::from_str::<serde_json::Value>(json_str) {
-                                Ok(json_value) => {
-                                    if let Some(candidates) = json_value.get("candidates").and_then(|v| v.as_array()) {
-                                        for candidate in candidates {
-                                            if let Some(content_obj) = candidate.get("content") {
-                                                if let Some(parts) = content_obj.get("parts").and_then(|v| v.as_array()) {
-                                                    for part in parts {
-                                                        if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                                                            if !text.is_empty() {
-                                                                if let Err(e) = tx.send(text.to_string()) {
-                                                                    log::error!("Failed to send Gemini response chunk to UI: {}", e);
-                                                                    error_occurred_in_stream = true;
-                                                                    break; // Break inner part loop
-                                                                }
-                                                            }
-                                                        }
-                                                    }
+            // Process complete lines
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer.drain(..=line_end);
+
+                if line.is_empty() || !line.starts_with("data: ") {
+                    continue;
+                }
+
+                let data = &line[6..]; // Remove "data: " prefix
+                
+                // Parse JSON response
+                match serde_json::from_str::<Value>(data) {
+                    Ok(json) => {
+                        if let Some(candidates) = json.get("candidates").and_then(|c| c.as_array()) {
+                            if let Some(candidate) = candidates.first() {
+                                if let Some(content) = candidate.get("content") {
+                                    if let Some(parts) = content.get("parts").and_then(|p| p.as_array()) {
+                                        if let Some(part) = parts.first() {
+                                            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                                                if let Err(e) = tx.send(text.to_string()) {
+                                                    log::error!("Failed to send token: {}", e);
+                                                    return Err(anyhow::anyhow!("Channel send failed"));
                                                 }
                                             }
-                                            if error_occurred_in_stream { break; } // Break candidate loop
                                         }
                                     }
                                 }
-                                Err(e) => {
-                                    log::warn!("Failed to parse JSON from Gemini stream: {}. Chunk: '{}'", e, json_str);
+                                
+                                // Check if generation is finished
+                                if let Some(finish_reason) = candidate.get("finishReason") {
+                                    log::info!("Gemini generation finished: {}", finish_reason);
+                                    return Ok(());
                                 }
                             }
                         }
-                        if error_occurred_in_stream { break; } // Break line loop
+                        
+                        // Check for errors in the response
+                        if let Some(error) = json.get("error") {
+                            let error_msg = error.get("message")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("Unknown Gemini error");
+                            return Err(anyhow::anyhow!("Gemini API error: {}", error_msg));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to parse JSON chunk: {} - Error: {}", data, e);
+                        // Continue processing other chunks
                     }
                 }
-                Err(e) => {
-                    log::error!("Error reading Gemini response stream: {}", e);
-                    // This error is from the stream itself (e.g. network issue)
-                    // We return it, and the caller (send_chat_request) will handle EOT.
-                    return Err(Box::new(e)); 
-                }
             }
-            if error_occurred_in_stream { break; } // Break main while loop
         }
-        
-        if error_occurred_in_stream {
-             return Err("Failed to send data to UI channel during Gemini streaming.".into());
-        }
-        // Gemini stream ends when no more data is sent. Unlike OpenAI, no explicit [DONE].
+
         Ok(())
     }
 }
 
 #[async_trait]
 impl LLMProvider for GeminiProviderLlm {
-    async fn list_models(&self) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-        // Placeholder, similar to OpenAIProviderLlm.
-        // Proper implementation would require AppConfig for API key and URL.
-        log::info!("GeminiProviderLlm: list_models called. Returning placeholder.");
-        Ok(vec!["gemini-pro".to_string(), "gemini-1.5-flash".to_string()]) // Placeholder
+    async fn list_models(&self) -> LLMResult<Vec<String>> {
+        // Return commonly available Gemini models
+        Ok(vec![
+            "gemini-1.5-pro".to_string(),
+            "gemini-1.5-flash".to_string(),
+            "gemini-pro".to_string(),
+            "gemini-pro-vision".to_string(),
+        ])
     }
 
     async fn send_chat_request(
         &self,
         input: &str,
-        model_name: &str, // This should be just the model name like "gemini-pro"
+        model_name: &str,
         config: &AppConfig,
-        tx: &mpsc::UnboundedSender<String>
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let api_key = match config.api_key.as_ref() {
-            Some(k) => k,
-            None => {
-                let err_msg = "API key not provided for Gemini".to_string();
-                log::error!("{}", err_msg);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send API key error to UI.");
-                }
-                // EOT is sent by the final block
-                return Err(err_msg.into());
-            }
-        };
-        let base_url = match config.providers.get("gemini") {
-            Some(url) => url,
-            None => {
-                let err_msg = "Gemini provider URL not configured".to_string();
-                log::error!("{}", err_msg);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send URL config error to UI.");
-                }
-                // EOT is sent by the final block
-                return Err(err_msg.into());
-            }
-        };
-        
-        let client = Client::new();
-        let request_url = format!("{}models/{}:streamGenerateContent?alt=sse", base_url.trim_end_matches('/'), model_name);
-        log::info!("Gemini Request URL: {}", request_url);
+        tx: &mpsc::UnboundedSender<String>,
+    ) -> LLMResult<()> {
+        // Get API key
+        let api_key = config.api_key.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("API key not provided for Gemini"))?;
 
-        let request_payload = json!({
+        // Get base URL
+        let base_url = config.providers.get("gemini")
+            .ok_or_else(|| anyhow::anyhow!("Gemini provider URL not configured"))?;
+
+        let request_url = format!(
+            "{}/models/{}:streamGenerateContent?alt=sse",
+            base_url.trim_end_matches('/'),
+            model_name
+        );
+        
+        log::info!("Gemini request: {} with model {}", request_url, model_name);
+
+        // Create request payload
+        let payload = json!({
             "contents": [{
                 "parts": [{"text": input}]
-            }]
-            // TODO: Add generationConfig if needed (temperature, maxOutputTokens, etc.)
-            // "generationConfig": {
-            //   "temperature": 0.7,
-            //   "maxOutputTokens": 1024,
-            // }
-        });
-        log::debug!("Gemini Request Payload: {}", request_payload.to_string());
-
-        let final_result = async {
-            let request = client.post(&request_url)
-                .header(header::CONTENT_TYPE, "application/json")
-                .header("x-goog-api-key", api_key)
-                .json(&request_payload);
-
-            let response = request.send().await.map_err(|e| {
-                log::error!("Failed to send Gemini request: {}", e);
-                Box::new(e) as Box<dyn Error + Send + Sync>
-            })?;
-
-            let status = response.status();
-            log::info!("Gemini Response Status: {}", status);
-
-            if status.is_success() {
-                self.stream_response(response, tx).await
-            } else {
-                let error_body = response.text().await.unwrap_or_else(|_| "Unknown error body".to_string());
-                log::error!("Gemini API Error: {} - {}", status, error_body);
-                let err_msg = format!("Gemini API Error: {} - {}", status, error_body);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                     log::warn!("Failed to send API error to UI.");
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "topP": 0.9,
+                "topK": 40,
+                "maxOutputTokens": 2048,
+                "candidateCount": 1
+            },
+            "safetySettings": [
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH",
+                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_MEDIUM_AND_ABOVE"
                 }
-                Err(err_msg.into())
-            }
-        }.await;
+            ]
+        });
 
-        // Always send EOT signal after processing is done or an error occurred.
-        if let Err(e) = tx.send(crate::EOT_SIGNAL.to_string()) {
-            log::error!("Failed to send EOT signal for Gemini: {}", e);
+        // Send request
+        let response = self.client
+            .post(&request_url)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-goog-api-key", api_key)
+            .json(&payload)
+            .send()
+            .await?;
+
+        let status = response.status();
+        log::info!("Gemini response status: {}", status);
+
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_msg = format!("Gemini API error: {} - {}", status, error_body);
+            log::error!("{}", error_msg);
+            let _ = tx.send(format!("Error: {}", error_msg));
+            return Err(anyhow::anyhow!(error_msg));
         }
 
-        final_result
+        // Stream the response
+        let result = self.stream_response(response, tx).await;
+
+        // Always send EOT signal
+        if let Err(e) = tx.send(crate::EOT_SIGNAL.to_string()) {
+            log::error!("Failed to send EOT signal: {}", e);
+        }
+
+        result
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::Gemini
+    }
+
+    async fn validate_config(&self, config: &AppConfig) -> LLMResult<()> {
+        if config.api_key.is_none() {
+            return Err(anyhow::anyhow!("API key is required for Gemini provider"));
+        }
+
+        if !config.providers.contains_key("gemini") {
+            return Err(anyhow::anyhow!("Gemini provider URL not configured"));
+        }
+
+        Ok(())
     }
 }

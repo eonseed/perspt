@@ -1,107 +1,87 @@
 // src/main.rs
 use clap::{Arg, Command};
-use std::error::Error;
+use anyhow::{Context, Result};
 use std::io;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 // Define EOT_SIGNAL
-pub const EOT_SIGNAL: &str = "<<EOT>>"; // Made public
+pub const EOT_SIGNAL: &str = "<<EOT>>";
 
 use crossterm::{
-    event::{self, KeyCode, KeyEventKind, KeyModifiers, Event},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{enable_raw_mode, EnterAlternateScreen},
 };
+use env_logger;
 use log::LevelFilter;
-use log4rs::{
-    append::file::FileAppender,
-    config::{Appender, Config as Log4rsConfig, Root},
-    encode::pattern::PatternEncoder,
-};
-use crate::ui::run_ui;
-use crate::ui::AppEvent;
-use crate::config::AppConfig;
-// Removed old provider imports
-// use crate::openai::OpenAIProvider;
-// use crate::gemini::GeminiProvider;
 
-// Added new provider imports
+use crate::config::AppConfig;
 use crate::llm_provider::LLMProvider;
+use crate::local_llm_provider::LocalLlmProvider;
 use crate::openai_llm::OpenAIProviderLlm;
 use crate::gemini_llm::GeminiProviderLlm;
-use crate::local_llm_provider::LocalLlmProvider;
-// Arc might be needed if provider is shared more complexly, Box for now.
-// use std::sync::Arc;
+use crate::ui::{run_ui, AppEvent};
 
-
-mod ui;
 mod config;
-// Removed old module declarations
-// mod openai;
-// mod gemini;
-// Add new module declarations if they are not already in lib.rs or other central place
-// For now, assuming these are direct files in src/ referenced by main or lib.rs
-// If src/openai_llm.rs etc. are meant to be modules, they should be declared:
-mod openai_llm;
 mod gemini_llm;
-mod local_llm_provider;
 mod llm_provider;
-
+mod local_llm_provider;
+mod openai_llm;
+mod ui;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<()> {
     // Initialize logging
-    let logfile = FileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new("{d(%Y-%m-%d %H:%M:%S)} [{l}] - {m}\n")))
-        .build("perspt.log")?;
-
-    let log_config = Log4rsConfig::builder()
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(Root::builder().appender("logfile").build(LevelFilter::Info))?;
-
-    log4rs::init_config(log_config)?;
+    env_logger::Builder::from_default_env()
+        .filter_level(LevelFilter::Info)
+        .init();
 
     // Parse CLI arguments
-    let matches = Command::new("LLM Chat CLI")
+    let matches = Command::new("Perspt - Performance LLM Chat CLI")
+        .version("0.3.0")
+        .author("Vikrant Rathore")
+        .about("A performant CLI for talking to LLMs using modern APIs")
         .arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
                 .value_name("FILE")
-                .help("Path to the configuration file"),
+                .help("Configuration file path")
         )
         .arg(
             Arg::new("api-key")
                 .short('k')
                 .long("api-key")
-                .value_name("API_KEY")
-                .help("API key to use for the provider"),
+                .value_name("KEY")
+                .help("API key for the LLM provider")
         )
         .arg(
             Arg::new("model-name")
                 .short('m')
-                .long("model-name")
-                .value_name("MODEL/PATH") // Changed from MODEL
-                .help("Model to use (e.g., gpt-4, or path to local model file if provider-type is local_llm)"),
-        )
-        .arg(
-            Arg::new("provider") // This can be used to select a pre-configured provider profile from config.providers
-                .short('p')
-                .long("provider")
-                .value_name("PROVIDER_PROFILE")
-                .help("Choose a configured LLM provider profile (e.g., openai, gemini)"),
+                .long("model")
+                .value_name("MODEL")
+                .help("Model name or path to use")
         )
         .arg(
             Arg::new("provider-type")
-                .short('t')
+                .short('p')
                 .long("provider-type")
                 .value_name("TYPE")
-                .help("Specify the type of LLM provider (e.g., openai, gemini, local_llm)"),
+                .help("Provider type: local, openai, gemini")
+                .value_parser(["local", "openai", "gemini"])
         )
-         .arg(
+        .arg(
+            Arg::new("provider")
+                .long("provider")
+                .value_name("PROFILE")
+                .help("Provider profile name from config")
+        )
+        .arg(
             Arg::new("list-models")
+                .short('l')
                 .long("list-models")
-                .help("List available models for the provider")
+                .help("List available models for the configured provider")
                 .action(clap::ArgAction::SetTrue)
         )
         .get_matches();
@@ -109,196 +89,143 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config_path = matches.get_one::<String>("config");
     let cli_api_key = matches.get_one::<String>("api-key");
     let cli_model_name = matches.get_one::<String>("model-name");
-    let cli_provider_profile = matches.get_one::<String>("provider"); // Profile name like "openai_default"
-    let cli_provider_type = matches.get_one::<String>("provider-type"); // Type like "openai", "local_llm"
+    let cli_provider_profile = matches.get_one::<String>("provider");
+    let cli_provider_type = matches.get_one::<String>("provider-type");
     let list_models = matches.get_flag("list-models");
 
     // Load configuration
-    let mut config = config::load_config(config_path).await?;
+    let mut config = config::load_config(config_path).await
+        .context("Failed to load configuration")?;
 
     // Apply CLI overrides
     if let Some(key) = cli_api_key {
         config.api_key = Some(key.clone());
-        log::info!("Overriding API key from CLI.");
     }
 
     if let Some(ptype) = cli_provider_type {
         config.provider_type = Some(ptype.clone());
-        log::info!("Overriding provider type from CLI: {}", ptype);
-        // If local_llm is chosen via CLI, adjust default_provider to avoid URL lookup issues.
-        // LocalLlmProvider uses config.default_model as path and doesn't need a provider URL.
-        if ptype == "local_llm" {
-            // Set default_provider to a non-API specific name.
-            // This ensures that if other logic tries to use default_provider to get a URL, it won't pick an API one.
-            config.default_provider = Some("local_llm_cli".to_string());
-        }
     }
     
     if let Some(profile_name) = cli_provider_profile {
-        // If --provider (profile) is specified, it might imply a provider_type
-        // For example, if profile "openai_custom" is chosen, provider_type should be "openai".
-        // This logic might need refinement based on how profiles in config.providers are structured.
-        // For now, assume that if --provider is used, it sets both default_provider and implies provider_type.
         config.default_provider = Some(profile_name.clone());
-        log::info!("Overriding default provider profile from CLI: {}", profile_name);
-        // Infer provider_type from profile if not explicitly set by --provider-type
-        if config.provider_type.is_none() {
-            if profile_name.contains("openai") { config.provider_type = Some("openai".to_string()); }
-            else if profile_name.contains("gemini") { config.provider_type = Some("gemini".to_string()); }
-            // local_llm profiles might exist but are less common if path is primary identifier.
-        }
     }
 
     if let Some(model_val) = cli_model_name {
         config.default_model = Some(model_val.clone());
-        log::info!("Overriding model name/path from CLI: {}", model_val);
     }
     
-    // Ensure config.default_provider is sensible if provider_type was set to local_llm by CLI
-    // and no explicit --provider profile was given that might have already set it.
-    if config.provider_type.as_deref() == Some("local_llm") {
-        // If default_provider is still pointing to an API provider (e.g. from config file default),
-        // change it to something generic for local_llm.
-        if config.default_provider.as_deref() == Some("openai") || config.default_provider.as_deref() == Some("gemini") {
-             config.default_provider = Some("local_llm_instance".to_string());
-             log::info!("Adjusted default_provider to 'local_llm_instance' due to provider_type being 'local_llm'.");
-        } else if config.default_provider.is_none() {
-            config.default_provider = Some("local_llm_instance".to_string());
-            log::info!("Set default_provider to 'local_llm_instance' for provider_type 'local_llm'.");
+    // Ensure we have a default provider if local type was set
+    if config.provider_type.as_deref() == Some("local") {
+        if config.default_provider.is_none() {
+            config.default_provider = Some("local".to_string());
         }
     }
 
-
-    // Final model_name to be used by the provider
-    // For local_llm, this must be the path to the model file.
-    // For API providers, this is the model identifier (e.g., "gpt-4").
-    let model_name_for_provider = config.default_model.clone().unwrap_or_else(|| {
-        match config.provider_type.as_deref() {
-            Some("openai") => "gpt-3.5-turbo".to_string(),
-            Some("gemini") => "gemini-pro".to_string(),
-            Some("local_llm") => {
-                log::warn!("Local LLM provider selected, but no model path provided via --model-name or in config.default_model. This will likely fail.");
-                "".to_string() // Empty path will cause error in LocalLlmProvider
+    // Get model name for the provider
+    let model_name_for_provider = config.default_model.clone()
+        .unwrap_or_else(|| {
+            match config.provider_type.as_deref() {
+                Some("openai") => "gpt-3.5-turbo".to_string(),
+                Some("gemini") => "gemini-pro".to_string(),
+                Some("local") => "/path/to/model.gguf".to_string(),
+                _ => "gpt-3.5-turbo".to_string(),
             }
-            _ => "gemini-pro".to_string(), // Fallback default
-        }
-    });
+        });
     
     let api_key_string = config.api_key.clone().unwrap_or_default();
 
     // Create the LLM provider instance
-    let provider: Box<dyn LLMProvider + Send + Sync> = match config.provider_type.as_deref() {
-        Some("openai") => Box::new(OpenAIProviderLlm::new()),
-        Some("gemini") => Box::new(GeminiProviderLlm::new()),
-        Some("local_llm") => Box::new(LocalLlmProvider::new()),
-        // Default if provider_type is None or unrecognized
-        None | Some(_) => {
-            log::warn!(
-                "Provider type '{}' is not set or unrecognized. Defaulting to GeminiProviderLlm.",
-                config.provider_type.as_deref().unwrap_or("not set")
-            );
-            // Before defaulting, ensure config reflects this choice if it was None
-            if config.provider_type.is_none() {
-                config.provider_type = Some("gemini".to_string());
-                config.default_provider = Some("gemini".to_string()); // Assuming a "gemini" profile in providers map
-            }
-            Box::new(GeminiProviderLlm::new())
+    let provider: Arc<dyn LLMProvider + Send + Sync> = match config.provider_type.as_deref() {
+        Some("local") => Arc::new(LocalLlmProvider::new()),
+        Some("openai") => Arc::new(OpenAIProviderLlm::new()),
+        Some("gemini") => Arc::new(GeminiProviderLlm::new()),
+        _ => {
+            log::warn!("Unknown or missing provider type, defaulting to Gemini");
+            Arc::new(GeminiProviderLlm::new())
         }
     };
+
+    // Validate configuration for the provider
+    if let Err(e) = provider.validate_config(&config).await {
+        log::error!("Configuration validation failed: {}", e);
+        return Err(e);
+    }
 
     if list_models {
         list_available_models(&provider, &config).await?;
         return Ok(());
     }
 
-    // Initialize Ratatui
-    let mut terminal = initialize_terminal()?;
+    // Initialize terminal
+    let mut terminal = initialize_terminal()
+        .context("Failed to initialize terminal")?;
 
-    // Run the UI, passing the provider and the resolved model_name_for_provider
-    run_ui(&mut terminal, config, model_name_for_provider, api_key_string, provider).await?;
+    // Run the UI
+    run_ui(&mut terminal, config, model_name_for_provider, api_key_string, provider).await
+        .context("UI execution failed")?;
+    
     Ok(())
 }
 
-// list_available_models remains the same
-async fn list_available_models(provider: &Box<dyn LLMProvider + Send + Sync>, _config: &AppConfig) -> Result<(), Box<dyn Error>> {
-    // _config might be used if list_models needed details not in provider, but current trait doesn't pass it.
+async fn list_available_models(
+    provider: &Arc<dyn LLMProvider + Send + Sync>,
+    _config: &AppConfig,
+) -> Result<()> {
     match provider.list_models().await {
         Ok(models) => {
-            if models.is_empty() {
-                println!("No models listed by the provider, or model is pre-loaded (e.g., local model path).");
-            } else {
-                println!("Available models/info from provider:");
-                for model_info in models {
-                    println!("- {}", model_info);
-                }
+            println!("Available models for {:?} provider:", provider.provider_type());
+            for model in models {
+                println!("  - {}", model);
             }
         }
         Err(e) => {
-            eprintln!("Failed to list models: {}", e); // Use eprintln for errors
+            log::error!("Failed to list models: {}", e);
+            return Err(e);
         }
     }
     Ok(())
 }
 
-
-fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>, Box<dyn Error>> {
-    enable_raw_mode()?;
+fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>> {
+    enable_raw_mode().context("Failed to enable raw mode")?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen).context("Failed to enter alternate screen")?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
-    let mut terminal = ratatui::Terminal::new(backend)?;
-    terminal.clear()?;
+    let mut terminal = ratatui::Terminal::new(backend).context("Failed to create terminal")?;
+    terminal.clear().context("Failed to clear terminal")?;
     Ok(terminal)
 }
-
-// (Existing main, list_available_models, initialize_terminal functions are above this.
-// The SEARCH block will start from the existing initiate_llm_request or where it should be inserted,
-// and cover the existing handle_events function.)
-
-// Ensure initiate_llm_request and truncate_message are defined as per the prompt.
-// (If they exist from a previous step, they will be overwritten if different; if not, created)
 
 async fn initiate_llm_request(
     app: &mut ui::App,
     input_to_send: String,
-    provider: &(dyn LLMProvider + Send + Sync), 
+    provider: Arc<dyn LLMProvider + Send + Sync>, 
     model_name: &str,
     tx_llm: &mpsc::UnboundedSender<String>,
 ) {
     app.is_llm_busy = true;
-    app.is_input_disabled = true; // Visually disable input when a request starts
+    app.is_input_disabled = true;
 
-    // User message is added to chat_history in handle_events before this call.
-    
     log::info!("Initiating LLM request for input: '{}'", input_to_send);
     app.set_status(format!("Sending: {}...", truncate_message(&input_to_send, 20)), false);
 
     let model_name_clone = model_name.to_string();
     let config_clone = app.config.clone(); 
     let tx_clone_for_provider = tx_llm.clone();
+    let input_clone = input_to_send.clone();
 
     tokio::spawn(async move {
-        log::info!("LLM Task: Sending request for '{}' with model '{}'", input_to_send, model_name_clone);
-        match provider.send_chat_request(&input_to_send, &model_name_clone, &config_clone, &tx_clone_for_provider).await {
-            Ok(_) => {
-                log::info!("LLM Task: Request for '{}' processed successfully by provider. Provider should send EOT.", input_to_send);
-            }
-            Err(err) => {
-                log::error!("LLM Task: Error for input '{}': {}", input_to_send, err);
-                // Provider should send EOT, but if it failed before that, we might need to ensure UI knows.
-                // However, providers were modified to always send EOT. If an error occurs here,
-                // it means the provider's send_chat_request itself returned Err.
-                // The provider's EOT should still be sent in its own error handling logic.
-                // We still send the error message to the UI via the channel.
-                if tx_clone_for_provider.send(format!("Error: {}", err)).is_err() {
-                    log::error!("LLM Task: Failed to send error to UI for input '{}'", input_to_send);
-                }
-                // Defensive EOT from here if provider might fail before its own EOT.
-                // (Commented out as providers should handle their own EOT)
-                // if tx_clone_for_provider.send(EOT_SIGNAL.to_string()).is_err() {
-                //     log::error!("LLM Task: Failed to send defensive EOT after error for input '{}'", input_to_send);
-                // }
-            }
+        let result = provider.send_chat_request(
+            &input_clone,
+            &model_name_clone,
+            &config_clone,
+            &tx_clone_for_provider,
+        ).await;
+
+        if let Err(e) = result {
+            log::error!("LLM request failed: {}", e);
+            let _ = tx_clone_for_provider.send(format!("Error: {}", e));
+            let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
         }
     });
 }
@@ -311,76 +238,70 @@ fn truncate_message(s: &str, max_chars: usize) -> String {
     }
 }
 
-// Replacing the entire handle_events function with the new logic.
 pub async fn handle_events(
     app: &mut ui::App,
     tx_llm: &mpsc::UnboundedSender<String>, 
-    _api_key: &String, // Unused, as AppConfig within app is used by provider
-    model_name: &String, // This is model_name_for_provider from main
-    provider: &Box<dyn LLMProvider + Send + Sync>, 
+    _api_key: &String,
+    model_name: &String,
+    provider: &Arc<dyn LLMProvider + Send + Sync>, 
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
             Event::Key(key) => {
                 if key.kind == KeyEventKind::Press {
-                    // Global keybindings (Ctrl+C/D, Esc)
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && 
-                       (key.code == KeyCode::Char('c') || key.code == KeyCode::Char('d')) {
-                        app.should_quit = true;
-                        return Some(AppEvent::Tick);
-                    }
-                    if key.code == KeyCode::Esc {
-                        return Some(AppEvent::Key(key)); // Propagate Esc for run_ui to handle
-                    }
-
-                    // Handle text input keys (Char, Backspace, Enter)
-                    // These are allowed even if app.is_llm_busy (for queuing)
-                    // but not if app.is_input_disabled (active request processing).
                     match key.code {
+                        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.should_quit = true;
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.should_quit = true;
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Enter => {
-                            if !app.input_text.is_empty() {
-                                let current_input = app.input_text.drain(..).collect::<String>();
+                            if !app.is_input_disabled && !app.input_text.trim().is_empty() {
+                                let input_to_send = app.input_text.trim().to_string();
+                                app.input_text.clear();
+
+                                // Add user message to chat history
                                 app.add_message(ui::ChatMessage {
                                     message_type: ui::MessageType::User,
-                                    content: vec![ratatui::text::Line::from(ratatui::text::Span::styled(
-                                        std::borrow::Cow::from(current_input.clone()),
-                                        ratatui::style::Style::default().fg(ratatui::style::Color::Green),
-                                    ))],
+                                    content: vec![ratatui::text::Line::from(input_to_send.clone())],
                                 });
 
-                                if app.is_llm_busy {
-                                    log::info!("LLM is busy, queuing input: '{}'", current_input);
-                                    app.pending_inputs.push_back(current_input);
-                                    app.set_status(format!("Request queued. {} in queue.", app.pending_inputs.len()), false);
-                                } else {
-                                    // Not busy, so initiate the request immediately.
-                                    // Pass &**provider to convert &Box<dyn T> to &dyn T
-                                    initiate_llm_request(app, current_input, &**provider, model_name, tx_llm).await;
-                                }
-                                return Some(AppEvent::Tick); // Input processed
+                                // Start LLM request
+                                initiate_llm_request(app, input_to_send, Arc::clone(provider), model_name, tx_llm).await;
                             }
-                        },
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Char(c) => {
-                            // Only allow typing if input is not visually/logically disabled by an active request
                             if !app.is_input_disabled {
                                 app.input_text.push(c);
                             }
-                        },
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Backspace => {
                             if !app.is_input_disabled {
                                 app.input_text.pop();
                             }
-                        },
-                        // Up and Down keys are handled by run_ui for scrolling if not captured here.
-                        // If is_input_disabled is true, they are passed through.
-                        _ => {} 
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Up => {
+                            app.scroll_up();
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Down => {
+                            app.scroll_down();
+                            return Some(AppEvent::Key(key));
+                        }
+                        _ => {
+                            return Some(AppEvent::Key(key));
+                        }
                     }
                 }
-                // Propagate all key events for other handlers (like scrolling in run_ui)
-                return Some(AppEvent::Key(key));
             }
-            _ => {} // Other event types like Mouse, Resize
+            _ => {}
         }
     }
-    None // No event read
+    None
 }

@@ -1,153 +1,173 @@
 // src/local_llm_provider.rs
 use async_trait::async_trait;
-use tokio::sync::mpsc;
-use std::error::Error;
 use std::path::PathBuf;
-use std::convert::Infallible; // For llm crate's inference callback
+use tokio::sync::mpsc;
+use anyhow::{Result as AnyhowResult};
+use tokio::time::{sleep, Duration};
 
 use crate::config::AppConfig;
-use crate::llm_provider::LLMProvider;
-// Import the llm crate itself
-use llm::KnownModel;
+use crate::llm_provider::{LLMProvider, LLMResult, ProviderType};
 
-pub struct LocalLlmProvider;
+/// Local LLM provider placeholder implementation
+/// Note: This is a placeholder. For a real implementation, you would use:
+/// - candle-core + candle-transformers for pure Rust inference
+/// - llama-cpp bindings for C++ based inference
+/// - tch (PyTorch) bindings
+/// - Or other inference engines
+pub struct LocalLlmProvider {
+    model_name: String,
+}
 
 impl LocalLlmProvider {
     pub fn new() -> Self {
-        LocalLlmProvider
+        Self {
+            model_name: "local-placeholder".to_string(),
+        }
+    }
+    
+    pub fn with_model_name(mut self, name: String) -> Self {
+        self.model_name = name;
+        self
+    }
+
+    /// Simulate model loading for demonstration
+    async fn simulate_model_loading(&self, model_path: &str) -> AnyhowResult<()> {
+        log::info!("Simulating model loading from: {}", model_path);
+        
+        // Simulate loading time
+        sleep(Duration::from_millis(100)).await;
+        
+        let model_path_buf = PathBuf::from(model_path);
+        if !model_path_buf.exists() {
+            anyhow::bail!("Model file not found: {}", model_path);
+        }
+        
+        log::info!("Model simulation loaded successfully");
+        Ok(())
+    }
+    
+    /// Generate a placeholder response
+    async fn generate_placeholder_response(&self, input: &str) -> String {
+        // Simple placeholder responses based on input characteristics
+        let word_count = input.split_whitespace().count();
+        
+        match word_count {
+            0..=3 => "I understand. Could you provide more details?",
+            4..=10 => "That's an interesting point. Based on what you've mentioned, I think this topic deserves careful consideration.",
+            11..=20 => "You've raised several important points. Let me address them systematically. First, the context you've provided suggests multiple perspectives to consider.",
+            _ => "Thank you for the detailed input. This is a complex topic with many facets. Let me provide a comprehensive response that addresses the key aspects you've mentioned while considering various viewpoints and implications.",
+        }.to_string()
+    }
+    
+    /// Simulate streaming response
+    async fn stream_placeholder_response(&self, response: &str, tx: &mpsc::UnboundedSender<String>) -> LLMResult<()> {
+        let words: Vec<&str> = response.split_whitespace().collect();
+        
+        for (i, word) in words.iter().enumerate() {
+            // Add natural delays to simulate thinking
+            sleep(Duration::from_millis(50 + (i as u64 * 10) % 100)).await;
+            
+            let token = if i == words.len() - 1 {
+                word.to_string()
+            } else {
+                format!("{} ", word)
+            };
+            
+            if let Err(e) = tx.send(token) {
+                log::error!("Failed to send token: {}", e);
+                return Err(anyhow::anyhow!("Streaming error: {}", e));
+            }
+        }
+        
+        Ok(())
     }
 }
 
 #[async_trait]
 impl LLMProvider for LocalLlmProvider {
-    async fn list_models(&self) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-        // For local models, "listing models" is less about an API call
-        // and more about what model file is currently specified or available.
-        // This could be enhanced later to scan a directory, but for now,
-        // it can return a placeholder or expect the model path to be in AppConfig.
-        log::info!("LocalLlmProvider: list_models called. Returning placeholder.");
-        Ok(vec!["Path specified in config".to_string()])
+    async fn list_models(&self) -> LLMResult<Vec<String>> {
+        // For local models, return available options
+        let available = vec![
+            "🔧 Local Model Placeholder".to_string(),
+            "📁 Specify model file path in config".to_string(),
+            "💡 Supported formats: GGML, GGUF, SafeTensors".to_string(),
+            "⚡ Recommended: Use candle-core for Rust inference".to_string(),
+            "🦙 Alternative: llama.cpp bindings".to_string(),
+        ];
+        Ok(available)
     }
 
     async fn send_chat_request(
         &self,
         input: &str,
-        model_path_str: &str, // This is the path to the model file from AppConfig.default_model
-        _config: &AppConfig,  // AppConfig might be used for other params in future (threads, etc.)
-        tx: &mpsc::UnboundedSender<String>
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let model_path = PathBuf::from(model_path_str);
-        if !model_path.exists() {
-            let err_msg = format!("Model file not found: {}", model_path_str);
-            log::error!("{}", err_msg);
-            if tx.send(format!("Error: {}", err_msg)).is_err() {
-                log::warn!("Failed to send model not found error to UI channel.");
-            }
-            // Send EOT even if model not found
-            if tx.send(crate::EOT_SIGNAL.to_string()).is_err() {
-                log::warn!("Failed to send EOT signal to UI after model not found error.");
-            }
-            return Err(err_msg.into());
+        model_path: &str,
+        _config: &AppConfig,
+        tx: &mpsc::UnboundedSender<String>,
+    ) -> LLMResult<()> {
+        
+        // Simulate model loading
+        if let Err(e) = self.simulate_model_loading(model_path).await {
+            let error_msg = format!("Model loading failed: {}", e);
+            log::error!("{}", error_msg);
+            let _ = tx.send(format!("❌ Error: {}", error_msg));
+            let _ = tx.send(crate::EOT_SIGNAL.to_string());
+            return Err(anyhow::anyhow!(error_msg));
         }
-
-        log::info!("LocalLlmProvider: Loading model from path: {:?}", model_path);
-
-        // Determine model architecture from path or use a dynamic approach
-        // This is a simplified example. The llm crate might need more info or specific load functions.
-        // We'll assume Llama for .gguf files as a common case.
-        // The llm crate's `llm::load_dynamic` is better for auto-detection.
-        // let architecture = llm::ModelArchitecture::Llama; // Example, try to infer or make configurable - REMOVED as load_dynamic with None is used
-
-        let now = std::time::Instant::now();
-
-        // Using llm::load_dynamic to automatically infer model type
-        let model = llm::load_dynamic(
-            None, // architecture: None lets llm crate infer it.
-            &model_path,
-            llm::TokenizerSource::Embedded, // Or specify a tokenizer file
-            Default::default(), // ModelParameters
-            llm::load_progress_callback_stdout // Progress callback
-        )
-        .map_err(|e| {
-            let err_msg = format!("Failed to load local model: {}", e);
-            log::error!("{}", err_msg);
-            if tx.send(format!("Error: {}", err_msg)).is_err() {
-                log::warn!("Failed to send model load error to UI channel.");
-            }
-            // Send EOT even if model loading fails
-            if tx.send(crate::EOT_SIGNAL.to_string()).is_err() {
-                log::warn!("Failed to send EOT signal to UI after model load error.");
-            }
-            Box::new(e) as Box<dyn Error + Send + Sync>
-        })?;
         
-        log::info!(
-            "Local model loaded successfully. Time taken: {}ms",
-            now.elapsed().as_millis()
-        );
-
-        let mut session = model.start_session(Default::default()); // InferenceSessionConfig
-        let tx_clone = tx.clone(); 
-        let inference_input = input.to_string(); // Clone input for the inference closure
-
-        log::info!("Starting inference for local model...");
+        // Send status message
+        let _ = tx.send("🤖 Local LLM Provider (Placeholder Implementation)\n\n".to_string());
+        let _ = tx.send("📝 Processing your request...\n\n".to_string());
         
-        let res = session.infer::<Infallible>( // Specify Infallible for the callback's error type
-            model.as_ref(), 
-            &mut rand::thread_rng(), // Ensure rand is in Cargo.toml
-            &llm::InferenceRequest {
-                prompt: (&inference_input).into(), // Use the cloned input
-                parameters: &llm::InferenceParameters::default(), 
-                play_back_previous_tokens: false,
-                maximum_token_count: Some(1024), // Set a reasonable maximum token count
-            },
-            &mut Default::default(), // OutputRequest
-            move |t| { // move tx_clone and inference_input (if not already .into()) into closure
-                match t {
-                    llm::InferenceResponse::InferredToken(token) => {
-                        if let Err(e) = tx_clone.send(token) {
-                            log::error!("Failed to send token from local LLM: {}", e);
-                            return Ok(llm::InferenceFeedback::Halt); // Stop if channel is broken
-                        }
-                    }
-                    llm::InferenceResponse::EotToken => {
-                        log::info!("Local LLM EOT token received.");
-                         return Ok(llm::InferenceFeedback::Halt);
-                    }
-                    _ => {} // Handle other InferenceResponse types as needed
-                }
-                Ok(llm::InferenceFeedback::Continue)
-            }
+        log::info!("Starting placeholder inference for input: {}", input);
+        
+        // Generate response
+        let response = self.generate_placeholder_response(input).await;
+        
+        // Add model information to response
+        let full_response = format!(
+            "{}\n\n💬 Response generated by: {}\n📂 Model path: {}\n🔧 Note: This is a placeholder implementation.",
+            response, self.model_name, model_path
         );
-
-        let final_result = match res {
-            Ok(_) => {
-                log::info!("Local LLM inference completed successfully.");
-                Ok(())
-            }
-            Err(llm::InferenceError::ContextFull) => {
-                let err_msg = "Inference context full. Input may be too long.".to_string();
-                log::error!("{}", err_msg);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send context full error to UI: {}", err_msg);
-                }
-                Err(err_msg.into())
-            }
-            Err(e) => { // Handles other llm::InferenceError types
-                let err_msg = format!("Local LLM inference failed: {}", e);
-                log::error!("{}", err_msg);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send inference error to UI: {}", e);
-                }
-                Err(err_msg.into())
-            }
-        };
-
-        // Always send EOT signal, regardless of success or failure of inference itself
+        
+        // Stream the response
+        if let Err(e) = self.stream_placeholder_response(&full_response, tx).await {
+            log::error!("Streaming failed: {}", e);
+            return Err(e);
+        }
+        
+        // Send EOT signal
         if let Err(e) = tx.send(crate::EOT_SIGNAL.to_string()) {
             log::error!("Failed to send EOT signal: {}", e);
         }
         
-        final_result // Return the actual result of the inference
+        log::info!("Placeholder inference completed successfully");
+        Ok(())
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::Local
+    }
+
+    async fn validate_config(&self, config: &AppConfig) -> LLMResult<()> {
+        if let Some(model_path) = &config.default_model {
+            let path = PathBuf::from(model_path);
+            if !path.exists() {
+                return Err(anyhow::anyhow!("Model file not found: {}", model_path));
+            }
+            
+            // Check if file extension suggests it's a supported model
+            if let Some(ext) = path.extension() {
+                let ext_str = ext.to_string_lossy().to_lowercase();
+                if !["ggml", "gguf", "bin", "safetensors", "st"].contains(&ext_str.as_str()) {
+                    log::warn!("Model file extension '{}' may not be supported by local inference engines", ext_str);
+                }
+            }
+            
+            log::info!("✅ Local model path validation passed: {}", model_path);
+        } else {
+            return Err(anyhow::anyhow!("No model path specified in configuration for local provider"));
+        }
+        
+        Ok(())
     }
 }

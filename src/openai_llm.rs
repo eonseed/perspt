@@ -1,82 +1,89 @@
 // src/openai_llm.rs
 use async_trait::async_trait;
-use reqwest::{Client, header, Response};
-use serde_json::json;
+use futures::StreamExt;
+use reqwest::{header, Client, Response};
+use serde_json::{json, Value};
+use std::time::Duration;
 use tokio::sync::mpsc;
-use futures::StreamExt; // Ensure this is in Cargo.toml, reqwest might bring it
-use std::error::Error;
 
 use crate::config::AppConfig;
-use crate::llm_provider::LLMProvider;
+use crate::llm_provider::{LLMProvider, LLMResult, ProviderType};
 
-pub struct OpenAIProviderLlm;
+/// OpenAI API provider with modern async implementation
+pub struct OpenAIProviderLlm {
+    client: Client,
+}
 
 impl OpenAIProviderLlm {
     pub fn new() -> Self {
-        OpenAIProviderLlm
+        let client = Client::builder()
+            .timeout(Duration::from_secs(300)) // 5 minute timeout
+            .build()
+            .expect("Failed to create HTTP client");
+        
+        Self { client }
     }
 
-    // Helper method for streaming, adapted from old openai.rs
-    async fn stream_response(&self, response: Response, tx: &mpsc::UnboundedSender<String>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    /// Parse streaming SSE response from OpenAI
+    async fn stream_response(
+        &self,
+        response: Response,
+        tx: &mpsc::UnboundedSender<String>,
+    ) -> LLMResult<()> {
         let mut stream = response.bytes_stream();
-        let mut error_occurred_in_stream = false;
+        let mut buffer = String::new();
 
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(bytes) => {
-                    let chunk = String::from_utf8_lossy(&bytes).to_string();
-                    log::debug!("OpenAI Response Chunk: {}", chunk);
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result?;
+            let chunk_str = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&chunk_str);
 
-                    for line in chunk.lines() {
-                        let line = line.trim();
-                        if line.starts_with("data: ") {
-                            let json_data = &line[6..];
-                            if json_data == "[DONE]" {
-                                log::info!("OpenAI stream reported [DONE].");
-                                // The [DONE] message means stream is finished from provider side.
-                                // We will send our EOT_SIGNAL after this loop naturally finishes.
-                                return Ok(()); // Exit the while loop and function.
-                            }
-                            if json_data.is_empty() {
-                                continue;
-                            }
-                            match serde_json::from_str::<serde_json::Value>(json_data) {
-                                Ok(json_val) => {
-                                    let content = json_val
-                                        .get("choices")
-                                        .and_then(|choices| choices.get(0))
-                                        .and_then(|choice| choice.get("delta"))
-                                        .and_then(|delta| delta.get("content"))
-                                        .and_then(|text| text.as_str())
-                                        .unwrap_or("");
-                                    if !content.is_empty() {
+            // Process complete lines
+            while let Some(line_end) = buffer.find('\n') {
+                let line = buffer[..line_end].trim().to_string();
+                buffer.drain(..=line_end);
+
+                if line.is_empty() || !line.starts_with("data: ") {
+                    continue;
+                }
+
+                let data = &line[6..]; // Remove "data: " prefix
+                
+                if data == "[DONE]" {
+                    log::info!("OpenAI stream completed");
+                    return Ok(());
+                }
+
+                // Parse JSON response
+                match serde_json::from_str::<Value>(data) {
+                    Ok(json) => {
+                        if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
+                            if let Some(choice) = choices.first() {
+                                if let Some(delta) = choice.get("delta") {
+                                    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
                                         if let Err(e) = tx.send(content.to_string()) {
-                                            log::error!("Failed to send OpenAI response chunk to UI: {}", e);
-                                            error_occurred_in_stream = true;
-                                            break; // Break inner loop
+                                            log::error!("Failed to send token: {}", e);
+                                            return Err(anyhow::anyhow!("Channel send failed"));
                                         }
                                     }
                                 }
-                                Err(e) => {
-                                    log::warn!("Failed to parse JSON from OpenAI stream: {}. Chunk: '{}'", e, json_data);
-                                }
                             }
                         }
+                        
+                        // Check for errors in the response
+                        if let Some(error) = json.get("error") {
+                            let error_msg = error.get("message")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("Unknown OpenAI error");
+                            return Err(anyhow::anyhow!("OpenAI API error: {}", error_msg));
+                        }
                     }
-                    if error_occurred_in_stream { break; } // Break outer loop
-                }
-                Err(e) => {
-                    log::error!("Error reading OpenAI response stream: {}", e);
-                    // This error is from the stream itself (e.g. network issue)
-                    // We return it, and the caller (send_chat_request) will handle EOT.
-                    return Err(Box::new(e));
+                    Err(e) => {
+                        log::warn!("Failed to parse JSON chunk: {} - Error: {}", data, e);
+                        // Continue processing other chunks
+                    }
                 }
             }
-        }
-        
-        if error_occurred_in_stream {
-            // If error occurred due to tx.send failure, create a generic error.
-            return Err("Failed to send data to UI channel during streaming.".into());
         }
 
         Ok(())
@@ -85,15 +92,15 @@ impl OpenAIProviderLlm {
 
 #[async_trait]
 impl LLMProvider for OpenAIProviderLlm {
-    async fn list_models(&self) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-        // For now, let's return a fixed list or an empty list.
-        // Implementing full model listing is a bit out of scope for the immediate refactor
-        // if the old provider didn't use it extensively in the chat loop.
-        // The old code printed to stdout, which is not ideal for a library function.
-        // Let's keep it simple or fetch from a known popular model.
-        // To do it properly, we'd need AppConfig here to get API key and URL.
-        log::info!("OpenAIProviderLlm: list_models called. Returning placeholder.");
-        Ok(vec!["gpt-3.5-turbo".to_string(), "gpt-4".to_string()]) // Placeholder
+    async fn list_models(&self) -> LLMResult<Vec<String>> {
+        // Return commonly available OpenAI models
+        Ok(vec![
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "gpt-4-turbo".to_string(),
+            "gpt-4".to_string(),
+            "gpt-3.5-turbo".to_string(),
+        ])
     }
 
     async fn send_chat_request(
@@ -101,81 +108,76 @@ impl LLMProvider for OpenAIProviderLlm {
         input: &str,
         model_name: &str,
         config: &AppConfig,
-        tx: &mpsc::UnboundedSender<String>
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let api_key = match config.api_key.as_ref() {
-            Some(k) => k,
-            None => {
-                let err_msg = "API key not provided for OpenAI".to_string();
-                log::error!("{}", err_msg);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send API key error to UI.");
-                }
-                // EOT is sent by the final block
-                return Err(err_msg.into());
-            }
-        };
-        let base_url = match config.providers.get("openai") {
-             Some(url) => url,
-             None => {
-                let err_msg = "OpenAI provider URL not configured".to_string();
-                log::error!("{}", err_msg);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send URL config error to UI.");
-                }
-                 // EOT is sent by the final block
-                return Err(err_msg.into());
-             }
-        };
+        tx: &mpsc::UnboundedSender<String>,
+    ) -> LLMResult<()> {
+        // Get API key
+        let api_key = config.api_key.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("API key not provided for OpenAI"))?;
 
-        let client = Client::new();
-        let request_url = format!("{}chat/completions", base_url.trim_end_matches('/'));
+        // Get base URL
+        let base_url = config.providers.get("openai")
+            .ok_or_else(|| anyhow::anyhow!("OpenAI provider URL not configured"))?;
 
-        log::info!("OpenAI Request URL: {}, Model: {}", request_url, model_name);
+        let request_url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        
+        log::info!("OpenAI request: {} with model {}", request_url, model_name);
 
-        let request_payload = json!({
+        // Create request payload
+        let payload = json!({
             "model": model_name,
-            "messages": [{"role": "user", "content": input}],
+            "messages": [
+                {"role": "user", "content": input}
+            ],
             "stream": true,
+            "max_tokens": 2048,
+            "temperature": 0.7,
+            "top_p": 0.9,
         });
 
-        log::debug!("OpenAI Request Payload: {}", request_payload.to_string());
+        // Send request
+        let response = self.client
+            .post(&request_url)
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {}", api_key))
+            .json(&payload)
+            .send()
+            .await?;
 
-        let final_result = async {
-            let request = client.post(&request_url)
-                .header(header::CONTENT_TYPE, "application/json")
-                .header(header::AUTHORIZATION, format!("Bearer {}", api_key))
-                .json(&request_payload);
+        let status = response.status();
+        log::info!("OpenAI response status: {}", status);
 
-            let response = request.send().await.map_err(|e| {
-                log::error!("Failed to send OpenAI request: {}", e);
-                Box::new(e) as Box<dyn Error + Send + Sync>
-            })?;
-
-            let status = response.status();
-            log::info!("OpenAI Response Status: {}", status);
-
-            if status.is_success() {
-                self.stream_response(response, tx).await
-            } else {
-                let error_body = response.text().await.unwrap_or_else(|_| "Unknown error body".to_string());
-                log::error!("OpenAI API Error: {} - {}", status, error_body);
-                let err_msg = format!("OpenAI API Error: {} - {}", status, error_body);
-                if tx.send(format!("Error: {}", err_msg)).is_err() {
-                    log::warn!("Failed to send API error to UI.");
-                }
-                Err(err_msg.into())
-            }
-        }.await;
-
-        // Always send EOT signal after processing is done or an error occurred.
-        if let Err(e) = tx.send(crate::EOT_SIGNAL.to_string()) {
-            log::error!("Failed to send EOT signal for OpenAI: {}", e);
-            // If sending EOT fails, the original error (if any) is more important to return.
-            // If final_result was Ok, but EOT send failed, we might consider this an error.
-            // For now, we prioritize returning the outcome of the API call.
+        if !status.is_success() {
+            let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_msg = format!("OpenAI API error: {} - {}", status, error_body);
+            log::error!("{}", error_msg);
+            let _ = tx.send(format!("Error: {}", error_msg));
+            return Err(anyhow::anyhow!(error_msg));
         }
-        
-        final_result
+
+        // Stream the response
+        let result = self.stream_response(response, tx).await;
+
+        // Always send EOT signal
+        if let Err(e) = tx.send(crate::EOT_SIGNAL.to_string()) {
+            log::error!("Failed to send EOT signal: {}", e);
+        }
+
+        result
+    }
+
+    fn provider_type(&self) -> ProviderType {
+        ProviderType::OpenAI
+    }
+
+    async fn validate_config(&self, config: &AppConfig) -> LLMResult<()> {
+        if config.api_key.is_none() {
+            return Err(anyhow::anyhow!("API key is required for OpenAI provider"));
+        }
+
+        if !config.providers.contains_key("openai") {
+            return Err(anyhow::anyhow!("OpenAI provider URL not configured"));
+        }
+
+        Ok(())
     }
 }
