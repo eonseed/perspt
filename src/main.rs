@@ -31,7 +31,7 @@ static TERMINAL_RAW_MODE: Mutex<bool> = Mutex::new(false);
 
 /// Set up a panic hook that restores terminal state before panicking
 fn setup_panic_hook() {
-    let original_hook = panic::take_hook();
+    let _original_hook = panic::take_hook();
     panic::set_hook(Box::new(move |panic_info| {
         // Force terminal restoration immediately
         let _ = disable_raw_mode();
@@ -81,29 +81,6 @@ fn setup_panic_hook() {
         // Don't call the original hook to avoid double panic output
         std::process::exit(1);
     }));
-}
-
-/// Safe wrapper for operations that might panic from external crates
-/// This is a simplified version that doesn't try to catch async panics
-fn catch_panic_sync<F, T>(operation: F) -> Result<T>
-where
-    F: FnOnce() -> Result<T> + std::panic::UnwindSafe,
-{
-    match panic::catch_unwind(operation) {
-        Ok(result) => result,
-        Err(panic_err) => {
-            let panic_msg = if let Some(s) = panic_err.downcast_ref::<String>() {
-                s.clone()
-            } else if let Some(s) = panic_err.downcast_ref::<&str>() {
-                s.to_string()
-            } else {
-                "Unknown panic occurred".to_string()
-            };
-            
-            log::error!("Caught panic in sync operation: {}", panic_msg);
-            Err(anyhow::anyhow!("Operation failed due to panic: {}", panic_msg))
-        }
-    }
 }
 
 /// Set the global raw mode flag
