@@ -248,6 +248,18 @@ pub async fn handle_events(
                             app.should_quit = true;
                             return Some(AppEvent::Key(key));
                         }
+                        KeyCode::F(1) => {
+                            app.show_help = !app.show_help;
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Esc => {
+                            if app.show_help {
+                                app.show_help = false;
+                            } else {
+                                app.should_quit = true;
+                            }
+                            return Some(AppEvent::Key(key));
+                        }
                         KeyCode::Enter => {
                             if !app.is_input_disabled && !app.input_text.trim().is_empty() {
                                 let input_to_send = app.input_text.trim().to_string();
@@ -257,21 +269,31 @@ pub async fn handle_events(
                                 app.add_message(ui::ChatMessage {
                                     message_type: ui::MessageType::User,
                                     content: vec![ratatui::text::Line::from(input_to_send.clone())],
+                                    timestamp: ui::App::get_timestamp(),
                                 });
+
+                                // Clear any previous errors when starting a new request
+                                app.clear_error();
 
                                 // Start LLM request
                                 initiate_llm_request(app, input_to_send, Arc::clone(provider), model_name, tx_llm).await;
+                            } else if app.is_input_disabled && !app.input_text.trim().is_empty() {
+                                // Queue the input if LLM is busy
+                                let input_to_queue = app.input_text.trim().to_string();
+                                app.pending_inputs.push_back(input_to_queue);
+                                app.input_text.clear();
+                                app.set_status(format!("Message queued (queue: {})", app.pending_inputs.len()), false);
                             }
                             return Some(AppEvent::Key(key));
                         }
                         KeyCode::Char(c) => {
-                            if !app.is_input_disabled {
+                            if !app.is_input_disabled || !app.show_help {
                                 app.input_text.push(c);
                             }
                             return Some(AppEvent::Key(key));
                         }
                         KeyCode::Backspace => {
-                            if !app.is_input_disabled {
+                            if !app.is_input_disabled || !app.show_help {
                                 app.input_text.pop();
                             }
                             return Some(AppEvent::Key(key));
@@ -282,6 +304,31 @@ pub async fn handle_events(
                         }
                         KeyCode::Down => {
                             app.scroll_down();
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::PageUp => {
+                            // Scroll up by 5 lines
+                            for _ in 0..5 {
+                                app.scroll_up();
+                            }
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::PageDown => {
+                            // Scroll down by 5 lines
+                            for _ in 0..5 {
+                                app.scroll_down();
+                            }
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::Home => {
+                            // Scroll to top
+                            app.scroll_position = 0;
+                            app.update_scroll_state();
+                            return Some(AppEvent::Key(key));
+                        }
+                        KeyCode::End => {
+                            // Scroll to bottom
+                            app.scroll_to_bottom();
                             return Some(AppEvent::Key(key));
                         }
                         _ => {
