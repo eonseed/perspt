@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use std::io;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use std::panic;
+use std::sync::Mutex;
 
 // Define EOT_SIGNAL
 pub const EOT_SIGNAL: &str = "<<EOT>>";
@@ -11,7 +13,7 @@ pub const EOT_SIGNAL: &str = "<<EOT>>";
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
-    terminal::{enable_raw_mode, EnterAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use env_logger;
 use log::LevelFilter;
@@ -24,8 +26,98 @@ mod config;
 mod llm_provider;
 mod ui;
 
+// Global flag to track if we're in raw mode for panic recovery
+static TERMINAL_RAW_MODE: Mutex<bool> = Mutex::new(false);
+
+/// Set up a panic hook that restores terminal state before panicking
+fn setup_panic_hook() {
+    let original_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        // Force terminal restoration immediately
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        
+        // Clear the screen and move cursor to start
+        print!("\x1b[2J\x1b[H");
+        
+        // Print a clean error message
+        eprintln!();
+        eprintln!("🚨 Application Error: External Library Panic");
+        eprintln!("═══════════════════════════════════════════");
+        eprintln!();
+        eprintln!("The application encountered a fatal error in an external library.");
+        eprintln!("This is typically caused by missing environment variables or configuration issues.");
+        eprintln!();
+        
+        // Extract useful information from panic
+        let panic_str = format!("{}", panic_info);
+        if panic_str.contains("PROJECT_ID") {
+            eprintln!("❌ Missing Google Cloud Configuration:");
+            eprintln!("   Please set the PROJECT_ID environment variable to your Google Cloud project ID");
+            eprintln!("   Example: export PROJECT_ID=your-project-id");
+        } else if panic_str.contains("AWS") || panic_str.contains("credentials") {
+            eprintln!("❌ Missing AWS Configuration:");
+            eprintln!("   Please configure your AWS credentials using one of these methods:");
+            eprintln!("   - Set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables");
+            eprintln!("   - Configure AWS CLI: aws configure");
+            eprintln!("   - Set AWS_PROFILE environment variable");
+        } else if panic_str.contains("NotPresent") {
+            eprintln!("❌ Missing Environment Variable:");
+            eprintln!("   A required environment variable is not set.");
+            eprintln!("   Please check the documentation for your chosen provider.");
+        } else {
+            eprintln!("❌ Configuration Error:");
+            eprintln!("   {}", panic_str);
+        }
+        
+        eprintln!();
+        eprintln!("💡 Troubleshooting Tips:");
+        eprintln!("   - Check your provider configuration");
+        eprintln!("   - Verify all required environment variables are set");
+        eprintln!("   - Use --help for available options");
+        eprintln!("   - Try a different provider (e.g., --provider-type openai)");
+        eprintln!();
+        
+        // Don't call the original hook to avoid double panic output
+        std::process::exit(1);
+    }));
+}
+
+/// Safe wrapper for operations that might panic from external crates
+/// This is a simplified version that doesn't try to catch async panics
+fn catch_panic_sync<F, T>(operation: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T> + std::panic::UnwindSafe,
+{
+    match panic::catch_unwind(operation) {
+        Ok(result) => result,
+        Err(panic_err) => {
+            let panic_msg = if let Some(s) = panic_err.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = panic_err.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Unknown panic occurred".to_string()
+            };
+            
+            log::error!("Caught panic in sync operation: {}", panic_msg);
+            Err(anyhow::anyhow!("Operation failed due to panic: {}", panic_msg))
+        }
+    }
+}
+
+/// Set the global raw mode flag
+fn set_raw_mode_flag(enabled: bool) {
+    if let Ok(mut flag) = TERMINAL_RAW_MODE.lock() {
+        *flag = enabled;
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Set up panic hook before doing anything else
+    setup_panic_hook();
+    
     // Initialize logging
     env_logger::Builder::from_default_env()
         .filter_level(LevelFilter::Info)
@@ -150,9 +242,12 @@ async fn main() -> Result<()> {
     let mut terminal = initialize_terminal()
         .context("Failed to initialize terminal")?;
 
-    // Run the UI
+    // Run the UI - panic handling is done at the LLM provider level and via the global panic hook
     run_ui(&mut terminal, config, model_name_for_provider, api_key_string, provider).await
         .context("UI execution failed")?;
+
+    // Ensure terminal cleanup
+    cleanup_terminal()?;
     
     Ok(())
 }
@@ -178,12 +273,21 @@ async fn list_available_models(
 
 fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>> {
     enable_raw_mode().context("Failed to enable raw mode")?;
+    set_raw_mode_flag(true);
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("Failed to enter alternate screen")?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend).context("Failed to create terminal")?;
     terminal.clear().context("Failed to clear terminal")?;
     Ok(terminal)
+}
+
+/// Clean up terminal state
+fn cleanup_terminal() -> Result<()> {
+    set_raw_mode_flag(false);
+    disable_raw_mode().context("Failed to disable raw mode")?;
+    execute!(io::stdout(), LeaveAlternateScreen).context("Failed to leave alternate screen")?;
+    Ok(())
 }
 
 async fn initiate_llm_request(
@@ -205,6 +309,7 @@ async fn initiate_llm_request(
     let input_clone = input_to_send.clone();
 
     tokio::spawn(async move {
+        // The panic protection is now handled inside the LLM provider's get_completion_response
         let result = provider.send_chat_request(
             &input_clone,
             &model_name_clone,
@@ -214,7 +319,8 @@ async fn initiate_llm_request(
 
         if let Err(e) = result {
             log::error!("LLM request failed: {}", e);
-            let _ = tx_clone_for_provider.send(format!("Error: {}", e));
+            let error_msg = format!("Error: {}", e);
+            let _ = tx_clone_for_provider.send(error_msg);
             let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
         }
     });

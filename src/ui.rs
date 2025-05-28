@@ -351,10 +351,11 @@ pub async fn run_ui(
         }
     }
 
-    // Restore terminal
-    crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    // Restore terminal (this will be called even if there's an error thanks to our panic handling)
+    // Note: The main cleanup is handled by the panic hook and cleanup_terminal() in main.rs
+    crossterm::terminal::disable_raw_mode().ok(); // Use .ok() to ignore errors during cleanup
+    crossterm::execute!(terminal.backend_mut(), crossterm::terminal::LeaveAlternateScreen).ok();
+    terminal.show_cursor().ok();
 
     Ok(())
 }

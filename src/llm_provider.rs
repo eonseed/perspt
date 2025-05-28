@@ -171,77 +171,126 @@ impl UnifiedLLMProvider {
     }
 
     /// Create a Completions instance for the given model and get response
+    /// This method includes panic protection for external crate operations
     async fn get_completion_response(&self, model: &str, api_key: &str, prompt: &str) -> LLMResult<String> {
         let provider_type = self.provider_type.clone();
         let model = model.to_string();
         let api_key = api_key.to_string();
         let prompt = prompt.to_string();
         
-        // Use spawn_blocking to handle the non-Send future from allms
-        tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async move {
-                match provider_type {
-                    ProviderType::OpenAI => {
-                        // Use try_from_str to dynamically create the model enum
-                        let model_enum = OpenAIModels::try_from_str(&model)
-                            .unwrap_or(OpenAIModels::Gpt4oMini);
-                        let completions = Completions::new(model_enum, &api_key, None, None);
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("OpenAI API error: {}", e))
-                    },
-                    ProviderType::Anthropic => {
-                        let model_enum = AnthropicModels::try_from_str(&model)
-                            .unwrap_or(AnthropicModels::Claude3_5Sonnet);
-                        let completions = Completions::new(model_enum, &api_key, None, None);
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("Anthropic API error: {}", e))
-                    },
-                    ProviderType::Google => {
-                        let model_enum = GoogleModels::try_from_str(&model)
-                            .unwrap_or(GoogleModels::Gemini1_5Flash);
-                        let completions = Completions::new(model_enum, &api_key, None, None);
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("Google API error: {}", e))
-                    },
-                    ProviderType::Mistral => {
-                        let model_enum = MistralModels::try_from_str(&model)
-                            .unwrap_or(MistralModels::MistralSmall);
-                        let completions = Completions::new(model_enum, &api_key, None, None);
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("Mistral API error: {}", e))
-                    },
-                    ProviderType::Perplexity => {
-                        let model_enum = PerplexityModels::try_from_str(&model)
-                            .unwrap_or(PerplexityModels::Sonar);
-                        let completions = Completions::new(model_enum, &api_key, None, None);
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("Perplexity API error: {}", e))
-                    },
-                    ProviderType::DeepSeek => {
-                        let model_enum = DeepSeekModels::try_from_str(&model)
-                            .unwrap_or(DeepSeekModels::DeepSeekChat);
-                        let completions = Completions::new(model_enum, &api_key, None, None);
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("DeepSeek API error: {}", e))
-                    },
-                    ProviderType::AwsBedrock => {
-                        let model_enum = AwsBedrockModels::try_from_str(&model)
-                            .unwrap_or(AwsBedrockModels::NovaLite);
-                        let completions = Completions::new(model_enum, "", None, None); // AWS Bedrock uses different auth
-                        
-                        completions.get_answer::<String>(&prompt).await
-                            .map_err(|e| anyhow::anyhow!("AWS Bedrock API error: {}", e))
-                    },
+        // Use spawn_blocking with panic protection
+        let result = tokio::task::spawn_blocking(move || {
+            // Catch panics from allms crate operations
+            let result = std::panic::catch_unwind(|| {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(async move {
+                    Self::execute_llm_request(provider_type, model, api_key, prompt).await
+                })
+            });
+            
+            match result {
+                Ok(Ok(response)) => Ok(response),
+                Ok(Err(e)) => Err(e),
+                Err(panic_err) => {
+                    let panic_msg = if let Some(s) = panic_err.downcast_ref::<String>() {
+                        s.clone()
+                    } else if let Some(s) = panic_err.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else {
+                        "Unknown panic in LLM operation".to_string()
+                    };
+                    
+                    log::error!("LLM operation panicked: {}", panic_msg);
+                    
+                    // Return a user-friendly error based on common panic scenarios
+                    if panic_msg.contains("PROJECT_ID") {
+                        Err(anyhow::anyhow!("Google Cloud PROJECT_ID environment variable is not set. Please set PROJECT_ID to your Google Cloud project ID."))
+                    } else if panic_msg.contains("NotPresent") {
+                        Err(anyhow::anyhow!("Required environment variable is missing. Please check your configuration and ensure all required environment variables are set."))
+                    } else if panic_msg.contains("AWS") || panic_msg.contains("credentials") {
+                        Err(anyhow::anyhow!("AWS credentials are not properly configured. Please set up your AWS credentials."))
+                    } else {
+                        Err(anyhow::anyhow!("LLM provider configuration error: {}. Please check your environment variables and API keys.", panic_msg))
+                    }
                 }
-            })
-        }).await?
+            }
+        }).await;
+        
+        match result {
+            Ok(response) => response,
+            Err(join_err) => {
+                log::error!("Task join error: {}", join_err);
+                Err(anyhow::anyhow!("Internal error: {}", join_err))
+            }
+        }
+    }
+    
+    /// Execute the actual LLM request with the allms crate
+    async fn execute_llm_request(
+        provider_type: ProviderType,
+        model: String,
+        api_key: String,
+        prompt: String,
+    ) -> LLMResult<String> {
+        match provider_type {
+            ProviderType::OpenAI => {
+                // Use try_from_str to dynamically create the model enum
+                let model_enum = OpenAIModels::try_from_str(&model)
+                    .unwrap_or(OpenAIModels::Gpt4oMini);
+                let completions = Completions::new(model_enum, &api_key, None, None);
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("OpenAI API error: {}", e))
+            },
+            ProviderType::Anthropic => {
+                let model_enum = AnthropicModels::try_from_str(&model)
+                    .unwrap_or(AnthropicModels::Claude3_5Sonnet);
+                let completions = Completions::new(model_enum, &api_key, None, None);
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("Anthropic API error: {}", e))
+            },
+            ProviderType::Google => {
+                let model_enum = GoogleModels::try_from_str(&model)
+                    .unwrap_or(GoogleModels::Gemini1_5Flash);
+                let completions = Completions::new(model_enum, &api_key, None, None);
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("Google API error: {}", e))
+            },
+            ProviderType::Mistral => {
+                let model_enum = MistralModels::try_from_str(&model)
+                    .unwrap_or(MistralModels::MistralSmall);
+                let completions = Completions::new(model_enum, &api_key, None, None);
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("Mistral API error: {}", e))
+            },
+            ProviderType::Perplexity => {
+                let model_enum = PerplexityModels::try_from_str(&model)
+                    .unwrap_or(PerplexityModels::Sonar);
+                let completions = Completions::new(model_enum, &api_key, None, None);
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("Perplexity API error: {}", e))
+            },
+            ProviderType::DeepSeek => {
+                let model_enum = DeepSeekModels::try_from_str(&model)
+                    .unwrap_or(DeepSeekModels::DeepSeekChat);
+                let completions = Completions::new(model_enum, &api_key, None, None);
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("DeepSeek API error: {}", e))
+            },
+            ProviderType::AwsBedrock => {
+                let model_enum = AwsBedrockModels::try_from_str(&model)
+                    .unwrap_or(AwsBedrockModels::NovaLite);
+                let completions = Completions::new(model_enum, "", None, None); // AWS Bedrock uses different auth
+                
+                completions.get_answer::<String>(&prompt).await
+                    .map_err(|e| anyhow::anyhow!("AWS Bedrock API error: {}", e))
+            },
+        }
     }
 
 }
@@ -302,7 +351,32 @@ impl LLMProvider for UnifiedLLMProvider {
     async fn validate_config(&self, config: &AppConfig) -> LLMResult<()> {
         // Check if API key is configured - using unified api_key field
         match self.provider_type {
-            ProviderType::AwsBedrock => Ok(()), // AWS uses different auth validation
+            ProviderType::AwsBedrock => {
+                // AWS uses different auth - check for AWS credentials
+                if std::env::var("AWS_ACCESS_KEY_ID").is_err() && std::env::var("AWS_PROFILE").is_err() {
+                    return Err(anyhow::anyhow!(
+                        "AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or configure AWS_PROFILE"
+                    ));
+                }
+                Ok(())
+            },
+            ProviderType::Google => {
+                // For Google, check both API key and PROJECT_ID
+                if config.api_key.is_none() || config.api_key.as_ref().unwrap().is_empty() {
+                    return Err(anyhow::anyhow!(
+                        "API key not configured for {} provider", 
+                        self.provider_type.to_string()
+                    ));
+                }
+                
+                // Check for PROJECT_ID environment variable
+                if std::env::var("PROJECT_ID").is_err() {
+                    return Err(anyhow::anyhow!(
+                        "Google Cloud PROJECT_ID environment variable is not set. Please set PROJECT_ID to your Google Cloud project ID."
+                    ));
+                }
+                Ok(())
+            },
             _ => {
                 if config.api_key.is_none() || config.api_key.as_ref().unwrap().is_empty() {
                     return Err(anyhow::anyhow!(
