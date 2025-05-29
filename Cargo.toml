@@ -9,7 +9,7 @@ description = "A performant CLI for talking to LLMs using the allms crate with u
 
 [dependencies]
 # LLM unified interface
-allms = "0.17"
+allms = "0.18"
 
 # Core async and traits
 async-trait = "0.1.88"
