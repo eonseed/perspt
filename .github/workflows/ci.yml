@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        rust: [stable, beta]
+        exclude:
+          # Only test on stable for Windows and macOS to reduce CI time
+          - os: windows-latest
+            rust: beta
+          - os: macos-latest
+            rust: beta
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+      if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
+
+    - name: Run clippy
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      if: matrix.rust == 'stable'
+
+    - name: Build project
+      run: cargo build --verbose --all-features
+
+    - name: Run tests
+      run: cargo test --verbose --all-features
+
+    - name: Build documentation
+      run: cargo doc --no-deps --all-features
+      if: matrix.rust == 'stable' && matrix.os == 'ubuntu-latest'
+
+  build-docs:
+    name: Build Sphinx Documentation
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Build HTML documentation
+      run: |
+        cd docs/perspt_book
+        uv run make html
+
+    - name: Build PDF documentation
+      run: |
+        cd docs/perspt_book
+        # Install complete LaTeX distribution and fonts for PDF generation
+        sudo apt-get update
+        sudo apt-get install -y \
+          texlive-full \
+          texstudio \
+          texlive-latex-extra \
+          fonts-liberation \
+          fonts-dejavu \
+          fonts-noto \
+          fonts-noto-color-emoji \
+          fonts-noto-extra \
+          fontconfig
+        
+        # Update font cache and verify font installation
+        sudo fc-cache -fv
+        echo "🔍 Checking available fonts..."
+        fc-list | grep -i "noto.*emoji" || echo "⚠️  Noto Color Emoji not found"
+        fc-list | grep -i "liberation" || echo "⚠️  Liberation fonts not found"
+        
+        # Use CI configuration optimized for Linux
+        cp source/conf_ci.py source/conf.py
+        
+        echo "🏗️  Building LaTeX files with LuaLaTeX..."
+        uv run sphinx-build -b latex source build/latex
+        
+        echo "📄 Building PDF..."
+        cd build/latex
+        lualatex -interaction=nonstopmode perspt.tex || echo "⚠️  First LaTeX pass failed, trying again..."
+        lualatex -interaction=nonstopmode perspt.tex || echo "⚠️  Second LaTeX pass failed, continuing..."
+        
+        # Check if PDF was created
+        if [ -f "perspt.pdf" ]; then
+            echo "✅ PDF generated successfully!"
+            ls -la perspt.pdf
+        else
+            echo "❌ PDF generation failed"
+            echo "📋 LaTeX log (last 30 lines):"
+            tail -n 30 perspt.log || echo "No log file found"
+        fi
+
+    - name: Upload documentation artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation
+        path: |
+          docs/perspt_book/build/html/
+          docs/perspt_book/build/latex/*.pdf
+        retention-days: 30
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      run: cargo audit
