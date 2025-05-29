@@ -46,7 +46,7 @@ use std::{collections::VecDeque, io, time::Duration, sync::Arc};
 use anyhow::Result;
 
 use crate::config::AppConfig;
-use crate::llm_provider::LLMProvider;
+use crate::llm_provider::GenAIProvider;
 use tokio::sync::mpsc;
 use pulldown_cmark::{Parser, Options, Tag, Event as MarkdownEvent, TagEnd};
 use crossterm::event::KeyEvent;
@@ -214,6 +214,7 @@ pub struct App {
     pub show_help: bool,
     pub typing_indicator: String,
     pub response_progress: f64,
+    pub streaming_buffer: String, // Buffer for accumulating streaming content
 }
 
 impl App {
@@ -300,6 +301,7 @@ impl App {
             show_help: false,
             typing_indicator: String::new(),
             response_progress: 0.0,
+            streaming_buffer: String::new(),
         }
     }
 
@@ -678,7 +680,7 @@ pub async fn run_ui(
     config: AppConfig,
     model_name: String, 
     api_key: String,
-    provider: Arc<dyn LLMProvider + Send + Sync>
+    provider: Arc<GenAIProvider>
 ) -> Result<()> {
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
@@ -694,9 +696,9 @@ pub async fn run_ui(
             draw_ui(f, &mut app, &model_name);
         })?;
 
-        // Handle events with timeout
+        // Handle events with timeout (reduced timeout for better responsiveness)
         if let Ok(Some(event)) = tokio::time::timeout(
-            Duration::from_millis(100),
+            Duration::from_millis(50), // Reduced from 100ms to 50ms for better responsiveness
             crate::handle_events(&mut app, &tx, &api_key, &model_name, &provider)
         ).await {
             match event {
@@ -718,6 +720,7 @@ pub async fn run_ui(
                 app.response_progress = 0.0;
                 app.set_status("Ready".to_string(), false);
                 app.clear_error();
+                app.streaming_buffer.clear(); // Clear the streaming buffer
                 
                 // Process any pending inputs
                 if let Some(pending_input) = app.pending_inputs.pop_front() {
@@ -741,9 +744,15 @@ pub async fn run_ui(
                 app.is_llm_busy = false;
                 app.is_input_disabled = false;
                 app.response_progress = 0.0;
+                app.streaming_buffer.clear(); // Clear the streaming buffer on error
                 app.set_status("Error occurred".to_string(), true);
             } else {
-                // Regular response token
+                // Regular response token - use streaming buffer for better rendering
+                
+                // Add token to streaming buffer
+                app.streaming_buffer.push_str(&message);
+
+                // Check if we should start a new assistant message
                 if app.chat_history.is_empty() || 
                    app.chat_history.last().unwrap().message_type != MessageType::Assistant {
                     // Start new assistant message
@@ -754,25 +763,16 @@ pub async fn run_ui(
                     });
                 }
 
-                // Append to last assistant message
+                // Update the last assistant message with the complete buffer content
                 if let Some(last_msg) = app.chat_history.last_mut() {
                     if last_msg.message_type == MessageType::Assistant {
-                        if let Some(last_line) = last_msg.content.last_mut() {
-                            // Append to existing line
-                            let mut current_text = String::new();
-                            for span in &last_line.spans {
-                                current_text.push_str(&span.content);
-                            }
-                            current_text.push_str(&message);
-                            
-                            // Replace with updated content using markdown rendering
-                            let rendered_lines = markdown_to_lines(&current_text);
-                            last_msg.content = rendered_lines;
-                        }
+                        // Render the complete buffer content as markdown
+                        let rendered_lines = markdown_to_lines(&app.streaming_buffer);
+                        last_msg.content = rendered_lines;
                     }
                 }
                 
-                // Update progress indicator
+                // Update progress indicator and auto-scroll
                 app.response_progress = (app.response_progress + 0.1).min(1.0);
                 app.scroll_to_bottom();
                 app.set_status(format!("{}  Receiving response...", app.typing_indicator), false);
