@@ -122,7 +122,7 @@ html_sidebars = {
 
 # -- Options for LaTeX output ------------------------------------------------
 
-latex_engine = 'lualatex'  # LuaLaTeX for better emoji support in CI
+latex_engine = 'luahbtex'  # LuaHBTeX for superior emoji and Unicode support in CI
 latex_elements = {
     'papersize': 'letterpaper',
     'pointsize': '10pt',
