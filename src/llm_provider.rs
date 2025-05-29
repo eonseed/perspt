@@ -47,6 +47,28 @@ pub enum ProviderType {
 }
 
 impl ProviderType {
+    /// Converts a string to a ProviderType enum variant.
+    ///
+    /// Performs case-insensitive matching to determine the provider type
+    /// from configuration strings or user input.
+    ///
+    /// # Arguments
+    ///
+    /// * `s` - The string to match against provider names
+    ///
+    /// # Returns
+    ///
+    /// `Some(ProviderType)` if the string matches a known provider, `None` otherwise
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::llm_provider::ProviderType;
+    ///
+    /// assert_eq!(ProviderType::from_string("openai"), Some(ProviderType::OpenAI));
+    /// assert_eq!(ProviderType::from_string("OpenAI"), Some(ProviderType::OpenAI));
+    /// assert_eq!(ProviderType::from_string("invalid"), None);
+    /// ```
     pub fn from_string(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "openai" => Some(ProviderType::OpenAI),
@@ -60,6 +82,23 @@ impl ProviderType {
         }
     }
 
+    /// Converts the ProviderType to its string representation.
+    ///
+    /// Returns the canonical string name for the provider type,
+    /// which can be used in configuration files and API calls.
+    ///
+    /// # Returns
+    ///
+    /// A static string representing the provider name
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::llm_provider::ProviderType;
+    ///
+    /// let provider = ProviderType::OpenAI;
+    /// assert_eq!(provider.to_string(), "openai");
+    /// ```
     pub fn to_string(&self) -> &'static str {
         match self {
             ProviderType::OpenAI => "openai",
@@ -76,19 +115,69 @@ impl ProviderType {
 /// Result type for LLM operations
 pub type LLMResult<T> = Result<T>;
 
-/// Unified LLM provider using allms crate
+/// Unified LLM provider using allms crate.
+///
+/// This struct provides a unified interface to multiple LLM providers through
+/// the allms crate, automatically handling provider-specific implementations
+/// and model availability.
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
+///
+/// let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
+/// let models = provider.get_available_models();
+/// println!("Available models: {:?}", models);
+/// ```
 #[derive(Debug)]
 pub struct UnifiedLLMProvider {
     provider_type: ProviderType,
 }
 
 impl UnifiedLLMProvider {
+    /// Creates a new UnifiedLLMProvider for the specified provider type.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider_type` - The type of LLM provider to create
+    ///
+    /// # Returns
+    ///
+    /// A new UnifiedLLMProvider instance
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
+    ///
+    /// let openai_provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
+    /// let anthropic_provider = UnifiedLLMProvider::new(ProviderType::Anthropic);
+    /// ```
     pub fn new(provider_type: ProviderType) -> Self {
         Self { provider_type }
     }
 
-    /// Get available models for the provider type by using the allms enums directly
+    /// Gets available models for the provider type by using the allms enums directly.
+    ///
     /// This method dynamically retrieves all available models from the allms crate
+    /// for the specific provider type. It validates common models and returns
+    /// those that are supported by the underlying allms implementation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of model names available for this provider
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
+    ///
+    /// let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
+    /// let models = provider.get_available_models();
+    /// assert!(!models.is_empty());
+    /// assert!(models.contains(&"gpt-4".to_string()));
+    /// ```
     pub fn get_available_models(&self) -> Vec<String> {
         match self.provider_type {
             ProviderType::OpenAI => {

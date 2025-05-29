@@ -1,3 +1,38 @@
+//! # User Interface Module (ui.rs)
+//!
+//! This module implements the terminal-based user interface for the Perspt chat application using
+//! the Ratatui TUI framework. It provides a rich, interactive chat experience with real-time
+//! markdown rendering, scrollable chat history, and comprehensive error handling.
+//!
+//! ## Features
+//!
+//! * **Rich Terminal UI**: Modern terminal interface with colors, borders, and layouts
+//! * **Real-time Markdown Rendering**: Live rendering of LLM responses with markdown formatting
+//! * **Scrollable Chat History**: Full chat history with keyboard navigation
+//! * **Progress Indicators**: Visual feedback for LLM response generation
+//! * **Error Display**: Comprehensive error handling with user-friendly messages
+//! * **Help System**: Built-in help overlay with keyboard shortcuts
+//! * **Responsive Layout**: Adaptive layout that works across different terminal sizes
+//!
+//! ## Architecture
+//!
+//! The UI follows a component-based architecture:
+//! * `App` - Main application state and controller
+//! * `ChatMessage` - Individual message representation with styling
+//! * `ErrorState` - Error handling and display logic
+//! * Event handling system for keyboard inputs and timers
+//!
+//! ## Usage Example
+//!
+//! ```rust
+//! use perspt::ui::{App, run_app};
+//! use perspt::config::AppConfig;
+//!
+//! let config = AppConfig::load().unwrap();
+//! let mut app = App::new(config);
+//! run_app(&mut app).await?;
+//! ```
+
 // src/ui.rs
 use ratatui::{
     backend::CrosstermBackend,
@@ -16,15 +51,58 @@ use tokio::sync::mpsc;
 use pulldown_cmark::{Parser, Options, Tag, Event as MarkdownEvent, TagEnd};
 use crossterm::event::KeyEvent;
 
+/// Represents the type of message in the chat interface.
+///
+/// This enum is used to determine the visual styling and behavior of messages
+/// in the chat history, allowing for different color schemes and formatting
+/// based on the message source.
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::ui::MessageType;
+///
+/// let user_msg = MessageType::User;      // Blue styling for user input
+/// let ai_msg = MessageType::Assistant;   // Green styling for AI responses
+/// let error_msg = MessageType::Error;    // Red styling for error messages
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageType {
+    /// Messages sent by the user
     User,
+    /// Responses from the AI assistant
     Assistant,
+    /// Error messages and warnings
     Error,
+    /// System notifications and status updates
     System,
+    /// Warning messages that don't halt operation
     Warning,
 }
 
+/// Represents a single message in the chat interface.
+///
+/// Contains all the information needed to display a message including its content,
+/// styling, timestamp, and message type for proper visual rendering.
+///
+/// # Fields
+///
+/// * `message_type` - The type of message (User, Assistant, Error, etc.)
+/// * `content` - The formatted content as a vector of styled lines
+/// * `timestamp` - When the message was created (formatted string)
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::ui::{ChatMessage, MessageType};
+/// use ratatui::text::Line;
+///
+/// let message = ChatMessage {
+///     message_type: MessageType::User,
+///     content: vec![Line::from("Hello, AI!")],
+///     timestamp: "2024-01-01 12:00:00".to_string(),
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub message_type: MessageType,
@@ -32,12 +110,28 @@ pub struct ChatMessage {
     pub timestamp: String,
 }
 
+/// Events that can occur in the application.
+///
+/// These events drive the main event loop and determine how the application
+/// responds to user input and system events.
 #[derive(Debug)]
 pub enum AppEvent {
+    /// Keyboard input events
     Key(KeyEvent),
+    /// Timer tick events for periodic updates
     Tick,
 }
 
+/// Represents an error state with detailed information for user display.
+///
+/// Provides structured error information that can be displayed to users
+/// with appropriate styling and context for troubleshooting.
+///
+/// # Fields
+///
+/// * `message` - Primary error message for display
+/// * `details` - Optional additional details for debugging
+/// * `error_type` - Category of error for appropriate styling and handling
 #[derive(Debug, Clone)]
 pub struct ErrorState {
     pub message: String,
@@ -45,16 +139,66 @@ pub struct ErrorState {
     pub error_type: ErrorType,
 }
 
+/// Categories of errors that can occur in the application.
+///
+/// Used to determine appropriate error handling, styling, and user guidance
+/// for different types of failures.
 #[derive(Debug, Clone)]
 pub enum ErrorType {
+    /// Network connectivity issues
     Network,
+    /// Authentication failures with LLM providers
     Authentication,
+    /// API rate limiting responses
     RateLimit,
+    /// Invalid or unsupported model requests
     InvalidModel,
+    /// Server-side errors from LLM providers
     ServerError,
+    /// Unknown or unclassified errors
     Unknown,
 }
 
+/// Main application state and controller.
+///
+/// The `App` struct contains all the state needed to run the chat interface,
+/// including chat history, user input, configuration, and UI state management.
+/// It serves as the central controller for the entire application.
+///
+/// # Fields
+///
+/// * `chat_history` - Complete history of all chat messages
+/// * `input_text` - Current user input text
+/// * `status_message` - Current status bar message
+/// * `config` - Application configuration
+/// * `should_quit` - Flag to control application shutdown
+/// * `scroll_state` - State for chat history scrolling
+/// * `scroll_position` - Current scroll position in chat
+/// * `is_input_disabled` - Whether input is currently disabled
+/// * `pending_inputs` - Queue of pending user inputs
+/// * `is_llm_busy` - Whether an LLM request is in progress
+/// * `current_error` - Current error state if any
+/// * `show_help` - Whether help overlay is shown
+/// * `typing_indicator` - Animation for response generation
+/// * `response_progress` - Progress indicator for LLM responses
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::ui::App;
+/// use perspt::config::AppConfig;
+///
+/// let config = AppConfig::load().unwrap();
+/// let mut app = App::new(config);
+/// 
+/// // Add a user message
+/// app.add_user_message("Hello, AI!".to_string());
+/// 
+/// // Check if app should quit
+/// if app.should_quit {
+///     // Handle shutdown
+/// }
+/// ```
 pub struct App {
     pub chat_history: Vec<ChatMessage>,
     pub input_text: String,
@@ -73,6 +217,31 @@ pub struct App {
 }
 
 impl App {
+    /// Creates a new App instance with the given configuration.
+    ///
+    /// Initializes the application with a welcome message, empty chat history,
+    /// and default UI state. The welcome message includes quick help information
+    /// to get users started.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Application configuration containing LLM provider settings
+    ///
+    /// # Returns
+    ///
+    /// A new `App` instance ready for use
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let app = App::new(config);
+    /// assert!(!app.should_quit);
+    /// assert!(app.chat_history.len() > 0); // Welcome message
+    /// ```
     pub fn new(config: AppConfig) -> Self {
         let welcome_msg = ChatMessage {
             message_type: MessageType::System,
@@ -134,6 +303,24 @@ impl App {
         }
     }
 
+    /// Generates a formatted timestamp string for message display.
+    ///
+    /// Creates a timestamp in HH:MM format based on the current system time.
+    /// Used for timestamping chat messages to help users track conversation flow.
+    ///
+    /// # Returns
+    ///
+    /// A formatted timestamp string in "HH:MM" format
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    ///
+    /// let timestamp = App::get_timestamp();
+    /// assert!(timestamp.len() == 5); // "HH:MM" format
+    /// assert!(timestamp.contains(':'));
+    /// ```
     pub fn get_timestamp() -> String {
         use std::time::{SystemTime, UNIX_EPOCH};
         let timestamp = SystemTime::now()
@@ -147,12 +334,67 @@ impl App {
         format!("{:02}:{:02}", hours, minutes)
     }
 
+    /// Adds a new message to the chat history.
+    ///
+    /// Automatically timestamps the message and scrolls the view to the bottom
+    /// to show the new message. This is the primary method for adding any type
+    /// of message to the chat interface.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The chat message to add (will be timestamped automatically)
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::{App, ChatMessage, MessageType};
+    /// use perspt::config::AppConfig;
+    /// use ratatui::text::Line;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// let message = ChatMessage {
+    ///     message_type: MessageType::User,
+    ///     content: vec![Line::from("Hello!")],
+    ///     timestamp: String::new(), // Will be set automatically
+    /// };
+    /// 
+    /// app.add_message(message);
+    /// ```
     pub fn add_message(&mut self, mut message: ChatMessage) {
         message.timestamp = Self::get_timestamp();
         self.chat_history.push(message);
         self.scroll_to_bottom();
     }
 
+    /// Adds an error to both the error state and chat history.
+    ///
+    /// Creates a formatted error message that appears in the chat history
+    /// and sets the current error state for display in the status bar.
+    /// Errors are styled with red coloring and error icons.
+    ///
+    /// # Arguments
+    ///
+    /// * `error` - The error state to display
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::{App, ErrorState, ErrorType};
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// let error = ErrorState {
+    ///     message: "Network connection failed".to_string(),
+    ///     details: Some("Check your internet connection".to_string()),
+    ///     error_type: ErrorType::Network,
+    /// };
+    ///
+    /// app.add_error(error);
+    /// ```
     pub fn add_error(&mut self, error: ErrorState) {
         self.current_error = Some(error.clone());
         
@@ -178,10 +420,50 @@ impl App {
         });
     }
 
+    /// Clears the current error state.
+    ///
+    /// Removes any active error from the status bar display, allowing normal
+    /// status messages to be shown again.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// // After adding an error...
+    /// app.clear_error();
+    /// assert!(app.current_error.is_none());
+    /// ```
     pub fn clear_error(&mut self) {
         self.current_error = None;
     }
 
+    /// Sets the status bar message.
+    ///
+    /// Updates the status message displayed at the bottom of the interface.
+    /// Can be used for both informational messages and error notifications.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The status message to display
+    /// * `is_error` - Whether this is an error message (affects logging)
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// app.set_status("Processing request...".to_string(), false);
+    /// app.set_status("Connection failed".to_string(), true);
+    /// ```
     pub fn set_status(&mut self, message: String, is_error: bool) {
         self.status_message = message;
         if is_error {
@@ -189,6 +471,25 @@ impl App {
         }
     }
 
+    /// Updates the animated typing indicator.
+    ///
+    /// Creates a spinning animation to show when the LLM is generating a response.
+    /// The animation cycles through different Unicode spinner characters based on
+    /// system time to create smooth motion.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// app.is_llm_busy = true;
+    /// app.update_typing_indicator();
+    /// assert!(!app.typing_indicator.is_empty());
+    /// ```
     pub fn update_typing_indicator(&mut self) {
         if self.is_llm_busy {
             let indicators = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -203,6 +504,24 @@ impl App {
         }
     }
 
+    /// Scrolls the chat view up by one position.
+    ///
+    /// Allows users to view earlier messages in the chat history.
+    /// Updates the scroll state and position for proper display.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// let initial_pos = app.scroll_position;
+    /// app.scroll_up();
+    /// // Position may change depending on chat history
+    /// ```
     pub fn scroll_up(&mut self) {
         if self.scroll_position > 0 {
             self.scroll_position -= 1;
@@ -210,6 +529,23 @@ impl App {
         }
     }
 
+    /// Scrolls the chat view down by one position.
+    ///
+    /// Allows users to move toward more recent messages in the chat history.
+    /// Will not scroll past the last message in the history.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// app.scroll_down();
+    /// // Position updated based on available content
+    /// ```
     pub fn scroll_down(&mut self) {
         if self.scroll_position < self.max_scroll() {
             self.scroll_position += 1;
@@ -217,11 +553,37 @@ impl App {
         }
     }
 
+    /// Scrolls the chat view to the bottom (most recent messages).
+    ///
+    /// Automatically called when new messages are added to ensure users
+    /// see the latest content. Can be manually called to return to the
+    /// bottom of the conversation.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// app.scroll_to_bottom();
+    /// assert_eq!(app.scroll_position, app.max_scroll());
+    /// ```
     pub fn scroll_to_bottom(&mut self) {
         self.scroll_position = self.max_scroll();
         self.update_scroll_state();
     }
 
+    /// Calculates the maximum scroll position based on content height.
+    ///
+    /// Determines how far the user can scroll based on the total number
+    /// of lines in the chat history. Used internally for scroll bounds checking.
+    ///
+    /// # Returns
+    ///
+    /// The maximum valid scroll position
     fn max_scroll(&self) -> usize {
         let content_height: usize = self.chat_history
             .iter()
@@ -234,12 +596,83 @@ impl App {
         }
     }
 
+    /// Updates the internal scroll state for display.
+    ///
+    /// Synchronizes the scroll position with the UI scrollbar state.
+    /// Called automatically by scroll methods to maintain consistency.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use perspt::ui::App;
+    /// use perspt::config::AppConfig;
+    ///
+    /// let config = AppConfig::load().unwrap();
+    /// let mut app = App::new(config);
+    ///
+    /// app.scroll_position = 5;
+    /// app.update_scroll_state();
+    /// // Internal state updated
+    /// ```
     pub fn update_scroll_state(&mut self) {
         let _max_scroll = self.max_scroll();
         self.scroll_state = self.scroll_state.position(self.scroll_position);
     }
 }
 
+/// Runs the main UI event loop for the chat application.
+///
+/// This is the primary entry point for the terminal user interface. It initializes
+/// the app state, sets up event handling, and manages the main interaction loop
+/// between the user and the LLM provider.
+///
+/// # Arguments
+///
+/// * `terminal` - Configured terminal instance for rendering
+/// * `config` - Application configuration with provider settings
+/// * `model_name` - Name of the LLM model to use
+/// * `api_key` - API key for the LLM provider
+/// * `provider` - LLM provider implementation for making requests
+///
+/// # Returns
+///
+/// `Result<()>` - Ok if the UI runs successfully and exits cleanly, Err for fatal errors
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Terminal operations fail (rendering, input handling)
+/// - Event channel communication fails
+/// - Critical UI state corruption occurs
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::ui::run_ui;
+/// use perspt::config::AppConfig;
+/// use perspt::llm_provider::create_provider;
+/// use ratatui::backend::CrosstermBackend;
+/// use ratatui::Terminal;
+/// use std::sync::Arc;
+/// use std::io;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<()> {
+///     let config = AppConfig::load()?;
+///     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+///     let provider = create_provider(&config)?;
+///     
+///     run_ui(
+///         &mut terminal,
+///         config.clone(),
+///         config.model.clone(),
+///         config.api_key.clone(),
+///         Arc::new(provider)
+///     ).await?;
+///     
+///     Ok(())
+/// }
+/// ```
 pub async fn run_ui(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, 
     config: AppConfig,
@@ -360,6 +793,32 @@ pub async fn run_ui(
     Ok(())
 }
 
+/// Renders the complete UI layout to the terminal frame.
+///
+/// This function coordinates the rendering of all UI components including the header,
+/// chat area, input area, and status line. It also handles the help overlay when active.
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `app` - Current application state for rendering
+/// * `model_name` - Name of the active LLM model for header display
+///
+/// # Layout Structure
+///
+/// ```text
+/// ┌─────────────────────────────────────┐
+/// │             Header (3 lines)        │ 
+/// ├─────────────────────────────────────┤
+/// │                                     │
+/// │          Chat Area (flexible)       │
+/// │                                     │ 
+/// ├─────────────────────────────────────┤
+/// │           Input Area (4 lines)      │
+/// ├─────────────────────────────────────┤
+/// │          Status Line (2 lines)      │
+/// └─────────────────────────────────────┘
+/// ```
 fn draw_ui(f: &mut Frame, app: &mut App, model_name: &str) {
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -389,6 +848,29 @@ fn draw_ui(f: &mut Frame, app: &mut App, model_name: &str) {
     }
 }
 
+/// Renders the application header with model information and status.
+///
+/// The header displays the application name, current LLM model, and real-time
+/// status information including whether the AI is currently processing a request.
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `area` - The rectangular area allocated for the header
+/// * `model_name` - Name of the active LLM model
+/// * `app` - Current application state for status information
+///
+/// # Header Content
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────┐
+/// │ 🧠 Perspt | Model: gpt-4 | Status: Ready              │
+/// └─────────────────────────────────────────────────────────┘
+/// ```
+///
+/// Status can be:
+/// - "Ready" (green) - Available for new input
+/// - "Thinking..." (yellow) - Processing LLM request
 fn draw_header(f: &mut Frame, area: ratatui::layout::Rect, model_name: &str, app: &App) {
     let header_content = vec![
         Line::from(vec![
@@ -417,6 +899,32 @@ fn draw_header(f: &mut Frame, area: ratatui::layout::Rect, model_name: &str, app
     f.render_widget(header, area);
 }
 
+/// Renders the scrollable chat history area.
+///
+/// This function displays all chat messages with appropriate styling based on
+/// message type (user, assistant, error, system, warning). It handles scrolling,
+/// message formatting, and visual indicators for different message sources.
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `area` - The rectangular area allocated for the chat
+/// * `app` - Current application state containing chat history and scroll position
+///
+/// # Message Format
+///
+/// Each message is displayed with:
+/// - Type-specific icon and color (👤 User, 🤖 Assistant, ❌ Error, etc.)
+/// - Timestamp in (HH:MM) format
+/// - Full message content with markdown rendering for assistant responses
+/// - Appropriate spacing between messages
+///
+/// # Scroll Behavior
+///
+/// - Automatically scrolls to bottom for new messages
+/// - User can scroll up/down to view history
+/// - Scroll position is preserved during message updates
+/// - Visual scrollbar indicates position in long conversations
 fn draw_chat_area(f: &mut Frame, area: ratatui::layout::Rect, app: &mut App) {
     let chat_content: Vec<Line> = app.chat_history
         .iter()
@@ -455,6 +963,33 @@ fn draw_chat_area(f: &mut Frame, area: ratatui::layout::Rect, app: &mut App) {
     f.render_widget(chat_paragraph, area);
 }
 
+/// Renders the user input area with text field and progress indicators.
+///
+/// This function displays the text input area where users type their messages,
+/// along with visual feedback about the current state (ready, disabled, thinking).
+/// It also shows a progress bar when the LLM is generating responses.
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `area` - The rectangular area allocated for the input section
+/// * `app` - Current application state including input text and busy status
+///
+/// # Input States
+///
+/// - **Ready**: Green border, normal text input, "Type your message..." prompt
+/// - **Disabled**: Gray border, italic text, "AI is thinking..." message
+/// - **Busy**: Shows animated progress bar below input field
+///
+/// # Visual Elements
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────┐
+/// │ Input: Hello, can you help me with...                  │
+/// ├─────────────────────────────────────────────────────────┤
+/// │ [████████████████████                    ] 75%         │
+/// └─────────────────────────────────────────────────────────┘
+/// ```
 fn draw_input_area(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let input_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -509,6 +1044,41 @@ fn draw_input_area(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     }
 }
 
+/// Renders the status line with current application state and error information.
+///
+/// This function displays the status bar at the bottom of the interface, showing
+/// the current application state, any active errors, queue information, and
+/// helpful keyboard shortcuts for the user.
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `area` - The rectangular area allocated for the status line
+/// * `app` - Current application state containing status and error information
+///
+/// # Status Display Modes
+///
+/// **Error Mode**: When an error is present
+/// ```text
+/// ┌─────────────────────────────────────────────────────────┐
+/// │ ❌ Authentication failed | Press F1 for help            │
+/// └─────────────────────────────────────────────────────────┘
+/// ```
+///
+/// **Normal Mode**: During regular operation
+/// ```text
+/// ┌─────────────────────────────────────────────────────────┐
+/// │ Status: Ready | Queued: 2 | Ctrl+C to exit             │
+/// └─────────────────────────────────────────────────────────┘
+/// ```
+///
+/// # Visual Indicators
+///
+/// - **Green**: Ready state, normal operation
+/// - **Yellow**: Busy/processing state
+/// - **Red**: Error conditions
+/// - **Blue**: Queue information
+/// - **Gray**: Help text and shortcuts
 fn draw_status_line(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     let status_content = if let Some(error) = &app.current_error {
         vec![Line::from(vec![
@@ -545,6 +1115,56 @@ fn draw_status_line(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     f.render_widget(status_paragraph, area);
 }
 
+/// Renders a modal help overlay displaying keyboard shortcuts and features.
+///
+/// This function creates a centered popup window that displays comprehensive
+/// help information including navigation controls, input shortcuts, and
+/// application features. The overlay is rendered on top of the main UI.
+///
+/// # Arguments
+///
+/// * `f` - The Ratatui frame to render to
+/// * `_app` - Current application state (unused but kept for consistency)
+///
+/// # Overlay Layout
+///
+/// The help popup is centered on screen using a three-tier layout:
+/// - 20% top padding
+/// - 60% content area (centered popup)
+/// - 20% bottom padding
+///
+/// # Help Content Sections
+///
+/// 1. **Navigation**: Scroll controls for chat history
+/// 2. **Input**: Message sending and help toggle
+/// 3. **Exit**: Application termination shortcuts
+/// 4. **Features**: List of available functionality
+///
+/// # Visual Design
+///
+/// ```text
+/// ╔═══════════════════════════════════════════════════════════╗
+/// ║                    📖 Help & Shortcuts                    ║
+/// ╠═══════════════════════════════════════════════════════════╣
+/// ║ Navigation:                                               ║
+/// ║   ↑/↓      Scroll chat history                          ║
+/// ║                                                           ║
+/// ║ Input:                                                    ║
+/// ║   Enter    Send message                                   ║
+/// ║   F1       Toggle this help                              ║
+/// ║                                                           ║
+/// ║ Features:                                                 ║
+/// ║   • Input queuing while AI responds                      ║
+/// ║   • Markdown rendering support                           ║
+/// ║   • Automatic scrolling                                  ║
+/// ╚═══════════════════════════════════════════════════════════╝
+/// ```
+///
+/// # Interaction
+///
+/// - Press F1 again to close the help overlay
+/// - Uses double-line border for visual prominence
+/// - Clears background area to ensure readability
 fn draw_help_overlay(f: &mut Frame, _app: &App) {
     let popup_area = Layout::default()
         .direction(Direction::Vertical)
@@ -601,6 +1221,49 @@ fn draw_help_overlay(f: &mut Frame, _app: &App) {
     f.render_widget(help_popup, popup_area);
 }
 
+/// Categorizes error messages into specific error types with helpful details.
+///
+/// This function analyzes error message content to determine the most likely
+/// cause and provides appropriate error categorization along with user-friendly
+/// suggestions for resolution.
+///
+/// # Arguments
+///
+/// * `error_msg` - The raw error message string to analyze
+///
+/// # Returns
+///
+/// Returns an `ErrorState` containing:
+/// - `error_type`: The categorized error type enum
+/// - `message`: A simplified, user-friendly error message
+/// - `details`: Optional detailed explanation and suggested resolution
+///
+/// # Error Categories
+///
+/// | Category | Triggers | User Message | Resolution Hint |
+/// |----------|----------|--------------|-----------------|
+/// | **Authentication** | "api key", "unauthorized" | "Authentication failed" | Check API key validity |
+/// | **RateLimit** | "rate limit", "too many requests" | "Rate limit exceeded" | Wait before retrying |
+/// | **Network** | "network", "connection", "timeout" | "Network error" | Check internet connection |
+/// | **InvalidModel** | "model", "invalid" | "Invalid model or request" | Verify model availability |
+/// | **ServerError** | "server", "5xx", "internal" | "Server error" | Service issues, retry later |
+/// | **Unknown** | All other cases | Original message | No specific hint |
+///
+/// # Examples
+///
+/// ```rust
+/// let auth_error = categorize_error("Invalid API key provided");
+/// assert_eq!(auth_error.error_type, ErrorType::Authentication);
+/// assert_eq!(auth_error.message, "Authentication failed");
+/// 
+/// let rate_error = categorize_error("Rate limit exceeded for requests");
+/// assert_eq!(rate_error.error_type, ErrorType::RateLimit);
+/// ```
+///
+/// # Usage in UI
+///
+/// The categorized errors are displayed in the status line with appropriate
+/// styling and helpful context for users to understand and resolve issues.
 fn categorize_error(error_msg: &str) -> ErrorState {
     let error_lower = error_msg.to_lowercase();
     
@@ -625,6 +1288,63 @@ fn categorize_error(error_msg: &str) -> ErrorState {
     }
 }
 
+/// Converts markdown text into styled terminal lines with rich formatting.
+///
+/// This function parses markdown content and converts it into Ratatui `Line` structures
+/// with appropriate styling for display in the terminal interface. It supports various
+/// markdown elements including headers, code blocks, lists, emphasis, and more.
+///
+/// # Arguments
+///
+/// * `markdown` - The markdown-formatted string to convert
+///
+/// # Returns
+///
+/// Returns a vector of `Line<'static>` objects that can be rendered by Ratatui,
+/// with appropriate styling applied to different markdown elements.
+///
+/// # Supported Markdown Elements
+///
+/// | Element | Styling | Visual Example |
+/// |---------|---------|----------------|
+/// | **Headers** | Magenta, bold | `# Header` |
+/// | **Code Blocks** | Cyan on dark gray background | `┌─ Code Block ─┐` |
+/// | **Inline Code** | Cyan on dark gray | ` code ` |
+/// | **Bold Text** | Bold modifier | **bold** |
+/// | **Italic Text** | Italic modifier | *italic* |
+/// | **Lists** | Green bullet points | `• Item` |
+/// | **Block Quotes** | Blue vertical bar | `▎ Quote` |
+/// | **Line Breaks** | Proper line separation | |
+///
+/// # Code Block Formatting
+///
+/// Code blocks are rendered with decorative borders:
+/// ```text
+/// ┌─ Code Block ─┐
+/// let x = 42;
+/// println!("{}", x);
+/// └─────────────┘
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// let markdown = "# Hello\n\nThis is **bold** and *italic* text.\n\n```rust\nlet x = 42;\n```";
+/// let lines = markdown_to_lines(markdown);
+/// // Returns styled lines ready for terminal rendering
+/// ```
+///
+/// # Performance Considerations
+///
+/// - Uses `pulldown_cmark` for efficient markdown parsing
+/// - Converts all content to owned strings for `'static` lifetime
+/// - Optimized for terminal display with appropriate color choices
+/// - Handles large documents gracefully with streaming parsing
+///
+/// # Error Handling
+///
+/// This function is designed to be robust and will handle malformed markdown
+/// gracefully, falling back to plain text rendering for unrecognized elements.
 fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     let parser = Parser::new_ext(markdown, Options::all());
     let mut lines = Vec::new();
