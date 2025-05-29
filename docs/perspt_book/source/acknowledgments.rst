@@ -190,7 +190,7 @@ Contributing Back
 Perspt aims to be a good citizen of the open-source ecosystem. We contribute back by:
 
 **Open Source Release**
-  Perspt itself is released under the MIT license, allowing anyone to use, modify, and distribute it.
+  Perspt itself is released under the LGPL v3 license, allowing anyone to use, modify, and distribute it.
 
 **Documentation Standards**
   This comprehensive documentation serves as an example of thorough project documentation.
@@ -204,7 +204,7 @@ Perspt aims to be a good citizen of the open-source ecosystem. We contribute bac
 License Information
 -------------------
 
-Perspt is licensed under the MIT License. For complete license information, see :doc:`license`.
+Perspt is licensed under the LGPL v3 License. For complete license information, see :doc:`license`.
 
 All dependencies are used in accordance with their respective licenses. We are grateful to all the authors and maintainers who choose to share their work under permissive open-source licenses.
 

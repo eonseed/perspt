@@ -165,10 +165,10 @@ providers directly in your terminal using a unified, beautiful interface.
 🔗 Quick Links
 ---------------
 
-- **Repository:** `GitHub <https://github.com/yourusername/perspt>`_
+- **Repository:** `GitHub <https://github.com/eonseed/perspt>`_
 - **Crates.io:** `perspt <https://crates.io/crates/perspt>`_
-- **Issues:** `Bug Reports & Feature Requests <https://github.com/yourusername/perspt/issues>`_
-- **Discussions:** `Community Chat <https://github.com/yourusername/perspt/discussions>`_
+- **Issues:** `Bug Reports & Feature Requests <https://github.com/eonseed/perspt/issues>`_
+- **Discussions:** `Community Chat <https://github.com/eonseed/perspt/discussions>`_
 
 Indices and Tables
 ==================

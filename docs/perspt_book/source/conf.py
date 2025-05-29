@@ -10,8 +10,8 @@ import sys
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'Perspt'
-copyright = '2025, Ronak Rathoer, Vikrant Rathore'
-author = 'Ronak Rathoer, Vikrant Rathore'
+copyright = '2025, Ronak Rathore, Vikrant Rathore'
+author = 'Ronak Rathore, Vikrant Rathore'
 release = '0.4.0'
 version = '0.4.0'
 
@@ -228,7 +228,7 @@ latex_elements = {
 
 latex_documents = [
     (master_doc, 'perspt.tex', 'Perspt Documentation',
-     'Ronak Rathoer, Vikrant Rathore', 'manual'),
+     'Ronak Rathore, Vikrant Rathore', 'manual'),
 ]
 
 # -- Options for manual page output ------------------------------------------

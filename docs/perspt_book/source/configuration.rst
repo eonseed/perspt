@@ -713,7 +713,7 @@ If you need assistance with configuration:
 1. **Check the examples** in this guide
 2. **Use the validation commands** to check your config
 3. **Review the error messages** - they often contain helpful hints
-4. **Ask the community** on `GitHub Discussions <https://github.com/yourusername/perspt/discussions>`_
+4. **Ask the community** on `GitHub Discussions <https://github.com/eonseed/perspt/discussions>`_
 5. **File an issue** if you find a bug in configuration handling
 
 .. seealso::
