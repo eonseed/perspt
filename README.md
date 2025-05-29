@@ -220,9 +220,55 @@ This approach eliminates the maintenance burden of keeping model lists synchroni
 -   `Ctrl+C` / `Ctrl+D`: Exit the application.
 -   `Up Arrow` / `Down Arrow`: Scroll through chat history.
 
+## 🔄 CI/CD & Releases
+
+This project uses GitHub Actions for comprehensive CI/CD:
+
+### 🧪 Continuous Integration
+- **Multi-Platform Testing**: Automated testing on Ubuntu, Windows, and macOS
+- **Code Quality**: Automated formatting checks, clippy linting, and security audits
+- **Documentation**: Automated building of both Rust API docs and Sphinx documentation
+
+### 📦 Automated Releases
+- **Cross-Platform Binaries**: Automatic generation of optimized binaries for:
+  - Linux (x86_64)
+  - Windows (x86_64)
+  - macOS (x86_64 and ARM64)
+- **Documentation Packaging**: Complete documentation bundles included in releases
+- **Checksum Generation**: SHA256 checksums for all release artifacts
+
+### 📚 Documentation Deployment
+- **GitHub Pages**: Automatic deployment of documentation to GitHub Pages
+- **Dual Documentation**: Both user guides (Sphinx) and API documentation (rustdoc)
+- **Live Updates**: Documentation automatically updates on main branch changes
+
+### 🎯 Getting Pre-built Binaries
+
+Instead of building from source, you can download pre-built binaries from the [releases page](../../releases):
+
+1. Navigate to the latest release
+2. Download the appropriate binary for your platform
+3. Make it executable: `chmod +x perspt-*` (Linux/macOS)
+4. Move to your PATH: `sudo mv perspt-* /usr/local/bin/perspt`
+
+### 📚 Documentation
+
+- **Live Documentation**: [https://eonseed.github.io/perspt/](https://eonseed.github.io/perspt/)
+- **User Guide**: Comprehensive tutorials and usage examples
+- **API Documentation**: Detailed Rust API documentation
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please open issues or submit pull requests for any bugs, features, or improvements.
+
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Ensure CI passes locally: `cargo test && cargo clippy && cargo fmt --check`
+5. Submit a pull request
+
+The CI will automatically test your changes on all supported platforms.
 
 ## 📜 License
 

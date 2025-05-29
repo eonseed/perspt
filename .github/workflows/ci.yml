@@ -112,8 +112,8 @@ jobs:
         
         echo "📄 Building PDF..."
         cd build/latex
-        lualatex -interaction=nonstopmode perspt.tex || echo "⚠️  First LaTeX pass failed, trying again..."
-        lualatex -interaction=nonstopmode perspt.tex || echo "⚠️  Second LaTeX pass failed, continuing..."
+        luahbtex -interaction=nonstopmode perspt.tex || echo "⚠️  First LaTeX pass failed, trying again..."
+        luahbtex -interaction=nonstopmode perspt.tex || echo "⚠️  Second LaTeX pass failed, continuing..."
         
         # Check if PDF was created
         if [ -f "perspt.pdf" ]; then
