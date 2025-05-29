@@ -180,42 +180,47 @@ latex_elements = {
 \setlist[description,8]{leftmargin=8\parindent,labelindent=8\parindent}
 \setlist[description,9]{leftmargin=9\parindent,labelindent=9\parindent}
 
-% XeTeX-specific Unicode character replacements using newunicodechar
+% Configure emoji fonts for Unicode emoji rendering
+% Use system font with full path specification for XeLaTeX
 \usepackage{newunicodechar}
+\newfontfamily\emojifont{NotoEmoji-Regular}[
+    Path=/Users/vikrantrathore/Library/Fonts/,
+    Scale=1.0,
+    Extension = .ttf,
+    UprightFont=*
+]
 
-% Define emoji replacements (works better with XeLaTeX)
-\newunicodechar{🚀}{\textbf{[rocket]}}
-\newunicodechar{📚}{\textbf{[books]}}
-\newunicodechar{🛠}{\textbf{[tools]}}
-\newunicodechar{️}{} % Variation selector, ignore
-\newunicodechar{📖}{\textbf{[book]}}
-\newunicodechar{✨}{\textbf{[sparkles]}}
-\newunicodechar{🎨}{\textbf{[art]}}
-\newunicodechar{⚡}{\textbf{[zap]}}
-\newunicodechar{🔀}{\textbf{[shuffle]}}
-\newunicodechar{⚙}{\textbf{[gear]}}
-\newunicodechar{🔄}{\textbf{[arrows]}}
-\newunicodechar{📜}{\textbf{[scroll]}}
-\newunicodechar{🛡}{\textbf{[shield]}}
-\newunicodechar{🎯}{\textbf{[target]}}
-\newunicodechar{📋}{\textbf{[clipboard]}}
-\newunicodechar{🔧}{\textbf{[wrench]}}
-\newunicodechar{🐌}{\textbf{[snail]}}
-\newunicodechar{🔒}{\textbf{[lock]}}
-\newunicodechar{↪}{\textrightarrow}
-\newunicodechar{🎉}{\textbf{[party]}}
-\newunicodechar{❌}{\textbf{[X]}}
-\newunicodechar{✓}{\textbf{[check]}}
-\newunicodechar{✅}{\textbf{[check]}}
-\newunicodechar{❗}{\textbf{[!]}}
-\newunicodechar{🚫}{\textbf{[no]}}
-\newunicodechar{🔗}{\textbf{[link]}}
-\newunicodechar{📦}{\textbf{[package]}}
-\newunicodechar{🦀}{\textbf{[crab]}}
-\newunicodechar{🏗}{\textbf{[construction]}}
-\newunicodechar{🤝}{\textbf{[handshake]}}
-\newunicodechar{🧪}{\textbf{[test-tube]}}
-\newunicodechar{🤖}{\textbf{[robot]}}
+% Define all emojis used in documentation with primary font
+\newunicodechar{🎉}{{\emojifont 🎉}}
+\newunicodechar{🎨}{{\emojifont 🎨}}
+\newunicodechar{🎯}{{\emojifont 🎯}}
+\newunicodechar{🏗}{{\emojifont 🏗}}
+\newunicodechar{🐌}{{\emojifont 🐌}}
+\newunicodechar{👁}{{\emojifont 👁}}
+\newunicodechar{📋}{{\emojifont 📋}}
+\newunicodechar{📖}{{\emojifont 📖}}
+\newunicodechar{📚}{{\emojifont 📚}}
+\newunicodechar{📜}{{\emojifont 📜}}
+\newunicodechar{📦}{{\emojifont 📦}}
+\newunicodechar{🔀}{{\emojifont 🔀}}
+\newunicodechar{🔄}{{\emojifont 🔄}}
+\newunicodechar{🔒}{{\emojifont 🔒}}
+\newunicodechar{🔗}{{\emojifont 🔗}}
+\newunicodechar{🔧}{{\emojifont 🔧}}
+\newunicodechar{🚀}{{\emojifont 🚀}}
+\newunicodechar{🚫}{{\emojifont 🚫}}
+\newunicodechar{🛠}{{\emojifont 🛠}}
+\newunicodechar{🛡}{{\emojifont 🛡}}
+\newunicodechar{🤖}{{\emojifont 🤖}}
+\newunicodechar{🦀}{{\emojifont 🦀}}
+
+% Additional common emojis that might be used
+\newunicodechar{✨}{{\emojifont ✨}}
+\newunicodechar{⚡}{{\emojifont ⚡}}
+\newunicodechar{⚙}{{\emojifont ⚙}}
+
+% Emoji command for manual usage
+\newcommand{\emoji}[1]{{\emojifont #1}}
 ''',
     'fncychap': '\\usepackage[Bjornstrup]{fncychap}',
     'printindex': '\\footnotesize\\raggedright\\printindex',
