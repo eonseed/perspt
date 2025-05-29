@@ -88,7 +88,7 @@ Method 1: From Source (Recommended)
 .. code-block:: bash
 
    # Clone the repository
-   git clone https://github.com/yourusername/perspt.git
+   git clone https://github.com/eonseed/perspt.git
    cd perspt
 
    # Build the project
@@ -117,7 +117,7 @@ Method 3: Download Binary
 .. code-block:: bash
 
    # Download the latest release (replace with actual URL)
-   curl -L https://github.com/yourusername/perspt/releases/latest/download/perspt-linux-x86_64.tar.gz | tar xz
+   curl -L https://github.com/eonseed/perspt/releases/latest/download/perspt-linux-x86_64.tar.gz | tar xz
 
    # Make executable and move to PATH
    chmod +x perspt
@@ -152,16 +152,16 @@ You should see a welcome screen like this:
 .. code-block:: text
 
    ┌──────────────────────────────────────────────────────────┐
-   │                     Welcome to Perspt!                  │
-   │              Your Terminal's Window to AI               │
+   │                     Welcome to Perspt!                   │
+   │              Your Terminal's Window to AI                │
    ├──────────────────────────────────────────────────────────┤
    │                                                          │
    │  Provider: OpenAI                                        │
    │  Model: gpt-4o-mini                                      │
    │  Status: Ready                                           │
    │                                                          │
-   │  Type your message and press Enter to start chatting!   │
-   │  Press Ctrl+C to exit                                   │
+   │  Type your message and press Enter to start chatting!    │
+   │  Press Ctrl+C to exit                                    │
    │                                                          │
    └──────────────────────────────────────────────────────────┘
 

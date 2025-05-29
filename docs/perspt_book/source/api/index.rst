@@ -414,4 +414,4 @@ When using the Perspt API:
 
    - :doc:`../developer-guide/index` - Development guidelines and architecture
    - :doc:`../user-guide/index` - User-focused documentation
-   - `GitHub Repository <https://github.com/yourusername/perspt>`_ - Source code and examples
+   - `GitHub Repository <https://github.com/eonseed/perspt>`_ - Source code and examples

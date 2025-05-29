@@ -316,15 +316,15 @@ We welcome contributions! Please see our :doc:`developer-guide/contributing` for
 Support
 -------
 
-- **GitHub Issues**: `Bug Reports <https://github.com/yourusername/perspt/issues>`_
-- **Discussions**: `Community Chat <https://github.com/yourusername/perspt/discussions>`_
+- **GitHub Issues**: `Bug Reports <https://github.com/eonseed/perspt/issues>`_
+- **Discussions**: `Community Chat <https://github.com/eonseed/perspt/discussions>`_
 - **Documentation**: This guide and API reference
 - **Email**: support@perspt.dev (for enterprise inquiries)
 
 License
 -------
 
-Perspt is released under the MIT License. See :doc:`license` for details.
+Perspt is released under the LGPL v3 License. See :doc:`license` for details.
 
 Acknowledgments
 ---------------

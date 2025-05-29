@@ -61,7 +61,7 @@ Choose your preferred installation method:
       
       .. code-block:: bash
 
-         curl -L https://github.com/yourusername/perspt/releases/latest/download/perspt-linux-x86_64.tar.gz | tar xz
+         curl -L https://github.com/eonseed/perspt/releases/latest/download/perspt-linux-x86_64.tar.gz | tar xz
          chmod +x perspt
          sudo mv perspt /usr/local/bin/
 
@@ -69,7 +69,7 @@ Choose your preferred installation method:
       
       .. code-block:: bash
 
-         curl -L https://github.com/yourusername/perspt/releases/latest/download/perspt-darwin-x86_64.tar.gz | tar xz
+         curl -L https://github.com/eonseed/perspt/releases/latest/download/perspt-darwin-x86_64.tar.gz | tar xz
          chmod +x perspt
          sudo mv perspt /usr/local/bin/
 
@@ -77,7 +77,7 @@ Choose your preferred installation method:
       
       .. code-block:: bash
 
-         curl -L https://github.com/yourusername/perspt/releases/latest/download/perspt-darwin-arm64.tar.gz | tar xz
+         curl -L https://github.com/eonseed/perspt/releases/latest/download/perspt-darwin-arm64.tar.gz | tar xz
          chmod +x perspt
          sudo mv perspt /usr/local/bin/
 
@@ -98,7 +98,7 @@ Choose your preferred installation method:
          cargo install perspt
 
          # Or install the latest development version
-         cargo install --git https://github.com/yourusername/perspt
+         cargo install --git https://github.com/eonseed/perspt
 
    .. tab:: 🏗️ Build from Source
 
@@ -107,7 +107,7 @@ Choose your preferred installation method:
       .. code-block:: bash
 
          # Clone repository
-         git clone https://github.com/yourusername/perspt.git
+         git clone https://github.com/eonseed/perspt.git
          cd perspt
 
          # Build release version
@@ -125,7 +125,7 @@ Homebrew (macOS/Linux)
 .. code-block:: bash
 
    # Add tap (when available)
-   brew tap yourusername/perspt
+   brew tap eonseed/perspt
    
    # Install
    brew install perspt
@@ -139,7 +139,7 @@ Scoop (Windows)
 .. code-block:: powershell
 
    # Add bucket (when available)
-   scoop bucket add perspt https://github.com/yourusername/scoop-perspt
+   scoop bucket add perspt https://github.com/eonseed/scoop-perspt
    
    # Install
    scoop install perspt
@@ -204,7 +204,7 @@ Clone and Build
 .. code-block:: bash
 
    # Clone the repository
-   git clone https://github.com/yourusername/perspt.git
+   git clone https://github.com/eonseed/perspt.git
    cd perspt
 
    # Build in release mode
@@ -239,7 +239,7 @@ For development and testing:
 .. code-block:: bash
 
    # Clone with all development tools
-   git clone https://github.com/yourusername/perspt.git
+   git clone https://github.com/eonseed/perspt.git
    cd perspt
 
    # Install development dependencies
@@ -265,12 +265,12 @@ Basic Usage
 .. code-block:: bash
 
    # Pull the image
-   docker pull ghcr.io/yourusername/perspt:latest
+   docker pull ghcr.io/eonseed/perspt:latest
 
    # Run interactively
    docker run -it --rm \
      -e OPENAI_API_KEY="$OPENAI_API_KEY" \
-     ghcr.io/yourusername/perspt:latest
+     ghcr.io/eonseed/perspt:latest
 
 With Configuration
 ~~~~~~~~~~~~~~~~~~
@@ -292,7 +292,7 @@ With Configuration
    # Run with mounted config
    docker run -it --rm \
      -v ~/.config/perspt:/app/config \
-     ghcr.io/yourusername/perspt:latest \
+     ghcr.io/eonseed/perspt:latest \
      --config /app/config/config.json
 
 Docker Compose
@@ -305,7 +305,7 @@ Create a `docker-compose.yml` file:
    version: '3.8'
    services:
      perspt:
-       image: ghcr.io/yourusername/perspt:latest
+       image: ghcr.io/eonseed/perspt:latest
        stdin_open: true
        tty: true
        environment:
@@ -352,7 +352,7 @@ Linux
 
    # Or build from source
    sudo pacman -S rust git
-   git clone https://github.com/yourusername/perspt.git
+   git clone https://github.com/eonseed/perspt.git
    cd perspt
    cargo build --release
 
@@ -493,7 +493,7 @@ Binary Installation
 .. code-block:: bash
 
    # Download and replace binary
-   curl -L https://github.com/yourusername/perspt/releases/latest/download/perspt-linux-x86_64.tar.gz | tar xz
+   curl -L https://github.com/eonseed/perspt/releases/latest/download/perspt-linux-x86_64.tar.gz | tar xz
    sudo mv perspt /usr/local/bin/
 
 Package Managers
@@ -616,8 +616,8 @@ Getting Help
 
 If you encounter issues during installation:
 
-1. **Check the GitHub Issues**: `Issues Page <https://github.com/yourusername/perspt/issues>`_
-2. **Join the Discussion**: `GitHub Discussions <https://github.com/yourusername/perspt/discussions>`_
+1. **Check the GitHub Issues**: `Issues Page <https://github.com/eonseed/perspt/issues>`_
+2. **Join the Discussion**: `GitHub Discussions <https://github.com/eonseed/perspt/discussions>`_
 3. **Read the FAQ**: :doc:`user-guide/troubleshooting`
 4. **Contact Support**: Create a new issue with:
    - Your operating system and version
@@ -633,7 +633,7 @@ After successful installation:
 1. **Set up API keys**: :doc:`configuration`
 2. **Learn basic usage**: :doc:`getting-started`
 3. **Explore features**: :doc:`user-guide/index`
-4. **Join the community**: `GitHub Discussions <https://github.com/yourusername/perspt/discussions>`_
+4. **Join the community**: `GitHub Discussions <https://github.com/eonseed/perspt/discussions>`_
 
 .. seealso::
 

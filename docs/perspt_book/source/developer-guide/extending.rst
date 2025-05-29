@@ -297,7 +297,7 @@ Here's a complete example of a plugin that adds file processing capabilities:
                    let content = self.process_file(&args[0]).await?;
                    Ok(PluginResponse::Text(format!(
                        "File content ({}):
-{}",
+                        {}",
                        args[0], content
                    )))
                }
@@ -725,7 +725,7 @@ Installation Methods
    perspt plugin install file-processor
 
    # Install from Git
-   perspt plugin install --git https://github.com/user/perspt-plugin
+   perspt plugin install --git https://github.com/eonseed/perspt-plugin
 
    # Install local plugin
    perspt plugin install --path ./my-plugin

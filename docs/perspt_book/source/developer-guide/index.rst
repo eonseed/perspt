@@ -173,7 +173,7 @@ Clone and Setup
 .. code-block:: bash
 
    # Clone repository
-   git clone https://github.com/yourusername/perspt.git
+   git clone https://github.com/eonseed/perspt.git
    cd perspt
 
    # Install dependencies
@@ -527,4 +527,4 @@ Ready to dive deeper? Choose your path:
 
    - :doc:`../api/index` - Complete API reference
    - :doc:`../user-guide/index` - User-focused documentation
-   - `GitHub Repository <https://github.com/yourusername/perspt>`_ - Source code and issues
+   - `GitHub Repository <https://github.com/eonseed/perspt>`_ - Source code and issues
