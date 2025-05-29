@@ -79,3 +79,30 @@ wheels/
 instance/
 .env
 .aider*
+
+# Documentation generated files
+docs/generated/
+docs/book/book/
+target/doc/
+*.html
+*.css.bak
+*.js.bak
+
+# mdBook generated files
+book/
+book.toml.bak
+
+# Rustdoc custom assets (generated)
+docs/header.html.bak
+docs/custom.css.bak
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary documentation files
+docs/temp/
+*.tmp.md

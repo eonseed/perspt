@@ -1,19 +1,162 @@
+//! # Configuration Management Module
+//!
+//! This module handles all configuration-related functionality for the Perspt application.
+//! It provides a flexible configuration system that supports multiple LLM providers,
+//! custom endpoints, and various authentication methods.
+//!
+//! ## Features
+//!
+//! - **Multi-provider support**: Configuration for OpenAI, Anthropic, Google, Mistral, and more
+//! - **Automatic inference**: Smart provider type detection based on configuration
+//! - **Default fallbacks**: Sensible defaults when configuration is missing
+//! - **JSON-based**: Human-readable JSON configuration files
+//! - **Environment integration**: Support for environment-based API keys
+//!
+//! ## Configuration Structure
+//!
+//! The configuration supports both simple and complex setups:
+//!
+//! ```json
+//! {
+//!   "api_key": "your-api-key",
+//!   "provider_type": "openai",
+//!   "default_model": "gpt-4o-mini",
+//!   "providers": {
+//!     "openai": "https://api.openai.com/v1",
+//!     "anthropic": "https://api.anthropic.com"
+//!   }
+//! }
+//! ```
+
 // src/config.rs
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use anyhow::Result;
 
+/// Application configuration structure that defines all configurable aspects of Perspt.
+///
+/// This structure supports flexible configuration for multiple LLM providers with
+/// automatic fallbacks and intelligent defaults. The configuration can be loaded
+/// from JSON files or created programmatically for testing.
+///
+/// # Fields
+///
+/// * `providers` - Map of provider names to their API endpoints
+/// * `api_key` - Universal API key for authentication (provider-specific keys can override)
+/// * `default_model` - Model identifier to use when none is specified
+/// * `default_provider` - Provider name to use when none is specified
+/// * `provider_type` - Provider type classification for API compatibility
+///
+/// # Provider Types
+///
+/// Supported provider types:
+/// - `openai`: OpenAI GPT models
+/// - `anthropic`: Anthropic Claude models  
+/// - `google`: Google Gemini models
+/// - `mistral`: Mistral AI models
+/// - `perplexity`: Perplexity AI models
+/// - `deepseek`: DeepSeek models
+/// - `aws-bedrock`: AWS Bedrock service
+/// - `azure-openai`: Azure OpenAI service
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::config::AppConfig;
+/// use std::collections::HashMap;
+///
+/// // Create a basic OpenAI configuration
+/// let mut providers = HashMap::new();
+/// providers.insert("openai".to_string(), "https://api.openai.com/v1".to_string());
+///
+/// let config = AppConfig {
+///     providers,
+///     api_key: Some("sk-...".to_string()),
+///     default_model: Some("gpt-4o-mini".to_string()),
+///     default_provider: Some("openai".to_string()),
+///     provider_type: Some("openai".to_string()),
+/// };
+/// ```
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AppConfig {
-    pub providers: HashMap<String, String>, // e.g., "openai" -> "https://api.openai.com/v1"
-    pub api_key: Option<String>,           // For API-based providers
-    pub default_model: Option<String>,     // Model name for API
-    pub default_provider: Option<String>,  // Name of the provider configuration to use
-    pub provider_type: Option<String>,     // Type of provider: "openai", "anthropic", "google", "mistral", "perplexity", "deepseek", "aws-bedrock", "azure-openai"
+    /// Map of provider names to their API base URLs.
+    /// 
+    /// Example: "openai" -> "<https://api.openai.com/v1>"
+    /// This allows for custom endpoints and local installations.
+    pub providers: HashMap<String, String>,
+    
+    /// Universal API key for provider authentication.
+    /// 
+    /// Individual providers may override this with provider-specific keys.
+    /// Can be None if using environment variables or other auth methods.
+    pub api_key: Option<String>,
+    
+    /// Default model identifier to use for LLM requests.
+    /// 
+    /// This should be a valid model name for the configured provider.
+    /// Examples: "gpt-4o-mini", "claude-3-sonnet-20240229", "gemini-pro"
+    pub default_model: Option<String>,
+    
+    /// Name of the default provider configuration to use.
+    /// 
+    /// This should match a key in the providers HashMap.
+    /// Used for provider selection when multiple are configured.
+    pub default_provider: Option<String>,
+    
+    /// Provider type classification for API compatibility.
+    /// 
+    /// Determines which API interface and authentication method to use.
+    /// Valid values: "openai", "anthropic", "google", "mistral", "perplexity", 
+    /// "deepseek", "aws-bedrock", "azure-openai"
+    pub provider_type: Option<String>,
 }
 
-/// Helper function for testing: processes a config from a JSON string
+/// Processes and validates a loaded configuration, applying intelligent defaults.
+///
+/// This function performs post-processing on configuration loaded from JSON or
+/// created programmatically. It applies intelligent inference to determine the
+/// provider type based on the default provider name if not explicitly set.
+///
+/// # Arguments
+///
+/// * `config` - The configuration to process
+///
+/// # Returns
+///
+/// * `AppConfig` - The processed configuration with inferred values
+///
+/// # Provider Type Inference
+///
+/// If `provider_type` is None, the function attempts to infer it from the
+/// `default_provider` field using these mappings:
+/// - "openai" -> "openai"
+/// - "anthropic" -> "anthropic"  
+/// - "google" or "gemini" -> "google"
+/// - "mistral" -> "mistral"
+/// - "perplexity" -> "perplexity"
+/// - "deepseek" -> "deepseek"
+/// - "aws", "bedrock", or "aws-bedrock" -> "aws-bedrock"
+/// - "azure" or "azure-openai" -> "azure-openai"
+/// - Unknown providers default to "openai"
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::config::{AppConfig, process_loaded_config};
+/// use std::collections::HashMap;
+///
+/// let mut config = AppConfig {
+///     providers: HashMap::new(),
+///     api_key: None,
+///     default_model: None,
+///     default_provider: Some("anthropic".to_string()),
+///     provider_type: None, // Will be inferred
+/// };
+///
+/// let processed = process_loaded_config(config);
+/// assert_eq!(processed.provider_type, Some("anthropic".to_string()));
+/// ```
 pub fn process_loaded_config(mut config: AppConfig) -> AppConfig {
     if config.provider_type.is_none() {
         if let Some(dp) = &config.default_provider {
@@ -39,6 +182,66 @@ pub fn process_loaded_config(mut config: AppConfig) -> AppConfig {
     config
 }
 
+/// Loads application configuration from a file or provides sensible defaults.
+///
+/// This asynchronous function handles configuration loading with robust fallback behavior.
+/// It can load configuration from a JSON file or provide comprehensive defaults when
+/// no configuration file is specified.
+///
+/// # Arguments
+///
+/// * `config_path` - Optional path to a JSON configuration file
+///
+/// # Returns
+///
+/// * `Result<AppConfig>` - The loaded configuration or an error
+///
+/// # Behavior
+///
+/// ## With Configuration File
+/// When a path is provided:
+/// 1. Reads the JSON file from the filesystem
+/// 2. Parses the JSON into an AppConfig structure
+/// 3. Processes the configuration to apply intelligent defaults
+/// 4. Returns the processed configuration
+///
+/// ## Without Configuration File
+/// When no path is provided:
+/// 1. Creates a comprehensive default configuration
+/// 2. Includes all supported provider endpoints
+/// 3. Sets OpenAI as the default provider with GPT-4o-mini model
+/// 4. Returns the default configuration
+///
+/// # Default Configuration
+///
+/// The default configuration includes endpoints for:
+/// - OpenAI: <https://api.openai.com/v1>
+/// - Anthropic: <https://api.anthropic.com>
+/// - Google: <https://generativelanguage.googleapis.com/v1beta/>
+/// - Mistral: <https://api.mistral.ai/v1>
+/// - Perplexity: <https://api.perplexity.ai>
+/// - DeepSeek: <https://api.deepseek.com/v1>
+/// - AWS Bedrock: <https://bedrock.amazonaws.com>
+/// - Azure OpenAI: <https://api.openai.azure.com>
+///
+/// # Errors
+///
+/// This function can return errors for:
+/// - File system errors (file not found, permission denied)
+/// - JSON parsing errors (invalid syntax, missing fields)
+/// - I/O errors during file reading
+///
+/// # Examples
+///
+/// ```rust
+/// use perspt::config::load_config;
+///
+/// // Load from file
+/// let config = load_config(Some(&"config.json".to_string())).await?;
+///
+/// // Use defaults
+/// let default_config = load_config(None).await?;
+/// ```
 pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
     let config: AppConfig = match config_path {
         Some(path) => {
