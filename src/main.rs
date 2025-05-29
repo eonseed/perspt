@@ -95,7 +95,7 @@ use env_logger;
 use log::LevelFilter;
 
 use crate::config::AppConfig;
-use crate::llm_provider::{LLMProvider, UnifiedLLMProvider, ProviderType};
+use crate::llm_provider::GenAIProvider;
 use crate::ui::{run_ui, AppEvent};
 
 mod config;
@@ -310,51 +310,60 @@ async fn main() -> Result<()> {
     // Apply CLI overrides
     if let Some(key) = cli_api_key {
         config.api_key = Some(key.clone());
+        log::info!("Using API key from command line argument");
     }
 
     if let Some(ptype) = cli_provider_type {
         config.provider_type = Some(ptype.clone());
+        log::info!("Using provider type from command line: {}", ptype);
     }
     
     if let Some(profile_name) = cli_provider_profile {
         config.default_provider = Some(profile_name.clone());
+        log::info!("Using provider profile from command line: {}", profile_name);
     }
 
     if let Some(model_val) = cli_model_name {
         config.default_model = Some(model_val.clone());
+        log::info!("Using model from command line: {}", model_val);
     }
 
-    // Get model name for the provider - set defaults based on provider type
+    // Get model name for the provider - set defaults based on provider type using genai compatible names
     let model_name_for_provider = config.default_model.clone()
         .unwrap_or_else(|| {
             match config.provider_type.as_deref() {
-                Some("openai") => "gpt-3.5-turbo".to_string(),
-                Some("anthropic") => "claude-3-sonnet-20240229".to_string(),
-                Some("google") => "gemini-pro".to_string(),
-                Some("mistral") => "mistral-small".to_string(),
+                Some("openai") => "gpt-4o-mini".to_string(),
+                Some("anthropic") => "claude-3-5-sonnet-20241022".to_string(),
+                Some("google") | Some("gemini") => "gemini-1.5-flash".to_string(),
+                Some("mistral") => "mistral-small-latest".to_string(),
                 Some("perplexity") => "llama-3.1-sonar-small-128k-online".to_string(),
                 Some("deepseek") => "deepseek-chat".to_string(),
+                Some("groq") => "llama-3.1-8b-instant".to_string(),
+                Some("cohere") => "command-r-plus".to_string(),
+                Some("xai") => "grok-beta".to_string(),
                 Some("aws-bedrock") => "anthropic.claude-v2".to_string(),
-                Some("azure-openai") => "gpt-35-turbo".to_string(),
-                _ => "gpt-3.5-turbo".to_string(),
+                Some("azure-openai") => "gpt-4o-mini".to_string(),
+                _ => "gpt-4o-mini".to_string(),
             }
         });
     
     let api_key_string = config.api_key.clone().unwrap_or_default();
 
-    // Create the unified LLM provider instance
-    let provider_type = ProviderType::from_string(
-        config.provider_type.as_deref().unwrap_or("openai")
-    ).unwrap_or(ProviderType::OpenAI);
+    // Create the GenAI provider instance with configuration
+    let provider = Arc::new(GenAIProvider::new_with_config(
+        config.provider_type.as_deref(),
+        config.api_key.as_deref()
+    )?);
 
-    let provider: Arc<dyn LLMProvider + Send + Sync> = Arc::new(
-        UnifiedLLMProvider::new(provider_type)
-    );
+    log::info!("Created GenAI provider with provider_type: {:?}, has_api_key: {}", 
+        config.provider_type, config.api_key.is_some());
 
-    // Validate configuration for the provider
-    if let Err(e) = provider.validate_config(&config).await {
-        log::error!("Configuration validation failed: {}", e);
-        return Err(e);
+    // Validate the model before starting UI
+    let validated_model = provider.validate_model(&model_name_for_provider, config.provider_type.as_deref()).await
+        .context("Failed to validate model")?;
+    
+    if validated_model != model_name_for_provider {
+        log::info!("Model changed from {} to {} after validation", model_name_for_provider, validated_model);
     }
 
     if list_models {
@@ -367,7 +376,7 @@ async fn main() -> Result<()> {
         .context("Failed to initialize terminal")?;
 
     // Run the UI - panic handling is done at the LLM provider level and via the global panic hook
-    run_ui(&mut terminal, config, model_name_for_provider, api_key_string, provider).await
+    run_ui(&mut terminal, config, validated_model, api_key_string, provider).await
         .context("UI execution failed")?;
 
     // Ensure terminal cleanup
@@ -408,20 +417,25 @@ async fn main() -> Result<()> {
 /// perspt --provider-type anthropic --list-models
 /// ```
 async fn list_available_models(
-    provider: &Arc<dyn LLMProvider + Send + Sync>,
+    provider: &Arc<GenAIProvider>,
     _config: &AppConfig,
 ) -> Result<()> {
-    match provider.list_models().await {
-        Ok(models) => {
-            println!("Available models for {:?} provider:", provider.provider_type());
-            for model in models {
-                println!("  - {}", model);
+    // List all providers and their models
+    let providers = provider.get_available_providers().await?;
+    
+    for provider_name in providers {
+        println!("Available models for {} provider:", provider_name);
+        match provider.get_available_models(&provider_name).await {
+            Ok(models) => {
+                for model in models {
+                    println!("  - {}", model);
+                }
+            }
+            Err(e) => {
+                println!("  Error fetching models: {}", e);
             }
         }
-        Err(e) => {
-            log::error!("Failed to list models: {}", e);
-            return Err(e);
-        }
+        println!();
     }
     Ok(())
 }
@@ -534,35 +548,41 @@ fn cleanup_terminal() -> Result<()> {
 async fn initiate_llm_request(
     app: &mut ui::App,
     input_to_send: String,
-    provider: Arc<dyn LLMProvider + Send + Sync>, 
+    provider: Arc<GenAIProvider>, 
     model_name: &str,
     tx_llm: &mpsc::UnboundedSender<String>,
 ) {
     app.is_llm_busy = true;
     app.is_input_disabled = true;
+    app.streaming_buffer.clear(); // Clear any previous streaming buffer
 
     log::info!("Initiating LLM request for input: '{}'", input_to_send);
     app.set_status(format!("Sending: {}...", truncate_message(&input_to_send, 20)), false);
 
     let model_name_clone = model_name.to_string();
-    let config_clone = app.config.clone(); 
+    let _config_clone = app.config.clone(); 
     let tx_clone_for_provider = tx_llm.clone();
     let input_clone = input_to_send.clone();
 
     tokio::spawn(async move {
-        // The panic protection is now handled inside the LLM provider's get_completion_response
-        let result = provider.send_chat_request(
-            &input_clone,
+        // Use the provider's streaming method with proper genai streaming
+        let result = provider.generate_response_stream_to_channel(
             &model_name_clone,
-            &config_clone,
-            &tx_clone_for_provider,
+            &input_clone,
+            tx_clone_for_provider.clone(),
         ).await;
 
-        if let Err(e) = result {
-            log::error!("LLM request failed: {}", e);
-            let error_msg = format!("Error: {}", e);
-            let _ = tx_clone_for_provider.send(error_msg);
-            let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+        match result {
+            Ok(()) => {
+                log::debug!("Streaming completed successfully");
+                let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+            }
+            Err(e) => {
+                log::error!("LLM request failed: {}", e);
+                let error_msg = format!("Error: {}", e);
+                let _ = tx_clone_for_provider.send(error_msg);
+                let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+            }
         }
     });
 }
@@ -643,7 +663,7 @@ pub async fn handle_events(
     tx_llm: &mpsc::UnboundedSender<String>, 
     _api_key: &String,
     model_name: &String,
-    provider: &Arc<dyn LLMProvider + Send + Sync>, 
+    provider: &Arc<GenAIProvider>, 
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {

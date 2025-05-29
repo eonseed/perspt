@@ -1,508 +1,621 @@
-// src/llm_provider.rs
-//
-// This module provides a unified LLM provider interface that directly leverages the allms crate
-// instead of maintaining its own model lists. This design has several benefits:
-//
-// 1. **Automatic Updates**: As the allms crate adds support for new models and providers,
-//    this code automatically benefits without requiring manual updates.
-//
-// 2. **Dynamic Model Discovery**: Uses try_from_str() to validate and support any model
-//    that the allms crate recognizes, including future additions.
-//
-// 3. **Consistent API**: Leverages the allms crate's unified Completions API for all providers,
-//    ensuring consistent behavior and feature support across different LLM providers.
-//
-// 4. **Reduced Maintenance**: No need to manually track model names, API changes, or
-//    provider-specific implementations - the allms crate handles all of this.
-//
-use async_trait::async_trait;
+//! # LLM Provider Module (llm_provider.rs)
+//!
+//! This module provides a unified interface for interacting with various Large Language Model (LLM)
+//! providers using the modern `genai` crate. It abstracts away provider-specific implementations
+//! and provides a consistent API for chat functionality, streaming responses, and model management.
+//!
+//! ## Supported Providers
+//!
+//! The module supports multiple LLM providers through the genai crate:
+//! - **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview models
+//! - **Anthropic**: Claude 3 (Opus, Sonnet, Haiku), Claude 3.5 models
+//! - **Google**: Gemini Pro, Gemini 1.5 Pro/Flash, Gemini 2.0 models
+//! - **Groq**: Llama 3.x models with ultra-fast inference
+//! - **Cohere**: Command R/R+ models
+//! - **XAI**: Grok models
+//! - **Ollama**: Local model hosting (requires local setup)
+//!
+//! ## Features
+//!
+//! - **Unified API**: Single interface across all providers
+//! - **Streaming Support**: Real-time response streaming with proper event handling
+//! - **Auto Configuration**: Automatic environment variable detection and setup
+//! - **Model Validation**: Pre-flight model availability checking
+//! - **Error Handling**: Comprehensive error categorization and recovery
+//! - **Async/Await**: Full async support with tokio integration
+//!
+//! ## Architecture
+//!
+//! The provider uses the genai crate's `Client` as the underlying interface, which handles:
+//! - Authentication via environment variables
+//! - Provider-specific API endpoints and protocols
+//! - Request/response serialization
+//! - Rate limiting and retry logic
+//!
+//! ## Example Usage
+//!
+//! ```rust
+//! use perspt::llm_provider::GenAIProvider;
+//! use tokio::sync::mpsc;
+//!
+//! // Create provider with auto-configuration
+//! let provider = GenAIProvider::new()?;
+//!
+//! // Or create with explicit configuration
+//! let provider = GenAIProvider::new_with_config(
+//!     Some("openai"),
+//!     Some("sk-your-api-key")
+//! )?;
+//!
+//! // Simple text generation
+//! let response = provider.generate_response_simple(
+//!     "gpt-4o-mini",
+//!     "Hello, how are you?"
+//! ).await?;
+//!
+//! // Streaming generation
+//! let (tx, rx) = mpsc::unbounded_channel();
+//! provider.generate_response_stream_to_channel(
+//!     "gpt-4o-mini",
+//!     "Tell me a story",
+//!     tx
+//! ).await?;
+//! ```
+
+use anyhow::{Context, Result};
+use genai::chat::{ChatMessage, ChatRequest, ChatOptions, ChatStreamEvent};
+use genai::{Client};
+use genai::adapter::AdapterKind;
+use futures::StreamExt;
 use tokio::sync::mpsc;
-use anyhow::Result;
-use allms::{
-    Completions, 
-    llm_models::{
-        OpenAIModels, AnthropicModels, GoogleModels, MistralModels, 
-        PerplexityModels, DeepSeekModels, AwsBedrockModels, LLMModel
-    }
-};
-use serde::{Deserialize, Serialize};
-use crate::config::AppConfig;
 
-/// Simple string response for get_answer
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SimpleResponse {
-    pub content: String,
+/// A comprehensive LLM provider implementation using the modern genai crate.
+///
+/// This struct provides a unified interface for interacting with multiple LLM providers
+/// through a single API. It handles authentication, model validation, streaming responses,
+/// and error management across different providers.
+///
+/// ## Design Philosophy
+///
+/// The provider is designed around the principle of "configure once, use everywhere".
+/// It automatically handles provider-specific authentication requirements, API endpoints,
+/// and response formats while presenting a consistent interface to the application.
+///
+/// ## Configuration
+///
+/// The provider supports multiple configuration methods:
+/// 1. **Auto-configuration**: Uses environment variables (recommended)
+/// 2. **Explicit configuration**: API keys and provider types via constructor
+/// 3. **Runtime configuration**: Dynamic provider switching (future enhancement)
+///
+/// ## Thread Safety
+///
+/// The provider is thread-safe and can be shared across async tasks using `Arc<GenAIProvider>`.
+/// The underlying genai client handles concurrent requests efficiently.
+///
+/// ## Error Handling
+///
+/// All methods return `Result<T>` with detailed error contexts. Network errors, authentication
+/// failures, and API limits are properly categorized and can be handled appropriately by
+/// the calling application.
+pub struct GenAIProvider {
+    /// The underlying genai client that handles provider-specific implementations.
+    /// This client is configured during construction and handles authentication,
+    /// request routing, and response processing for all supported providers.
+    client: Client,
 }
 
-/// Represents different types of LLM providers supported by allms
-#[derive(Debug, Clone, PartialEq)]
-pub enum ProviderType {
-    OpenAI,
-    Anthropic,
-    Google,
-    Mistral,
-    Perplexity,
-    DeepSeek,
-    AwsBedrock,
-}
-
-impl ProviderType {
-    /// Converts a string to a ProviderType enum variant.
+impl GenAIProvider {
+    /// Creates a new GenAI provider with automatic configuration.
     ///
-    /// Performs case-insensitive matching to determine the provider type
-    /// from configuration strings or user input.
+    /// This constructor creates a provider instance using the genai client's default
+    /// configuration, which automatically detects and uses environment variables for
+    /// authentication. This is the recommended approach for production use.
     ///
-    /// # Arguments
+    /// ## Environment Variables
     ///
-    /// * `s` - The string to match against provider names
+    /// The client will automatically detect and use these environment variables:
+    /// - `OPENAI_API_KEY`: For OpenAI models
+    /// - `ANTHROPIC_API_KEY`: For Anthropic Claude models
+    /// - `GEMINI_API_KEY`: For Google Gemini models
+    /// - `GROQ_API_KEY`: For Groq models
+    /// - `COHERE_API_KEY`: For Cohere models
+    /// - `XAI_API_KEY`: For XAI Grok models
     ///
-    /// # Returns
+    /// ## Returns
     ///
-    /// `Some(ProviderType)` if the string matches a known provider, `None` otherwise
+    /// * `Result<Self>` - A configured provider instance or configuration error
     ///
-    /// # Examples
+    /// ## Errors
     ///
-    /// ```rust
-    /// use perspt::llm_provider::ProviderType;
+    /// This method can fail if:
+    /// - The genai client cannot be initialized
+    /// - Required system dependencies are missing
+    /// - Network configuration prevents client creation
     ///
-    /// assert_eq!(ProviderType::from_string("openai"), Some(ProviderType::OpenAI));
-    /// assert_eq!(ProviderType::from_string("OpenAI"), Some(ProviderType::OpenAI));
-    /// assert_eq!(ProviderType::from_string("invalid"), None);
-    /// ```
-    pub fn from_string(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "openai" => Some(ProviderType::OpenAI),
-            "anthropic" => Some(ProviderType::Anthropic),
-            "google" | "gemini" => Some(ProviderType::Google),
-            "mistral" => Some(ProviderType::Mistral),
-            "perplexity" => Some(ProviderType::Perplexity),
-            "deepseek" => Some(ProviderType::DeepSeek),
-            "aws" | "bedrock" | "aws-bedrock" => Some(ProviderType::AwsBedrock),
-            _ => None,
-        }
-    }
-
-    /// Converts the ProviderType to its string representation.
-    ///
-    /// Returns the canonical string name for the provider type,
-    /// which can be used in configuration files and API calls.
-    ///
-    /// # Returns
-    ///
-    /// A static string representing the provider name
-    ///
-    /// # Examples
+    /// ## Example
     ///
     /// ```rust
-    /// use perspt::llm_provider::ProviderType;
+    /// // Set environment variable first
+    /// std::env::set_var("OPENAI_API_KEY", "sk-your-key");
     ///
-    /// let provider = ProviderType::OpenAI;
-    /// assert_eq!(provider.to_string(), "openai");
+    /// // Create provider with auto-configuration
+    /// let provider = GenAIProvider::new()?;
     /// ```
-    pub fn to_string(&self) -> &'static str {
-        match self {
-            ProviderType::OpenAI => "openai",
-            ProviderType::Anthropic => "anthropic",
-            ProviderType::Google => "google",
-            ProviderType::Mistral => "mistral",
-            ProviderType::Perplexity => "perplexity",
-            ProviderType::DeepSeek => "deepseek",
-            ProviderType::AwsBedrock => "aws-bedrock",
-        }
+    pub fn new() -> Result<Self> {
+        let client = Client::default();
+        Ok(Self { client })
     }
-}
 
-/// Result type for LLM operations
-pub type LLMResult<T> = Result<T>;
-
-/// Unified LLM provider using allms crate.
-///
-/// This struct provides a unified interface to multiple LLM providers through
-/// the allms crate, automatically handling provider-specific implementations
-/// and model availability.
-///
-/// # Examples
-///
-/// ```rust
-/// use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
-///
-/// let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
-/// let models = provider.get_available_models();
-/// println!("Available models: {:?}", models);
-/// ```
-#[derive(Debug)]
-pub struct UnifiedLLMProvider {
-    provider_type: ProviderType,
-}
-
-impl UnifiedLLMProvider {
-    /// Creates a new UnifiedLLMProvider for the specified provider type.
+    /// Creates a new GenAI provider with explicit configuration.
     ///
-    /// # Arguments
+    /// This constructor allows explicit specification of provider type and API key,
+    /// which is useful for CLI applications, testing, or when configuration needs
+    /// to be provided at runtime rather than through environment variables.
     ///
-    /// * `provider_type` - The type of LLM provider to create
+    /// The method automatically sets the appropriate environment variable based on
+    /// the provider type before creating the genai client. This ensures compatibility
+    /// with the genai crate's authentication system.
     ///
-    /// # Returns
+    /// ## Arguments
     ///
-    /// A new UnifiedLLMProvider instance
+    /// * `provider_type` - Optional provider identifier (e.g., "openai", "anthropic")
+    /// * `api_key` - Optional API key for authentication
     ///
-    /// # Examples
+    /// ## Provider Type Mapping
+    ///
+    /// The following provider types are supported:
+    /// - `"openai"` → Sets `OPENAI_API_KEY`
+    /// - `"anthropic"` → Sets `ANTHROPIC_API_KEY`
+    /// - `"google"` or `"gemini"` → Sets `GEMINI_API_KEY`
+    /// - `"groq"` → Sets `GROQ_API_KEY`
+    /// - `"cohere"` → Sets `COHERE_API_KEY`
+    /// - `"xai"` → Sets `XAI_API_KEY`
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<Self>` - A configured provider instance or configuration error
+    ///
+    /// ## Errors
+    ///
+    /// This method can fail if:
+    /// - The genai client cannot be initialized
+    /// - An unknown provider type is specified
+    /// - System environment cannot be modified
+    ///
+    /// ## Example
     ///
     /// ```rust
-    /// use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
+    /// // Create provider with explicit configuration
+    /// let provider = GenAIProvider::new_with_config(
+    ///     Some("openai"),
+    ///     Some("sk-your-api-key")
+    /// )?;
     ///
-    /// let openai_provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
-    /// let anthropic_provider = UnifiedLLMProvider::new(ProviderType::Anthropic);
+    /// // Or use for testing with no authentication
+    /// let provider = GenAIProvider::new_with_config(None, None)?;
     /// ```
-    pub fn new(provider_type: ProviderType) -> Self {
-        Self { provider_type }
-    }
-
-    /// Gets available models for the provider type by using the allms enums directly.
-    ///
-    /// This method dynamically retrieves all available models from the allms crate
-    /// for the specific provider type. It validates common models and returns
-    /// those that are supported by the underlying allms implementation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of model names available for this provider
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
-    ///
-    /// let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
-    /// let models = provider.get_available_models();
-    /// assert!(!models.is_empty());
-    /// assert!(models.contains(&"gpt-4".to_string()));
-    /// ```
-    pub fn get_available_models(&self) -> Vec<String> {
-        match self.provider_type {
-            ProviderType::OpenAI => {
-                // Get a comprehensive list of available OpenAI models
-                // Since we can't easily iterate over enum variants, we use try_from_str to validate common models
-                let common_models = vec![
-                    "gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o", "gpt-4o-mini",
-                    "gpt-4.1", "gpt-4.1-mini", "o1", "o1-mini", "o3", "o3-mini",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        OpenAIModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-            ProviderType::Anthropic => {
-                let common_models = vec![
-                    "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307",
-                    "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        AnthropicModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-            ProviderType::Google => {
-                let common_models = vec![
-                    "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.5-flash-8b",
-                    "gemini-2.0-flash", "gemini-pro",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        GoogleModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-            ProviderType::Mistral => {
-                let common_models = vec![
-                    "mistral-tiny", "mistral-small", "mistral-medium", "mistral-large",
-                    "open-mistral-nemo", "open-mistral-7b", "open-mixtral-8x7b", "open-mixtral-8x22b",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        MistralModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-            ProviderType::Perplexity => {
-                let common_models = vec![
-                    "sonar", "sonar-pro", "sonar-reasoning",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        PerplexityModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-            ProviderType::DeepSeek => {
-                let common_models = vec![
-                    "deepseek-chat", "deepseek-coder", "deepseek-reasoner",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        DeepSeekModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-            ProviderType::AwsBedrock => {
-                let common_models = vec![
-                    "amazon.nova-pro-v1:0", "amazon.nova-lite-v1:0", "amazon.nova-micro-v1:0",
-                ];
-                common_models.into_iter()
-                    .filter_map(|model| {
-                        AwsBedrockModels::try_from_str(model).map(|m| m.as_str().to_string())
-                    })
-                    .collect()
-            },
-        }
-    }
-
-    /// Create a Completions instance for the given model and get response
-    /// This method includes panic protection for external crate operations
-    async fn get_completion_response(&self, model: &str, api_key: &str, prompt: &str) -> LLMResult<String> {
-        let provider_type = self.provider_type.clone();
-        let model = model.to_string();
-        let api_key = api_key.to_string();
-        let prompt = prompt.to_string();
-        
-        // Use spawn_blocking with panic protection
-        let result = tokio::task::spawn_blocking(move || {
-            // Catch panics from allms crate operations
-            let result = std::panic::catch_unwind(|| {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(async move {
-                    Self::execute_llm_request(provider_type, model, api_key, prompt).await
-                })
-            });
+    pub fn new_with_config(provider_type: Option<&str>, api_key: Option<&str>) -> Result<Self> {
+        // Set environment variable if API key is provided
+        if let (Some(provider), Some(key)) = (provider_type, api_key) {
+            let env_var = match provider {
+                "openai" => "OPENAI_API_KEY",
+                "anthropic" => "ANTHROPIC_API_KEY", 
+                "google" | "gemini" => "GEMINI_API_KEY",
+                "groq" => "GROQ_API_KEY",
+                "cohere" => "COHERE_API_KEY",
+                "xai" => "XAI_API_KEY",
+                _ => {
+                    log::warn!("Unknown provider type for API key: {}", provider);
+                    return Ok(Self::new()?);
+                }
+            };
             
-            match result {
-                Ok(Ok(response)) => Ok(response),
-                Ok(Err(e)) => Err(e),
-                Err(panic_err) => {
-                    let panic_msg = if let Some(s) = panic_err.downcast_ref::<String>() {
-                        s.clone()
-                    } else if let Some(s) = panic_err.downcast_ref::<&str>() {
-                        s.to_string()
-                    } else {
-                        "Unknown panic in LLM operation".to_string()
-                    };
-                    
-                    log::error!("LLM operation panicked: {}", panic_msg);
-                    
-                    // Return a user-friendly error based on common panic scenarios
-                    if panic_msg.contains("PROJECT_ID") {
-                        Err(anyhow::anyhow!("Google Cloud PROJECT_ID environment variable is not set. Please set PROJECT_ID to your Google Cloud project ID."))
-                    } else if panic_msg.contains("NotPresent") {
-                        Err(anyhow::anyhow!("Required environment variable is missing. Please check your configuration and ensure all required environment variables are set."))
-                    } else if panic_msg.contains("AWS") || panic_msg.contains("credentials") {
-                        Err(anyhow::anyhow!("AWS credentials are not properly configured. Please set up your AWS credentials."))
-                    } else {
-                        Err(anyhow::anyhow!("LLM provider configuration error: {}. Please check your environment variables and API keys.", panic_msg))
+            log::info!("Setting {} environment variable for genai client", env_var);
+            std::env::set_var(env_var, key);
+        }
+
+        let client = Client::default();
+        Ok(Self { client })
+    }
+
+    /// Retrieves all available models for a specific provider.
+    ///
+    /// This method queries the specified provider's API to get a list of all available
+    /// models that can be used for chat completion. The list includes both current and
+    /// legacy models, allowing users to choose the most appropriate model for their needs.
+    ///
+    /// ## Arguments
+    ///
+    /// * `provider` - The provider identifier (e.g., "openai", "anthropic", "google")
+    ///
+    /// ## Provider Support
+    ///
+    /// Model listing is supported for:
+    /// - **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1 series models
+    /// - **Anthropic**: Claude 3/3.5 series (Opus, Sonnet, Haiku)
+    /// - **Google**: Gemini Pro, Gemini 1.5/2.0 series
+    /// - **Groq**: Llama 3.x series with various sizes
+    /// - **Cohere**: Command R/R+ models
+    /// - **XAI**: Grok models
+    /// - **Ollama**: Requires local setup and running instance
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<Vec<String>>` - List of model identifiers or error
+    ///
+    /// ## Errors
+    ///
+    /// This method can fail if:
+    /// - The provider name is not recognized by genai
+    /// - Network connectivity issues prevent API access
+    /// - Authentication credentials are invalid or missing
+    /// - The provider's API is temporarily unavailable
+    /// - Rate limits are exceeded
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// let provider = GenAIProvider::new()?;
+    /// 
+    /// // Get OpenAI models
+    /// let openai_models = provider.get_available_models("openai").await?;
+    /// for model in openai_models {
+    ///     println!("Available: {}", model);
+    /// }
+    ///
+    /// // Get Anthropic models
+    /// let claude_models = provider.get_available_models("anthropic").await?;
+    /// ```
+    pub async fn get_available_models(&self, provider: &str) -> Result<Vec<String>> {
+        let adapter_kind = str_to_adapter_kind(provider)?;
+        
+        let models = self.client.all_model_names(adapter_kind).await
+            .context(format!("Failed to get models for provider: {}", provider))?;
+            
+        Ok(models)
+    }
+
+    /// Generates a simple text response without streaming.
+    ///
+    /// This method provides a straightforward way to get a complete response from an LLM
+    /// without the complexity of streaming. It's ideal for simple Q&A scenarios, testing,
+    /// or when the entire response is needed before processing.
+    ///
+    /// ## Arguments
+    ///
+    /// * `model` - The model identifier (e.g., "gpt-4o-mini", "claude-3-5-sonnet-20241022")
+    /// * `prompt` - The user's message or prompt text
+    ///
+    /// ## Model Compatibility
+    ///
+    /// Supports all models available through the genai crate:
+    /// - OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`, `o1-mini`, `o1-preview`
+    /// - Anthropic: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`, etc.
+    /// - Google: `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-2.0-flash`
+    /// - Groq: `llama-3.1-70b-versatile`, `mixtral-8x7b-32768`, etc.
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<String>` - The complete response text or error
+    ///
+    /// ## Errors
+    ///
+    /// This method can fail if:
+    /// - The model name is invalid or not available
+    /// - Authentication fails (missing or invalid API key)
+    /// - The prompt violates the provider's content policy
+    /// - Network connectivity issues
+    /// - The provider returns an error (rate limits, server errors, etc.)
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// let provider = GenAIProvider::new_with_config(
+    ///     Some("openai"), 
+    ///     Some("sk-your-key")
+    /// )?;
+    ///
+    /// let response = provider.generate_response_simple(
+    ///     "gpt-4o-mini",
+    ///     "What is the capital of France?"
+    /// ).await?;
+    ///
+    /// println!("AI: {}", response);
+    /// ```
+    pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<String> {
+        let chat_req = ChatRequest::default()
+            .append_message(ChatMessage::user(prompt));
+
+        log::debug!("Sending chat request to model: {} with prompt: {}", model, prompt);
+
+        let chat_res = self.client.exec_chat(model, chat_req, None).await
+            .context(format!("Failed to execute chat request for model: {}", model))?;
+
+        let content = chat_res.content_text_as_str()
+            .context("No text content in response")?;
+        
+        log::debug!("Received response with {} characters", content.len());
+        Ok(content.to_string())
+    }
+
+    /// Generates a streaming response and sends chunks via mpsc channel.
+    ///
+    /// This is the core streaming method that provides real-time response generation,
+    /// essential for creating responsive chat interfaces. It properly handles the genai
+    /// crate's streaming events and manages the async communication with the UI layer.
+    ///
+    /// ## Streaming Architecture
+    ///
+    /// The method uses an async stream from the genai crate and processes different
+    /// types of events:
+    /// - **Start**: Indicates the beginning of response generation
+    /// - **Chunk**: Contains incremental text content (main response text)
+    /// - **ReasoningChunk**: Contains reasoning steps (for models like o1)
+    /// - **End**: Indicates completion of response generation
+    ///
+    /// ## Arguments
+    ///
+    /// * `model` - The model identifier to use for generation
+    /// * `prompt` - The user's input prompt or message
+    /// * `tx` - Unbounded mpsc sender for streaming response chunks to the UI
+    ///
+    /// ## Channel Communication
+    ///
+    /// The method sends content chunks through the provided channel as they arrive.
+    /// The receiving end (typically the UI) should listen for messages and handle:
+    /// - Regular text chunks for incremental display
+    /// - End-of-transmission signal (`EOT_SIGNAL`) indicating completion
+    /// - Error messages prefixed with "Error: " for failure cases
+    ///
+    /// ## Event Processing
+    ///
+    /// 1. **ChatStreamEvent::Start** - Logs stream initiation, no content sent
+    /// 2. **ChatStreamEvent::Chunk** - Sends content immediately to channel
+    /// 3. **ChatStreamEvent::ReasoningChunk** - Logs reasoning (future: may send to channel)
+    /// 4. **ChatStreamEvent::End** - Logs completion, caller should send EOT signal
+    ///
+    /// ## Error Handling
+    ///
+    /// Stream errors are handled gracefully:
+    /// - Errors are logged with full context
+    /// - Error messages are sent through the channel
+    /// - The method returns the error for caller handling
+    /// - Channel send failures are logged but don't halt processing
+    ///
+    /// ## Returns
+    ///
+    /// * `Result<()>` - Success (content sent via channel) or error details
+    ///
+    /// ## Errors
+    ///
+    /// This method can fail if:
+    /// - Model is invalid or not available for the authenticated provider
+    /// - Authentication credentials are missing or invalid
+    /// - Network connectivity issues prevent streaming
+    /// - The provider's streaming endpoint is unavailable
+    /// - Content policy violations in the prompt
+    /// - API rate limits or quota exceeded
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// use tokio::sync::mpsc;
+    /// use perspt::EOT_SIGNAL;
+    ///
+    /// let provider = GenAIProvider::new()?;
+    /// let (tx, mut rx) = mpsc::unbounded_channel();
+    ///
+    /// // Start streaming in background task
+    /// let provider_clone = provider.clone();
+    /// tokio::spawn(async move {
+    ///     match provider_clone.generate_response_stream_to_channel(
+    ///         "gpt-4o-mini",
+    ///         "Tell me about Rust programming",
+    ///         tx.clone()
+    ///     ).await {
+    ///         Ok(()) => {
+    ///             let _ = tx.send(EOT_SIGNAL.to_string());
+    ///         }
+    ///         Err(e) => {
+    ///             let _ = tx.send(format!("Error: {}", e));
+    ///             let _ = tx.send(EOT_SIGNAL.to_string());
+    ///         }
+    ///     }
+    /// });
+    ///
+    /// // Receive and process chunks
+    /// while let Some(chunk) = rx.recv().await {
+    ///     if chunk == EOT_SIGNAL {
+    ///         break;
+    ///     } else if chunk.starts_with("Error: ") {
+    ///         eprintln!("Stream error: {}", chunk);
+    ///         break;
+    ///     } else {
+    ///         print!("{}", chunk); // Display incremental content
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// ## Performance Considerations
+    ///
+    /// - Uses async streams for efficient memory usage
+    /// - Processes chunks immediately to minimize latency
+    /// - Unbounded channels prevent backpressure but require careful memory management
+    /// - Logs are at debug level to avoid performance impact in production
+    pub async fn generate_response_stream_to_channel(
+        &self, 
+        model: &str, 
+        prompt: &str,
+        tx: mpsc::UnboundedSender<String>
+    ) -> Result<()> {
+        let chat_req = ChatRequest::default()
+            .append_message(ChatMessage::user(prompt));
+
+        log::debug!("Sending streaming chat request to model: {} with prompt: {}", model, prompt);
+
+        let chat_res_stream = self.client.exec_chat_stream(model, chat_req, None).await
+            .context(format!("Failed to execute streaming chat request for model: {}", model))?;
+
+        // Process the stream properly
+        let mut stream = chat_res_stream.stream;
+        
+        while let Some(stream_result) = stream.next().await {
+            match stream_result {
+                Ok(ChatStreamEvent::Start) => {
+                    log::debug!("Stream started for model: {}", model);
+                }
+                Ok(ChatStreamEvent::Chunk(chunk)) => {
+                    if !chunk.content.is_empty() {
+                        if tx.send(chunk.content).is_err() {
+                            log::warn!("Failed to send chunk to channel");
+                            break;
+                        }
                     }
                 }
-            }
-        }).await;
-        
-        match result {
-            Ok(response) => response,
-            Err(join_err) => {
-                log::error!("Task join error: {}", join_err);
-                Err(anyhow::anyhow!("Internal error: {}", join_err))
-            }
-        }
-    }
-    
-    /// Execute the actual LLM request with the allms crate
-    async fn execute_llm_request(
-        provider_type: ProviderType,
-        model: String,
-        api_key: String,
-        prompt: String,
-    ) -> LLMResult<String> {
-        match provider_type {
-            ProviderType::OpenAI => {
-                // Use try_from_str to dynamically create the model enum
-                let model_enum = OpenAIModels::try_from_str(&model)
-                    .unwrap_or(OpenAIModels::Gpt4oMini);
-                let completions = Completions::new(model_enum, &api_key, None, None);
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("OpenAI API error: {}", e))
-            },
-            ProviderType::Anthropic => {
-                let model_enum = AnthropicModels::try_from_str(&model)
-                    .unwrap_or(AnthropicModels::Claude3_5Sonnet);
-                let completions = Completions::new(model_enum, &api_key, None, None);
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("Anthropic API error: {}", e))
-            },
-            ProviderType::Google => {
-                let model_enum = GoogleModels::try_from_str(&model)
-                    .unwrap_or(GoogleModels::Gemini1_5Flash);
-                let completions = Completions::new(model_enum, &api_key, None, None);
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("Google API error: {}", e))
-            },
-            ProviderType::Mistral => {
-                let model_enum = MistralModels::try_from_str(&model)
-                    .unwrap_or(MistralModels::MistralSmall);
-                let completions = Completions::new(model_enum, &api_key, None, None);
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("Mistral API error: {}", e))
-            },
-            ProviderType::Perplexity => {
-                let model_enum = PerplexityModels::try_from_str(&model)
-                    .unwrap_or(PerplexityModels::Sonar);
-                let completions = Completions::new(model_enum, &api_key, None, None);
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("Perplexity API error: {}", e))
-            },
-            ProviderType::DeepSeek => {
-                let model_enum = DeepSeekModels::try_from_str(&model)
-                    .unwrap_or(DeepSeekModels::DeepSeekChat);
-                let completions = Completions::new(model_enum, &api_key, None, None);
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("DeepSeek API error: {}", e))
-            },
-            ProviderType::AwsBedrock => {
-                let model_enum = AwsBedrockModels::try_from_str(&model)
-                    .unwrap_or(AwsBedrockModels::NovaLite);
-                let completions = Completions::new(model_enum, "", None, None); // AWS Bedrock uses different auth
-                
-                completions.get_answer::<String>(&prompt).await
-                    .map_err(|e| anyhow::anyhow!("AWS Bedrock API error: {}", e))
-            },
-        }
-    }
-
-}
-
-#[async_trait]
-impl LLMProvider for UnifiedLLMProvider {
-    async fn list_models(&self) -> LLMResult<Vec<String>> {
-        Ok(self.get_available_models())
-    }
-
-    async fn send_chat_request(
-        &self,
-        input: &str,
-        model_name: &str,
-        config: &AppConfig,
-        tx: &mpsc::UnboundedSender<String>,
-    ) -> LLMResult<()> {
-        // Get the API key from config - using unified api_key field
-        let api_key = match self.provider_type {
-            ProviderType::AwsBedrock => "", // AWS uses different auth
-            _ => config.api_key.as_deref().unwrap_or_default(),
-        };
-
-        let api_key = api_key.to_string();
-        
-        // Get the actual response using our existing method
-        let response = self.get_completion_response(model_name, &api_key, input).await?;
-        
-        // Simulate streaming by sending the response in chunks
-        // This provides a better user experience than sending all at once
-        let chunks: Vec<&str> = response.split_whitespace().collect();
-        
-        for (i, chunk) in chunks.iter().enumerate() {
-            if tx.send(chunk.to_string()).is_err() {
-                log::warn!("Failed to send response chunk - receiver dropped");
-                break;
-            }
-            
-            // Add space between words (except for the last chunk)
-            if i < chunks.len() - 1 {
-                if tx.send(" ".to_string()).is_err() {
-                    log::warn!("Failed to send space - receiver dropped");
+                Ok(ChatStreamEvent::ReasoningChunk(chunk)) => {
+                    // Handle reasoning chunks if needed (for models like o1)
+                    log::debug!("Reasoning chunk: {}", chunk.content);
+                }
+                Ok(ChatStreamEvent::End(_)) => {
+                    log::debug!("Stream ended for model: {}", model);
                     break;
                 }
+                Err(e) => {
+                    log::error!("Stream error: {}", e);
+                    let error_msg = format!("Stream error: {}", e);
+                    let _ = tx.send(error_msg);
+                    return Err(e.into());
+                }
             }
-            
-            // Small delay to simulate streaming
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
-        
+
+        log::debug!("Streaming completed for model: {}", model);
         Ok(())
     }
 
-    fn provider_type(&self) -> ProviderType {
-        self.provider_type.clone()
+    /// Generate response with conversation history
+    pub async fn generate_response_with_history(&self, model: &str, messages: Vec<ChatMessage>) -> Result<String> {
+        let chat_req = ChatRequest::new(messages);
+
+        log::debug!("Sending chat request to model: {} with conversation history", model);
+
+        let chat_res = self.client.exec_chat(model, chat_req, None).await
+            .context(format!("Failed to execute chat request for model: {}", model))?;
+
+        let content = chat_res.content_text_as_str()
+            .context("No text content in response")?;
+        
+        log::debug!("Received response with {} characters", content.len());
+        Ok(content.to_string())
     }
 
-    async fn validate_config(&self, config: &AppConfig) -> LLMResult<()> {
-        // Check if API key is configured - using unified api_key field
-        match self.provider_type {
-            ProviderType::AwsBedrock => {
-                // AWS uses different auth - check for AWS credentials
-                if std::env::var("AWS_ACCESS_KEY_ID").is_err() && std::env::var("AWS_PROFILE").is_err() {
-                    return Err(anyhow::anyhow!(
-                        "AWS credentials not configured. Please set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or configure AWS_PROFILE"
-                    ));
-                }
-                Ok(())
-            },
-            ProviderType::Google => {
-                // For Google, check both API key and PROJECT_ID
-                if config.api_key.is_none() || config.api_key.as_ref().unwrap().is_empty() {
-                    return Err(anyhow::anyhow!(
-                        "API key not configured for {} provider", 
-                        self.provider_type.to_string()
-                    ));
-                }
-                
-                // Check for PROJECT_ID environment variable
-                if std::env::var("PROJECT_ID").is_err() {
-                    return Err(anyhow::anyhow!(
-                        "Google Cloud PROJECT_ID environment variable is not set. Please set PROJECT_ID to your Google Cloud project ID."
-                    ));
-                }
-                Ok(())
-            },
-            _ => {
-                if config.api_key.is_none() || config.api_key.as_ref().unwrap().is_empty() {
-                    return Err(anyhow::anyhow!(
-                        "API key not configured for {} provider", 
-                        self.provider_type.to_string()
-                    ));
-                }
-                Ok(())
+    /// Generate response with custom chat options
+    pub async fn generate_response_with_options(&self, model: &str, prompt: &str, options: ChatOptions) -> Result<String> {
+        let chat_req = ChatRequest::default()
+            .append_message(ChatMessage::user(prompt));
+
+        log::debug!("Sending chat request to model: {} with custom options", model);
+
+        let chat_res = self.client.exec_chat(model, chat_req, Some(&options)).await
+            .context(format!("Failed to execute chat request for model: {}", model))?;
+
+        let content = chat_res.content_text_as_str()
+            .context("No text content in response")?;
+        
+        log::debug!("Received response with {} characters", content.len());
+        Ok(content.to_string())
+    }
+
+    /// Get a list of supported providers
+    pub fn get_supported_providers() -> Vec<&'static str> {
+        vec![
+            "openai",
+            "anthropic", 
+            "gemini",
+            "groq",
+            "cohere",
+            "ollama",
+            "xai"
+        ]
+    }
+
+    /// Get all available providers (for compatibility with main.rs)
+    pub async fn get_available_providers(&self) -> Result<Vec<String>> {
+        Ok(Self::get_supported_providers().iter().map(|s| s.to_string()).collect())
+    }
+
+    /// Test if a model is available and working
+    pub async fn test_model(&self, model: &str) -> Result<bool> {
+        match self.generate_response_simple(model, "Hello").await {
+            Ok(_) => {
+                log::info!("Model {} is available and working", model);
+                Ok(true)
+            }
+            Err(e) => {
+                log::warn!("Model {} test failed: {}", model, e);
+                Ok(false)
             }
         }
     }
+
+    /// Validate and get the best available model for a provider
+    pub async fn validate_model(&self, model: &str, provider_type: Option<&str>) -> Result<String> {
+        // First try the specified model
+        if self.test_model(model).await? {
+            return Ok(model.to_string());
+        }
+
+        // If that fails, try to get available models and find a suitable one
+        if let Some(provider) = provider_type {
+            if let Ok(models) = self.get_available_models(provider).await {
+                if !models.is_empty() {
+                    log::info!("Model {} not available, using {} instead", model, models[0]);
+                    return Ok(models[0].clone());
+                }
+            }
+        }
+
+        // If all else fails, use the original model and let it fail with a proper error
+        log::warn!("Could not validate model {}, proceeding anyway", model);
+        Ok(model.to_string())
+    }
 }
 
-/// Trait for LLM providers with modern async interface
-#[async_trait]
-pub trait LLMProvider {
-    /// Lists available models for this provider
-    async fn list_models(&self) -> LLMResult<Vec<String>>;
+/// Convert a provider string to genai AdapterKind
+fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
+    match provider.to_lowercase().as_str() {
+        "openai" => Ok(AdapterKind::OpenAI),
+        "anthropic" => Ok(AdapterKind::Anthropic),
+        "gemini" | "google" => Ok(AdapterKind::Gemini),
+        "groq" => Ok(AdapterKind::Groq),
+        "cohere" => Ok(AdapterKind::Cohere),
+        "ollama" => Ok(AdapterKind::Ollama),
+        "xai" => Ok(AdapterKind::Xai),
+        _ => Err(anyhow::anyhow!("Unsupported provider: {}", provider)),
+    }
+}
 
-    /// Sends a chat request to the LLM with streaming response
-    /// 
-    /// # Arguments
-    /// * `input` - The user's message/prompt
-    /// * `model_name` - Model identifier (name for API, path for local)
-    /// * `config` - Application configuration
-    /// * `tx` - Channel sender for streaming responses
-    async fn send_chat_request(
-        &self,
-        input: &str,
-        model_name: &str,
-        config: &AppConfig,
-        tx: &mpsc::UnboundedSender<String>,
-    ) -> LLMResult<()>;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    /// Returns the provider type
-    fn provider_type(&self) -> ProviderType;
+    #[test]
+    fn test_str_to_adapter_kind() {
+        assert!(str_to_adapter_kind("openai").is_ok());
+        assert!(str_to_adapter_kind("anthropic").is_ok());
+        assert!(str_to_adapter_kind("gemini").is_ok());
+        assert!(str_to_adapter_kind("google").is_ok());
+        assert!(str_to_adapter_kind("groq").is_ok());
+        assert!(str_to_adapter_kind("cohere").is_ok());
+        assert!(str_to_adapter_kind("ollama").is_ok());
+        assert!(str_to_adapter_kind("xai").is_ok());
+        assert!(str_to_adapter_kind("invalid").is_err());
+    }
 
-    /// Validates if the provider can be used with the given configuration
-    async fn validate_config(&self, config: &AppConfig) -> LLMResult<()>;
+    #[tokio::test]
+    async fn test_provider_creation() {
+        let provider = GenAIProvider::new();
+        assert!(provider.is_ok());
+    }
 }

@@ -5,11 +5,12 @@ version = "0.4.0"
 edition = "2021"
 authors = ["Vikrant Rathore"]
 license = "LGPL-3.0"
-description = "A performant CLI for talking to LLMs using the allms crate with unified API support"
+description = "A high-performance CLI for chatting with LLMs using the modern genai crate with support for latest models like o1-mini and Gemini 2.5 Pro"
 
 [dependencies]
-# LLM unified interface
-allms = "0.17"
+# LLM unified interface - using genai for better model support
+genai = "0.3.5"
+futures = "0.3"
 
 # Core async and traits
 async-trait = "0.1.88"
