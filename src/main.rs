@@ -242,9 +242,10 @@ async fn main() -> Result<()> {
     // Set up panic hook before doing anything else
     setup_panic_hook();
     
-    // Initialize logging
+    // Initialize logging - set to error level only to avoid TUI interference
+    // Logs will only show critical errors
     env_logger::Builder::from_default_env()
-        .filter_level(LevelFilter::Info)
+        .filter_level(LevelFilter::Error)
         .init();
 
     // Parse CLI arguments
