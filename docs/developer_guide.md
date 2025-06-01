@@ -2,7 +2,7 @@
 
 ## 🏗️ Architecture Overview
 
-Perspt is built with a modular, extensible architecture that separates concerns and promotes maintainability. The application follows Rust best practices and leverages the powerful `allms` crate for unified LLM access.
+Perspt is built with a modular, extensible architecture that separates concerns and promotes maintainability. The application follows Rust best practices and leverages the powerful `genai` crate for unified LLM access with a custom markdown parser for terminal rendering.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -47,19 +47,19 @@ Perspt is built with a modular, extensible architecture that separates concerns 
   - Environment variable integration
 
 #### 3. `llm_provider.rs` - LLM Abstraction Layer
-- **Purpose**: Unified interface to multiple LLM providers
+- **Purpose**: Unified interface to multiple LLM providers using genai crate
 - **Responsibilities**:
-  - Provider abstraction
-  - Model discovery and validation
-  - Streaming response handling
+  - Provider abstraction with genai integration
+  - Model discovery and validation through genai
+  - Streaming response handling with proper event types
   - Error categorization and recovery
 
 #### 4. `ui.rs` - Terminal User Interface
-- **Purpose**: Beautiful, responsive terminal interface
+- **Purpose**: Beautiful, responsive terminal interface with custom markdown parser
 - **Responsibilities**:
   - Real-time chat rendering
-  - Markdown parsing and display
-  - Keyboard event handling
+  - Custom markdown parsing and display optimized for terminals
+  - Keyboard event handling with 50ms responsiveness
   - Status and error management
 
 ## 🎯 Design Principles
@@ -68,7 +68,16 @@ Perspt is built with a modular, extensible architecture that separates concerns 
 Each module has a single, well-defined responsibility with clear interfaces.
 
 ```rust
-// Example: Clean module interfaces
+// Example: Clean module interfaces using genai crate
+// Current implementation uses concrete GenAIProvider struct
+impl GenAIProvider {
+    pub async fn get_available_models(&self, provider: &str) -> Result<Vec<String>>;
+    pub async fn generate_response_stream_to_channel(&self, model: &str, prompt: &str, tx: Sender<String>) -> Result<()>;
+    pub async fn validate_model(&self, model: &str, provider_type: Option<&str>) -> Result<String>;
+    pub async fn test_model(&self, model: &str) -> Result<bool>;
+}
+
+// Legacy trait-based approach (shown for extensibility examples)
 pub trait LLMProvider {
     async fn send_chat_request(&self, input: &str, model: &str, config: &AppConfig, tx: &Sender<String>) -> Result<()>;
     async fn list_models(&self) -> Result<Vec<String>>;
@@ -81,16 +90,42 @@ pub trait LLMProvider {
 New providers can be added by implementing the `LLMProvider` trait.
 
 ```rust
-// Example: Adding a new provider
+// Example: Adding a new provider using genai crate
 pub struct NewProvider {
-    api_key: String,
-    base_url: String,
+    client: genai::Client,
+    provider_type: ProviderType,
 }
 
 #[async_trait]
 impl LLMProvider for NewProvider {
     async fn send_chat_request(&self, input: &str, model: &str, config: &AppConfig, tx: &Sender<String>) -> Result<()> {
-        // Implementation here
+        // Use genai client for requests
+        let chat_req = ChatRequest::new(vec![
+            ChatMessage::user(input)
+        ]);
+        
+        let mut stream = self.client.exec_stream(model, chat_req).await?;
+        
+        while let Some(event) = stream.try_next().await? {
+            match event {
+                ChatStreamEvent::Start => { /* Handle start */ }
+                ChatStreamEvent::Chunk(chunk) => {
+                    if let Some(content) = chunk.content {
+                        tx.send(content)?;
+                    }
+                }
+                ChatStreamEvent::ReasoningChunk(reasoning) => {
+                    // Handle reasoning models
+                    if let Some(content) = reasoning.content {
+                        tx.send(format!("🧠 {}", content))?;
+                    }
+                }
+                ChatStreamEvent::End => break,
+            }
+        }
+        
+        tx.send(crate::EOT_SIGNAL.to_string())?;
+        Ok(())
     }
     
     // ... other trait methods
@@ -122,15 +157,29 @@ fn setup_panic_hook() {
 Asynchronous operations, efficient memory usage, and minimal allocations.
 
 ```rust
-// Example: Efficient async streaming
+// Example: Efficient async streaming with genai
 pub async fn send_chat_request(&self, input: &str, model: &str, config: &AppConfig, tx: &Sender<String>) -> Result<()> {
-    let response = self.get_completion_response(model, &api_key, input).await?;
+    let chat_req = ChatRequest::new(vec![ChatMessage::user(input)]);
+    let mut stream = self.client.exec_stream(model, chat_req).await?;
     
-    // Simulate streaming for better UX
-    let chunks: Vec<&str> = response.split_whitespace().collect();
-    for (i, chunk) in chunks.iter().enumerate() {
-        tx.send(format!("{} ", chunk))?;
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    while let Some(event) = stream.try_next().await? {
+        match event {
+            ChatStreamEvent::Chunk(chunk) => {
+                if let Some(content) = chunk.content {
+                    tx.send(content)?;
+                }
+            }
+            ChatStreamEvent::ReasoningChunk(reasoning) => {
+                if let Some(content) = reasoning.content {
+                    tx.send(format!("🧠 {}", content))?;
+                }
+            }
+            ChatStreamEvent::End => break,
+            _ => {}
+        }
+        
+        // Small delay for smooth rendering
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
     
     Ok(())
@@ -224,21 +273,100 @@ pub struct ChatMessage {
 - `Vec<Line<'static>>` for efficient terminal rendering
 - Static lifetime for performance optimization
 
-#### `LLMProvider` Trait - Provider Abstraction
+#### `GenAIProvider` - Main Provider Implementation
 ```rust
-#[async_trait]
-pub trait LLMProvider {
-    async fn list_models(&self) -> LLMResult<Vec<String>>;
-    async fn send_chat_request(&self, input: &str, model_name: &str, config: &AppConfig, tx: &mpsc::UnboundedSender<String>) -> LLMResult<()>;
-    fn provider_type(&self) -> ProviderType;
-    async fn validate_config(&self, config: &AppConfig) -> LLMResult<()>;
+#[derive(Debug)]
+pub struct GenAIProvider {
+    client: genai::Client,
+    provider_type: ProviderType,
+}
+
+impl GenAIProvider {
+    pub fn new(provider_type: ProviderType) -> Self {
+        let client = genai::Client::default();
+        Self { client, provider_type }
+    }
+    
+    pub async fn get_available_models(&self) -> Vec<String> {
+        match self.provider_type {
+            ProviderType::OpenAI => {
+                use genai::adapter::openai::OpenAIModel;
+                vec![
+                    OpenAIModel::Gpt4oMini.to_string(),
+                    OpenAIModel::Gpt4o.to_string(),
+                    OpenAIModel::O1Mini.to_string(),
+                    OpenAIModel::O1Preview.to_string(),
+                    // ... more models
+                ]
+            }
+            // ... other providers
+        }
+    }
 }
 ```
 
 **Design Rationale**:
-- `async_trait` for async method support in traits
-- `mpsc::UnboundedSender` for efficient streaming
-- Separate validation method for early error detection
+- Uses `genai::Client` for unified API access across providers
+- Automatic model discovery through genai crate enums
+- Built-in support for reasoning models and streaming events
+
+#### Custom Markdown Parser - Terminal-Optimized Rendering
+```rust
+// Custom markdown parser optimized for terminal streaming
+pub fn parse_markdown_line(line: &str) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut current_text = String::new();
+    let mut in_code = false;
+    let mut in_bold = false;
+    let mut in_italic = false;
+    
+    // Parse markdown inline elements
+    for ch in line.chars() {
+        match ch {
+            '`' => {
+                if !current_text.is_empty() {
+                    spans.push(create_span(&current_text, in_bold, in_italic, in_code));
+                    current_text.clear();
+                }
+                in_code = !in_code;
+            }
+            '*' => {
+                // Handle bold/italic logic
+                // ...
+            }
+            _ => current_text.push(ch),
+        }
+    }
+    
+    if !current_text.is_empty() {
+        spans.push(create_span(&current_text, in_bold, in_italic, in_code));
+    }
+    
+    Line::from(spans)
+}
+
+fn create_span(text: &str, bold: bool, italic: bool, code: bool) -> Span<'static> {
+    let mut style = Style::default();
+    
+    if code {
+        style = style.bg(Color::DarkGray).fg(Color::White);
+    }
+    if bold {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if italic {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    
+    Span::styled(text.to_string(), style)
+}
+```
+
+**Design Rationale**:
+- **Stream-optimized**: Handles partial content during real-time streaming
+- **Terminal-native**: Uses Ratatui's styling system directly
+- **Lightweight**: No external dependencies, built for performance
+- **Robust**: Handles malformed markdown gracefully
 
 ### Control Flow Analysis
 
@@ -263,12 +391,14 @@ graph TD
     C -->|Yes| D[initiate_llm_request()]
     C -->|No| E[Update UI State]
     D --> F[Spawn Async Task]
-    F --> G[send_chat_request()]
+    F --> G[generate_response_stream_to_channel()]
     G --> H[Stream Response]
     H --> I[Update Chat History]
 ```
 
 ## 🚀 Extending Perspt
+
+> **Current Architecture Note**: Perspt currently uses a concrete `GenAIProvider` struct that leverages the genai crate's unified API to support multiple LLM providers through a single interface. The genai crate handles provider-specific implementations internally. The following examples show both the current approach and legacy trait-based patterns for educational purposes and potential future extensions.
 
 ### Adding a New LLM Provider
 
@@ -301,20 +431,27 @@ impl ProviderType {
 ```rust
 #[derive(Debug)]
 pub struct NewLLMProvider {
-    api_key: String,
-    base_url: String,
-    // Add provider-specific fields
+    client: genai::Client,
+    provider_type: ProviderType,
 }
 
 impl NewLLMProvider {
-    pub fn new(api_key: String, base_url: String) -> Self {
-        Self { api_key, base_url }
+    pub fn new() -> Self {
+        let client = genai::Client::default();
+        Self { 
+            client, 
+            provider_type: ProviderType::NewProvider 
+        }
     }
     
-    // Provider-specific helper methods
-    async fn make_api_request(&self, payload: &str) -> Result<String> {
-        // Implementation here
-        todo!()
+    // Provider-specific helper methods using genai
+    async fn get_models(&self) -> Result<Vec<String>> {
+        // Use genai's model discovery if available
+        // or define custom model list
+        Ok(vec![
+            "new-model-1".to_string(),
+            "new-model-2".to_string(),
+        ])
     }
 }
 ```
@@ -324,12 +461,7 @@ impl NewLLMProvider {
 #[async_trait]
 impl LLMProvider for NewLLMProvider {
     async fn list_models(&self) -> LLMResult<Vec<String>> {
-        // Query your provider's model list endpoint
-        let models = vec![
-            "new-model-1".to_string(),
-            "new-model-2".to_string(),
-        ];
-        Ok(models)
+        self.get_models().await
     }
 
     async fn send_chat_request(
@@ -339,20 +471,29 @@ impl LLMProvider for NewLLMProvider {
         config: &AppConfig,
         tx: &mpsc::UnboundedSender<String>,
     ) -> LLMResult<()> {
-        // Create API request payload
-        let payload = serde_json::json!({
-            "model": model_name,
-            "messages": [{"role": "user", "content": input}],
-            "stream": true
-        });
+        let chat_req = ChatRequest::new(vec![
+            ChatMessage::user(input)
+        ]);
 
-        // Make API request
-        let response = self.make_api_request(&payload.to_string()).await?;
+        let mut stream = self.client.exec_stream(model_name, chat_req).await?;
         
-        // Stream response back
-        for chunk in response.split_whitespace() {
-            tx.send(format!("{} ", chunk))?;
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        while let Some(event) = stream.try_next().await? {
+            match event {
+                ChatStreamEvent::Start => {
+                    // Optional: Handle stream start
+                }
+                ChatStreamEvent::Chunk(chunk) => {
+                    if let Some(content) = chunk.content {
+                        tx.send(content)?;
+                    }
+                }
+                ChatStreamEvent::ReasoningChunk(reasoning) => {
+                    if let Some(content) = reasoning.content {
+                        tx.send(format!("🧠 {}", content))?;
+                    }
+                }
+                ChatStreamEvent::End => break,
+            }
         }
         
         tx.send(crate::EOT_SIGNAL.to_string())?;
@@ -364,6 +505,7 @@ impl LLMProvider for NewLLMProvider {
     }
 
     async fn validate_config(&self, config: &AppConfig) -> LLMResult<()> {
+        // Validate using genai client configuration
         if config.api_key.is_none() {
             return Err(anyhow::anyhow!("API key required for NewProvider"));
         }
@@ -374,25 +516,73 @@ impl LLMProvider for NewLLMProvider {
 
 #### Step 4: Update Provider Factory
 ```rust
-// In main.rs or llm_provider.rs
-pub fn create_provider(provider_type: ProviderType, config: &AppConfig) -> Result<Arc<dyn LLMProvider + Send + Sync>> {
-    match provider_type {
-        ProviderType::OpenAI => Ok(Arc::new(UnifiedLLMProvider::new(provider_type))),
-        ProviderType::Anthropic => Ok(Arc::new(UnifiedLLMProvider::new(provider_type))),
-        // Add your new provider
-        ProviderType::NewProvider => {
-            let api_key = config.api_key.clone().ok_or_else(|| anyhow::anyhow!("API key required"))?;
-            let base_url = config.providers.get("newprovider")
-                .cloned()
-                .unwrap_or_else(|| "https://api.newprovider.com/v1".to_string());
-            Ok(Arc::new(NewLLMProvider::new(api_key, base_url)))
-        }
-        _ => Err(anyhow::anyhow!("Unsupported provider type")),
-    }
+// In main.rs or llm_provider.rs  
+pub fn create_provider(config: &AppConfig) -> Result<GenAIProvider> {
+    // Create unified provider using genai crate
+    // The genai crate handles multiple providers through a single client
+    let provider = if let (Some(provider_type), Some(api_key)) = 
+        (config.provider_type.as_ref(), config.api_key.as_ref()) {
+        GenAIProvider::new_with_config(Some(provider_type), Some(api_key))?
+    } else {
+        GenAIProvider::new()?
+    };
+    
+    Ok(provider)
 }
 ```
 
 ### Adding New UI Features
+
+#### Enhancing the Custom Markdown Parser
+```rust
+// In ui.rs - Extend markdown parsing capabilities
+pub fn parse_markdown_with_syntax_highlighting(content: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let mut in_code_block = false;
+    let mut code_language = String::new();
+    
+    for line in content.lines() {
+        if line.starts_with("```") {
+            if in_code_block {
+                // End of code block
+                in_code_block = false;
+                code_language.clear();
+                lines.push(Line::from(vec![
+                    Span::styled("```", Style::default().fg(Color::DarkGray))
+                ]));
+            } else {
+                // Start of code block
+                in_code_block = true;
+                code_language = line[3..].to_string();
+                lines.push(Line::from(vec![
+                    Span::styled(line, Style::default().fg(Color::DarkGray))
+                ]));
+            }
+        } else if in_code_block {
+            // Code content with syntax highlighting
+            lines.push(highlight_code_line(line, &code_language));
+        } else {
+            // Regular markdown parsing
+            lines.push(parse_markdown_line(line));
+        }
+    }
+    
+    lines
+}
+
+fn highlight_code_line(line: &str, language: &str) -> Line<'static> {
+    match language {
+        "rust" => highlight_rust_syntax(line),
+        "python" => highlight_python_syntax(line),
+        "json" => highlight_json_syntax(line),
+        _ => Line::from(vec![
+            Span::styled(line.to_string(), Style::default()
+                .bg(Color::DarkGray)
+                .fg(Color::White))
+        ]),
+    }
+}
+```
 
 #### Adding a New Chat Message Type
 ```rust
@@ -404,8 +594,10 @@ pub enum MessageType {
     Error,
     System,
     Warning,
-    // Add new type
-    Debug,
+    // Add new types for genai streaming events
+    Reasoning,
+    StreamStart,
+    StreamEnd,
 }
 
 // Update message styling
@@ -416,8 +608,10 @@ fn get_message_style(message_type: &MessageType) -> Style {
         MessageType::Error => Style::default().fg(Color::Red),
         MessageType::System => Style::default().fg(Color::Yellow),
         MessageType::Warning => Style::default().fg(Color::Magenta),
-        // Add styling for new type
-        MessageType::Debug => Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+        // Add styling for genai-specific types
+        MessageType::Reasoning => Style::default().fg(Color::Blue).add_modifier(Modifier::ITALIC),
+        MessageType::StreamStart => Style::default().fg(Color::Gray),
+        MessageType::StreamEnd => Style::default().fg(Color::Gray),
     }
 }
 ```
@@ -434,13 +628,17 @@ pub async fn handle_events(/* ... */) -> Option<AppEvent> {
                     KeyCode::Enter => { /* ... */ }
                     KeyCode::Esc => { /* ... */ }
                     
-                    // Add new shortcuts
+                    // Add new shortcuts for genai features
                     KeyCode::F(2) => {
-                        app.toggle_debug_mode();
+                        app.toggle_reasoning_mode();
                         return Some(AppEvent::Tick);
                     }
-                    KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        app.save_conversation();
+                    KeyCode::F(3) => {
+                        app.export_markdown();
+                        return Some(AppEvent::Tick);
+                    }
+                    KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.toggle_raw_stream_view();
                         return Some(AppEvent::Tick);
                     }
                     
@@ -457,18 +655,20 @@ pub async fn handle_events(/* ... */) -> Option<AppEvent> {
 
 #### Adding New Configuration Fields
 ```rust
-// Extend AppConfig
+// Extend AppConfig for genai features
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AppConfig {
     // Existing fields...
     pub providers: HashMap<String, String>,
     pub api_key: Option<String>,
     
-    // New configuration options
+    // New configuration options for genai integration
     pub max_history_size: Option<usize>,
-    pub auto_save: Option<bool>,
-    pub theme: Option<String>,
-    pub custom_prompts: Option<HashMap<String, String>>,
+    pub enable_reasoning_display: Option<bool>,
+    pub custom_markdown_theme: Option<String>,
+    pub stream_buffer_size: Option<usize>,
+    pub response_timeout_ms: Option<u64>,
+    pub genai_adapter_config: Option<HashMap<String, serde_json::Value>>,
 }
 
 // Update default configuration
@@ -481,11 +681,13 @@ pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
                 providers: providers_map,
                 api_key: None,
                 
-                // New defaults
+                // New genai-specific defaults
                 max_history_size: Some(1000),
-                auto_save: Some(false),
-                theme: Some("default".to_string()),
-                custom_prompts: Some(HashMap::new()),
+                enable_reasoning_display: Some(true),
+                custom_markdown_theme: Some("terminal".to_string()),
+                stream_buffer_size: Some(1_000_000), // 1MB
+                response_timeout_ms: Some(50),
+                genai_adapter_config: Some(HashMap::new()),
             }
         }
     };
@@ -528,16 +730,16 @@ mod tests {
 ```rust
 // tests/integration_test.rs
 use perspt::config::load_config;
-use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
+use perspt::llm_provider::GenAIProvider;
 
 #[tokio::test]
 async fn test_provider_creation() {
     let config = load_config(None).await.unwrap();
-    let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
+    let provider = GenAIProvider::new().unwrap();
     
     // Test model listing (may require API key)
     if std::env::var("OPENAI_API_KEY").is_ok() {
-        let models = provider.list_models().await.unwrap();
+        let models = provider.get_available_models("openai").await.unwrap();
         assert!(!models.is_empty());
     }
 }
@@ -827,7 +1029,7 @@ assets = [
 - **Rust Documentation**: https://doc.rust-lang.org/
 - **Tokio Guide**: https://tokio.rs/tokio/tutorial
 - **Ratatui Documentation**: https://ratatui.rs/
-- **allms Crate**: https://crates.io/crates/allms
+- **genai Crate**: https://crates.io/crates/genai
 - **Serde Documentation**: https://serde.rs/
 
 ---
