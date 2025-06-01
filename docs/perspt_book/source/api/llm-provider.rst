@@ -1,7 +1,7 @@
 LLM Provider Module
 ===================
 
-The ``llm_provider`` module provides a unified interface for integrating with multiple AI providers through the ``genai`` crate. This module enables automatic model discovery, dynamic provider support, and consistent API behavior across different LLM services.
+The ``llm_provider`` module provides a modern, unified interface for integrating with multiple AI providers using the cutting-edge ``genai`` crate. This module enables real-time streaming responses, automatic model discovery, and consistent API behavior across different LLM services.
 
 .. currentmodule:: llm_provider
 
@@ -10,115 +10,58 @@ Core Philosophy
 
 The module is designed around these principles:
 
-1. **Automatic Updates**: Leverages ``genai`` crate for automatic support of new models and providers
-2. **Dynamic Discovery**: Uses ``try_from_str()`` for validation and future compatibility
-3. **Consistent API**: Unified interface across all providers
-4. **Reduced Maintenance**: No manual tracking of model names or API changes
+1. **Modern GenAI Integration**: Built on the latest ``genai`` crate with support for newest models like o1-mini, Gemini 2.0, and Claude 3.5
+2. **Real-time Streaming**: Advanced streaming with proper event handling and reasoning chunk support
+3. **Zero-Configuration**: Automatic environment variable detection with manual override options
+4. **Developer-Friendly**: Comprehensive logging, error handling, and debugging capabilities
+5. **Production-Ready**: Thread-safe, async-first design with proper resource management
+
+## Supported Providers
+
+The module supports multiple LLM providers through the genai crate:
+
+* **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview models
+* **Anthropic**: Claude 3 (Opus, Sonnet, Haiku), Claude 3.5 models  
+* **Google**: Gemini Pro, Gemini 1.5 Pro/Flash, Gemini 2.0 models
+* **Groq**: Llama 3.x models with ultra-fast inference
+* **Cohere**: Command R/R+ models
+* **XAI**: Grok models
+* **Ollama**: Local model hosting (requires local setup)
+
+## Architecture
+
+The provider uses the genai crate's ``Client`` as the underlying interface, which handles:
+
+* Authentication via environment variables
+* Provider-specific API endpoints and protocols
+* Request/response serialization
+* Rate limiting and retry logic
 
 Core Types
 ----------
 
-ProviderType
-~~~~~~~~~~~~
+GenAIProvider
+~~~~~~~~~~~~~
 
 .. code-block:: rust
 
-   #[derive(Debug, Clone, PartialEq)]
-   pub enum ProviderType {
-       OpenAI,
-       Anthropic,
-       Google,
-       Mistral,
-       Perplexity,
-       DeepSeek,
-       AwsBedrock,
-   }
-
-Enumeration of supported LLM provider types.
-
-**Methods:**
-
-from_string()
-^^^^^^^^^^^^^
-
-.. code-block:: rust
-
-   pub fn from_string(s: &str) -> Option<Self>
-
-Converts string representation to ProviderType enum.
-
-**Parameters:**
-
-* ``s`` - String representation of provider type
-
-**Returns:**
-
-* ``Option<ProviderType>`` - Some(provider) if recognized, None otherwise
-
-**Supported Strings:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Input String
-     - Output
-   * - ``"openai"``
-     - ``ProviderType::OpenAI``
-   * - ``"anthropic"``
-     - ``ProviderType::Anthropic``
-   * - ``"google"``, ``"gemini"``
-     - ``ProviderType::Google``
-   * - ``"mistral"``
-     - ``ProviderType::Mistral``
-   * - ``"perplexity"``
-     - ``ProviderType::Perplexity``
-   * - ``"deepseek"``
-     - ``ProviderType::DeepSeek``
-   * - ``"aws"``, ``"bedrock"``, ``"aws-bedrock"``
-     - ``ProviderType::AwsBedrock``
-
-**Example:**
-
-.. code-block:: rust
-
-   let provider_type = ProviderType::from_string("anthropic");
-   assert_eq!(provider_type, Some(ProviderType::Anthropic));
-
-   let unknown = ProviderType::from_string("unknown");
-   assert_eq!(unknown, None);
-
-to_string()
-^^^^^^^^^^^
-
-.. code-block:: rust
-
-   pub fn to_string(&self) -> &'static str
-
-Converts ProviderType enum to canonical string representation.
-
-**Returns:**
-
-* ``&'static str`` - String representation of the provider type
-
-**Example:**
-
-.. code-block:: rust
-
-   let provider = ProviderType::Anthropic;
-   assert_eq!(provider.to_string(), "anthropic");
-
-UnifiedLLMProvider
-~~~~~~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   #[derive(Debug)]
-   pub struct UnifiedLLMProvider {
-       provider_type: ProviderType,
+   pub struct GenAIProvider {
+       client: Client,
    }
 
 Main LLM provider implementation using the ``genai`` crate for unified access to multiple AI providers.
+
+**Design Philosophy:**
+
+The provider is designed around the principle of "configure once, use everywhere". It automatically handles provider-specific authentication requirements, API endpoints, and response formats while presenting a consistent interface to the application.
+
+**Configuration Methods:**
+
+1. **Auto-configuration**: Uses environment variables (recommended)
+2. **Explicit configuration**: API keys and provider types via constructor  
+3. **Runtime configuration**: Dynamic provider switching (future enhancement)
+
+**Thread Safety:** The provider is thread-safe and can be shared across async tasks using ``Arc<GenAIProvider>``. The underlying genai client handles concurrent requests efficiently.
 
 **Methods:**
 
@@ -127,301 +70,574 @@ new()
 
 .. code-block:: rust
 
-   pub fn new(provider_type: ProviderType) -> Self
+   pub fn new() -> Result<Self>
 
-Creates a new UnifiedLLMProvider instance.
+Creates a new GenAI provider with automatic configuration.
 
-**Parameters:**
+This constructor creates a provider instance using the genai client's default configuration, which automatically detects and uses environment variables for authentication. This is the recommended approach for production use.
 
-* ``provider_type`` - The type of provider to create
+**Environment Variables:**
+
+The client will automatically detect and use these environment variables:
+
+* ``OPENAI_API_KEY``: For OpenAI models
+* ``ANTHROPIC_API_KEY``: For Anthropic Claude models
+* ``GEMINI_API_KEY``: For Google Gemini models
+* ``GROQ_API_KEY``: For Groq models
+* ``COHERE_API_KEY``: For Cohere models
+* ``XAI_API_KEY``: For XAI Grok models
 
 **Returns:**
 
-* ``Self`` - New provider instance
+* ``Result<Self>`` - A configured provider instance or configuration error
+
+**Errors:**
+
+This method can fail if:
+
+* The genai client cannot be initialized
+* Required system dependencies are missing
+* Network configuration prevents client creation
 
 **Example:**
 
 .. code-block:: rust
 
-   let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
+   // Set environment variable first
+   std::env::set_var("OPENAI_API_KEY", "sk-your-key");
+
+   // Create provider with auto-configuration
+   let provider = GenAIProvider::new()?;
+
+new_with_config()
+^^^^^^^^^^^^^^^^^
+
+.. code-block:: rust
+
+   pub fn new_with_config(provider_type: Option<&str>, api_key: Option<&str>) -> Result<Self>
+
+Creates a new GenAI provider with explicit configuration.
+
+This constructor allows explicit specification of provider type and API key, which is useful for CLI applications, testing, or when configuration needs to be provided at runtime rather than through environment variables.
+
+**Arguments:**
+
+* ``provider_type`` - Optional provider identifier (e.g., "openai", "anthropic")
+* ``api_key`` - Optional API key for authentication
+
+**Provider Type Mapping:**
+
+* ``"openai"`` → Sets ``OPENAI_API_KEY``
+* ``"anthropic"`` → Sets ``ANTHROPIC_API_KEY``
+* ``"google"`` or ``"gemini"`` → Sets ``GEMINI_API_KEY``
+* ``"groq"`` → Sets ``GROQ_API_KEY``
+* ``"cohere"`` → Sets ``COHERE_API_KEY``
+* ``"xai"`` → Sets ``XAI_API_KEY``
+
+**Example:**
+
+.. code-block:: rust
+
+   // Create provider with explicit configuration
+   let provider = GenAIProvider::new_with_config(
+       Some("openai"),
+       Some("sk-your-api-key")
+   )?;
 
 get_available_models()
 ^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: rust
 
-   pub fn get_available_models(&self) -> Vec<String>
+   pub async fn get_available_models(&self, provider: &str) -> Result<Vec<String>>
 
-Retrieves all available models for the provider type using the ``genai`` crate enums.
+Retrieves all available models for a specific provider.
+
+This method queries the specified provider's API to get a list of all available models that can be used for chat completion. The list includes both current and legacy models, allowing users to choose the most appropriate model for their needs.
+
+**Arguments:**
+
+* ``provider`` - The provider identifier (e.g., "openai", "anthropic", "google")
+
+**Provider Support:**
+
+Model listing is supported for:
+
+* **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1 series models
+* **Anthropic**: Claude 3/3.5 series (Opus, Sonnet, Haiku)
+* **Google**: Gemini Pro, Gemini 1.5/2.0 series
+* **Groq**: Llama 3.x series with various sizes
+* **Cohere**: Command R/R+ models
+* **XAI**: Grok models
+* **Ollama**: Requires local setup and running instance
 
 **Returns:**
 
-* ``Vec<String>`` - List of available model identifiers
+* ``Result<Vec<String>>`` - List of model identifiers or error
 
-**Model Sources by Provider:**
+**Errors:**
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
+This method can fail if:
 
-   * - Provider
-     - Model Source
-   * - OpenAI
-     - ``OpenAIModels`` enum from genai
-   * - Anthropic
-     - ``AnthropicModels`` enum from genai
-   * - Google
-     - ``GoogleModels`` enum from genai
-   * - Mistral
-     - ``MistralModels`` enum from genai
-   * - Perplexity
-     - ``PerplexityModels`` enum from genai
-   * - DeepSeek
-     - ``DeepSeekModels`` enum from genai
-   * - AWS Bedrock
-     - ``AwsBedrockModels`` enum from genai
+* The provider name is not recognized by genai
+* Network connectivity issues prevent API access
+* Authentication credentials are invalid or missing
+* The provider's API is temporarily unavailable
+* Rate limits are exceeded
 
 **Example:**
 
 .. code-block:: rust
 
-   let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
-   let models = provider.get_available_models();
-   // Returns: ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo", ...]
-
-SimpleResponse
-~~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   #[derive(Debug, Deserialize, Serialize)]
-   pub struct SimpleResponse {
-       pub content: String,
+   let provider = GenAIProvider::new()?;
+   
+   // Get OpenAI models
+   let openai_models = provider.get_available_models("openai").await?;
+   for model in openai_models {
+       println!("Available: {}", model);
    }
 
-Simple response structure for LLM completions.
+   // Get Anthropic models
+   let claude_models = provider.get_available_models("anthropic").await?;
 
-**Fields:**
-
-* ``content`` - The response content from the LLM
-
-Traits
-------
-
-LLMProvider
-~~~~~~~~~~~
+generate_response_simple()
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: rust
 
-   #[async_trait]
-   pub trait LLMProvider {
-       async fn list_models(&self) -> LLMResult<Vec<String>>;
-       async fn send_chat_request(&self, input: &str, model_name: &str, config: &AppConfig, tx: &mpsc::UnboundedSender<String>) -> LLMResult<()>;
-       fn provider_type(&self) -> ProviderType;
-       async fn validate_config(&self, config: &AppConfig) -> LLMResult<()>;
-   }
+   pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<String>
 
-Unified trait for all LLM providers, providing consistent interface across different AI services.
+Generates a simple text response without streaming.
 
-**Methods:**
+This method provides a straightforward way to get a complete response from an LLM without the complexity of streaming. It's ideal for simple Q&A scenarios, testing, or when the entire response is needed before processing.
 
-list_models()
-^^^^^^^^^^^^^
+**Arguments:**
 
-.. code-block:: rust
+* ``model`` - The model identifier (e.g., "gpt-4o-mini", "claude-3-5-sonnet-20241022")
+* ``prompt`` - The user's message or prompt text
 
-   async fn list_models(&self) -> LLMResult<Vec<String>>
+**Model Compatibility:**
 
-Lists all available models for the provider.
+Supports all models available through the genai crate:
+
+* OpenAI: ``gpt-4o``, ``gpt-4o-mini``, ``gpt-3.5-turbo``, ``o1-mini``, ``o1-preview``
+* Anthropic: ``claude-3-5-sonnet-20241022``, ``claude-3-opus-20240229``, etc.
+* Google: ``gemini-1.5-pro``, ``gemini-1.5-flash``, ``gemini-2.0-flash``
+* Groq: ``llama-3.1-70b-versatile``, ``mixtral-8x7b-32768``, etc.
 
 **Returns:**
 
-* ``LLMResult<Vec<String>>`` - List of model identifiers or error
+* ``Result<String>`` - The complete response text or error
 
 **Example:**
 
 .. code-block:: rust
 
-   let provider = UnifiedLLMProvider::new(ProviderType::Anthropic);
-   let models = provider.list_models().await?;
-   println!("Available models: {:?}", models);
+   let provider = GenAIProvider::new_with_config(
+       Some("openai"), 
+       Some("sk-your-key")
+   )?;
 
-send_chat_request()
-^^^^^^^^^^^^^^^^^^^
+   let response = provider.generate_response_simple(
+       "gpt-4o-mini",
+       "What is the capital of France?"
+   ).await?;
+
+   println!("AI: {}", response);
+
+generate_response_stream_to_channel()
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: rust
 
-   async fn send_chat_request(
-       &self,
-       input: &str,
-       model_name: &str,
-       config: &AppConfig,
-       tx: &mpsc::UnboundedSender<String>,
-   ) -> LLMResult<()>
+   pub async fn generate_response_stream_to_channel(
+       &self, 
+       model: &str, 
+       prompt: &str,
+       tx: mpsc::UnboundedSender<String>
+   ) -> Result<()>
 
-Sends a chat request to the LLM with streaming response.
+Generates a streaming response and sends chunks via mpsc channel.
 
-**Parameters:**
+This is the core streaming method that provides real-time response generation, essential for creating responsive chat interfaces. It properly handles the genai crate's streaming events and manages the async communication with the UI layer.
 
-* ``input`` - The user's message/prompt
-* ``model_name`` - Model identifier to use
-* ``config`` - Application configuration
-* ``tx`` - Channel for streaming responses
+**Streaming Architecture:**
 
-**Returns:**
+The method uses an async stream from the genai crate and processes different types of events:
 
-* ``LLMResult<()>`` - Success or error
+* **Start**: Indicates the beginning of response generation
+* **Chunk**: Contains incremental text content (main response text)
+* **ReasoningChunk**: Contains reasoning steps (for models like o1)
+* **End**: Indicates completion of response generation
 
-**Behavior:**
+**Arguments:**
 
-1. Validates API key from configuration
-2. Creates completion request using ``genai`` crate
-3. Simulates streaming by sending response in chunks
-4. Sends ``EOT_SIGNAL`` when complete
+* ``model`` - The model identifier to use for generation
+* ``prompt`` - The user's input prompt or message
+* ``tx`` - Unbounded mpsc sender for streaming response chunks to the UI
+
+**Channel Communication:**
+
+The method sends content chunks through the provided channel as they arrive. The receiving end (typically the UI) should listen for messages and handle:
+
+* Regular text chunks for incremental display
+* End-of-transmission signal (``EOT_SIGNAL``) indicating completion
+* Error messages prefixed with "Error: " for failure cases
+
+**Event Processing:**
+
+1. **ChatStreamEvent::Start** - Logs stream initiation, no content sent
+2. **ChatStreamEvent::Chunk** - Sends content immediately to channel
+3. **ChatStreamEvent::ReasoningChunk** - Logs reasoning (future: may send to channel)
+4. **ChatStreamEvent::End** - Logs completion, caller should send EOT signal
 
 **Error Handling:**
 
-* Missing API key
-* Invalid model name
-* Network connectivity issues
-* Provider-specific errors
+Stream errors are handled gracefully:
+
+* Errors are logged with full context
+* Error messages are sent through the channel
+* The method returns the error for caller handling
+* Channel send failures are logged but don't halt processing
+
+**Returns:**
+
+* ``Result<()>`` - Success (content sent via channel) or error details
 
 **Example:**
 
 .. code-block:: rust
 
+   use tokio::sync::mpsc;
+   use perspt::EOT_SIGNAL;
+
+   let provider = GenAIProvider::new()?;
    let (tx, mut rx) = mpsc::unbounded_channel();
-   let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
-   let config = load_config(None).await?;
 
-   provider.send_chat_request(
-       "Hello, how are you?",
-       "gpt-4o-mini",
-       &config,
-       &tx
-   ).await?;
+   // Start streaming in background task
+   let provider_clone = provider.clone();
+   tokio::spawn(async move {
+       match provider_clone.generate_response_stream_to_channel(
+           "gpt-4o-mini",
+           "Tell me about Rust programming",
+           tx.clone()
+       ).await {
+           Ok(()) => {
+               let _ = tx.send(EOT_SIGNAL.to_string());
+           }
+           Err(e) => {
+               let _ = tx.send(format!("Error: {}", e));
+               let _ = tx.send(EOT_SIGNAL.to_string());
+           }
+       }
+   });
 
-   // Receive streaming response
+   // Receive and process chunks
    while let Some(chunk) = rx.recv().await {
        if chunk == EOT_SIGNAL {
            break;
+       } else if chunk.starts_with("Error: ") {
+           eprintln!("Stream error: {}", chunk);
+           break;
+       } else {
+           print!("{}", chunk); // Display incremental content
        }
-       print!("{}", chunk);
    }
 
-provider_type()
-^^^^^^^^^^^^^^^
+generate_response_with_history()
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: rust
 
-   fn provider_type(&self) -> ProviderType
+   pub async fn generate_response_with_history(&self, model: &str, messages: Vec<ChatMessage>) -> Result<String>
 
-Returns the provider type for this instance.
+Generate response with conversation history.
+
+**Arguments:**
+
+* ``model`` - The model identifier
+* ``messages`` - Vector of ChatMessage objects representing conversation history
 
 **Returns:**
 
-* ``ProviderType`` - The provider type enum
+* ``Result<String>`` - Complete response text or error
 
-validate_config()
-^^^^^^^^^^^^^^^^^
+get_supported_providers()
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: rust
 
-   async fn validate_config(&self, config: &AppConfig) -> LLMResult<()>
+   pub fn get_supported_providers() -> Vec<&'static str>
 
-Validates if the provider can be used with the given configuration.
-
-**Parameters:**
-
-* ``config`` - Configuration to validate
+Get a list of supported providers.
 
 **Returns:**
 
-* ``LLMResult<()>`` - Success or validation error
+* ``Vec<&'static str>`` - List of supported provider identifiers
 
-**Validation Checks:**
-
-* API key presence and format
-* Required environment variables
-* Provider-specific configuration requirements
-
-**Example:**
+**Supported Providers:**
 
 .. code-block:: rust
 
-   let provider = UnifiedLLMProvider::new(ProviderType::Anthropic);
-   let config = load_config(None).await?;
+   [
+       "openai",
+       "anthropic", 
+       "gemini",
+       "groq",
+       "cohere",
+       "ollama",
+       "xai"
+   ]
 
-   match provider.validate_config(&config).await {
-       Ok(()) => println!("Configuration valid"),
-       Err(e) => eprintln!("Configuration error: {}", e),
+test_model()
+^^^^^^^^^^^^
+
+.. code-block:: rust
+
+   pub async fn test_model(&self, model: &str) -> Result<bool>
+
+Test if a model is available and working.
+
+**Arguments:**
+
+* ``model`` - The model identifier to test
+
+**Returns:**
+
+* ``Result<bool>`` - True if model is working, false otherwise
+
+validate_model()
+^^^^^^^^^^^^^^^^
+
+.. code-block:: rust
+
+   pub async fn validate_model(&self, model: &str, provider_type: Option<&str>) -> Result<String>
+
+Validate and get the best available model for a provider.
+
+**Arguments:**
+
+* ``model`` - The model identifier to validate
+* ``provider_type`` - Optional provider type for fallback model selection
+
+**Returns:**
+
+* ``Result<String>`` - Validated model identifier or fallback model
+
+Utility Functions
+-----------------
+
+str_to_adapter_kind()
+~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind>
+
+Convert a provider string to genai AdapterKind.
+
+**Arguments:**
+
+* ``provider`` - Provider string identifier
+
+**Returns:**
+
+* ``Result<AdapterKind>`` - Corresponding AdapterKind enum variant
+
+**Provider Mapping:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Input String
+     - AdapterKind
+   * - ``"openai"``
+     - ``AdapterKind::OpenAI``
+   * - ``"anthropic"``
+     - ``AdapterKind::Anthropic``
+   * - ``"gemini"``, ``"google"``
+     - ``AdapterKind::Gemini``
+   * - ``"groq"``
+     - ``AdapterKind::Groq``
+   * - ``"cohere"``
+     - ``AdapterKind::Cohere``
+   * - ``"ollama"``
+     - ``AdapterKind::Ollama``
+   * - ``"xai"``
+     - ``AdapterKind::Xai``
+
+Usage Examples
+--------------
+
+Basic Chat Interaction
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   use perspt::llm_provider::GenAIProvider;
+
+   #[tokio::main]
+   async fn main() -> Result<(), Box<dyn std::error::Error>> {
+       // Initialize provider with environment variables
+       let provider = GenAIProvider::new()?;
+       
+       // Simple question-answer
+       let response = provider.generate_response_simple(
+           "gpt-4o-mini",
+           "Explain async programming in Rust"
+       ).await?;
+       
+       println!("AI: {}", response);
+       Ok(())
    }
 
-Type Aliases
-------------
-
-LLMResult<T>
-~~~~~~~~~~~~
+Streaming Chat Interface
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
-   pub type LLMResult<T> = Result<T>;
+   use perspt::llm_provider::GenAIProvider;
+   use tokio::sync::mpsc;
+   use perspt::EOT_SIGNAL;
 
-Standard result type for LLM operations using ``anyhow::Result``.
+   #[tokio::main]
+   async fn main() -> Result<(), Box<dyn std::error::Error>> {
+       let provider = GenAIProvider::new()?;
+       let (tx, mut rx) = mpsc::unbounded_channel();
+       
+       // Start streaming
+       tokio::spawn(async move {
+           let _ = provider.generate_response_stream_to_channel(
+               "claude-3-5-sonnet-20241022",
+               "Write a haiku about programming",
+               tx
+           ).await;
+       });
+       
+       // Display results in real-time
+       while let Some(chunk) = rx.recv().await {
+           if chunk == EOT_SIGNAL {
+               println!("\n[Stream Complete]");
+               break;
+           }
+           print!("{}", chunk);
+       }
+       
+       Ok(())
+   }
+
+Error Handling Best Practices
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   use perspt::llm_provider::GenAIProvider;
+   use anyhow::{Context, Result};
+
+   async fn robust_llm_call() -> Result<String> {
+       let provider = GenAIProvider::new()
+           .context("Failed to initialize LLM provider")?;
+       
+       // Test model availability first
+       let model = "gpt-4o-mini";
+       if !provider.test_model(model).await? {
+           return Err(anyhow::anyhow!("Model {} is not available", model));
+       }
+       
+       // Make the actual request with proper error context
+       let response = provider.generate_response_simple(
+           model,
+           "Hello, world!"
+       )
+       .await
+       .context(format!("Failed to generate response using model {}", model))?;
+       
+       Ok(response)
+   }
+
+Provider Selection
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   use perspt::llm_provider::GenAIProvider;
+
+   async fn choose_best_provider() -> Result<(), Box<dyn std::error::Error>> {
+       let provider = GenAIProvider::new()?;
+       
+       // Get all supported providers
+       let providers = GenAIProvider::get_supported_providers();
+       
+       for provider_name in providers {
+           println!("Checking provider: {}", provider_name);
+           
+           // Get available models for each provider
+           if let Ok(models) = provider.get_available_models(provider_name).await {
+               println!("  Available models: {:?}", models);
+               
+               // Test the first model
+               if !models.is_empty() {
+                   let works = provider.test_model(&models[0]).await.unwrap_or(false);
+                   println!("  Model {} works: {}", models[0], works);
+               }
+           }
+       }
+       
+       Ok(())
+   }
 
 Implementation Details
 ----------------------
 
-Provider-Specific API Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+GenAI Crate Integration
+~~~~~~~~~~~~~~~~~~~~~~~
 
-**OpenAI:**
+The module is built on the modern ``genai`` crate which provides:
 
-.. code-block:: rust
-
-   use genai::llm_models::OpenAIModels;
-
-   // Model enumeration
-   let models: Vec<String> = OpenAIModels::iter()
-       .map(|model| model.to_string())
-       .collect();
-
-   // API request
-   let completions = Completions::new(&model_str, &api_key);
-
-**Anthropic:**
+**Unified Client Interface:**
 
 .. code-block:: rust
 
-   use genai::llm_models::AnthropicModels;
+   use genai::Client;
+   
+   // Single client handles all providers
+   let client = Client::default();
+   let models = client.all_model_names(AdapterKind::OpenAI).await?;
 
-   // Model enumeration
-   let models: Vec<String> = AnthropicModels::iter()
-       .map(|model| model.to_string())
-       .collect();
-
-**Google:**
-
-.. code-block:: rust
-
-   use genai::llm_models::GoogleModels;
-
-   // Model enumeration with Gemini support
-   let models: Vec<String> = GoogleModels::iter()
-       .map(|model| model.to_string())
-       .collect();
-
-Constants
----------
-
-EOT_SIGNAL
-~~~~~~~~~~
+**Automatic Authentication:**
 
 .. code-block:: rust
 
-   pub const EOT_SIGNAL: &str = "<<EOT>>";
+   // Environment variables are automatically detected:
+   // OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, etc.
+   let client = Client::default();
 
-End-of-transmission signal used to indicate completion of streaming responses.
+**Streaming Support:**
+
+.. code-block:: rust
+
+   use genai::chat::{ChatRequest, ChatMessage};
+   
+   let chat_req = ChatRequest::default()
+       .append_message(ChatMessage::user("Hello"));
+   
+   let stream = client.exec_chat_stream("gpt-4o-mini", chat_req, None).await?;
+
+**Event Processing:**
+
+.. code-block:: rust
+
+   use genai::chat::ChatStreamEvent;
+   
+   while let Some(event) = stream.stream.next().await {
+       match event? {
+           ChatStreamEvent::Start => println!("Stream started"),
+           ChatStreamEvent::Chunk(chunk) => print!("{}", chunk.content),
+           ChatStreamEvent::ReasoningChunk(chunk) => println!("Reasoning: {}", chunk.content),
+           ChatStreamEvent::End(_) => println!("Stream ended"),
+       }
+   }
 
 Error Handling
 --------------
@@ -429,27 +645,142 @@ Error Handling
 The module uses ``anyhow::Result`` for comprehensive error handling:
 
 * **Configuration Errors**: Missing API keys, invalid provider types
-* **Network Errors**: Connection timeouts, API rate limits
-* **Validation Errors**: Invalid model names, malformed requests
-* **Provider Errors**: Service-specific error responses
+* **Network Errors**: Connection timeouts, API rate limits  
+* **Model Errors**: Invalid model names, unavailable models
+* **Stream Errors**: Interrupted streams, malformed responses
+* **Authentication Errors**: Invalid API keys, expired tokens
 
 **Example Error Handling:**
 
 .. code-block:: rust
 
-   match provider.send_chat_request(input, model, &config, &tx).await {
-       Ok(()) => println!("Request successful"),
-       Err(e) => {
-           match e.downcast_ref::<std::io::Error>() {
-               Some(io_err) => eprintln!("Network error: {}", io_err),
-               None => eprintln!("Other error: {}", e),
+   use anyhow::{Context, Result};
+   
+   async fn safe_llm_call() -> Result<String> {
+       let provider = GenAIProvider::new()
+           .context("Failed to create provider")?;
+           
+       let response = provider.generate_response_simple(
+           "gpt-4o-mini",
+           "Hello"
+       )
+       .await
+       .context("Failed to generate response")?;
+       
+       Ok(response)
+   }
+
+**Advanced Error Recovery:**
+
+.. code-block:: rust
+
+   // Graceful fallback to alternative models
+   async fn robust_generation(provider: &GenAIProvider, prompt: &str) -> Result<String> {
+       let preferred_models = ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"];
+       
+       for model in preferred_models {
+           match provider.generate_response_simple(model, prompt).await {
+               Ok(response) => return Ok(response),
+               Err(e) => {
+                   log::warn!("Model {} failed: {}, trying next", model, e);
+                   continue;
+               }
            }
        }
+       
+       Err(anyhow::anyhow!("All models failed"))
+   }
+
+Performance Considerations
+--------------------------
+
+**Async Streaming:**
+
+The streaming implementation is designed for optimal performance:
+
+* Non-blocking async operations
+* Immediate chunk forwarding (no batching delays)
+* Minimal memory footprint
+* Proper backpressure handling
+
+**Memory Management:**
+
+.. code-block:: rust
+
+   // Unbounded channels for streaming (careful with memory)
+   let (tx, rx) = mpsc::unbounded_channel();
+   
+   // Alternative: bounded channels with backpressure
+   let (tx, rx) = mpsc::channel(1000);
+
+**Logging and Debugging:**
+
+Comprehensive logging is built-in for performance monitoring:
+
+.. code-block:: rust
+
+   // Enable debug logging to track stream performance
+   RUST_LOG=debug ./perspt
+   
+   // Logs include:
+   // - Chunk counts and timing
+   // - Content length tracking  
+   // - Stream start/end events
+   // - Error conditions and recovery
+
+Testing
+-------
+
+**Unit Tests:**
+
+.. code-block:: rust
+
+   #[cfg(test)]
+   mod tests {
+       use super::*;
+       
+       #[test]
+       fn test_str_to_adapter_kind() {
+           assert!(str_to_adapter_kind("openai").is_ok());
+           assert!(str_to_adapter_kind("invalid").is_err());
+       }
+       
+       #[tokio::test]
+       async fn test_provider_creation() {
+           let provider = GenAIProvider::new();
+           assert!(provider.is_ok());
+       }
+   }
+
+**Integration Tests:**
+
+.. code-block:: rust
+
+   // Test with real API keys (requires environment setup)
+   #[tokio::test]
+   #[ignore] // Only run with --ignored
+   async fn test_live_openai() -> Result<()> {
+       let provider = GenAIProvider::new()?;
+       let response = provider.generate_response_simple(
+           "gpt-3.5-turbo",
+           "Say hello"
+       ).await?;
+       assert!(!response.is_empty());
+       Ok(())
    }
 
 See Also
 --------
 
-* :doc:`config` - Configuration module for provider setup
-* :doc:`../user-guide/providers` - User guide for provider configuration
-* :doc:`../developer-guide/extending` - Guide for adding new providers
+* :doc:`config` - Configuration module for provider setup and authentication
+* :doc:`main` - Main module for application orchestration and LLM provider integration
+* :doc:`ui` - UI module for displaying streaming responses
+* `GenAI Crate Documentation <https://docs.rs/genai>`_ - Underlying LLM integration library
+* `Tokio Documentation <https://docs.rs/tokio>`_ - Async runtime used for streaming
+
+**Related Files:**
+
+* ``src/llm_provider.rs`` - Source implementation
+* ``src/config.rs`` - Configuration and provider setup
+* ``src/main.rs`` - Provider initialization and usage
+* ``tests/`` - Integration and unit tests

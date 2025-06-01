@@ -51,27 +51,31 @@ Architecture Overview
 .. code-block:: text
 
    ┌─────────────────────────────────────────────────────┐
-   │                   main.rs                           │
+   │                     main.rs                         │
    │              (Application Entry)                    │
    ├─────────────────────────────────────────────────────┤
-   │  • CLI argument parsing                             │
-   │  • Application initialization                       │
-   │  • Error handling and recovery                      │
-   │  • Terminal setup and cleanup                       │
+   │  • CLI argument parsing with clap                   │
+   │  • Application initialization & config loading      │
+   │  • Comprehensive panic handling & recovery          │
+   │  • Terminal setup, cleanup & state management       │
+   │  • Event loop coordination                          │
    └─────────────────┬───────────────────────────────────┘
                      │
        ┌─────────────┼─────────────┐
        ▼             ▼             ▼
-   ┌─────────┐  ┌─────────┐  ┌─────────────┐
-   │config.rs│  │  ui.rs  │  │llm_provider │
-   │         │  │         │  │    .rs      │
-   ├─────────┤  ├─────────┤  ├─────────────┤
-   │• Config │  │• TUI    │  │• Provider   │
-   │  parsing│  │  render │  │  abstraction│
-   │• Env    │  │• Events │  │• Model      │
-   │  vars   │  │• Input  │  │  discovery  │
-   │• Validation     │  handling   │• Streaming  │
-   └─────────┘  └─────────┘  └─────────────┘
+   ┌───────────┐ ┌───────────┐ ┌───────────────┐
+   │ config.rs │ │   ui.rs   │ │ llm_provider  │
+   │           │ │           │ │     .rs       │
+   ├───────────┤ ├───────────┤ ├───────────────┤
+   │ • Multi-  │ │ • Ratatui │ │ • GenAI       │
+   │   provider│ │   TUI     │ │   client      │
+   │ • Smart   │ │ • Real-   │ │ • Multi-      │
+   │   defaults│ │   time    │ │   provider    │
+   │ • Type    │ │   markdown│ │ • Streaming   │
+   │  inference│ │ • Scroll- │ │ • Auto-config │
+   │ • JSON    │ │   able    │ │ • Error       │
+   │   config  │ │   history │ │   handling    │
+   └───────────┘ └───────────┘ └───────────────┘
 
 Module Dependencies
 -------------------
@@ -79,100 +83,184 @@ Module Dependencies
 The modules have clear dependency relationships:
 
 **main.rs**
-   - Uses all other modules
-   - Orchestrates application flow
-   - Handles top-level error recovery
+   - Application orchestrator and entry point
+   - Uses all other modules for complete functionality
+   - Handles panic recovery and terminal state management
+   - Coordinates event loop and user interactions
 
 **config.rs**
-   - No dependencies on other modules
-   - Pure configuration logic
-   - Standalone and testable
+   - Standalone configuration management
+   - Supports 8+ LLM providers with intelligent defaults
+   - JSON-based configuration with environment variable integration
+   - Provider type inference and validation
 
 **llm_provider.rs**
-   - Depends on config.rs for configuration
-   - Independent of UI concerns
-   - Provider-agnostic interface
+   - Uses modern `genai` crate for unified provider interface
+   - Supports OpenAI, Anthropic, Google, Groq, Cohere, XAI
+   - Auto-configuration via environment variables
+   - Streaming response handling and model discovery
 
 **ui.rs**
-   - Depends on config.rs for UI settings
-   - Uses llm_provider.rs for AI communication
-   - Handles all user interaction
+   - Rich terminal UI using Ratatui framework
+   - Real-time markdown rendering and streaming support
+   - Scrollable chat history with responsive event handling
+   - Enhanced input management with cursor positioning
 
-Key Traits and Interfaces
--------------------------
+Key Structures and Interfaces
+-----------------------------
 
-LLMProvider Trait
-~~~~~~~~~~~~~~~~~
+GenAIProvider Struct
+~~~~~~~~~~~~~~~~~~~~~
 
-The core abstraction for AI providers:
+The modern unified provider implementation using the genai crate:
 
 .. code-block:: rust
 
-   #[async_trait]
-   pub trait LLMProvider {
-       /// Send a chat request to the LLM provider
-       async fn send_chat_request(
-           &self,
-           input: &str,
-           model: &str,
-           config: &AppConfig,
-           tx: &Sender<String>
-       ) -> Result<()>;
-
-       /// Get the provider type
-       fn provider_type(&self) -> ProviderType;
-
-       /// Get available models for this provider
-       async fn get_available_models(&self) -> Result<Vec<String>>;
-
-       /// Validate model availability
-       async fn validate_model(&self, model: &str) -> Result<bool>;
+   pub struct GenAIProvider {
+       client: Client,
    }
+
+   impl GenAIProvider {
+       /// Creates provider with auto-configuration
+       pub fn new() -> Result<Self>
+       
+       /// Creates provider with explicit configuration
+       pub fn new_with_config(
+           provider_type: Option<&str>, 
+           api_key: Option<&str>
+       ) -> Result<Self>
+       
+       /// Generates simple text response
+       pub async fn generate_response_simple(
+           &self,
+           model: &str,
+           message: &str
+       ) -> Result<String>
+       
+       /// Generates streaming response to channel
+       pub async fn generate_response_stream_to_channel(
+           &self,
+           model: &str,
+           message: &str,
+           sender: mpsc::UnboundedSender<String>
+       ) -> Result<()>
+       
+       /// Lists available models for current provider
+       pub async fn list_models(&self) -> Result<Vec<String>>
+   }
+
+Supported Providers
+~~~~~~~~~~~~~~~~~~~
+
+The GenAI provider supports multiple LLM services:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
+
+   * - Provider
+     - Environment Variable
+     - Supported Models
+   * - OpenAI
+     - ``OPENAI_API_KEY``
+     - GPT-4o, GPT-4o-mini, GPT-4, GPT-3.5, o1-preview, o1-mini
+   * - Anthropic
+     - ``ANTHROPIC_API_KEY``
+     - Claude 3.5 Sonnet, Claude 3 Opus/Sonnet/Haiku
+   * - Google
+     - ``GEMINI_API_KEY``
+     - Gemini 1.5 Pro/Flash, Gemini 2.0 Flash
+   * - Groq
+     - ``GROQ_API_KEY``
+     - Llama 3.x models with ultra-fast inference
+   * - Cohere
+     - ``COHERE_API_KEY``
+     - Command R, Command R+
+   * - XAI
+     - ``XAI_API_KEY``
+     - Grok models
 
 Error Handling
 --------------
 
-Perspt uses a comprehensive error handling strategy with custom error types:
+Perspt uses comprehensive error handling with proper context and user-friendly messages:
 
 .. code-block:: rust
 
-   use thiserror::Error;
+   use anyhow::{Context, Result};
 
-   #[derive(Error, Debug)]
-   pub enum PersptError {
-       #[error("Configuration error: {0}")]
-       Config(#[from] ConfigError),
-
-       #[error("Provider error: {0}")]
-       Provider(#[from] ProviderError),
-
-       #[error("UI error: {0}")]
-       Ui(#[from] UiError),
-
-       #[error("Network error: {0}")]
-       Network(#[from] NetworkError),
+   // All functions return Result<T> with proper error context
+   pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
+       // Configuration loading with detailed error context
    }
 
+   pub async fn generate_response_simple(
+       &self,
+       model: &str,
+       message: &str
+   ) -> Result<String> {
+       // Provider communication with error handling
+   }
 Configuration System
 --------------------
 
-The configuration system supports multiple sources with clear precedence:
+The configuration system supports multiple sources with intelligent defaults:
 
-1. **Command-line arguments** (highest priority)
-2. **Configuration files**
-3. **Environment variables**
-4. **Default values** (lowest priority)
+1. **JSON Configuration Files** (explicit configuration)
+2. **Environment Variables** (for API keys and credentials)
+3. **Intelligent Defaults** (comprehensive provider endpoints)
+4. **Provider Type Inference** (automatic detection)
 
 .. code-block:: rust
 
-   #[derive(Debug, Clone, Deserialize)]
+   #[derive(Debug, Clone, Deserialize, PartialEq)]
    pub struct AppConfig {
-       pub api_key: Option<String>,
-       pub default_model: String,
-       pub provider_type: String,
        pub providers: HashMap<String, String>,
-       // ... additional fields
+       pub api_key: Option<String>,
+       pub default_model: Option<String>,
+       pub default_provider: Option<String>,
+       pub provider_type: Option<String>,
    }
+
+   // Load configuration with smart defaults
+   pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig>
+   
+   // Process configuration with provider type inference
+   pub fn process_loaded_config(mut config: AppConfig) -> AppConfig
+
+Provider Type Inference
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The configuration system automatically infers provider types from provider names:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - Provider Name
+     - Inferred Type
+     - Notes
+   * - ``openai``
+     - ``openai``
+     - Direct mapping
+   * - ``anthropic``
+     - ``anthropic``
+     - Direct mapping
+   * - ``google``, ``gemini``
+     - ``google``
+     - Multiple aliases supported
+   * - ``groq``
+     - ``groq``
+     - Fast inference provider
+   * - ``cohere``
+     - ``cohere``
+     - Command models
+   * - ``xai``
+     - ``xai``
+     - Grok models
+   * - Unknown
+     - ``openai``
+     - Fallback default
 
 Async Architecture
 ------------------
@@ -180,16 +268,16 @@ Async Architecture
 Perspt is built on Tokio's async runtime for high-performance concurrent operations:
 
 **Streaming Responses**
-   Real-time display of AI responses as they're generated
+   Real-time display of AI responses as they're generated using async channels
 
 **Non-blocking UI**
-   User can type new messages while AI is responding
+   User can continue typing while AI responses stream in real-time
 
 **Concurrent Operations**
-   Multiple API calls and UI updates can happen simultaneously
+   Multiple API calls and UI updates happen simultaneously without blocking
 
 **Resource Efficiency**
-   Minimal thread usage with async/await patterns
+   Minimal memory footprint with efficient async/await patterns
 
 Type Safety
 -----------
@@ -214,26 +302,35 @@ Performance Considerations
 Memory Management
 ~~~~~~~~~~~~~~~~~
 
-- **Zero-copy operations** where possible
-- **String interning** for frequently used values
-- **Efficient collection usage** with appropriate data structures
+- **Streaming buffers** with configurable size limits (1MB max)
+- **Efficient VecDeque** for chat history with automatic cleanup
 - **RAII patterns** for automatic resource cleanup
+- **Minimal allocations** in hot paths for better performance
 
 Network Efficiency
 ~~~~~~~~~~~~~~~~~~
 
-- **Connection pooling** for repeated requests
-- **Request batching** where supported by providers
-- **Timeout handling** with configurable values
-- **Retry logic** with exponential backoff
+- **GenAI client pooling** handles connection reuse automatically
+- **Streaming responses** reduce memory usage for long responses
+- **Timeout handling** with proper error recovery
+- **Environment-based auth** avoids credential storage
 
 UI Performance
 ~~~~~~~~~~~~~~
 
-- **Incremental rendering** only updates changed content
-- **Efficient text processing** with optimized algorithms
-- **Smooth scrolling** with virtual scrolling for large histories
-- **Responsive input** with non-blocking event handling
+- **Real-time rendering** with responsive update intervals (500 chars)
+- **Efficient scrolling** with proper state management
+- **Markdown rendering** using optimized terminal formatting
+- **Non-blocking input** with cursor position management
+- **Progress indicators** for better user feedback
+
+Terminal Integration
+~~~~~~~~~~~~~~~~~~~~
+
+- **Crossterm compatibility** across platforms (Windows, macOS, Linux)
+- **Raw mode management** with proper cleanup on panic
+- **Alternate screen** support for clean terminal experience
+- **Unicode support** for international characters and emojis
 
 API Stability
 -------------
@@ -258,30 +355,56 @@ Deprecation Policy
 Usage Examples
 --------------
 
+Usage Examples
+--------------
+
 Basic Provider Usage
 ~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
-   use perspt::llm_provider::{UnifiedLLMProvider, ProviderType};
-   use perspt::config::AppConfig;
+   use perspt::llm_provider::GenAIProvider;
+   use tokio::sync::mpsc;
 
    #[tokio::main]
    async fn main() -> Result<()> {
-       let config = AppConfig::load(None).await?;
-       let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
+       // Create provider with auto-configuration
+       let provider = GenAIProvider::new()?;
        
-       let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-       
-       provider.send_chat_request(
-           "Hello, AI!",
+       // Simple text generation
+       let response = provider.generate_response_simple(
            "gpt-4o-mini",
-           &config,
-           &tx
+           "Hello, how are you?"
        ).await?;
        
+       println!("Response: {}", response);
+       Ok(())
+   }
+
+Streaming Response Usage
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   use perspt::llm_provider::GenAIProvider;
+   use tokio::sync::mpsc;
+
+   #[tokio::main]
+   async fn main() -> Result<()> {
+       let provider = GenAIProvider::new()?;
+       let (tx, mut rx) = mpsc::unbounded_channel();
+       
+       // Start streaming response
+       provider.generate_response_stream_to_channel(
+           "gpt-4o-mini",
+           "Tell me a story",
+           tx
+       ).await?;
+       
+       // Process streaming chunks
        while let Some(chunk) = rx.recv().await {
            print!("{}", chunk);
+           std::io::stdout().flush()?;
        }
        
        Ok(())
@@ -296,16 +419,14 @@ Configuration Loading
 
    #[tokio::main]
    async fn main() -> Result<()> {
-       // Load from default locations
+       // Load with defaults (no config file)
        let config = load_config(None).await?;
        
        // Load from specific file
-       let config = load_config(Some(&"custom.json".to_string())).await?;
+       let config = load_config(Some(&"config.json".to_string())).await?;
        
-       // Process and validate
-       let config = process_loaded_config(config);
-       
-       println!("Using model: {}", config.default_model);
+       println!("Provider: {:?}", config.provider_type);
+       println!("Model: {:?}", config.default_model);
        Ok(())
    }
 
@@ -337,6 +458,9 @@ Custom UI Events
 Testing APIs
 ------------
 
+Testing APIs
+------------
+
 Unit Testing
 ~~~~~~~~~~~~
 
@@ -348,37 +472,41 @@ Each module includes comprehensive unit tests:
    mod tests {
        use super::*;
 
-       #[test]
-       fn test_config_defaults() {
-           let config = AppConfig::default();
-           assert_eq!(config.default_model, "gpt-4o-mini");
+       #[tokio::test]
+       async fn test_load_config_defaults() {
+           let config = load_config(None).await.unwrap();
+           assert_eq!(config.provider_type, Some("openai".to_string()));
+           assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
        }
 
        #[tokio::test]
-       async fn test_provider_validation() {
-           let provider = UnifiedLLMProvider::new(ProviderType::OpenAI);
-           assert!(provider.validate_model("gpt-4").await.unwrap());
+       async fn test_provider_creation() {
+           let provider = GenAIProvider::new().unwrap();
+           // Provider created successfully
        }
    }
 
 Integration Testing
 ~~~~~~~~~~~~~~~~~~~
 
-Full end-to-end tests validate complete workflows:
+End-to-end tests validate complete workflows:
 
 .. code-block:: rust
 
    #[tokio::test]
-   async fn test_full_conversation() {
-       let config = test_config().await;
-       let app = App::new(config).await?;
+   async fn test_streaming_response() {
+       let provider = GenAIProvider::new().unwrap();
+       let (tx, mut rx) = mpsc::unbounded_channel();
        
-       // Simulate user input
-       app.send_message("Test message").await?;
+       provider.generate_response_stream_to_channel(
+           "gpt-4o-mini",
+           "Hello",
+           tx
+       ).await.unwrap();
        
-       // Verify response
-       let response = app.get_last_response().await?;
-       assert!(!response.is_empty());
+       // Verify streaming works
+       let first_chunk = rx.recv().await;
+       assert!(first_chunk.is_some());
    }
 
 Documentation Generation
@@ -388,10 +516,11 @@ API documentation is automatically generated from source code:
 
 .. code-block:: bash
 
-   # Generate full documentation
-   cargo doc --open --no-deps
+   # Generate Rust documentation
+   cargo doc --open --no-deps --all-features
 
-   # Include private items
+   # Build Sphinx documentation
+   cd docs/perspt_book && uv run make html
    cargo doc --document-private-items
 
    # Generate for specific package
