@@ -87,7 +87,7 @@ llm-provider
 Unified interface for AI provider integration. Handles:
 
 * **Provider Abstraction** - Unified API across different AI services
-* **Model Discovery** - Automatic model enumeration using the ``allms`` crate
+* **Model Discovery** - Automatic model enumeration using the ``genai`` crate
 * **Request Management** - Streaming request handling and response processing
 * **Error Handling** - Provider-specific error handling and recovery
 
@@ -192,7 +192,7 @@ Dependency Graph
        ├── crossterm (terminal control)
        ├── anyhow (error handling)
        ├── serde (serialization)
-       └── allms (LLM provider APIs)
+       └── genai (LLM provider APIs)
 
 **Dependency Relationships:**
 

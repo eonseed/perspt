@@ -15,7 +15,15 @@ This comprehensive user guide covers everything you need to know to use Perspt e
 Overview
 --------
 
-Perspt is designed to be intuitive and powerful, whether you're having a quick conversation or conducting deep research. This guide will help you master all aspects of the application.
+Perspt is a high-performance terminal-based chat application built with Rust that provides a unified interface for interacting with multiple Large Language Model (LLM) providers. Using the modern `genai` crate (v0.3.5), Perspt offers seamless access to the latest AI models with enhanced streaming capabilities, robust error handling, and intuitive CLI functionality.
+
+**Key Features:**
+
+- **Multi-Provider Support**: OpenAI, Anthropic, Google, Groq, Cohere, XAI, and Ollama
+- **Latest Models**: Support for reasoning models (o1-mini, o1-preview, o3-mini), GPT-4.1, Claude 3.5, Gemini 2.5 Pro
+- **Real-time Streaming**: Enhanced streaming with proper reasoning chunk handling
+- **Robust CLI**: Working command-line arguments with model validation
+- **Beautiful UI**: Responsive terminal interface with markdown rendering
 
 .. grid:: 2
    :gutter: 3
@@ -72,20 +80,26 @@ Common Commands
 
 .. code-block:: bash
 
-   # Start with default settings
+   # Start with default settings (gpt-4o-mini)
    perspt
 
-   # Use specific model
-   perspt --model-name gpt-4
+   # Use specific model with validation
+   perspt --model gpt-4.1
 
-   # Switch provider
-   perspt --provider-type anthropic --model-name claude-3-sonnet-20240229
+   # Switch provider and model
+   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
 
-   # List available models
+   # List available models for current provider
    perspt --list-models
 
-   # Use configuration file
+   # Use custom configuration file
    perspt --config my-config.json
+
+   # Override API key from command line
+   perspt --api-key your-api-key
+
+   # Use provider profile from config
+   perspt --provider work-profile
 
 Typical Workflows
 -----------------

@@ -21,7 +21,8 @@ What is Perspt?
 **Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum **P**\ ertaining **T**\ houghts) represents 
 a paradigm shift in how developers and AI enthusiasts interact with Large Language Models. Born from the need for a 
 unified, fast, and beautiful terminal-based interface to the AI world, Perspt bridges the gap between raw API calls 
-and user-friendly AI interaction.
+and user-friendly AI interaction. Built on the modern ``genai`` crate, it provides cutting-edge support for the latest 
+reasoning models like GPT-4.1, o1-preview, o3-mini, and Gemini 2.5 Pro.
 
 Philosophy & Vision
 -------------------
@@ -89,8 +90,8 @@ Perspt addresses these challenges through:
    Written in Rust for maximum performance. Streaming responses, efficient memory usage, and instant startup times.
 
 **Provider Agnostic**
-   Leverages the `allms <https://crates.io/crates/allms>`_ crate for automatic support of new models 
-   and providers without manual updates.
+   Leverages the modern `genai <https://crates.io/crates/genai>`_ crate for automatic support of new models 
+   and providers, including cutting-edge reasoning models and ultra-fast inference platforms.
 
 **Beautiful UX**
    Rich markdown rendering, syntax highlighting, and a responsive interface powered by Ratatui make 
@@ -191,8 +192,8 @@ Perspt is built on a foundation of cutting-edge technologies:
 **Ratatui TUI Framework**
    Rich terminal user interfaces with responsive design, smooth animations, and beautiful rendering.
 
-**allms Crate Integration**
-   Unified access to multiple LLM providers through a single, well-designed Rust API.
+**genai Crate Integration**
+   Unified access to multiple LLM providers through a single, modern Rust API with support for cutting-edge reasoning models.
 
 **Tokio Async Runtime**
    Efficient handling of concurrent operations, streaming responses, and network communication.

@@ -89,7 +89,7 @@ Technology Stack
    * - **Serde**
      - 1.0+
      - JSON serialization and configuration
-   * - **allms**
+   * - **genai**
      - 0.1+
      - Unified LLM provider interface
    * - **clap**
@@ -107,7 +107,7 @@ Key Dependencies
    crossterm = "0.27"
    serde = { version = "1.0", features = ["derive"] }
    serde_json = "1.0"
-   allms = "0.1"
+   genai = "0.3.5"
    clap = { version = "4.0", features = ["derive"] }
    anyhow = "1.0"
    thiserror = "1.0"

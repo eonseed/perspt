@@ -1,7 +1,7 @@
 LLM Provider Module
 ===================
 
-The ``llm_provider`` module provides a unified interface for integrating with multiple AI providers through the ``allms`` crate. This module enables automatic model discovery, dynamic provider support, and consistent API behavior across different LLM services.
+The ``llm_provider`` module provides a unified interface for integrating with multiple AI providers through the ``genai`` crate. This module enables automatic model discovery, dynamic provider support, and consistent API behavior across different LLM services.
 
 .. currentmodule:: llm_provider
 
@@ -10,7 +10,7 @@ Core Philosophy
 
 The module is designed around these principles:
 
-1. **Automatic Updates**: Leverages ``allms`` crate for automatic support of new models and providers
+1. **Automatic Updates**: Leverages ``genai`` crate for automatic support of new models and providers
 2. **Dynamic Discovery**: Uses ``try_from_str()`` for validation and future compatibility
 3. **Consistent API**: Unified interface across all providers
 4. **Reduced Maintenance**: No manual tracking of model names or API changes
@@ -118,7 +118,7 @@ UnifiedLLMProvider
        provider_type: ProviderType,
    }
 
-Main LLM provider implementation using the ``allms`` crate for unified access to multiple AI providers.
+Main LLM provider implementation using the ``genai`` crate for unified access to multiple AI providers.
 
 **Methods:**
 
@@ -152,7 +152,7 @@ get_available_models()
 
    pub fn get_available_models(&self) -> Vec<String>
 
-Retrieves all available models for the provider type using the ``allms`` crate enums.
+Retrieves all available models for the provider type using the ``genai`` crate enums.
 
 **Returns:**
 
@@ -167,19 +167,19 @@ Retrieves all available models for the provider type using the ``allms`` crate e
    * - Provider
      - Model Source
    * - OpenAI
-     - ``OpenAIModels`` enum from allms
+     - ``OpenAIModels`` enum from genai
    * - Anthropic
-     - ``AnthropicModels`` enum from allms
+     - ``AnthropicModels`` enum from genai
    * - Google
-     - ``GoogleModels`` enum from allms
+     - ``GoogleModels`` enum from genai
    * - Mistral
-     - ``MistralModels`` enum from allms
+     - ``MistralModels`` enum from genai
    * - Perplexity
-     - ``PerplexityModels`` enum from allms
+     - ``PerplexityModels`` enum from genai
    * - DeepSeek
-     - ``DeepSeekModels`` enum from allms
+     - ``DeepSeekModels`` enum from genai
    * - AWS Bedrock
-     - ``AwsBedrockModels`` enum from allms
+     - ``AwsBedrockModels`` enum from genai
 
 **Example:**
 
@@ -275,7 +275,7 @@ Sends a chat request to the LLM with streaming response.
 **Behavior:**
 
 1. Validates API key from configuration
-2. Creates completion request using ``allms`` crate
+2. Creates completion request using ``genai`` crate
 3. Simulates streaming by sending response in chunks
 4. Sends ``EOT_SIGNAL`` when complete
 
@@ -379,7 +379,7 @@ Provider-Specific API Integration
 
 .. code-block:: rust
 
-   use allms::llm_models::OpenAIModels;
+   use genai::llm_models::OpenAIModels;
 
    // Model enumeration
    let models: Vec<String> = OpenAIModels::iter()
@@ -393,7 +393,7 @@ Provider-Specific API Integration
 
 .. code-block:: rust
 
-   use allms::llm_models::AnthropicModels;
+   use genai::llm_models::AnthropicModels;
 
    // Model enumeration
    let models: Vec<String> = AnthropicModels::iter()
@@ -404,7 +404,7 @@ Provider-Specific API Integration
 
 .. code-block:: rust
 
-   use allms::llm_models::GoogleModels;
+   use genai::llm_models::GoogleModels;
 
    // Model enumeration with Gemini support
    let models: Vec<String> = GoogleModels::iter()

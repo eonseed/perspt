@@ -164,11 +164,14 @@ OpenAI
                 --api-key "sk-your-key-here"
 
 **Available Models:**
+- ``gpt-4.1`` - Latest and most advanced GPT model
 - ``gpt-4o`` - Latest GPT-4 Omni model
 - ``gpt-4o-mini`` - Faster, cost-effective GPT-4 Omni
+- ``o1-preview`` - Advanced reasoning model
+- ``o1-mini`` - Efficient reasoning model  
+- ``o3-mini`` - Next-generation reasoning model
 - ``gpt-4-turbo`` - Latest GPT-4 Turbo
 - ``gpt-4`` - Standard GPT-4
-- ``gpt-3.5-turbo`` - Fast and efficient
 
 Anthropic
 ~~~~~~~~~

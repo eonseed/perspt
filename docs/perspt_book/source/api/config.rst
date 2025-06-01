@@ -263,7 +263,7 @@ Local Development Configuration
 
    {
      "provider_type": "openai",
-     "default_model": "gpt-3.5-turbo",
+     "default_model": "gpt-4o-mini",
      "providers": {
        "openai": "http://localhost:8080/v1"
      }

@@ -329,7 +329,7 @@ Provider Integration Tests
        
        let config = OpenAIConfig {
            api_key,
-           model: "gpt-3.5-turbo".to_string(),
+           model: "gpt-4o-mini".to_string(),
            ..Default::default()
        };
        

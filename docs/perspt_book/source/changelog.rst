@@ -41,7 +41,7 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 
 ### Technical Highlights
 - Built with Rust for maximum performance and safety
-- Leverages `allms` crate for unified LLM access
+- Leverages `genai` crate for unified LLM access
 - Async/await architecture with Tokio
 - Comprehensive test suite with unit and integration tests
 - Memory-safe with zero-copy operations where possible
@@ -49,9 +49,9 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 ### Supported Providers
 - **OpenAI**: GPT-4, GPT-4-turbo, GPT-4o series, GPT-3.5-turbo
 - **AWS Bedrock**: Amazon Nova models and more
-- **Anthropic**: Claude 3 models (via allms)
-- **Google**: Gemini models (via allms)
-- **Mistral**: Mistral AI models (via allms)
+- **Anthropic**: Claude 3 models (via genai)
+- **Google**: Gemini models (via genai)
+- **Mistral**: Mistral AI models (via genai)
 - **Others**: Perplexity, DeepSeek, and more
 
 ### Configuration Features
@@ -333,7 +333,7 @@ Special thanks to:
 
 - The Rust community for excellent tooling and libraries
 - Ratatui developers for the amazing TUI framework
-- allms crate maintainers for unified LLM access
+- genai crate maintainers for unified LLM access
 - All contributors and users who help improve Perspt
 
 .. seealso::

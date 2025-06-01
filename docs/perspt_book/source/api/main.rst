@@ -216,11 +216,13 @@ Lists all available models for the current LLM provider and exits.
 .. code-block:: text
 
    Available models for OpenAI:
-   • gpt-4o-mini
+   • gpt-4.1
    • gpt-4o
+   • gpt-4o-mini
+   • o1-preview
+   • o1-mini
+   • o3-mini
    • gpt-4-turbo
-   • gpt-3.5-turbo
-   • text-davinci-003
 
 **Example Usage:**
 

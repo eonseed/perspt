@@ -1,28 +1,29 @@
 Advanced Features
 =================
 
-This guide covers Perspt's advanced features that enhance productivity and provide sophisticated interaction capabilities.
+This guide covers Perspt's advanced features powered by the modern genai crate (v0.3.5), enabling sophisticated AI interactions, enhanced streaming capabilities, and productivity workflows.
 
-Configuration Profiles
------------------------
+Configuration Profiles and Multi-Provider Setup
+-----------------------------------------------
 
-Perspt supports multiple configuration profiles for different use cases:
+GenAI-Powered Provider Management
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Profile Management
-~~~~~~~~~~~~~~~~~~
-
-Create different profiles for various scenarios:
+With the genai crate integration, Perspt supports seamless switching between providers and models:
 
 .. code-block:: bash
 
-   # Work profile with conservative models
+   # Work profile with reasoning models
    perspt --config ~/.config/perspt/work.json
    
-   # Creative profile with more experimental models
+   # Creative profile with latest models
    perspt --config ~/.config/perspt/creative.json
    
-   # Development profile with code-focused models
+   # Development profile with coding-focused models
    perspt --config ~/.config/perspt/dev.json
+   
+   # Research profile with large context models
+   perspt --config ~/.config/perspt/research.json
 
 Example profile configurations:
 
@@ -31,12 +32,13 @@ Example profile configurations:
 .. code-block:: json
 
    {
-     "provider": "openai",
-     "model": "gpt-4",
-     "max_tokens": 1000,
-     "temperature": 0.3,
-     "system_prompt": "You are a professional assistant focused on business and productivity.",
-     "conversation_history_limit": 50
+     "provider_type": "anthropic",
+     "default_model": "claude-3-5-sonnet-20241022",
+     "api_key": "${ANTHROPIC_API_KEY}",
+     "providers": {
+       "anthropic": "https://api.anthropic.com",
+       "openai": "https://api.openai.com/v1"
+     }
    }
 
 **Creative Profile** (``creative.json``):
@@ -44,59 +46,230 @@ Example profile configurations:
 .. code-block:: json
 
    {
-     "provider": "anthropic",
-     "model": "claude-3-opus-20240229",
-     "max_tokens": 2000,
-     "temperature": 0.8,
-     "system_prompt": "You are a creative assistant that helps with writing, brainstorming, and artistic projects.",
-     "conversation_history_limit": 100
+     "provider_type": "openai", 
+     "default_model": "gpt-4.1",
+     "api_key": "${OPENAI_API_KEY}",
+     "providers": {
+       "openai": "https://api.openai.com/v1",
+       "xai": "https://api.x.ai/v1"
+     }
    }
 
-Advanced Model Configuration
-----------------------------
-
-Temperature Control
-~~~~~~~~~~~~~~~~~~~
-
-Fine-tune response creativity and consistency:
+**Development Profile** (``dev.json``):
 
 .. code-block:: json
 
    {
-     "temperature": 0.1,  // Very consistent, factual responses
-     "temperature": 0.5,  // Balanced creativity and consistency
-     "temperature": 0.9   // Highly creative, varied responses
+     "provider_type": "openai",
+     "default_model": "o1-mini",
+     "api_key": "${OPENAI_API_KEY}",
+     "providers": {
+       "openai": "https://api.openai.com/v1",
+       "groq": "https://api.groq.com/openai/v1"
+     }
    }
 
-Top-p (Nucleus Sampling)
+**Research Profile** (``research.json``):
+
+.. code-block:: json
+
+   {
+     "provider_type": "google",
+     "default_model": "gemini-1.5-pro",
+     "api_key": "${GOOGLE_API_KEY}",
+     "providers": {
+       "google": "https://generativelanguage.googleapis.com",
+       "anthropic": "https://api.anthropic.com"
+     }
+   }
+
+Enhanced Streaming and Real-time Features
+------------------------------------------
+
+GenAI Crate Streaming Capabilities
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The genai crate provides sophisticated streaming with multiple event types:
+
+**Standard Streaming**
+- Token-by-token streaming for immediate feedback
+- Smooth rendering with buffer management
+- Context-aware response building
+
+**Reasoning Model Streaming**
+- ``ChatStreamEvent::Start``: Beginning of response
+- ``ChatStreamEvent::Chunk``: Regular content tokens
+- ``ChatStreamEvent::ReasoningChunk``: Thinking process (o1-series)
+- ``ChatStreamEvent::End``: Response completion
+
+**Advanced Streaming Features**
+
+.. code-block:: text
+
+   # Example with reasoning model (o1-mini)
+   > Solve this complex math problem: ...
+   
+   [Reasoning] Let me think through this step by step...
+   [Reasoning] First, I'll identify the key variables...
+   [Reasoning] Now I'll apply the quadratic formula...
+   [Streaming] Based on my analysis, the solution is...
+
+**Real-time Model Switching**
+
+Switch between models during conversations while maintaining context:
+
+.. code-block:: bash
+
+   # Start with fast model for exploration
+   perspt --provider-type groq --model llama-3.1-8b-instant
+   
+   # Switch to reasoning model for complex analysis
+   # (Context maintained across switch)
+   perspt --provider-type openai --model o1-mini
+
+Model Validation and Discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Pre-flight model validation ensures reliable connections:
+
+.. code-block:: bash
+
+   # Validate model before starting conversation
+   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022 --list-models
+   
+   # Discover available models for provider
+   perspt --provider-type google --list-models | grep gemini-2
+
+**Automatic Fallback Configuration**
+
+Configure automatic fallbacks for reliability:
+
+.. code-block:: json
+
+   {
+     "provider_type": "openai",
+     "default_model": "gpt-4o-mini",
+     "fallback_providers": [
+       {
+         "provider_type": "anthropic",
+         "model": "claude-3-5-haiku-20241022"
+       },
+       {
+         "provider_type": "groq", 
+         "model": "llama-3.1-70b-versatile"
+       }
+     ]
+   }
+
+Advanced Conversation Patterns
+-------------------------------
+
+Multi-Model Collaborative Workflows
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Leverage different models for their strengths within single sessions:
+
+**Research and Analysis Workflow**
+
+.. code-block:: bash
+
+   # 1. Start with fast model for initial exploration
+   perspt --provider-type groq --model llama-3.1-8b-instant
+   
+   # 2. Switch to reasoning model for deep analysis  
+   perspt --provider-type openai --model o1-mini
+   
+   # 3. Use large context model for comprehensive review
+   perspt --provider-type google --model gemini-1.5-pro
+
+**Code Development Workflow**
+
+.. code-block:: text
+
+   # Use reasoning model for architecture planning
+   > Design a microservices architecture for an e-commerce platform
+   [Using o1-mini for complex reasoning]
+   
+   # Switch to coding-focused model for implementation
+   > Now implement the user authentication service
+   [Using claude-3-5-sonnet for code generation]
+   
+   # Use fast model for quick iterations and testing
+   > Review this code for potential bugs
+   [Using llama-3.1-70b for rapid feedback]
+
+Provider-Specific Optimizations
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**OpenAI Reasoning Models**
+- Best for: Complex problem-solving, mathematical reasoning, logic puzzles
+- Features: Step-by-step thinking process, enhanced accuracy
+- Usage: Allow extra time for reasoning, provide complex multi-step problems
+
+**Anthropic Constitutional AI**
+- Best for: Safety-critical applications, ethical reasoning, content moderation
+- Features: Built-in safety guardrails, nuanced understanding
+- Usage: Ideal for sensitive topics, business communications
+
+**Google Multimodal Capabilities**
+- Best for: Document analysis, image understanding, large context processing
+- Features: 2M token context, multimodal input support
+- Usage: Large document analysis, comprehensive research
+
+**Groq Ultra-Fast Inference**
+- Best for: Real-time chat, rapid prototyping, interactive sessions
+- Features: Sub-second response times, consistent performance
+- Usage: Brainstorming sessions, quick iterations
+
+Local Model Privacy Features
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enhanced privacy with local Ollama integration:
+
+**Private Development Environment**
+
+.. code-block:: json
+
+   {
+     "provider_type": "ollama",
+     "default_model": "llama3.2:8b",
+     "privacy_mode": true,
+     "data_retention": "none",
+     "providers": {
+       "ollama": "http://localhost:11434"
+     }
+   }
+
+**Sensitive Data Processing**
+
+.. code-block:: bash
+
+   # Use local models for proprietary code review
+   perspt --provider-type ollama --model qwen2.5:14b
+   
+   # Process confidential documents offline
+   perspt --provider-type ollama --model llama3.2:8b
+
+Terminal UI Enhancements
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Control response diversity:
+**Advanced Markdown Rendering**
+- Syntax highlighting for code blocks
+- Proper table formatting and alignment
+- Mathematical equation rendering
+- Nested list and quote support
 
-.. code-block:: json
+**Streaming Visual Indicators**
+- Real-time token streaming animations
+- Reasoning process visualization for o1-models
+- Connection status and model information
+- Error recovery visual feedback
 
-   {
-     "top_p": 0.1,  // Very focused responses
-     "top_p": 0.5,  // Moderate diversity
-     "top_p": 0.9   // High diversity
-   }
-
-Frequency and Presence Penalties
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Reduce repetition and encourage novel content:
-
-.. code-block:: json
-
-   {
-     "frequency_penalty": 0.5,  // Reduce repetition of frequent tokens
-     "presence_penalty": 0.3    // Encourage discussing new topics
-   }
-
-Custom System Prompts
----------------------
-
-Tailor AI behavior with system prompts:
+**Keyboard Shortcuts and Navigation**
+- Input queuing while AI responds
+- Seamless scrolling through long conversations  
+- Context-aware copy/paste operations
+- Quick model switching hotkeys
 
 Domain Expert Prompts
 ~~~~~~~~~~~~~~~~~~~~~
@@ -188,7 +361,7 @@ Compare responses from different models:
 
 .. code-block:: text
 
-   > /compare "Explain quantum computing" gpt-4 claude-3-opus
+   > /compare "Explain quantum computing" gpt-4o claude-3-5-sonnet-20241022
 
 This sends the same prompt to multiple models and displays responses side by side.
 
@@ -202,8 +375,8 @@ Switch models mid-conversation while maintaining context:
    > We've been discussing Python optimization
    AI: Yes, we covered several techniques including caching and algorithmic improvements.
    
-   > /model claude-3-opus
-   Model switched to claude-3-opus
+   > /model claude-3-5-sonnet-20241022
+   Model switched to claude-3-5-sonnet-20241022
    
    > Can you continue with memory optimization techniques?
    AI: Continuing our Python optimization discussion, let's explore memory optimization...
