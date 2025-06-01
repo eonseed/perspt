@@ -54,15 +54,18 @@ Project Structure
 .. code-block:: text
 
    perspt/
-   ├── src/                    # Source code
-   │   ├── main.rs            # Application entry point
-   │   ├── config.rs          # Configuration management
-   │   ├── llm_provider.rs    # LLM provider abstraction
-   │   └── ui.rs              # Terminal user interface
-   ├── tests/                 # Integration tests
-   ├── docs/                  # Documentation
-   ├── Cargo.toml             # Project metadata and dependencies
-   └── README.md              # Project overview
+   ├── src/
+   │   ├── main.rs          # Entry point, CLI parsing, panic handling
+   │   ├── config.rs        # Configuration management and validation
+   │   ├── llm_provider.rs  # GenAI provider abstraction and implementation
+   │   └── ui.rs            # Terminal UI with Ratatui and real-time streaming
+   ├── tests/
+   │   └── panic_handling_test.rs  # Integration tests
+   ├── docs/
+   │   ├── perspt_book/     # Sphinx documentation
+   │   └── *.html           # Asset library and design system
+   ├── Cargo.toml           # Dependencies and project metadata
+   └── config.json.example  # Sample configuration
 
 Core Technologies
 -----------------
@@ -71,30 +74,33 @@ Technology Stack
 ~~~~~~~~~~~~~~~~
 
 .. list-table::
-   :widths: 25 25 50
    :header-rows: 1
+   :widths: 25 75
 
-   * - Technology
-     - Version
-     - Purpose
-   * - **Rust**
-     - 1.70+
-     - Core language for performance and safety
-   * - **Tokio**
-     - 1.0+
-     - Async runtime for concurrent operations
-   * - **Ratatui**
-     - 0.26+
-     - Terminal user interface framework
-   * - **Serde**
-     - 1.0+
-     - JSON serialization and configuration
-   * - **allms**
-     - 0.1+
-     - Unified LLM provider interface
-   * - **clap**
-     - 4.0+
-     - Command-line argument parsing
+   * - Component
+     - Technology & Purpose
+   * - **LLM Integration**
+     - `genai v0.3.5 <https://crates.io/crates/genai>`_ - Unified interface for multiple LLM providers
+   * - **Async Runtime**
+     - `tokio v1.42 <https://crates.io/crates/tokio>`_ - High-performance async runtime
+   * - **Terminal UI**
+     - `ratatui v0.29 <https://crates.io/crates/ratatui>`_ - Modern terminal user interface framework
+   * - **Cross-platform Terminal**
+     - `crossterm v0.28 <https://crates.io/crates/crossterm>`_ - Cross-platform terminal manipulation
+   * - **CLI Framework**
+     - `clap v4.5 <https://crates.io/crates/clap>`_ - Command line argument parser
+   * - **Configuration**
+     - `serde v1.0 <https://crates.io/crates/serde>`_ + `serde_json v1.0 <https://crates.io/crates/serde_json>`_ - Serialization framework
+   * - **Markdown Rendering**
+     - `pulldown-cmark v0.12 <https://crates.io/crates/pulldown-cmark>`_ - CommonMark markdown parser
+   * - **Error Handling**
+     - `anyhow v1.0 <https://crates.io/crates/anyhow>`_ - Flexible error handling
+   * - **Async Traits**
+     - `async-trait v0.1.88 <https://crates.io/crates/async-trait>`_ - Async functions in traits
+   * - **Logging**
+     - `log v0.4 <https://crates.io/crates/log>`_ + `env_logger v0.11 <https://crates.io/crates/env_logger>`_ - Structured logging
+   * - **Streaming**
+     - `futures v0.3 <https://crates.io/crates/futures>`_ - Utilities for async programming
 
 Key Dependencies
 ~~~~~~~~~~~~~~~~
@@ -102,12 +108,53 @@ Key Dependencies
 .. code-block:: toml
 
    [dependencies]
+   # LLM unified interface - using genai for better model support
+   genai = "0.3.5"
+   futures = "0.3"
+
+   # Core async and traits
+   async-trait = "0.1.88"
+   tokio = { version = "1.42", features = ["full"] }
+
+   # CLI and configuration
+   clap = { version = "4.5", features = ["derive"] }
+   serde = { version = "1.0", features = ["derive"] }
+   serde_json = "1.0"
+
+   # UI components
+   ratatui = "0.29"
+   crossterm = "0.28"
+   pulldown-cmark = "0.12"
+
+   # Logging
+   log = "0.4"
+   env_logger = "0.11"
+
+   # Utilities
+   anyhow = "1.0"
+
+   # CLI and configuration
+   clap = { version = "4.5", features = ["derive"] }
+   serde = { version = "1.0", features = ["derive"] }
+   serde_json = "1.0"
+
+   # UI components
+   ratatui = "0.29"
+   crossterm = "0.28"
+   pulldown-cmark = "0.12"
+
+   # Logging and error handling
+   log = "0.4"
+   env_logger = "0.11"
+   anyhow = "1.0"
+
+   [dependencies]
    tokio = { version = "1.0", features = ["full"] }
    ratatui = "0.26"
    crossterm = "0.27"
    serde = { version = "1.0", features = ["derive"] }
    serde_json = "1.0"
-   allms = "0.1"
+   genai = "0.3.5"
    clap = { version = "4.0", features = ["derive"] }
    anyhow = "1.0"
    thiserror = "1.0"
@@ -214,53 +261,123 @@ Module Structure
 Each module has a specific responsibility:
 
 **main.rs**
-   - Application entry point
-   - CLI argument parsing
-   - Error handling and panic recovery
-   - Terminal initialization and cleanup
+
+- Application entry point and orchestration
+- CLI argument parsing with clap derive macros
+- Comprehensive panic handling with terminal restoration
+- Terminal initialization and cleanup with crossterm
+- Configuration loading and provider initialization
+- Real-time event loop with enhanced responsiveness
 
 **config.rs**
-   - Configuration file parsing
-   - Environment variable handling
-   - Default value management
-   - Configuration validation
+
+- JSON-based configuration system with serde
+- Multi-provider support with intelligent defaults
+- Automatic provider type inference
+- Environment variable integration
+- Configuration validation and fallbacks
 
 **llm_provider.rs**
-   - Provider abstraction layer
-   - Model discovery and validation
-   - Request/response handling
-   - Error categorization
+
+- GenAI crate integration for unified LLM access
+- Support for OpenAI, Anthropic, Google, Groq, Cohere, XAI, Ollama
+- Streaming response handling with proper event processing
+- Model validation and discovery
+- Comprehensive error categorization and recovery
 
 **ui.rs**
-   - Terminal interface rendering
-   - Event handling and input processing
-   - Message formatting and display
-   - Real-time updates and streaming
+
+- Ratatui-based terminal user interface
+- Real-time markdown rendering with pulldown-cmark
+- Responsive layout with scrollable chat history
+- Enhanced keyboard input handling and cursor management
+- Progress indicators and error display
+- Help system with keyboard shortcuts
 
 Design Patterns
 ~~~~~~~~~~~~~~~
 
-**Trait Objects for Providers:**
+**GenAI Provider Architecture:**
 
 .. code-block:: rust
 
-   pub trait LLMProvider {
-       async fn send_chat_request(
+   use genai::{Client, chat::{ChatRequest, ChatMessage}};
+   use futures::StreamExt;
+
+   pub struct GenAIProvider {
+       client: Client,
+   }
+
+   impl GenAIProvider {
+       pub fn new() -> Result<Self> {
+           let client = Client::default();
+           Ok(Self { client })
+       }
+
+       pub async fn generate_response_stream_to_channel(
            &self,
-           input: &str,
            model: &str,
-           config: &AppConfig,
-           tx: &Sender<String>
-       ) -> Result<()>;
-       
-       fn provider_type(&self) -> ProviderType;
+           prompt: &str,
+           tx: mpsc::UnboundedSender<String>
+       ) -> Result<()> {
+           let chat_req = ChatRequest::default()
+               .append_message(ChatMessage::user(prompt));
+
+           let chat_res_stream = self.client
+               .exec_chat_stream(model, chat_req, None)
+               .await?;
+
+           let mut stream = chat_res_stream.stream;
+           while let Some(chunk_result) = stream.next().await {
+               match chunk_result? {
+                   ChatStreamEvent::Chunk(chunk) => {
+                       tx.send(chunk.content)?;
+                   }
+                   ChatStreamEvent::End(_) => break,
+                   _ => {}
+               }
+           }
+           Ok(())
+       }
    }
 
 **Error Handling Strategy:**
 
 .. code-block:: rust
 
+   use anyhow::{Context, Result};
    use thiserror::Error;
+
+   #[derive(Error, Debug)]
+   pub enum PersptError {
+       #[error("Configuration error: {0}")]
+       Config(String),
+       
+       #[error("Provider error: {0}")]
+       Provider(#[from] genai::GenAIError),
+       
+       #[error("UI error: {0}")]
+       Ui(String),
+       
+       #[error("Network error: {0}")]
+       Network(String),
+   }
+
+   // Example error handling in main
+   fn setup_panic_hook() {
+       panic::set_hook(Box::new(move |panic_info| {
+           // Force terminal restoration immediately
+           let _ = disable_raw_mode();
+           let _ = execute!(io::stdout(), LeaveAlternateScreen);
+           
+           // Provide contextual error messages
+           let panic_str = format!("{}", panic_info);
+           if panic_str.contains("PROJECT_ID") {
+               eprintln!("💡 Tip: Set PROJECT_ID environment variable");
+           }
+           // ... more context-specific help
+       }));
+   }
 
    #[derive(Error, Debug)]
    pub enum ProviderError {
@@ -277,6 +394,46 @@ Design Patterns
 **Configuration Pattern:**
 
 .. code-block:: rust
+
+   use serde::Deserialize;
+   use std::collections::HashMap;
+
+   #[derive(Debug, Clone, Deserialize, PartialEq)]
+   pub struct AppConfig {
+       pub providers: HashMap<String, String>,
+       pub api_key: Option<String>,
+       pub default_model: Option<String>,
+       pub default_provider: Option<String>,
+       pub provider_type: Option<String>,
+   }
+
+   pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
+       let config: AppConfig = match config_path {
+           Some(path) => {
+               let config_str = fs::read_to_string(path)?;
+               let initial_config: AppConfig = serde_json::from_str(&config_str)?;
+               process_loaded_config(initial_config)
+           }
+           None => {
+               // Comprehensive defaults with all supported providers
+               let mut providers_map = HashMap::new();
+               providers_map.insert("openai".to_string(), 
+                   "https://api.openai.com/v1".to_string());
+               providers_map.insert("anthropic".to_string(), 
+                   "https://api.anthropic.com".to_string());
+               // ... more providers
+               
+               AppConfig {
+                   providers: providers_map,
+                   api_key: None,
+                   default_model: Some("gpt-4o-mini".to_string()),
+                   default_provider: Some("openai".to_string()),
+                   provider_type: Some("openai".to_string()),
+               }
+           }
+       };
+       Ok(config)
+   }
 
    #[derive(Debug, Deserialize)]
    pub struct AppConfig {

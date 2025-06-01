@@ -13,7 +13,7 @@
 
 ## 🚀 Welcome to Perspt!
 
-Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a blazing-fast terminal-based chat application that lets you talk to various Large Language Models (LLMs) through a beautiful, unified interface. Built with Rust for maximum performance and reliability.
+Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a blazing-fast terminal-based chat application that lets you talk to various Large Language Models (LLMs) through a beautiful, unified interface. Built with Rust for maximum performance and reliability, using the modern **genai** crate for provider integration.
 
 ## ✨ Features
 
@@ -21,20 +21,20 @@ Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertainin
 ┌─────────────────────────────────────────────────────┐
 │  🤖 Multiple AI Providers    📡 Real-time Streaming │
 │  ⚡ Lightning Fast           🛡️  Robust Error Handling│
-│  🎨 Beautiful Terminal UI    📝 Markdown Support    │
+│  🎨 Beautiful Terminal UI    📝 Custom Markdown Parser│
 │  ⚙️  Flexible Configuration  🔑 Secure Authentication│
 └─────────────────────────────────────────────────────┘
 ```
 
 ### Supported AI Providers
 
-- **OpenAI** - GPT-3.5, GPT-4, GPT-4o series
-- **Anthropic** - Claude 3 Opus, Sonnet, Haiku
-- **Google** - Gemini Pro, Gemini Ultra
-- **Mistral AI** - Mistral 7B, Mixtral 8x7B
-- **Perplexity** - Various models
-- **DeepSeek** - DeepSeek models
-- **AWS Bedrock** - Multiple foundation models
+- **OpenAI** - GPT-3.5, GPT-4, GPT-4o series, o1-mini, o1-preview, o3-mini
+- **Anthropic** - Claude 3 Opus, Sonnet, Haiku, Claude 3.5 series
+- **Google** - Gemini Pro, Gemini Flash, Gemini 2.0, Gemini 2.5 Pro
+- **Mistral AI** - Mistral 7B, Mixtral 8x7B, Mistral Large
+- **Perplexity** - Sonar models, reasoning models
+- **DeepSeek** - DeepSeek chat and reasoning models
+- **AWS Bedrock** - Multiple foundation models including Amazon Nova
 
 ## 🏁 Quick Start
 
@@ -79,10 +79,10 @@ cargo build --release
 perspt
 
 # Use a specific model
-perspt --model-name gpt-4
+perspt --model gpt-4
 
 # Use a different provider
-perspt --provider-type anthropic --model-name claude-3-sonnet-20240229
+perspt --provider-type anthropic --model claude-3-sonnet-20240229
 
 # Custom configuration file
 perspt --config /path/to/your/config.json
@@ -189,9 +189,9 @@ USAGE:
 OPTIONS:
     -c, --config <FILE>           Configuration file path
     -k, --api-key <KEY>          API key (overrides config)
-    -m, --model-name <MODEL>     Model name to use
+    -m, --model <MODEL>          Model name to use
     -p, --provider <PROVIDER>    Provider profile name
-    -t, --provider-type <TYPE>   Provider type
+        --provider-type <TYPE>   Provider type
     -l, --list-models            List available models
     -h, --help                   Print help information
     -V, --version                Print version information
@@ -205,14 +205,14 @@ perspt --provider-type openai --list-models
 
 # Use Claude with specific model
 perspt --provider-type anthropic \
-       --model-name claude-3-opus-20240229 \
+       --model claude-3-opus-20240229 \
        --api-key sk-ant-your-key
 
 # Use custom configuration
 perspt --config ~/.config/perspt/config.json
 
 # Override model from config
-perspt --config my-config.json --model-name gpt-4
+perspt --config my-config.json --model gpt-4
 ```
 
 ## 🎨 User Interface Guide
@@ -227,6 +227,8 @@ perspt --config my-config.json --model-name gpt-4
 │  ⚡ Ready          │ System ready for input         │
 │  📤 Sending...     │ Request being sent to AI       │
 │  🤖 Thinking...    │ AI is processing your message  │
+│  🧠 Reasoning...   │ AI using reasoning capabilities │
+│  📝 Streaming...   │ Receiving streamed response    │
 │  ❌ Error          │ Something went wrong           │
 │  🔄 Reconnecting   │ Attempting to reconnect        │
 │                                                     │
@@ -271,15 +273,20 @@ perspt --config my-config.json --model-name gpt-4
 │                                                     │
 │  Problem: API key error                             │
 │  Solution: Check your API key is valid and active  │
+│            Use --api-key or environment variables   │
 │                                                     │
 │  Problem: Network connection failed                 │
 │  Solution: Check internet connection and firewall  │
 │                                                     │
 │  Problem: Model not found                           │
 │  Solution: Use --list-models to see available ones │
+│            Models are validated with genai crate   │
 │                                                     │
 │  Problem: Terminal display corrupted                │
-│  Solution: Restart terminal or run 'reset' command │
+│  Solution: Perspt has panic recovery - restart app │
+│                                                     │
+│  Problem: Streaming appears slow                    │
+│  Solution: Network dependent, parser is optimized  │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -330,6 +337,46 @@ perspt --provider-type openai --api-key "your-key" --list-models
 ```
 
 ## 📚 Advanced Usage
+
+### Custom Markdown Parser
+
+Perspt includes a built-in markdown parser optimized for terminal rendering:
+
+```
+┌─────────────────────────────────────────────────────┐
+│              📝 Markdown Features                   │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  ✅ Headers (# ## ###)                             │
+│  ✅ Bold (**text**) and Italic (*text*)            │
+│  ✅ Code blocks (```language```)                   │
+│  ✅ Inline code (`code`)                           │
+│  ✅ Lists (- item, 1. item)                        │
+│  ✅ Links and references                            │
+│  ✅ Stream-optimized rendering                      │
+│  ✅ Terminal color support                          │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+### genai Crate Integration
+
+Perspt uses the modern **genai** crate for robust LLM integration:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                🔧 Technical Features                │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  📡 Real-time streaming with proper event handling │
+│  🧠 Reasoning model support (o1-mini, o1-preview)  │
+│  🔄 Automatic model discovery and validation       │
+│  🛡️ Comprehensive error handling and recovery      │
+│  ⚡ 50ms response times for better user experience │
+│  🎯 Latest model support (GPT-4.1, Gemini 2.5)    │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
 
 ### Custom Endpoints
 
@@ -408,7 +455,9 @@ chmod 700 ~/.config/perspt
 │  • Use environment variables for easy switching     │
 │  • Keep API keys in secure key management           │
 │  • Use --list-models to explore new models          │
-│  • Bookmark useful model names for quick access     │
+│  • Try reasoning models (o1-mini) for complex tasks │
+│  • Custom markdown parser handles formatting well   │
+│  • genai crate provides latest model support        │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -417,9 +466,9 @@ chmod 700 ~/.config/perspt
 
 ```bash
 # Add to your .bashrc or .zshrc
-alias pgpt='perspt --provider-type openai --model-name gpt-4'
-alias pclaude='perspt --provider-type anthropic --model-name claude-3-sonnet-20240229'
-alias pgemini='perspt --provider-type google --model-name gemini-pro'
+alias pgpt='perspt --provider-type openai --model gpt-4'
+alias pclaude='perspt --provider-type anthropic --model claude-3-sonnet-20240229'
+alias pgemini='perspt --provider-type google --model gemini-pro'
 alias pwork='perspt --config ~/.config/perspt/work.json'
 ```
 
@@ -455,5 +504,6 @@ perspt --help
 ```
 🎉 Happy chatting with Perspt! 🎉
 
-Built with ❤️ for performance and reliability (not yet there...).
+Built with ❤️ using Rust, genai crate, and custom optimizations
+for the best terminal AI chat experience.
 ```

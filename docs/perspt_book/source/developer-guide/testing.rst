@@ -23,34 +23,39 @@ Test Organization
 .. code-block:: text
 
    src/
-   ├── lib.rs
-   ├── config.rs
-   ├── llm_provider.rs
-   ├── ui.rs
-   └── main.rs
+   ├── main.rs          # Entry point with unit tests
+   ├── config.rs        # Configuration with validation tests  
+   ├── llm_provider.rs  # GenAI integration with provider tests
+   └── ui.rs           # Ratatui UI components with widget tests
 
    tests/
-   ├── integration/
-   │   ├── config_tests.rs
-   │   ├── provider_tests.rs
-   │   └── ui_tests.rs
-   ├── e2e/
-   │   ├── full_conversation_test.rs
-   │   └── plugin_integration_test.rs
-   └── common/
-       ├── mod.rs
-       ├── fixtures.rs
-       └── helpers.rs
+   ├── panic_handling_test.rs     # Panic handling integration tests
+   └── integration_tests/         # Additional integration tests
+       ├── config_loading.rs
+       ├── provider_streaming.rs
+       └── ui_rendering.rs
 
-   benches/
-   ├── provider_benchmarks.rs
-   └── ui_benchmarks.rs
+   benches/                       # Performance benchmarks
+   ├── streaming_benchmarks.rs
+   └── config_benchmarks.rs
+
+Current Test Structure
+~~~~~~~~~~~~~~~~~~~~~~
+
+The project currently includes:
+
+- **Unit tests**: Embedded in source files using ``#[cfg(test)]``
+- **Integration tests**: In the ``tests/`` directory
+- **Panic handling tests**: Specialized tests for error recovery
+- **Performance benchmarks**: For critical performance paths
 
 Unit Testing
 ------------
 
 Testing Configuration Module
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tests for configuration loading, validation, and environment handling:
 
 .. code-block:: rust
 
@@ -62,7 +67,7 @@ Testing Configuration Module
        use tempfile::TempDir;
 
        #[test]
-       fn test_config_loading() {
+       fn test_config_loading_from_file() {
            let temp_dir = TempDir::new().unwrap();
            let config_path = temp_dir.path().join("config.json");
            
@@ -71,7 +76,9 @@ Testing Configuration Module
                "provider": "openai",
                "model": "gpt-4",
                "api_key": "test-key",
-               "temperature": 0.7
+               "temperature": 0.7,
+               "max_tokens": 2000,
+               "timeout_seconds": 30
            }
            "#;
            
@@ -79,51 +86,53 @@ Testing Configuration Module
            
            let config = Config::load_from_path(&config_path).unwrap();
            assert_eq!(config.provider, "openai");
-           assert_eq!(config.model, "gpt-4");
+           assert_eq!(config.model, Some("gpt-4".to_string()));
            assert_eq!(config.temperature, Some(0.7));
+           assert_eq!(config.max_tokens, Some(2000));
+       }
+
+       #[test]
+       fn test_provider_inference() {
+           // Test automatic provider inference from API key environment
+           std::env::set_var("OPENAI_API_KEY", "sk-test");
+           let config = Config::with_inferred_provider().unwrap();
+           assert_eq!(config.provider, "openai");
+           
+           std::env::remove_var("OPENAI_API_KEY");
+           std::env::set_var("ANTHROPIC_API_KEY", "sk-ant-test");
+           let config = Config::with_inferred_provider().unwrap();
+           assert_eq!(config.provider, "anthropic");
+           
+           // Cleanup
+           std::env::remove_var("ANTHROPIC_API_KEY");
        }
 
        #[test]
        fn test_config_validation() {
-           let config = Config {
-               provider: "openai".to_string(),
-               model: "".to_string(), // Invalid: empty model
-               api_key: Some("test-key".to_string()),
-               ..Default::default()
-           };
+           let mut config = Config::default();
+           config.provider = "openai".to_string();
+           config.api_key = None; // Missing required API key
            
-           let validation_result = config.validate();
-           assert!(validation_result.is_err());
-           assert!(validation_result.unwrap_err().to_string().contains("model"));
+           let result = config.validate();
+           assert!(result.is_err());
+           assert!(result.unwrap_err().to_string().contains("API key"));
        }
 
        #[test]
        fn test_config_defaults() {
            let config = Config::default();
-           assert_eq!(config.max_tokens, Some(4000));
+           assert_eq!(config.provider, "openai");
+           assert_eq!(config.model, Some("gpt-3.5-turbo".to_string()));
            assert_eq!(config.temperature, Some(0.7));
-           assert_eq!(config.timeout, Some(30));
-       }
-
-       #[test]
-       fn test_environment_variable_override() {
-           std::env::set_var("PERSPT_API_KEY", "env-key");
-           std::env::set_var("PERSPT_MODEL", "env-model");
-           
-           let mut config = Config::default();
-           config.apply_environment_overrides();
-           
-           assert_eq!(config.api_key, Some("env-key".to_string()));
-           assert_eq!(config.model, "env-model");
-           
-           // Cleanup
-           std::env::remove_var("PERSPT_API_KEY");
-           std::env::remove_var("PERSPT_MODEL");
+           assert_eq!(config.max_tokens, Some(4000));
+           assert_eq!(config.timeout_seconds, Some(30));
        }
    }
 
-Testing LLM Providers
-~~~~~~~~~~~~~~~~~~~~~
+Testing LLM Provider Module
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tests for GenAI integration and streaming functionality:
 
 .. code-block:: rust
 
@@ -131,20 +140,90 @@ Testing LLM Providers
    #[cfg(test)]
    mod tests {
        use super::*;
-       use mockall::predicate::*;
-       use serde_json::json;
+       use tokio::sync::mpsc;
+       use std::time::Duration;
 
-       // Mock HTTP client for testing
-       mockall::mock! {
-           HttpClient {}
+       #[tokio::test]
+       async fn test_message_validation() {
+           assert!(validate_message("Hello, world!").is_ok());
+           assert!(validate_message("").is_err());
+           assert!(validate_message(&"x".repeat(20_000)).is_err()); // Too long
+       }
+
+       #[tokio::test]
+       async fn test_streaming_channel_communication() {
+           let (tx, mut rx) = mpsc::unbounded_channel();
            
-           #[async_trait]
-           impl HttpClient for HttpClient {
-               async fn post(
-                   &self,
-                   url: &str,
-                   headers: &HashMap<String, String>,
-                   body: &str,
+           // Simulate streaming response
+           tokio::spawn(async move {
+               for i in 0..5 {
+                   tx.send(format!("chunk_{}", i)).unwrap();
+                   tokio::time::sleep(Duration::from_millis(10)).await;
+               }
+           });
+           
+           let mut received = Vec::new();
+           while let Ok(chunk) = tokio::time::timeout(
+               Duration::from_millis(100), 
+               rx.recv()
+           ).await {
+               if let Some(chunk) = chunk {
+                   received.push(chunk);
+               } else {
+                   break;
+               }
+           }
+           
+           assert_eq!(received.len(), 5);
+           assert_eq!(received[0], "chunk_0");
+           assert_eq!(received[4], "chunk_4");
+       }
+
+       #[tokio::test]
+       #[ignore] // Requires API key
+       async fn test_real_provider_integration() {
+           if std::env::var("OPENAI_API_KEY").is_err() {
+               return; // Skip if no API key
+           }
+
+           let config = Config {
+               provider: "openai".to_string(),
+               api_key: std::env::var("OPENAI_API_KEY").ok(),
+               model: Some("gpt-3.5-turbo".to_string()),
+               temperature: Some(0.1), // Low temperature for predictable results
+               max_tokens: Some(50),
+               timeout_seconds: Some(30),
+           };
+
+           let (tx, mut rx) = mpsc::unbounded_channel();
+           let result = send_message(&config, "Say 'Hello'", tx).await;
+           
+           assert!(result.is_ok());
+           
+           // Should receive at least some response
+           let response = tokio::time::timeout(
+               Duration::from_secs(10),
+               rx.recv()
+           ).await;
+           assert!(response.is_ok());
+       }
+
+       #[test]
+       fn test_config_preparation_for_genai() {
+           let config = Config {
+               provider: "openai".to_string(),
+               api_key: Some("test-key".to_string()),
+               model: Some("gpt-4".to_string()),
+               temperature: Some(0.7),
+               max_tokens: Some(1000),
+               timeout_seconds: Some(60),
+           };
+
+           // Test that config can be converted to GenAI client format
+           assert!(!config.api_key.unwrap().is_empty());
+           assert!(config.model.unwrap().contains("gpt"));
+       }
+   }
                ) -> Result<String, HttpError>;
            }
        }
@@ -248,7 +327,7 @@ Testing LLM Providers
    }
 
 Testing UI Components
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -313,7 +392,7 @@ Integration Testing
 -------------------
 
 Provider Integration Tests
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -329,7 +408,7 @@ Provider Integration Tests
        
        let config = OpenAIConfig {
            api_key,
-           model: "gpt-3.5-turbo".to_string(),
+           model: "gpt-4o-mini".to_string(),
            ..Default::default()
        };
        
@@ -378,7 +457,7 @@ Provider Integration Tests
    }
 
 Configuration Integration Tests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -430,7 +509,7 @@ End-to-End Testing
 ------------------
 
 Full Conversation Flow
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -493,7 +572,7 @@ Full Conversation Flow
    }
 
 Plugin Integration Tests
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -527,7 +606,7 @@ Performance Testing
 -------------------
 
 Benchmark Configuration
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -572,7 +651,7 @@ Benchmark Configuration
    criterion_main!(benches);
 
 Memory and Resource Testing
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -622,7 +701,7 @@ Security Testing
 ----------------
 
 Input Validation Testing
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -666,7 +745,7 @@ Testing Utilities
 -----------------
 
 Test Fixtures
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -704,7 +783,7 @@ Test Fixtures
    }
 
 Mock Implementations
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -804,7 +883,7 @@ Running Tests
    cargo tarpaulin --out Html
 
 Continuous Integration
----------------------
+----------------------
 
 GitHub Actions Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -859,7 +938,7 @@ Best Practices
 --------------
 
 Testing Guidelines
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 1. **Test Isolation**: Each test should be independent
 2. **Clear Naming**: Test names should describe what they verify
@@ -869,7 +948,7 @@ Testing Guidelines
 6. **Error Testing**: Test error conditions and edge cases
 
 Performance Testing Guidelines
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Baseline Measurements**: Establish performance baselines
 2. **Regression Detection**: Catch performance regressions early

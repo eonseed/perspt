@@ -9,10 +9,10 @@ Core Dependencies
 AI and LLM Integration
 ~~~~~~~~~~~~~~~~~~~~~~
 
-**allms**
+**genai**
   The foundation of Perspt's multi-provider support. This exceptional crate provides unified interfaces to multiple AI providers and automatically stays up-to-date with new models and capabilities.
   
-  * **Project**: `allms <https://crates.io/crates/allms>`_
+  * **Project**: `genai <https://crates.io/crates/genai>`_
   * **License**: MIT/Apache 2.0
   * **Impact**: Enables seamless integration with OpenAI, Anthropic, Google, Mistral, and other providers
 

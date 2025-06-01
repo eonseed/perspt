@@ -1,286 +1,353 @@
 Basic Usage
 ===========
 
-This guide covers the fundamental usage patterns of Perspt, from starting your first conversation to understanding the basic commands and features.
+This guide covers the fundamental usage patterns of Perspt, from starting your first conversation to understanding the CLI commands and streaming features powered by the modern genai crate.
 
 Starting Perspt
 ----------------
 
-Once Perspt is installed and configured, you can start it with a simple command:
+Perspt uses the latest genai crate (v0.3.5) for unified LLM access with enhanced capabilities. You can start it with various configuration options:
+
+**Basic Usage**
 
 .. code-block:: bash
 
+   # Start with default configuration (OpenAI gpt-4o-mini)
    perspt
 
-This will launch Perspt with your default configuration. You can also specify a custom configuration file:
+**Provider Selection**
 
 .. code-block:: bash
 
+   # Use Anthropic with Claude 3.5 Sonnet
+   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
+
+   # Use Google Gemini
+   perspt --provider-type google --model gemini-1.5-flash
+
+   # Use latest reasoning models
+   perspt --provider-type openai --model o1-mini
+
+**Configuration Files**
+
+.. code-block:: bash
+
+   # Use custom configuration file
    perspt --config /path/to/your/config.json
+
+   # Override API key from command line
+   perspt --api-key your-api-key-here
+
+**Model Discovery**
+
+.. code-block:: bash
+
+   # List all available models for current provider
+   perspt --list-models
+
+   # List models for specific provider
+   perspt --provider-type anthropic --list-models
 
 Your First Conversation
 ------------------------
 
-When Perspt starts, you'll see a clean interface ready for interaction:
+When Perspt starts, you'll see a clean interface with model validation and streaming capabilities:
 
 .. code-block:: text
 
-   Perspt - Personal Perspective Tool
+   Perspt v0.4.0 - Performance LLM Chat CLI
+   Provider: OpenAI | Model: gpt-4o-mini | Status: Connected ✓
+   Enhanced streaming with genai crate v0.3.5
+   
    Type your message and press Enter to start a conversation.
-   Type 'help' for available commands.
+   Use Ctrl+C to exit gracefully.
    
    > 
 
-Simply type your message or question and press Enter:
+Simply type your message or question and press Enter. Perspt will validate the model connection before starting:
 
 .. code-block:: text
 
-   > Hello, can you help me understand quantum computing?
+   > Hello, can you explain quantum computing?
 
-The AI will respond based on your configured provider and model. The conversation flows naturally, with context maintained throughout the session.
+**Enhanced Streaming Experience**
 
-Basic Commands
---------------
+With the genai crate integration, responses stream in real-time with proper event handling:
 
-Perspt includes several built-in commands to enhance your experience:
+- **Reasoning Models**: See thinking process with reasoning chunks for o1-series models
+- **Regular Models**: Smooth token-by-token streaming for immediate feedback  
+- **Error Recovery**: Robust error handling with terminal restoration
 
-Help Command
-~~~~~~~~~~~~
+The AI maintains context throughout the session and provides rich, formatted responses with markdown support.
 
-Get information about available commands:
+CLI Arguments and Options
+-------------------------
 
-.. code-block:: text
+Perspt supports comprehensive command-line arguments that actually work with the genai crate integration:
 
-   > /help
+**Core Arguments**
 
-This displays all available commands and their descriptions.
+.. code-block:: bash
 
-Clear Screen
-~~~~~~~~~~~~
+   # Configuration
+   perspt --config|-c FILE          # Custom configuration file path
+   
+   # Authentication  
+   perspt --api-key|-k KEY          # Override API key
+   
+   # Model Selection
+   perspt --model|-m MODEL          # Specific model name
+   perspt --provider-type|-p TYPE   # Provider type
+   perspt --provider PROFILE        # Provider profile from config
+   
+   # Discovery
+   perspt --list-models|-l          # List available models
 
-Clear the conversation history from the display:
+**Supported Provider Types**
 
-.. code-block:: text
+.. code-block:: bash
 
-   > /clear
+   openai          # OpenAI GPT models (default)
+   anthropic       # Anthropic Claude models  
+   google          # Google Gemini models
+   groq            # Groq ultra-fast inference
+   cohere          # Cohere Command models
+   xai             # XAI Grok models
+   ollama          # Local Ollama models
+   mistral         # Mistral AI models
+   perplexity      # Perplexity models
+   deepseek        # DeepSeek models
+   aws-bedrock     # AWS Bedrock service
+   azure-openai    # Azure OpenAI service
 
-.. note::
-   This only clears the display. The conversation context is still maintained for the AI.
+**Example Usage Patterns**
 
-Exit
-~~~~
+.. code-block:: bash
 
-Exit Perspt gracefully:
+   # Quick reasoning with o1-mini
+   perspt -p openai -m o1-mini
+   
+   # Creative writing with Claude
+   perspt -p anthropic -m claude-3-5-sonnet-20241022
+   
+   # Fast local inference  
+   perspt -p ollama -m llama3.2
+   
+   # Validate model before starting
+   perspt -p google -m gemini-2.0-flash-exp --list-models
 
-.. code-block:: text
+Interactive Commands
+--------------------
 
-   > /exit
+Once in the chat interface, you can use keyboard shortcuts for efficient interaction:
 
-Or use the keyboard shortcut ``Ctrl+C``.
+**Navigation Shortcuts**
 
-Status
-~~~~~~
+.. list-table::
+   :widths: 25 75
+   :header-rows: 1
 
-Check the current configuration and connection status:
+   * - Shortcut
+     - Action
+   * - **Enter**
+     - Send message (validated before transmission)
+   * - **Ctrl+C**
+     - Exit gracefully with terminal restoration
+   * - **↑/↓ Keys**
+     - Scroll through chat history  
+   * - **Page Up/Down**
+     - Fast scroll through long conversations
+   * - **Ctrl+L**
+     - Clear screen (preserves context)
 
-.. code-block:: text
+**Input Management**
 
-   > /status
-
-This shows:
-
-- Current AI provider and model
-- Connection status
-- Configuration file location
-- Available commands
-
-Model Switching
-~~~~~~~~~~~~~~~
-
-If you have multiple models configured, you can switch between them:
-
-.. code-block:: text
-
-   > /model gpt-4
-   > /model claude-3-opus
-
-.. note::
-   Model availability depends on your configuration and provider setup.
+- **Multi-line Input**: Natural line breaks supported
+- **Input Queuing**: Type new messages while AI responds  
+- **Context Preservation**: Full conversation history maintained
+- **Markdown Rendering**: Rich text formatting in responses
 
 Managing Conversations
 ----------------------
 
-Context Awareness
-~~~~~~~~~~~~~~~~~
+Enhanced Context Management
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Perspt maintains conversation context throughout your session. The AI remembers:
+With the genai crate integration, Perspt provides superior context handling:
 
-- Previous messages in the conversation
-- Established context and preferences
-- Ongoing topics and threads
+**Context Awareness**
+- Full conversation history maintained per session
+- Automatic context window management for each provider
+- Smart truncation when approaching token limits
+- Provider-specific optimizations
 
-Example of context-aware conversation:
+**Streaming and Responsiveness**
+- Real-time token streaming for immediate feedback
+- Reasoning chunk display for o1-series models  
+- Background processing while you type new queries
+- Robust error recovery with terminal restoration
 
-.. code-block:: text
-
-   > I'm working on a Python project
-   AI: I'd be happy to help with your Python project! What specific aspect are you working on?
-   
-   > It involves web scraping
-   AI: Great! For web scraping in Python, you have several excellent options...
-   
-   > Which library would you recommend for JavaScript-heavy sites?
-   AI: For JavaScript-heavy sites that you mentioned for your Python web scraping project, 
-        I'd recommend Selenium or Playwright...
-
-Conversation Flow
-~~~~~~~~~~~~~~~~~
-
-- **Natural Language**: Write naturally as you would to a human assistant
-- **Follow-up Questions**: Ask clarifying questions without repeating context
-- **Topic Changes**: Smoothly transition between topics within the same session
-- **Code Discussions**: Share code snippets and get detailed feedback
-
-Message Formatting
-------------------
-
-Perspt supports rich text formatting in conversations:
-
-Code Blocks
-~~~~~~~~~~~
-
-Share code by using triple backticks:
+Example of enhanced conversation flow:
 
 .. code-block:: text
 
-   > Here's my Python function:
-   ```python
-   def fibonacci(n):
-       if n <= 1:
-           return n
-       return fibonacci(n-1) + fibonacci(n-2)
+   > I'm working on a Rust project with async/await
+   [Streaming...] I'd be happy to help with your Rust async project! 
+   Rust's async/await provides excellent performance for concurrent operations...
+   
+   > How do I handle multiple futures concurrently?
+   [Streaming...] For handling multiple futures concurrently in your Rust project,
+   you have several powerful options with tokio...
+   
+   > Show me an example with tokio::join!
+   [Reasoning...] Let me provide a practical example using tokio::join!
+   for your async Rust project...
+
+**Advanced Conversation Features**
+
+- **Input Queuing**: Continue typing while AI generates responses
+- **Context Preservation**: Seamless topic transitions within sessions  
+- **Error Recovery**: Automatic reconnection and state restoration
+- **Model Validation**: Pre-flight checks ensure model availability
+
+Message Formatting and Rendering
+---------------------------------
+
+Enhanced Markdown Support
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Perspt includes a custom markdown parser optimized for terminal rendering:
+
+**Supported Formatting**
+
+.. code-block:: text
+
+   **Bold text** and *italic text*
+   `inline code` and ```code blocks```
+   
+   # Headers and ## Subheaders
+   
+   - Bullet points
+   - With proper indentation
+   
+   1. Numbered lists  
+   2. With automatic formatting
+
+**Code Block Rendering**
+
+Share code with syntax highlighting hints:
+
+.. code-block:: text
+
+   > Can you help optimize this Rust function?
+   
+   ```rust
+   async fn process_data(data: Vec<String>) -> Result<Vec<String>, Error> {
+       // Your code here
+   }
    ```
-   
-   Can you help me optimize this?
 
-Long Messages
-~~~~~~~~~~~~~
+**Long Message Handling**
 
-For long messages, you can use multiple lines. Press ``Shift+Enter`` for line breaks:
+- Automatic text wrapping for terminal width
+- Proper paragraph breaks and spacing
+- Smooth scrolling through long responses
+- Visual indicators for streaming progress
 
-.. code-block:: text
+Best Practices for Effective Usage
+-----------------------------------
 
-   > I have a complex question about my architecture:
-   
-   I'm building a microservices system with the following components:
-   - User service (handles authentication)
-   - Product service (manages catalog)
-   - Order service (processes purchases)
-   
-   How should I handle cross-service communication?
+Communication Strategies
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-File Discussions
-~~~~~~~~~~~~~~~~
+**Optimized for GenAI Crate Integration**
 
-Reference files in your project:
+1. **Model-Specific Approaches**:
+   - **Reasoning Models (o1-series)**: Provide complex problems and let them work through the logic
+   - **Fast Models (gpt-4o-mini, claude-3-haiku)**: Use for quick questions and iterations
+   - **Large Context Models (claude-3-5-sonnet)**: Share entire codebases or documents
 
-.. code-block:: text
+2. **Provider Strengths**:
+   - **OpenAI**: Latest reasoning capabilities, coding assistance
+   - **Anthropic**: Safety-focused, analytical reasoning, constitutional AI
+   - **Google**: Multimodal capabilities, large context windows
+   - **Groq**: Ultra-fast inference for real-time conversations
 
-   > I'm having trouble with my config.js file. The authentication isn't working properly.
-
-Best Practices
---------------
-
-Effective Communication
-~~~~~~~~~~~~~~~~~~~~~~~
-
-1. **Be Specific**: Provide context and specific details about your questions
-2. **Share Code**: Include relevant code snippets for programming questions
-3. **Ask Follow-ups**: Don't hesitate to ask for clarification or examples
-4. **Use Commands**: Leverage built-in commands for better experience
-
-Example of effective communication:
+**Effective Prompting Techniques**
 
 .. code-block:: text
 
-   > I'm getting a "connection refused" error when trying to connect to my PostgreSQL 
-     database from my Node.js application. Here's my connection code:
-     
-     ```javascript
-     const { Pool } = require('pg');
-     const pool = new Pool({
-       user: 'myuser',
-       host: 'localhost',
-       database: 'mydb',
-       password: 'mypass',
-       port: 5432,
-     });
-     ```
-     
-     The database is running on Docker. What could be wrong?
+   # Instead of vague requests:
+   > Help me with my code
+   
+   # Be specific with context:
+   > I'm working on a Rust HTTP server using tokio and warp. The server 
+   compiles but panics when handling concurrent requests. Here's the 
+   relevant code: [paste code]. Can you help me identify the race condition?
 
-Session Management
-~~~~~~~~~~~~~~~~~~
+**Session Management Strategies**
 
-- **Single Sessions**: Keep related topics in one session for better context
-- **Clear When Needed**: Use ``/clear`` when switching to unrelated topics
-- **Save Important Information**: Copy important responses before clearing
-- **Regular Breaks**: Take breaks during long sessions to maintain focus
-
-Privacy Considerations
-~~~~~~~~~~~~~~~~~~~~~~
-
-Remember that your conversations are sent to the configured AI provider:
-
-- **Sensitive Data**: Avoid sharing passwords, API keys, or personal information
-- **Code Review**: Be mindful when sharing proprietary code
-- **Local Processing**: Consider local models for sensitive discussions
+- **Single-Topic Sessions**: Keep related discussions in one session for better context
+- **Model Switching**: Use `perspt --list-models` to explore optimal models for different tasks
+- **Configuration Profiles**: Set up different configs for work, creative, and development tasks
 
 Troubleshooting Common Issues
 -----------------------------
 
-Connection Problems
-~~~~~~~~~~~~~~~~~~~
+Connection and Model Issues
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you encounter connection issues:
+**Model Validation Failures**
 
-1. Check your internet connection
-2. Verify API keys in configuration
-3. Check provider status pages
-4. Try switching models if available
+.. code-block:: bash
 
-.. code-block:: text
+   # Check if model exists for provider
+   perspt --provider-type openai --list-models | grep o1-mini
+   
+   # Test connection with basic model
+   perspt --provider-type openai --model gpt-3.5-turbo
 
-   > /status
+**API Key Problems**
 
-This command helps diagnose connection issues.
+.. code-block:: bash
 
-Slow Responses
-~~~~~~~~~~~~~~
+   # Test API key directly
+   perspt --api-key your-key --provider-type openai --list-models
+   
+   # Use environment variables (recommended)
+   export OPENAI_API_KEY="your-key"
+   perspt
 
-If responses are slow:
+**Streaming Issues**
 
-- Check your internet connection
-- Try a different model
-- Verify provider service status
-- Consider switching providers temporarily
+If streaming responses seem slow or interrupted:
 
-Configuration Issues
-~~~~~~~~~~~~~~~~~~~~
+1. **Network Check**: Ensure stable internet connection
+2. **Provider Status**: Check provider service status pages  
+3. **Model Selection**: Try faster models like gpt-4o-mini
+4. **Terminal Compatibility**: Ensure terminal supports ANSI colors and UTF-8
 
-If settings aren't working:
+Performance Optimization
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Verify configuration file syntax
-2. Check file permissions
-3. Ensure API keys are valid
-4. Review provider-specific settings
+**Memory and Speed**
+
+- **Local Models**: Use Ollama for privacy and reduced latency
+- **Model Selection**: Choose appropriate model size for your task
+- **Context Management**: Clear context for unrelated new topics
+
+**Cost Optimization**
+
+- **Model Tiers**: Use cheaper models (gpt-3.5-turbo) for simple queries
+- **Streaming Benefits**: Stop generation early if you have enough information
+- **Batch Questions**: Ask related questions in single sessions to share context
 
 Next Steps
 ----------
 
-Once you're comfortable with basic usage, explore:
+Once you're comfortable with basic usage:
 
-- :doc:`advanced-features` - Learn about advanced Perspt features
-- :doc:`providers` - Understand different AI providers and their capabilities
-- :doc:`troubleshooting` - Comprehensive troubleshooting guide
-- :doc:`../configuration` - Detailed configuration options
+- **Advanced Features**: Learn about configuration profiles and system prompts in :doc:`advanced-features`
+- **Provider Deep-Dive**: Explore specific provider capabilities in :doc:`providers`  
+- **Troubleshooting**: Get help with specific issues in :doc:`troubleshooting`
+- **Configuration**: Set up custom configurations in :doc:`../configuration`

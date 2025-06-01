@@ -17,9 +17,9 @@
    </div>
 
 **Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum **P**\ ertaining **T**\ houghts) is a 
-blazing-fast command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). 
-Built with Rust for maximum performance and reliability, it allows you to chat with various AI models from multiple 
-providers directly in your terminal using a unified, beautiful interface.
+high-performance command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). 
+Built with Rust for maximum speed and reliability, it allows you to chat with the latest AI models from multiple 
+providers directly in your terminal using a modern, unified interface powered by the cutting-edge ``genai`` crate.
 
 .. grid:: 2
    :gutter: 3
@@ -79,36 +79,43 @@ providers directly in your terminal using a unified, beautiful interface.
 
    .. tab:: OpenAI
 
-      - GPT-4, GPT-4-turbo, GPT-4o series
-      - GPT-3.5-turbo models
+      - **GPT-4.1** - Latest and most advanced model
+      - **GPT-4o series** - GPT-4o, GPT-4o-mini for fast responses
+      - **o1 reasoning models** - o1-preview, o1-mini, o3-mini
+      - **GPT-4 series** - GPT-4-turbo, GPT-4 for complex tasks
       - Latest model variants automatically supported
 
    .. tab:: AWS Bedrock
 
-      - Amazon Nova models
+      - Amazon Nova models (micro, lite, pro)
       - Anthropic Claude on Bedrock
       - Automatic model discovery
 
    .. tab:: Anthropic
 
-      - Claude 3 Opus, Sonnet, Haiku
+      - Claude 3.5 (latest Sonnet, Haiku)
+      - Claude 3 (Opus, Sonnet, Haiku)
       - Latest Claude models
 
    .. tab:: Google
 
-      - Gemini Pro, Gemini Ultra
+      - **Gemini 2.5 Pro** - Latest multimodal model
+      - Gemini Pro, Gemini 1.5 Pro/Flash
       - PaLM models
 
-   .. tab:: Others
+   .. tab:: Advanced Providers
 
-      - Mistral AI models
-      - Perplexity AI
-      - DeepSeek models
-      - And more via the allms crate
+      - **Groq**: Ultra-fast Llama 3.x inference
+      - **Cohere**: Command R/R+ models
+      - **XAI**: Grok models
+      - **Mistral AI**: Latest Mistral models
+      - **Perplexity AI**: Research-focused models
+      - **DeepSeek**: Advanced reasoning models
+      - **Ollama**: Local model hosting
 
 .. note::
-   Perspt leverages the powerful `allms <https://crates.io/crates/allms>`_ crate for unified LLM access, 
-   ensuring automatic support for new models and providers without manual updates.
+   Perspt leverages the powerful `genai <https://crates.io/crates/genai>`_ crate for unified LLM access, 
+   ensuring automatic support for new models and providers with cutting-edge features like reasoning model support.
 
 📋 Table of Contents
 --------------------
@@ -158,7 +165,6 @@ providers directly in your terminal using a unified, beautiful interface.
    :caption: Appendices
 
    changelog
-   acknowledgments
    license
    acknowledgments
 

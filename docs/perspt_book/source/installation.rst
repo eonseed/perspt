@@ -464,7 +464,7 @@ After installation, verify that Perspt is working correctly:
 
    # Test basic functionality (requires API key)
    export OPENAI_API_KEY="your-key-here"
-   perspt --model-name gpt-3.5-turbo
+   perspt --model-name gpt-4o-mini
 
 You should see output similar to:
 

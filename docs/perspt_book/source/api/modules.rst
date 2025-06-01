@@ -84,19 +84,19 @@ llm-provider
 
    llm-provider
 
-Unified interface for AI provider integration. Handles:
+Unified interface for AI provider integration using the modern GenAI crate. Handles:
 
-* **Provider Abstraction** - Unified API across different AI services
-* **Model Discovery** - Automatic model enumeration using the ``allms`` crate
-* **Request Management** - Streaming request handling and response processing
-* **Error Handling** - Provider-specific error handling and recovery
+* **Provider Abstraction** - Single interface across OpenAI, Anthropic, Google, Groq, Cohere, and XAI
+* **Auto-Configuration** - Environment variable detection and automatic setup
+* **Streaming Support** - Real-time response streaming with proper event handling
+* **Error Handling** - Comprehensive error categorization and recovery
 
 **Key Components:**
 
-* ``UnifiedLLMProvider`` for consistent provider interaction
-* ``LLMProvider`` trait defining the common interface
-* Provider type enumeration and string conversion
-* Model validation and availability checking
+* ``GenAIProvider`` struct using the ``genai`` crate client
+* Auto-configuration via environment variables
+* Model listing and validation capabilities
+* Streaming response generation to channels
 
 ui
 ~~
@@ -106,19 +106,21 @@ ui
 
    ui
 
-Terminal-based user interface using Ratatui. Handles:
+Rich terminal-based user interface using Ratatui framework. Handles:
 
-* **Interactive Chat** - Real-time chat interface with markdown support
-* **Message Management** - Chat history, scrolling, and message formatting
-* **State Management** - Application state, input handling, and UI updates
-* **Error Display** - User-friendly error presentation and recovery options
+* **Real-time Chat** - Interactive chat interface with live markdown rendering
+* **Streaming Display** - Real-time response streaming with configurable buffer management
+* **State Management** - Comprehensive application state with cursor position tracking
+* **Error Handling** - User-friendly error display with categorized error types
+* **Responsive Design** - Adaptive layout with scrollable history and progress indicators
 
 **Key Components:**
 
-* ``App`` structure managing complete application state
-* ``ChatMessage`` and ``MessageType`` for message representation
-* Event handling for keyboard input and navigation
-* Comprehensive rendering system with markdown support
+* ``App`` structure with enhanced state management and cursor tracking
+* ``ChatMessage`` and ``MessageType`` for styled message representation
+* ``ErrorState`` and ``ErrorType`` for comprehensive error handling
+* Real-time event handling with non-blocking input processing
+* Streaming buffer management with configurable update intervals
 
 Module Interactions
 -------------------
@@ -128,18 +130,19 @@ Data Flow
 
 .. code-block:: text
 
-   User Input → UI Module → Main Module → LLM Provider → External API
-        ↑                      ↓              ↓              ↓
-   Terminal ← UI Rendering ← Event Loop ← Response ← API Response
+   User Input → UI Module → Main Module → GenAI Provider → LLM API
+        ↑              ↓           ↓             ↓             ↓
+   Terminal ← Real-time ← Event ← Streaming ← API Response ← Provider
+           Rendering    Loop     Channel
 
-**Flow Description:**
+**Enhanced Flow Description:**
 
-1. **User Input**: User types in terminal, captured by UI module
-2. **Event Processing**: Main module processes events and coordinates actions
-3. **Configuration**: Config module provides provider settings and validation
-4. **LLM Request**: LLM provider module handles API communication
-5. **Response Processing**: Streaming responses processed and formatted
-6. **UI Update**: UI module renders responses with appropriate formatting
+1. **User Input**: User types in terminal, captured by UI module with cursor tracking
+2. **Event Processing**: Main module coordinates actions with comprehensive panic handling
+3. **Configuration**: Config module provides auto-configured provider settings
+4. **LLM Request**: GenAI provider handles API communication with environment-based auth
+5. **Streaming Processing**: Real-time response streaming through unbounded channels
+6. **UI Update**: UI module renders responses with markdown formatting and progress indicators
 
 Configuration Flow
 ~~~~~~~~~~~~~~~~~~
@@ -192,7 +195,7 @@ Dependency Graph
        ├── crossterm (terminal control)
        ├── anyhow (error handling)
        ├── serde (serialization)
-       └── allms (LLM provider APIs)
+       └── genai (LLM provider APIs)
 
 **Dependency Relationships:**
 
@@ -204,47 +207,66 @@ Dependency Graph
 External Integrations
 ~~~~~~~~~~~~~~~~~~~~~
 
-**AI Provider APIs:**
+**AI Provider APIs (via GenAI crate):**
 
-* OpenAI GPT models
-* Anthropic Claude models
-* Google Gemini models
-* Mistral AI models
-* Perplexity AI models
-* DeepSeek models
-* AWS Bedrock service
+* OpenAI GPT models (GPT-4o, GPT-4o-mini, o1-preview, o1-mini)
+* Anthropic Claude models (Claude 3.5 Sonnet, Claude 3 Opus/Sonnet/Haiku)
+* Google Gemini models (Gemini 1.5 Pro/Flash, Gemini 2.0 Flash)
+* Groq models (Llama 3.x with ultra-fast inference)
+* Cohere models (Command R, Command R+)
+* XAI models (Grok)
 
 **Terminal and System:**
 
-* Cross-platform terminal control via ``crossterm``
-* Unicode and markdown support
-* Async I/O and event handling
+* Cross-platform terminal control via ``crossterm`` (Windows, macOS, Linux)
+* Real-time markdown rendering with ``ratatui``
+* Async I/O with ``tokio`` runtime
+* Environment variable integration for secure authentication
 
 Module Testing
 --------------
 
-Each module includes comprehensive testing:
+Each module includes comprehensive testing aligned with current implementation:
 
 **Unit Tests:**
 
-* Configuration parsing and validation
-* Provider type inference
-* Message formatting and display
-* Error handling and recovery
+* Configuration loading with intelligent defaults (``test_load_config_defaults``)
+* Provider type inference and validation (``test_load_config_from_json_string_infer_provider_type_*``)
+* GenAI provider creation and model listing
+* UI state management and error handling
+* Panic handling and terminal restoration
 
 **Integration Tests:**
 
-* End-to-end configuration flow
-* Provider initialization and validation
-* UI event handling and state management
-* Error propagation and display
+* End-to-end configuration flow with all supported providers
+* GenAI provider initialization with environment variables
+* Streaming response handling with channel communication
+* UI event processing and state updates
+* Error propagation and user-friendly display
 
-**Example Test Structure:**
+**Current Test Examples:**
 
 .. code-block:: rust
 
    #[cfg(test)]
    mod tests {
+       use super::*;
+
+       #[tokio::test]
+       async fn test_load_config_defaults() {
+           let config = load_config(None).await.unwrap();
+           assert_eq!(config.provider_type, Some("openai".to_string()));
+           assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
+           assert!(config.providers.contains_key("openai"));
+           assert!(config.providers.contains_key("groq"));
+       }
+
+       #[tokio::test]
+       async fn test_genai_provider_creation() {
+           let provider = GenAIProvider::new();
+           assert!(provider.is_ok());
+       }
+   }
        use super::*;
        
        #[test]
@@ -270,27 +292,38 @@ When working with Perspt modules:
 
 **Configuration:**
 
-* Use ``load_config()`` for consistent configuration loading
-* Leverage automatic provider type inference when possible
-* Validate configuration before provider initialization
+* Use ``load_config(None)`` for defaults or ``load_config(Some(&path))`` for custom files
+* Leverage automatic provider type inference with ``process_loaded_config()``
+* Validate configuration before GenAI provider initialization
+* Use environment variables for secure API key management
 
-**LLM Provider:**
+**GenAI Provider:**
 
-* Use the unified provider interface for consistency
-* Handle errors gracefully with appropriate user feedback
-* Leverage streaming responses for better user experience
+* Use ``GenAIProvider::new()`` for auto-configuration via environment variables
+* Use ``GenAIProvider::new_with_config()`` for explicit provider/key setup
+* Handle streaming responses with unbounded channels for real-time display
+* Implement proper error handling with ``anyhow::Result`` for detailed context
 
 **UI Development:**
 
-* Follow the established message type conventions
-* Implement proper error display and recovery options
-* Maintain responsive UI during long-running operations
+* Follow established ``MessageType`` conventions (User, Assistant, Error, etc.)
+* Use ``ErrorState`` and ``ErrorType`` for categorized error display
+* Maintain responsive UI with configurable streaming buffer intervals
+* Implement proper cursor position tracking for enhanced user experience
 
 **Error Handling:**
 
-* Use ``anyhow::Result`` for comprehensive error context
+* Use ``anyhow::Result`` throughout for comprehensive error context
+* Implement panic hooks for terminal state restoration
 * Provide user-friendly error messages with recovery suggestions
-* Implement proper cleanup in error conditions
+* Use ``ErrorType`` categories for appropriate styling and user guidance
+
+**Performance:**
+
+* Use streaming buffers with size limits (``MAX_STREAMING_BUFFER_SIZE``)
+* Update UI responsively with configurable intervals (``UI_UPDATE_INTERVAL``)
+* Leverage async/await patterns for non-blocking operations
+* Properly manage terminal raw mode state for clean shutdown
 
 See Also
 --------
