@@ -389,7 +389,7 @@ Data Flow
 ---------
 
 Real-time Message Processing Pipeline
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **User Input Capture**:
 
@@ -416,7 +416,7 @@ Real-time Message Processing Pipeline
       Streaming chunks → UI update → Markdown rendering → Terminal display
 
 Streaming Response Flow
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 The application uses Tokio channels for real-time streaming:
 
@@ -446,7 +446,7 @@ Error Handling Strategy
 -----------------------
 
 Comprehensive Error Management
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Perspt uses Rust's robust error handling with custom error types:
 
@@ -503,7 +503,7 @@ Memory Management
 -----------------
 
 Efficient Message Storage
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Perspt manages conversation history efficiently in memory:
 
@@ -560,7 +560,7 @@ Perspt manages conversation history efficiently in memory:
    }
 
 Streaming Buffer Management
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For streaming responses, Perspt uses efficient buffering:
 
@@ -626,7 +626,7 @@ Perspt uses Tokio for efficient asynchronous operations:
    }
 
 Task Management
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 The application manages multiple concurrent tasks:
 
@@ -661,7 +661,7 @@ The application manages multiple concurrent tasks:
    }
 
 Real-time Event Processing
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The UI event loop handles multiple event sources concurrently:
 
@@ -712,8 +712,6 @@ The UI event loop handles multiple event sources concurrently:
        
        Ok(())
    }
-
-Security Considerations
            let id = RequestId::new();
            let handle = tokio::spawn(async move {
                tokio::time::timeout(self.request_timeout, process_request(request)).await
@@ -723,45 +721,11 @@ Security Considerations
        }
    }
 
-Plugin Architecture
--------------------
-
-Plugin Interface
-~~~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   #[async_trait]
-   pub trait Plugin: Send + Sync {
-       fn name(&self) -> &str;
-       fn version(&self) -> &str;
-       
-       async fn initialize(&mut self, config: &PluginConfig) -> Result<(), PluginError>;
-       async fn handle_command(&self, command: &str, args: &[String]) -> Result<PluginResponse, PluginError>;
-       fn supported_commands(&self) -> Vec<String>;
-   }
-
-Plugin Manager
-~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   pub struct PluginManager {
-       plugins: HashMap<String, Box<dyn Plugin>>,
-       plugin_configs: HashMap<String, PluginConfig>,
-   }
-
-   impl PluginManager {
-       pub async fn load_plugin(&mut self, path: &Path) -> Result<(), PluginError> {
-           // Dynamic loading of plugins
-           // Plugin validation and initialization
-       }
-       
 Security Considerations
 -----------------------
 
 API Key Management
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 Perspt handles API keys securely through environment variables and configuration:
 
@@ -829,7 +793,7 @@ User input is validated before processing:
    }
 
 Secure Error Handling
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Error messages are sanitized to prevent information leakage:
 
@@ -853,7 +817,7 @@ Testing Architecture
 --------------------
 
 Unit Testing Strategy
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Perspt includes comprehensive unit tests for each module:
 
@@ -900,7 +864,7 @@ Perspt includes comprehensive unit tests for each module:
    }
 
 Integration Testing
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 Integration tests verify the complete application flow:
 
@@ -948,10 +912,10 @@ Integration tests verify the complete application flow:
    }
 
 Performance Considerations
--------------------------
+--------------------------
 
 Optimization Strategies
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Perspt is optimized for performance through several key strategies:
 
@@ -984,7 +948,7 @@ Perspt is optimized for performance through several key strategies:
    }
 
 Memory Optimization
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -1013,7 +977,7 @@ Future Architecture Considerations
 ----------------------------------
 
 Planned Enhancements
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 Based on the current GenAI-powered architecture, future enhancements include:
 
@@ -1048,7 +1012,7 @@ Based on the current GenAI-powered architecture, future enhancements include:
    }
 
 Migration Strategies
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 For evolutionary architecture changes:
 

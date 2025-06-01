@@ -478,7 +478,7 @@ Basic Google AI configuration:
    }
 
 Multimodal Configuration
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 For image analysis with Gemini Vision:
 

@@ -199,7 +199,7 @@ Leverage different models for their strengths within single sessions:
    [Using llama-3.1-70b for rapid feedback]
 
 Provider-Specific Optimizations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **OpenAI Reasoning Models**
 - Best for: Complex problem-solving, mathematical reasoning, logic puzzles
@@ -341,7 +341,7 @@ Manage conversation sessions:
    > /delete session_name     # Delete a saved session
 
 Export Conversations
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 Export conversations in various formats:
 
@@ -382,12 +382,12 @@ Switch models mid-conversation while maintaining context:
    AI: Continuing our Python optimization discussion, let's explore memory optimization...
 
 Plugin System
---------------
+-------------
 
 Perspt supports plugins for extended functionality:
 
 Code Analysis Plugin
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 Analyze code quality and suggest improvements:
 
@@ -544,7 +544,7 @@ Run with:
    perspt --script development_workflow.perspt
 
 Batch Processing
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 Process multiple queries in batch:
 
@@ -583,7 +583,7 @@ Performance Optimization
 ------------------------
 
 Response Caching
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 Cache responses for repeated queries:
 
@@ -599,7 +599,7 @@ Cache responses for repeated queries:
    }
 
 Parallel Processing
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 Process multiple requests simultaneously:
 
@@ -617,7 +617,7 @@ Custom Integrations
 -------------------
 
 IDE Integration
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 Integrate Perspt with your development environment:
 
@@ -643,7 +643,7 @@ Integrate Perspt with your development environment:
    nnoremap <leader>p :!perspt --query "<C-R><C-W>"<CR>
 
 API Integration
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 Use Perspt programmatically:
 

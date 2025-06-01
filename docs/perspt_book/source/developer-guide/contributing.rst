@@ -159,7 +159,7 @@ We follow the official Rust style guide with these additions:
    }
 
 Naming Conventions
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 - **Functions and variables**: `snake_case`
 - **Types and traits**: `PascalCase`
@@ -260,7 +260,7 @@ Organize tests in the same file as the code they test:
    }
 
 Integration Tests
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 Place integration tests in the `tests/` directory:
 
@@ -310,7 +310,7 @@ Place integration tests in the `tests/` directory:
    }
 
 Test Categories
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 We have several categories of tests:
 
@@ -343,7 +343,7 @@ We have several categories of tests:
       cargo test ui::tests
 
 Test Utilities
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 Use these utilities for consistent testing:
 
@@ -410,7 +410,7 @@ Before Submitting
 4. **Update changelog** if applicable
 
 PR Description Template
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 When creating a pull request, use this template:
 
@@ -461,7 +461,7 @@ Look for issues labeled `good first issue`:
 - Example configurations for new providers
 
 Feature Development
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 Major areas where contributions are welcome:
 
@@ -604,7 +604,7 @@ Types of Documentation
 - **Changelog**: Version history and migration guides
 
 Documentation Standards
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 - Use clear, concise language
 - Include working code examples that match current implementation
@@ -613,7 +613,7 @@ Documentation Standards
 - Follow reStructuredText formatting for Sphinx docs
 
 Building Documentation
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 **Rust API Documentation**:
 
@@ -655,7 +655,7 @@ You can also use the VS Code tasks for documentation:
 - "Validate Documentation Links"
 
 Writing Documentation
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 **Code Examples**: Ensure all code examples compile and work:
 
@@ -708,7 +708,7 @@ We follow the Rust Code of Conduct. In summary:
 - When we disagree, try to understand why
 
 Communication Channels
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 - **GitHub Issues**: Bug reports and feature requests
 - **GitHub Discussions**: General questions and ideas
@@ -729,7 +729,7 @@ Release Process
 ---------------
 
 Version Numbering
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 We follow Semantic Versioning (SemVer):
 
@@ -738,7 +738,7 @@ We follow Semantic Versioning (SemVer):
 - **PATCH**: Bug fixes (backward compatible)
 
 Release Cycle
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 - **Major releases**: Every 6-12 months
 - **Minor releases**: Every 1-3 months
@@ -756,7 +756,7 @@ See the following documentation for more detailed information:
 - :doc:`../api/index` - API reference documentation
 
 Development Workflow Tips
------------------------
+-------------------------
 
 Using VS Code Tasks
 ~~~~~~~~~~~~~~~~~~~
@@ -774,7 +774,7 @@ The project includes several VS Code tasks for common development activities:
    - "Validate Documentation Links"
 
 Hot Reloading During Development
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For faster development cycles:
 
@@ -821,7 +821,7 @@ The project includes debug scripts:
    let result = dbg!(some_function());
 
 Project Structure Understanding
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Key files and their purposes:
 
@@ -836,7 +836,7 @@ Key files and their purposes:
 - ``validate-docs.sh``: Documentation validation script
 
 Common Development Patterns
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Error Handling Pattern**:
 
@@ -903,7 +903,7 @@ Common Development Patterns
    }
 
 Dependency Management
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 **Adding New Dependencies**:
 
@@ -948,7 +948,7 @@ Dependency Management
    cargo audit --update
 
 Release Process
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 **Version Bumping**:
 
@@ -994,7 +994,7 @@ Release Process
    - Updated dependencies
 
 Performance Profiling
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 **CPU Profiling**:
 
@@ -1034,7 +1034,7 @@ Performance Profiling
    criterion_main!(benches);
 
 Troubleshooting Common Issues
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Build Failures**:
 
@@ -1090,7 +1090,7 @@ Troubleshooting Common Issues
    uv run make clean && uv run make html
 
 Getting Help
------------
+------------
 
 If you encounter issues or need guidance:
 
@@ -1110,7 +1110,7 @@ If you encounter issues or need guidance:
 - Your configuration (sanitized)
 
 Final Notes
-----------
+-----------
 
 **Code Quality**:
 

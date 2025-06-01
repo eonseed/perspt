@@ -53,7 +53,7 @@ Perspt uses the `genai` crate which supports multiple providers out of the box. 
    }
 
 Custom Provider Implementation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 For providers not supported by GenAI, you can extend the message handling:
 
@@ -114,7 +114,7 @@ Extending UI Components
 -----------------------
 
 Custom Terminal UI Elements
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can extend the Ratatui-based UI with custom components:
 
@@ -187,10 +187,10 @@ You can extend the Ratatui-based UI with custom components:
    }
 
 Configuration Extensions
------------------------
+------------------------
 
 Adding Custom Configuration Options
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can extend the configuration system to support custom options:
 
@@ -238,7 +238,7 @@ You can extend the configuration system to support custom options:
    }
 
 Custom Command System
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Implement custom slash commands for enhanced functionality:
 
@@ -375,7 +375,7 @@ Implement custom slash commands for enhanced functionality:
    }
 
 Advanced Provider Features
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Function Calling Support**:
 
@@ -605,7 +605,7 @@ Here's a complete example of a plugin that adds file processing capabilities:
    }
 
 Integration Plugin Example
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Here's a plugin that integrates with external APIs:
 
@@ -717,7 +717,7 @@ Plugin Configuration Schema
    }
 
 Dynamic Plugin Loading
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -756,7 +756,7 @@ Custom UI Components
 --------------------
 
 Creating Custom Display Components
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -881,7 +881,7 @@ Unit Testing Plugins
    }
 
 Integration Testing
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -898,7 +898,7 @@ Integration Testing
    }
 
 Performance Testing
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -920,7 +920,7 @@ Distribution and Packaging
 --------------------------
 
 Plugin Distribution
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 **Cargo Package**:
 
@@ -958,7 +958,7 @@ Plugin Distribution
    }
 
 Extension Deployment
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 **Configuration-Based Extensions**:
 
@@ -1000,7 +1000,7 @@ Best Practices
 --------------
 
 Provider Extension Development
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Error Handling**: Use comprehensive error types and meaningful messages
 
@@ -1093,7 +1093,7 @@ Provider Extension Development
       }
 
 UI Extension Development
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Component Modularity**: Keep UI components small and focused
 
@@ -1138,7 +1138,7 @@ UI Extension Development
       }
 
 Configuration Extension Development
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Schema Validation**: Define clear configuration schemas
 
@@ -1176,7 +1176,7 @@ Configuration Extension Development
       }
 
 Performance Considerations
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Async Efficiency**: Use proper async patterns to avoid blocking
 
@@ -1233,7 +1233,7 @@ Performance Considerations
       }
 
 Security Considerations
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **API Key Management**: Secure handling of sensitive data
 
@@ -1295,7 +1295,7 @@ Next Steps
 - :doc:`architecture` - Understanding Perspt's internal architecture
 
 Example Projects
----------------
+----------------
 
 For complete examples of extending Perspt, see:
 

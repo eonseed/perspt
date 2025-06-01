@@ -246,7 +246,7 @@ Supports all models available through the genai crate:
    println!("AI: {}", response);
 
 generate_response_stream_to_channel()
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: rust
 

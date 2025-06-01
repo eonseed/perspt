@@ -40,7 +40,7 @@ Test Organization
    └── config_benchmarks.rs
 
 Current Test Structure
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 The project currently includes:
 
@@ -130,7 +130,7 @@ Tests for configuration loading, validation, and environment handling:
    }
 
 Testing LLM Provider Module
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tests for GenAI integration and streaming functionality:
 
@@ -327,7 +327,7 @@ Tests for GenAI integration and streaming functionality:
    }
 
 Testing UI Components
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -392,7 +392,7 @@ Integration Testing
 -------------------
 
 Provider Integration Tests
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -457,7 +457,7 @@ Provider Integration Tests
    }
 
 Configuration Integration Tests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -509,7 +509,7 @@ End-to-End Testing
 ------------------
 
 Full Conversation Flow
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -572,7 +572,7 @@ Full Conversation Flow
    }
 
 Plugin Integration Tests
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -606,7 +606,7 @@ Performance Testing
 -------------------
 
 Benchmark Configuration
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -651,7 +651,7 @@ Benchmark Configuration
    criterion_main!(benches);
 
 Memory and Resource Testing
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -701,7 +701,7 @@ Security Testing
 ----------------
 
 Input Validation Testing
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -745,7 +745,7 @@ Testing Utilities
 -----------------
 
 Test Fixtures
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -783,7 +783,7 @@ Test Fixtures
    }
 
 Mock Implementations
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: rust
 
@@ -883,7 +883,7 @@ Running Tests
    cargo tarpaulin --out Html
 
 Continuous Integration
----------------------
+----------------------
 
 GitHub Actions Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -938,7 +938,7 @@ Best Practices
 --------------
 
 Testing Guidelines
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 1. **Test Isolation**: Each test should be independent
 2. **Clear Naming**: Test names should describe what they verify
@@ -948,7 +948,7 @@ Testing Guidelines
 6. **Error Testing**: Test error conditions and edge cases
 
 Performance Testing Guidelines
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Baseline Measurements**: Establish performance baselines
 2. **Regression Detection**: Catch performance regressions early

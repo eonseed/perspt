@@ -741,7 +741,7 @@ Community Support
 - **Discord/Slack**: Real-time community support
 
 Reporting Issues
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 When reporting issues, include:
 
@@ -1077,15 +1077,15 @@ Ollama (Local) Provider Issues
 
 4. **Configuration Tuning**:
 
-   .. code-block:: json
+   .. code-block:: javascript
 
       {
         "provider_type": "ollama",
         "base_url": "http://localhost:11434",
         "options": {
-          "num_gpu": 1,           # Number of GPU layers
-          "num_thread": 8,        # CPU threads
-          "num_ctx": 4096,        # Context window
+          "num_gpu": 1,           // Number of GPU layers
+          "num_thread": 8,        // CPU threads
+          "num_ctx": 4096,        // Context window
           "temperature": 0.7,
           "top_p": 0.9
         }
@@ -1109,15 +1109,15 @@ Response Time Optimization
 
 **Configuration Tuning**
 
-.. code-block:: json
+.. code-block:: javascript
 
    {
      "performance": {
-       "max_tokens": 1000,           # Limit response length
-       "stream": true,               # Enable streaming
-       "timeout": 15,                # Shorter timeout
-       "parallel_requests": 2,       # Multiple requests
-       "cache_responses": true       # Cache similar queries
+       "max_tokens": 1000,           // Limit response length
+       "stream": true,               // Enable streaming
+       "timeout": 15,                // Shorter timeout
+       "parallel_requests": 2,       // Multiple requests
+       "cache_responses": true       // Cache similar queries
      }
    }
 
@@ -1139,14 +1139,14 @@ Memory and Resource Management
 
 **Resource Optimization**
 
-.. code-block:: json
+.. code-block:: javascript
 
    {
      "resource_limits": {
-       "max_history_size": 50,       # Limit conversation history
-       "cache_size_mb": 100,         # Limit cache size
-       "log_rotation_size": "10MB",  # Rotate logs
-       "cleanup_interval": "24h"     # Regular cleanup
+       "max_history_size": 50,       // Limit conversation history
+       "cache_size_mb": 100,         // Limit cache size
+       "log_rotation_size": "10MB",  // Rotate logs
+       "cleanup_interval": "24h"     // Regular cleanup
      }
    }
 
@@ -1155,31 +1155,31 @@ Network Performance
 
 **Connection Optimization**
 
-.. code-block:: json
+.. code-block:: javascript
 
    {
      "network": {
-       "keep_alive": true,           # Reuse connections
-       "connection_pool_size": 5,    # Pool connections
-       "dns_cache": true,            # Cache DNS lookups
-       "compression": true           # Enable compression
+       "keep_alive": true,           // Reuse connections
+       "connection_pool_size": 5,    // Pool connections
+       "dns_cache": true,            // Cache DNS lookups
+       "compression": true           // Enable compression
      }
    }
 
 **Regional Configuration**
 
-.. code-block:: json
+.. code-block:: javascript
 
    {
      "provider_endpoints": {
-       "openai": "https://api.openai.com",           # US
-       "anthropic": "https://api.anthropic.com",     # US
-       "google": "https://generativelanguage.googleapis.com"  # Global
+       "openai": "https://api.openai.com",           // US
+       "anthropic": "https://api.anthropic.com",     // US
+       "google": "https://generativelanguage.googleapis.com"  // Global
      }
    }
 
 Advanced Recovery Procedures
----------------------------
+----------------------------
 
 Complete System Reset
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1290,7 +1290,7 @@ Data Recovery
    perspt --reconfigure
 
 Version Migration Issues
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Upgrading from allms to genai**
 
@@ -1375,7 +1375,7 @@ When reporting issues, include this information:
    - Workarounds attempted: [list what you've tried]
 
 Recovery Verification
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 After resolving issues, verify system health:
 
@@ -1397,7 +1397,7 @@ After resolving issues, verify system health:
    done
 
 Related Documentation
---------------------
+---------------------
 
 For additional help:
 

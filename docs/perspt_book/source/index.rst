@@ -165,7 +165,6 @@ providers directly in your terminal using a modern, unified interface powered by
    :caption: Appendices
 
    changelog
-   acknowledgments
    license
    acknowledgments
 
