@@ -1,14 +1,22 @@
 Main Module
 ===========
 
-The ``main`` module serves as the entry point for the Perspt application, responsible for application initialization, CLI parsing, and lifecycle management.
+The ``main`` module serves as the entry point and orchestrator for the Perspt application, handling CLI argument parsing, application initialization, terminal management, and the main event loop coordination.
 
 .. currentmodule:: main
 
 Overview
 --------
 
-The main module orchestrates the entire application lifecycle, from terminal initialization to graceful shutdown. It provides comprehensive error handling, panic recovery, and manages the interaction between UI components and LLM providers.
+The main module is responsible for the complete application lifecycle, from startup to graceful shutdown. It implements comprehensive panic recovery, terminal state management, and coordinates between the UI, configuration, and LLM provider modules.
+
+**Key Responsibilities:**
+
+* **Application Bootstrap**: Initialize logging, parse CLI arguments, load configuration
+* **Terminal Management**: Setup/cleanup terminal raw mode and alternate screen  
+* **Event Coordination**: Manage the main event loop and message passing between components
+* **Error Recovery**: Comprehensive panic handling with terminal restoration
+* **Resource Cleanup**: Ensure proper cleanup of terminal state and background tasks
 
 Constants
 ---------
@@ -20,9 +28,19 @@ EOT_SIGNAL
 
    pub const EOT_SIGNAL: &str = "<<EOT>>";
 
-End-of-transmission signal used to indicate completion of streaming responses from LLM providers.
+End-of-transmission signal used throughout the application to indicate completion of streaming LLM responses.
 
-**Usage:** Sent by LLM providers to signal the end of a streaming response.
+**Usage Pattern:**
+
+.. code-block:: rust
+
+   // LLM provider sends this signal when response is complete
+   tx.send(EOT_SIGNAL.to_string()).unwrap();
+   
+   // UI receives and recognizes completion
+   if message == EOT_SIGNAL {
+       app.finish_streaming();
+   }
 
 Global State
 ------------
@@ -34,7 +52,11 @@ TERMINAL_RAW_MODE
 
    static TERMINAL_RAW_MODE: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 
-Thread-safe global flag tracking terminal raw mode state for proper cleanup during panics.
+Thread-safe global flag tracking terminal raw mode state for proper cleanup during panics and application crashes.
+
+**Safety Mechanism:**
+
+This global state ensures that even if the application panics or crashes unexpectedly, the panic handler can properly restore the terminal to a usable state, preventing terminal corruption for the user.
 
 Core Functions
 --------------
@@ -51,39 +73,45 @@ Main application entry point that orchestrates the entire application lifecycle.
 
 **Returns:**
 
-* ``Result<()>`` - Success or error details if the application fails to start
+* ``Result<()>`` - Success or application startup error
 
-**Application Flow:**
+**Application Lifecycle:**
 
-1. **Panic Hook Setup** - Configures panic recovery and terminal restoration
-2. **CLI Parsing** - Processes command-line arguments and options
-3. **Configuration Loading** - Loads configuration from file or defaults
-4. **Provider Initialization** - Sets up LLM provider based on configuration
-5. **Model Listing** - Optionally lists available models and exits
-6. **Terminal Setup** - Initializes TUI terminal interface
-7. **Main Loop** - Runs event loop until quit signal
-8. **Cleanup** - Restores terminal state and exits gracefully
+1. **Panic Hook Setup** - Configures comprehensive error recovery and terminal restoration
+2. **Logging Initialization** - Sets up error-level logging for debugging
+3. **CLI Argument Processing** - Parses command-line options with clap
+4. **Configuration Management** - Loads config from file or generates intelligent defaults
+5. **Provider Setup** - Initializes LLM provider with auto-configuration
+6. **Model Discovery** - Optionally lists available models and exits early
+7. **Terminal Initialization** - Sets up TUI with proper raw mode and alternate screen
+8. **Event Loop Execution** - Runs the main UI loop with real-time responsiveness
+9. **Graceful Cleanup** - Restores terminal state and releases resources
 
-**Possible Errors:**
-
-* Invalid command-line arguments
-* Configuration file parsing failures
-* LLM provider validation failures
-* Terminal initialization failures
-* Network connectivity issues
-
-**Example Usage:**
+**CLI Arguments Supported:**
 
 .. code-block:: bash
 
-   # Basic usage
+   # Basic usage with auto-configuration
    perspt
    
-   # With specific provider and model
+   # Specify provider and model
    perspt --provider-type anthropic --model-name claude-3-sonnet-20240229
    
-   # List available models
-   perspt --list-models --provider-type openai
+   # Use custom configuration file
+   perspt --config /path/to/config.json
+   
+   # List available models for current provider
+   perspt --list-models
+   
+   # Override API key from command line
+   perspt --api-key sk-your-key-here
+
+**Error Scenarios:**
+
+* **Configuration Errors**: Invalid JSON, missing required fields
+* **Provider Failures**: Invalid API keys, network connectivity issues
+* **Terminal Issues**: Raw mode setup failures, insufficient permissions
+* **Resource Constraints**: Memory limitations, file system errors
 
 Terminal Management
 -------------------
@@ -95,37 +123,39 @@ setup_panic_hook()
 
    fn setup_panic_hook()
 
-Sets up a comprehensive panic hook that ensures proper terminal restoration and provides user-friendly error messages.
+Configures a comprehensive panic handler that ensures terminal integrity and provides helpful error messages with recovery guidance.
 
-**Behavior:**
+**Recovery Actions:**
 
-1. Immediately disables raw terminal mode
-2. Exits alternate screen mode
-3. Clears the terminal display
-4. Provides context-specific error messages and recovery tips
-5. Exits the application cleanly
+1. **Immediate Terminal Restoration**: Disables raw mode and exits alternate screen
+2. **Screen Cleanup**: Clears display and positions cursor appropriately  
+3. **Contextual Error Messages**: Provides specific guidance based on error type
+4. **Clean Application Exit**: Prevents zombie processes and terminal corruption
 
-**Safety:** Must be called early in main() before any terminal operations.
+**Error Context Detection:**
 
-**Error Messages:** Provides helpful context and recovery suggestions:
+The panic hook intelligently detects common error scenarios:
+
+* **Missing Environment Variables**: PROJECT_ID, AWS credentials, API keys
+* **Authentication Failures**: Invalid or expired API keys
+* **Network Connectivity**: Connection timeouts, DNS resolution failures
+* **Provider-Specific Issues**: Service outages, rate limiting
+
+**Example Error Output:**
 
 .. code-block:: text
 
-   ╭─ Perspt encountered an unexpected error ─╮
-   │                                          │
-   │ A critical error occurred that caused    │
-   │ the application to crash. This is likely │
-   │ due to a network issue or invalid        │
-   │ configuration.                           │
-   │                                          │
-   │ Please check:                            │
-   │ • Your internet connection               │
-   │ • API key configuration                  │
-   │ • Provider availability                  │
-   │                                          │
-   │ If the problem persists, please report   │
-   │ this issue with the error details above. │
-   ╰──────────────────────────────────────────╯
+   🚨 Application Error: External Library Panic
+   ═══════════════════════════════════════════
+   
+   ❌ Missing Google Cloud Configuration:
+      Please set the PROJECT_ID environment variable
+      Example: export PROJECT_ID=your-project-id
+   
+   💡 Troubleshooting Tips:
+      - Check your provider configuration
+      - Verify all required environment variables are set
+      - Try a different provider (e.g., --provider-type openai)
 
 set_raw_mode_flag()
 ~~~~~~~~~~~~~~~~~~~
@@ -147,26 +177,50 @@ initialize_terminal()
 
 .. code-block:: rust
 
+set_raw_mode_flag()
+~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   fn set_raw_mode_flag(enabled: bool)
+
+Thread-safe function to update the global terminal raw mode state flag.
+
+**Parameters:**
+
+* ``enabled`` - Boolean indicating whether raw mode is currently enabled
+
+**Thread Safety:** 
+
+Uses mutex protection to prevent race conditions during concurrent access. This function is called from multiple contexts:
+
+* Main thread during terminal setup/cleanup
+* Panic handler for emergency restoration
+* Signal handlers for graceful shutdown
+
+initialize_terminal()
+~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
    fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>>
 
-Initializes the terminal for TUI operation with proper error handling.
+Initializes the terminal interface for TUI operation with comprehensive error handling and state tracking.
 
 **Returns:**
 
-* ``Result<Terminal<...>>`` - Configured terminal instance or error
+* ``Result<Terminal<...>>`` - Configured terminal instance or initialization error
 
-**Setup Process:**
+**Initialization Sequence:**
 
-1. Enables raw terminal mode for character-by-character input
-2. Enters alternate screen mode to preserve user's terminal session
-3. Creates crossterm backend for ratatui
-4. Updates global raw mode flag for panic recovery
+1. **Raw Mode Activation**: Enables character-by-character input without buffering
+2. **Alternate Screen Entry**: Preserves user's current terminal session
+3. **Backend Creation**: Sets up crossterm backend for ratatui compatibility
+4. **State Registration**: Updates global raw mode flag for panic recovery
 
-**Possible Errors:**
+**Error Recovery:**
 
-* Raw mode cannot be enabled (terminal not supported)
-* Alternate screen mode fails (terminal limitations)
-* Terminal backend creation fails (I/O errors)
+If any step fails, the function automatically cleans up partial initialization to prevent terminal corruption.
 
 cleanup_terminal()
 ~~~~~~~~~~~~~~~~~~
@@ -175,20 +229,85 @@ cleanup_terminal()
 
    fn cleanup_terminal() -> Result<()>
 
-Cleans up terminal state and restores normal operation.
+Performs comprehensive terminal cleanup and restoration to original state.
 
 **Returns:**
 
-* ``Result<()>`` - Success or error if cleanup fails
+* ``Result<()>`` - Success indication or cleanup error details
 
-**Cleanup Process:**
+**Restoration Process:**
 
-1. Updates global raw mode flag to false
-2. Disables raw terminal mode
-3. Exits alternate screen mode
-4. Restores original terminal state and cursor
+1. **State Flag Reset**: Updates global raw mode tracking to false
+2. **Raw Mode Disable**: Restores normal terminal input behavior
+3. **Alternate Screen Exit**: Returns to user's original terminal session
+4. **Cursor Restoration**: Ensures cursor visibility and proper positioning
 
-**Error Handling:** Continues cleanup even if individual steps fail, ensuring maximum restoration.
+**Fault Tolerance:** 
+
+Each cleanup step is executed independently - if one fails, others continue to maximize terminal restoration.
+
+Event Handling
+--------------
+
+handle_events()
+~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   pub async fn handle_events(
+       app: &mut ui::App,
+       tx_llm: &mpsc::UnboundedSender<String>, 
+       _api_key: &String,
+       model_name: &String,
+       provider: &Arc<GenAIProvider>, 
+   ) -> Option<AppEvent>
+
+Processes terminal events and user input in the main application loop with real-time responsiveness.
+
+**Parameters:**
+
+* ``app`` - Mutable reference to application state for immediate updates
+* ``tx_llm`` - Channel sender for LLM communication and streaming
+* ``_api_key`` - API key for provider authentication (reserved)
+* ``model_name`` - Current model identifier for requests
+* ``provider`` - Arc reference to configured LLM provider
+
+**Returns:**
+
+* ``Option<AppEvent>`` - Some(event) for significant state changes, None for no-ops
+
+**Supported Keyboard Events:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Key Combination
+     - Action
+   * - ``Enter``
+     - Send current input to LLM (queues if busy)
+   * - ``Ctrl+C, Ctrl+Q``
+     - Quit application gracefully
+   * - ``F1``
+     - Toggle help overlay display
+   * - ``Esc``
+     - Close help overlay or exit application
+   * - ``↑/↓``
+     - Scroll chat history up/down
+   * - ``Page Up/Down``
+     - Scroll chat history by 5 lines
+   * - ``Home/End``
+     - Jump to start/end of chat history
+   * - ``Backspace``
+     - Delete character before cursor
+   * - ``Left/Right``
+     - Move cursor in input field
+   * - ``Printable chars``
+     - Insert character at cursor position
+
+**Input Queuing System:**
+
+When the LLM is busy generating a response, user input is automatically queued and processed when the current response completes, ensuring no user input is lost.
 
 Model and Provider Management
 -----------------------------
@@ -198,29 +317,42 @@ list_available_models()
 
 .. code-block:: rust
 
-   async fn list_available_models(provider: &Arc<dyn LLMProvider + Send + Sync>, _config: &AppConfig) -> Result<()>
+   async fn list_available_models(provider: &Arc<GenAIProvider>, _config: &AppConfig) -> Result<()>
 
-Lists all available models for the current LLM provider and exits.
+Discovers and displays all available models for the configured LLM provider, then exits the application.
 
 **Parameters:**
 
-* ``provider`` - Arc reference to the LLM provider implementation
-* ``_config`` - Application configuration (reserved for future features)
+* ``provider`` - Arc reference to the initialized LLM provider
+* ``_config`` - Application configuration (reserved for filtering features)
 
 **Returns:**
 
-* ``Result<()>`` - Success or error if model listing fails
+* ``Result<()>`` - Success or model discovery error
 
 **Output Format:**
 
 .. code-block:: text
 
    Available models for OpenAI:
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   ✓ gpt-4o-mini                Latest GPT-4 Optimized Mini
+   ✓ gpt-4o                     GPT-4 Optimized
+   ✓ gpt-4-turbo                GPT-4 Turbo with Vision
+   ✓ gpt-4                      Standard GPT-4
+   ✓ gpt-3.5-turbo             GPT-3.5 Turbo
+   ✓ o1-mini                    Reasoning Model Mini
+   ✓ o1-preview                 Reasoning Model Preview
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**Provider Discovery:**
+
+Uses the ``genai`` crate's automatic model discovery to provide up-to-date model lists without manual maintenance.
    • gpt-4o-mini
-   • gpt-4o
+   • o1-preview
+   • o1-mini
+   • o3-mini
    • gpt-4-turbo
-   • gpt-3.5-turbo
-   • text-davinci-003
 
 **Example Usage:**
 

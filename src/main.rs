@@ -242,9 +242,10 @@ async fn main() -> Result<()> {
     // Set up panic hook before doing anything else
     setup_panic_hook();
     
-    // Initialize logging
+    // Initialize logging - set to error level only to avoid TUI interference
+    // Logs will only show critical errors
     env_logger::Builder::from_default_env()
-        .filter_level(LevelFilter::Info)
+        .filter_level(LevelFilter::Error)
         .init();
 
     // Parse CLI arguments
@@ -575,7 +576,7 @@ async fn initiate_llm_request(
         match result {
             Ok(()) => {
                 log::debug!("Streaming completed successfully");
-                let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+                // EOT signal is now sent by the provider itself, no need to send it here
             }
             Err(e) => {
                 log::error!("LLM request failed: {}", e);

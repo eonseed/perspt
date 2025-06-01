@@ -236,8 +236,11 @@ OpenAI Models
    # Use GPT-4 Turbo
    perspt --model-name gpt-4-turbo-preview
 
-   # Use GPT-3.5 Turbo
-   perspt --model-name gpt-3.5-turbo
+   # Use GPT-4o Mini (recommended for most use cases)
+   perspt --model-name gpt-4o-mini
+
+   # Use latest GPT-4.1
+   perspt --model-name gpt-4.1
 
 Other Providers
 ~~~~~~~~~~~~~~~
@@ -323,7 +326,7 @@ Issue: "Model not available"
    perspt --list-models
 
    # Use a specific model that's available
-   perspt --model-name gpt-3.5-turbo
+   perspt --model-name gpt-4o-mini
 
 Issue: "Network connection failed"
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

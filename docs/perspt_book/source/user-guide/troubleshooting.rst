@@ -1,102 +1,148 @@
 Troubleshooting
 ===============
 
-This comprehensive troubleshooting guide helps you diagnose and resolve common issues with Perspt.
+This comprehensive troubleshooting guide helps you diagnose and resolve issues with Perspt's genai crate integration, provider connectivity, and advanced features.
 
 Quick Diagnostics
 ------------------
 
-Start with these basic diagnostic commands:
+Start with these diagnostic commands to check system status:
 
-.. code-block:: text
+.. code-block:: bash
 
-   > /status          # Check current configuration and connectivity
-   > /validate-config # Validate configuration file
-   > /test-connection # Test provider connectivity
-   > /version         # Check Perspt version
+   # Check provider connectivity and model availability
+   perspt --provider-type openai --list-models
+   
+   # Validate specific model
+   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022 --list-models
+   
+   # Test with minimal configuration
+   perspt --api-key your-key --provider-type openai --model gpt-3.5-turbo
+
+**Environment Variable Check**
+
+.. code-block:: bash
+
+   # Check if API keys are set
+   echo $OPENAI_API_KEY
+   echo $ANTHROPIC_API_KEY
+   echo $GOOGLE_API_KEY
+   
+   # Verify genai crate can access providers
+   export RUST_LOG=debug
+   perspt --provider-type openai --list-models
 
 Common Issues
 -------------
 
-Installation Problems
-~~~~~~~~~~~~~~~~~~~~~
+GenAI Crate Integration Issues
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Binary Not Found**
-
-.. code-block:: bash
-
-   perspt: command not found
-
-**Solutions**:
-
-1. Check if Perspt is in your PATH:
-
-   .. code-block:: bash
-
-      echo $PATH
-      which perspt
-
-2. Add Perspt to PATH:
-
-   .. code-block:: bash
-
-      # Add to ~/.bashrc, ~/.zshrc, or ~/.config/fish/config.fish
-      export PATH="$PATH:/path/to/perspt/binary"
-
-3. Reinstall using package manager:
-
-   .. code-block:: bash
-
-      # Using Homebrew
-      brew uninstall perspt
-      brew install perspt
-
-**Permission Denied**
-
-.. code-block:: bash
-
-   -bash: ./perspt: Permission denied
-
-**Solution**:
-
-.. code-block:: bash
-
-   chmod +x /path/to/perspt
-
-**Missing Dependencies**
-
-For builds from source:
-
-.. code-block:: bash
-
-   # macOS
-   xcode-select --install
-   
-   # Ubuntu/Debian
-   sudo apt update
-   sudo apt install build-essential pkg-config libssl-dev
-   
-   # Fedora/RHEL
-   sudo dnf groupinstall "Development Tools"
-   sudo dnf install pkg-config openssl-devel
-
-Configuration Issues
-~~~~~~~~~~~~~~~~~~~~
-
-**Invalid Configuration File**
+**Provider Authentication Failures**
 
 .. code-block:: text
 
-   Error: Failed to parse configuration file
+   Error: Authentication failed for provider 'openai'
+   Caused by: Invalid API key
 
-**Common causes and solutions**:
+**Solutions**:
 
-1. **JSON Syntax Errors**:
+1. **Verify API key format**:
 
    .. code-block:: bash
 
-      # Validate JSON syntax
-      cat config.json | python -m json.tool
+      # OpenAI keys start with 'sk-'
+      echo $OPENAI_API_KEY | head -c 5  # Should show 'sk-'
+      
+      # Anthropic keys start with 'sk-ant-'
+      echo $ANTHROPIC_API_KEY | head -c 7  # Should show 'sk-ant-'
+
+2. **Test API key directly**:
+
+   .. code-block:: bash
+
+      # Test OpenAI API key
+      curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+           https://api.openai.com/v1/models
+      
+      # Test Anthropic API key
+      curl -H "x-api-key: $ANTHROPIC_API_KEY" \
+           https://api.anthropic.com/v1/models
+
+3. **Check API key permissions and billing**:
+   - Ensure API key has model access permissions
+   - Verify account has sufficient credits/billing set up
+   - Check for rate limiting or usage quotas
+
+**Model Validation Failures**
+
+.. code-block:: text
+
+   Error: Model 'gpt-4.1' not available for provider 'openai'
+   Available models: gpt-3.5-turbo, gpt-4, gpt-4-turbo...
+
+**Solutions**:
+
+1. **Check model availability**:
+
+   .. code-block:: bash
+
+      # List all available models for provider
+      perspt --provider-type openai --list-models
+      
+      # Search for specific model
+      perspt --provider-type openai --list-models | grep gpt-4
+
+2. **Use correct model names**:
+
+   .. code-block:: bash
+
+      # Correct model names (case-sensitive)
+      perspt --provider-type openai --model gpt-4o-mini       # ✓ Correct
+      perspt --provider-type openai --model GPT-4O-Mini       # ✗ Wrong case
+      perspt --provider-type openai --model gpt4o-mini        # ✗ Missing hyphen
+
+3. **Check provider-specific model access**:
+   - Some models require special access (e.g., GPT-4, Claude Opus)
+   - Verify your account tier supports the requested model
+   - Check if model is in beta/preview status
+
+**Streaming Connection Issues**
+
+.. code-block:: text
+
+   Error: Streaming connection interrupted
+   Caused by: Connection reset by peer
+
+**Solutions**:
+
+1. **Network connectivity check**:
+
+   .. code-block:: bash
+
+      # Test basic connectivity
+      ping api.openai.com
+      ping api.anthropic.com
+      
+      # Check for proxy/firewall issues
+      curl -I https://api.openai.com/v1/models
+
+2. **Provider service status**:
+   - Check OpenAI Status: https://status.openai.com
+   - Check Anthropic Status: https://status.anthropic.com
+   - Check Google AI Status: https://status.google.com
+
+3. **Adjust streaming settings**:
+
+   .. code-block:: json
+
+      {
+        "provider_type": "openai",
+        "default_model": "gpt-4o-mini",
+        "stream_timeout": 30,
+        "retry_attempts": 3,
+        "buffer_size": 1024
+      }
 
    Common syntax errors:
 
@@ -587,7 +633,7 @@ Network Debugging
    # Test OpenAI API
    curl -v -H "Authorization: Bearer YOUR_API_KEY" \\
         -H "Content-Type: application/json" \\
-        -d '{"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"Hello"}]}' \\
+        -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hello"}]}' \\
         https://api.openai.com/v1/chat/completions
 
 Configuration Debugging
@@ -610,7 +656,7 @@ Configuration Debugging
    {
      "provider": "openai",
      "api_key": "your-key",
-     "model": "gpt-3.5-turbo"
+     "model": "gpt-4o-mini"
    }
 
 Performance Debugging
@@ -695,7 +741,7 @@ Community Support
 - **Discord/Slack**: Real-time community support
 
 Reporting Issues
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 When reporting issues, include:
 
@@ -730,12 +776,633 @@ For enterprise users:
 - **Custom configuration assistance**
 - **Integration consulting**
 
-Next Steps
-----------
 
-If you're still experiencing issues:
 
-- :doc:`../configuration` - Review complete configuration options
-- :doc:`providers` - Check provider-specific troubleshooting
-- :doc:`../developer-guide/index` - Development and debugging guides
-- :doc:`../api/index` - API reference for programmatic troubleshooting
+Provider-Specific Troubleshooting
+---------------------------------
+
+OpenAI Provider Issues
+~~~~~~~~~~~~~~~~~~~~~~
+
+**Authentication and API Key Problems**
+
+.. code-block:: text
+
+   Error: Invalid API key for OpenAI
+   Error: Rate limit exceeded for model gpt-4
+
+**Solutions**:
+
+1. **API Key Validation**:
+
+   .. code-block:: bash
+
+      # Verify OpenAI API key format (should start with 'sk-')
+      echo $OPENAI_API_KEY | head -c 3  # Should show 'sk-'
+      
+      # Test API key with curl
+      curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+           https://api.openai.com/v1/models
+
+2. **Rate Limiting Management**:
+
+   .. code-block:: bash
+
+      # Use tier-appropriate models
+      perspt --provider-type openai --model gpt-3.5-turbo  # Lower tier
+      perspt --provider-type openai --model gpt-4o-mini    # Tier 1+
+      perspt --provider-type openai --model gpt-4          # Tier 3+
+
+3. **Quota and Billing Issues**:
+   - Check OpenAI dashboard for usage limits
+   - Verify payment method is valid
+   - Monitor usage to avoid unexpected charges
+
+**Model Access Issues**
+
+.. code-block:: text
+
+   Error: Model 'o1-preview' not available
+   Error: Insufficient quota for GPT-4
+
+**Solutions**:
+
+1. **Model Tier Requirements**:
+
+   .. code-block:: bash
+
+      # Tier 1 models (widely available)
+      perspt --provider-type openai --model gpt-3.5-turbo
+      perspt --provider-type openai --model gpt-4o-mini
+      
+      # Tier 2+ models (higher usage requirements)
+      perspt --provider-type openai --model gpt-4
+      perspt --provider-type openai --model gpt-4-turbo
+      
+      # Special access models (invitation/waitlist)
+      perspt --provider-type openai --model o1-preview
+      perspt --provider-type openai --model o1-mini
+
+2. **Reasoning Model Limitations**:
+   - o1 models have special usage patterns
+   - Higher latency expected for reasoning
+   - May have stricter rate limits
+
+Anthropic Provider Issues
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Claude Model Access**
+
+.. code-block:: text
+
+   Error: Model 'claude-3-opus-20240229' not available
+   Error: Anthropic API key authentication failed
+
+**Solutions**:
+
+1. **API Key Format**:
+
+   .. code-block:: bash
+
+      # Anthropic keys start with 'sk-ant-'
+      echo $ANTHROPIC_API_KEY | head -c 7  # Should show 'sk-ant-'
+      
+      # Test with curl
+      curl -H "x-api-key: $ANTHROPIC_API_KEY" \
+           -H "anthropic-version: 2023-06-01" \
+           https://api.anthropic.com/v1/models
+
+2. **Model Availability**:
+
+   .. code-block:: bash
+
+      # Generally available models
+      perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
+      perspt --provider-type anthropic --model claude-3-5-haiku-20241022
+      
+      # Request access for Opus through Anthropic Console
+      perspt --provider-type anthropic --model claude-3-opus-20240229
+
+3. **Rate Limiting**:
+   - Anthropic has strict rate limits for new accounts
+   - Build up usage history for higher limits
+   - Use Haiku model for testing and development
+
+Google AI (Gemini) Provider Issues
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**API Key and Setup Problems**
+
+.. code-block:: text
+
+   Error: Google AI API key not valid
+   Error: Gemini model access denied
+
+**Solutions**:
+
+1. **API Key Configuration**:
+
+   .. code-block:: bash
+
+      # Get API key from Google AI Studio
+      export GOOGLE_API_KEY="your-api-key"
+      # Alternative environment variable
+      export GEMINI_API_KEY="your-api-key"
+      
+      # Test API access
+      curl -H "Content-Type: application/json" \
+           "https://generativelanguage.googleapis.com/v1beta/models?key=$GOOGLE_API_KEY"
+
+2. **Model Selection**:
+
+   .. code-block:: bash
+
+      # Recommended models
+      perspt --provider-type google --model gemini-1.5-flash     # Fast, cost-effective
+      perspt --provider-type google --model gemini-1.5-pro      # Balanced capability
+      perspt --provider-type google --model gemini-1.5-pro-exp  # Experimental features
+
+3. **Geographic Restrictions**:
+   - Some Gemini models have geographic limitations
+   - Check Google AI availability in your region
+   - Use VPN if necessary and allowed by Google's terms
+
+Groq Provider Issues
+~~~~~~~~~~~~~~~~~~~~
+
+**Service Availability**
+
+.. code-block:: text
+
+   Error: Groq service temporarily unavailable
+   Error: Model inference timeout
+
+**Solutions**:
+
+1. **Service Reliability**:
+   - Groq prioritizes speed over availability
+   - Configure fallback providers for production use
+   - Monitor Groq status page for outages
+
+2. **Model Selection**:
+
+   .. code-block:: bash
+
+      # Fast inference models
+      perspt --provider-type groq --model llama-3.1-8b-instant
+      perspt --provider-type groq --model mixtral-8x7b-32768
+      perspt --provider-type groq --model gemma-7b-it
+
+3. **Timeout Configuration**:
+
+   .. code-block:: json
+
+      {
+        "provider_type": "groq",
+        "timeout": 30,
+        "retry_attempts": 2,
+        "fallback_provider": "openai"
+      }
+
+Cohere Provider Issues
+~~~~~~~~~~~~~~~~~~~~~~
+
+**API Integration Problems**
+
+.. code-block:: text
+
+   Error: Cohere API authentication failed
+   Error: Model 'command-r-plus' not accessible
+
+**Solutions**:
+
+1. **API Key Setup**:
+
+   .. code-block:: bash
+
+      export COHERE_API_KEY="your-api-key"
+      
+      # Test API access
+      curl -H "Authorization: Bearer $COHERE_API_KEY" \
+           https://api.cohere.ai/v1/models
+
+2. **Model Access**:
+
+   .. code-block:: bash
+
+      # Available Cohere models
+      perspt --provider-type cohere --model command-r
+      perspt --provider-type cohere --model command-r-plus
+      perspt --provider-type cohere --model command-light
+
+XAI (Grok) Provider Issues
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Grok Model Access**
+
+.. code-block:: text
+
+   Error: XAI API key invalid
+   Error: Grok model not available
+
+**Solutions**:
+
+1. **API Configuration**:
+
+   .. code-block:: bash
+
+      export XAI_API_KEY="your-api-key"
+      
+      # Check available models
+      perspt --provider-type xai --list-models
+
+2. **Model Selection**:
+
+   .. code-block:: bash
+
+      # Available Grok models
+      perspt --provider-type xai --model grok-beta
+
+Ollama (Local) Provider Issues
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Service Connection Problems**
+
+.. code-block:: text
+
+   Error: Could not connect to Ollama server
+   Error: Model not found in Ollama
+
+**Solutions**:
+
+1. **Ollama Service Management**:
+
+   .. code-block:: bash
+
+      # Check if Ollama is running
+      curl http://localhost:11434/api/tags
+      
+      # Start Ollama service
+      ollama serve
+      
+      # Start as background service (macOS)
+      brew services start ollama
+
+2. **Model Management**:
+
+   .. code-block:: bash
+
+      # List installed models
+      ollama list
+      
+      # Install popular models
+      ollama pull llama3.2:8b
+      ollama pull mistral:7b
+      ollama pull codellama:7b
+      
+      # Remove unused models to save space
+      ollama rm unused-model
+
+3. **Resource Optimization**:
+
+   .. code-block:: bash
+
+      # Check system resources
+      htop
+      nvidia-smi  # For GPU users
+      
+      # Use smaller models for limited resources
+      ollama pull llama3.2:3b      # 3B parameters
+      ollama pull phi3:mini        # Microsoft Phi-3 Mini
+
+4. **Configuration Tuning**:
+
+   .. code-block:: javascript
+
+      {
+        "provider_type": "ollama",
+        "base_url": "http://localhost:11434",
+        "options": {
+          "num_gpu": 1,           // Number of GPU layers
+          "num_thread": 8,        // CPU threads
+          "num_ctx": 4096,        // Context window
+          "temperature": 0.7,
+          "top_p": 0.9
+        }
+      }
+
+Performance Optimization
+------------------------
+
+Response Time Optimization
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Model Selection for Speed**
+
+.. code-block:: bash
+
+   # Fastest models by provider
+   perspt --provider-type groq --model llama-3.1-8b-instant     # Groq (fastest)
+   perspt --provider-type openai --model gpt-4o-mini            # OpenAI (fast)
+   perspt --provider-type google --model gemini-1.5-flash       # Google (fast)
+   perspt --provider-type anthropic --model claude-3-5-haiku-20241022  # Anthropic (fast)
+
+**Configuration Tuning**
+
+.. code-block:: javascript
+
+   {
+     "performance": {
+       "max_tokens": 1000,           // Limit response length
+       "stream": true,               // Enable streaming
+       "timeout": 15,                // Shorter timeout
+       "parallel_requests": 2,       // Multiple requests
+       "cache_responses": true       // Cache similar queries
+     }
+   }
+
+Memory and Resource Management
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**System Resource Monitoring**
+
+.. code-block:: bash
+
+   # Monitor CPU and memory usage
+   top -p $(pgrep perspt)
+   
+   # Monitor network usage
+   iftop -i any -f "host api.openai.com"
+   
+   # Check disk usage for logs and cache
+   du -sh ~/.config/perspt/
+
+**Resource Optimization**
+
+.. code-block:: javascript
+
+   {
+     "resource_limits": {
+       "max_history_size": 50,       // Limit conversation history
+       "cache_size_mb": 100,         // Limit cache size
+       "log_rotation_size": "10MB",  // Rotate logs
+       "cleanup_interval": "24h"     // Regular cleanup
+     }
+   }
+
+Network Performance
+~~~~~~~~~~~~~~~~~~~
+
+**Connection Optimization**
+
+.. code-block:: javascript
+
+   {
+     "network": {
+       "keep_alive": true,           // Reuse connections
+       "connection_pool_size": 5,    // Pool connections
+       "dns_cache": true,            // Cache DNS lookups
+       "compression": true           // Enable compression
+     }
+   }
+
+**Regional Configuration**
+
+.. code-block:: javascript
+
+   {
+     "provider_endpoints": {
+       "openai": "https://api.openai.com",           // US
+       "anthropic": "https://api.anthropic.com",     // US
+       "google": "https://generativelanguage.googleapis.com"  // Global
+     }
+   }
+
+Advanced Recovery Procedures
+----------------------------
+
+Complete System Reset
+~~~~~~~~~~~~~~~~~~~~~
+
+**Full Configuration Reset**
+
+.. code-block:: bash
+
+   # Backup current configuration
+   cp -r ~/.config/perspt ~/.config/perspt.backup.$(date +%Y%m%d)
+   
+   # Remove all Perspt data
+   rm -rf ~/.config/perspt/
+   rm -rf ~/.local/share/perspt/
+   rm -rf ~/.cache/perspt/
+   
+   # Clear temporary files
+   rm -rf /tmp/perspt*
+   
+   # Recreate default configuration
+   perspt --create-default-config
+
+**Selective Reset Options**
+
+.. code-block:: bash
+
+   # Reset only configuration
+   rm ~/.config/perspt/config.json
+   perspt --setup
+   
+   # Clear only cache
+   rm -rf ~/.config/perspt/cache/
+   
+   # Clear only conversation history
+   rm -rf ~/.config/perspt/history/
+   
+   # Reset only logs
+   rm ~/.config/perspt/*.log
+
+Emergency Fallback Procedures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Provider Fallback Chain**
+
+.. code-block:: json
+
+   {
+     "fallback_chain": [
+       {
+         "provider_type": "openai",
+         "model": "gpt-4o-mini",
+         "on_failure": "next"
+       },
+       {
+         "provider_type": "anthropic", 
+         "model": "claude-3-5-haiku-20241022",
+         "on_failure": "next"
+       },
+       {
+         "provider_type": "ollama",
+         "model": "llama3.2:8b",
+         "on_failure": "fail"
+       }
+     ]
+   }
+
+**Manual Override Mode**
+
+.. code-block:: bash
+
+   # Force specific provider regardless of config
+   perspt --force-provider openai --force-model gpt-3.5-turbo
+   
+   # Use minimal configuration
+   perspt --no-config --api-key sk-... --provider-type openai
+   
+   # Debug mode with maximum verbosity
+   perspt --debug --verbose --log-level trace
+
+Data Recovery
+~~~~~~~~~~~~~
+
+**Conversation History Recovery**
+
+.. code-block:: bash
+
+   # Check for backup files
+   ls ~/.config/perspt/history/*.backup
+   
+   # Restore from backup
+   cp ~/.config/perspt/history/conversation.backup \
+      ~/.config/perspt/history/conversation.json
+   
+   # Export conversations before reset
+   perspt --export-history ~/perspt-backup.json
+
+**Configuration Recovery**
+
+.. code-block:: bash
+
+   # Restore from automatic backup
+   cp ~/.config/perspt/config.json.backup ~/.config/perspt/config.json
+   
+   # Recreate from environment variables
+   perspt --config-from-env
+   
+   # Interactive configuration rebuild
+   perspt --reconfigure
+
+Version Migration Issues
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Upgrading from allms to genai**
+
+.. code-block:: bash
+
+   # Backup old configuration
+   cp ~/.config/perspt/config.json ~/.config/perspt/config.allms.backup
+   
+   # Run migration script
+   perspt --migrate-config
+   
+   # Manual migration if needed
+   perspt --validate-config --fix-issues
+
+**Downgrade Procedures**
+
+.. code-block:: bash
+
+   # Install specific version
+   cargo install perspt --version 0.2.0
+   
+   # Use version-specific configuration
+   cp ~/.config/perspt/config.v0.2.0.json ~/.config/perspt/config.json
+
+Emergency Contact and Support
+-----------------------------
+
+Critical Issue Escalation
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For production-critical issues:
+
+1. **Immediate Workarounds**:
+   - Switch to backup providers
+   - Use local models (Ollama) for offline capability
+   - Enable debug logging for detailed diagnosis
+
+2. **Community Support Channels**:
+   - GitHub Issues: https://github.com/eonseed/perspt/issues
+   - Discord Community: [Link to Discord]
+   - Reddit: r/perspt
+
+3. **Enterprise Support**:
+   - Priority ticket system
+   - Direct developer contact
+   - Custom configuration assistance
+
+Issue Documentation Template
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When reporting issues, include this information:
+
+.. code-block:: text
+
+   **Environment Information:**
+   - OS: [macOS 14.1 / Ubuntu 22.04 / Windows 11]
+   - Perspt Version: [perspt --version]
+   - Installation Method: [cargo / brew / binary]
+   
+   **Configuration:**
+   - Provider: [openai / anthropic / google / etc.]
+   - Model: [gpt-4o-mini / claude-3-5-sonnet / etc.]
+   - Config file: [attach sanitized config.json]
+   
+   **Error Details:**
+   - Full error message: [exact text]
+   - Error code: [if available]
+   - Stack trace: [if available]
+   
+   **Reproduction Steps:**
+   1. [Step 1]
+   2. [Step 2]
+   3. [Error occurs]
+   
+   **Expected vs Actual Behavior:**
+   - Expected: [what should happen]
+   - Actual: [what actually happens]
+   
+   **Additional Context:**
+   - Network environment: [corporate / home / proxy]
+   - Recent changes: [configuration / system updates]
+   - Workarounds attempted: [list what you've tried]
+
+Recovery Verification
+~~~~~~~~~~~~~~~~~~~~~
+
+After resolving issues, verify system health:
+
+.. code-block:: bash
+
+   # Test basic functionality
+   perspt --provider-type openai --model gpt-3.5-turbo --test-connection
+   
+   # Verify configuration
+   perspt --validate-config
+   
+   # Test streaming
+   echo "Hello" | perspt --provider-type openai --model gpt-4o-mini --stream
+   
+   # Check all providers
+   for provider in openai anthropic google groq; do
+     echo "Testing $provider..."
+     perspt --provider-type $provider --list-models
+   done
+
+Related Documentation
+---------------------
+
+For additional help:
+
+- :doc:`providers` - Provider-specific configuration and features
+- :doc:`advanced-features` - Advanced usage patterns and optimization
+- :doc:`../configuration` - Complete configuration reference
+- :doc:`../developer-guide/index` - Development and API documentation
+- :doc:`../api/index` - API reference and integration guides

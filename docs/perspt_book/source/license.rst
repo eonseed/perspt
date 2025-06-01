@@ -93,7 +93,7 @@ LLM Integration
    * - Crate
      - License
      - Description
-   * - **allms**
+   * - **genai**
      - MIT/Apache-2.0
      - Unified LLM provider interface
    * - **reqwest**

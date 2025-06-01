@@ -41,21 +41,17 @@ The main configuration structure containing all configurable aspects of Perspt.
    * - Provider Type
      - Description
    * - ``openai``
-     - OpenAI GPT models
+     - OpenAI GPT models (GPT-4o, GPT-4o-mini, o1-preview, o1-mini)
    * - ``anthropic``
-     - Anthropic Claude models
+     - Anthropic Claude models (Claude 3.5 Sonnet, Claude 3 Opus/Sonnet/Haiku)
    * - ``google``
-     - Google Gemini models
-   * - ``mistral``
-     - Mistral AI models
-   * - ``perplexity``
-     - Perplexity AI models
-   * - ``deepseek``
-     - DeepSeek models
-   * - ``aws-bedrock``
-     - AWS Bedrock service
-   * - ``azure-openai``
-     - Azure OpenAI service
+     - Google Gemini models (Gemini 1.5 Pro/Flash, Gemini 2.0 Flash)
+   * - ``groq``
+     - Groq ultra-fast inference (Llama 3.x models)
+   * - ``cohere``
+     - Cohere Command models (Command R, Command R+)
+   * - ``xai``
+     - XAI Grok models
 
 **Example Configuration:**
 
@@ -69,7 +65,10 @@ The main configuration structure containing all configurable aspects of Perspt.
      "providers": {
        "openai": "https://api.openai.com/v1",
        "anthropic": "https://api.anthropic.com",
-       "local-llm": "http://localhost:8080/v1"
+       "google": "https://generativelanguage.googleapis.com/v1beta/",
+       "groq": "https://api.groq.com/openai/v1",
+       "cohere": "https://api.cohere.ai/v1",
+       "xai": "https://api.x.ai/v1"
      }
    }
 
@@ -112,22 +111,16 @@ If ``provider_type`` is None, attempts inference from ``default_provider``:
      - Direct mapping
    * - ``google``, ``gemini``
      - ``google``
-     - Multiple aliases
-   * - ``mistral``
-     - ``mistral``
+     - Multiple aliases supported
+   * - ``groq``
+     - ``groq``
      - Direct mapping
-   * - ``perplexity``
-     - ``perplexity``
+   * - ``cohere``
+     - ``cohere``
      - Direct mapping
-   * - ``deepseek``
-     - ``deepseek``
+   * - ``xai``
+     - ``xai``
      - Direct mapping
-   * - ``aws``, ``bedrock``, ``aws-bedrock``
-     - ``aws-bedrock``
-     - Multiple aliases
-   * - ``azure``, ``azure-openai``
-     - ``azure-openai``
-     - Multiple aliases
    * - Unknown
      - ``openai``
      - Fallback default
@@ -183,11 +176,9 @@ Without Configuration File (None)
        "openai": "https://api.openai.com/v1",
        "anthropic": "https://api.anthropic.com", 
        "google": "https://generativelanguage.googleapis.com/v1beta/",
-       "mistral": "https://api.mistral.ai/v1",
-       "perplexity": "https://api.perplexity.ai",
-       "deepseek": "https://api.deepseek.com/v1",
-       "aws-bedrock": "https://bedrock.amazonaws.com",
-       "azure-openai": "https://api.openai.azure.com"
+       "groq": "https://api.groq.com/openai/v1",
+       "cohere": "https://api.cohere.ai/v1",
+       "xai": "https://api.x.ai/v1"
    }
 
 **Possible Errors:**
@@ -234,13 +225,15 @@ Multi-Provider Configuration
    {
      "api_key": "your-default-key",
      "provider_type": "anthropic",
-     "default_model": "claude-3-sonnet-20240229",
+     "default_model": "claude-3-5-sonnet-20241022",
      "default_provider": "anthropic",
      "providers": {
        "openai": "https://api.openai.com/v1",
        "anthropic": "https://api.anthropic.com",
-       "local-openai": "http://localhost:8080/v1",
-       "proxy-claude": "https://your-proxy.com/anthropic"
+       "google": "https://generativelanguage.googleapis.com/v1beta/",
+       "groq": "https://api.groq.com/openai/v1",
+       "cohere": "https://api.cohere.ai/v1",
+       "xai": "https://api.x.ai/v1"
      }
    }
 
@@ -250,22 +243,24 @@ Minimal Configuration with Provider Inference
 .. code-block:: json
 
    {
-     "default_provider": "google",
-     "default_model": "gemini-pro"
+     "default_provider": "groq",
+     "default_model": "llama-3.1-70b-versatile"
    }
 
-*Provider type will be automatically inferred as "google"*
+*Provider type will be automatically inferred as "groq"*
 
-Local Development Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Development with Multiple Models
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: json
 
    {
      "provider_type": "openai",
-     "default_model": "gpt-3.5-turbo",
+     "default_model": "gpt-4o-mini",
+     "default_provider": "openai",
      "providers": {
-       "openai": "http://localhost:8080/v1"
+       "openai": "https://api.openai.com/v1",
+       "groq": "https://api.groq.com/openai/v1"
      }
    }
 

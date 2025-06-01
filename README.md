@@ -19,7 +19,7 @@
 
 ## ✨ Features
 
--   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui with smooth scrolling and markdown rendering.
+-   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui with smooth scrolling and custom markdown rendering.
 -   **⚡ Advanced Streaming:** Real-time streaming of LLM responses with support for reasoning chunks and proper event handling.
 -   **🔀 Latest Provider Support**: Built on the modern `genai` crate with support for cutting-edge models:
     -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, **GPT-4.1**, **o1-mini**, **o1-preview**, **o3-mini**, and more)
@@ -29,12 +29,12 @@
     -   **Perplexity** (Sonar, Sonar-pro, Sonar-reasoning, and more)
     -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner, and more)
     -   **AWS Bedrock** (Amazon Nova models, and more)
--   **�️ Robust CLI Options**: Full command-line support for API keys, models, and provider types that actually work.
+-   **🔧 Robust CLI Options**: Full command-line support for API keys, models, and provider types that actually work.
 -   **🔄 Flexible Authentication**: API keys work via CLI arguments, environment variables, or configuration files.
 -   **⚙️ Smart Configuration:** Intelligent configuration loading with fallbacks and validation.
 -   **🔄 Input Queuing:** Type and submit new questions even while the AI is generating a previous response.
 -   **💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
--   **📜 Advanced Markdown Rendering:** Full markdown support with proper streaming buffer management.
+-   **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering with proper streaming buffer management.
 -   **🛡️ Bulletproof Error Handling:** Comprehensive panic recovery, network resilience, and user-friendly error messages.
 -   **📚 Extensive Documentation:** Comprehensive code documentation and user guides.
 
@@ -221,7 +221,7 @@ target/release/perspt --config my_config.json
 
 ### 🎯 Model Discovery & Validation
 
-Perspt now uses the modern **genai** crate for robust model handling and validation:
+Perspt uses the modern **genai** crate for robust model handling and validation:
 
 ```bash
 # List OpenAI models (including o1-mini, o1-preview, o3-mini, GPT-4.1)
@@ -253,7 +253,7 @@ target/release/perspt --provider-type deepseek --api-key YOUR_API_KEY --list-mod
 
 ### Built on Modern genai Crate
 
-Perspt has been completely rewritten to use the **genai** crate (v0.3.5), providing:
+Perspt is built using the **genai** crate (v0.3.5), providing:
 
 1. **🎯 Latest Model Support**: Direct support for cutting-edge models including:
    - OpenAI's o1-mini, o1-preview, o3-mini, and GPT-4.1 reasoning models
@@ -273,17 +273,28 @@ Perspt has been completely rewritten to use the **genai** crate (v0.3.5), provid
    - Graceful panic recovery with terminal restoration
 
 4. **🔧 Flexible Configuration**: Multiple configuration methods:
-   - CLI arguments (now working properly!)
+   - CLI arguments (working properly!)
    - Environment variables
    - JSON configuration files
    - Smart fallbacks and validation
+
+### Custom Markdown Parser
+
+Perspt includes a custom-built markdown parser optimized for terminal rendering:
+
+- **Stream-optimized**: Handles real-time streaming content efficiently
+- **Terminal-native**: Designed specifically for terminal color capabilities
+- **Lightweight**: No external dependencies, built for performance
+- **Robust**: Handles partial and malformed markdown gracefully
+- **Buffer-managed**: Intelligent buffering for smooth rendering during streaming
 
 ### Key Technical Improvements
 
 - **Fixed CLI Arguments**: API keys and model selection now work correctly via command line
 - **Enhanced Streaming**: Improved buffering and event handling for smooth response rendering
 - **Better Authentication**: Proper environment variable mapping for different providers
-- **Robust UI**: Reduced timeouts and improved responsiveness (50ms vs 100ms)
+- **Responsive UI**: Reduced timeouts and improved responsiveness (50ms vs 100ms)
+- **Custom Markdown Rendering**: Built-in parser eliminates external dependencies
 - **Comprehensive Documentation**: Extensive code documentation and user guides
 
 ## 🖐️ Key Bindings
@@ -296,7 +307,7 @@ Perspt has been completely rewritten to use the **genai** crate (v0.3.5), provid
 
 **✅ UI Improvements:**
 - Faster response times with 50ms event timeouts
-- Better streaming buffer management for smooth markdown rendering
+- Better streaming buffer management for smooth markdown rendering with custom parser
 - Visual feedback during model processing
 - Proper terminal restoration on all exit paths
 
@@ -304,17 +315,18 @@ Perspt has been completely rewritten to use the **genai** crate (v0.3.5), provid
 
 ### Migration to genai Crate
 
-We've completely migrated from the `allms` crate to the modern **genai** crate (v0.3.5), bringing significant improvements:
+We've migrated from the `allms` crate to the modern **genai** crate (v0.3.5), bringing significant improvements:
 
 **🎯 Fixed Critical Issues:**
 1. ✅ **CLI Arguments Now Work**: API keys, models, and provider types work correctly via command line
 2. ✅ **Flexible Authentication**: API keys work via CLI, environment variables, or config files
 3. ✅ **Responsive UI**: Fixed keystroke waiting issues - UI now responds immediately
-4. ✅ **Better Parsing**: Improved markdown rendering with proper streaming buffer management
+4. ✅ **Custom Markdown Parser**: Built-in markdown parser eliminates external dependencies
 
 **🚀 New Features:**
 - Support for latest reasoning models (o1-mini, o1-preview, Gemini 2.5 Pro)
 - Enhanced streaming with proper reasoning chunk handling
+- Custom markdown parser optimized for terminal rendering
 - Comprehensive error handling with terminal restoration
 - Model validation before UI startup
 - Extensive code documentation and user guides
@@ -327,7 +339,7 @@ We've completely migrated from the `allms` crate to the modern **genai** crate (
 
 **🎨 User Experience:**
 - Reduced response latency (50ms vs 100ms timeouts)
-- Smoother markdown rendering
+- Smoother markdown rendering with custom parser
 - Better visual feedback during processing
 - Improved chat history navigation
 

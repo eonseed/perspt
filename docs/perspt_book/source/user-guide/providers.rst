@@ -1,133 +1,299 @@
 AI Providers
 ============
 
-This comprehensive guide covers all supported AI providers in Perspt, their capabilities, configuration options, and best practices for optimal performance.
+This comprehensive guide covers all supported AI providers in Perspt powered by the modern genai crate (v0.3.5), their latest capabilities, configuration options, and best practices for optimal performance.
 
 Overview
 --------
 
-Perspt supports multiple AI providers, each with unique strengths and capabilities:
+Perspt leverages the unified genai crate to provide seamless access to multiple AI providers with consistent APIs and enhanced features:
 
-.. grid:: 1 2 2 2
+.. grid:: 2 2 3 4
     :gutter: 3
 
     .. grid-item-card:: OpenAI
         :text-align: center
         :class-header: sd-bg-primary sd-text-white
 
-        Industry-leading models including GPT-4, GPT-3.5, and specialized variants
+        Latest GPT models including reasoning models (o1-series), GPT-4.1, and optimized variants
 
     .. grid-item-card:: Anthropic
         :text-align: center
         :class-header: sd-bg-secondary sd-text-white
 
-        Claude family models known for safety and nuanced understanding
+        Claude 3.5 family with constitutional AI and safety-focused design
 
     .. grid-item-card:: Google AI
         :text-align: center
         :class-header: sd-bg-success sd-text-white
 
-        Gemini models with multimodal capabilities and reasoning
+        Gemini 2.5 Pro and multimodal capabilities with large context windows
 
-    .. grid-item-card:: Local Models
+    .. grid-item-card:: Groq
+        :text-align: center
+        :class-header: sd-bg-warning sd-text-white
+
+        Ultra-fast inference with Llama and Mixtral models
+
+    .. grid-item-card:: Cohere
         :text-align: center
         :class-header: sd-bg-info sd-text-white
 
-        Ollama, LM Studio, and other local inference solutions
+        Command R+ models optimized for business and RAG applications
+
+    .. grid-item-card:: XAI
+        :text-align: center
+        :class-header: sd-bg-dark sd-text-white
+
+        Grok models with real-time web access and humor
+
+    .. grid-item-card:: Ollama
+        :text-align: center
+        :class-header: sd-bg-light sd-text-dark
+
+        Local model hosting with privacy and offline capabilities
+
+    .. grid-item-card:: AWS Bedrock
+        :text-align: center
+        :class-header: sd-bg-danger sd-text-white
+
+        Enterprise-grade with Nova and Titan models
 
 OpenAI
 ------
 
-OpenAI provides some of the most capable and widely-used language models.
+OpenAI provides cutting-edge language models including the latest reasoning capabilities through the genai crate integration.
 
 Supported Models
 ~~~~~~~~~~~~~~~~
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 25 25 25
+   :widths: 30 20 25 25
 
    * - Model
      - Context Length
      - Best For
      - Notes
+   * - ``gpt-4.1``
+     - 128K tokens
+     - Enhanced reasoning, latest capabilities
+     - Most advanced GPT-4 variant (2025)
+   * - ``o1-preview``
+     - 128K tokens
+     - Complex reasoning, problem solving
+     - Advanced reasoning with step-by-step thinking
+   * - ``o1-mini``
+     - 128K tokens
+     - Fast reasoning, coding tasks
+     - Efficient reasoning model
+   * - ``o3-mini``
+     - 128K tokens
+     - Latest reasoning capabilities
+     - Newest reasoning model (2025)
+   * - ``gpt-4o``
+     - 128K tokens
+     - Multimodal, fast performance
+     - Optimized for speed and quality
+   * - ``gpt-4o-mini``
+     - 128K tokens
+     - Fast, cost-effective (default)
+     - Efficient version of GPT-4o
    * - ``gpt-4-turbo``
      - 128K tokens
      - Complex reasoning, analysis
-     - Latest and most capable
-   * - ``gpt-4``
-     - 8K tokens
-     - High-quality responses
-     - Reliable for most tasks
+     - Previous generation flagship
    * - ``gpt-3.5-turbo``
      - 16K tokens
      - Fast, cost-effective
      - Good for simple tasks
-   * - ``gpt-4-vision-preview``
-     - 128K tokens
-     - Image analysis
-     - Supports multimodal input
 
 Configuration
 ~~~~~~~~~~~~~
 
-Basic OpenAI configuration:
+Basic OpenAI configuration with genai crate:
 
 .. code-block:: json
 
    {
-     "provider": "openai",
-     "api_key": "your-openai-api-key",
-     "model": "gpt-4-turbo",
-     "base_url": "https://api.openai.com/v1",
-     "organization": "optional-org-id",
-     "max_tokens": 4000,
-     "temperature": 0.7,
-     "top_p": 1.0,
-     "frequency_penalty": 0.0,
-     "presence_penalty": 0.0
-   }
-
-Advanced Configuration
-~~~~~~~~~~~~~~~~~~~~~~
-
-**Function Calling**:
-
-.. code-block:: json
-
-   {
-     "provider": "openai",
-     "model": "gpt-4-turbo",
-     "functions": {
-       "enabled": true,
-       "auto_invoke": true,
-       "available_functions": [
-         "web_search",
-         "code_execution",
-         "file_operations"
-       ]
+     "provider_type": "openai",
+     "api_key": "sk-your-openai-api-key",
+     "default_model": "gpt-4o-mini",
+     "providers": {
+       "openai": "https://api.openai.com/v1"
      }
    }
 
-**Streaming Responses**:
+CLI Usage
+~~~~~~~~~
+
+.. code-block:: bash
+
+   # Use latest reasoning model
+   perspt --provider-type openai --model o1-mini
+   
+   # Use fastest model (default)
+   perspt --provider-type openai --model gpt-4o-mini
+   
+   # List all available OpenAI models
+   perspt --provider-type openai --list-models
+
+**Reasoning Model Features**
+
+O1-series models provide enhanced reasoning with visual feedback:
+
+.. code-block:: text
+
+   > Solve this logic puzzle: There are 5 houses in a row...
+   
+   [Reasoning...] Let me work through this step by step:
+   1. Setting up the constraints...
+   2. Analyzing the color clues...
+   3. Cross-referencing with pet information...
+   [Streaming...] Based on my analysis, here's the solution...
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export OPENAI_API_KEY="sk-your-key-here"
+   export OPENAI_ORG_ID="org-your-org-id"  # Optional
+
+Anthropic (Claude)
+------------------
+
+Anthropic's Claude models excel at safety, reasoning, and nuanced understanding through constitutional AI principles.
+
+Supported Models
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 25 20
+
+   * - Model
+     - Context Length
+     - Best For
+     - Notes
+   * - ``claude-3-5-sonnet-20241022``
+     - 200K tokens
+     - Balanced performance, latest version
+     - Recommended default
+   * - ``claude-3-5-sonnet-20240620``
+     - 200K tokens
+     - Previous Sonnet version
+     - Stable and reliable
+   * - ``claude-3-5-haiku-20241022``
+     - 200K tokens
+     - Fast responses, cost-effective
+     - Good for simple tasks
+   * - ``claude-3-opus-20240229``
+     - 200K tokens
+     - Most capable, complex reasoning
+     - Highest quality responses
+
+Configuration
+~~~~~~~~~~~~~
 
 .. code-block:: json
 
    {
-     "provider": "openai",
-     "model": "gpt-4-turbo",
-     "stream": true,
-     "stream_buffer_size": 1024
+     "provider_type": "anthropic",
+     "api_key": "sk-ant-your-anthropic-key",
+     "default_model": "claude-3-5-sonnet-20241022",
+     "providers": {
+       "anthropic": "https://api.anthropic.com"
+     }
    }
 
-**Custom Headers**:
+CLI Usage
+~~~~~~~~~
+
+.. code-block:: bash
+
+   # Use latest Claude model
+   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
+   
+   # Use fastest Claude model  
+   perspt --provider-type anthropic --model claude-3-5-haiku-20241022
+   
+   # List available Anthropic models
+   perspt --provider-type anthropic --list-models
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+
+Google AI (Gemini)
+------------------
+
+Google's Gemini models offer multimodal capabilities and large context windows with competitive performance.
+
+Supported Models
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 25 20
+
+   * - Model
+     - Context Length
+     - Best For
+     - Notes
+   * - ``gemini-2.0-flash-exp``
+     - 1M tokens
+     - Latest experimental model
+     - Cutting-edge capabilities (2025)
+   * - ``gemini-1.5-pro``
+     - 2M tokens
+     - Large documents, complex analysis
+     - Largest context window
+   * - ``gemini-1.5-flash``
+     - 1M tokens
+     - Fast responses, good balance
+     - Recommended default
+   * - ``gemini-pro``
+     - 32K tokens
+     - General purpose tasks
+     - Stable and reliable
+
+Configuration
+~~~~~~~~~~~~~
 
 .. code-block:: json
 
    {
-     "provider": "openai",
-     "headers": {
-       "Custom-Header": "value",
+     "provider_type": "google",
+     "api_key": "your-google-api-key",
+     "default_model": "gemini-1.5-flash",
+     "providers": {
+       "google": "https://generativelanguage.googleapis.com"
+     }
+   }
+
+CLI Usage
+~~~~~~~~~
+
+.. code-block:: bash
+
+   # Use latest Gemini model
+   perspt --provider-type google --model gemini-2.0-flash-exp
+   
+   # Use model with largest context
+   perspt --provider-type google --model gemini-1.5-pro
+   
+   # List available Google models
+   perspt --provider-type google --list-models
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export GOOGLE_API_KEY="your-key-here"
+   # or
+   export GEMINI_API_KEY="your-key-here"
        "User-Agent": "Perspt/1.0"
      }
    }
@@ -260,18 +426,30 @@ Supported Models
      - Context Length
      - Best For
      - Notes
+   * - ``gemini-2.5-pro``
+     - 2M tokens
+     - Advanced reasoning, analysis
+     - Latest and most capable
+   * - ``gemini-2.0-flash``
+     - 1M tokens
+     - Fast, efficient performance
+     - Optimized for speed
+   * - ``gemini-1.5-pro``
+     - 2M tokens
+     - Complex reasoning, long context
+     - High-capability model
+   * - ``gemini-1.5-flash``
+     - 1M tokens
+     - Fast responses, good quality
+     - Balanced speed and capability
    * - ``gemini-pro``
      - 32K tokens
      - General reasoning
-     - Balanced performance
+     - Legacy model
    * - ``gemini-pro-vision``
      - 16K tokens
      - Multimodal tasks
      - Supports images and text
-   * - ``gemini-ultra``
-     - 32K tokens
-     - Complex reasoning
-     - Highest capability tier
 
 Configuration
 ~~~~~~~~~~~~~
@@ -300,7 +478,7 @@ Basic Google AI configuration:
    }
 
 Multimodal Configuration
-~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 For image analysis with Gemini Vision:
 
@@ -633,3 +811,247 @@ Next Steps
 - :doc:`advanced-features` - Advanced features that work with different providers
 - :doc:`../configuration` - Complete configuration reference
 - :doc:`../developer-guide/extending` - Create custom provider integrations
+
+Groq
+----
+
+Groq provides ultra-fast inference speeds with popular open-source models, optimized for real-time conversations.
+
+Supported Models
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 25 20
+
+   * - Model
+     - Context Length
+     - Best For
+     - Notes
+   * - ``llama-3.1-405b-reasoning``
+     - 128K tokens
+     - Complex reasoning, analysis
+     - Largest Llama model
+   * - ``llama-3.1-70b-versatile``
+     - 128K tokens
+     - Balanced performance
+     - Good general purpose model
+   * - ``llama-3.1-8b-instant``
+     - 128K tokens
+     - Ultra-fast responses
+     - Best for speed
+   * - ``mixtral-8x7b-32768``
+     - 32K tokens
+     - Mixture of experts
+     - Strong coding capabilities
+
+Configuration
+~~~~~~~~~~~~~
+
+.. code-block:: json
+
+   {
+     "provider_type": "groq",
+     "api_key": "your-groq-api-key",
+     "default_model": "llama-3.1-70b-versatile",
+     "providers": {
+       "groq": "https://api.groq.com/openai/v1"
+     }
+   }
+
+CLI Usage
+~~~~~~~~~
+
+.. code-block:: bash
+
+   # Ultra-fast responses
+   perspt --provider-type groq --model llama-3.1-8b-instant
+   
+   # Balanced performance
+   perspt --provider-type groq --model llama-3.1-70b-versatile
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export GROQ_API_KEY="your-key-here"
+
+Cohere
+------
+
+Cohere specializes in enterprise-focused models with strong RAG (Retrieval-Augmented Generation) capabilities.
+
+Supported Models
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 25 20
+
+   * - Model
+     - Context Length
+     - Best For
+     - Notes
+   * - ``command-r-plus``
+     - 128K tokens
+     - RAG, business applications
+     - Most capable Cohere model
+   * - ``command-r``
+     - 128K tokens
+     - General purpose, fast
+     - Good balance of speed and quality
+   * - ``command``
+     - 4K tokens
+     - Simple tasks, cost-effective
+     - Basic model
+
+Configuration
+~~~~~~~~~~~~~
+
+.. code-block:: json
+
+   {
+     "provider_type": "cohere",
+     "api_key": "your-cohere-api-key", 
+     "default_model": "command-r-plus",
+     "providers": {
+       "cohere": "https://api.cohere.ai"
+     }
+   }
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export COHERE_API_KEY="your-key-here"
+
+XAI (Grok)
+----------
+
+XAI's Grok models provide real-time web access and are known for their humor and current knowledge.
+
+Supported Models
+~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 20 25 20
+
+   * - Model
+     - Context Length
+     - Best For
+     - Notes
+   * - ``grok-beta``
+     - 128K tokens
+     - Current events, humor
+     - Latest Grok model
+   * - ``grok-vision-beta``
+     - 128K tokens
+     - Multimodal analysis
+     - Image understanding
+
+Configuration
+~~~~~~~~~~~~~
+
+.. code-block:: json
+
+   {
+     "provider_type": "xai",
+     "api_key": "your-xai-api-key",
+     "default_model": "grok-beta",
+     "providers": {
+       "xai": "https://api.x.ai/v1"
+     }
+   }
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export XAI_API_KEY="your-key-here"
+
+Ollama (Local Models)
+---------------------
+
+Ollama provides local model hosting for privacy, offline usage, and cost control with the genai crate integration.
+
+Supported Models
+~~~~~~~~~~~~~~~~
+
+Popular models available through Ollama:
+
+.. code-block:: bash
+
+   # Large models (requires significant RAM)
+   llama3.2:90b     # Latest Llama model
+   qwen2.5:72b      # Alibaba's capable model
+   
+   # Medium models (good balance)
+   llama3.2:8b      # Recommended default
+   mistral-nemo:12b # Mistral's latest
+   
+   # Small models (fast, low resource)
+   llama3.2:3b      # Efficient Llama variant
+   qwen2.5:7b       # Compact but capable
+
+Setup and Configuration
+~~~~~~~~~~~~~~~~~~~~~~~
+
+1. **Install Ollama**:
+
+.. code-block:: bash
+
+   # macOS
+   brew install ollama
+   
+   # Linux
+   curl -fsSL https://ollama.com/install.sh | sh
+
+2. **Download Models**:
+
+.. code-block:: bash
+
+   # Download recommended model
+   ollama pull llama3.2:8b
+   
+   # Download smaller model for testing
+   ollama pull llama3.2:3b
+
+3. **Configure Perspt**:
+
+.. code-block:: json
+
+   {
+     "provider_type": "ollama",
+     "default_model": "llama3.2:8b",
+     "providers": {
+       "ollama": "http://localhost:11434"
+     }
+   }
+
+CLI Usage
+~~~~~~~~~
+
+.. code-block:: bash
+
+   # Use local Ollama model
+   perspt --provider-type ollama --model llama3.2:8b
+   
+   # List installed Ollama models
+   perspt --provider-type ollama --list-models
+   
+   # Use custom Ollama endpoint
+   perspt --provider-type ollama --model llama3.2:8b
+
+**Benefits of Local Models**
+
+- **Privacy**: Data stays on your machine
+- **Offline Usage**: No internet required after setup
+- **Cost Control**: No per-token charges
+- **Customization**: Fine-tune models for specific tasks
+
+**Environment Variables**
+
+.. code-block:: bash
+
+   export OLLAMA_HOST="http://localhost:11434"
