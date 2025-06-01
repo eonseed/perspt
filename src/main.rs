@@ -576,7 +576,7 @@ async fn initiate_llm_request(
         match result {
             Ok(()) => {
                 log::debug!("Streaming completed successfully");
-                let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+                // EOT signal is now sent by the provider itself, no need to send it here
             }
             Err(e) => {
                 log::error!("LLM request failed: {}", e);

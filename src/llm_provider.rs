@@ -68,6 +68,7 @@ use genai::{Client};
 use genai::adapter::AdapterKind;
 use futures::StreamExt;
 use tokio::sync::mpsc;
+use std::time::Instant;
 
 /// A comprehensive LLM provider implementation using the modern genai crate.
 ///
@@ -457,32 +458,63 @@ impl GenAIProvider {
         let chat_res_stream = self.client.exec_chat_stream(model, chat_req, None).await
             .context(format!("Failed to execute streaming chat request for model: {}", model))?;
 
-        // Process the stream properly
+        // Process the stream with enhanced debugging to identify truncation issues
         let mut stream = chat_res_stream.stream;
+        let mut chunk_count = 0;
+        let mut total_content_length = 0;
+        let mut stream_ended_explicitly = false;
+        let start_time = Instant::now();
         
-        while let Some(stream_result) = stream.next().await {
-            match stream_result {
+        log::info!("=== STREAM START === Model: {}, Prompt length: {} chars", model, prompt.len());
+        
+        // CRITICAL FIX: Only rely on genai's ChatStreamEvent signals, not custom timeouts
+        // This prevents premature stream termination that causes content spillover
+        while let Some(chunk_result) = stream.next().await {
+            let elapsed = start_time.elapsed();
+            
+            match chunk_result {
                 Ok(ChatStreamEvent::Start) => {
-                    log::debug!("Stream started for model: {}", model);
+                    log::info!(">>> STREAM STARTED for model: {} at {:?}", model, elapsed);
                 }
                 Ok(ChatStreamEvent::Chunk(chunk)) => {
+                    chunk_count += 1;
+                    total_content_length += chunk.content.len();
+                    
+                    // Enhanced logging: log every 10 chunks AND any large chunks
+                    if chunk_count % 10 == 0 || chunk.content.len() > 100 {
+                        log::info!("CHUNK #{}: {} chars, total: {} chars, elapsed: {:?}, content preview: '{}'", 
+                                  chunk_count, chunk.content.len(), total_content_length, elapsed,
+                                  chunk.content.chars().take(50).collect::<String>().replace('\n', "\\n"));
+                    }
+                    
                     if !chunk.content.is_empty() {
-                        if tx.send(chunk.content).is_err() {
-                            log::warn!("Failed to send chunk to channel");
+                        // Send content immediately without batching to prevent content loss
+                        if tx.send(chunk.content.clone()).is_err() {
+                            log::error!("!!! CHANNEL SEND FAILED for chunk #{} - STOPPING STREAM !!!", chunk_count);
                             break;
                         }
+                        
+                        // Additional detailed logging every 25 chunks
+                        if chunk_count % 25 == 0 {
+                            log::info!("=== PROGRESS: {} chunks, {} chars, {:?} elapsed ===", 
+                                       chunk_count, total_content_length, elapsed);
+                        }
+                    } else {
+                        log::debug!("Empty chunk #{} received", chunk_count);
                     }
                 }
                 Ok(ChatStreamEvent::ReasoningChunk(chunk)) => {
-                    // Handle reasoning chunks if needed (for models like o1)
-                    log::debug!("Reasoning chunk: {}", chunk.content);
+                    log::info!("REASONING CHUNK: {} chars at {:?}", chunk.content.len(), elapsed);
+                    // For now, just log reasoning chunks. In future versions we might display them differently.
                 }
                 Ok(ChatStreamEvent::End(_)) => {
-                    log::debug!("Stream ended for model: {}", model);
+                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {} after {} chunks, {} chars, {:?} elapsed", 
+                               model, chunk_count, total_content_length, elapsed);
+                    stream_ended_explicitly = true;
                     break;
                 }
                 Err(e) => {
-                    log::error!("Stream error: {}", e);
+                    log::error!("!!! STREAM ERROR after {} chunks at {:?}: {} !!!", chunk_count, elapsed, e);
                     let error_msg = format!("Stream error: {}", e);
                     let _ = tx.send(error_msg);
                     return Err(e.into());
@@ -490,7 +522,24 @@ impl GenAIProvider {
             }
         }
 
-        log::debug!("Streaming completed for model: {}", model);
+        // Stream ended - either explicitly via End event or stream exhaustion
+        let final_elapsed = start_time.elapsed();
+        if !stream_ended_explicitly {
+            log::warn!("!!! STREAM ENDED IMPLICITLY (exhausted) for model: {} after {} chunks, {} chars, {:?} elapsed !!!", 
+                       model, chunk_count, total_content_length, final_elapsed);
+        }
+
+        log::info!("=== STREAM COMPLETE === Model: {}, Final: {} chunks, {} chars, {:?} elapsed", 
+                   model, chunk_count, total_content_length, final_elapsed);
+        
+        // CRITICAL: Send single EOT signal to indicate completion
+        // Remove duplicate/backup EOT signals that can cause confusion in the UI
+        if tx.send(crate::EOT_SIGNAL.to_string()).is_err() {
+            log::error!("!!! FAILED TO SEND EOT SIGNAL - channel may be closed !!!");
+            return Err(anyhow::anyhow!("Channel closed during EOT signal send"));
+        }
+        
+        log::info!(">>> EOT SIGNAL SENT for model: {} <<<", model);
         Ok(())
     }
 

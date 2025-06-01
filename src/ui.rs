@@ -50,10 +50,15 @@ use crate::llm_provider::GenAIProvider;
 use tokio::sync::mpsc;
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers, KeyEvent, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyEvent},
     terminal::{self, LeaveAlternateScreen},
     ExecutableCommand,
 };
+
+// Buffer management constants - optimized for responsiveness
+const MAX_STREAMING_BUFFER_SIZE: usize = 1_000_000; // 1MB limit for streaming buffer
+const UI_UPDATE_INTERVAL: usize = 500; // Update UI every 500 characters (more responsive)
+const SMALL_BUFFER_THRESHOLD: usize = 500; // Always update UI for small content (more responsive)
 
 /// Represents the type of message in the chat interface.
 ///
@@ -585,14 +590,14 @@ impl App {
         let total_content_lines: usize = self.chat_history
             .iter()
             .map(|msg| {
-                // Header line + content lines + empty line
-                1 + msg.content.len() + 1
+                // Header line (1) + content lines + empty separator line (1)
+                2 + msg.content.len()
             })
             .sum();
         
         // Account for the visible height of the chat area
-        // Terminal height minus header(3) + input(5) + status(3) = 11
-        let visible_height = self.terminal_height.saturating_sub(11);
+        // Terminal height minus header(3) + input(5) + status(3) = 11 reserved lines
+        let visible_height = self.terminal_height.saturating_sub(11).max(1);
         
         if total_content_lines > visible_height {
             total_content_lines.saturating_sub(visible_height)
@@ -731,54 +736,201 @@ impl App {
         }
     }
 
-    /// Start streaming response with immediate feedback
+    /// Start streaming response with immediate feedback and state protection
     pub fn start_streaming(&mut self) {
+        // Ensure we're in a clean state before starting new stream
+        if self.is_llm_busy {
+            log::warn!("Starting new stream while already busy - forcing clean state");
+            self.finish_streaming();
+        }
+        
         self.is_llm_busy = true;
         self.is_input_disabled = true;
         self.response_progress = 0.0;
         self.streaming_buffer.clear();
+        
+        // Create a new assistant message immediately to ensure we have a dedicated message for this streaming session
+        let initial_message = ChatMessage {
+            message_type: MessageType::Assistant,
+            content: vec![Line::from("...")], // Placeholder content while waiting for response
+            timestamp: Self::get_timestamp(),
+        };
+        self.chat_history.push(initial_message);
+        
         self.needs_redraw = true;
         self.typing_indicator = "⠋".to_string(); // Start with first spinner frame
         self.set_status("🚀 Sending request...".to_string(), false);
+        log::debug!("Started streaming mode with new assistant message");
     }
 
-    /// Finish streaming response with clean state reset
+    /// Finish streaming response with clean state reset and final content preservation
     pub fn finish_streaming(&mut self) {
+        log::debug!("Finishing streaming mode, buffer has {} chars", self.streaming_buffer.len());
+        
+        // CRITICAL FIX: Always force final UI update regardless of throttling
+        // This ensures that all accumulated content in the buffer gets transferred to the chat message
+        if !self.streaming_buffer.is_empty() {
+            log::debug!("Forcing final UI update with {} chars in buffer", self.streaming_buffer.len());
+            
+            if let Some(last_msg) = self.chat_history.last_mut() {
+                if last_msg.message_type == MessageType::Assistant {
+                    // Force final update of the assistant message with complete content
+                    last_msg.content = markdown_to_lines(&self.streaming_buffer);
+                    last_msg.timestamp = Self::get_timestamp();
+                    log::debug!("FINAL UPDATE: Assistant message now has {} lines of content", last_msg.content.len());
+                } else {
+                    // This shouldn't happen with our new approach, but handle gracefully
+                    log::warn!("Expected assistant message at end of streaming but found {:?}", last_msg.message_type);
+                    self.add_streaming_message();
+                    log::debug!("Added new assistant message with final content");
+                }
+            } else {
+                // This shouldn't happen either, but handle gracefully
+                log::warn!("No messages in chat history at end of streaming");
+                self.add_streaming_message();
+                log::debug!("Added assistant message to empty chat history");
+            }
+            
+            // Log the final content for debugging
+            if let Some(last_msg) = self.chat_history.last() {
+                if last_msg.message_type == MessageType::Assistant {
+                    let content_preview = last_msg.content.iter()
+                        .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect::<String>())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .chars()
+                        .take(100)
+                        .collect::<String>();
+                    log::debug!("Final message content preview: {}...", content_preview);
+                }
+            }
+        } else {
+            // If no content was received, check if we have a placeholder and remove it
+            if let Some(last_msg) = self.chat_history.last() {
+                if last_msg.message_type == MessageType::Assistant {
+                    // Check if this looks like our placeholder (empty or just "...")
+                    let is_placeholder = last_msg.content.is_empty() ||
+                        (last_msg.content.len() == 1 && 
+                         last_msg.content[0].spans.len() == 1 &&
+                         (last_msg.content[0].spans[0].content == "..." || 
+                          last_msg.content[0].spans[0].content.trim().is_empty()));
+                    
+                    if is_placeholder {
+                        self.chat_history.pop();
+                        log::debug!("Removed placeholder assistant message (no content received)");
+                    }
+                }
+            }
+            log::debug!("No content in streaming buffer to finalize");
+        }
+        
+        // Clear the buffer AFTER ensuring content is saved to prevent race conditions
+        self.streaming_buffer.clear();
+        
+        // Reset streaming state
         self.is_llm_busy = false;
         self.is_input_disabled = false;
-        self.response_progress = 0.0;
-        self.streaming_buffer.clear();
+        self.response_progress = 1.0; // Show completion
         self.typing_indicator.clear();
+        
+        // Ensure final content is visible
+        self.scroll_to_bottom();
         self.needs_redraw = true;
+        
+        // Update status
         self.set_status("✅ Ready".to_string(), false);
         self.clear_error();
+        
+        log::debug!("Streaming mode finished successfully, chat history has {} messages", self.chat_history.len());
     }
 
     /// Update streaming content with optimized rendering and immediate feedback
     pub fn update_streaming_content(&mut self, content: &str) {
+        // Only process non-empty content
+        if content.is_empty() {
+            return;
+        }
+        
+        // Prevent buffer overflow - if buffer gets too large, start replacing old content
+        if self.streaming_buffer.len() + content.len() > MAX_STREAMING_BUFFER_SIZE {
+            log::warn!("Streaming buffer approaching limit, truncating old content");
+            // Keep the last 80% of the buffer to maintain context
+            let keep_from = self.streaming_buffer.len() / 5;
+            self.streaming_buffer = self.streaming_buffer[keep_from..].to_string();
+        }
+        
         self.streaming_buffer.push_str(content);
         
-        // Update or create assistant message
+        // CRITICAL FIX: Always update the message content, regardless of UI throttling
+        // This ensures that the message always contains the latest content
         if let Some(last_msg) = self.chat_history.last_mut() {
             if last_msg.message_type == MessageType::Assistant {
+                // Always update the assistant message with the latest streaming content
                 last_msg.content = markdown_to_lines(&self.streaming_buffer);
+                last_msg.timestamp = Self::get_timestamp(); // Update timestamp for latest content
             } else {
+                // This should not happen with our new approach, but handle it gracefully
+                log::warn!("Expected assistant message but found {:?}, creating new assistant message", last_msg.message_type);
                 self.add_streaming_message();
             }
         } else {
+            // This should also not happen, but handle it gracefully
+            log::warn!("No messages in chat history during streaming, creating new assistant message");
             self.add_streaming_message();
         }
         
-        // Update progress and ensure visibility
-        self.response_progress = (self.response_progress + 0.05).min(1.0);
-        self.scroll_to_bottom();
-        self.needs_redraw = true;
+        // FIXED: More responsive UI update strategy that prevents freezing during long responses
+        // Balance performance with responsiveness by using multiple update triggers
+        let buffer_len = self.streaming_buffer.len();
         
-        // Force immediate status update for better feedback
-        self.set_status(format!("{}  Receiving response... ({}% complete)", 
-            self.typing_indicator, 
-            (self.response_progress * 100.0) as u8
-        ), false);
+        // Track when we last updated the UI to ensure regular updates
+        thread_local! {
+            static LAST_UI_UPDATE_SIZE: std::cell::Cell<usize> = std::cell::Cell::new(0);
+        }
+        let last_update_size = LAST_UI_UPDATE_SIZE.with(|c| c.get());
+        let size_since_last_update = buffer_len.saturating_sub(last_update_size);
+        
+        let should_redraw_ui = 
+            // Always update for small content (responsive for short responses)
+            buffer_len < SMALL_BUFFER_THRESHOLD ||
+            
+            // Regular interval updates (every 250 chars for better responsiveness)
+            size_since_last_update >= (UI_UPDATE_INTERVAL / 2) ||
+            
+            // Content-based triggers for better UX
+            content.contains('\n') ||      // Line breaks
+            content.contains("```") ||     // Code blocks
+            content.contains("##") ||      // Headers
+            content.contains("**") ||      // Bold text
+            content.contains("*") ||       // Italic text or bullet points
+            content.contains("- ") ||      // List items
+            content.contains(". ") ||      // Sentence endings
+            content.contains("? ") ||      // Questions
+            content.contains("! ") ||      // Exclamations
+            
+            // Time-based fallback: ensure UI updates at least every few chunks
+            // This prevents long freezes even if content doesn't match patterns
+            size_since_last_update >= 200; // Force update every 200 chars minimum
+        
+        if should_redraw_ui {
+            // Update our tracking of when we last updated
+            LAST_UI_UPDATE_SIZE.with(|c| c.set(buffer_len));
+            
+            // Update progress and ensure visibility
+            self.response_progress = (self.response_progress + 0.05).min(0.95);
+            self.scroll_to_bottom(); // Ensure latest content is visible
+            self.needs_redraw = true;
+            
+            // Force immediate status update for better feedback
+            self.set_status(format!("{}  Receiving response... ({} chars, {}% complete)", 
+                self.typing_indicator, 
+                buffer_len,
+                (self.response_progress * 100.0) as u8
+            ), false);
+        } else {
+            // Even if we don't redraw UI, still update the progress indicator
+            self.response_progress = (self.response_progress + 0.01).min(0.95);
+        }
     }
 
     /// Add new streaming assistant message
@@ -829,27 +981,78 @@ pub async fn run_ui(
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
     
-    // log::info!("Starting enhanced UI with model: {}", model_name); // Removed to prevent TUI interference
-
-    // Create event stream for non-blocking event handling
+    // Create event stream for responsive event handling
     let mut event_stream = EventStream::new();
-    let mut tick_interval = tokio::time::interval(Duration::from_millis(16)); // ~60 FPS for smooth animations
+    let mut tick_interval = tokio::time::interval(Duration::from_millis(50)); // Slower tick for efficiency
+    let mut render_interval = tokio::time::interval(Duration::from_millis(16)); // ~60 FPS for smooth rendering
 
     loop {
-        // Handle UI updates first for responsiveness
-        app.tick();
-
-        // Draw UI only when needed
-        if app.needs_redraw {
-            terminal.draw(|f| {
-                draw_enhanced_ui(f, &mut app, &model_name);
-            })?;
-            app.needs_redraw = false;
-        }
-
-        // Use tokio::select! for non-blocking event handling
+        // Use tokio::select! with proper priorities for responsive UI
         tokio::select! {
-            // Handle terminal events with highest priority
+            // Highest priority: Handle LLM responses immediately for real-time streaming
+            // Process ALL available messages to prevent backlog and prioritize EOT signals
+            llm_message = rx.recv() => {
+                if let Some(message) = llm_message {
+                    // Collect all messages from the channel first to prioritize EOT signals
+                    let mut all_messages = vec![message];
+                    while let Ok(additional_message) = rx.try_recv() {
+                        all_messages.push(additional_message);
+                    }
+                    
+                    log::info!("=== UI PROCESSING === {} messages received", all_messages.len());
+                    
+                    // Process EOT signals FIRST to prevent state confusion
+                    let mut content_messages: Vec<String> = Vec::new();
+                    let mut eot_count = 0;
+                    let mut total_content_chars = 0;
+                    
+                    for (i, msg) in all_messages.iter().enumerate() {
+                        if msg == crate::EOT_SIGNAL {
+                            eot_count += 1;
+                            log::info!(">>> EOT SIGNAL #{} found at position {} <<<", eot_count, i);
+                            if eot_count == 1 {
+                                // Process all accumulated content before first EOT
+                                log::info!("Processing {} content messages before EOT ({} total chars)", 
+                                          content_messages.len(), total_content_chars);
+                                for (j, content_msg) in content_messages.iter().enumerate() {
+                                    log::debug!("Processing content message {}/{}: {} chars", 
+                                               j+1, content_messages.len(), content_msg.len());
+                                    handle_llm_response(&mut app, content_msg.clone(), &provider, &model_name, &tx).await;
+                                }
+                                content_messages.clear();
+                                // Now process the EOT signal
+                                handle_llm_response(&mut app, msg.clone(), &provider, &model_name, &tx).await;
+                                break; // Stop processing after first EOT
+                            } else {
+                                // Ignore duplicate EOT signals
+                                log::warn!("Ignoring duplicate EOT signal #{}", eot_count);
+                            }
+                        } else {
+                            total_content_chars += msg.len();
+                            content_messages.push(msg.clone());
+                        }
+                    }
+                    
+                    // If no EOT signal, process remaining content messages
+                    if eot_count == 0 {
+                        log::info!("No EOT signal found, processing {} remaining content messages ({} chars)", 
+                                  content_messages.len(), total_content_chars);
+                        for (j, content_msg) in content_messages.into_iter().enumerate() {
+                            log::debug!("Processing remaining content message {}: {} chars", j+1, content_msg.len());
+                            handle_llm_response(&mut app, content_msg, &provider, &model_name, &tx).await;
+                        }
+                    }
+                    
+                    app.needs_redraw = true;
+                    // Force immediate redraw for streaming responses
+                    terminal.draw(|f| {
+                        draw_enhanced_ui(f, &mut app, &model_name);
+                    })?;
+                    app.needs_redraw = false;
+                }
+            }
+            
+            // Second priority: Handle terminal events for user interaction
             event_result = event_stream.next() => {
                 if let Some(Ok(event)) = event_result {
                     if let Some(app_event) = handle_terminal_event(&mut app, event, &tx, &api_key, &model_name, &provider).await {
@@ -869,17 +1072,21 @@ pub async fn run_ui(
                 }
             }
             
-            // Handle LLM responses
-            llm_message = rx.recv() => {
-                if let Some(message) = llm_message {
-                    handle_llm_response(&mut app, message, &provider, &model_name, &tx).await;
-                    app.needs_redraw = true;
+            // Third priority: Regular rendering updates
+            _ = render_interval.tick() => {
+                app.tick(); // Handle animations and cursor blinking
+                
+                if app.needs_redraw {
+                    terminal.draw(|f| {
+                        draw_enhanced_ui(f, &mut app, &model_name);
+                    })?;
+                    app.needs_redraw = false;
                 }
             }
             
-            // Periodic tick for animations (lower priority)
+            // Lowest priority: General tick for cleanup and background tasks
             _ = tick_interval.tick() => {
-                // Tick is handled above in app.tick()
+                // Additional background processing if needed
             }
         }
 
@@ -904,14 +1111,15 @@ impl EventStream {
     }
 
     async fn next(&mut self) -> Option<Result<Event, io::Error>> {
-        // Use completely non-blocking approach
-        if let Ok(true) = event::poll(Duration::from_millis(0)) {
+        // Use a small timeout to balance responsiveness and CPU usage
+        // This allows the event loop to process other tasks while still being responsive
+        if let Ok(true) = event::poll(Duration::from_millis(10)) {
             match event::read() {
                 Ok(event) => Some(Ok(event)),
                 Err(e) => Some(Err(e)),
             }
         } else {
-            // No event available, don't block
+            // Return None to allow other tasks in the select! loop to run
             None
         }
     }
@@ -1094,7 +1302,7 @@ async fn initiate_llm_request_enhanced(
     match result {
         Ok(()) => {
             log::debug!("Streaming completed successfully");
-            let _ = tx.send(crate::EOT_SIGNAL.to_string());
+            // EOT signal is now sent by the provider itself, no need to send it here
         }
         Err(e) => {
             log::error!("LLM request failed: {}", e);
@@ -1113,12 +1321,27 @@ async fn handle_llm_response(
     tx: &mpsc::UnboundedSender<String>,
 ) {
     if message == crate::EOT_SIGNAL {
-        // End of response
-        app.finish_streaming();
+        // End of response - CRITICAL: Ensure this is processed immediately
+        log::info!(">>> RECEIVED EOT SIGNAL - finishing streaming (busy: {}, buffer: {} chars) <<<", 
+                   app.is_llm_busy, app.streaming_buffer.len());
         
-        // Process pending inputs
-        if let Some(pending_input) = app.pending_inputs.pop_front() {
-            // log::info!("Processing pending input: {}", pending_input); // Removed to prevent TUI interference
+        // Always finish streaming when we get EOT, even if state seems wrong
+        if app.is_llm_busy {
+            log::info!("Calling finish_streaming() due to EOT");
+            app.finish_streaming();
+        } else {
+            log::warn!("!!! Received EOT signal but not in busy state - cleaning up anyway !!!");
+            app.streaming_buffer.clear();
+            app.is_input_disabled = false;
+        }
+        
+        // Ensure the UI has processed the finish_streaming state change
+        app.needs_redraw = true;
+        
+        // Process pending inputs ONLY after confirming we're in clean state
+        if !app.is_llm_busy && !app.pending_inputs.is_empty() {
+            let pending_input = app.pending_inputs.pop_front().unwrap();
+            log::info!("Processing pending input after EOT: {} chars", pending_input.len());
             
             app.add_message(ChatMessage {
                 message_type: MessageType::User,
@@ -1126,6 +1349,7 @@ async fn handle_llm_response(
                 timestamp: App::get_timestamp(),
             });
             
+            // Start new streaming session with clean state
             app.start_streaming();
             tokio::spawn(initiate_llm_request_enhanced(
                 pending_input,
@@ -1133,15 +1357,43 @@ async fn handle_llm_response(
                 model_name.to_string(),
                 tx.clone(),
             ));
+        } else if !app.pending_inputs.is_empty() {
+            log::warn!("Still have pending inputs but LLM is busy - this shouldn't happen");
+        } else {
+            log::debug!("No pending inputs to process after EOT");
         }
     } else if message.starts_with("Error: ") && message.len() > 7 {
         // Handle errors
         let error_msg = &message[7..];
+        log::error!("Received error message: {}", error_msg);
         let error_state = categorize_error(error_msg);
         app.add_error(error_state);
         app.finish_streaming();
     } else {
-        // Regular streaming content
+        // Regular streaming content - use thread-local counters for logging
+        thread_local! {
+            static TOTAL_CONTENT_RECEIVED: std::cell::Cell<usize> = std::cell::Cell::new(0);
+            static CHUNK_COUNT: std::cell::Cell<usize> = std::cell::Cell::new(0);
+        }
+        
+        let chunk_count = CHUNK_COUNT.with(|c| {
+            let count = c.get() + 1;
+            c.set(count);
+            count
+        });
+        
+        let total_received = TOTAL_CONTENT_RECEIVED.with(|t| {
+            let total = t.get() + message.len();
+            t.set(total);
+            total
+        });
+        
+        // Log every 25 chunks or large content chunks
+        if chunk_count % 25 == 0 || message.len() > 100 {
+            log::info!("STREAMING: chunk #{}, {} chars, total {} chars, buffer: {} chars", 
+                      chunk_count, message.len(), total_received, app.streaming_buffer.len());
+        }
+        
         app.update_streaming_content(&message);
         app.set_status(format!("{}  Receiving response...", app.typing_indicator), false);
     }
@@ -1285,17 +1537,29 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
             
             // Use the existing message content directly to avoid formatting issues
             lines.extend(msg.content.iter().cloned());
-            lines.push(Line::from(""));
+            lines.push(Line::from("")); // Separator line
             lines
         })
         .collect();
 
     // Calculate proper scroll position relative to content
     let content_height = chat_content.len();
-    let _visible_height = area.height.saturating_sub(2) as usize; // Account for borders
+    let visible_height = area.height.saturating_sub(2) as usize; // Account for borders
     
-    // Update scroll state for content
-    app.scroll_state = app.scroll_state.content_length(content_height.saturating_sub(1));
+    // Update scroll state for content - ensure proper bounds
+    app.scroll_state = app.scroll_state.content_length(content_height.max(1).saturating_sub(1));
+    
+    // Ensure scroll position is within valid bounds when content changes
+    let max_scroll = if content_height > visible_height {
+        content_height.saturating_sub(visible_height)
+    } else {
+        0
+    };
+    
+    if app.scroll_position > max_scroll {
+        app.scroll_position = max_scroll;
+        app.update_scroll_state();
+    }
 
     // Create layout for chat and scrollbar
     let chat_chunks = Layout::default()
