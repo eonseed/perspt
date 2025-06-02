@@ -140,7 +140,7 @@ jobs:
         cp -r docs/perspt_book/build/html _site/sphinx
         
         # Copy Rust documentation
-        cp -r target/doc _site/rust-docs
+        cp -r target/doc/perspt _site/rust-docs
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
