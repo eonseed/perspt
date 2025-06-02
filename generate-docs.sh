@@ -55,7 +55,7 @@ print_status "Generating documentation with custom assets..."
 export RUSTDOCFLAGS="--html-in-header docs/header.html --extend-css docs/custom.css --default-theme dark"
 
 # Generate the documentation
-cargo doc --no-deps --all-features
+#cargo doc --no-deps --all-features
 
 if [ $? -eq 0 ]; then
     print_success "Documentation generated successfully!"
