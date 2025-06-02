@@ -3,9 +3,14 @@
 name = "perspt"
 version = "0.4.0"
 edition = "2021"
-authors = ["Vikrant Rathore"]
+authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
-description = "A high-performance CLI for chatting with LLMs using the modern genai crate with support for latest models like o1-mini and Gemini 2.5 Pro"
+description = "A high-performance CLI application for chatting with various AI models from multiple providers directly in your terminal"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://eonseed.github.io/perspt/"
+readme = "README.md"
+keywords = ["terminal", "cli", "ai", "llm", "chat"]
+categories = ["command-line-utilities", "text-processing", "api-bindings", "visualization"]
 
 [dependencies]
 # LLM unified interface - using genai for better model support
