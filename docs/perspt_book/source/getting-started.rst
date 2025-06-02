@@ -20,7 +20,7 @@ System Requirements
    * - **Operating System**
      - Linux, macOS, or Windows
    * - **Rust Toolchain**
-     - Rust 1.70.0 or later
+     - Rust 1.82.0 or later
    * - **Terminal**
      - Any modern terminal emulator
    * - **Internet Connection**

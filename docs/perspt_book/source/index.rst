@@ -21,32 +21,50 @@ high-performance command-line interface (CLI) application that gives you a peek 
 Built with Rust for maximum speed and reliability, it allows you to chat with the latest AI models from multiple 
 providers directly in your terminal using a modern, unified interface powered by the cutting-edge ``genai`` crate.
 
-.. grid:: 2
-   :gutter: 3
+.. only:: html
 
-   .. grid-item-card:: 🚀 Quick Start
-      :link: getting-started
-      :link-type: doc
+   .. grid:: 2
+      :gutter: 3
 
-      Get up and running with Perspt in minutes. Install, configure, and start chatting with AI models.
+      .. grid-item-card:: 🚀 Quick Start
+         :link: getting-started
+         :link-type: doc
+         
+         Get up and running with Perspt in minutes. Install, configure, and start chatting with AI models.
 
-   .. grid-item-card:: 📚 User Guide
-      :link: user-guide/index
-      :link-type: doc
+      .. grid-item-card:: 📚 User Guide
+         :link: user-guide/index
+         :link-type: doc
+         
+         Complete guide to using Perspt effectively, from basic chat to advanced features.
 
-      Complete guide to using Perspt effectively, from basic chat to advanced features.
+      .. grid-item-card:: 🛠 Developer Guide
+         :link: developer-guide/index
+         :link-type: doc
+         
+         Deep dive into Perspt's architecture, contribute to the project, and extend functionality.
 
-   .. grid-item-card:: 🛠️ Developer Guide
-      :link: developer-guide/index
-      :link-type: doc
+      .. grid-item-card:: 📖 API Reference
+         :link: api/index
+         :link-type: doc
+         
+         Comprehensive API documentation generated from source code comments.
 
-      Deep dive into Perspt's architecture, contribute to the project, and extend functionality.
+.. only:: latex
 
-   .. grid-item-card:: 📖 API Reference
-      :link: api/index
-      :link-type: doc
+   .. rubric:: Documentation Navigation
 
-      Comprehensive API documentation generated from source code comments.
+   * **🚀 Quick Start**: Get up and running with Perspt in minutes. Install, configure, and start chatting with AI models.
+     (See chapter: :ref:`getting-started`)
+   
+   * **📚 User Guide**: Complete guide to using Perspt effectively, from basic chat to advanced features.
+     (See chapter: :ref:`user-guide`)
+   
+   * **🛠 Developer Guide**: Deep dive into Perspt's architecture, contribute to the project, and extend functionality.
+     (See chapter: :ref:`developer-guide`)
+   
+   * **📖 API Reference**: Comprehensive API documentation generated from source code comments.
+     (See chapter: :ref:`api-reference`)
 
 ✨ Key Features
 ---------------
@@ -117,8 +135,8 @@ providers directly in your terminal using a modern, unified interface powered by
    Perspt leverages the powerful `genai <https://crates.io/crates/genai>`_ crate for unified LLM access, 
    ensuring automatic support for new models and providers with cutting-edge features like reasoning model support.
 
-📋 Table of Contents
---------------------
+📋 Perspt
+---------
 
 .. toctree::
    :maxdepth: 2

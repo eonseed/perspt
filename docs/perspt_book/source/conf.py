@@ -107,6 +107,11 @@ html_theme_options = {
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
 
+# Get absolute path to font directory
+font_dir = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), '_static/fonts'))
+font_dir = font_dir.replace('\\', '/') # Convert to forward slashes for LaTeX
+
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
 html_sidebars = {
@@ -122,7 +127,7 @@ html_sidebars = {
 
 # -- Options for LaTeX output ------------------------------------------------
 
-latex_engine = 'xelatex'  # XeLaTeX for excellent Unicode and emoji support
+latex_engine = 'lualatex'  # LuaHBLaTeX for excellent Unicode and emoji support
 latex_elements = {
     'papersize': 'letterpaper',
     'pointsize': '10pt',
@@ -182,14 +187,13 @@ latex_elements = {
 
 % Configure emoji fonts for Unicode emoji rendering
 % Use system font with full path specification for XeLaTeX
-\usepackage{newunicodechar}
-\newfontfamily\emojifont{NotoEmoji-Regular}[
-    Path=/Users/vikrantrathore/Library/Fonts/,
+\usepackage{newunicodechar}'''+f'''
+\\newfontfamily\\emojifont{{NotoColorEmoji}}[
+    Path={font_dir}/,
     Scale=1.0,
     Extension = .ttf,
     UprightFont=*
-]
-
+]'''+r'''
 % Define all emojis used in documentation with primary font
 \newunicodechar{🎉}{{\emojifont 🎉}}
 \newunicodechar{🎨}{{\emojifont 🎨}}

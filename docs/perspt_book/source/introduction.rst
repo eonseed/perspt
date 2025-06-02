@@ -29,14 +29,15 @@ Philosophy & Vision
 
 .. epigraph::
 
-   *"The keyboard hums, the screen aglow,  
-   AI's wisdom, a steady flow.  
-   Will robots take over, it's quite the fright,  
-   Or just provide insights, day and night?  
-   We ponder and chat, with code as our guide,  
-   Is AI our helper or our human pride?"*
+   
+   | *The keyboard hums, the screen aglow,*
+   | *AI's wisdom, a steady flow.*
+   | *Will robots take over, it's quite the fright,*
+   | *Or just provide insights, day and night?*
+   | *We ponder and chat, with code as our guide,*
+   | *Is AI our helper or our human pride?*
 
-   -- The Perspt Manifesto
+   -The Perspt Manifesto
 
 In an era where artificial intelligence is rapidly transforming how we work, learn, and create, Perspt embodies the 
 belief that the most powerful tools should be accessible, fast, and delightful to use. We envision a world where 
