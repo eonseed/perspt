@@ -45,8 +45,10 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-docs-
 
-    - name: Build Rust documentation
-      run: cargo doc --no-deps --all-features
+    - name: Build API Documentation
+      run: |
+        chmod +x generate-docs.sh
+        ./generate-docs.sh
 
     - name: Build Sphinx documentation
       run: |
@@ -126,7 +128,7 @@ jobs:
                         <p>Complete window into perspt for users, developers, rustaceans and enthusiasts.</p>
                     </a>
                     
-                    <a href="./rust-docs/" class="doc-card">
+                    <a href="./rust-docs/perspt/" class="doc-card">
                         <h3>🔧 API Documentation</h3>
                         <p>Rust API documentation generated from source code. Detailed information about modules, functions, and data structures.</p>
                     </a>
@@ -140,7 +142,7 @@ jobs:
         cp -r docs/perspt_book/build/html _site/sphinx
         
         # Copy Rust documentation
-        cp -r target/doc/perspt _site/rust-docs
+        cp -r target/doc/ _site/rust-docs
 
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
