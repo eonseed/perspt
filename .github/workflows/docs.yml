@@ -55,7 +55,6 @@ jobs:
 
     - name: Build API Documentation
       run: |
-        cd ${{ github.workspace }}
         ./generate-docs.sh
 
     - name: Build Sphinx documentation
@@ -150,7 +149,6 @@ jobs:
         cp -r docs/perspt_book/build/html _site/sphinx
         
         # Copy Rust documentation
-        cd ${{ github.workspace }}
         cp -r target/doc _site/rust-docs
 
     - name: Upload artifact
