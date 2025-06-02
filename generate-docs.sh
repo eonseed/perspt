@@ -45,8 +45,8 @@ if [ ! -d "docs" ]; then
 fi
 
 # Clean previous documentation
-print_status "Cleaning previous documentation..."
-cargo clean --doc
+#print_status "Cleaning previous documentation..."
+#cargo clean --doc
 
 # Generate documentation with custom assets
 print_status "Generating documentation with custom assets..."
