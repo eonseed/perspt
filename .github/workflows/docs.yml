@@ -45,6 +45,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-docs-
 
+    - name: Environment for cargo documentations
+      env: 
+        CARGO_TARGET_DIR: target
+        RUSTDOCFLAGS: "--html-in-header docs/header.html --extend-css docs/custom.css --default-theme dark"
+
     - name: Build API Documentation
       run: |
         chmod +x generate-docs.sh
