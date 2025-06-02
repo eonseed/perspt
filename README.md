@@ -40,6 +40,8 @@
 
 ## 🚀 Getting Started
 
+### **Read the [perspt book](docs/perspt.pdf)** - This illustrated guide walks through the project and explains key Rust concepts
+
 ### 🛠️ Prerequisites
 
 -   **Rust:** Ensure you have the Rust toolchain installed. Get it from [rustup.rs](https://rustup.rs/).
