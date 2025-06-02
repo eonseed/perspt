@@ -48,7 +48,13 @@ jobs:
     - name: Build API Documentation
       run: |
         cargo doc --no-deps --all-features
+        
+    - name: Setup script to be executable
+      run: |
         chmod +x generate-docs.sh
+
+    - name: Build API Documentation
+      run: |
         ./generate-docs.sh
 
     - name: Build Sphinx documentation
