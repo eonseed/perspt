@@ -122,8 +122,8 @@ jobs:
                 
                 <div class="doc-links">
                     <a href="./sphinx/" class="doc-card">
-                        <h3>📚 User Guide</h3>
-                        <p>Complete user guide and tutorials built with Sphinx. Includes installation instructions, usage examples, and best practices.</p>
+                        <h3>📚 Perspt Book</h3>
+                        <p>Complete window into perspt for users, developers, rustaceans and enthusiasts.</p>
                     </a>
                     
                     <a href="./rust-docs/" class="doc-card">

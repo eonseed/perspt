@@ -10,7 +10,10 @@ on:
         description: 'Tag to release'
         required: true
         default: 'v0.4.0'
-
+        
+permissions:
+  contents: write
+  
 env:
   CARGO_TERM_COLOR: always
 
