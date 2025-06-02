@@ -32,11 +32,3 @@ env_logger = "0.11"
 
 # Utilities
 anyhow = "1.0"
-
-[package.metadata.docs.rs]
-# Configuration for docs.rs and local documentation
-rustdoc-args = [
-    "--html-in-header", "docs/header.html",
-    "--extend-css", "docs/custom.css",
-    "--default-theme", "dark"
-]
