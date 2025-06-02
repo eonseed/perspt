@@ -186,6 +186,8 @@ providers directly in your terminal using a modern, unified interface powered by
    license
    acknowledgments
 
+`Download as PDF <https://github.com/eonseed/perspt/raw/master/docs/perspt.pdf>`_
+
 🔗 Quick Links
 ---------------
 
