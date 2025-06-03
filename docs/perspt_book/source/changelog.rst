@@ -110,19 +110,22 @@ Fixed
 
 Added
 ~~~~~
+
 - Streaming response support
 - Basic configuration file support
 - Terminal UI with Ratatui
 - OpenAI provider implementation
 
 Changed
-~~~~~~
+~~~~~~~
+
 - Migrated from simple CLI to TUI interface
 - Improved async architecture
 - Better error handling patterns
 
 Fixed
 ~~~~~
+
 - Terminal rendering issues
 - API request timeout handling
 - Configuration loading edge cases
