@@ -22,8 +22,7 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
+      tag_name: ${{ steps.tag_name.outputs.TAG_NAME }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -38,34 +37,29 @@ jobs:
         fi
 
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag_name.outputs.TAG_NAME }}
-        release_name: Release ${{ steps.tag_name.outputs.TAG_NAME }}
+        name: Release ${{ steps.tag_name.outputs.TAG_NAME }}
+        generate_release_notes: true
         body: |
-          ## Changes in ${{ steps.tag_name.outputs.TAG_NAME }}
-          
-          ### Features
-          - Added cross-platform binary releases
-          - Improved documentation with Sphinx
-          
-          ### Downloads
+          ## Downloads
           - **Linux (x86_64)**: `perspt-linux-x86_64`
           - **Windows (x86_64)**: `perspt-windows-x86_64.exe`
           - **macOS (x86_64)**: `perspt-macos-x86_64`
           - **macOS (ARM64)**: `perspt-macos-arm64`
           
-          ### Installation
+          ## Installation
           1. Download the appropriate binary for your platform
           2. Make it executable (Linux/macOS): `chmod +x perspt-*`
           3. Move to your PATH: `sudo mv perspt-* /usr/local/bin/perspt`
           
-          See the [documentation](https://eonseed.github.io/perspt/) for usage instructions.
+          ## Documentation
+          See the [documentation](https://eonseed.github.io/perspt/) for detailed usage instructions.
         draft: false
-        prerelease: false
+        prerelease: true
 
   build-release:
     name: Build Release Binary
@@ -118,15 +112,18 @@ jobs:
       if: matrix.os != 'windows-latest'
       run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
+    - name: Rename binary for release
+      run: |
+        mkdir -p release-assets
+        cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release-assets/${{ matrix.asset_name }}
+
     - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-        asset_name: ${{ matrix.asset_name }}
-        asset_content_type: application/octet-stream
+        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        files: release-assets/${{ matrix.asset_name }}
 
   build-documentation:
     name: Build and Upload Documentation
@@ -191,14 +188,12 @@ jobs:
         zip -r ../documentation.zip .
 
     - name: Upload Documentation Asset
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: documentation.zip
-        asset_name: documentation.zip
-        asset_content_type: application/zip
+        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        files: documentation.zip
 
   checksums:
     name: Generate Checksums
@@ -207,13 +202,25 @@ jobs:
     steps:
     - name: Download release assets
       run: |
-        # Get the release ID and download all assets
-        RELEASE_ID="${{ needs.create-release.outputs.release_id }}"
-        curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-             -H "Accept: application/vnd.github.v3+json" \
-             "https://api.github.com/repos/${{ github.repository }}/releases/${RELEASE_ID}/assets" \
-             | jq -r '.[] | select(.name | test("^perspt-")) | .browser_download_url' \
-             | xargs -I {} curl -L -o "$(basename {})" {}
+        # Get the tag name
+        TAG_NAME="${{ needs.create-release.outputs.tag_name }}"
+        
+        # Wait a bit for assets to be available
+        sleep 30
+        
+        # Download all binary assets with retries
+        for asset in "perspt-linux-x86_64" "perspt-windows-x86_64.exe" "perspt-macos-x86_64" "perspt-macos-arm64"; do
+          for i in {1..5}; do
+            if curl -L -f -o "$asset" \
+              "https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/${asset}"; then
+              echo "Successfully downloaded $asset"
+              break
+            else
+              echo "Attempt $i failed for $asset, retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
+        done
 
     - name: Generate checksums
       run: |
@@ -224,11 +231,9 @@ jobs:
         done
         
     - name: Upload Checksums
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: checksums.txt
-        asset_name: checksums.txt
-        asset_content_type: text/plain
+        tag_name: ${{ needs.create-release.outputs.tag_name }}
+        files: checksums.txt
