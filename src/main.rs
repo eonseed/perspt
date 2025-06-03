@@ -26,10 +26,10 @@
 //! ## Architecture
 //!
 //! The application follows a modular architecture:
-//! - `main.rs`: Entry point, CLI argument parsing, and application initialization
-//! - `config.rs`: Configuration management and loading
-//! - `llm_provider.rs`: LLM provider abstraction and implementation
-//! - `ui.rs`: Terminal user interface and event handling
+//! - [`main`](crate): Entry point, CLI argument parsing, and application initialization
+//! - [`config`]: Configuration management and loading
+//! - [`llm_provider`]: LLM provider abstraction and implementation
+//! - [`ui`]: Terminal user interface and event handling
 //!
 //! ## Usage
 //!
@@ -47,30 +47,17 @@
 //! perspt --list-models
 //! ```
 //!
-//! ## 🎯 Interactive Resources
+//! ## Configuration
 //!
-//! Explore Perspt through these interactive demonstrations and asset collections:
+//! See [`AppConfig`] for detailed configuration options.
+//! The application uses JSON configuration files to manage provider settings,
+//! API keys, and UI preferences.
 //!
-//! ### 🎪 **[Interactive Demo](../interactive-demo.html)**
-//! Experience Perspt in action with an animated terminal simulation showcasing key features,
-//! provider switching, and real-time streaming capabilities.
+//! ## Error Handling
 //!
-//! ### 📚 **Documentation & Assets**
-//! - **[Design System](../design-system.html)** - Complete visual design system and components
-//! - **[Asset Library](../asset-library.html)** - Comprehensive collection of all project assets
-//! - **[Asset Integration Guide](../asset-integration.html)** - Step-by-step integration instructions
-//!
-//! ### 🎨 **Visual Assets**
-//! - **[Banner Assets](../banner-assets.html)** - Hero banners and promotional graphics
-//! - **[Logo Assets](../logo-assets.html)** - Complete logo collection and branding materials
-//! - **[Icon Collection](../icon-collection.html)** - 50+ custom SVG icons and symbols
-//! - **[Background Patterns](../background-patterns.html)** - Subtle textures and patterns
-//!
-//! ### 💡 **Getting Started**
-//! 1. Try the [Interactive Demo](../interactive-demo.html) to see Perspt in action
-//! 2. Check the [Design System](../design-system.html) for visual guidelines
-//! 3. Browse the [Asset Library](../asset-library.html) for integration resources
-//! 4. Follow the [Integration Guide](../asset-integration.html) for setup instructions
+//! The application implements comprehensive error handling and panic recovery.
+//! All critical operations are wrapped in appropriate error contexts for
+//! better debugging and user experience.
 
 // src/main.rs
 use clap::{Arg, Command};
