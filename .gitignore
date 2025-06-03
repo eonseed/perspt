@@ -84,6 +84,7 @@ instance/
 .aider*
 
 # Documentation generated files
+!docs/header.html
 docs/generated/
 docs/perspt_book/build*
 docs/book/book/
