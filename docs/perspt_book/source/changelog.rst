@@ -53,7 +53,7 @@ Technical Highlights
 - Memory-safe with zero-copy operations where possible
 
 Supported Providers
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 - **OpenAI**: GPT-4, GPT-4-turbo, GPT-4o series, GPT-3.5-turbo
 - **AWS Bedrock**: Amazon Nova models and more
@@ -63,7 +63,7 @@ Supported Providers
 - **Others**: Perplexity, DeepSeek, and more
 
 Configuration Features
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 - Multiple configuration file locations
 - Environment variable support
@@ -72,7 +72,7 @@ Configuration Features
 - UI customization options
 
 User Interface Features
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 - Real-time chat interface
 - Syntax highlighting for code blocks
