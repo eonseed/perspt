@@ -6,7 +6,6 @@ on:
     paths:
       - 'docs/**'
       - 'src/**'
-      - 'Cargo.toml'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -82,38 +81,186 @@ jobs:
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Perspt Documentation</title>
+            <title>Perspt - Terminal AI Chat Interface</title>
+            <meta name="description" content="A Rust-based CLI for chatting with AI models in your terminal">
             <style>
-                body { 
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-                    max-width: 800px; 
-                    margin: 2rem auto; 
-                    padding: 0 1rem;
-                    background: #0f172a;
-                    color: #e2e8f0;
+                :root {
+                    --primary: #00d4aa;
+                    --bg-dark: #0f172a;
+                    --bg-card: #1e293b;
+                    --bg-card-hover: #334155;
+                    --text-primary: #e2e8f0;
+                    --text-muted: #94a3b8;
+                    --border: #334155;
+                    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
                 }
-                h1 { color: #00d4aa; text-align: center; }
+                
+                * { box-sizing: border-box; }
+                
+                body { 
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    line-height: 1.6;
+                    margin: 0;
+                    padding: 2rem 1rem;
+                    background: var(--bg-dark);
+                    color: var(--text-primary);
+                    min-height: 100vh;
+                }
+                
+                .container {
+                    max-width: 900px;
+                    margin: 0 auto;
+                }
+                
+                .header {
+                    text-align: center;
+                    margin-bottom: 3rem;
+                }
+                
+                .logo {
+                    font-size: 3rem;
+                    margin-bottom: 0.5rem;
+                }
+                
+                .title {
+                    font-size: 2.5rem;
+                    font-weight: 700;
+                    color: var(--primary);
+                    margin: 0 0 1rem 0;
+                    letter-spacing: -0.025em;
+                }
+                
+                .subtitle {
+                    font-size: 1.25rem;
+                    color: var(--text-muted);
+                    margin: 0 0 2rem 0;
+                    font-weight: 400;
+                }
+                
+                .description {
+                    max-width: 600px;
+                    margin: 0 auto 2rem auto;
+                    font-size: 1.1rem;
+                    color: var(--text-muted);
+                    text-align: left;
+                }
+                
+                .description p {
+                    margin-bottom: 1rem;
+                }
+                
+                .nav-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                    gap: 1.5rem;
+                    margin-top: 3rem;
+                }
+                
                 .nav-card { 
                     display: block; 
-                    padding: 1.5rem; 
-                    margin: 1rem 0; 
-                    background: #1e293b; 
-                    border: 1px solid #334155;
-                    border-radius: 8px; 
+                    padding: 2rem; 
+                    background: var(--bg-card); 
+                    border: 1px solid var(--border);
+                    border-radius: 12px; 
                     text-decoration: none; 
-                    color: #e2e8f0;
+                    color: var(--text-primary);
                     transition: all 0.2s ease;
+                    box-shadow: var(--shadow);
+                    position: relative;
+                    overflow: hidden;
                 }
-                .nav-card:hover { 
-                    background: #334155; 
-                    border-color: #00d4aa;
+                
+                .nav-card::before {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    height: 3px;
+                    background: var(--primary);
+                    transform: scaleX(0);
+                    transition: transform 0.2s ease;
                 }
-                .nav-title { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; color: #00d4aa; }
-                .nav-desc { color: #94a3b8; }
+                
+                .nav-card:hover {
+                    background: var(--bg-card-hover);
+                    border-color: var(--primary);
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.2);
+                }
+                
+                .nav-card:hover::before {
+                    transform: scaleX(1);
+                }
+                
+                .nav-icon {
+                    font-size: 2rem;
+                    margin-bottom: 1rem;
+                }
+                
+                .nav-title { 
+                    font-size: 1.4rem; 
+                    font-weight: 600; 
+                    margin-bottom: 0.75rem; 
+                    color: var(--primary);
+                }
+                
+                .nav-desc { 
+                    color: var(--text-muted);
+                    font-size: 1rem;
+                    line-height: 1.5;
+                }
+                
+                .footer {
+                    text-align: center;
+                    margin-top: 4rem;
+                    padding-top: 2rem;
+                    border-top: 1px solid var(--border);
+                    color: var(--text-muted);
+                    font-size: 0.9rem;
+                }
+                
+                .github-link {
+                    color: var(--primary);
+                    text-decoration: none;
+                    font-weight: 500;
+                }
+                
+                .github-link:hover {
+                    text-decoration: underline;
+                }
+                
+                @media (max-width: 768px) {
+                    .title { font-size: 2rem; }
+                    .subtitle { font-size: 1.1rem; }
+                    .nav-grid { grid-template-columns: 1fr; gap: 1rem; }
+                    .nav-card { padding: 1.5rem; }
+                    .container { padding: 0 1rem; }
+                }
             </style>
         </head>
         <body>
-            <h1>👁️ Perspt Documentation</h1>
+            <div class="container">
+                <header class="header">
+                    <div class="logo">👁️</div>
+                    <h1 class="title">Perspt</h1>
+                    <p class="subtitle">Your Terminal's Window to the AI World</p>
+                    
+                    <div class="description">
+                        <p>
+                            <strong>Perspt</strong> is an experimental CLI tool built by developers exploring Rust while creating something genuinely useful. 
+                            Born from curiosity and the desire to chat with AI models directly from the terminal, this project represents our journey 
+                            into systems programming with Rust with help from Large Language Models to code.
+                        </p>
+                        <p>
+                            What started as a learning exercise has grown into a fast, terminal interface that supports multiple AI providers 
+                            and models. It's not perfect, but it's ours—and we hope it's useful to you too.
+                        </p>
+                    </div>
+                </header>
+                
+                <main>
+                    <div class="nav-grid">
             
             <a href="perspt/index.html" class="nav-card">
                 <div class="nav-title">📚 API Documentation</div>
@@ -121,19 +268,29 @@ jobs:
             </a>
             
             <a href="book/index.html" class="nav-card" style="display: none;" id="sphinx-link">
-                <div class="nav-title">� User Guide</div>
-                <div class="nav-desc">Comprehensive user guide and tutorials</div>
+              <div class="nav-icon">📖</div>
+              <div class="nav-title">The Perspt Book</div>
+              <div class="nav-desc">
+                More than just documentation—a comprehensive guide for users, developers,
+                Rustaceans, and anyone curious about building CLI tools with Rust.
+                Includes tutorials, architecture insights, and lessons learned.
+              </div>
             </a>
             
             <script>
-                // Show sphinx link only if it exists
+                // Show Perspt Book link only if it exists
                 fetch('book/index.html')
                     .then(response => {
                         if (response.ok) {
                             document.getElementById('sphinx-link').style.display = 'block';
                         }
                     })
-                    .catch(() => {});
+                    .catch(() => {
+                        // If book doesn't exist, adjust grid layout
+                        document.querySelector('.nav-grid').style.gridTemplateColumns = '1fr';
+                        document.querySelector('.nav-grid').style.maxWidth = '400px';
+                        document.querySelector('.nav-grid').style.margin = '3rem auto 0 auto';
+                    });
             </script>
         </body>
         </html>
