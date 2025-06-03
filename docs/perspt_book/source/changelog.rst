@@ -7,25 +7,33 @@ The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
 [0.4.1] - 2025-06-03
-------------
+--------------------
 
-### Added
+Added
+~~~~~
+
 - Enhanced documentation with Sphinx
 - Comprehensive API reference
 - Developer guide for contributors
 
-### Changed
+Changed
+~~~~~~~
+
 - Improved error messages for better user experience
 - Optimized memory usage for large conversations
 
-### Fixed
+Fixed
+~~~~~
+
 - Fixed terminal cleanup on panic
 - Resolved configuration file parsing edge cases
 
 [0.4.0] - 2025-05-29
 --------------------
 
-### Added
+Added
+~~~~~
+
 - **Multi-provider support**: OpenAI, Anthropic, Google, AWS Bedrock, and more
 - **Dynamic model discovery**: Automatic detection of available models
 - **Input queuing**: Type new messages while AI is responding
@@ -35,14 +43,18 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 - **Beautiful terminal UI**: Powered by Ratatui with modern design
 - **Graceful error handling**: User-friendly error messages and recovery
 
-### Technical Highlights
+Technical Highlights
+~~~~~~~~~~~~~~~~~~~~
+
 - Built with Rust for maximum performance and safety
 - Leverages `genai` crate for unified LLM access
 - Async/await architecture with Tokio
 - Comprehensive test suite with unit and integration tests
 - Memory-safe with zero-copy operations where possible
 
-### Supported Providers
+Supported Providers
+~~~~~~~~~~~~~~~~~~~~
+
 - **OpenAI**: GPT-4, GPT-4-turbo, GPT-4o series, GPT-3.5-turbo
 - **AWS Bedrock**: Amazon Nova models and more
 - **Anthropic**: Claude 3 models (via genai)
@@ -50,14 +62,18 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 - **Mistral**: Mistral AI models (via genai)
 - **Others**: Perplexity, DeepSeek, and more
 
-### Configuration Features
+Configuration Features
+~~~~~~~~~~~~~~~~~~~~
+
 - Multiple configuration file locations
 - Environment variable support
 - Command-line argument overrides
 - Provider-specific settings
 - UI customization options
 
-### User Interface Features
+User Interface Features
+~~~~~~~~~~~~~~~~~~~~
+
 - Real-time chat interface
 - Syntax highlighting for code blocks
 - Scrollable message history
@@ -68,17 +84,23 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [0.3.0] - 2025-05-15
 --------------------
 
-### Added
+Added
+~~~~~
+
 - Initial AWS Bedrock support
 - Configuration file validation
 - Improved error categorization
 
-### Changed
+Changed
+~~~~~~~
+
 - Refactored provider architecture for extensibility
 - Enhanced UI responsiveness
 - Better handling of long responses
 
-### Fixed
+Fixed
+~~~~~
+
 - Terminal state cleanup on unexpected exit
 - Configuration merging precedence
 - Memory leaks in streaming responses
@@ -86,18 +108,21 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [0.2.0] - 2025-05-01
 --------------------
 
-### Added
+Added
+~~~~~
 - Streaming response support
 - Basic configuration file support
 - Terminal UI with Ratatui
 - OpenAI provider implementation
 
-### Changed
+Changed
+~~~~~~
 - Migrated from simple CLI to TUI interface
 - Improved async architecture
 - Better error handling patterns
 
-### Fixed
+Fixed
+~~~~~
 - Terminal rendering issues
 - API request timeout handling
 - Configuration loading edge cases
@@ -105,14 +130,18 @@ and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0
 [0.1.0] - 2025-04-15
 --------------------
 
-### Added
+Added
+~~~~~
+
 - Initial release
 - Basic OpenAI integration
 - Simple command-line interface
 - Environment variable configuration
 - Basic chat functionality
 
-### Features
+Features
+~~~~~~~~
+
 - Support for GPT-3.5 and GPT-4 models
 - API key authentication
 - Simple text-based conversations
