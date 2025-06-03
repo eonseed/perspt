@@ -48,8 +48,9 @@ jobs:
 
     - name: Build API Documentation with custom styling
       run: |
-        export RUSTDOCFLAGS="--html-in-header docs/header.html --extend-css docs/custom.css --default-theme dark"
         cargo doc --no-deps --all-features
+      env:
+        RUSTDOCFLAGS: "--html-in-header docs/header.html --extend-css docs/custom.css --default-theme dark"
 
     - name: Build Sphinx documentation (if exists)
       run: |
