@@ -3,10 +3,6 @@ Configuration Guide
 
 Perspt offers flexible configuration options to customize your AI chat experience. This guide covers all configuration methods, from simple environment variables to advanced JSON configurations.
 
-.. contents:: Configuration Topics
-   :local:
-   :depth: 2
-
 Configuration Methods
 ---------------------
 
