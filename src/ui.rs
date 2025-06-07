@@ -751,31 +751,34 @@ impl App {
 
     /// Start streaming response with immediate feedback and state protection
     pub fn start_streaming(&mut self) {
+        log::debug!("start_streaming: Called. Current state: is_llm_busy={}, current_response_id={:?}, streaming_buffer_len={}",
+                   self.is_llm_busy, self.current_response_id, self.streaming_buffer.len());
         // Ensure we're in a clean state before starting new stream
         if self.is_llm_busy {
             log::warn!("Starting new stream while already busy - forcing clean state");
-            self.finish_streaming();
+            // The call to self.finish_streaming() here needs an origin_id.
+            // This situation implies a logic error or an unexpected state.
+            // For now, we'll use a placeholder or perhaps the current_response_id if it exists.
+            // This part needs careful consideration if this state is reachable.
+            // Assuming finish_streaming should be called with the ID it's trying to finish.
+            if let Some(id_to_finish) = self.current_response_id {
+                self.finish_streaming(id_to_finish);
+            } else {
+                // If there's no current_response_id, what to do?
+                // For now, log and proceed with setting up new stream.
+                log::warn!("start_streaming: Was busy, but no current_response_id to pass to finish_streaming.");
+            }
         }
         
-        self.is_llm_busy = true;
-        self.is_input_disabled = true;
-        self.response_progress = 0.0;
-        self.streaming_buffer.clear();
-        
-        // Ensure we're in a clean state before starting new stream
-        if self.is_llm_busy {
-            log::warn!("Starting new stream while already busy - forcing clean state");
-            // Potentially call a refined finish_streaming that doesn't clear current_response_id if it's for a *different* stream.
-            // For now, the existing finish_streaming will reset current_response_id to None.
-        }
-
         self.current_response_id = Some(self.next_response_id);
         self.next_response_id += 1;
 
         self.is_llm_busy = true;
         self.is_input_disabled = true;
         self.response_progress = 0.0;
-        self.streaming_buffer.clear();
+        self.streaming_buffer.clear(); // Clear buffer for the new stream
+        log::debug!("start_streaming: Set up for new stream. current_response_id={:?}, streaming_buffer_len={} (should be 0). Placeholder will be added.",
+                   self.current_response_id, self.streaming_buffer.len());
 
         // Create a new assistant message immediately with the current response ID
         let initial_message = ChatMessage {
@@ -793,121 +796,131 @@ impl App {
     }
 
     /// Finish streaming response with clean state reset and final content preservation
-    pub fn finish_streaming(&mut self) {
-        log::debug!("Finishing streaming mode, buffer has {} chars", self.streaming_buffer.len());
+    pub fn finish_streaming(&mut self, origin_id: usize) { // Added origin_id
+        log::debug!("finish_streaming: Called with origin_id={}, current_ui_response_id={:?}, streaming_buffer_len={}",
+                   origin_id, self.current_response_id, self.streaming_buffer.len());
         
-        // CRITICAL FIX: Always force final UI update regardless of throttling
-        // This ensures that all accumulated content in the buffer gets transferred to the chat message
+        // CRITICAL: If the EOT is for the stream currently active in the UI,
+        // the streaming_buffer is relevant to it. Otherwise, the buffer might contain
+        // content from the *new* current_response_id if a new request started quickly.
+        // We should only flush buffer to message with `origin_id` if `Some(origin_id) == self.current_response_id`
+        // OR if we decide that buffer is *always* for the ID that just sent EOT.
+        // For now, let's assume buffer is for the EOT-ing stream *if that stream was the last one writing to it*.
+        // This is tricky. A safer way: buffer is *only* for self.current_response_id.
+        // If an EOT for an *old* stream comes, its content is already in chat_history. We just clean up its placeholder.
+
         if !self.streaming_buffer.is_empty() {
-            log::debug!("Forcing final UI update with {} chars in buffer for response_id: {:?}",
-                       self.streaming_buffer.len(), self.current_response_id);
-            
+            // If this EOT (origin_id) matches the stream the UI is currently tracking (current_response_id)
+            // then the buffer content is for this message.
+            if Some(origin_id) == self.current_response_id {
+                let mut found_message_to_update = false;
+                for msg in self.chat_history.iter_mut().rev() {
+                    if msg.message_type == MessageType::Assistant && msg.response_id == Some(origin_id) {
+                        msg.content = markdown_to_lines(&self.streaming_buffer);
+                        msg.timestamp = Self::get_timestamp();
+                        log::debug!("finish_streaming: Flushed buffer to message with response_id {:?}.", msg.response_id);
+                        log::debug!("FINAL BUFFER FLUSH: Assistant message (ID: {}) updated with {} chars from buffer.",
+                                   origin_id, self.streaming_buffer.len());
+                        found_message_to_update = true;
+                        break;
+                    }
+                }
+                if !found_message_to_update {
+                    log::warn!("finish_streaming: Buffer not empty, EOT for active stream ID {}, but no matching message found to flush to.", origin_id);
+                }
+                self.streaming_buffer.clear();
+                log::debug!("finish_streaming: streaming_buffer cleared.");
+            } else {
+                // EOT is for an older stream. The buffer is likely for a *newer* stream. Don't touch it here.
+                // The content for the older stream (origin_id) should already be finalized in its message.
+                log::debug!("finish_streaming: EOT for non-active stream ID {}. Buffer content ({} chars) preserved for current active stream ({:?}).",
+                           origin_id, self.streaming_buffer.len(), self.current_response_id);
+            }
+        } else { // Streaming buffer is empty
+            // If no content in buffer, check if we have a placeholder for *this specific origin_id* and remove it.
+            if let Some(pos) = self.chat_history.iter().rposition(|msg| msg.message_type == MessageType::Assistant && msg.response_id == Some(origin_id)) {
+                let msg = &self.chat_history[pos];
+                let is_placeholder = msg.content.is_empty() ||
+                    (msg.content.len() == 1 &&
+                     msg.content[0].spans.len() == 1 &&
+                     (msg.content[0].spans[0].content == "..." ||
+                      msg.content[0].spans[0].content.trim().is_empty()));
+                if is_placeholder {
+                    self.chat_history.remove(pos);
+                    log::debug!("Removed placeholder assistant message (ID: {}) as no content was received for it.", origin_id);
+                }
+            }
+            log::debug!("No content in streaming buffer to finalize for response_id: {}.", origin_id);
+        }
+        
+        // Only reset main app state if the EOT corresponds to the *currently active* UI stream
+        if Some(origin_id) == self.current_response_id {
+            self.is_llm_busy = false;
+            self.is_input_disabled = false;
+            // Store the ID that caused this finish, for handle_llm_response logic, then clear current_response_id
+            CURRENT_RESPONSE_ID_BEFORE_FINISH_FOR_EOT.with(|cell| cell.set(self.current_response_id));
+            self.current_response_id = None;
+            log::debug!("Cleared current_response_id due to EOT for active stream {}", origin_id);
+
+            // Update status only if this was the active stream ending
+            self.set_status("✅ Ready".to_string(), false);
+            self.clear_error();
+        } else {
+            log::debug!("Received EOT for non-active stream_id: {} (current_id is {:?}). Chat history updated, but active UI state (busy, input_disabled, current_id) unchanged.", origin_id, self.current_response_id);
+        }
+        
+        // These can be reset more generally or also conditioned if needed
+        self.response_progress = 1.0; // Show completion
+        self.typing_indicator.clear();
+        
+        self.scroll_to_bottom(); // Ensure visibility of any changes
+        self.needs_redraw = true;
+        
+        log::debug!("finish_streaming for ID {} completed. Chat history has {} messages. Current active UI stream ID is now {:?}.",
+                   origin_id, self.chat_history.len(), self.current_response_id);
+    }
+
+    /// Update streaming content with optimized rendering and immediate feedback
+    pub fn update_streaming_content(&mut self, content: &str, origin_id: usize) { // Added origin_id
+        // Only process non-empty content
+        if content.is_empty() {
+            return;
+        }
+        log::debug!("update_streaming_content: Called with origin_id={}, current_ui_response_id={:?}, incoming_chunk_len={}, current_streaming_buffer_len={}",
+                   origin_id, self.current_response_id, content.len(), self.streaming_buffer.len());
+
+        if Some(origin_id) == self.current_response_id {
+            // This chunk is for the currently active UI stream. Proceed.
+            log::debug!("update_streaming_content: Matched origin_id ({}) with current_ui_response_id. Appending chunk to buffer.", origin_id);
+            if self.streaming_buffer.len() + content.len() > MAX_STREAMING_BUFFER_SIZE {
+                log::warn!("Streaming buffer approaching limit for active stream {}, truncating old content", origin_id);
+                let keep_from = self.streaming_buffer.len() / 5;
+                self.streaming_buffer = self.streaming_buffer[keep_from..].to_string();
+            }
+            self.streaming_buffer.push_str(content);
+
             let mut found_message_to_update = false;
+            // current_id here will be Some(origin_id) due to the outer check
             if let Some(current_id) = self.current_response_id {
                 for msg in self.chat_history.iter_mut().rev() {
                     if msg.message_type == MessageType::Assistant && msg.response_id == Some(current_id) {
                         msg.content = markdown_to_lines(&self.streaming_buffer);
                         msg.timestamp = Self::get_timestamp();
-                        log::debug!("FINAL UPDATE: Assistant message (ID: {:?}) now has {} lines of content",
-                                   msg.response_id, msg.content.len());
                         found_message_to_update = true;
                         break;
                     }
                 }
             }
-
             if !found_message_to_update {
-                 log::warn!("finish_streaming: No active assistant message found for current_response_id: {:?}. Buffer content might be lost.", self.current_response_id);
-                // Optionally, add as a new message if no target found, though this might indicate a logic error.
-                // For now, we log and the buffer will be cleared.
+                log::error!("update_streaming_content: Expected assistant message for active ID {} not found in chat_history.", origin_id);
+                // This case is problematic, as we've already added to buffer.
+                // For now, we log and proceed to UI update logic.
             }
         } else {
-            // If no content was received, check if we have a placeholder and remove it, only if it matches current_response_id
-            if let Some(current_id) = self.current_response_id {
-                if let Some(pos) = self.chat_history.iter().rposition(|msg| msg.message_type == MessageType::Assistant && msg.response_id == Some(current_id)) {
-                    let msg = &self.chat_history[pos];
-                    let is_placeholder = msg.content.is_empty() ||
-                        (msg.content.len() == 1 &&
-                         msg.content[0].spans.len() == 1 &&
-                         (msg.content[0].spans[0].content == "..." ||
-                          msg.content[0].spans[0].content.trim().is_empty()));
-                    if is_placeholder {
-                        self.chat_history.remove(pos);
-                        log::debug!("Removed placeholder assistant message (ID: {:?}) as no content was received.", current_id);
-                    }
-                }
-            }
-            log::debug!("No content in streaming buffer to finalize for response_id: {:?}", self.current_response_id);
-        }
-        
-        // Clear the buffer AFTER ensuring content is saved
-        self.streaming_buffer.clear();
-        
-        // Reset streaming state
-        self.is_llm_busy = false; // This might be set true again quickly if there's a queued request
-        self.is_input_disabled = false; // Similarly, might be set true again
-        self.response_progress = 1.0; // Show completion
-        self.typing_indicator.clear();
-        
-        // Crucially, reset current_response_id AFTER all processing for this stream is done
-        self.current_response_id = None;
-
-        // Ensure final content is visible
-        self.scroll_to_bottom();
-        self.needs_redraw = true;
-        
-        // Update status (only if no new stream has started immediately)
-        if !self.is_llm_busy { // Check if a new stream started due to queued input
-            self.set_status("✅ Ready".to_string(), false);
-            self.clear_error();
-        }
-        
-        log::debug!("Streaming mode finished, chat history has {} messages. current_response_id is now None.", self.chat_history.len());
-    }
-
-    /// Update streaming content with optimized rendering and immediate feedback
-    pub fn update_streaming_content(&mut self, content: &str) {
-        // Only process non-empty content
-        if content.is_empty() {
-            return;
-        }
-        
-        // Prevent buffer overflow - if buffer gets too large, start replacing old content
-        if self.streaming_buffer.len() + content.len() > MAX_STREAMING_BUFFER_SIZE {
-            log::warn!("Streaming buffer approaching limit, truncating old content");
-            // Keep the last 80% of the buffer to maintain context
-            let keep_from = self.streaming_buffer.len() / 5;
-            self.streaming_buffer = self.streaming_buffer[keep_from..].to_string();
-        }
-        
-        self.streaming_buffer.push_str(content);
-        
-        // CRITICAL FIX: Always update the message content, regardless of UI throttling
-        // This ensures that the message always contains the latest content for the *correct* response stream
-
-        let mut found_message_to_update = false;
-        if let Some(current_id) = self.current_response_id {
-            for msg in self.chat_history.iter_mut().rev() {
-                if msg.message_type == MessageType::Assistant && msg.response_id == Some(current_id) {
-                    // Update this specific message's content
-                    msg.content = markdown_to_lines(&self.streaming_buffer);
-                    msg.timestamp = Self::get_timestamp(); // Update timestamp for latest content
-                    found_message_to_update = true;
-                    break;
-                }
-            }
-        }
-
-        if !found_message_to_update {
-            log::warn!("update_streaming_content: No active assistant message found for current_response_id: {:?}. Discarding chunk: '{}'",
-                       self.current_response_id, content.chars().take(50).collect::<String>());
-            // Do not update any message or the streaming buffer with this content if no target.
-            // However, the content IS ALREADY IN self.streaming_buffer due to the push_str above.
-            // This means if a message is found *later* it will get this content.
-            // For strict "discard", we might need to pop from streaming_buffer or not add it.
-            // For now, let's assume the current logic: if a message appears later for this ID, it gets the full buffer.
-            // If current_response_id is None, this content is effectively orphaned from an ID perspective.
-            return; // Early exit if no message to update, to prevent redraw logic for discarded chunk
+            // Chunk is for an older/unexpected stream, or UI isn't expecting any stream.
+            log::warn!("update_streaming_content: Received chunk for response_id: {} but current_response_id is {:?}. Discarding chunk: '{}'",
+                       origin_id, self.current_response_id, content.chars().take(50).collect::<String>());
+            return; // DO NOT append to streaming_buffer or update any message.
         }
         
         // FIXED: More responsive UI update strategy that prevents freezing during long responses
@@ -1000,7 +1013,7 @@ pub async fn run_ui(
     provider: Arc<GenAIProvider>
 ) -> Result<()> {
     let mut app = App::new(config);
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel::<(usize, String)>(); // Changed type
     
     // Create event stream for responsive event handling
     let mut event_stream = EventStream::new();
@@ -1013,54 +1026,67 @@ pub async fn run_ui(
             // Highest priority: Handle LLM responses immediately for real-time streaming
             // Process ALL available messages to prevent backlog and prioritize EOT signals
             llm_message = rx.recv() => {
-                if let Some(message) = llm_message {
+                if let Some(tagged_message) = llm_message { // tagged_message is (usize, String)
                     // Collect all messages from the channel first to prioritize EOT signals
-                    let mut all_messages = vec![message];
-                    while let Ok(additional_message) = rx.try_recv() {
-                        all_messages.push(additional_message);
+                    let mut all_tagged_messages = vec![tagged_message];
+                    while let Ok(additional_tagged_message) = rx.try_recv() {
+                        all_tagged_messages.push(additional_tagged_message);
                     }
                     
-                    log::info!("=== UI PROCESSING === {} messages received", all_messages.len());
+                    log::info!("=== UI PROCESSING === {} tagged messages received", all_tagged_messages.len());
                     
                     // Process EOT signals FIRST to prevent state confusion
-                    let mut content_messages: Vec<String> = Vec::new();
+                    // let mut content_messages: Vec<String> = Vec::new(); // Old
+                    let mut content_tagged_messages: Vec<(usize, String)> = Vec::new(); // New
                     let mut eot_count = 0;
-                    let mut total_content_chars = 0;
+                    // let mut total_content_chars = 0; // Can be re-calculated if needed for logging
                     
-                    for (i, msg) in all_messages.iter().enumerate() {
-                        if msg == crate::EOT_SIGNAL {
+                    for (i, (origin_id, msg_content)) in all_tagged_messages.iter().enumerate() {
+                        if msg_content == crate::EOT_SIGNAL {
                             eot_count += 1;
-                            log::info!(">>> EOT SIGNAL #{} found at position {} <<<", eot_count, i);
-                            if eot_count == 1 {
-                                // Process all accumulated content before first EOT
-                                log::info!("Processing {} content messages before EOT ({} total chars)", 
-                                          content_messages.len(), total_content_chars);
-                                for (j, content_msg) in content_messages.iter().enumerate() {
-                                    log::debug!("Processing content message {}/{}: {} chars", 
-                                               j+1, content_messages.len(), content_msg.len());
-                                    handle_llm_response(&mut app, content_msg.clone(), &provider, &model_name, &tx).await;
+                            log::info!(">>> EOT SIGNAL #{} (ID: {}) found at position {} <<<", eot_count, origin_id, i);
+                            if eot_count == 1 { // Process only the first EOT in a batch for now
+                                // Process all accumulated content messages before this EOT
+                                log::info!("Processing {} content messages before EOT (ID: {})",
+                                          content_tagged_messages.len(), origin_id);
+                                for (j, tagged_content_msg) in content_tagged_messages.iter().enumerate() {
+                                    log::debug!("Processing content message {}/{}: ID {}, {} chars",
+                                               j+1, content_tagged_messages.len(), tagged_content_msg.0, tagged_content_msg.1.len());
+                                    handle_llm_response(&mut app, tagged_content_msg.clone(), &provider, &model_name, &tx).await;
                                 }
-                                content_messages.clear();
-                                // Now process the EOT signal
-                                handle_llm_response(&mut app, msg.clone(), &provider, &model_name, &tx).await;
-                                break; // Stop processing after first EOT
+                                content_tagged_messages.clear();
+                                // Now process the EOT signal itself
+                                handle_llm_response(&mut app, (*origin_id, msg_content.clone()), &provider, &model_name, &tx).await;
+                                // Consider if we should break here or let other EOTs for *different* IDs be processed.
+                                // For now, let's process one EOT and its preceding messages per batch.
+                                // This break is important to re-evaluate `all_tagged_messages` if new messages arrived during processing.
+                                break;
                             } else {
-                                // Ignore duplicate EOT signals
-                                log::warn!("Ignoring duplicate EOT signal #{}", eot_count);
+                                // This EOT is for a different response_id or a duplicate for the same one within the same batch.
+                                // The handle_llm_response will manage its specific origin_id.
+                                log::warn!("Additional EOT signal #{} (ID: {}) in batch, will be processed if loop continues.", eot_count, origin_id);
+                                // We'll let it be processed if it's the next item after the break, or in the `content_tagged_messages` loop below.
+                                // To ensure it's handled if it's the *last* thing, or if we want to handle all EOTs in a batch:
+                                content_tagged_messages.push((*origin_id, msg_content.clone()));
                             }
                         } else {
-                            total_content_chars += msg.len();
-                            content_messages.push(msg.clone());
+                            // total_content_chars += msg_content.len();
+                            content_tagged_messages.push((*origin_id, msg_content.clone()));
                         }
                     }
                     
-                    // If no EOT signal, process remaining content messages
-                    if eot_count == 0 {
-                        log::info!("No EOT signal found, processing {} remaining content messages ({} chars)", 
-                                  content_messages.len(), total_content_chars);
-                        for (j, content_msg) in content_messages.into_iter().enumerate() {
-                            log::debug!("Processing remaining content message {}: {} chars", j+1, content_msg.len());
-                            handle_llm_response(&mut app, content_msg, &provider, &model_name, &tx).await;
+                    // If no EOT signal was processed via the eot_count == 1 path (e.g. no EOT, or multiple EOTs)
+                    // process all remaining (or all if no EOT) messages.
+                    if eot_count == 0 || !content_tagged_messages.is_empty() {
+                        if eot_count == 0 {
+                            log::info!("No EOT signal found in batch, processing {} remaining content messages",
+                                content_tagged_messages.len());
+                        } else {
+                            log::info!("Processing {} remaining messages after first EOT (or additional EOTs)", content_tagged_messages.len());
+                        }
+                        for (j, tagged_msg) in content_tagged_messages.into_iter().enumerate() {
+                            log::debug!("Processing remaining/additional message {}: ID {}, {} chars", j+1, tagged_msg.0, tagged_msg.1.len());
+                            handle_llm_response(&mut app, tagged_msg, &provider, &model_name, &tx).await;
                         }
                     }
                     
@@ -1153,7 +1179,7 @@ impl EventStream {
 async fn handle_terminal_event(
     app: &mut App,
     event: Event,
-    tx: &mpsc::UnboundedSender<String>,
+    tx: &mpsc::UnboundedSender<(usize, String)>, // Changed
     _api_key: &str,
     model_name: &str,
     provider: &Arc<GenAIProvider>,
@@ -1197,10 +1223,15 @@ async fn handle_terminal_event(
                         
                         // Start LLM request
                         app.start_streaming();
+                        let response_id = app.current_response_id.unwrap_or_else(|| {
+                            log::error!("current_response_id is None after start_streaming in handle_terminal_event, using 0 as fallback");
+                            0 // Fallback, though current_response_id should always be Some here
+                        });
                         tokio::spawn(initiate_llm_request_enhanced(
                             input,
                             Arc::clone(provider),
                             model_name.to_string(),
+                            response_id, // Pass the ID
                             tx.clone(),
                         ));
                         
@@ -1311,13 +1342,15 @@ async fn initiate_llm_request_enhanced(
     input: String,
     provider: Arc<GenAIProvider>,
     model_name: String,
-    tx: mpsc::UnboundedSender<String>,
+    response_id_for_provider: usize, // Added
+    tx: mpsc::UnboundedSender<(usize, String)>, // Changed
 ) {
     // log::info!("Starting enhanced LLM request: {}", input); // Removed to prevent TUI interference
     
     let result = provider.generate_response_stream_to_channel(
         &model_name,
         &input,
+        response_id_for_provider, // Added
         tx.clone(),
     ).await;
     
@@ -1337,88 +1370,75 @@ async fn initiate_llm_request_enhanced(
 /// Handle LLM responses with immediate UI updates
 async fn handle_llm_response(
     app: &mut App,
-    message: String,
+    tagged_message: (usize, String), // Changed
     provider: &Arc<GenAIProvider>,
     model_name: &str,
-    tx: &mpsc::UnboundedSender<String>,
+    tx: &mpsc::UnboundedSender<(usize, String)>, // Changed
 ) {
-    if message == crate::EOT_SIGNAL {
-        // End of response - CRITICAL: Ensure this is processed immediately
-        log::info!(">>> RECEIVED EOT SIGNAL - finishing streaming (busy: {}, buffer: {} chars) <<<", 
-                   app.is_llm_busy, app.streaming_buffer.len());
+    let (origin_id, message_content) = tagged_message; // Unpack
+
+    if message_content == crate::EOT_SIGNAL {
+        // Existing log is good:
+        log::info!(">>> RECEIVED EOT SIGNAL for response_id: {} (current active UI stream ID: {:?}, buffer: {} chars) <<<",
+                   origin_id, app.current_response_id, app.streaming_buffer.len());
         
-        // Always finish streaming when we get EOT, even if state seems wrong
-        if app.is_llm_busy {
-            log::info!("Calling finish_streaming() due to EOT");
-            app.finish_streaming();
-        } else {
-            log::warn!("!!! Received EOT signal but not in busy state - cleaning up anyway !!!");
-            app.streaming_buffer.clear();
-            app.is_input_disabled = false;
-        }
+        let was_active_stream = Some(origin_id) == app.current_response_id;
+        app.finish_streaming(origin_id); // Pass origin_id. This might clear app.current_response_id
         
-        // Ensure the UI has processed the finish_streaming state change
         app.needs_redraw = true;
         
-        // Process pending inputs ONLY after confirming we're in clean state
-        if !app.is_llm_busy && !app.pending_inputs.is_empty() {
-            let pending_input = app.pending_inputs.pop_front().unwrap();
-            log::info!("Processing pending input after EOT: {} chars", pending_input.len());
-            
-            app.add_message(ChatMessage {
-                message_type: MessageType::User,
-                content: vec![Line::from(pending_input.clone())],
-                timestamp: App::get_timestamp(),
-                response_id: None, // User messages don't have a response_id
-            });
-            
-            // Start new streaming session with clean state
-            app.start_streaming();
-            tokio::spawn(initiate_llm_request_enhanced(
-                pending_input,
-                Arc::clone(provider),
-                model_name.to_string(),
-                tx.clone(),
-            ));
-        } else if !app.pending_inputs.is_empty() {
-            log::warn!("Still have pending inputs but LLM is busy - this shouldn't happen");
+        // Process pending inputs if the EOT was for the stream the UI considered active,
+        // and the app is now confirmed not busy (i.e., finish_streaming cleared the busy state).
+        if was_active_stream && !app.is_llm_busy {
+            if !app.pending_inputs.is_empty() {
+                let pending_input = app.pending_inputs.pop_front().unwrap();
+                log::info!("Processing pending input after EOT for active stream ID {}: {} chars", origin_id, pending_input.len());
+
+                app.add_message(ChatMessage {
+                    message_type: MessageType::User,
+                    content: vec![Line::from(pending_input.clone())],
+                    timestamp: App::get_timestamp(),
+                    response_id: None,
+                });
+
+                app.start_streaming();
+                let new_response_id = app.current_response_id.unwrap_or_else(|| {
+                    log::error!("current_response_id is None after start_streaming for pending input, using 0 as fallback");
+                    0
+                });
+                tokio::spawn(initiate_llm_request_enhanced(
+                    pending_input,
+                    Arc::clone(provider),
+                    model_name.to_string(),
+                    new_response_id,
+                    tx.clone(),
+                ));
+            } else {
+                log::debug!("No pending inputs to process after EOT for active stream ID {}", origin_id);
+            }
         } else {
-            log::debug!("No pending inputs to process after EOT");
+            if !was_active_stream {
+                log::info!("EOT for ID {} received, but it was not the current active UI stream (active: {:?}). Pending inputs not processed based on this EOT.", origin_id, app.current_response_id);
+            }
+            if app.is_llm_busy && was_active_stream { // Should not happen if finish_streaming worked correctly for active stream
+                 log::warn!("EOT for active ID {} received, but app is STILL busy. Pending inputs will wait.", origin_id);
+            }
         }
-    } else if message.starts_with("Error: ") && message.len() > 7 {
-        // Handle errors
-        let error_msg = &message[7..];
-        log::error!("Received error message: {}", error_msg);
-        let error_state = categorize_error(error_msg);
+
+    } else if message_content.starts_with("Error: ") && message_content.len() > 7 {
+        let error_msg_content = &message_content[7..];
+        log::error!("Received error message for ID {}: {}", origin_id, error_msg_content);
+        let error_state = categorize_error(error_msg_content);
         app.add_error(error_state);
-        app.finish_streaming();
+        app.finish_streaming(origin_id);
     } else {
-        // Regular streaming content - use thread-local counters for logging
-        thread_local! {
-            static TOTAL_CONTENT_RECEIVED: std::cell::Cell<usize> = std::cell::Cell::new(0);
-            static CHUNK_COUNT: std::cell::Cell<usize> = std::cell::Cell::new(0);
+        // Regular streaming content
+        log::debug!("handle_llm_response: Received content chunk for origin_id={}, len={}. Forwarding to update_streaming_content.",
+                   origin_id, message_content.len());
+        app.update_streaming_content(&message_content, origin_id);
+        if Some(origin_id) == app.current_response_id {
+             app.set_status(format!("{}  Receiving response...", app.typing_indicator), false);
         }
-        
-        let chunk_count = CHUNK_COUNT.with(|c| {
-            let count = c.get() + 1;
-            c.set(count);
-            count
-        });
-        
-        let total_received = TOTAL_CONTENT_RECEIVED.with(|t| {
-            let total = t.get() + message.len();
-            t.set(total);
-            total
-        });
-        
-        // Log every 25 chunks or large content chunks
-        if chunk_count % 25 == 0 || message.len() > 100 {
-            log::info!("STREAMING: chunk #{}, {} chars, total {} chars, buffer: {} chars", 
-                      chunk_count, message.len(), total_received, app.streaming_buffer.len());
-        }
-        
-        app.update_streaming_content(&message);
-        app.set_status(format!("{}  Receiving response...", app.typing_indicator), false);
     }
 }
 

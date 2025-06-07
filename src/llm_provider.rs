@@ -448,7 +448,8 @@ impl GenAIProvider {
         &self, 
         model: &str, 
         prompt: &str,
-        tx: mpsc::UnboundedSender<String>
+        response_id_tag: usize, // New parameter
+        tx: mpsc::UnboundedSender<(usize, String)> // Changed type
     ) -> Result<()> {
         let chat_req = ChatRequest::default()
             .append_message(ChatMessage::user(prompt));
@@ -486,8 +487,8 @@ impl GenAIProvider {
                     
                     if !chunk.content.is_empty() {
                         // Send content immediately without batching to prevent content loss
-                        if tx.send(chunk.content.clone()).is_err() {
-                            log::error!("!!! CHANNEL SEND FAILED for chunk #{} - STOPPING STREAM !!!", chunk_count);
+                        if tx.send((response_id_tag, chunk.content.clone())).is_err() {
+                            log::error!("!!! CHANNEL SEND FAILED for chunk #{} (ID: {}) - STOPPING STREAM !!!", chunk_count, response_id_tag);
                             break;
                         }
                         
@@ -508,9 +509,9 @@ impl GenAIProvider {
                     // The 'break;' statement has been removed.
                 }
                 Err(e) => {
-                    log::error!("!!! STREAM ERROR after {} chunks at {:?}: {} !!!", chunk_count, elapsed, e);
+                    log::error!("!!! STREAM ERROR after {} chunks (ID: {}) at {:?}: {} !!!", chunk_count, response_id_tag, elapsed, e);
                     let error_msg = format!("Stream error: {}", e);
-                    let _ = tx.send(error_msg);
+                    let _ = tx.send((response_id_tag, error_msg));
                     return Err(e.into());
                 }
             }
@@ -528,12 +529,12 @@ impl GenAIProvider {
         
         // CRITICAL: Send single EOT signal to indicate completion
         // Remove duplicate/backup EOT signals that can cause confusion in the UI
-        if tx.send(crate::EOT_SIGNAL.to_string()).is_err() {
-            log::error!("!!! FAILED TO SEND EOT SIGNAL - channel may be closed !!!");
-            return Err(anyhow::anyhow!("Channel closed during EOT signal send"));
+        if tx.send((response_id_tag, crate::EOT_SIGNAL.to_string())).is_err() {
+            log::error!("!!! FAILED TO SEND EOT SIGNAL for ID: {} - channel may be closed !!!", response_id_tag);
+            return Err(anyhow::anyhow!("Channel closed during EOT signal send for ID {}", response_id_tag));
         }
         
-        log::info!(">>> EOT SIGNAL SENT for model: {} <<<", model);
+        log::info!(">>> EOT SIGNAL SENT for model: {}, ID: {} <<<", model, response_id_tag);
         Ok(())
     }
 
