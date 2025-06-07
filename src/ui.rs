@@ -857,8 +857,7 @@ impl App {
         if Some(origin_id) == self.current_response_id {
             self.is_llm_busy = false;
             self.is_input_disabled = false;
-            // Store the ID that caused this finish, for handle_llm_response logic, then clear current_response_id
-            CURRENT_RESPONSE_ID_BEFORE_FINISH_FOR_EOT.with(|cell| cell.set(self.current_response_id));
+            // CURRENT_RESPONSE_ID_BEFORE_FINISH_FOR_EOT was removed here
             self.current_response_id = None;
             log::debug!("Cleared current_response_id due to EOT for active stream {}", origin_id);
 
@@ -1350,7 +1349,7 @@ async fn initiate_llm_request_enhanced(
     let result = provider.generate_response_stream_to_channel(
         &model_name,
         &input,
-        response_id_for_provider, // Added
+        response_id_for_provider,
         tx.clone(),
     ).await;
     
@@ -1360,9 +1359,14 @@ async fn initiate_llm_request_enhanced(
             // EOT signal is now sent by the provider itself, no need to send it here
         }
         Err(e) => {
-            log::error!("LLM request failed: {}", e);
-            let _ = tx.send(format!("Error: {}", e));
-            let _ = tx.send(crate::EOT_SIGNAL.to_string());
+            log::error!("LLM request failed for response_id {}: {}", response_id_for_provider, e);
+            let error_msg = format!("Error: {}", e);
+            if tx.send((response_id_for_provider, error_msg)).is_err() {
+                log::error!("Failed to send error message to UI for response_id: {}", response_id_for_provider);
+            }
+            if tx.send((response_id_for_provider, crate::EOT_SIGNAL.to_string())).is_err() {
+                log::error!("Failed to send EOT signal to UI for error on response_id: {}", response_id_for_provider);
+            }
         }
     }
 }
