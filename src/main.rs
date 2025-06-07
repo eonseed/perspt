@@ -538,7 +538,7 @@ async fn initiate_llm_request(
     input_to_send: String,
     provider: Arc<GenAIProvider>, 
     model_name: &str,
-    tx_llm: &mpsc::UnboundedSender<String>,
+    tx_llm: &mpsc::UnboundedSender<(usize, String)>, // Changed type
 ) {
     app.is_llm_busy = true;
     app.is_input_disabled = true;
@@ -554,22 +554,29 @@ async fn initiate_llm_request(
 
     tokio::spawn(async move {
         // Use the provider's streaming method with proper genai streaming
+        let response_id_for_provider = app.current_response_id.expect("current_response_id should be Some when initiating LLM request from main.rs");
+
         let result = provider.generate_response_stream_to_channel(
             &model_name_clone,
             &input_clone,
+            response_id_for_provider, // Pass the app's current response ID
             tx_clone_for_provider.clone(),
         ).await;
 
         match result {
             Ok(()) => {
-                log::debug!("Streaming completed successfully");
-                // EOT signal is now sent by the provider itself, no need to send it here
+                log::debug!("Streaming completed successfully for ID: {}", response_id_for_provider);
+                // EOT signal is now sent by the provider itself
             }
             Err(e) => {
-                log::error!("LLM request failed: {}", e);
+                log::error!("LLM request failed for ID {}: {}", response_id_for_provider, e);
                 let error_msg = format!("Error: {}", e);
-                let _ = tx_clone_for_provider.send(error_msg);
-                let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
+                if tx_clone_for_provider.send((response_id_for_provider, error_msg)).is_err() {
+                    log::error!("Failed to send error message to UI for response_id: {}", response_id_for_provider);
+                }
+                if tx_clone_for_provider.send((response_id_for_provider, EOT_SIGNAL.to_string())).is_err() {
+                    log::error!("Failed to send EOT signal to UI for error on response_id: {}", response_id_for_provider);
+                }
             }
         }
     });
@@ -648,7 +655,7 @@ fn truncate_message(s: &str, max_chars: usize) -> String {
 /// application stability. Critical errors are logged for debugging.
 pub async fn handle_events(
     app: &mut ui::App,
-    tx_llm: &mpsc::UnboundedSender<String>, 
+    tx_llm: &mpsc::UnboundedSender<(usize, String)>, // Changed type
     _api_key: &String,
     model_name: &String,
     provider: &Arc<GenAIProvider>, 
