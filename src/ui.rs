@@ -964,18 +964,6 @@ impl App {
         }
     }
 
-    /// Add new streaming assistant message
-    fn add_streaming_message(&mut self) { // This function might need re-evaluation or be removed if direct update is always used.
-                                          // For now, it would add a message with the current self.current_response_id
-        let message = ChatMessage {
-            message_type: MessageType::Assistant,
-            content: markdown_to_lines(&self.streaming_buffer),
-            timestamp: Self::get_timestamp(),
-            response_id: self.current_response_id,
-        };
-        self.chat_history.push(message);
-    }
-
     /// Tick for animations and periodic updates with smoother frame rate
     pub fn tick(&mut self) {
         let now = Instant::now();
