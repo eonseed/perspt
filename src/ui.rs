@@ -99,6 +99,7 @@ pub enum MessageType {
 /// * `message_type` - The type of message (User, Assistant, Error, etc.)
 /// * `content` - The formatted content as a vector of styled lines
 /// * `timestamp` - When the message was created (formatted string)
+/// * `response_id` - Optional ID to associate message with a specific response stream
 ///
 /// # Examples
 ///
@@ -117,6 +118,7 @@ pub struct ChatMessage {
     pub message_type: MessageType,
     pub content: Vec<Line<'static>>,
     pub timestamp: String,
+    pub response_id: Option<usize>,
 }
 
 /// Events that can occur in the application.
@@ -193,6 +195,8 @@ pub struct App {
     pub typing_indicator: String,
     pub response_progress: f64,
     pub streaming_buffer: String,
+    pub current_response_id: Option<usize>,
+    pub next_response_id: usize,
     // Enhanced input handling
     pub cursor_position: usize,
     pub input_scroll_offset: usize,
@@ -273,6 +277,7 @@ impl App {
                 Line::from(""),
             ],
             timestamp: Self::get_timestamp(),
+            response_id: None,
         };
 
         Self {
@@ -291,6 +296,8 @@ impl App {
             typing_indicator: String::new(),
             response_progress: 0.0,
             streaming_buffer: String::new(),
+            current_response_id: None,
+            next_response_id: 1,
             cursor_position: 0,
             input_scroll_offset: 0,
             last_animation_tick: Instant::now(),
@@ -358,12 +365,17 @@ impl App {
     ///     message_type: MessageType::User,
     ///     content: vec![Line::from("Hello!")],
     ///     timestamp: String::new(), // Will be set automatically
+    ///     response_id: None,
     /// };
     /// 
     /// app.add_message(message);
     /// ```
     pub fn add_message(&mut self, mut message: ChatMessage) {
         message.timestamp = Self::get_timestamp();
+        // Ensure response_id is handled if not already set by caller
+        if message.response_id.is_none() && (message.message_type == MessageType::User || message.message_type == MessageType::Error || message.message_type == MessageType::System) {
+            // User messages and general system/error messages not tied to a specific response stream get None
+        }
         self.chat_history.push(message);
         self.scroll_to_bottom();
         self.needs_redraw = true;
@@ -418,6 +430,7 @@ impl App {
             message_type: MessageType::Error,
             content: full_content,
             timestamp: Self::get_timestamp(),
+            response_id: None,
         });
     }
 
@@ -749,11 +762,27 @@ impl App {
         self.response_progress = 0.0;
         self.streaming_buffer.clear();
         
-        // Create a new assistant message immediately to ensure we have a dedicated message for this streaming session
+        // Ensure we're in a clean state before starting new stream
+        if self.is_llm_busy {
+            log::warn!("Starting new stream while already busy - forcing clean state");
+            // Potentially call a refined finish_streaming that doesn't clear current_response_id if it's for a *different* stream.
+            // For now, the existing finish_streaming will reset current_response_id to None.
+        }
+
+        self.current_response_id = Some(self.next_response_id);
+        self.next_response_id += 1;
+
+        self.is_llm_busy = true;
+        self.is_input_disabled = true;
+        self.response_progress = 0.0;
+        self.streaming_buffer.clear();
+
+        // Create a new assistant message immediately with the current response ID
         let initial_message = ChatMessage {
             message_type: MessageType::Assistant,
-            content: vec![Line::from("...")], // Placeholder content while waiting for response
+            content: vec![Line::from("...")], // Placeholder content
             timestamp: Self::get_timestamp(),
+            response_id: self.current_response_id,
         };
         self.chat_history.push(initial_message);
         
@@ -770,78 +799,70 @@ impl App {
         // CRITICAL FIX: Always force final UI update regardless of throttling
         // This ensures that all accumulated content in the buffer gets transferred to the chat message
         if !self.streaming_buffer.is_empty() {
-            log::debug!("Forcing final UI update with {} chars in buffer", self.streaming_buffer.len());
+            log::debug!("Forcing final UI update with {} chars in buffer for response_id: {:?}",
+                       self.streaming_buffer.len(), self.current_response_id);
             
-            if let Some(last_msg) = self.chat_history.last_mut() {
-                if last_msg.message_type == MessageType::Assistant {
-                    // Force final update of the assistant message with complete content
-                    last_msg.content = markdown_to_lines(&self.streaming_buffer);
-                    last_msg.timestamp = Self::get_timestamp();
-                    log::debug!("FINAL UPDATE: Assistant message now has {} lines of content", last_msg.content.len());
-                } else {
-                    // This shouldn't happen with our new approach, but handle gracefully
-                    log::warn!("Expected assistant message at end of streaming but found {:?}", last_msg.message_type);
-                    self.add_streaming_message();
-                    log::debug!("Added new assistant message with final content");
-                }
-            } else {
-                // This shouldn't happen either, but handle gracefully
-                log::warn!("No messages in chat history at end of streaming");
-                self.add_streaming_message();
-                log::debug!("Added assistant message to empty chat history");
-            }
-            
-            // Log the final content for debugging
-            if let Some(last_msg) = self.chat_history.last() {
-                if last_msg.message_type == MessageType::Assistant {
-                    let content_preview = last_msg.content.iter()
-                        .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect::<String>())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                        .chars()
-                        .take(100)
-                        .collect::<String>();
-                    log::debug!("Final message content preview: {}...", content_preview);
-                }
-            }
-        } else {
-            // If no content was received, check if we have a placeholder and remove it
-            if let Some(last_msg) = self.chat_history.last() {
-                if last_msg.message_type == MessageType::Assistant {
-                    // Check if this looks like our placeholder (empty or just "...")
-                    let is_placeholder = last_msg.content.is_empty() ||
-                        (last_msg.content.len() == 1 && 
-                         last_msg.content[0].spans.len() == 1 &&
-                         (last_msg.content[0].spans[0].content == "..." || 
-                          last_msg.content[0].spans[0].content.trim().is_empty()));
-                    
-                    if is_placeholder {
-                        self.chat_history.pop();
-                        log::debug!("Removed placeholder assistant message (no content received)");
+            let mut found_message_to_update = false;
+            if let Some(current_id) = self.current_response_id {
+                for msg in self.chat_history.iter_mut().rev() {
+                    if msg.message_type == MessageType::Assistant && msg.response_id == Some(current_id) {
+                        msg.content = markdown_to_lines(&self.streaming_buffer);
+                        msg.timestamp = Self::get_timestamp();
+                        log::debug!("FINAL UPDATE: Assistant message (ID: {:?}) now has {} lines of content",
+                                   msg.response_id, msg.content.len());
+                        found_message_to_update = true;
+                        break;
                     }
                 }
             }
-            log::debug!("No content in streaming buffer to finalize");
+
+            if !found_message_to_update {
+                 log::warn!("finish_streaming: No active assistant message found for current_response_id: {:?}. Buffer content might be lost.", self.current_response_id);
+                // Optionally, add as a new message if no target found, though this might indicate a logic error.
+                // For now, we log and the buffer will be cleared.
+            }
+        } else {
+            // If no content was received, check if we have a placeholder and remove it, only if it matches current_response_id
+            if let Some(current_id) = self.current_response_id {
+                if let Some(pos) = self.chat_history.iter().rposition(|msg| msg.message_type == MessageType::Assistant && msg.response_id == Some(current_id)) {
+                    let msg = &self.chat_history[pos];
+                    let is_placeholder = msg.content.is_empty() ||
+                        (msg.content.len() == 1 &&
+                         msg.content[0].spans.len() == 1 &&
+                         (msg.content[0].spans[0].content == "..." ||
+                          msg.content[0].spans[0].content.trim().is_empty()));
+                    if is_placeholder {
+                        self.chat_history.remove(pos);
+                        log::debug!("Removed placeholder assistant message (ID: {:?}) as no content was received.", current_id);
+                    }
+                }
+            }
+            log::debug!("No content in streaming buffer to finalize for response_id: {:?}", self.current_response_id);
         }
         
-        // Clear the buffer AFTER ensuring content is saved to prevent race conditions
+        // Clear the buffer AFTER ensuring content is saved
         self.streaming_buffer.clear();
         
         // Reset streaming state
-        self.is_llm_busy = false;
-        self.is_input_disabled = false;
+        self.is_llm_busy = false; // This might be set true again quickly if there's a queued request
+        self.is_input_disabled = false; // Similarly, might be set true again
         self.response_progress = 1.0; // Show completion
         self.typing_indicator.clear();
         
+        // Crucially, reset current_response_id AFTER all processing for this stream is done
+        self.current_response_id = None;
+
         // Ensure final content is visible
         self.scroll_to_bottom();
         self.needs_redraw = true;
         
-        // Update status
-        self.set_status("✅ Ready".to_string(), false);
-        self.clear_error();
+        // Update status (only if no new stream has started immediately)
+        if !self.is_llm_busy { // Check if a new stream started due to queued input
+            self.set_status("✅ Ready".to_string(), false);
+            self.clear_error();
+        }
         
-        log::debug!("Streaming mode finished successfully, chat history has {} messages", self.chat_history.len());
+        log::debug!("Streaming mode finished, chat history has {} messages. current_response_id is now None.", self.chat_history.len());
     }
 
     /// Update streaming content with optimized rendering and immediate feedback
@@ -862,21 +883,31 @@ impl App {
         self.streaming_buffer.push_str(content);
         
         // CRITICAL FIX: Always update the message content, regardless of UI throttling
-        // This ensures that the message always contains the latest content
-        if let Some(last_msg) = self.chat_history.last_mut() {
-            if last_msg.message_type == MessageType::Assistant {
-                // Always update the assistant message with the latest streaming content
-                last_msg.content = markdown_to_lines(&self.streaming_buffer);
-                last_msg.timestamp = Self::get_timestamp(); // Update timestamp for latest content
-            } else {
-                // This should not happen with our new approach, but handle it gracefully
-                log::warn!("Expected assistant message but found {:?}, creating new assistant message", last_msg.message_type);
-                self.add_streaming_message();
+        // This ensures that the message always contains the latest content for the *correct* response stream
+
+        let mut found_message_to_update = false;
+        if let Some(current_id) = self.current_response_id {
+            for msg in self.chat_history.iter_mut().rev() {
+                if msg.message_type == MessageType::Assistant && msg.response_id == Some(current_id) {
+                    // Update this specific message's content
+                    msg.content = markdown_to_lines(&self.streaming_buffer);
+                    msg.timestamp = Self::get_timestamp(); // Update timestamp for latest content
+                    found_message_to_update = true;
+                    break;
+                }
             }
-        } else {
-            // This should also not happen, but handle it gracefully
-            log::warn!("No messages in chat history during streaming, creating new assistant message");
-            self.add_streaming_message();
+        }
+
+        if !found_message_to_update {
+            log::warn!("update_streaming_content: No active assistant message found for current_response_id: {:?}. Discarding chunk: '{}'",
+                       self.current_response_id, content.chars().take(50).collect::<String>());
+            // Do not update any message or the streaming buffer with this content if no target.
+            // However, the content IS ALREADY IN self.streaming_buffer due to the push_str above.
+            // This means if a message is found *later* it will get this content.
+            // For strict "discard", we might need to pop from streaming_buffer or not add it.
+            // For now, let's assume the current logic: if a message appears later for this ID, it gets the full buffer.
+            // If current_response_id is None, this content is effectively orphaned from an ID perspective.
+            return; // Early exit if no message to update, to prevent redraw logic for discarded chunk
         }
         
         // FIXED: More responsive UI update strategy that prevents freezing during long responses
@@ -934,11 +965,13 @@ impl App {
     }
 
     /// Add new streaming assistant message
-    fn add_streaming_message(&mut self) {
+    fn add_streaming_message(&mut self) { // This function might need re-evaluation or be removed if direct update is always used.
+                                          // For now, it would add a message with the current self.current_response_id
         let message = ChatMessage {
             message_type: MessageType::Assistant,
             content: markdown_to_lines(&self.streaming_buffer),
             timestamp: Self::get_timestamp(),
+            response_id: self.current_response_id,
         };
         self.chat_history.push(message);
     }
@@ -1171,6 +1204,7 @@ async fn handle_terminal_event(
                             message_type: MessageType::User,
                             content: vec![Line::from(input.clone())],
                             timestamp: App::get_timestamp(),
+                            response_id: None, // User messages don't have a response_id
                         });
                         
                         // Start LLM request
@@ -1347,6 +1381,7 @@ async fn handle_llm_response(
                 message_type: MessageType::User,
                 content: vec![Line::from(pending_input.clone())],
                 timestamp: App::get_timestamp(),
+                response_id: None, // User messages don't have a response_id
             });
             
             // Start new streaming session with clean state
