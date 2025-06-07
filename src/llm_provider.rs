@@ -474,18 +474,15 @@ impl GenAIProvider {
             
             match chunk_result {
                 Ok(ChatStreamEvent::Start) => {
-                    log::info!(">>> STREAM STARTED for model: {} at {:?}", model, elapsed);
+                    log::debug!("Stream Event: Start, model={}, elapsed={:?}", model, elapsed);
                 }
                 Ok(ChatStreamEvent::Chunk(chunk)) => {
                     chunk_count += 1;
                     total_content_length += chunk.content.len();
                     
-                    // Enhanced logging: log every 10 chunks AND any large chunks
-                    if chunk_count % 10 == 0 || chunk.content.len() > 100 {
-                        log::info!("CHUNK #{}: {} chars, total: {} chars, elapsed: {:?}, content preview: '{}'", 
-                                  chunk_count, chunk.content.len(), total_content_length, elapsed,
-                                  chunk.content.chars().take(50).collect::<String>().replace('\n', "\\n"));
-                    }
+                    log::debug!("Stream Event: Chunk, count={}, len={}, total_len={}, elapsed={:?}, preview='{}'",
+                              chunk_count, chunk.content.len(), total_content_length, elapsed,
+                              chunk.content.chars().take(50).collect::<String>().replace("\n", "\\n"));
                     
                     if !chunk.content.is_empty() {
                         // Send content immediately without batching to prevent content loss
@@ -494,24 +491,21 @@ impl GenAIProvider {
                             break;
                         }
                         
-                        // Additional detailed logging every 25 chunks
-                        if chunk_count % 25 == 0 {
-                            log::info!("=== PROGRESS: {} chunks, {} chars, {:?} elapsed ===", 
-                                       chunk_count, total_content_length, elapsed);
-                        }
+                        // Removed the conditional log::info!("=== PROGRESS: ...") as it's covered by debug now
                     } else {
-                        log::debug!("Empty chunk #{} received", chunk_count);
+                        log::debug!("Stream Event: Empty Chunk, count={}", chunk_count);
                     }
                 }
                 Ok(ChatStreamEvent::ReasoningChunk(chunk)) => {
-                    log::info!("REASONING CHUNK: {} chars at {:?}", chunk.content.len(), elapsed);
-                    // For now, just log reasoning chunks. In future versions we might display them differently.
+                    log::debug!("Stream Event: ReasoningChunk, len={}, elapsed={:?}, preview='{}'",
+                               chunk.content.len(), elapsed,
+                               chunk.content.chars().take(50).collect::<String>().replace("\n", "\\n"));
                 }
-                Ok(ChatStreamEvent::End(_)) => {
-                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {} after {} chunks, {} chars, {:?} elapsed", 
-                               model, chunk_count, total_content_length, elapsed);
+                Ok(ChatStreamEvent::End(end_event)) => {
+                    log::debug!("Stream Event: End (Explicit), model={}, chunks={}, total_len={}, elapsed={:?}, event_details={:?}",
+                               model, chunk_count, total_content_length, elapsed, end_event);
                     stream_ended_explicitly = true;
-                    break;
+                    // The 'break;' statement has been removed.
                 }
                 Err(e) => {
                     log::error!("!!! STREAM ERROR after {} chunks at {:?}: {} !!!", chunk_count, elapsed, e);
@@ -525,7 +519,7 @@ impl GenAIProvider {
         // Stream ended - either explicitly via End event or stream exhaustion
         let final_elapsed = start_time.elapsed();
         if !stream_ended_explicitly {
-            log::warn!("!!! STREAM ENDED IMPLICITLY (exhausted) for model: {} after {} chunks, {} chars, {:?} elapsed !!!", 
+            log::debug!("Stream Event: End (Implicit/Exhausted), model={}, chunks={}, total_len={}, elapsed={:?}",
                        model, chunk_count, total_content_length, final_elapsed);
         }
 
