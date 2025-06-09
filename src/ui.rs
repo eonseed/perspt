@@ -8,16 +8,26 @@
 //!
 //! * **Rich Terminal UI**: Modern terminal interface with colors, borders, and layouts
 //! * **Real-time Markdown Rendering**: Live rendering of LLM responses with markdown formatting
-//! * **Scrollable Chat History**: Full chat history with keyboard navigation
+//! * **Advanced Scrollable Chat History**: Intelligent scrolling with accurate text wrapping calculations
 //! * **Progress Indicators**: Visual feedback for LLM response generation
 //! * **Error Display**: Comprehensive error handling with user-friendly messages
 //! * **Help System**: Built-in help overlay with keyboard shortcuts
 //! * **Responsive Layout**: Adaptive layout that works across different terminal sizes
+//! * **Unicode Text Wrapping**: Accurate character counting for proper terminal text wrapping
+//!
+//! ## Scroll System Improvements
+//!
+//! The scroll system has been enhanced to handle long responses reliably:
+//! * **Accurate Text Wrapping**: Uses `.chars().count()` for proper Unicode character counting
+//! * **Consistent Calculations**: Unified logic between `max_scroll()` and `update_scroll_state()`
+//! * **Content Visibility**: Conservative buffer ensures no content is cut off at the bottom
+//! * **Separator Line Handling**: Properly accounts for separator lines in scroll calculations
+//! * **Debug Logging**: Comprehensive logging for scroll-related troubleshooting
 //!
 //! ## Architecture
 //!
 //! The UI follows a component-based architecture:
-//! * `App` - Main application state and controller
+//! * `App` - Main application state and controller with enhanced scroll management
 //! * `ChatMessage` - Individual message representation with styling
 //! * `ErrorState` - Error handling and display logic
 //! * Event handling system for keyboard inputs and timers
@@ -579,13 +589,28 @@ impl App {
 
     /// Calculates the maximum scroll position based on content height and terminal height.
     ///
-    /// Determines how far the user can scroll based on the total number
-    /// of lines in the chat history and the available display area, accounting
-    /// for text wrapping in the terminal.
+    /// This method accurately determines how far the user can scroll by calculating the
+    /// total rendered lines accounting for text wrapping in the terminal. It ensures that
+    /// all content remains accessible and prevents content cutoff at the bottom of the
+    /// conversation area.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Calculates visible height of the chat area (terminal height - UI overhead)
+    /// 2. Computes total rendered lines including:
+    ///    - Header lines (1 per message)
+    ///    - Content lines with accurate text wrapping using character count
+    ///    - Separator lines (1 per message)
+    /// 3. Applies conservative buffer to prevent content cutoff
+    ///
+    /// # Text Wrapping
+    ///
+    /// Uses `.chars().count()` instead of `.len()` for accurate Unicode character
+    /// counting, ensuring proper text wrapping calculations in the terminal.
     ///
     /// # Returns
     ///
-    /// The maximum valid scroll position
+    /// The maximum valid scroll position with buffer to ensure content visibility
     pub fn max_scroll(&self) -> usize {
         // Calculate visible height for the chat area
         let chat_area_height = self.terminal_height.saturating_sub(11).max(1);
@@ -643,9 +668,22 @@ impl App {
 
     /// Updates the internal scroll state for display.
     ///
-    /// Synchronizes the scroll position with the UI scrollbar state,
-    /// accounting for text wrapping in the terminal.
-    /// Called automatically by scroll methods to maintain consistency.
+    /// Synchronizes the scroll position with the UI scrollbar state by recalculating
+    /// the total rendered lines accounting for text wrapping in the terminal. This
+    /// method ensures consistency between scroll calculations and actual rendered
+    /// content.
+    ///
+    /// # Implementation Details
+    ///
+    /// * Recalculates total rendered lines using the same algorithm as `max_scroll()`
+    /// * Accounts for text wrapping using accurate character counting
+    /// * Updates scrollbar content length and position for proper display
+    /// * Called automatically by scroll methods to maintain UI consistency
+    ///
+    /// # Text Wrapping Consistency
+    ///
+    /// This method uses identical text wrapping calculations as `max_scroll()` to
+    /// ensure that the scrollbar accurately represents the actual content layout.
     ///
     /// # Examples
     ///

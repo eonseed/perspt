@@ -385,6 +385,84 @@ Conversation messages support rich markdown formatting:
        Text::from(Line::from(spans))
    }
 
+**Enhanced Scroll Handling**:
+
+Recent improvements to the scroll system ensure accurate display of long responses:
+
+.. code-block:: rust
+
+   impl App {
+       /// Calculate maximum scroll position with text wrapping awareness
+       pub fn max_scroll(&self) -> usize {
+           // Calculate visible height for the chat area
+           let chat_area_height = self.terminal_height.saturating_sub(11).max(1);
+           let visible_height = chat_area_height.saturating_sub(2).max(1);
+           
+           // Calculate terminal width for text wrapping calculations
+           let chat_width = self.input_width.saturating_sub(4).max(20);
+           
+           // Calculate actual rendered lines accounting for text wrapping
+           let total_rendered_lines: usize = self.chat_history
+               .iter()
+               .map(|msg| {
+                   let mut lines = 1; // Header line
+                   
+                   // Content lines - account for text wrapping
+                   for line in &msg.content {
+                       let line_text = line.spans.iter()
+                           .map(|span| span.content.as_ref())
+                           .collect::<String>();
+                       
+                       if line_text.trim().is_empty() {
+                           lines += 1; // Empty lines
+                       } else {
+                           // Character-based text wrapping calculation
+                           let display_width = line_text.chars().count();
+                           if display_width <= chat_width {
+                               lines += 1;
+                           } else {
+                               let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                               lines += wrapped_lines.max(1);
+                           }
+                       }
+                   }
+                   
+                   lines += 1; // Separator line after each message
+                   lines
+               })
+               .sum();
+           
+           // Conservative scroll calculation to prevent content cutoff
+           if total_rendered_lines > visible_height {
+               let max_scroll = total_rendered_lines.saturating_sub(visible_height);
+               max_scroll.saturating_sub(1) // Buffer to ensure last lines are visible
+           } else {
+               0
+           }
+       }
+       
+       /// Update scroll state with accurate content length calculation
+       pub fn update_scroll_state(&mut self) {
+           // Uses same logic as max_scroll() for consistency
+           let chat_width = self.input_width.saturating_sub(4).max(20);
+           let total_rendered_lines = /* same calculation as above */;
+           
+           self.scroll_state = self.scroll_state
+               .content_length(total_rendered_lines.max(1))
+               .position(self.scroll_position);
+       }
+   }
+
+**Key Scroll Improvements**:
+
+* **Text Wrapping Awareness**: Uses character count (`.chars().count()`) instead of byte length for accurate Unicode text measurement
+* **Conservative Buffering**: Reduces max scroll by 1 position to prevent content cutoff at bottom
+* **Consistent Separator Handling**: Always includes separator lines after each message for uniform spacing
+* **Terminal Width Adaptive**: Properly calculates available chat area excluding UI borders and padding
+* **Synchronized State**: Both `max_scroll()` and `update_scroll_state()` use identical line counting logic
+
+These improvements ensure that all lines of long LLM responses are visible and properly scrollable, especially when viewing the bottom of the conversation.
+
 Data Flow
 ---------
 
