@@ -186,6 +186,75 @@ You can extend the Ratatui-based UI with custom components:
        Text::from(Line::from(spans))
    }
 
+Enhanced Scroll Handling
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Recent improvements to Perspt's scroll system demonstrate best practices for handling long content in terminal UIs:
+
+.. code-block:: rust
+
+   // Custom scroll handling for terminal applications
+   impl App {
+       /// Advanced scroll calculation accounting for text wrapping
+       pub fn calculate_content_height(&self, content: &[ChatMessage], terminal_width: usize) -> usize {
+           let chat_width = terminal_width.saturating_sub(4).max(20); // Account for borders
+           
+           content.iter().map(|msg| {
+               let mut lines = 1; // Header line
+               
+               // Calculate wrapped content lines
+               for line in &msg.content {
+                   let line_text = line.spans.iter()
+                       .map(|span| span.content.as_ref())
+                       .collect::<String>();
+                   
+                   if line_text.trim().is_empty() {
+                       lines += 1;
+                   } else {
+                       // Character-aware text wrapping (important for Unicode)
+                       let display_width = line_text.chars().count();
+                       if display_width <= chat_width {
+                           lines += 1;
+                       } else {
+                           let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                           lines += wrapped_lines.max(1);
+                       }
+                   }
+               }
+               
+               lines += 1; // Separator line
+               lines
+           }).sum()
+       }
+       
+       /// Conservative scroll bounds to prevent content cutoff
+       pub fn calculate_max_scroll(&self, content_height: usize, visible_height: usize) -> usize {
+           if content_height > visible_height {
+               let max_scroll = content_height.saturating_sub(visible_height);
+               // Conservative buffer to ensure bottom content is always visible
+               max_scroll.saturating_sub(1)
+           } else {
+               0
+           }
+       }
+   }
+
+**Key Extension Points for Scroll Handling**:
+
+* **Text Wrapping Logic**: Customize how text wraps based on content type or user preferences
+* **Scroll Animation**: Add smooth scrolling animations for better user experience  
+* **Auto-scroll Behavior**: Implement smart auto-scrolling that respects user navigation intent
+* **Content-aware Scrolling**: Different scroll behavior for code blocks, lists, or other content types
+* **Accessibility Features**: Add scroll indicators, position feedback, or keyboard shortcuts
+
+**Best Practices for Terminal UI Scrolling**:
+
+1. **Character-based calculations**: Always use `.chars().count()` for Unicode-safe text measurement
+2. **Conservative buffering**: Leave small buffers to prevent content cutoff at boundaries
+3. **Consistent state**: Keep scroll calculation logic identical across all scroll methods
+4. **Terminal adaptation**: Account for borders, padding, and other UI elements in calculations
+5. **User feedback**: Provide visual indicators (scrollbars, position info) for scroll state
+
 Configuration Extensions
 ------------------------
 
