@@ -68,16 +68,16 @@ You'll need an API key from at least one AI provider:
 
          export GOOGLE_API_KEY="your-google-api-key-here"
 
-   .. tab:: AWS Bedrock
+   .. tab:: Ollama (Local)
 
-      1. Set up AWS CLI and credentials
-      2. Ensure you have Bedrock access
-      3. Configure your AWS profile
+      1. Install Ollama from `ollama.ai <https://ollama.ai>`_
+      2. Pull a model
+      3. Start Ollama service
 
       .. code-block:: bash
 
-         aws configure
-         # Set up your AWS credentials
+         ollama pull llama3.2
+         # Ollama service starts automatically
 
 Quick Installation
 ------------------
@@ -253,8 +253,8 @@ Other Providers
    # Use Google Gemini
    perspt --provider-type google --model-name gemini-pro
 
-   # Use AWS Bedrock
-   perspt --provider-type aws-bedrock --model-name amazon.nova-micro-v1:0
+   # Use Ollama (Local)
+   perspt --provider-type ollama --model-name llama3.2
 
 List Available Models
 ~~~~~~~~~~~~~~~~~~~~~

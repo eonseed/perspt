@@ -14,7 +14,7 @@ AI and LLM Integration
   
   * **Project**: `genai <https://crates.io/crates/genai>`_
   * **License**: MIT/Apache 2.0
-  * **Impact**: Enables seamless integration with OpenAI, Anthropic, Google, Mistral, and other providers
+  * **Impact**: Enables seamless integration with OpenAI, Anthropic, Google, Groq, Cohere, XAI, DeepSeek, and Ollama providers
 
 **serde & serde_json**
   Rust's premier serialization framework, powering Perspt's configuration management and API communication.
@@ -116,14 +116,20 @@ AI Provider Communities
 **Google**
   For Gemini models and their contributions to accessible AI technology.
 
-**Mistral AI**
-  For their excellent open-source and commercial models.
+**Groq**
+  For ultra-fast inference infrastructure and democratizing AI speed.
 
-**Perplexity AI**
-  For innovative approaches to AI-powered search and information retrieval.
+**Cohere**
+  For enterprise-grade language models and excellent developer tools.
+
+**XAI**
+  For Grok models and advancing conversational AI capabilities.
 
 **DeepSeek**
   For their contributions to the open-source AI ecosystem.
+
+**Ollama**
+  For making local AI model hosting accessible and user-friendly.
 
 Open Source Ecosystem
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -27,10 +27,11 @@
     -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, **GPT-4.1**, **o1-mini**, **o1-preview**, **o3-mini**, and more)
     -   **Anthropic** (Claude-3 Opus, Sonnet, Haiku, Claude-3.5 Sonnet, Claude-3.5 Haiku, and more)
     -   **Google Gemini** (Gemini-1.5-pro, Gemini-1.5-flash, **Gemini-2.0-flash**, **Gemini-2.5-Pro**, and more)
-    -   **Mistral** (Mistral-tiny, small, medium, large, Mistral-nemo, Mixtral models, and more)
-    -   **Perplexity** (Sonar, Sonar-pro, Sonar-reasoning, and more)
+    -   **Groq** (Llama models with ultra-fast inference, Mixtral, Gemma, and more)
+    -   **Cohere** (Command models, Command-R, Command-R+, and more)
+    -   **XAI** (Grok models and more)
     -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner, and more)
-    -   **AWS Bedrock** (Amazon Nova models, and more)
+    -   **Ollama** (Local models: Llama, Mistral, Code Llama, Vicuna, and custom models)
 -   **🔧 Robust CLI Options**: Full command-line support for API keys, models, and provider types that actually work.
 -   **🔄 Flexible Authentication**: API keys work via CLI arguments, environment variables, or configuration files.
 -   **⚙️ Smart Configuration:** Intelligent configuration loading with fallbacks and validation.
@@ -47,13 +48,15 @@
 ### 🛠️ Prerequisites
 
 -   **Rust:** Ensure you have the Rust toolchain installed. Get it from [rustup.rs](https://rustup.rs/).
--   **🔑 LLM API Key:** For API providers, you'll need an API key from the respective provider:
+-   **🔑 LLM API Key:** For cloud providers, you'll need an API key from the respective provider:
     -   **OpenAI**: Get yours at [platform.openai.com](https://platform.openai.com) (supports o1-mini, o1-preview, o3-mini, GPT-4.1)
     -   **Anthropic**: Get yours at [console.anthropic.com](https://console.anthropic.com)
     -   **Google Gemini**: Get yours at [aistudio.google.com](https://aistudio.google.com) (supports Gemini 2.5 Pro)
-    -   **Mistral**: Get yours at [console.mistral.ai](https://console.mistral.ai)
-    -   **Perplexity**: Get yours at [www.perplexity.ai/settings/api](https://www.perplexity.ai/settings/api)
+    -   **Groq**: Get yours at [console.groq.com](https://console.groq.com)
+    -   **Cohere**: Get yours at [dashboard.cohere.com](https://dashboard.cohere.com)
+    -   **XAI**: Get yours at [console.x.ai](https://console.x.ai)
     -   **DeepSeek**: Get yours at [platform.deepseek.com](https://platform.deepseek.com)
+    -   **Ollama**: For local models, install Ollama from [ollama.ai](https://ollama.ai) (no API key needed)
 
 ### 📦 Installation
 
@@ -96,11 +99,12 @@ Create a `config.json` in the root directory of the project, or specify a custom
   "providers": {
     "openai": "https://api.openai.com/v1",
     "anthropic": "https://api.anthropic.com",
-    "google": "https://generativelanguage.googleapis.com/v1beta/",
-    "mistral": "https://api.mistral.ai/v1",
-    "perplexity": "https://api.perplexity.ai",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/",
+    "groq": "https://api.groq.com/openai/v1",
+    "cohere": "https://api.cohere.com/v1",
+    "xai": "https://api.x.ai/v1",
     "deepseek": "https://api.deepseek.com/v1",
-    "aws-bedrock": "https://bedrock.amazonaws.com"
+    "ollama": "http://localhost:11434/v1"
   },
   "provider_type": "openai",
   "default_provider": "openai",
@@ -113,7 +117,7 @@ Create a `config.json` in the root directory of the project, or specify a custom
 
 -   **`providers`** (Optional): A map of provider profile names to their API base URLs.
 -   **`provider_type`**: The type of LLM provider to use. 
-    -   Valid values: `"openai"`, `"anthropic"`, `"google"`, `"mistral"`, `"perplexity"`, `"deepseek"`, `"aws-bedrock"`
+    -   Valid values: `"openai"`, `"anthropic"`, `"gemini"`, `"groq"`, `"cohere"`, `"xai"`, `"deepseek"`, `"ollama"`
 -   **`default_provider`** (Optional): The name of the provider profile from the `providers` map to use by default.
 -   **`default_model`**: The model name to use (e.g., "gpt-4o-mini", "claude-3-5-sonnet-20241022", "gemini-1.5-flash").
 -   **`api_key`**: Your API key for the configured provider.
@@ -145,11 +149,71 @@ Create a `config.json` in the root directory of the project, or specify a custom
 ```json
 {
     "providers": {
-        "google": "https://generativelanguage.googleapis.com/v1beta/"
+        "gemini": "https://generativelanguage.googleapis.com/v1beta/"
     },
     "api_key": "YOUR_GEMINI_API_KEY",
     "default_model": "gemini-1.5-flash",
-    "provider_type": "google"
+    "provider_type": "gemini"
+}
+```
+
+**Groq:**
+```json
+{
+    "providers": {
+        "groq": "https://api.groq.com/openai/v1"
+    },
+    "api_key": "YOUR_GROQ_API_KEY",
+    "default_model": "llama-3.1-70b-versatile",
+    "provider_type": "groq"
+}
+```
+
+**Cohere:**
+```json
+{
+    "providers": {
+        "cohere": "https://api.cohere.com/v1"
+    },
+    "api_key": "YOUR_COHERE_API_KEY",
+    "default_model": "command-r-plus",
+    "provider_type": "cohere"
+}
+```
+
+**XAI (Grok):**
+```json
+{
+    "providers": {
+        "xai": "https://api.x.ai/v1"
+    },
+    "api_key": "YOUR_XAI_API_KEY",
+    "default_model": "grok-beta",
+    "provider_type": "xai"
+}
+```
+
+**DeepSeek:**
+```json
+{
+    "providers": {
+        "deepseek": "https://api.deepseek.com/v1"
+    },
+    "api_key": "YOUR_DEEPSEEK_API_KEY",
+    "default_model": "deepseek-chat",
+    "provider_type": "deepseek"
+}
+```
+
+**Ollama (Local Models):**
+```json
+{
+    "providers": {
+        "ollama": "http://localhost:11434/v1"
+    },
+    "api_key": "not-required",
+    "default_model": "llama3.2",
+    "provider_type": "ollama"
 }
 ```
 
@@ -158,9 +222,9 @@ Create a `config.json` in the root directory of the project, or specify a custom
 The CLI now has **fully working** argument support with proper API key handling:
 
 -   `-c <FILE>`, `--config <FILE>`: Path to a custom configuration file.
--   `-p <TYPE>`, `--provider-type <TYPE>`: Specify the provider type (`openai`, `anthropic`, `google`, `mistral`, `perplexity`, `deepseek`, `aws-bedrock`). 
+-   `-p <TYPE>`, `--provider-type <TYPE>`: Specify the provider type (`openai`, `anthropic`, `gemini`, `groq`, `cohere`, `xai`, `deepseek`, `ollama`). 
 -   `-k <API_KEY>`, `--api-key <API_KEY>`: Your API key for the LLM provider (works properly now!).
--   `-m <MODEL>`, `--model <MODEL>`: The model name (e.g., `gpt-4o-mini`, `o1-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-pro`).
+-   `-m <MODEL>`, `--model <MODEL>`: The model name (e.g., `gpt-4o-mini`, `o1-mini`, `claude-3-5-sonnet-20241022`, `gemini-2.5-pro`, `llama3.2`).
 -   `--provider <PROVIDER_PROFILE>`: Choose a pre-configured provider profile from your `config.json`'s `providers` map.
 -   `--list-models`: List available models for the configured provider.
 
@@ -195,10 +259,10 @@ target/release/perspt --provider-type openai --api-key YOUR_OPENAI_API_KEY --mod
 **Google Gemini (including latest models):**
 ```bash
 # Gemini 2.0 Flash (latest fast model)
-target/release/perspt --provider-type google --api-key YOUR_GEMINI_API_KEY --model gemini-2.0-flash-exp
+target/release/perspt --provider-type gemini --api-key YOUR_GEMINI_API_KEY --model gemini-2.0-flash-exp
 
 # Gemini 1.5 Pro (balanced performance)
-target/release/perspt --provider-type google --api-key YOUR_GEMINI_API_KEY --model gemini-1.5-pro
+target/release/perspt --provider-type gemini --api-key YOUR_GEMINI_API_KEY --model gemini-1.5-pro
 ```
 
 **Anthropic:**
@@ -206,15 +270,73 @@ target/release/perspt --provider-type google --api-key YOUR_GEMINI_API_KEY --mod
 target/release/perspt --provider-type anthropic --api-key YOUR_ANTHROPIC_API_KEY --model claude-3-5-sonnet-20241022
 ```
 
+**Groq (Ultra-fast inference):**
+```bash
+# Llama models with lightning-fast inference
+target/release/perspt --provider-type groq --api-key YOUR_GROQ_API_KEY --model llama-3.1-70b-versatile
+
+# Mixtral model
+target/release/perspt --provider-type groq --api-key YOUR_GROQ_API_KEY --model mixtral-8x7b-32768
+```
+
+**Cohere:**
+```bash
+# Command-R+ (latest reasoning model)
+target/release/perspt --provider-type cohere --api-key YOUR_COHERE_API_KEY --model command-r-plus
+
+# Command-R (balanced performance)
+target/release/perspt --provider-type cohere --api-key YOUR_COHERE_API_KEY --model command-r
+```
+
+**XAI (Grok):**
+```bash
+target/release/perspt --provider-type xai --api-key YOUR_XAI_API_KEY --model grok-beta
+```
+
+**DeepSeek:**
+```bash
+# DeepSeek Chat
+target/release/perspt --provider-type deepseek --api-key YOUR_DEEPSEEK_API_KEY --model deepseek-chat
+
+# DeepSeek Reasoner
+target/release/perspt --provider-type deepseek --api-key YOUR_DEEPSEEK_API_KEY --model deepseek-reasoner
+```
+
+**Ollama (Local Models - No API Key Required!):**
+```bash
+# First, make sure Ollama is running locally:
+# ollama serve
+
+# Llama 3.2 (3B - fast and efficient)
+target/release/perspt --provider-type ollama --model llama3.2
+
+# Llama 3.1 (8B - more capable)
+target/release/perspt --provider-type ollama --model llama3.1:8b
+
+# Code Llama (for coding tasks)
+target/release/perspt --provider-type ollama --model codellama
+
+# Mistral (7B - general purpose)
+target/release/perspt --provider-type ollama --model mistral
+
+# Custom model (if you've imported one)
+target/release/perspt --provider-type ollama --model your-custom-model
+```
+
 **Using environment variables:**
 ```bash
 # Set once, use multiple times
 export OPENAI_API_KEY="your-key-here"
 export GOOGLE_API_KEY="your-gemini-key-here"
+export GROQ_API_KEY="your-groq-key-here"
 
 # Now you can skip the --api-key argument
 target/release/perspt --provider-type openai --model gpt-4o-mini
-target/release/perspt --provider-type google --model gemini-2.0-flash-exp
+target/release/perspt --provider-type gemini --model gemini-2.0-flash-exp
+target/release/perspt --provider-type groq --model llama-3.1-70b-versatile
+
+# Ollama doesn't need API keys
+target/release/perspt --provider-type ollama --model llama3.2
 ```
 
 **Using a config file:**
@@ -232,19 +354,25 @@ Perspt uses the modern **genai** crate for robust model handling and validation:
 target/release/perspt --provider-type openai --api-key YOUR_API_KEY --list-models
 
 # List Google models (including Gemini 2.5 Pro, 2.0 Flash)
-target/release/perspt --provider-type google --api-key YOUR_API_KEY --list-models
+target/release/perspt --provider-type gemini --api-key YOUR_API_KEY --list-models
 
 # List Anthropic models  
 target/release/perspt --provider-type anthropic --api-key YOUR_API_KEY --list-models
 
-# List Mistral models
-target/release/perspt --provider-type mistral --api-key YOUR_API_KEY --list-models
+# List Groq models (ultra-fast inference)
+target/release/perspt --provider-type groq --api-key YOUR_API_KEY --list-models
 
-# List Perplexity models
-target/release/perspt --provider-type perplexity --api-key YOUR_API_KEY --list-models
+# List Cohere models
+target/release/perspt --provider-type cohere --api-key YOUR_API_KEY --list-models
+
+# List XAI models
+target/release/perspt --provider-type xai --api-key YOUR_API_KEY --list-models
 
 # List DeepSeek models
 target/release/perspt --provider-type deepseek --api-key YOUR_API_KEY --list-models
+
+# List Ollama models (local, no API key needed)
+target/release/perspt --provider-type ollama --list-models
 ```
 
 **✅ Enhanced Model Support:**
@@ -252,6 +380,127 @@ target/release/perspt --provider-type deepseek --api-key YOUR_API_KEY --list-mod
 - **Latest Model Support**: Built on genai crate which supports cutting-edge models like o1-mini and Gemini 2.5 Pro
 - **Proper Error Handling**: Clear error messages when models don't exist or aren't available
 - **Reasoning Model Support**: Full support for models with reasoning capabilities and special event handling
+
+## 🏠 Using Ollama for Local Models
+
+Ollama provides a fantastic way to run AI models locally on your machine without needing API keys or internet connectivity. This is perfect for privacy-conscious users, offline work, or simply experimenting with different models.
+
+### 🛠️ Setting Up Ollama
+
+1. **Install Ollama:**
+   ```bash
+   # macOS
+   brew install ollama
+   
+   # Linux
+   curl -fsSL https://ollama.ai/install.sh | sh
+   
+   # Or download from: https://ollama.ai
+   ```
+
+2. **Start the Ollama service:**
+   ```bash
+   ollama serve
+   ```
+   This starts the Ollama server at `http://localhost:11434`
+
+3. **Download models:**
+   ```bash
+   # Llama 3.2 (3B) - Great balance of speed and capability
+   ollama pull llama3.2
+   
+   # Llama 3.1 (8B) - More capable, slightly slower
+   ollama pull llama3.1:8b
+   
+   # Code Llama - Optimized for coding tasks
+   ollama pull codellama
+   
+   # Mistral - General purpose model
+   ollama pull mistral
+   
+   # Phi-3 - Microsoft's efficient model
+   ollama pull phi3
+   ```
+
+4. **List available models:**
+   ```bash
+   ollama list
+   ```
+
+### 🚀 Using Ollama with Perspt
+
+Once Ollama is running, you can use it with Perspt:
+
+```bash
+# Basic usage (no API key needed!)
+target/release/perspt --provider-type ollama --model llama3.2
+
+# List available Ollama models
+target/release/perspt --provider-type ollama --list-models
+
+# Use different models
+target/release/perspt --provider-type ollama --model codellama  # For coding
+target/release/perspt --provider-type ollama --model mistral   # General purpose
+target/release/perspt --provider-type ollama --model llama3.1:8b  # More capable
+
+# With configuration file
+cat > ollama_config.json << EOF
+{
+  "provider_type": "ollama",
+  "default_model": "llama3.2",
+  "api_key": "not-required"
+}
+EOF
+
+target/release/perspt --config ollama_config.json
+```
+
+### 🎯 Ollama Model Recommendations
+
+| **Model** | **Size** | **Best For** | **Speed** | **Quality** |
+|-----------|----------|--------------|-----------|-------------|
+| `llama3.2` | 3B | General chat, quick responses | ⚡⚡⚡ | ⭐⭐⭐ |
+| `llama3.1:8b` | 8B | Balanced performance | ⚡⚡ | ⭐⭐⭐⭐ |
+| `codellama` | 7B | Code generation, programming help | ⚡⚡ | ⭐⭐⭐⭐ |
+| `mistral` | 7B | General purpose, good reasoning | ⚡⚡ | ⭐⭐⭐⭐ |
+| `phi3` | 3.8B | Efficient, good for resource-constrained systems | ⚡⚡⚡ | ⭐⭐⭐ |
+
+### 🔧 Ollama Troubleshooting
+
+**❌ "Connection refused" errors:**
+```bash
+# Make sure Ollama is running
+ollama serve
+
+# Check if it's responding
+curl http://localhost:11434/api/tags
+```
+
+**❌ "Model not found" errors:**
+```bash
+# List available models
+ollama list
+
+# Pull the model if not available
+ollama pull llama3.2
+```
+
+**❌ Performance issues:**
+```bash
+# Use smaller models for better performance
+target/release/perspt --provider-type ollama --model llama3.2
+
+# Or check system resources
+htop  # Monitor CPU/Memory usage
+```
+
+### 🌟 Ollama Advantages
+
+- **🔒 Privacy**: All processing happens locally, no data sent to external servers
+- **💰 Cost-effective**: No API fees or usage limits
+- **⚡ Offline capable**: Works without internet connectivity
+- **🎛️ Full control**: Choose exactly which models to run
+- **🔄 Easy model switching**: Download and switch between models easily
 
 ## 🏗️ Architecture & Technical Features
 
@@ -360,6 +609,13 @@ perspt --provider-type openai --api-key YOUR_API_KEY --model gpt-4o-mini
 export OPENAI_API_KEY="your-key-here"
 export GOOGLE_API_KEY="your-gemini-key-here"
 export ANTHROPIC_API_KEY="your-claude-key-here"
+export GROQ_API_KEY="your-groq-key-here"
+export COHERE_API_KEY="your-cohere-key-here"
+export XAI_API_KEY="your-xai-key-here"
+export DEEPSEEK_API_KEY="your-deepseek-key-here"
+
+# Method 3: Ollama doesn't need API keys
+perspt --provider-type ollama --model llama3.2
 ```
 
 **❌ "Model not found" errors:**
@@ -418,7 +674,8 @@ cargo doc --no-deps
    ```bash
    # These are reliable and fast
    perspt --provider-type openai --model gpt-4o-mini
-   perspt --provider-type google --model gemini-1.5-flash
+   perspt --provider-type gemini --model gemini-1.5-flash
+   perspt --provider-type ollama --model llama3.2  # No API key needed!
    ```
 
 4. **Check the logs if issues persist:**

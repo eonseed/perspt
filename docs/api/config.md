@@ -32,11 +32,11 @@ pub struct AppConfig {
 - `"openai"` - OpenAI GPT models
 - `"anthropic"` - Anthropic Claude models
 - `"google"` - Google Gemini models
-- `"mistral"` - Mistral AI models
-- `"perplexity"` - Perplexity AI models
+- `"groq"` - Groq ultra-fast inference
+- `"cohere"` - Cohere Command models
+- `"xai"` - XAI Grok models
 - `"deepseek"` - DeepSeek models
-- `"aws-bedrock"` - AWS Bedrock service
-- `"azure-openai"` - Azure OpenAI service
+- `"ollama"` - Local Ollama models
 
 **Example Configuration**:
 ```json
@@ -76,11 +76,11 @@ If `provider_type` is None, attempts inference from `default_provider`:
 | "openai" | "openai" |
 | "anthropic" | "anthropic" |
 | "google", "gemini" | "google" |
-| "mistral" | "mistral" |
-| "perplexity" | "perplexity" |
+| "groq" | "groq" |
+| "cohere" | "cohere" |
+| "xai" | "xai" |
 | "deepseek" | "deepseek" |
-| "aws", "bedrock", "aws-bedrock" | "aws-bedrock" |
-| "azure", "azure-openai" | "azure-openai" |
+| "ollama" | "ollama" |
 | Unknown | "openai" (default) |
 
 **Example**:
@@ -130,11 +130,11 @@ Creates default configuration with:
     "openai": "https://api.openai.com/v1",
     "anthropic": "https://api.anthropic.com", 
     "google": "https://generativelanguage.googleapis.com/v1beta/",
-    "mistral": "https://api.mistral.ai/v1",
-    "perplexity": "https://api.perplexity.ai",
+    "groq": "https://api.groq.com/openai/v1",
+    "cohere": "https://api.cohere.com/v1",
+    "xai": "https://api.x.ai/v1",
     "deepseek": "https://api.deepseek.com/v1",
-    "aws-bedrock": "https://bedrock.amazonaws.com",
-    "azure-openai": "https://api.openai.azure.com"
+    "ollama": "http://localhost:11434/v1"
 }
 ```
 
@@ -289,5 +289,5 @@ mod tests {
 ### From v0.3.x to v0.4.x
 - `provider_type` field added for explicit provider classification
 - Automatic provider type inference from `default_provider`
-- New provider endpoints for Google, Mistral, and others
+- New provider endpoints for Google, Groq, Cohere, XAI, DeepSeek, and Ollama
 - Backward compatibility maintained for existing configurations

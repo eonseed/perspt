@@ -6,7 +6,7 @@
 //!
 //! ## Features
 //!
-//! - **Multi-provider support**: Configuration for OpenAI, Anthropic, Google, Mistral, and more
+//! - **Multi-provider support**: Configuration for OpenAI, Anthropic, Gemini, Groq, Cohere, XAI, DeepSeek, and Ollama
 //! - **Automatic inference**: Smart provider type detection based on configuration
 //! - **Default fallbacks**: Sensible defaults when configuration is missing
 //! - **JSON-based**: Human-readable JSON configuration files
@@ -23,7 +23,20 @@
 //!   "default_model": "gpt-4o-mini",
 //!   "providers": {
 //!     "openai": "https://api.openai.com/v1",
-//!     "anthropic": "https://api.anthropic.com"
+//!     "anthropic": "https://api.anthropic.com",
+//!     "gemini": "https://generativelanguage.googleapis.com/v1beta",
+//!     "groq": "https://api.groq.com/openai/v1",
+//!     "cohere": "https://api.cohere.com/v1",
+//!     "xai": "https://api.x.ai/v1",
+//!     "deepseek": "https://api.deepseek.com/v1",
+//!     "ollama": "http://localhost:11434/v1"
+//!   }
+//! }
+//! ```
+//!     "cohere": "https://api.cohere.com/v1",
+//!     "xai": "https://api.x.ai/v1",
+//!     "deepseek": "https://api.deepseek.com/v1",
+//!     "ollama": "http://localhost:11434/v1"
 //!   }
 //! }
 //! ```
@@ -50,15 +63,15 @@ use anyhow::Result;
 ///
 /// # Provider Types
 ///
-/// Supported provider types:
+/// Supported provider types (based on genai 0.3.5):
 /// - `openai`: OpenAI GPT models
 /// - `anthropic`: Anthropic Claude models  
-/// - `google`: Google Gemini models
-/// - `mistral`: Mistral AI models
-/// - `perplexity`: Perplexity AI models
+/// - `gemini`: Google Gemini models
+/// - `groq`: Groq models (Llama, Mixtral, etc.)
+/// - `cohere`: Cohere Command models
+/// - `xai`: XAI Grok models
 /// - `deepseek`: DeepSeek models
-/// - `aws-bedrock`: AWS Bedrock service
-/// - `azure-openai`: Azure OpenAI service
+/// - `ollama`: Local models via Ollama
 ///
 /// # Examples
 ///
@@ -107,8 +120,8 @@ pub struct AppConfig {
     /// Provider type classification for API compatibility.
     /// 
     /// Determines which API interface and authentication method to use.
-    /// Valid values: "openai", "anthropic", "google", "mistral", "perplexity", 
-    /// "deepseek", "aws-bedrock", "azure-openai"
+    /// Valid values: "openai", "anthropic", "gemini", "groq", "cohere", 
+    /// "xai", "deepseek", "ollama"
     pub provider_type: Option<String>,
 }
 
@@ -132,12 +145,12 @@ pub struct AppConfig {
 /// `default_provider` field using these mappings:
 /// - "openai" -> "openai"
 /// - "anthropic" -> "anthropic"  
-/// - "google" or "gemini" -> "google"
-/// - "mistral" -> "mistral"
-/// - "perplexity" -> "perplexity"
+/// - "google" or "gemini" -> "gemini"
+/// - "groq" -> "groq"
+/// - "cohere" -> "cohere"
+/// - "xai" -> "xai"
 /// - "deepseek" -> "deepseek"
-/// - "aws", "bedrock", or "aws-bedrock" -> "aws-bedrock"
-/// - "azure" or "azure-openai" -> "azure-openai"
+/// - "ollama" -> "ollama"
 /// - Unknown providers default to "openai"
 ///
 /// # Examples
@@ -163,12 +176,12 @@ pub fn process_loaded_config(mut config: AppConfig) -> AppConfig {
             match dp.as_str() {
                 "openai" => config.provider_type = Some("openai".to_string()),
                 "anthropic" => config.provider_type = Some("anthropic".to_string()),
-                "google" | "gemini" => config.provider_type = Some("google".to_string()),
-                "mistral" => config.provider_type = Some("mistral".to_string()),
-                "perplexity" => config.provider_type = Some("perplexity".to_string()),
+                "google" | "gemini" => config.provider_type = Some("gemini".to_string()),
+                "groq" => config.provider_type = Some("groq".to_string()),
+                "cohere" => config.provider_type = Some("cohere".to_string()),
+                "xai" => config.provider_type = Some("xai".to_string()),
                 "deepseek" => config.provider_type = Some("deepseek".to_string()),
-                "aws" | "bedrock" | "aws-bedrock" => config.provider_type = Some("aws-bedrock".to_string()),
-                "azure" | "azure-openai" => config.provider_type = Some("azure-openai".to_string()),
+                "ollama" => config.provider_type = Some("ollama".to_string()),
                 _ => {
                     // Default to OpenAI if provider not recognized
                     config.provider_type = Some("openai".to_string());
@@ -217,12 +230,12 @@ pub fn process_loaded_config(mut config: AppConfig) -> AppConfig {
 /// The default configuration includes endpoints for:
 /// - OpenAI: <https://api.openai.com/v1>
 /// - Anthropic: <https://api.anthropic.com>
-/// - Google: <https://generativelanguage.googleapis.com/v1beta/>
-/// - Mistral: <https://api.mistral.ai/v1>
-/// - Perplexity: <https://api.perplexity.ai>
+/// - Google Gemini: <https://generativelanguage.googleapis.com/v1beta>
+/// - Groq: <https://api.groq.com/openai/v1>
+/// - Cohere: <https://api.cohere.com/v1>
+/// - XAI: <https://api.x.ai/v1>
 /// - DeepSeek: <https://api.deepseek.com/v1>
-/// - AWS Bedrock: <https://bedrock.amazonaws.com>
-/// - Azure OpenAI: <https://api.openai.azure.com>
+/// - Ollama: <http://localhost:11434/v1>
 ///
 /// # Errors
 ///
@@ -250,16 +263,16 @@ pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
             process_loaded_config(initial_config)
         }
         None => {
-            // Default configuration with all supported providers
+            // Default configuration with all supported providers (genai 0.3.5)
             let mut providers_map = HashMap::new();
             providers_map.insert("openai".to_string(), "https://api.openai.com/v1".to_string());
             providers_map.insert("anthropic".to_string(), "https://api.anthropic.com".to_string());
-            providers_map.insert("google".to_string(), "https://generativelanguage.googleapis.com/v1beta/".to_string());
-            providers_map.insert("mistral".to_string(), "https://api.mistral.ai/v1".to_string());
-            providers_map.insert("perplexity".to_string(), "https://api.perplexity.ai".to_string());
+            providers_map.insert("gemini".to_string(), "https://generativelanguage.googleapis.com/v1beta".to_string());
+            providers_map.insert("groq".to_string(), "https://api.groq.com/openai/v1".to_string());
+            providers_map.insert("cohere".to_string(), "https://api.cohere.com/v1".to_string());
+            providers_map.insert("xai".to_string(), "https://api.x.ai/v1".to_string());
             providers_map.insert("deepseek".to_string(), "https://api.deepseek.com/v1".to_string());
-            providers_map.insert("aws-bedrock".to_string(), "https://bedrock.amazonaws.com".to_string());
-            providers_map.insert("azure-openai".to_string(), "https://api.openai.azure.com".to_string());
+            providers_map.insert("ollama".to_string(), "http://localhost:11434/v1".to_string());
             
             AppConfig {
                 providers: providers_map,
@@ -286,7 +299,12 @@ mod tests {
         assert_eq!(config.default_model, Some("gpt-4o-mini".to_string()));
         assert!(config.providers.contains_key("openai"));
         assert!(config.providers.contains_key("anthropic"));
-        assert!(config.providers.contains_key("google"));
+        assert!(config.providers.contains_key("gemini"));
+        assert!(config.providers.contains_key("groq"));
+        assert!(config.providers.contains_key("cohere"));
+        assert!(config.providers.contains_key("xai"));
+        assert!(config.providers.contains_key("deepseek"));
+        assert!(config.providers.contains_key("ollama"));
         assert_eq!(config.api_key, None);
     }
 
@@ -341,7 +359,7 @@ mod tests {
         }
         "#;
         let config = load_config_from_string_for_test(json_input).await.unwrap();
-        assert_eq!(config.provider_type, Some("google".to_string()));
+        assert_eq!(config.provider_type, Some("gemini".to_string()));
         assert_eq!(config.default_provider, Some("google".to_string()));
         assert_eq!(config.default_model, Some("gemini-pro".to_string()));
         assert_eq!(config.api_key, Some("test_google_key".to_string()));
@@ -351,13 +369,13 @@ mod tests {
     async fn test_load_config_from_json_string_infer_provider_type_gemini() {
         let json_input = r#"
         {
-            "providers": {"gemini": "https://gemini.api/v1"},
+            "providers": {"gemini": "https://generativelanguage.googleapis.com/v1beta"},
             "default_provider": "gemini",
             "default_model": "gemini-1.5-flash"
         }
         "#;
         let config = load_config_from_string_for_test(json_input).await.unwrap();
-        assert_eq!(config.provider_type, Some("google".to_string())); // "gemini" maps to "google"
+        assert_eq!(config.provider_type, Some("gemini".to_string())); // "gemini" maps to "gemini"
         assert_eq!(config.default_provider, Some("gemini".to_string()));
         assert_eq!(config.default_model, Some("gemini-1.5-flash".to_string()));
     }
