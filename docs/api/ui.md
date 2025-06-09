@@ -2,7 +2,13 @@
 
 ## Overview
 
-The `ui.rs` module implements the terminal-based user interface for the Perspt chat application using the Ratatui TUI framework. It provides a rich, interactive chat experience with real-time markdown rendering, scrollable chat history, and comprehensive error handling.
+The `ui.rs` module implements the terminal-based user interface for the Perspt chat application using the Ratatui TUI framework. It provides a rich, interactive chat experience with real-time markdown rendering, enhanced scrollable chat history, and comprehensive error handling.
+
+**Recent Improvements:**
+- **Enhanced Scroll System**: Accurate text wrapping calculations for long responses
+- **Unicode Text Support**: Proper character counting using `.chars().count()`
+- **Content Protection**: Conservative buffering prevents content cutoff at bottom
+- **Consistent Rendering**: Unified logic between scroll calculations and display
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -242,9 +248,18 @@ assert!(app.current_error.is_none());
 
 ### Scroll Management
 
+The scroll system has been enhanced to handle long responses and text wrapping accurately:
+
+#### Enhanced Features
+- **Accurate Text Wrapping**: Uses `.chars().count()` for proper Unicode character counting
+- **Consistent Calculations**: Unified logic between scroll position calculation and rendering
+- **Content Protection**: Conservative buffer ensures no content is cut off at the bottom
+- **Separator Line Handling**: Properly accounts for separator lines in scroll calculations
+- **Debug Support**: Comprehensive logging for troubleshooting scroll issues
+
 #### `scroll_up(&mut self)` / `scroll_down(&mut self)`
 
-Navigate through chat history by single positions.
+Navigate through chat history by single positions with accurate boundary checking.
 
 **Example:**
 ```rust
@@ -254,13 +269,38 @@ app.scroll_down(); // Move toward newer messages
 
 #### `scroll_to_bottom(&mut self)`
 
-Jump to the most recent messages (bottom of history).
+Jump to the most recent messages (bottom of history) with guaranteed content visibility.
 
 **Example:**
 ```rust
 app.scroll_to_bottom();
 assert_eq!(app.scroll_position, app.max_scroll());
 ```
+
+#### `max_scroll(&self) -> usize`
+
+Calculates the maximum scroll position with accurate text wrapping consideration.
+
+**Features:**
+- Accounts for text wrapping using character count (not byte length)
+- Includes separator lines and headers in calculations
+- Applies conservative buffer to prevent content cutoff
+- Handles Unicode text correctly
+
+**Example:**
+```rust
+let max_pos = app.max_scroll();
+// Safe to scroll up to max_pos without losing content
+```
+
+#### `update_scroll_state(&mut self)`
+
+Synchronizes internal scroll state with UI scrollbar using consistent calculations.
+
+**Implementation:**
+- Uses identical wrapping logic as `max_scroll()` for consistency
+- Updates scrollbar content length and position
+- Called automatically by other scroll methods
 
 ### Visual Feedback
 

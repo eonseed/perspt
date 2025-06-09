@@ -1122,51 +1122,139 @@ update_scroll_state()
 
    pub fn update_scroll_state(&mut self)
 
-Synchronizes internal scroll state with UI scrollbar for consistent display and user feedback.
+Synchronizes internal scroll state with UI scrollbar using accurate text wrapping calculations for consistent display and user feedback.
 
-**Features:**
+**Enhanced Features:**
 
-* **Scrollbar Synchronization**: Updates ScrollbarState position to match current scroll_position
-* **Automatic Calls**: Called by all scroll methods to maintain consistency
-* **UI Integration**: Ensures scrollbar thumb position accurately reflects content position
+* **Text Wrapping Aware**: Recalculates total rendered lines with proper wrapping logic
+* **Scrollbar Synchronization**: Updates ScrollbarState position and content length accurately
+* **Terminal Width Adaptive**: Uses current terminal width for wrapping calculations
+* **Consistent Line Counting**: Matches the same logic used in max_scroll() for accuracy
 * **State Management**: Maintains internal state consistency across navigation operations
 
-**Implementation:**
+**Improved Implementation:**
 
 .. code-block:: rust
 
    pub fn update_scroll_state(&mut self) {
-       self.scroll_state = self.scroll_state.position(self.scroll_position);
+       // Calculate terminal width for text wrapping calculations
+       let chat_width = self.input_width.saturating_sub(4).max(20);
+       
+       // Calculate total rendered lines accounting for text wrapping
+       let total_rendered_lines: usize = self.chat_history
+           .iter()
+           .map(|msg| {
+               let mut lines = 1; // Header line
+               
+               // Content lines - account for text wrapping
+               for line in &msg.content {
+                   let line_text = line.spans.iter()
+                       .map(|span| span.content.as_ref())
+                       .collect::<String>();
+                   
+                   if line_text.trim().is_empty() {
+                       lines += 1; // Empty lines
+                   } else {
+                       // Character-based text wrapping calculation
+                       let display_width = line_text.chars().count();
+                       if display_width <= chat_width {
+                           lines += 1;
+                       } else {
+                           let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                           lines += wrapped_lines.max(1);
+                       }
+                   }
+               }
+               
+               lines += 1; // Separator line after each message
+               lines
+           })
+           .sum();
+       
+       self.scroll_state = self.scroll_state
+           .content_length(total_rendered_lines.max(1))
+           .position(self.scroll_position);
    }
 
-max_scroll() (Internal)
-^^^^^^^^^^^^^^^^^^^^^^^
+**Key Improvements:**
+
+* **Accurate content length**: Sets scrollbar content length to match actual rendered lines
+* **Character-aware wrapping**: Uses `.chars().count()` for proper Unicode text measurement
+* **Consistent logic**: Uses identical calculation method as max_scroll() for reliability
+
+max_scroll()
+^^^^^^^^^^^^
 
 .. code-block:: rust
 
-   fn max_scroll(&self) -> usize
+   pub fn max_scroll(&self) -> usize
 
-Calculates the maximum valid scroll position based on content height and terminal dimensions.
+Calculates the maximum valid scroll position with accurate text wrapping calculations and conservative buffering to ensure content visibility.
 
-**Algorithm:**
+**Enhanced Features:**
+
+* **Text Wrapping Aware**: Accurately calculates wrapped lines using character counts instead of byte lengths
+* **Terminal Width Adaptive**: Accounts for actual terminal width and border spacing
+* **Conservative Buffering**: Reduces max scroll by 1 position to prevent content cutoff at bottom
+* **Separator Line Tracking**: Always includes separator lines after each message for consistency
+* **Border Accounting**: Properly calculates available chat area excluding UI borders
+
+**Improved Algorithm:**
 
 .. code-block:: rust
 
-   // Calculate total content lines accurately
-   let total_content_lines: usize = self.chat_history
+   // Calculate visible height for the chat area
+   let chat_area_height = self.terminal_height.saturating_sub(11).max(1);
+   let visible_height = chat_area_height.saturating_sub(2).max(1); // Account for borders
+   
+   // Calculate terminal width for text wrapping calculations
+   let chat_width = self.input_width.saturating_sub(4).max(20); // Account for borders and padding
+   
+   // Calculate the actual rendered lines accounting for text wrapping
+   let total_rendered_lines: usize = self.chat_history
        .iter()
-       .map(|msg| 2 + msg.content.len()) // Header + content + separator
+       .map(|msg| {
+           let mut lines = 1; // Header line
+           
+           // Content lines - account for text wrapping
+           for line in &msg.content {
+               let line_text = line.spans.iter()
+                   .map(|span| span.content.as_ref())
+                   .collect::<String>();
+               
+               if line_text.trim().is_empty() {
+                   lines += 1; // Empty lines
+               } else {
+                   // More accurate text wrapping calculation using char count
+                   let display_width = line_text.chars().count();
+                   if display_width <= chat_width {
+                       lines += 1;
+                   } else {
+                       let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                       lines += wrapped_lines.max(1);
+                   }
+               }
+           }
+           
+           lines += 1; // Separator line after each message
+           lines
+       })
        .sum();
    
-   // Account for terminal UI space (header + input + status = 11 lines)
-   let visible_height = self.terminal_height.saturating_sub(11).max(1);
-   
-   // Return scroll range
-   if total_content_lines > visible_height {
-       total_content_lines.saturating_sub(visible_height)
+   // Conservative scroll calculation to prevent content cutoff
+   if total_rendered_lines > visible_height {
+       let max_scroll = total_rendered_lines.saturating_sub(visible_height);
+       max_scroll.saturating_sub(1) // Buffer to ensure last lines are visible
    } else {
        0
    }
+
+**Key Improvements:**
+
+* **Character-based wrapping**: Uses `.chars().count()` for accurate Unicode text measurement
+* **Conservative max scroll**: Reduces by 1 to ensure bottom content is always accessible  
+* **Consistent separator handling**: Always adds separator lines for uniform spacing
+* **Robust border calculation**: Properly accounts for terminal borders and padding
 
 Animation and Visual Feedback
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

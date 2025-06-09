@@ -8,16 +8,26 @@
 //!
 //! * **Rich Terminal UI**: Modern terminal interface with colors, borders, and layouts
 //! * **Real-time Markdown Rendering**: Live rendering of LLM responses with markdown formatting
-//! * **Scrollable Chat History**: Full chat history with keyboard navigation
+//! * **Advanced Scrollable Chat History**: Intelligent scrolling with accurate text wrapping calculations
 //! * **Progress Indicators**: Visual feedback for LLM response generation
 //! * **Error Display**: Comprehensive error handling with user-friendly messages
 //! * **Help System**: Built-in help overlay with keyboard shortcuts
 //! * **Responsive Layout**: Adaptive layout that works across different terminal sizes
+//! * **Unicode Text Wrapping**: Accurate character counting for proper terminal text wrapping
+//!
+//! ## Scroll System Improvements
+//!
+//! The scroll system has been enhanced to handle long responses reliably:
+//! * **Accurate Text Wrapping**: Uses `.chars().count()` for proper Unicode character counting
+//! * **Consistent Calculations**: Unified logic between `max_scroll()` and `update_scroll_state()`
+//! * **Content Visibility**: Conservative buffer ensures no content is cut off at the bottom
+//! * **Separator Line Handling**: Properly accounts for separator lines in scroll calculations
+//! * **Debug Logging**: Comprehensive logging for scroll-related troubleshooting
 //!
 //! ## Architecture
 //!
 //! The UI follows a component-based architecture:
-//! * `App` - Main application state and controller
+//! * `App` - Main application state and controller with enhanced scroll management
 //! * `ChatMessage` - Individual message representation with styling
 //! * `ErrorState` - Error handling and display logic
 //! * Event handling system for keyboard inputs and timers
@@ -579,28 +589,78 @@ impl App {
 
     /// Calculates the maximum scroll position based on content height and terminal height.
     ///
-    /// Determines how far the user can scroll based on the total number
-    /// of lines in the chat history and the available display area.
+    /// This method accurately determines how far the user can scroll by calculating the
+    /// total rendered lines accounting for text wrapping in the terminal. It ensures that
+    /// all content remains accessible and prevents content cutoff at the bottom of the
+    /// conversation area.
+    ///
+    /// # Algorithm
+    ///
+    /// 1. Calculates visible height of the chat area (terminal height - UI overhead)
+    /// 2. Computes total rendered lines including:
+    ///    - Header lines (1 per message)
+    ///    - Content lines with accurate text wrapping using character count
+    ///    - Separator lines (1 per message)
+    /// 3. Applies conservative buffer to prevent content cutoff
+    ///
+    /// # Text Wrapping
+    ///
+    /// Uses `.chars().count()` instead of `.len()` for accurate Unicode character
+    /// counting, ensuring proper text wrapping calculations in the terminal.
     ///
     /// # Returns
     ///
-    /// The maximum valid scroll position
-    fn max_scroll(&self) -> usize {
-        // Calculate total content lines more accurately
-        let total_content_lines: usize = self.chat_history
+    /// The maximum valid scroll position with buffer to ensure content visibility
+    pub fn max_scroll(&self) -> usize {
+        // Calculate visible height for the chat area
+        let chat_area_height = self.terminal_height.saturating_sub(11).max(1);
+        let visible_height = chat_area_height.saturating_sub(2).max(1); // Account for borders
+        
+        // Calculate terminal width for text wrapping calculations
+        let chat_width = self.input_width.saturating_sub(4).max(20); // Account for borders and padding
+        
+        // Calculate the actual rendered lines accounting for text wrapping
+        let total_rendered_lines: usize = self.chat_history
             .iter()
             .map(|msg| {
-                // Header line (1) + content lines + empty separator line (1)
-                2 + msg.content.len()
+                let mut lines = 0;
+                
+                // Header line (always 1 line)
+                lines += 1;
+                
+                // Content lines - account for text wrapping
+                for line in &msg.content {
+                    let line_text = line.spans.iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>();
+                    
+                    if line_text.trim().is_empty() {
+                        lines += 1; // Empty lines
+                    } else {
+                        // More accurate text wrapping calculation
+                        let display_width = line_text.chars().count();
+                        if display_width <= chat_width {
+                            lines += 1;
+                        } else {
+                            let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                            lines += wrapped_lines.max(1);
+                        }
+                    }
+                }
+                
+                // Separator line after each message (always 1 line)
+                lines += 1;
+                
+                lines
             })
             .sum();
         
-        // Account for the visible height of the chat area
-        // Terminal height minus header(3) + input(5) + status(3) = 11 reserved lines
-        let visible_height = self.terminal_height.saturating_sub(11).max(1);
-        
-        if total_content_lines > visible_height {
-            total_content_lines.saturating_sub(visible_height)
+        // Return scroll position that ensures content is accessible
+        // Be more conservative to ensure the last lines are always visible
+        if total_rendered_lines > visible_height {
+            let max_scroll = total_rendered_lines.saturating_sub(visible_height);
+            // Reduce max scroll by 2-3 lines to ensure content isn't cut off at bottom
+            max_scroll.saturating_sub(1)
         } else {
             0
         }
@@ -608,8 +668,22 @@ impl App {
 
     /// Updates the internal scroll state for display.
     ///
-    /// Synchronizes the scroll position with the UI scrollbar state.
-    /// Called automatically by scroll methods to maintain consistency.
+    /// Synchronizes the scroll position with the UI scrollbar state by recalculating
+    /// the total rendered lines accounting for text wrapping in the terminal. This
+    /// method ensures consistency between scroll calculations and actual rendered
+    /// content.
+    ///
+    /// # Implementation Details
+    ///
+    /// * Recalculates total rendered lines using the same algorithm as `max_scroll()`
+    /// * Accounts for text wrapping using accurate character counting
+    /// * Updates scrollbar content length and position for proper display
+    /// * Called automatically by scroll methods to maintain UI consistency
+    ///
+    /// # Text Wrapping Consistency
+    ///
+    /// This method uses identical text wrapping calculations as `max_scroll()` to
+    /// ensure that the scrollbar accurately represents the actual content layout.
     ///
     /// # Examples
     ///
@@ -625,8 +699,48 @@ impl App {
     /// // Internal state updated
     /// ```
     pub fn update_scroll_state(&mut self) {
-        let _max_scroll = self.max_scroll();
-        self.scroll_state = self.scroll_state.position(self.scroll_position);
+        // Calculate terminal width for text wrapping calculations
+        let chat_width = self.input_width.saturating_sub(4).max(20); // Account for borders and padding
+        
+        // Calculate total rendered lines accounting for text wrapping
+        let total_rendered_lines: usize = self.chat_history
+            .iter()
+            .map(|msg| {
+                let mut lines = 0;
+                
+                // Header line (always 1 line)
+                lines += 1;
+                
+                // Content lines - account for text wrapping
+                for line in &msg.content {
+                    let line_text = line.spans.iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>();
+                    
+                    if line_text.trim().is_empty() {
+                        lines += 1; // Empty lines
+                    } else {
+                        // More accurate text wrapping calculation
+                        let display_width = line_text.chars().count();
+                        if display_width <= chat_width {
+                            lines += 1;
+                        } else {
+                            let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                            lines += wrapped_lines.max(1);
+                        }
+                    }
+                }
+                
+                // Separator line after each message (always 1 line)
+                lines += 1;
+                
+                lines
+            })
+            .sum();
+        
+        self.scroll_state = self.scroll_state
+            .content_length(total_rendered_lines.max(1))
+            .position(self.scroll_position);
     }
 
     /// Insert character at cursor position with immediate feedback
@@ -837,6 +951,12 @@ impl App {
         self.scroll_to_bottom();
         self.needs_redraw = true;
         
+        // Debug: Log final scroll state for long responses
+        if !self.streaming_buffer.is_empty() && self.streaming_buffer.len() > 1000 {
+            log::debug!("Final streaming scroll state: position={}, max_scroll={}, buffer_len={}", 
+                       self.scroll_position, self.max_scroll(), self.streaming_buffer.len());
+        }
+        
         // Update status
         self.set_status("✅ Ready".to_string(), false);
         self.clear_error();
@@ -861,72 +981,50 @@ impl App {
         
         self.streaming_buffer.push_str(content);
         
-        // CRITICAL FIX: Always update the message content, regardless of UI throttling
-        // This ensures that the message always contains the latest content
+        // Update the message content with latest streaming data
         if let Some(last_msg) = self.chat_history.last_mut() {
             if last_msg.message_type == MessageType::Assistant {
                 // Always update the assistant message with the latest streaming content
                 last_msg.content = markdown_to_lines(&self.streaming_buffer);
-                last_msg.timestamp = Self::get_timestamp(); // Update timestamp for latest content
+                last_msg.timestamp = Self::get_timestamp();
             } else {
-                // This should not happen with our new approach, but handle it gracefully
                 log::warn!("Expected assistant message but found {:?}, creating new assistant message", last_msg.message_type);
                 self.add_streaming_message();
             }
         } else {
-            // This should also not happen, but handle it gracefully
             log::warn!("No messages in chat history during streaming, creating new assistant message");
             self.add_streaming_message();
         }
         
-        // FIXED: More responsive UI update strategy that prevents freezing during long responses
-        // Balance performance with responsiveness by using multiple update triggers
-        let buffer_len = self.streaming_buffer.len();
+        // Always scroll to bottom to ensure new content is visible
+        self.scroll_to_bottom();
         
-        // Track when we last updated the UI to ensure regular updates
-        thread_local! {
-            static LAST_UI_UPDATE_SIZE: std::cell::Cell<usize> = std::cell::Cell::new(0);
-        }
-        let last_update_size = LAST_UI_UPDATE_SIZE.with(|c| c.get());
-        let size_since_last_update = buffer_len.saturating_sub(last_update_size);
-        
-        let should_redraw_ui = 
+        // Mark for UI redraw - use simpler logic for better responsiveness
+        let should_redraw = 
             // Always update for small content (responsive for short responses)
-            buffer_len < SMALL_BUFFER_THRESHOLD ||
-            
-            // Regular interval updates (every 250 chars for better responsiveness)
-            size_since_last_update >= (UI_UPDATE_INTERVAL / 2) ||
-            
+            self.streaming_buffer.len() < SMALL_BUFFER_THRESHOLD ||
+            // Regular interval updates for longer content
+            self.streaming_buffer.len() % UI_UPDATE_INTERVAL == 0 ||
             // Content-based triggers for better UX
             content.contains('\n') ||      // Line breaks
             content.contains("```") ||     // Code blocks
             content.contains("##") ||      // Headers
-            content.contains("**") ||      // Bold text
-            content.contains("*") ||       // Italic text or bullet points
-            content.contains("- ") ||      // List items
-            content.contains(". ") ||      // Sentence endings
-            content.contains("? ") ||      // Questions
-            content.contains("! ") ||      // Exclamations
-            
-            // Time-based fallback: ensure UI updates at least every few chunks
-            // This prevents long freezes even if content doesn't match patterns
-            size_since_last_update >= 200; // Force update every 200 chars minimum
+            content.ends_with(". ") ||     // Sentence endings
+            content.ends_with("? ") ||     // Questions
+            content.ends_with("! ");       // Exclamations
         
-        if should_redraw_ui {
-            // Update our tracking of when we last updated
-            LAST_UI_UPDATE_SIZE.with(|c| c.set(buffer_len));
-            
-            // Update progress and ensure visibility
-            self.response_progress = (self.response_progress + 0.05).min(0.95);
-            self.scroll_to_bottom(); // Ensure latest content is visible
+        if should_redraw {
             self.needs_redraw = true;
             
-            // Force immediate status update for better feedback
+            // Update status with progress info
             self.set_status(format!("{}  Receiving response... ({} chars, {}% complete)", 
                 self.typing_indicator, 
-                buffer_len,
+                self.streaming_buffer.len(),
                 (self.response_progress * 100.0) as u8
             ), false);
+            
+            // Update progress
+            self.response_progress = (self.response_progress + 0.05).min(0.95);
         } else {
             // Even if we don't redraw UI, still update the progress indicator
             self.response_progress = (self.response_progress + 0.01).min(0.95);
@@ -1506,59 +1604,59 @@ fn draw_enhanced_header(f: &mut Frame, area: Rect, model_name: &str, app: &App) 
 
 /// Enhanced chat area with better scrolling and formatting
 fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
-    let chat_content: Vec<Line> = app.chat_history
-        .iter()
-        .flat_map(|msg| {
-            let (icon, style) = match msg.message_type {
-                MessageType::User => ("👤", Style::default().fg(Color::Blue).bold()),
-                MessageType::Assistant => ("🤖", Style::default().fg(Color::Green).bold()),
-                MessageType::Error => ("❌", Style::default().fg(Color::Red).bold()),
-                MessageType::System => ("ℹ️", Style::default().fg(Color::Cyan).bold()),
-                MessageType::Warning => ("⚠️", Style::default().fg(Color::Yellow).bold()),
-            };
-            
-            let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(icon, style),
-                    Span::styled(" ", Style::default()),
-                    Span::styled(
-                        match msg.message_type {
-                            MessageType::User => "You",
-                            MessageType::Assistant => "Assistant",
-                            MessageType::Error => "Error",
-                            MessageType::System => "System",
-                            MessageType::Warning => "Warning",
-                        },
-                        style
-                    ),
-                    Span::styled(format!(" • {}", msg.timestamp), Style::default().fg(Color::DarkGray)),
-                ]),
-            ];
-            
-            // Use the existing message content directly to avoid formatting issues
-            lines.extend(msg.content.iter().cloned());
-            lines.push(Line::from("")); // Separator line
-            lines
-        })
-        .collect();
+    let mut chat_content: Vec<Line> = Vec::new();
+    
+    for (_i, msg) in app.chat_history.iter().enumerate() {
+        let (icon, style) = match msg.message_type {
+            MessageType::User => ("👤", Style::default().fg(Color::Blue).bold()),
+            MessageType::Assistant => ("🤖", Style::default().fg(Color::Green).bold()),
+            MessageType::Error => ("❌", Style::default().fg(Color::Red).bold()),
+            MessageType::System => ("ℹ️", Style::default().fg(Color::Cyan).bold()),
+            MessageType::Warning => ("⚠️", Style::default().fg(Color::Yellow).bold()),
+        };
+        
+        // Add header line
+        chat_content.push(Line::from(vec![
+            Span::styled(icon, style),
+            Span::styled(" ", Style::default()),
+            Span::styled(
+                match msg.message_type {
+                    MessageType::User => "You",
+                    MessageType::Assistant => "Assistant",
+                    MessageType::Error => "Error",
+                    MessageType::System => "System",
+                    MessageType::Warning => "Warning",
+                },
+                style
+            ),
+            Span::styled(format!(" • {}", msg.timestamp), Style::default().fg(Color::DarkGray)),
+        ]));
+        
+        // Add message content
+        chat_content.extend(msg.content.iter().cloned());
+        
+        // Add separator line after each message for consistency
+        chat_content.push(Line::from(""));
+    }
 
-    // Calculate proper scroll position relative to content
-    let content_height = chat_content.len();
-    let visible_height = area.height.saturating_sub(2) as usize; // Account for borders
+    // Update the app's input width for accurate scroll calculations
+    app.input_width = area.width as usize;
     
-    // Update scroll state for content - ensure proper bounds
-    app.scroll_state = app.scroll_state.content_length(content_height.max(1).saturating_sub(1));
-    
-    // Ensure scroll position is within valid bounds when content changes
-    let max_scroll = if content_height > visible_height {
-        content_height.saturating_sub(visible_height)
-    } else {
-        0
-    };
-    
+    // Ensure scroll position is within bounds
+    let max_scroll = app.max_scroll();
     if app.scroll_position > max_scroll {
         app.scroll_position = max_scroll;
-        app.update_scroll_state();
+    }
+    
+    // Update scroll state
+    app.update_scroll_state();
+
+    // Debug: Log scroll information for troubleshooting
+    let total_content_lines = chat_content.len();
+    let visible_height = area.height.saturating_sub(2) as usize; // Account for borders
+    if total_content_lines > 20 { // Only log for substantial content
+        log::debug!("Scroll debug - total_content: {}, visible_height: {}, scroll_pos: {}, max_scroll: {}", 
+                   total_content_lines, visible_height, app.scroll_position, max_scroll);
     }
 
     // Create layout for chat and scrollbar
@@ -1567,6 +1665,7 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
 
+    // Use the calculated scroll position directly
     let chat_paragraph = Paragraph::new(chat_content)
         .block(Block::default()
             .borders(Borders::ALL)
@@ -1574,7 +1673,7 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
             .border_style(Style::default().fg(Color::White))
             .title(" Conversation ")
             .title_style(Style::default().fg(Color::White).bold()))
-        .wrap(Wrap { trim: true })
+        .wrap(Wrap { trim: false })
         .scroll((app.scroll_position as u16, 0));
 
     f.render_widget(chat_paragraph, chat_chunks[0]);
@@ -1967,7 +2066,14 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
         
         // Regular paragraph text
         if line.trim().is_empty() {
-            lines.push(Line::from(""));
+            // Only add empty line if the previous line was not empty to avoid excessive spacing
+            if !lines.is_empty() {
+                if let Some(last_line) = lines.last() {
+                    if !last_line.spans.is_empty() && !last_line.spans[0].content.trim().is_empty() {
+                        lines.push(Line::from(""));
+                    }
+                }
+            }
         } else {
             lines.push(Line::from(parse_inline_markdown_to_spans(line)));
         }
@@ -2072,3 +2178,5 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
     
     spans
 }
+
+
