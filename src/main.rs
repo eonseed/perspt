@@ -57,7 +57,7 @@
 //! ## Error Handling
 //!
 //! The application implements comprehensive error handling and panic recovery.
-//! All critical operations are wrapped in appropriate error contexts for
+//! All critical operations are wrapped in appropriate error contexts for!
 //! better debugging and user experience.
 
 // src/main.rs
@@ -295,6 +295,28 @@ async fn main() -> Result<()> {
     // Load configuration
     let mut config = config::load_config(config_path).await
         .context("Failed to load configuration")?;
+
+    // Check if we have a valid provider configuration
+    if config.provider_type.is_none() {
+        eprintln!("❌ No LLM provider configured!");
+        eprintln!();
+        eprintln!("To get started, either:");
+        eprintln!("  1. Set an environment variable for a supported provider:");
+        eprintln!("     • OPENAI_API_KEY=sk-your-key");
+        eprintln!("     • ANTHROPIC_API_KEY=sk-ant-your-key");
+        eprintln!("     • GEMINI_API_KEY=your-key");
+        eprintln!("     • GROQ_API_KEY=your-key");
+        eprintln!("     • COHERE_API_KEY=your-key");
+        eprintln!("     • XAI_API_KEY=your-key");
+        eprintln!("     • DEEPSEEK_API_KEY=your-key");
+        eprintln!();
+        eprintln!("  2. Use command line arguments:");
+        eprintln!("     perspt --provider-type openai --api-key sk-your-key");
+        eprintln!();
+        eprintln!("  3. Create a config.json file with provider settings");
+        eprintln!();
+        return Err(anyhow::anyhow!("No provider configured"));
+    }
 
     // Apply CLI overrides
     if let Some(key) = cli_api_key {
