@@ -1,50 +1,123 @@
 Configuration Guide
 ===================
 
-Perspt offers flexible configuration options to customize your AI chat experience. This guide covers all configuration methods, from simple environment variables to advanced JSON configurations.
+Perspt offers flexible configuration options to customize your AI chat experience. This guide covers all configuration methods, from zero-config automatic provider detection to advanced JSON configurations.
 
-Configuration Methods
----------------------
+Automatic Provider Detection (Zero-Config)
+-------------------------------------------
 
-Perspt supports multiple configuration approaches, with the following priority order (highest to lowest):
+**NEW!** Perspt now features intelligent automatic provider detection that makes getting started as simple as setting an environment variable.
+
+How It Works
+~~~~~~~~~~~~
+
+When you launch Perspt without specifying a provider, it automatically scans your environment variables for supported provider API keys and selects the first one found based on this priority order:
+
+1. **OpenAI** (``OPENAI_API_KEY``) - *Default model: gpt-4o-mini*
+2. **Anthropic** (``ANTHROPIC_API_KEY``) - *Default model: claude-3-5-sonnet-20241022*
+3. **Google Gemini** (``GEMINI_API_KEY``) - *Default model: gemini-1.5-flash*
+4. **Groq** (``GROQ_API_KEY``) - *Default model: llama-3.1-70b-versatile*
+5. **Cohere** (``COHERE_API_KEY``) - *Default model: command-r-plus*
+6. **XAI** (``XAI_API_KEY``) - *Default model: grok-beta*
+7. **DeepSeek** (``DEEPSEEK_API_KEY``) - *Default model: deepseek-chat*
+8. **Ollama** (auto-detected if running) - *Default model: llama3.2*
+
+Quick Examples
+~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # Option 1: OpenAI (highest priority)
+   export OPENAI_API_KEY="sk-your-key"
+   perspt  # Auto-detects OpenAI, uses gpt-4o-mini
+
+   # Option 2: Multiple providers - OpenAI takes priority
+   export OPENAI_API_KEY="sk-your-openai-key"
+   export ANTHROPIC_API_KEY="sk-ant-your-anthropic-key"
+   perspt  # Uses OpenAI (higher priority)
+
+   # Option 3: Force a specific provider
+   perspt --provider anthropic  # Uses Anthropic even if OpenAI key exists
+
+   # Option 4: Ollama (no API key needed)
+   # Just ensure Ollama is running: ollama serve
+   perspt  # Auto-detects Ollama if no other keys found
+
+What Happens When No Providers Are Found
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If no API keys are detected, Perspt displays helpful setup instructions:
+
+.. code-block:: text
+
+   ❌ No LLM provider configured!
+
+   To get started, either:
+     1. Set an environment variable for a supported provider:
+        • OPENAI_API_KEY=sk-your-key
+        • ANTHROPIC_API_KEY=sk-ant-your-key
+        • GEMINI_API_KEY=your-key
+        # ... (shows all supported providers)
+
+     2. Use command line arguments:
+        perspt --provider openai --api-key sk-your-key
+
+Manual Configuration Methods
+----------------------------
+
+For more control or advanced setups, Perspt supports traditional configuration methods with the following priority order (highest to lowest):
 
 1. **Command-line arguments** (highest priority)
 2. **Configuration file** (``config.json``)
 3. **Environment variables**
-4. **Default values** (lowest priority)
+4. **Automatic provider detection** 
+5. **Default values** (lowest priority)
 
 This means command-line arguments will override config file settings, which override environment variables, and so on.
 
 Environment Variables
 ---------------------
 
-The simplest way to configure Perspt is through environment variables:
+Environment variables are the simplest way to configure Perspt and enable automatic provider detection.
 
-API Keys
-~~~~~~~~
+API Keys (Auto-Detection Enabled)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Setting any of these environment variables enables automatic provider detection:
 
 .. code-block:: bash
 
-   # OpenAI
+   # OpenAI (Priority 1 - will be auto-selected first)
    export OPENAI_API_KEY="sk-your-openai-api-key-here"
 
-   # Anthropic
+   # Anthropic (Priority 2)
    export ANTHROPIC_API_KEY="your-anthropic-api-key-here"
 
-   # Google
-   export GOOGLE_API_KEY="your-google-api-key-here"
+   # Google Gemini (Priority 3)
+   export GEMINI_API_KEY="your-google-api-key-here"
 
-   # AWS (uses standard AWS credentials)
-   export AWS_ACCESS_KEY_ID="your-access-key"
-   export AWS_SECRET_ACCESS_KEY="your-secret-key"
-   export AWS_REGION="us-east-1"
+   # Groq (Priority 4)
+   export GROQ_API_KEY="your-groq-api-key-here"
 
-   # Azure OpenAI
-   export AZURE_OPENAI_API_KEY="your-azure-key"
-   export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
+   # Cohere (Priority 5)
+   export COHERE_API_KEY="your-cohere-api-key-here"
 
-Provider Settings
-~~~~~~~~~~~~~~~~~
+   # XAI (Priority 6)
+   export XAI_API_KEY="your-xai-api-key-here"
+
+   # DeepSeek (Priority 7)
+   export DEEPSEEK_API_KEY="your-deepseek-api-key-here"
+
+   # Ollama (Priority 8 - no API key needed, auto-detected if service is running)
+   # Just run: ollama serve
+
+.. note::
+   **Automatic Detection:** Simply set any of these environment variables and run ``perspt`` with no arguments. Perspt will automatically detect and use the highest priority provider available.
+
+Legacy Provider Settings (Manual Override)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These variables override automatic detection and force manual configuration:
 
 .. code-block:: bash
 

@@ -73,6 +73,8 @@ providers directly in your terminal using a modern, unified interface powered by
    :widths: 20 80
    :header-rows: 0
 
+   * - 🤖
+     - **Zero-Config Startup:** Automatic provider detection from environment variables - just set your API key and run ``perspt``!
    * - 🎨
      - **Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui
    * - ⚡
