@@ -41,17 +41,21 @@ The main configuration structure containing all configurable aspects of Perspt.
    * - Provider Type
      - Description
    * - ``openai``
-     - OpenAI GPT models (GPT-4o, GPT-4o-mini, o1-preview, o1-mini)
+     - OpenAI GPT models (GPT-4o, GPT-4o-mini, o1-preview, o1-mini, o3-mini, o4-mini)
    * - ``anthropic``
      - Anthropic Claude models (Claude 3.5 Sonnet, Claude 3 Opus/Sonnet/Haiku)
-   * - ``google``
+   * - ``gemini``
      - Google Gemini models (Gemini 1.5 Pro/Flash, Gemini 2.0 Flash)
    * - ``groq``
      - Groq ultra-fast inference (Llama 3.x models)
    * - ``cohere``
      - Cohere Command models (Command R, Command R+)
    * - ``xai``
-     - XAI Grok models
+     - XAI Grok models (grok-3-beta, grok-3-fast-beta)
+   * - ``deepseek``
+     - DeepSeek models (deepseek-chat, deepseek-reasoner)
+   * - ``ollama``
+     - Local model hosting via Ollama (requires local setup)
 
 **Example Configuration:**
 
@@ -65,10 +69,12 @@ The main configuration structure containing all configurable aspects of Perspt.
      "providers": {
        "openai": "https://api.openai.com/v1",
        "anthropic": "https://api.anthropic.com",
-       "google": "https://generativelanguage.googleapis.com/v1beta/",
+       "gemini": "https://generativelanguage.googleapis.com/v1beta",
        "groq": "https://api.groq.com/openai/v1",
-       "cohere": "https://api.cohere.ai/v1",
-       "xai": "https://api.x.ai/v1"
+       "cohere": "https://api.cohere.com/v1",
+       "xai": "https://api.x.ai/v1",
+       "deepseek": "https://api.deepseek.com/v1",
+       "ollama": "http://localhost:11434/v1"
      }
    }
 
@@ -110,7 +116,7 @@ If ``provider_type`` is None, attempts inference from ``default_provider``:
      - ``anthropic``
      - Direct mapping
    * - ``google``, ``gemini``
-     - ``google``
+     - ``gemini``
      - Multiple aliases supported
    * - ``groq``
      - ``groq``
@@ -120,6 +126,12 @@ If ``provider_type`` is None, attempts inference from ``default_provider``:
      - Direct mapping
    * - ``xai``
      - ``xai``
+     - Direct mapping
+   * - ``deepseek``
+     - ``deepseek``
+     - Direct mapping
+   * - ``ollama``
+     - ``ollama``
      - Direct mapping
    * - Unknown
      - ``openai``
@@ -175,10 +187,12 @@ Without Configuration File (None)
    {
        "openai": "https://api.openai.com/v1",
        "anthropic": "https://api.anthropic.com", 
-       "google": "https://generativelanguage.googleapis.com/v1beta/",
+       "gemini": "https://generativelanguage.googleapis.com/v1beta",
        "groq": "https://api.groq.com/openai/v1",
-       "cohere": "https://api.cohere.ai/v1",
-       "xai": "https://api.x.ai/v1"
+       "cohere": "https://api.cohere.com/v1",
+       "xai": "https://api.x.ai/v1",
+       "deepseek": "https://api.deepseek.com/v1",
+       "ollama": "http://localhost:11434/v1"
    }
 
 **Possible Errors:**
@@ -230,10 +244,12 @@ Multi-Provider Configuration
      "providers": {
        "openai": "https://api.openai.com/v1",
        "anthropic": "https://api.anthropic.com",
-       "google": "https://generativelanguage.googleapis.com/v1beta/",
+       "gemini": "https://generativelanguage.googleapis.com/v1beta",
        "groq": "https://api.groq.com/openai/v1",
-       "cohere": "https://api.cohere.ai/v1",
-       "xai": "https://api.x.ai/v1"
+       "cohere": "https://api.cohere.com/v1",
+       "xai": "https://api.x.ai/v1",
+       "deepseek": "https://api.deepseek.com/v1",
+       "ollama": "http://localhost:11434/v1"
      }
    }
 
@@ -260,7 +276,8 @@ Development with Multiple Models
      "default_provider": "openai",
      "providers": {
        "openai": "https://api.openai.com/v1",
-       "groq": "https://api.groq.com/openai/v1"
+       "groq": "https://api.groq.com/openai/v1",
+       "ollama": "http://localhost:11434/v1"
      }
    }
 

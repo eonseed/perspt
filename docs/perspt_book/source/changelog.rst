@@ -6,6 +6,38 @@ All notable changes to Perspt will be documented in this file.
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
+[0.4.2] - 2025-06-09
+--------------------
+
+Added
+~~~~~
+
+- **🤖 Zero-Config Automatic Provider Detection**: Perspt now automatically detects and configures available providers based on environment variables
+  
+  - Set any supported API key (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, etc.) and simply run ``perspt`` 
+  - No configuration files or CLI arguments needed for basic usage
+  - Intelligent priority-based selection: OpenAI → Anthropic → Gemini → Groq → Cohere → XAI → DeepSeek → Ollama
+  - Automatic default model selection for each detected provider
+  - Graceful fallback with helpful error messages when no providers are found
+
+- **Enhanced Error Handling**: Clear, actionable error messages when no providers are configured
+- **Comprehensive Provider Support**: All major LLM providers now supported for automatic detection
+- **Local Model Auto-Detection**: Ollama automatically detected when running locally (no API key required)
+
+Changed
+~~~~~~~
+
+- **Improved User Experience**: Launch Perspt instantly with just an API key - no config required
+- **Better Documentation**: Updated getting-started guide and configuration documentation with zero-config examples
+- **Streamlined Workflow**: Reduced friction for new users getting started
+
+Technical Details
+~~~~~~~~~~~~~~~~
+
+- Added ``detect_available_provider()`` function in ``config.rs`` for environment-based provider detection
+- Enhanced ``load_config()`` to use automatic detection when no explicit configuration is provided
+- Comprehensive test coverage for all provider detection scenarios and edge cases
+
 [0.4.1] - 2025-06-03
 --------------------
 
@@ -34,7 +66,7 @@ Fixed
 Added
 ~~~~~
 
-- **Multi-provider support**: OpenAI, Anthropic, Google, AWS Bedrock, and more
+- **Multi-provider support**: OpenAI, Anthropic, Google, Groq, Cohere, XAI, DeepSeek, and Ollama
 - **Dynamic model discovery**: Automatic detection of available models
 - **Input queuing**: Type new messages while AI is responding
 - **Markdown rendering**: Rich text formatting in terminal
@@ -56,11 +88,13 @@ Supported Providers
 ~~~~~~~~~~~~~~~~~~~
 
 - **OpenAI**: GPT-4, GPT-4-turbo, GPT-4o series, GPT-3.5-turbo
-- **AWS Bedrock**: Amazon Nova models and more
 - **Anthropic**: Claude 3 models (via genai)
 - **Google**: Gemini models (via genai)
-- **Mistral**: Mistral AI models (via genai)
-- **Others**: Perplexity, DeepSeek, and more
+- **Groq**: Ultra-fast Llama inference
+- **Cohere**: Command R/R+ models
+- **XAI**: Grok models
+- **DeepSeek**: Advanced reasoning models
+- **Ollama**: Local model hosting
 
 Configuration Features
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -87,7 +121,7 @@ User Interface Features
 Added
 ~~~~~
 
-- Initial AWS Bedrock support
+- Multi-provider foundation with genai crate
 - Configuration file validation
 - Improved error categorization
 
@@ -273,9 +307,9 @@ Current Version (0.4.0)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Windows terminal compatibility**: Some Unicode characters may not display correctly on older Windows terminals
-- **AWS Bedrock regions**: Limited model availability in some AWS regions
 - **Large conversation history**: Memory usage increases with very long conversations (>1000 messages)
 - **Network interruption**: Streaming responses may be interrupted during network issues
+- **Ollama connectivity**: Local models may require manual service restart after system reboot
 
 Workarounds:
 

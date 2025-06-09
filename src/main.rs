@@ -9,10 +9,11 @@
 //! - OpenAI (GPT models)
 //! - Anthropic (Claude models)
 //! - Google (Gemini models)
-//! - Mistral AI
-//! - Perplexity
-//! - DeepSeek
-//! - AWS Bedrock
+//! - Groq (Fast inference models)
+//! - Cohere (Command models)
+//! - XAI (Grok models)
+//! - DeepSeek (Chat and reasoning models)
+//! - Ollama (Local models)
 //!
 //! ## Features
 //!
@@ -56,7 +57,7 @@
 //! ## Error Handling
 //!
 //! The application implements comprehensive error handling and panic recovery.
-//! All critical operations are wrapped in appropriate error contexts for
+//! All critical operations are wrapped in appropriate error contexts for!
 //! better debugging and user experience.
 
 // src/main.rs
@@ -266,8 +267,8 @@ async fn main() -> Result<()> {
                 .short('p')
                 .long("provider-type")
                 .value_name("TYPE")
-                .help("Provider type: openai, anthropic, google, mistral, perplexity, deepseek, aws-bedrock, azure-openai")
-                .value_parser(["openai", "anthropic", "google", "mistral", "perplexity", "deepseek", "aws-bedrock", "azure-openai"])
+                .help("Provider type: openai, anthropic, gemini, groq, cohere, xai, deepseek, ollama")
+                .value_parser(["openai", "anthropic", "gemini", "groq", "cohere", "xai", "deepseek", "ollama"])
         )
         .arg(
             Arg::new("provider")
@@ -294,6 +295,28 @@ async fn main() -> Result<()> {
     // Load configuration
     let mut config = config::load_config(config_path).await
         .context("Failed to load configuration")?;
+
+    // Check if we have a valid provider configuration
+    if config.provider_type.is_none() {
+        eprintln!("❌ No LLM provider configured!");
+        eprintln!();
+        eprintln!("To get started, either:");
+        eprintln!("  1. Set an environment variable for a supported provider:");
+        eprintln!("     • OPENAI_API_KEY=sk-your-key");
+        eprintln!("     • ANTHROPIC_API_KEY=sk-ant-your-key");
+        eprintln!("     • GEMINI_API_KEY=your-key");
+        eprintln!("     • GROQ_API_KEY=your-key");
+        eprintln!("     • COHERE_API_KEY=your-key");
+        eprintln!("     • XAI_API_KEY=your-key");
+        eprintln!("     • DEEPSEEK_API_KEY=your-key");
+        eprintln!();
+        eprintln!("  2. Use command line arguments:");
+        eprintln!("     perspt --provider-type openai --api-key sk-your-key");
+        eprintln!();
+        eprintln!("  3. Create a config.json file with provider settings");
+        eprintln!();
+        return Err(anyhow::anyhow!("No provider configured"));
+    }
 
     // Apply CLI overrides
     if let Some(key) = cli_api_key {
@@ -322,15 +345,12 @@ async fn main() -> Result<()> {
             match config.provider_type.as_deref() {
                 Some("openai") => "gpt-4o-mini".to_string(),
                 Some("anthropic") => "claude-3-5-sonnet-20241022".to_string(),
-                Some("google") | Some("gemini") => "gemini-1.5-flash".to_string(),
-                Some("mistral") => "mistral-small-latest".to_string(),
-                Some("perplexity") => "llama-3.1-sonar-small-128k-online".to_string(),
-                Some("deepseek") => "deepseek-chat".to_string(),
+                Some("gemini") => "gemini-1.5-flash".to_string(),
                 Some("groq") => "llama-3.1-8b-instant".to_string(),
                 Some("cohere") => "command-r-plus".to_string(),
                 Some("xai") => "grok-beta".to_string(),
-                Some("aws-bedrock") => "anthropic.claude-v2".to_string(),
-                Some("azure-openai") => "gpt-4o-mini".to_string(),
+                Some("deepseek") => "deepseek-chat".to_string(),
+                Some("ollama") => "llama3.2".to_string(),
                 _ => "gpt-4o-mini".to_string(),
             }
         });

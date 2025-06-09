@@ -99,9 +99,6 @@ LLM Integration
    * - **reqwest**
      - MIT/Apache-2.0
      - HTTP client library
-   * - **aws-sdk-bedrock**
-     - Apache-2.0
-     - AWS Bedrock SDK for Rust
 
 Terminal and UI
 ~~~~~~~~~~~~~~~

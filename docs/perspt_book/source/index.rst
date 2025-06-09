@@ -73,12 +73,14 @@ providers directly in your terminal using a modern, unified interface powered by
    :widths: 20 80
    :header-rows: 0
 
+   * - 🤖
+     - **Zero-Config Startup:** Automatic provider detection from environment variables - just set your API key and run ``perspt``!
    * - 🎨
      - **Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui
    * - ⚡
      - **Streaming Responses:** Real-time streaming of LLM responses for an interactive experience
    * - 🔀
-     - **Multiple Provider Support:** Seamlessly switch between OpenAI, AWS Bedrock, Anthropic, Google, and more
+     - **Multiple Provider Support:** Seamlessly switch between OpenAI, Anthropic, Google, Groq, Cohere, XAI, DeepSeek, and Ollama
    * - 🚀
      - **Dynamic Model Discovery:** Automatically discovers available models without manual updates
    * - ⚙️
@@ -103,12 +105,6 @@ providers directly in your terminal using a modern, unified interface powered by
       - **GPT-4 series** - GPT-4-turbo, GPT-4 for complex tasks
       - Latest model variants automatically supported
 
-   .. tab:: AWS Bedrock
-
-      - Amazon Nova models (micro, lite, pro)
-      - Anthropic Claude on Bedrock
-      - Automatic model discovery
-
    .. tab:: Anthropic
 
       - Claude 3.5 (latest Sonnet, Haiku)
@@ -121,15 +117,20 @@ providers directly in your terminal using a modern, unified interface powered by
       - Gemini Pro, Gemini 1.5 Pro/Flash
       - PaLM models
 
-   .. tab:: Advanced Providers
+   .. tab:: Ollama (Local)
+
+      - **Llama 3.2** - Latest Meta model
+      - **CodeLlama** - Code-specialized models
+      - **Mistral** - Fast and capable models
+      - **Qwen** - Multilingual models
+      - All popular open-source models
+
+   .. tab:: Cloud Providers
 
       - **Groq**: Ultra-fast Llama 3.x inference
       - **Cohere**: Command R/R+ models
       - **XAI**: Grok models
-      - **Mistral AI**: Latest Mistral models
-      - **Perplexity AI**: Research-focused models
       - **DeepSeek**: Advanced reasoning models
-      - **Ollama**: Local model hosting
 
 .. note::
    Perspt leverages the powerful `genai <https://crates.io/crates/genai>`_ crate for unified LLM access, 

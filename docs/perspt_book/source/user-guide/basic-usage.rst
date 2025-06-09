@@ -23,7 +23,7 @@ Perspt uses the latest genai crate (v0.3.5) for unified LLM access with enhanced
    perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
 
    # Use Google Gemini
-   perspt --provider-type google --model gemini-1.5-flash
+   perspt --provider-type gemini --model gemini-1.5-flash
 
    # Use latest reasoning models
    perspt --provider-type openai --model o1-mini
@@ -113,12 +113,8 @@ Perspt supports comprehensive command-line arguments that actually work with the
    groq            # Groq ultra-fast inference
    cohere          # Cohere Command models
    xai             # XAI Grok models
-   ollama          # Local Ollama models
-   mistral         # Mistral AI models
-   perplexity      # Perplexity models
    deepseek        # DeepSeek models
-   aws-bedrock     # AWS Bedrock service
-   azure-openai    # Azure OpenAI service
+   ollama          # Local Ollama models
 
 **Example Usage Patterns**
 
@@ -253,6 +249,190 @@ Share code with syntax highlighting hints:
 - Proper paragraph breaks and spacing
 - Smooth scrolling through long responses
 - Visual indicators for streaming progress
+
+Testing Local Models with Ollama
+---------------------------------
+
+Ollama provides an excellent way to test local models without API keys or internet connectivity. This section walks through setting up and testing Ollama with Perspt.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+**Install and Start Ollama**
+
+.. code-block:: bash
+
+   # macOS
+   brew install ollama
+   
+   # Linux
+   curl -fsSL https://ollama.ai/install.sh | sh
+   
+   # Start Ollama service
+   ollama serve
+
+**Download Test Models**
+
+.. code-block:: bash
+
+   # Download Llama 3.2 (3B) - fast and efficient
+   ollama pull llama3.2
+   
+   # Download Code Llama - for coding tasks
+   ollama pull codellama
+   
+   # Verify models are available
+   ollama list
+
+Basic Ollama Testing
+~~~~~~~~~~~~~~~~~~~~
+
+**Start with Simple Conversations**
+
+.. code-block:: bash
+
+   # Test basic functionality
+   perspt --provider-type ollama --model llama3.2
+
+Example conversation flow:
+
+.. code-block:: text
+
+   Perspt v0.4.0 - Performance LLM Chat CLI
+   Provider: Ollama | Model: llama3.2 | Status: Connected ✓
+   Local model hosting - no API key required
+   
+   > Hello! Can you help me understand how LLMs work?
+   
+   [Assistant responds with explanation of language models...]
+   
+   > That's helpful! Now explain it like I'm 5 years old.
+   
+   [Assistant provides simplified explanation...]
+
+**Test Different Model Types**
+
+.. code-block:: bash
+
+   # General conversation
+   perspt --provider-type ollama --model llama3.2
+   
+   # Coding assistance
+   perspt --provider-type ollama --model codellama
+   
+   # Larger model for complex tasks (if you have enough RAM)
+   perspt --provider-type ollama --model llama3.1:8b
+
+Performance Testing
+~~~~~~~~~~~~~~~~~~~
+
+**Model Comparison**
+
+Test different model sizes to find the right balance for your system:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 25 30
+
+   * - Model
+     - Size
+     - RAM Required
+     - Best For
+   * - ``llama3.2``
+     - 3B
+     - ~4GB
+     - Quick responses, chat
+   * - ``llama3.1:8b``
+     - 8B
+     - ~8GB
+     - Better reasoning, longer context
+   * - ``codellama``
+     - 7B
+     - ~7GB
+     - Code generation, technical tasks
+   * - ``mistral``
+     - 7B
+     - ~7GB
+     - Balanced performance
+
+**Speed Testing**
+
+.. code-block:: bash
+
+   # Time how long responses take
+   time perspt --provider-type ollama --model llama3.2
+
+   # Compare with cloud providers
+   time perspt --provider-type openai --model gpt-4o-mini
+
+**Practical Test Scenarios**
+
+.. code-block:: text
+
+   # Test 1: Basic Knowledge
+   > What is the capital of France?
+   
+   # Test 2: Reasoning
+   > If a train travels 60 mph for 2.5 hours, how far does it go?
+   
+   # Test 3: Creative Writing
+   > Write a short story about a robot learning to paint.
+   
+   # Test 4: Code Generation (with codellama)
+   > Write a Python function to calculate fibonacci numbers.
+
+Troubleshooting Ollama
+~~~~~~~~~~~~~~~~~~~~~~
+
+**Common Issues**
+
+.. code-block:: bash
+
+   # Check if Ollama is running
+   curl http://localhost:11434/api/tags
+   
+   # If connection fails
+   ollama serve
+   
+   # List available models
+   perspt --provider-type ollama --list-models
+   
+   # Pull missing models
+   ollama pull llama3.2
+
+**Performance Issues**
+
+- **Slow responses**: Try smaller models (llama3.2 vs llama3.1:8b)
+- **Out of memory**: Close other applications or use lighter models
+- **Model not found**: Ensure you've pulled the model with ``ollama pull``
+
+**Configuration for Regular Use**
+
+Create a config file for easy Ollama usage:
+
+.. code-block:: json
+
+   {
+     "provider_type": "ollama",
+     "default_model": "llama3.2",
+     "providers": {
+       "ollama": "http://localhost:11434/v1"
+     },
+     "api_key": "not-required"
+   }
+
+.. code-block:: bash
+
+   # Save as ollama_config.json and use
+   perspt --config ollama_config.json
+
+**Benefits of Local Testing**
+
+- **Privacy**: All data stays on your machine
+- **Cost**: No API fees or usage limits
+- **Offline**: Works without internet after initial setup
+- **Experimentation**: Try different models and settings freely
+- **Learning**: Understand model capabilities and limitations
 
 Best Practices for Effective Usage
 -----------------------------------
