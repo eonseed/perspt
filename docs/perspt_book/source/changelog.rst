@@ -34,7 +34,7 @@ Fixed
 Added
 ~~~~~
 
-- **Multi-provider support**: OpenAI, Anthropic, Google, AWS Bedrock, and more
+- **Multi-provider support**: OpenAI, Anthropic, Google, Groq, Cohere, XAI, DeepSeek, and Ollama
 - **Dynamic model discovery**: Automatic detection of available models
 - **Input queuing**: Type new messages while AI is responding
 - **Markdown rendering**: Rich text formatting in terminal
@@ -56,11 +56,13 @@ Supported Providers
 ~~~~~~~~~~~~~~~~~~~
 
 - **OpenAI**: GPT-4, GPT-4-turbo, GPT-4o series, GPT-3.5-turbo
-- **AWS Bedrock**: Amazon Nova models and more
 - **Anthropic**: Claude 3 models (via genai)
 - **Google**: Gemini models (via genai)
-- **Mistral**: Mistral AI models (via genai)
-- **Others**: Perplexity, DeepSeek, and more
+- **Groq**: Ultra-fast Llama inference
+- **Cohere**: Command R/R+ models
+- **XAI**: Grok models
+- **DeepSeek**: Advanced reasoning models
+- **Ollama**: Local model hosting
 
 Configuration Features
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -87,7 +89,7 @@ User Interface Features
 Added
 ~~~~~
 
-- Initial AWS Bedrock support
+- Multi-provider foundation with genai crate
 - Configuration file validation
 - Improved error categorization
 
@@ -273,9 +275,9 @@ Current Version (0.4.0)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Windows terminal compatibility**: Some Unicode characters may not display correctly on older Windows terminals
-- **AWS Bedrock regions**: Limited model availability in some AWS regions
 - **Large conversation history**: Memory usage increases with very long conversations (>1000 messages)
 - **Network interruption**: Streaming responses may be interrupted during network issues
+- **Ollama connectivity**: Local models may require manual service restart after system reboot
 
 Workarounds:
 

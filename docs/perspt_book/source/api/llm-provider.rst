@@ -18,14 +18,15 @@ The module is designed around these principles:
 
 ## Supported Providers
 
-The module supports multiple LLM providers through the genai crate:
+The module supports multiple LLM providers through the genai crate (v0.3.5):
 
-* **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview models
+* **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview, o3-mini, o4-mini models
 * **Anthropic**: Claude 3 (Opus, Sonnet, Haiku), Claude 3.5 models  
 * **Google**: Gemini Pro, Gemini 1.5 Pro/Flash, Gemini 2.0 models
 * **Groq**: Llama 3.x models with ultra-fast inference
 * **Cohere**: Command R/R+ models
-* **XAI**: Grok models
+* **XAI**: Grok models (grok-3-beta, grok-3-fast-beta, etc.)
+* **DeepSeek**: DeepSeek chat and reasoning models (deepseek-chat, deepseek-reasoner)
 * **Ollama**: Local model hosting (requires local setup)
 
 ## Architecture
@@ -86,6 +87,8 @@ The client will automatically detect and use these environment variables:
 * ``GROQ_API_KEY``: For Groq models
 * ``COHERE_API_KEY``: For Cohere models
 * ``XAI_API_KEY``: For XAI Grok models
+* ``DEEPSEEK_API_KEY``: For DeepSeek models
+* ``OLLAMA_API_BASE``: For Ollama local models (optional, defaults to http://localhost:11434)
 
 **Returns:**
 
@@ -133,6 +136,8 @@ This constructor allows explicit specification of provider type and API key, whi
 * ``"groq"`` → Sets ``GROQ_API_KEY``
 * ``"cohere"`` → Sets ``COHERE_API_KEY``
 * ``"xai"`` → Sets ``XAI_API_KEY``
+* ``"deepseek"`` → Sets ``DEEPSEEK_API_KEY``
+* ``"ollama"`` → Sets ``OLLAMA_API_BASE`` (optional)
 
 **Example:**
 
@@ -163,12 +168,13 @@ This method queries the specified provider's API to get a list of all available 
 
 Model listing is supported for:
 
-* **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1 series models
+* **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1 series, o3-mini, o4-mini models
 * **Anthropic**: Claude 3/3.5 series (Opus, Sonnet, Haiku)
 * **Google**: Gemini Pro, Gemini 1.5/2.0 series
 * **Groq**: Llama 3.x series with various sizes
 * **Cohere**: Command R/R+ models
-* **XAI**: Grok models
+* **XAI**: Grok models (grok-3-beta, grok-3-fast-beta, etc.)
+* **DeepSeek**: DeepSeek chat and reasoning models
 * **Ollama**: Requires local setup and running instance
 
 **Returns:**

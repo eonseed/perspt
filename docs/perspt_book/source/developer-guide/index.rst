@@ -282,7 +282,7 @@ Each module has a specific responsibility:
 **llm_provider.rs**
 
 - GenAI crate integration for unified LLM access
-- Support for OpenAI, Anthropic, Google, Groq, Cohere, XAI, Ollama
+- Support for OpenAI, Anthropic, Google (Gemini), Groq, Cohere, XAI, DeepSeek, Ollama
 - Streaming response handling with proper event processing
 - Model validation and discovery
 - Comprehensive error categorization and recovery

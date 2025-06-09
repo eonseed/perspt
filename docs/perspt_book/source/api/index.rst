@@ -98,7 +98,7 @@ The modules have clear dependency relationships:
 
 **llm_provider.rs**
    - Uses modern `genai` crate for unified provider interface
-   - Supports OpenAI, Anthropic, Google, Groq, Cohere, XAI
+   - Supports OpenAI, Anthropic, Google (Gemini), Groq, Cohere, XAI, DeepSeek, Ollama
    - Auto-configuration via environment variables
    - Streaming response handling and model discovery
 

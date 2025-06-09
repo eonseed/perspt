@@ -148,7 +148,7 @@ LLM provider abstraction using the genai crate for unified API access.
 
 **Responsibilities**:
 
-- Multi-provider LLM integration (OpenAI, Anthropic, Gemini, etc.)
+- Multi-provider LLM integration (OpenAI, Anthropic, Gemini, Groq, Cohere, XAI, DeepSeek, Ollama)
 - Streaming response handling with real-time updates
 - Error handling and retry logic
 - Message formatting and conversation management
@@ -205,11 +205,14 @@ LLM provider abstraction using the genai crate for unified API access.
 
 The GenAI crate provides unified access to:
 
-- **OpenAI**: GPT-3.5, GPT-4, GPT-4-turbo, o1-mini models
-- **Anthropic**: Claude-3 models (Haiku, Sonnet, Opus)
-- **Google**: Gemini Pro and Gemini 2.5 Pro models
-- **Cohere**: Command models
-- **Groq**: High-speed inference models
+- **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview, o3-mini, o4-mini models
+- **Anthropic**: Claude 3 (Opus, Sonnet, Haiku), Claude 3.5 models
+- **Google**: Gemini Pro, Gemini 1.5 Pro/Flash, Gemini 2.0 models
+- **Groq**: Llama 3.x models with ultra-fast inference
+- **Cohere**: Command R/R+ models
+- **XAI**: Grok models (grok-3-beta, grok-3-fast-beta, etc.)
+- **DeepSeek**: DeepSeek chat and reasoning models
+- **Ollama**: Local model hosting (requires local setup)
 
 **Streaming Architecture**:
 
@@ -815,6 +818,10 @@ Perspt handles API keys securely through environment variables and configuration
            let api_key = env::var("OPENAI_API_KEY")
                .or_else(|_| env::var("ANTHROPIC_API_KEY"))
                .or_else(|_| env::var("GEMINI_API_KEY"))
+               .or_else(|_| env::var("GROQ_API_KEY"))
+               .or_else(|_| env::var("COHERE_API_KEY"))
+               .or_else(|_| env::var("XAI_API_KEY"))
+               .or_else(|_| env::var("DEEPSEEK_API_KEY"))
                .ok();
            
            // Load from config file as fallback
@@ -834,6 +841,9 @@ Perspt handles API keys securely through environment variables and configuration
                key if key.starts_with("sk-") => "openai".to_string(),
                key if key.starts_with("claude-") => "anthropic".to_string(),
                key if key.starts_with("AIza") => "gemini".to_string(),
+               key if key.starts_with("gsk_") => "groq".to_string(),
+               key if key.starts_with("xai-") => "xai".to_string(),
+               key if key.starts_with("ds-") => "deepseek".to_string(),
                _ => "openai".to_string(), // Default fallback
            }
        }
@@ -916,6 +926,9 @@ Perspt includes comprehensive unit tests for each module:
            assert_eq!(Config::infer_provider_from_key("sk-test"), "openai");
            assert_eq!(Config::infer_provider_from_key("claude-test"), "anthropic");
            assert_eq!(Config::infer_provider_from_key("AIza-test"), "gemini");
+           assert_eq!(Config::infer_provider_from_key("gsk_test"), "groq");
+           assert_eq!(Config::infer_provider_from_key("xai-test"), "xai");
+           assert_eq!(Config::infer_provider_from_key("ds-test"), "deepseek");
        }
 
        #[test]

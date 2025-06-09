@@ -31,6 +31,9 @@ Perspt uses the `genai` crate which supports multiple providers out of the box. 
                key if key.starts_with("sk-") => "openai".to_string(),
                key if key.starts_with("claude-") => "anthropic".to_string(),
                key if key.starts_with("AIza") => "gemini".to_string(),
+               key if key.starts_with("gsk_") => "groq".to_string(),
+               key if key.starts_with("xai-") => "xai".to_string(),
+               key if key.starts_with("ds-") => "deepseek".to_string(),
                key if key.starts_with("hf_") => "huggingface".to_string(), // New provider
                key if key.starts_with("co_") => "cohere".to_string(),       // New provider
                _ => "openai".to_string(),
@@ -41,12 +44,16 @@ Perspt uses the `genai` crate which supports multiple providers out of the box. 
            match self.model {
                Some(ref model) => model.clone(),
                None => match self.provider.as_str() {
-                   "openai" => "gpt-3.5-turbo".to_string(),
-                   "anthropic" => "claude-3-haiku-20240307".to_string(),
-                   "gemini" => "gemini-pro".to_string(),
+                   "openai" => "gpt-4o-mini".to_string(),
+                   "anthropic" => "claude-3-5-sonnet-20241022".to_string(),
+                   "gemini" => "gemini-1.5-flash".to_string(),
+                   "groq" => "llama-3.1-70b-versatile".to_string(),
+                   "cohere" => "command-r-plus".to_string(),
+                   "xai" => "grok-3-beta".to_string(),
+                   "deepseek" => "deepseek-chat".to_string(),
+                   "ollama" => "llama3.2".to_string(),
                    "huggingface" => "microsoft/DialoGPT-medium".to_string(), // New default
-                   "cohere" => "command".to_string(),                        // New default
-                   _ => "gpt-3.5-turbo".to_string(),
+                   _ => "gpt-4o-mini".to_string(),
                }
            }
        }
@@ -1062,8 +1069,14 @@ Extension Deployment
    # Set provider-specific environment variables
    export OPENAI_API_KEY="your-openai-key"
    export ANTHROPIC_API_KEY="your-anthropic-key"
+   export GEMINI_API_KEY="your-gemini-key"
+   export GROQ_API_KEY="your-groq-key"
+   export COHERE_API_KEY="your-cohere-key"
+   export XAI_API_KEY="your-xai-key"
+   export DEEPSEEK_API_KEY="your-deepseek-key"
+   export OLLAMA_API_BASE="http://localhost:11434"
    export PERSPT_PROVIDER="openai"
-   export PERSPT_MODEL="gpt-4"
+   export PERSPT_MODEL="gpt-4o-mini"
 
 Best Practices
 --------------

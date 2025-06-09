@@ -246,50 +246,6 @@ Google (Gemini)
 - ``gemini-pro`` - Google's most capable model
 - ``gemini-pro-vision`` - Multimodal capabilities
 
-AWS Bedrock
-~~~~~~~~~~~
-
-.. tabs::
-
-   .. tab:: Environment Variables
-
-      .. code-block:: bash
-
-         export AWS_ACCESS_KEY_ID="your-access-key"
-         export AWS_SECRET_ACCESS_KEY="your-secret-key"
-         export AWS_REGION="us-east-1"
-         export PERSPT_PROVIDER="aws-bedrock"
-         export PERSPT_MODEL="amazon.nova-micro-v1:0"
-
-   .. tab:: Config File
-
-      .. code-block:: json
-
-         {
-           "provider_type": "aws-bedrock",
-           "default_model": "amazon.nova-micro-v1:0",
-           "aws": {
-             "region": "us-east-1",
-             "access_key_id": "your-access-key",
-             "secret_access_key": "your-secret-key"
-           }
-         }
-
-   .. tab:: AWS CLI Profile
-
-      .. code-block:: bash
-
-         # Use AWS CLI configuration
-         aws configure
-         perspt --provider-type aws-bedrock \
-                --model-name amazon.nova-micro-v1:0
-
-**Available Models:**
-- ``amazon.nova-micro-v1:0`` - Fast and cost-effective
-- ``amazon.nova-lite-v1:0`` - Balanced performance
-- ``amazon.nova-pro-v1:0`` - Most capable
-- ``anthropic.claude-3-sonnet-20240229-v1:0`` - Claude on Bedrock
-
 Command-Line Options
 --------------------
 
@@ -311,7 +267,7 @@ Basic Options
    * - ``--config <PATH>``
      - Path to configuration file
    * - ``--provider-type <TYPE>``
-     - AI provider (openai, anthropic, google, aws-bedrock)
+     - AI provider (openai, anthropic, google, groq, cohere, xai, deepseek, ollama)
    * - ``--model-name <MODEL>``
      - Specific model to use
    * - ``--api-key <KEY>``

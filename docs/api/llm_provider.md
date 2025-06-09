@@ -23,10 +23,11 @@ pub enum ProviderType {
     OpenAI,
     Anthropic,
     Google,
-    Mistral,
-    Perplexity,
+    Groq,
+    Cohere,
+    Xai,
     DeepSeek,
-    AwsBedrock,
+    Ollama,
 }
 ```
 
@@ -52,10 +53,11 @@ pub fn from_string(s: &str) -> Option<Self>
 | "openai" | `ProviderType::OpenAI` |
 | "anthropic" | `ProviderType::Anthropic` |
 | "google", "gemini" | `ProviderType::Google` |
-| "mistral" | `ProviderType::Mistral` |
-| "perplexity" | `ProviderType::Perplexity` |
+| "groq" | `ProviderType::Groq` |
+| "cohere" | `ProviderType::Cohere` |
+| "xai" | `ProviderType::Xai` |
 | "deepseek" | `ProviderType::DeepSeek` |
-| "aws", "bedrock", "aws-bedrock" | `ProviderType::AwsBedrock` |
+| "ollama" | `ProviderType::Ollama` |
 
 **Example**:
 ```rust
@@ -122,13 +124,14 @@ pub fn get_available_models(&self) -> Vec<String>
 - `Vec<String>` - List of available model identifiers
 
 **Model Sources by Provider**:
-- **OpenAI**: `OpenAIModels` enum from allms
-- **Anthropic**: `AnthropicModels` enum from allms
-- **Google**: `GoogleModels` enum from allms
-- **Mistral**: `MistralModels` enum from allms
-- **Perplexity**: `PerplexityModels` enum from allms
-- **DeepSeek**: `DeepSeekModels` enum from allms
-- **AWS Bedrock**: `AwsBedrockModels` enum from allms
+- **OpenAI**: `OpenAIModels` enum from genai
+- **Anthropic**: `AnthropicModels` enum from genai
+- **Google**: `GoogleModels` enum from genai
+- **Groq**: `GroqModels` enum from genai
+- **Cohere**: `CohereModels` enum from genai
+- **XAI**: `XaiModels` enum from genai
+- **DeepSeek**: `DeepSeekModels` enum from genai
+- **Ollama**: Dynamic model discovery from local Ollama instance
 
 **Example**:
 ```rust
