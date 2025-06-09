@@ -17,12 +17,14 @@
 - **⚡ Real-time Streaming**: Ultra-responsive streaming responses with proper reasoning chunk handling
 - **🛡️ Rock-solid Reliability**: Comprehensive panic recovery and error handling that keeps your terminal safe
 - **🎨 Beautiful Interface**: Modern terminal UI with markdown rendering and smooth animations
+- **🤖 Zero-Config Startup**: Automatic provider detection from environment variables - just set your API key and go!
 - **🔧 Flexible Configuration**: CLI arguments, environment variables, and JSON config files all work seamlessly
 
 ## ✨ Features
 
 -   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui with smooth scrolling and custom markdown rendering.
 -   **⚡ Advanced Streaming:** Real-time streaming of LLM responses with support for reasoning chunks and proper event handling.
+-   **🤖 Automatic Provider Detection:** Zero-config startup that automatically detects and uses available providers based on environment variables (set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc. and just run `perspt`!).
 -   **🔀 Latest Provider Support**: Built on the modern `genai` crate with support for cutting-edge models:
     -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, **GPT-4.1**, **o1-mini**, **o1-preview**, **o3-mini**, and more)
     -   **Anthropic** (Claude-3 Opus, Sonnet, Haiku, Claude-3.5 Sonnet, Claude-3.5 Haiku, and more)
@@ -42,6 +44,64 @@
 -   **📚 Extensive Documentation:** Comprehensive code documentation and user guides.
 
 ## 🚀 Getting Started
+
+### 🤖 Zero-Config Automatic Provider Detection
+
+**NEW!** Perspt now features intelligent automatic provider detection. Simply set an environment variable for any supported provider, and Perspt will automatically detect and use it - no additional configuration needed!
+
+**Priority Detection Order:**
+1. OpenAI (`OPENAI_API_KEY`)
+2. Anthropic (`ANTHROPIC_API_KEY`) 
+3. Google Gemini (`GEMINI_API_KEY`)
+4. Groq (`GROQ_API_KEY`)
+5. Cohere (`COHERE_API_KEY`)
+6. XAI (`XAI_API_KEY`)
+7. DeepSeek (`DEEPSEEK_API_KEY`)
+8. Ollama (no API key needed - auto-detected if running)
+
+**Quick Start Examples:**
+
+```bash
+# Option 1: OpenAI (will be auto-detected and used)
+export OPENAI_API_KEY="sk-your-openai-key"
+./target/release/perspt  # That's it! Uses OpenAI with gpt-4o-mini
+
+# Option 2: Anthropic (will be auto-detected and used)
+export ANTHROPIC_API_KEY="sk-ant-your-key"
+./target/release/perspt  # Uses Anthropic with claude-3-5-sonnet-20241022
+
+# Option 3: Google Gemini (will be auto-detected and used)
+export GEMINI_API_KEY="your-gemini-key"
+./target/release/perspt  # Uses Gemini with gemini-1.5-flash
+
+# Option 4: Ollama (no API key needed!)
+# Just make sure Ollama is running: ollama serve
+./target/release/perspt  # Auto-detects Ollama if no other providers found
+```
+
+**What happens behind the scenes:**
+- Perspt scans your environment variables for supported provider API keys
+- Automatically selects the first available provider (based on priority order)
+- Sets appropriate default model for the detected provider
+- Starts up immediately - no config files or CLI arguments needed!
+
+**When no providers are detected:**
+If no API keys are found, Perspt shows helpful setup instructions:
+
+```bash
+❌ No LLM provider configured!
+
+To get started, either:
+  1. Set an environment variable for a supported provider:
+     • OPENAI_API_KEY=sk-your-key
+     • ANTHROPIC_API_KEY=sk-ant-your-key
+     # ... (shows all supported providers)
+
+  2. Use command line arguments:
+     perspt --provider-type openai --api-key sk-your-key
+
+  3. Create a config.json file with provider settings
+```
 
 ### **Read the [perspt book](docs/perspt.pdf)** - This illustrated guide walks through the project and explains key Rust concepts
 

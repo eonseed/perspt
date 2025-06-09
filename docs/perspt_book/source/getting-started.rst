@@ -128,8 +128,73 @@ Your First Conversation
 
 Let's start your first AI conversation with Perspt!
 
-Step 1: Set Your API Key
-~~~~~~~~~~~~~~~~~~~~~~~~
+Zero-Config Quick Start
+~~~~~~~~~~~~~~~~~~~~~~~
+
+**NEW!** Perspt now features intelligent automatic provider detection. Simply set an environment variable for any supported provider, and Perspt will automatically detect and use it - no additional configuration needed!
+
+.. note::
+   **Automatic Provider Detection Priority:**
+   
+   1. OpenAI (``OPENAI_API_KEY``)
+   2. Anthropic (``ANTHROPIC_API_KEY``) 
+   3. Google Gemini (``GEMINI_API_KEY``)
+   4. Groq (``GROQ_API_KEY``)
+   5. Cohere (``COHERE_API_KEY``)
+   6. XAI (``XAI_API_KEY``)
+   7. DeepSeek (``DEEPSEEK_API_KEY``)
+   8. Ollama (no API key needed - auto-detected if running)
+
+.. tabs::
+
+   .. tab:: OpenAI (Recommended)
+
+      .. code-block:: bash
+
+         # Set your API key
+         export OPENAI_API_KEY="sk-your-actual-api-key-here"
+         
+         # Launch Perspt - that's it!
+         perspt
+         # Automatically uses OpenAI with gpt-4o-mini
+
+   .. tab:: Anthropic Claude
+
+      .. code-block:: bash
+
+         # Set your API key
+         export ANTHROPIC_API_KEY="sk-ant-your-key"
+         
+         # Launch Perspt - zero config needed!
+         perspt
+         # Automatically uses Anthropic with claude-3-5-sonnet-20241022
+
+   .. tab:: Google Gemini
+
+      .. code-block:: bash
+
+         # Set your API key
+         export GEMINI_API_KEY="your-gemini-key"
+         
+         # Launch Perspt
+         perspt
+         # Automatically uses Gemini with gemini-1.5-flash
+
+   .. tab:: Ollama (Local)
+
+      .. code-block:: bash
+
+         # Just make sure Ollama is running
+         ollama serve
+         
+         # Launch Perspt (no API key needed!)
+         perspt
+         # Auto-detects Ollama if no other providers found
+
+Step 1: Set Your API Key (Manual Configuration)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you prefer manual configuration or want to override automatic detection:
 
 .. code-block:: bash
 
@@ -144,8 +209,11 @@ Step 2: Launch Perspt
 
 .. code-block:: bash
 
-   # Start with default settings (OpenAI GPT-4o-mini)
+   # Start with automatic detection (recommended)
    perspt
+
+   # Or specify provider manually
+   perspt --provider openai --model gpt-4o-mini
 
 You should see a welcome screen like this:
 
@@ -468,6 +536,67 @@ Technical Explanation
    - **Non-blocking**: Awaiting doesn't block the thread
 
    This makes Rust excellent for high-performance concurrent applications!
+
+Troubleshooting
+----------------
+
+No Provider Detected
+~~~~~~~~~~~~~~~~~~~~
+
+If you see an error message like this when launching Perspt:
+
+.. code-block:: text
+
+   ❌ No LLM provider configured!
+
+   To get started, either:
+     1. Set an environment variable for a supported provider:
+        • OPENAI_API_KEY=sk-your-key
+        • ANTHROPIC_API_KEY=sk-ant-your-key
+        • GEMINI_API_KEY=your-key
+        # ... (shows all supported providers)
+
+     2. Use command line arguments:
+        perspt --provider openai --api-key sk-your-key
+
+**Solution:** Set at least one API key environment variable:
+
+.. code-block:: bash
+
+   # Quick fix - set any supported provider
+   export OPENAI_API_KEY="sk-your-actual-key"
+   perspt  # Should now auto-detect and start
+
+Provider Priority
+~~~~~~~~~~~~~~~~~
+
+If you have multiple API keys set and want to use a specific provider:
+
+.. code-block:: bash
+
+   # Override automatic detection
+   perspt --provider anthropic  # Forces Anthropic even if OpenAI key is set
+   
+   # Or unset other providers temporarily
+   unset OPENAI_API_KEY
+   export ANTHROPIC_API_KEY="your-key"
+   perspt  # Now auto-detects Anthropic
+
+Connection Issues
+~~~~~~~~~~~~~~~~~
+
+If Perspt detects your provider but can't connect:
+
+1. **Check your API key**: Ensure it's valid and has sufficient credits
+2. **Test your connection**: Try a simple curl request to the provider's API
+3. **Check firewall**: Ensure your network allows HTTPS connections
+4. **Try Ollama**: For offline usage, install Ollama for local models
+
+.. code-block:: bash
+
+   # Test OpenAI connection
+   curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+        https://api.openai.com/v1/models
 
 Tips for Success
 ----------------

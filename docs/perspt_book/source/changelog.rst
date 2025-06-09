@@ -6,6 +6,38 @@ All notable changes to Perspt will be documented in this file.
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
+[0.4.2] - 2025-06-09
+--------------------
+
+Added
+~~~~~
+
+- **🤖 Zero-Config Automatic Provider Detection**: Perspt now automatically detects and configures available providers based on environment variables
+  
+  - Set any supported API key (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, etc.) and simply run ``perspt`` 
+  - No configuration files or CLI arguments needed for basic usage
+  - Intelligent priority-based selection: OpenAI → Anthropic → Gemini → Groq → Cohere → XAI → DeepSeek → Ollama
+  - Automatic default model selection for each detected provider
+  - Graceful fallback with helpful error messages when no providers are found
+
+- **Enhanced Error Handling**: Clear, actionable error messages when no providers are configured
+- **Comprehensive Provider Support**: All major LLM providers now supported for automatic detection
+- **Local Model Auto-Detection**: Ollama automatically detected when running locally (no API key required)
+
+Changed
+~~~~~~~
+
+- **Improved User Experience**: Launch Perspt instantly with just an API key - no config required
+- **Better Documentation**: Updated getting-started guide and configuration documentation with zero-config examples
+- **Streamlined Workflow**: Reduced friction for new users getting started
+
+Technical Details
+~~~~~~~~~~~~~~~~
+
+- Added ``detect_available_provider()`` function in ``config.rs`` for environment-based provider detection
+- Enhanced ``load_config()`` to use automatic detection when no explicit configuration is provided
+- Comprehensive test coverage for all provider detection scenarios and edge cases
+
 [0.4.1] - 2025-06-03
 --------------------
 
