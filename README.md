@@ -9,7 +9,12 @@
 
 **Perspt** (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a high-performance command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). Built with Rust for speed and reliability, it allows you to chat with various AI models from multiple providers directly in your terminal using the modern **genai** crate's unified API.
 
-[![Perstp in Action](docs/screencast/perspt_terminal_ui.jpg)](docs/screencast/perspt_screencast.mp4)
+<div align="center">
+  <video controls poster="docs/screencast/perspt_terminal_ui.jpg">
+    <source src="docs/screencast/perspt_screencast.mp4" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+</div>
 
 ## 🎯 Why Perspt?
 
