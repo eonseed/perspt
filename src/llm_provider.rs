@@ -6,13 +6,14 @@
 //!
 //! ## Supported Providers
 //!
-//! The module supports multiple LLM providers through the genai crate:
-//! - **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview models
+//! The module supports multiple LLM providers through the genai crate (v0.3.5):
+//! - **OpenAI**: GPT-4, GPT-3.5, GPT-4o, o1-mini, o1-preview, o3-mini, o4-mini models
 //! - **Anthropic**: Claude 3 (Opus, Sonnet, Haiku), Claude 3.5 models
 //! - **Google**: Gemini Pro, Gemini 1.5 Pro/Flash, Gemini 2.0 models
 //! - **Groq**: Llama 3.x models with ultra-fast inference
 //! - **Cohere**: Command R/R+ models
-//! - **XAI**: Grok models
+//! - **XAI**: Grok models (grok-3-beta, grok-3-fast-beta, etc.)
+//! - **DeepSeek**: DeepSeek chat and reasoning models (deepseek-chat, deepseek-reasoner)
 //! - **Ollama**: Local model hosting (requires local setup)
 //!
 //! ## Features
@@ -122,6 +123,8 @@ impl GenAIProvider {
     /// - `GROQ_API_KEY`: For Groq models
     /// - `COHERE_API_KEY`: For Cohere models
     /// - `XAI_API_KEY`: For XAI Grok models
+    /// - `DEEPSEEK_API_KEY`: For DeepSeek models
+    /// - (Ollama requires local setup, no API key needed)
     ///
     /// ## Returns
     ///
@@ -168,10 +171,12 @@ impl GenAIProvider {
     /// The following provider types are supported:
     /// - `"openai"` → Sets `OPENAI_API_KEY`
     /// - `"anthropic"` → Sets `ANTHROPIC_API_KEY`
-    /// - `"google"` or `"gemini"` → Sets `GEMINI_API_KEY`
+    /// - `"gemini"` → Sets `GEMINI_API_KEY`
     /// - `"groq"` → Sets `GROQ_API_KEY`
     /// - `"cohere"` → Sets `COHERE_API_KEY`
     /// - `"xai"` → Sets `XAI_API_KEY`
+    /// - `"deepseek"` → Sets `DEEPSEEK_API_KEY`
+    /// - `"ollama"` → No API key required (local setup)
     ///
     /// ## Returns
     ///
@@ -202,10 +207,15 @@ impl GenAIProvider {
             let env_var = match provider {
                 "openai" => "OPENAI_API_KEY",
                 "anthropic" => "ANTHROPIC_API_KEY", 
-                "google" | "gemini" => "GEMINI_API_KEY",
+                "gemini" => "GEMINI_API_KEY",
                 "groq" => "GROQ_API_KEY",
                 "cohere" => "COHERE_API_KEY",
                 "xai" => "XAI_API_KEY",
+                "deepseek" => "DEEPSEEK_API_KEY",
+                "ollama" => {
+                    log::info!("Ollama provider detected - no API key required for local setup");
+                    return Ok(Self::new()?);
+                }
                 _ => {
                     log::warn!("Unknown provider type for API key: {}", provider);
                     return Ok(Self::new()?);
@@ -239,6 +249,7 @@ impl GenAIProvider {
     /// - **Groq**: Llama 3.x series with various sizes
     /// - **Cohere**: Command R/R+ models
     /// - **XAI**: Grok models
+    /// - **DeepSeek**: DeepSeek chat and reasoning models
     /// - **Ollama**: Requires local setup and running instance
     ///
     /// ## Returns
@@ -291,10 +302,14 @@ impl GenAIProvider {
     /// ## Model Compatibility
     ///
     /// Supports all models available through the genai crate:
-    /// - OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`, `o1-mini`, `o1-preview`
+    /// - OpenAI: `gpt-4o`, `gpt-4o-mini`, `gpt-3.5-turbo`, `o1-mini`, `o1-preview`, `o3-mini`, `o4-mini`
     /// - Anthropic: `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229`, etc.
     /// - Google: `gemini-1.5-pro`, `gemini-1.5-flash`, `gemini-2.0-flash`
     /// - Groq: `llama-3.1-70b-versatile`, `mixtral-8x7b-32768`, etc.
+    /// - Cohere: `command-r`, `command-r-plus`, `command-light`
+    /// - XAI: `grok-3-beta`, `grok-3-fast-beta`, etc.
+    /// - DeepSeek: `deepseek-chat`, `deepseek-reasoner`
+    /// - Ollama: Any locally installed model
     ///
     /// ## Returns
     ///
@@ -641,6 +656,7 @@ fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
         "cohere" => Ok(AdapterKind::Cohere),
         "ollama" => Ok(AdapterKind::Ollama),
         "xai" => Ok(AdapterKind::Xai),
+        "deepseek" => Ok(AdapterKind::DeepSeek),
         _ => Err(anyhow::anyhow!("Unsupported provider: {}", provider)),
     }
 }
@@ -659,6 +675,7 @@ mod tests {
         assert!(str_to_adapter_kind("cohere").is_ok());
         assert!(str_to_adapter_kind("ollama").is_ok());
         assert!(str_to_adapter_kind("xai").is_ok());
+        assert!(str_to_adapter_kind("deepseek").is_ok());
         assert!(str_to_adapter_kind("invalid").is_err());
     }
 

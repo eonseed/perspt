@@ -136,7 +136,7 @@ Configures a comprehensive panic handler that ensures terminal integrity and pro
 
 The panic hook intelligently detects common error scenarios:
 
-* **Missing Environment Variables**: PROJECT_ID, AWS credentials, API keys
+* **Missing Environment Variables**: API keys, required configuration settings
 * **Authentication Failures**: Invalid or expired API keys
 * **Network Connectivity**: Connection timeouts, DNS resolution failures
 * **Provider-Specific Issues**: Service outages, rate limiting

@@ -53,11 +53,11 @@ Perspt leverages the unified genai crate to provide seamless access to multiple 
 
         Local model hosting with privacy and offline capabilities
 
-    .. grid-item-card:: AWS Bedrock
+    .. grid-item-card:: XAI
         :text-align: center
-        :class-header: sd-bg-danger sd-text-white
+        :class-header: sd-bg-dark sd-text-white
 
-        Enterprise-grade with Nova and Titan models
+        Grok models for advanced reasoning and conversation
 
 OpenAI
 ------
@@ -505,55 +505,6 @@ Best Practices
    - Use Gemini Vision for image analysis and understanding
    - Combine text and images for richer interactions
 
-Azure OpenAI
--------------
-
-Microsoft's Azure OpenAI service provides enterprise-grade access to OpenAI models.
-
-Configuration
-~~~~~~~~~~~~~
-
-.. code-block:: json
-
-   {
-     "provider": "azure_openai",
-     "api_key": "your-azure-api-key",
-     "endpoint": "https://your-resource.openai.azure.com/",
-     "api_version": "2023-12-01-preview",
-     "deployment_name": "gpt-4-turbo",
-     "model": "gpt-4-turbo",
-     "max_tokens": 4000,
-     "temperature": 0.7
-   }
-
-Enterprise Features
-~~~~~~~~~~~~~~~~~~~
-
-**Managed Identity**:
-
-.. code-block:: json
-
-   {
-     "provider": "azure_openai",
-     "authentication": {
-       "type": "managed_identity",
-       "client_id": "your-client-id"
-     }
-   }
-
-**Content Filtering**:
-
-.. code-block:: json
-
-   {
-     "provider": "azure_openai",
-     "content_filter": {
-       "enabled": true,
-       "categories": ["hate", "sexual", "violence", "self_harm"],
-       "severity_threshold": "medium"
-     }
-   }
-
 Local Models
 ------------
 
@@ -657,13 +608,13 @@ Provider Comparison
      - Cloud
      - 32K
      - Yes
-   * - Azure OpenAI
-     - Fast
+   * - Groq
+     - Ultra-Fast
      - Excellent
-     - Medium
-     - Enterprise
-     - 128K
-     - Yes
+     - Low
+     - Cloud
+     - 32K
+     - No
    * - Local (Ollama)
      - Variable
      - Good
@@ -973,25 +924,64 @@ Configuration
 Ollama (Local Models)
 ---------------------
 
-Ollama provides local model hosting for privacy, offline usage, and cost control with the genai crate integration.
+Ollama provides local model hosting for privacy, offline usage, and cost control with the genai crate integration. Perfect for testing, development, and privacy-conscious users.
 
 Supported Models
 ~~~~~~~~~~~~~~~~
 
 Popular models available through Ollama:
 
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 20 40
+
+   * - Model
+     - Size
+     - RAM Required
+     - Best Use Cases
+   * - ``llama3.2``
+     - 3B
+     - ~4GB
+     - General chat, quick responses, testing
+   * - ``llama3.1:8b``
+     - 8B
+     - ~8GB
+     - Better reasoning, longer conversations
+   * - ``llama3.1:70b``
+     - 70B
+     - ~40GB
+     - Complex reasoning, professional tasks
+   * - ``codellama``
+     - 7B
+     - ~7GB
+     - Code generation, debugging, technical docs
+   * - ``mistral``
+     - 7B
+     - ~7GB
+     - Balanced performance, multilingual
+   * - ``phi3``
+     - 3.8B
+     - ~4GB
+     - Efficient, resource-constrained systems
+   * - ``qwen2.5:7b``
+     - 7B
+     - ~7GB
+     - Strong reasoning, mathematics
+
 .. code-block:: bash
 
    # Large models (requires significant RAM)
-   llama3.2:90b     # Latest Llama model
-   qwen2.5:72b      # Alibaba's capable model
+   llama3.1:70b     # Most capable local model
+   qwen2.5:72b      # Alibaba's flagship model
    
    # Medium models (good balance)
-   llama3.2:8b      # Recommended default
+   llama3.1:8b      # Recommended for most users
    mistral-nemo:12b # Mistral's latest
+   codellama        # Specialized for coding
    
    # Small models (fast, low resource)
-   llama3.2:3b      # Efficient Llama variant
+   llama3.2         # Latest efficient model (default)
+   phi3             # Microsoft's compact model
    qwen2.5:7b       # Compact but capable
 
 Setup and Configuration
@@ -1011,22 +1001,39 @@ Setup and Configuration
 
 .. code-block:: bash
 
-   # Download recommended model
-   ollama pull llama3.2:8b
+   # Download recommended starter models
+   ollama pull llama3.2        # General purpose (3B)
+   ollama pull codellama       # Code assistance (7B)
+   ollama pull mistral         # Balanced performance (7B)
    
-   # Download smaller model for testing
-   ollama pull llama3.2:3b
+   # Optional: Download larger models if you have RAM
+   ollama pull llama3.1:8b     # Better reasoning (8B)
+   ollama pull qwen2.5:7b      # Strong at math/logic (7B)
+   
+   # Check what's available
+   ollama list
 
-3. **Configure Perspt**:
+3. **Start Ollama Service**:
+
+.. code-block:: bash
+
+   # Start the service (runs on http://localhost:11434)
+   ollama serve
+   
+   # Or run in background
+   nohup ollama serve > ollama.log 2>&1 &
+
+4. **Configure Perspt**:
 
 .. code-block:: json
 
    {
      "provider_type": "ollama",
-     "default_model": "llama3.2:8b",
+     "default_model": "llama3.2",
      "providers": {
-       "ollama": "http://localhost:11434"
-     }
+       "ollama": "http://localhost:11434/v1"
+     },
+     "api_key": "not-required"
    }
 
 CLI Usage
@@ -1034,14 +1041,51 @@ CLI Usage
 
 .. code-block:: bash
 
-   # Use local Ollama model
-   perspt --provider-type ollama --model llama3.2:8b
+   # Basic usage (no API key needed!)
+   perspt --provider-type ollama --model llama3.2
+   
+   # Use specific models for different tasks
+   perspt --provider-type ollama --model codellama    # For coding
+   perspt --provider-type ollama --model mistral      # General purpose
+   perspt --provider-type ollama --model llama3.1:8b  # Better reasoning
    
    # List installed Ollama models
    perspt --provider-type ollama --list-models
    
-   # Use custom Ollama endpoint
-   perspt --provider-type ollama --model llama3.2:8b
+   # Test connection and performance
+   perspt --provider-type ollama --model llama3.2 --config ollama_config.json
+
+**Testing Different Models**
+
+.. code-block:: bash
+
+   # Quick test with small model
+   echo "Explain quantum computing in simple terms" | \
+   perspt --provider-type ollama --model llama3.2
+   
+   # Coding test with Code Llama
+   echo "Write a Python function to sort a list" | \
+   perspt --provider-type ollama --model codellama
+   
+   # Reasoning test with larger model
+   echo "Solve this logic puzzle: ..." | \
+   perspt --provider-type ollama --model llama3.1:8b
+
+**Performance Monitoring**
+
+.. code-block:: bash
+
+   # Monitor resource usage
+   htop  # Check CPU/Memory while running
+   
+   # Time responses
+   time perspt --provider-type ollama --model llama3.2
+   
+   # Compare model speeds
+   for model in llama3.2 mistral codellama; do
+     echo "Testing $model..."
+     time echo "What is 2+2?" | perspt --provider-type ollama --model $model
+   done
 
 **Benefits of Local Models**
 

@@ -143,7 +143,11 @@ Create a `config.json` file to customize Perspt:
     "openai": "https://api.openai.com/v1",
     "anthropic": "https://api.anthropic.com",
     "google": "https://generativelanguage.googleapis.com/v1beta/",
-    "mistral": "https://api.mistral.ai/v1"
+    "groq": "https://api.groq.com/openai/v1",
+    "cohere": "https://api.cohere.com/v1",
+    "xai": "https://api.x.ai/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+    "ollama": "http://localhost:11434/v1"
   }
 }
 ```
