@@ -11,6 +11,9 @@ homepage = "https://eonseed.github.io/perspt/"
 readme = "README.md"
 keywords = ["terminal", "cli", "ai", "llm", "chat"]
 categories = ["command-line-utilities", "text-processing", "api-bindings", "visualization"]
+exclude = [
+    "docs/screencast/*",
+]
 
 [dependencies]
 # LLM unified interface - using genai for better model support
