@@ -41,7 +41,7 @@
 -   **� Conversation Export:** Save your chat conversations to text files using the `/save` command with timestamped filenames.
 -   **�💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
 -   **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering with proper streaming buffer management.
--   **🛡️ Bulletproof Error Handling:** Comprehensive panic recovery, network resilience, and user-friendly error messages.
+-   **🛡️ Graceful Error Handling:** Robust handling of network issues, API errors, edge cases with user-friendly error messages.
 -   **📚 Extensive Documentation:** Comprehensive code documentation and user guides.
 
 ## 🚀 Getting Started
