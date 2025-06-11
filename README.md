@@ -38,7 +38,8 @@
 -   **🔄 Flexible Authentication**: API keys work via CLI arguments, environment variables, or configuration files.
 -   **⚙️ Smart Configuration:** Intelligent configuration loading with fallbacks and validation.
 -   **🔄 Input Queuing:** Type and submit new questions even while the AI is generating a previous response.
--   **💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
+-   **� Conversation Export:** Save your chat conversations to text files using the `/save` command with timestamped filenames.
+-   **�💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
 -   **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering with proper streaming buffer management.
 -   **🛡️ Bulletproof Error Handling:** Comprehensive panic recovery, network resilience, and user-friendly error messages.
 -   **📚 Extensive Documentation:** Comprehensive code documentation and user guides.
@@ -440,6 +441,51 @@ target/release/perspt --provider-type ollama --list-models
 - **Latest Model Support**: Built on genai crate which supports cutting-edge models like o1-mini and Gemini 2.5 Pro
 - **Proper Error Handling**: Clear error messages when models don't exist or aren't available
 - **Reasoning Model Support**: Full support for models with reasoning capabilities and special event handling
+
+## 💬 Chat Interface & Commands
+
+### Built-in Commands
+
+Perspt includes several built-in commands that you can use during your chat session:
+
+**`/save` - Export Conversation**
+```bash
+# Save with a timestamped filename (e.g., conversation_1735123456.txt)
+/save
+
+# Save with a custom filename
+/save my_important_chat.txt
+```
+
+The `/save` command exports your entire conversation history (user messages and AI responses) to a plain text file. System messages are excluded from the export. The saved file includes:
+- A header with the conversation title
+- Timestamped messages in chronological order  
+- Raw text content without terminal formatting
+
+**Example saved conversation:**
+```
+Perspt Conversation
+==================
+[2024-01-01 12:00:00] User: Hello, how are you?
+[2024-01-01 12:00:01] Assistant: Hello! I'm doing well, thank you for asking...
+
+[2024-01-01 12:01:30] User: Can you help me with Python?
+[2024-01-01 12:01:31] Assistant: Of course! I'd be happy to help you with Python...
+```
+
+### Key Bindings
+
+-   `Enter`: Send your input to the LLM or queue it if the LLM is busy.
+-   `Esc`: Exit the application safely with proper terminal restoration.
+-   `Ctrl+C` / `Ctrl+D`: Exit the application with graceful cleanup.
+-   `Up Arrow` / `Down Arrow`: Scroll through chat history smoothly.
+-   `Page Up` / `Page Down`: Fast scroll through long conversations.
+
+**✅ UI Improvements:**
+- Faster response times with 50ms event timeouts
+- Better streaming buffer management for smooth markdown rendering with custom parser
+- Visual feedback during model processing
+- Proper terminal restoration on all exit paths
 
 ## 🏠 Using Ollama for Local Models
 

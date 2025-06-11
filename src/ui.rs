@@ -12,6 +12,8 @@
 //! * **Progress Indicators**: Visual feedback for LLM response generation
 //! * **Error Display**: Comprehensive error handling with user-friendly messages
 //! * **Help System**: Built-in help overlay with keyboard shortcuts
+//! * **Conversation Saving**: Export chat conversations to text files with `/save` command
+//! * **Command Interface**: Built-in command system for app functionality
 //! * **Responsive Layout**: Adaptive layout that works across different terminal sizes
 //! * **Unicode Text Wrapping**: Accurate character counting for proper terminal text wrapping
 //!
@@ -102,13 +104,15 @@ pub enum MessageType {
 /// Represents a single message in the chat interface.
 ///
 /// Contains all the information needed to display a message including its content,
-/// styling, timestamp, and message type for proper visual rendering.
+/// styling, timestamp, and message type for proper visual rendering. Also stores
+/// the raw content for conversation export functionality.
 ///
 /// # Fields
 ///
 /// * `message_type` - The type of message (User, Assistant, Error, etc.)
 /// * `content` - The formatted content as a vector of styled lines
 /// * `timestamp` - When the message was created (formatted string)
+/// * `raw_content` - Unformatted text content for saving to files
 ///
 /// # Examples
 ///
@@ -120,6 +124,7 @@ pub enum MessageType {
 ///     message_type: MessageType::User,
 ///     content: vec![Line::from("Hello, AI!")],
 ///     timestamp: "2024-01-01 12:00:00".to_string(),
+///     raw_content: "Hello, AI!".to_string(),
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -1077,7 +1082,29 @@ impl App {
         }
     }
 
-    /// Save conversation to a text file
+    /// Save the current conversation to a text file.
+    ///
+    /// Exports all user and assistant messages from the chat history to a plain text file
+    /// with timestamps and proper formatting. System messages are excluded from the export.
+    ///
+    /// # Arguments
+    ///
+    /// * `filename` - Optional custom filename. If None, generates a timestamped default name.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(String)` - The filename that was used for saving
+    /// * `Err(anyhow::Error)` - If no conversation exists or file operations fail
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// // Save with default timestamped filename
+    /// let filename = app.save_conversation(None)?;
+    ///
+    /// // Save with custom filename
+    /// let filename = app.save_conversation(Some("my_chat.txt".to_string()))?;
+    /// ```
     pub fn save_conversation(&self, filename: Option<String>) -> Result<String> {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
