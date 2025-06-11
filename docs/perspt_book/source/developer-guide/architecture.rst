@@ -523,6 +523,67 @@ The application uses Tokio channels for real-time streaming:
        }
    }
 
+Command Processing Pipeline
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Added in v0.4.3** - Built-in command system for productivity features:
+
+1. **Command Detection**:
+
+   .. code-block:: text
+
+      User input → Command prefix check ('/') → Command parsing → Action dispatch
+
+2. **Save Command Flow**:
+
+   .. code-block:: text
+
+      /save [filename] → Conversation validation → File generation → User feedback
+
+3. **Command Implementation**:
+
+   .. code-block:: rust
+
+      impl App {
+          pub fn handle_input(&mut self, input: String) -> Result<()> {
+              if input.starts_with('/') {
+                  // Handle built-in commands
+                  self.process_command(input)?;
+              } else {
+                  // Handle regular chat message
+                  self.send_user_message(input).await?;
+              }
+              Ok(())
+          }
+          
+          fn process_command(&mut self, input: String) -> Result<()> {
+              let parts: Vec<&str> = input.splitn(2, ' ').collect();
+              match parts[0] {
+                  "/save" => {
+                      let filename = parts.get(1).map(|s| s.to_string());
+                      match self.save_conversation(filename) {
+                          Ok(saved_filename) => {
+                              self.add_system_message(
+                                  format!("💾 Conversation saved to: {}", saved_filename)
+                              );
+                          }
+                          Err(e) => {
+                              self.add_system_message(
+                                  format!("❌ Error saving conversation: {}", e)
+                              );
+                          }
+                      }
+                  }
+                  _ => {
+                      self.add_system_message(
+                          format!("❌ Unknown command: {}", parts[0])
+                      );
+                  }
+              }
+              Ok(())
+          }
+      }
+
 Error Handling Strategy
 -----------------------
 
@@ -637,6 +698,55 @@ Perspt manages conversation history efficiently in memory:
            if self.messages.len() > self.max_history {
                self.messages.drain(0..self.messages.len() - self.max_history);
            }
+       }
+
+       /// Save current conversation to a text file
+       /// Added in v0.4.3 for productivity workflows
+       pub fn save_conversation(&self, filename: Option<String>) -> Result<String> {
+           use std::fs;
+           use std::time::{SystemTime, UNIX_EPOCH};
+           
+           // Filter out system messages for export
+           let conversation_messages: Vec<_> = self.messages
+               .iter()
+               .filter(|msg| matches!(msg.role, MessageRole::User | MessageRole::Assistant))
+               .collect();
+           
+           if conversation_messages.is_empty() {
+               return Err(anyhow::anyhow!("No conversation to save"));
+           }
+           
+           // Generate filename with timestamp if not provided
+           let filename = filename.unwrap_or_else(|| {
+               let timestamp = SystemTime::now()
+                   .duration_since(UNIX_EPOCH)
+                   .unwrap()
+                   .as_secs();
+               format!("conversation_{}.txt", timestamp)
+           });
+           
+           // Format conversation content
+           let mut content = String::new();
+           content.push_str("Perspt Conversation\n");
+           content.push_str(&"=".repeat(18));
+           content.push('\n');
+           
+           for message in conversation_messages {
+               let role = match message.role {
+                   MessageRole::User => "User",
+                   MessageRole::Assistant => "Assistant", 
+                   MessageRole::System => continue, // Skip system messages
+               };
+               content.push_str(&format!("[{}] {}: {}\n\n", 
+                   message.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                   role,
+                   message.content
+               ));
+           }
+           
+           // Write to file
+           fs::write(&filename, content)?;
+           Ok(filename)
        }
    }
 
