@@ -708,6 +708,7 @@ pub async fn handle_events(
                                     message_type: ui::MessageType::User,
                                     content: vec![ratatui::text::Line::from(input_to_send.clone())],
                                     timestamp: ui::App::get_timestamp(),
+                                    raw_content: input_to_send.clone(),
                                 });
 
                                 // Clear any previous errors when starting a new request
