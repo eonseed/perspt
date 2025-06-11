@@ -1525,6 +1525,7 @@ async fn handle_llm_response(
             log::warn!("!!! Received EOT signal but not in busy state - cleaning up anyway !!!");
             app.streaming_buffer.clear();
             app.is_input_disabled = false;
+            app.scroll_to_bottom(); // Ensure we're scrolled to bottom when re-enabling input
         }
         
         // Ensure the UI has processed the finish_streaming state change
