@@ -202,6 +202,45 @@ let message = ChatMessage {
 app.add_message(message);
 ```
 
+#### `save_conversation(&self, filename: Option<String>) -> Result<String>`
+
+**Added in v0.4.3** - Exports the current conversation to a text file.
+
+Saves all user and assistant messages from the chat history to a plain text file
+with timestamps and proper formatting. System messages are excluded from the export.
+
+**Parameters:**
+- `filename`: Optional custom filename. If None, generates a timestamped default name.
+
+**Returns:**
+- `Ok(String)`: The filename that was used for saving
+- `Err(anyhow::Error)`: If no conversation exists or file operations fail
+
+**Example:**
+```rust
+// Save with default timestamped filename
+let filename = app.save_conversation(None)?;
+println!("Saved to: {}", filename); // e.g., "conversation_1735123456.txt"
+
+// Save with custom filename  
+let filename = app.save_conversation(Some("my_chat.txt".to_string()))?;
+println!("Saved to: {}", filename); // "my_chat.txt"
+
+// Handle empty conversation
+match app.save_conversation(None) {
+    Ok(filename) => println!("Conversation saved to: {}", filename),
+    Err(e) => println!("Error: {}", e), // "No conversation to save"
+}
+```
+
+**File Format:**
+```text
+Perspt Conversation
+==================
+[2024-01-01 12:00:00] User: Hello, how are you?
+[2024-01-01 12:00:01] Assistant: Hello! I'm doing well, thank you for asking...
+```
+
 #### `add_error(&mut self, error: ErrorState)`
 
 Adds an error to both error state and chat history with proper formatting.

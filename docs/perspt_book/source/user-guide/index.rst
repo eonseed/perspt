@@ -26,6 +26,7 @@ Perspt is a high-performance terminal-based chat application built with Rust tha
 - **Real-time Streaming**: Enhanced streaming with proper reasoning chunk handling
 - **Robust CLI**: Working command-line arguments with model validation
 - **Beautiful UI**: Responsive terminal interface with markdown rendering
+- **Conversation Saving**: Export chat sessions to text files with ``/save`` command
 
 .. grid:: 2
    :gutter: 3
