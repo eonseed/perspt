@@ -87,7 +87,9 @@ providers directly in your terminal using a modern, unified interface powered by
      - **Configurable:** Flexible configuration via JSON files or command-line arguments
    * - 🔄
      - **Input Queuing:** Type new questions while AI is responding - inputs are queued and processed sequentially
-   * - 📜
+   * - �
+     - **Save Conversations:** Export chat sessions to text files with ``/save`` command for archival and reference
+   * - �📜
      - **Markdown Rendering:** Beautiful markdown support directly in the terminal
    * - 🛡️
      - **Graceful Error Handling:** Robust handling of network issues, API errors, and edge cases

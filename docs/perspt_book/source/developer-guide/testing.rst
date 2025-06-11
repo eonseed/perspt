@@ -602,6 +602,89 @@ Plugin Integration Tests
        }
    }
 
+UI and Command Testing
+~~~~~~~~~~~~~~~~~~~~~~
+
+**Added in v0.4.3** - Testing user interface components and command functionality:
+
+.. code-block:: rust
+
+   // src/ui.rs - Unit tests for UI components
+   #[cfg(test)]
+   mod tests {
+       use super::*;
+       use tempfile::TempDir;
+       use std::fs;
+
+       #[test]
+       fn test_save_conversation_command() {
+           let mut app = App::new_for_testing();
+           
+           // Add some test messages
+           app.add_message(ChatMessage {
+               message_type: MessageType::User,
+               content: vec![Line::from("Hello, AI!")],
+               timestamp: "2024-01-01 12:00:00".to_string(),
+               raw_content: "Hello, AI!".to_string(),
+           });
+           
+           app.add_message(ChatMessage {
+               message_type: MessageType::Assistant,
+               content: vec![Line::from("Hello! How can I help you?")],
+               timestamp: "2024-01-01 12:00:01".to_string(),
+               raw_content: "Hello! How can I help you?".to_string(),
+           });
+           
+           // Test save with custom filename
+           let temp_dir = TempDir::new().unwrap();
+           let save_path = temp_dir.path().join("test_conversation.txt");
+           let filename = save_path.to_string_lossy().to_string();
+           
+           let result = app.save_conversation(Some(filename.clone()));
+           assert!(result.is_ok());
+           assert_eq!(result.unwrap(), filename);
+           
+           // Verify file contents
+           let content = fs::read_to_string(&save_path).unwrap();
+           assert!(content.contains("Perspt Conversation"));
+           assert!(content.contains("User: Hello, AI!"));
+           assert!(content.contains("Assistant: Hello! How can I help you?"));
+       }
+
+       #[test]
+       fn test_command_handling() {
+           let mut app = App::new_for_testing();
+           
+           // Add a test conversation
+           app.add_message(ChatMessage {
+               message_type: MessageType::User,
+               content: vec![Line::from("Hello")],
+               timestamp: "2024-01-01 12:00:00".to_string(),
+               raw_content: "Hello".to_string(),
+           });
+           
+           // Test /save command
+           let result = app.handle_command("/save test.txt".to_string());
+           assert!(result.is_ok());
+           assert_eq!(result.unwrap(), true); // Command was handled
+           
+           // Clean up
+           let _ = fs::remove_file("test.txt");
+       }
+
+       impl App {
+           fn new_for_testing() -> Self {
+               let config = crate::config::AppConfig {
+                   provider_type: Some("test".to_string()),
+                   api_key: Some("test-key".to_string()),
+                   default_model: "test-model".to_string(),
+                   ..Default::default()
+               };
+               Self::new(config)
+           }
+       }
+   }
+
 Performance Testing
 -------------------
 

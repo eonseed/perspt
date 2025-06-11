@@ -135,7 +135,50 @@ Perspt supports comprehensive command-line arguments that actually work with the
 Interactive Commands
 --------------------
 
-Once in the chat interface, you can use keyboard shortcuts for efficient interaction:
+Once in the chat interface, you can use keyboard shortcuts and built-in commands for efficient interaction:
+
+**Built-in Chat Commands**
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 1
+
+   * - Command
+     - Description
+   * - ``/save``
+     - Save conversation with timestamped filename (e.g., conversation_1735123456.txt)
+   * - ``/save filename.txt``
+     - Save conversation with custom filename
+
+**Conversation Export Examples**
+
+.. code-block:: text
+
+   # Save with automatic timestamped filename
+   > /save
+   💾 Conversation saved to: conversation_1735123456.txt
+   
+   # Save with custom filename for organization
+   > /save python_debugging_session.txt
+   💾 Conversation saved to: python_debugging_session.txt
+   
+   # Attempt to save empty conversation
+   > /save
+   ❌ No conversation to save
+
+**Export File Format**
+
+The saved conversations are exported as plain text files with the following structure:
+
+.. code-block:: text
+
+   Perspt Conversation
+   ==================
+   [2024-01-01 12:00:00] User: Hello, can you explain quantum computing?
+   [2024-01-01 12:00:01] Assistant: Quantum computing is a revolutionary approach...
+
+   [2024-01-01 12:02:15] User: What are the main applications?
+   [2024-01-01 12:02:16] Assistant: The main applications of quantum computing include...
 
 **Navigation Shortcuts**
 
