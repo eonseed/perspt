@@ -2,6 +2,9 @@
 .DS_Store
 desktop.ini
 
+# Ignore saved conversation
+conversation*.txt
+
 ## Tool
 .valgrindrc
 .cargo
