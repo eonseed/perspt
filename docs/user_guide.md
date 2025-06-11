@@ -249,6 +249,53 @@ perspt --config my-config.json --model gpt-4
 💡 System: System notifications and status updates
 ```
 
+## 💾 Commands and Productivity Features
+
+### Built-in Commands
+
+Perspt includes several built-in commands that you can use during your chat session:
+
+**`/save` - Export Conversation**
+```bash
+# Save with a timestamped filename (e.g., conversation_1735123456.txt)
+/save
+
+# Save with a custom filename
+/save my_important_chat.txt
+```
+
+The `/save` command exports your entire conversation history (user messages and AI responses) to a plain text file. System messages are excluded from the export. The saved file includes:
+- A header with the conversation title
+- Timestamped messages in chronological order  
+- Raw text content without terminal formatting
+
+**Example saved conversation:**
+```
+Perspt Conversation
+==================
+[2024-01-01 12:00:00] User: Hello, how are you?
+[2024-01-01 12:00:01] Assistant: Hello! I'm doing well, thank you for asking...
+
+[2024-01-01 12:01:30] User: Can you help me with Python?
+[2024-01-01 12:01:31] Assistant: Of course! I'd be happy to help you with Python...
+```
+
+### Workflow Tips
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  💡 Productivity Tips               │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  • Save important conversations with /save          │
+│  • Use descriptive filenames for easy organization  │
+│  • Export research sessions for later reference     │
+│  • Keep transcripts of code review sessions         │
+│  • Archive problem-solving conversations            │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
 ### Scrolling and Navigation
 
 ```
@@ -256,12 +303,12 @@ perspt --config my-config.json --model gpt-4
 │                 📜 Chat Navigation                  │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
-│  ↑ Arrow Up      │ Scroll up in chat history       │
-│  ↓ Arrow Down    │ Scroll down in chat history     │
-│  Page Up         │ Scroll up by page               │
-│  Page Down       │ Scroll down by page             │
-│  Home            │ Jump to top of chat             │
-│  End             │ Jump to bottom of chat          │
+│  ↑ Arrow Up      │ Scroll up in chat history        │
+│  ↓ Arrow Down    │ Scroll down in chat history      │
+│  Page Up         │ Scroll up by page                │
+│  Page Down       │ Scroll down by page              │
+│  Home            │ Jump to top of chat              │
+│  End             │ Jump to bottom of chat           │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -276,21 +323,21 @@ perspt --config my-config.json --model gpt-4
 ├─────────────────────────────────────────────────────┤
 │                                                     │
 │  Problem: API key error                             │
-│  Solution: Check your API key is valid and active  │
+│  Solution: Check your API key is valid and active   │
 │            Use --api-key or environment variables   │
 │                                                     │
 │  Problem: Network connection failed                 │
-│  Solution: Check internet connection and firewall  │
+│  Solution: Check internet connection and firewall   │
 │                                                     │
 │  Problem: Model not found                           │
-│  Solution: Use --list-models to see available ones │
-│            Models are validated with genai crate   │
+│  Solution: Use --list-models to see available ones  │
+│            Models are validated with genai crate    │
 │                                                     │
 │  Problem: Terminal display corrupted                │
-│  Solution: Perspt has panic recovery - restart app │
+│  Solution: Perspt has panic recovery - restart app  │
 │                                                     │
 │  Problem: Streaming appears slow                    │
-│  Solution: Network dependent, parser is optimized  │
+│  Solution: Network dependent, parser is optimized   │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -303,20 +350,20 @@ perspt --config my-config.json --model gpt-4
 ├─────────────────────────────────────────────────────┤
 │                                                     │
 │  🔒 Authentication Error                            │
-│      • Check API key validity                      │
-│      • Verify environment variables                │
+│      • Check API key validity                       │
+│      • Verify environment variables                 │
 │                                                     │
 │  🌐 Network Error                                   │
-│      • Check internet connection                   │
-│      • Verify firewall settings                    │
+│      • Check internet connection                    │
+│      • Verify firewall settings                     │
 │                                                     │
 │  📊 Rate Limit Error                                │
-│      • Wait before sending next request            │
-│      • Consider upgrading API plan                 │
+│      • Wait before sending next request             │
+│      • Consider upgrading API plan                  │
 │                                                     │
 │  🤖 Invalid Model Error                             │
-│      • Use --list-models to see options            │
-│      • Check provider documentation                │
+│      • Use --list-models to see options             │
+│      • Check provider documentation                 │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
@@ -351,11 +398,11 @@ Perspt includes a built-in markdown parser optimized for terminal rendering:
 │              📝 Markdown Features                   │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
-│  ✅ Headers (# ## ###)                             │
-│  ✅ Bold (**text**) and Italic (*text*)            │
-│  ✅ Code blocks (```language```)                   │
-│  ✅ Inline code (`code`)                           │
-│  ✅ Lists (- item, 1. item)                        │
+│  ✅ Headers (# ## ###)                              │
+│  ✅ Bold (**text**) and Italic (*text*)             │
+│  ✅ Code blocks (```language```)                    │
+│  ✅ Inline code (`code`)                            │
+│  ✅ Lists (- item, 1. item)                         │
 │  ✅ Links and references                            │
 │  ✅ Stream-optimized rendering                      │
 │  ✅ Terminal color support                          │
@@ -372,12 +419,12 @@ Perspt uses the modern **genai** crate for robust LLM integration:
 │                🔧 Technical Features                │
 ├─────────────────────────────────────────────────────┤
 │                                                     │
-│  📡 Real-time streaming with proper event handling │
-│  🧠 Reasoning model support (o1-mini, o1-preview)  │
-│  🔄 Automatic model discovery and validation       │
-│  🛡️ Comprehensive error handling and recovery      │
-│  ⚡ 50ms response times for better user experience │
-│  🎯 Latest model support (GPT-4.1, Gemini 2.5)    │
+│  📡 Real-time streaming with proper event handling  │
+│  🧠 Reasoning model support (o1-mini, o1-preview)   │
+│  🔄 Automatic model discovery and validation        │
+│  🛡️ Comprehensive error handling and recovery       │
+│  ⚡ 50ms response times for better user experience   │
+│  🎯 Latest model support (GPT-4.1, Gemini 2.5)      │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```

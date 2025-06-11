@@ -491,11 +491,195 @@ Advanced Provider Features
        }
    }
 
-Creating Custom Plugins
+Creating Custom Commands
 ------------------------
 
-Command Plugin Example
+Built-in Command System
+~~~~~~~~~~~~~~~~~~~~~~~
+
+**Added in v0.4.3** - Perspt includes a built-in command system for productivity features. Commands are prefixed with ``/`` and processed before regular chat messages.
+
+**Save Conversation Command Implementation**:
+
+.. code-block:: rust
+
+   impl App {
+       /// Handle built-in commands like /save
+       pub fn handle_command(&mut self, input: String) -> Result<bool, String> {
+           if !input.starts_with('/') {
+               return Ok(false); // Not a command
+           }
+           
+           let parts: Vec<&str> = input.splitn(2, ' ').collect();
+           let command = parts[0];
+           
+           match command {
+               "/save" => {
+                   let filename = parts.get(1).map(|s| s.to_string());
+                   self.execute_save_command(filename)
+               }
+               "/help" => {
+                   self.show_help_command();
+                   Ok(true)
+               }
+               _ => {
+                   self.add_system_message(format!("❌ Unknown command: {}", command));
+                   Ok(true)
+               }
+           }
+       }
+       
+       fn execute_save_command(&mut self, filename: Option<String>) -> Result<bool, String> {
+           match self.save_conversation(filename) {
+               Ok(saved_filename) => {
+                   self.add_system_message(format!("💾 Conversation saved to: {}", saved_filename));
+                   Ok(true)
+               }
+               Err(e) => {
+                   self.add_system_message(format!("❌ Error saving conversation: {}", e));
+                   Ok(true) // Command was handled, even with error
+               }
+           }
+       }
+       
+       /// Save conversation to text file with proper formatting
+       pub fn save_conversation(&self, filename: Option<String>) -> Result<String> {
+           use std::fs;
+           use std::time::{SystemTime, UNIX_EPOCH};
+           
+           // Filter conversation messages (exclude system messages)
+           let conversation_messages: Vec<_> = self.chat_history
+               .iter()
+               .filter(|msg| matches!(msg.message_type, MessageType::User | MessageType::Assistant))
+               .collect();
+           
+           if conversation_messages.is_empty() {
+               return Err(anyhow::anyhow!("No conversation to save"));
+           }
+           
+           // Generate timestamped filename if not provided
+           let filename = filename.unwrap_or_else(|| {
+               let timestamp = SystemTime::now()
+                   .duration_since(UNIX_EPOCH)
+                   .unwrap()
+                   .as_secs();
+               format!("conversation_{}.txt", timestamp)
+           });
+           
+           // Format conversation content
+           let mut content = String::new();
+           content.push_str("Perspt Conversation\n");
+           content.push_str(&"=".repeat(18));
+           content.push('\n');
+           
+           for message in conversation_messages {
+               let role = match message.message_type {
+                   MessageType::User => "User",
+                   MessageType::Assistant => "Assistant",
+                   _ => continue, // Skip other message types
+               };
+               
+               content.push_str(&format!("[{}] {}: {}\n\n", 
+                   message.timestamp,
+                   role,
+                   message.raw_content
+               ));
+           }
+           
+           // Write to file
+           fs::write(&filename, content)?;
+           Ok(filename)
+       }
+   }
+
+**Command Registration System**:
+
+.. code-block:: rust
+
+   pub struct CommandRegistry {
+       commands: HashMap<String, Box<dyn Command>>,
+   }
+   
+   pub trait Command: Send + Sync {
+       fn name(&self) -> &str;
+       fn description(&self) -> &str;
+       fn execute(&self, app: &mut App, args: Vec<&str>) -> Result<(), String>;
+   }
+   
+   impl CommandRegistry {
+       pub fn new() -> Self {
+           let mut registry = Self {
+               commands: HashMap::new(),
+           };
+           
+           // Register built-in commands
+           registry.register(Box::new(SaveCommand));
+           registry.register(Box::new(HelpCommand));
+           
+           registry
+       }
+       
+       pub fn register(&mut self, command: Box<dyn Command>) {
+           self.commands.insert(command.name().to_string(), command);
+       }
+       
+       pub fn execute(&self, app: &mut App, input: String) -> Result<bool, String> {
+           let parts: Vec<&str> = input.splitn(2, ' ').collect();
+           let command_name = parts[0].trim_start_matches('/');
+           
+           if let Some(command) = self.commands.get(command_name) {
+               let args = if parts.len() > 1 {
+                   parts[1].split_whitespace().collect()
+               } else {
+                   vec![]
+               };
+               
+               command.execute(app, args)?;
+               Ok(true)
+           } else {
+               Ok(false) // Command not found
+           }
+       }
+   }
+
+Adding Custom Commands
 ~~~~~~~~~~~~~~~~~~~~~~
+
+You can extend the command system with your own commands:
+
+.. code-block:: rust
+
+   pub struct ExportMarkdownCommand;
+   
+   impl Command for ExportMarkdownCommand {
+       fn name(&self) -> &str {
+           "export-md"
+       }
+       
+       fn description(&self) -> &str {
+           "Export conversation as markdown with formatting preserved"
+       }
+       
+       fn execute(&self, app: &mut App, args: Vec<&str>) -> Result<(), String> {
+           let filename = args.get(0)
+               .map(|s| s.to_string())
+               .unwrap_or_else(|| format!("conversation_{}.md", 
+                   SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()));
+           
+           let markdown_content = self.format_as_markdown(&app.chat_history)?;
+           std::fs::write(&filename, markdown_content)
+               .map_err(|e| format!("Failed to write file: {}", e))?;
+           
+           app.add_system_message(format!("📄 Conversation exported as markdown to: {}", filename));
+           Ok(())
+       }
+   }
+   
+   // Usage in main application
+   let mut command_registry = CommandRegistry::new();
+   command_registry.register(Box::new(ExportMarkdownCommand));
+
+**File Processing Plugin Example**:
 
 Here's a complete example of a plugin that adds file processing capabilities:
 

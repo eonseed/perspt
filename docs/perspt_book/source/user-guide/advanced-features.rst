@@ -298,6 +298,68 @@ Domain Expert Prompts
      "system_prompt": "You are a creative writing mentor with expertise in storytelling, character development, and various literary forms. Help develop ideas, provide constructive feedback, and suggest techniques to improve writing craft."
    }
 
+Productivity and Session Management
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Conversation Export and Archival**
+
+Perspt includes built-in conversation export functionality for productivity workflows:
+
+.. code-block:: text
+
+   # Save conversation with timestamped filename
+   > /save
+   💾 Conversation saved to: conversation_1735123456.txt
+   
+   # Save with custom filename for organization
+   > /save python_debugging_session.txt
+   💾 Conversation saved to: python_debugging_session.txt
+
+**Export Features:**
+- Raw text format without terminal styling
+- Chronological message order with timestamps
+- User and assistant messages (system messages excluded)
+- Automatic filename generation with Unix timestamps
+- Custom filename support for organized archives
+
+**Typical Export Format:**
+
+.. code-block:: text
+
+   Perspt Conversation
+   ==================
+   [2024-01-01 12:00:00] User: How do I optimize this Python function?
+   [2024-01-01 12:00:01] Assistant: I can help you optimize that function...
+   
+   [2024-01-01 12:02:15] User: What about memory usage?
+   [2024-01-01 12:02:16] Assistant: For memory optimization, consider...
+
+**Workflow Integration:**
+
+.. code-block:: bash
+
+   # Research session workflow
+   perspt --provider-type openai --model o1-mini
+   # Conduct research conversation
+   # /save research_quantum_computing_2024.txt
+   
+   # Code review session  
+   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
+   # Review and discuss code
+   # /save code_review_auth_service.txt
+   
+   # Learning session
+   perspt --provider-type google --model gemini-1.5-pro
+   # Educational conversation
+   # /save learning_session_rust_async.txt
+
+**Session Management Best Practices:**
+- Use descriptive filenames with dates and topics
+- Export before switching contexts or models
+- Organize exported conversations in project folders
+- Archive important problem-solving sessions
+- Keep transcripts of architectural discussions
+
 Context-Aware Prompts
 ~~~~~~~~~~~~~~~~~~~~~
 

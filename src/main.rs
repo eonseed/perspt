@@ -22,6 +22,7 @@
 //! - **Robust error handling**: Comprehensive panic recovery and error categorization
 //! - **Configuration management**: Flexible JSON-based configuration
 //! - **Terminal UI**: Beautiful, responsive terminal interface with markdown rendering
+//! - **Conversation saving**: Export chat conversations to text files with `/save` command
 //! - **Model discovery**: Automatic model listing and validation
 //!
 //! ## Architecture
@@ -708,6 +709,7 @@ pub async fn handle_events(
                                     message_type: ui::MessageType::User,
                                     content: vec![ratatui::text::Line::from(input_to_send.clone())],
                                     timestamp: ui::App::get_timestamp(),
+                                    raw_content: input_to_send.clone(),
                                 });
 
                                 // Clear any previous errors when starting a new request
