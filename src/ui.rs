@@ -127,6 +127,8 @@ pub struct ChatMessage {
     pub message_type: MessageType,
     pub content: Vec<Line<'static>>,
     pub timestamp: String,
+    /// Raw text content before markdown formatting (for saving to file)
+    pub raw_content: String,
 }
 
 /// Events that can occur in the application.
@@ -276,6 +278,11 @@ impl App {
                     Span::styled("F1", Style::default().fg(Color::White).bold()),
                     Span::styled(" - Toggle help", Style::default().fg(Color::Gray)),
                 ]),
+                Line::from(vec![
+                    Span::styled("  • ", Style::default().fg(Color::Green)),
+                    Span::styled("/save", Style::default().fg(Color::White).bold()),
+                    Span::styled(" - Save conversation", Style::default().fg(Color::Gray)),
+                ]),
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("Ready to chat! Type your message below...", Style::default().fg(Color::Green).italic()),
@@ -283,6 +290,7 @@ impl App {
                 Line::from(""),
             ],
             timestamp: Self::get_timestamp(),
+            raw_content: "🌟 Welcome to Perspt - Your AI Chat Terminal\n\n💡 Quick Help:\n  • Enter - Send message\n  • ↑/↓ - Scroll chat history\n  • Ctrl+C/Ctrl+Q - Exit\n  • F1 - Toggle help\n  • /save - Save conversation\n\nReady to chat! Type your message below...".to_string(),
         };
 
         Self {
@@ -428,6 +436,7 @@ impl App {
             message_type: MessageType::Error,
             content: full_content,
             timestamp: Self::get_timestamp(),
+            raw_content: format!("ERROR: {}", error.message),
         });
     }
 
@@ -868,6 +877,7 @@ impl App {
             message_type: MessageType::Assistant,
             content: vec![Line::from("...")], // Placeholder content while waiting for response
             timestamp: Self::get_timestamp(),
+            raw_content: String::new(), // Will be filled as we receive chunks
         };
         self.chat_history.push(initial_message);
         
@@ -890,6 +900,7 @@ impl App {
                 if last_msg.message_type == MessageType::Assistant {
                     // Force final update of the assistant message with complete content
                     last_msg.content = markdown_to_lines(&self.streaming_buffer);
+                    last_msg.raw_content = self.streaming_buffer.clone();
                     last_msg.timestamp = Self::get_timestamp();
                     log::debug!("FINAL UPDATE: Assistant message now has {} lines of content", last_msg.content.len());
                 } else {
@@ -986,6 +997,7 @@ impl App {
             if last_msg.message_type == MessageType::Assistant {
                 // Always update the assistant message with the latest streaming content
                 last_msg.content = markdown_to_lines(&self.streaming_buffer);
+                last_msg.raw_content = self.streaming_buffer.clone();
                 last_msg.timestamp = Self::get_timestamp();
             } else {
                 log::warn!("Expected assistant message but found {:?}, creating new assistant message", last_msg.message_type);
@@ -1037,6 +1049,7 @@ impl App {
             message_type: MessageType::Assistant,
             content: markdown_to_lines(&self.streaming_buffer),
             timestamp: Self::get_timestamp(),
+            raw_content: self.streaming_buffer.clone(),
         };
         self.chat_history.push(message);
     }
@@ -1062,6 +1075,50 @@ impl App {
             }
             self.last_animation_tick = now;
         }
+    }
+
+    /// Save conversation to a text file
+    pub fn save_conversation(&self, filename: Option<String>) -> Result<String> {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        
+        // Check if there's any conversation to save (exclude system messages)
+        let has_conversation = self.chat_history.iter().any(|msg| 
+            matches!(msg.message_type, MessageType::User | MessageType::Assistant)
+        );
+        
+        if !has_conversation {
+            return Err(anyhow::anyhow!("No conversation to save"));
+        }
+        
+        let filename = filename.unwrap_or_else(|| {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            format!("conversation_{}.txt", timestamp)
+        });
+        
+        let mut content = String::new();
+        content.push_str("Perspt Conversation\n");
+        content.push_str(&"=".repeat(18));
+        content.push('\n');
+        content.push('\n');
+        
+        for msg in &self.chat_history {
+            match msg.message_type {
+                MessageType::User => {
+                    content.push_str(&format!("[{}] User:\n{}\n\n", msg.timestamp, msg.raw_content));
+                }
+                MessageType::Assistant => {
+                    content.push_str(&format!("[{}] Assistant:\n{}\n\n", msg.timestamp, msg.raw_content));
+                }
+                _ => {} // Skip system messages
+            }
+        }
+        
+        fs::write(&filename, content)?;
+        Ok(filename)
     }
 }
 
@@ -1264,11 +1321,48 @@ async fn handle_terminal_event(
                 // Send message
                 KeyCode::Enter => {
                     if let Some(input) = app.take_input() {
+                        // Handle commands starting with /
+                        if input.starts_with('/') {
+                            let command = input.trim_start_matches('/').trim();
+                            match command {
+                                "save" => {
+                                    match app.save_conversation(None) {
+                                        Ok(filename) => {
+                                            app.add_message(ChatMessage {
+                                                message_type: MessageType::System,
+                                                content: vec![Line::from(format!("✅ Conversation saved to: {}", filename))],
+                                                timestamp: App::get_timestamp(),
+                                                raw_content: format!("Conversation saved to: {}", filename),
+                                            });
+                                        }
+                                        Err(e) => {
+                                            app.add_message(ChatMessage {
+                                                message_type: MessageType::Error,
+                                                content: vec![Line::from(format!("❌ Error: {}", e))],
+                                                timestamp: App::get_timestamp(),
+                                                raw_content: format!("Error: {}", e),
+                                            });
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    app.add_message(ChatMessage {
+                                        message_type: MessageType::Error,
+                                        content: vec![Line::from("❌ Unknown command. Available: /save")],
+                                        timestamp: App::get_timestamp(),
+                                        raw_content: "Unknown command. Available: /save".to_string(),
+                                    });
+                                }
+                            }
+                            return Some(AppEvent::Redraw);
+                        }
+                        
                         // Add user message immediately for instant feedback
                         app.add_message(ChatMessage {
                             message_type: MessageType::User,
                             content: vec![Line::from(input.clone())],
                             timestamp: App::get_timestamp(),
+                            raw_content: input.clone(),
                         });
                         
                         // Start LLM request
@@ -1445,6 +1539,7 @@ async fn handle_llm_response(
                 message_type: MessageType::User,
                 content: vec![Line::from(pending_input.clone())],
                 timestamp: App::get_timestamp(),
+                raw_content: pending_input.clone(),
             });
             
             // Start new streaming session with clean state
