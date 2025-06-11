@@ -22,6 +22,7 @@
 //! - **Robust error handling**: Comprehensive panic recovery and error categorization
 //! - **Configuration management**: Flexible JSON-based configuration
 //! - **Terminal UI**: Beautiful, responsive terminal interface with markdown rendering
+//! - **Conversation saving**: Export chat conversations to text files with `/save` command
 //! - **Model discovery**: Automatic model listing and validation
 //!
 //! ## Architecture
