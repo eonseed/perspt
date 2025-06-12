@@ -188,36 +188,36 @@ jobs:
           const pspType = '${{ needs.detect-psp-pr.outputs.psp_type }}';
           const prNumber = context.payload.pull_request.number;
           
-          const issueBody = `## 💬 PSP Discussion: PSP-${pspNumber}
+          const issueBody = `## 💬 PSP Discussion: PSP-\${pspNumber}
           
-**PSP Title:** ${pspTitle}
-**PSP Type:** ${pspType}
-**Related PR:** #${prNumber}
-**Status:** Discussion
+          **PSP Title:** \${pspTitle}
+          **PSP Type:** \${pspType}
+          **Related PR:** #\${prNumber}
+          **Status:** Discussion
 
-### Abstract
-_Please refer to the PSP document in PR #${prNumber} for the complete abstract and details._
+          ### Abstract
+          _Please refer to the PSP document in PR #\${prNumber} for the complete abstract and details._
 
-### Discussion Guidelines
+          ### Discussion Guidelines
 
-- **Focus on the proposal:** Keep discussion relevant to this specific PSP
-- **Be constructive:** Provide specific feedback and suggestions  
-- **Consider all users:** Think about how this affects different user groups
-- **Technical concerns:** Raise implementation challenges or alternatives
-- **UI/UX feedback:** For interface changes, consider accessibility and usability
+          - **Focus on the proposal:** Keep discussion relevant to this specific PSP
+          - **Be constructive:** Provide specific feedback and suggestions  
+          - **Consider all users:** Think about how this affects different user groups
+          - **Technical concerns:** Raise implementation challenges or alternatives
+          - **UI/UX feedback:** For interface changes, consider accessibility and usability
 
-### PSP Status Flow
+          ### PSP Status Flow
 
-- **Current Status:** Discussion
-- **Next Steps:** Community feedback → Maintainer decision → Implementation (if accepted)
+          - **Current Status:** Discussion
+          - **Next Steps:** Community feedback → Maintainer decision → Implementation (if accepted)
 
-### Related Documentation
+          ### Related Documentation
 
-- [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
-- [PSP Index](docs/psps/source/psp-000000.rst)
+          - [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
+          - [PSP Index](docs/psps/source/psp-000000.rst)
 
----
-*This issue was automatically created for PSP discussion. The PSP document can be reviewed in PR #${prNumber}.*`;
+          ---
+          *This issue was automatically created for PSP discussion. The PSP document can be reviewed in PR #\${prNumber}.*`;
 
           const issue = await github.rest.issues.create({
             owner: context.repo.owner,
@@ -290,31 +290,31 @@ _Please refer to the PSP document in PR #${prNumber} for the complete abstract a
         script: |
           const comment = `👋 **Thank you for proposing a PSP!**
 
-This proposal will be reviewed by the community and maintainers. Here's what happens next:
+          This proposal will be reviewed by the community and maintainers. Here is what happens next:
 
-## 📋 Next Steps
+          ## 📋 Next Steps
 
-1. **Community Discussion** - Others can provide feedback on this proposal
-2. **PSP Document Creation** - If there's interest, you can create the formal PSP document
-3. **Review Process** - Maintainers will review and make a decision
+          1. **Community Discussion** - Others can provide feedback on this proposal
+          2. **PSP Document Creation** - If there is interest, you can create the formal PSP document
+          3. **Review Process** - Maintainers will review and make a decision
 
-## 🔨 Creating the PSP Document
+          ## 🔨 Creating the PSP Document
 
-When ready, you can create the formal PSP document:
+          When ready, you can create the formal PSP document:
 
-1. Copy the template: \`docs/psps/source/psp-template.rst\`
-2. Save as: \`docs/psps/source/psp-XXXXXX-your-title.rst\` (use XXXXXX as placeholder)
-3. Fill out all sections based on this proposal
-4. Submit a PR - our automation will assign a PSP number and create a discussion issue
+          1. Copy the template: \\\`docs/psps/source/psp-template.rst\\\`
+          2. Save as: \\\`docs/psps/source/psp-XXXXXX-your-title.rst\\\` (use XXXXXX as placeholder)
+          3. Fill out all sections based on this proposal
+          4. Submit a PR - our automation will assign a PSP number and create a discussion issue
 
-## 📚 Resources
+          ## 📚 Resources
 
-- [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
-- [PSP Template](docs/psps/source/psp-template.rst)
-- [PSP Index](docs/psps/source/psp-000000.rst)
+          - [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
+          - [PSP Template](docs/psps/source/psp-template.rst)
+          - [PSP Index](docs/psps/source/psp-000000.rst)
 
----
-*This comment was automatically added to help guide the PSP process.*`;
+          ---
+          *This comment was automatically added to help guide the PSP process.*`;
 
           await github.rest.issues.createComment({
             owner: context.repo.owner,
