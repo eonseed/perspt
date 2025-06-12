@@ -1,0 +1,27 @@
+digraph PSP_Status_Flow {
+    rankdir=LR;
+    fontname="Inter, Segoe UI, Helvetica, Arial";
+    fontsize=12;
+    
+    // Compact status flow for reference - transparent background for theme compatibility
+    graph [bgcolor=transparent, pad=0.2, ranksep=0.6, nodesep=0.4, size="8,2!"];
+    node [fontname="Inter, Segoe UI, Helvetica, Arial", fontsize=10, shape=box, style="rounded,filled", width=1.0, height=0.5];
+    edge [fontname="Inter, Segoe UI, Helvetica, Arial", fontsize=9, color="#4A5568", fontcolor="#2D3748"];
+    
+    draft [label="Draft", fillcolor="#FED7AA", fontcolor="#7C2D12"];
+    discussion [label="Discussion", fillcolor="#C6F6D5", fontcolor="#22543D"];
+    accepted [label="Accepted", fillcolor="#9AE6B4", fontcolor="#22543D"];
+    rejected [label="Rejected", fillcolor="#FEB2B2", fontcolor="#7F1D1D"];
+    withdrawn [label="Withdrawn", fillcolor="#FAF089", fontcolor="#744210"];
+    final [label="Final", fillcolor="#68D391", fontcolor="#22543D"];
+    
+    // Status transitions
+    draft -> discussion;
+    discussion -> accepted;
+    discussion -> rejected;
+    discussion -> withdrawn [style=dashed, label="author\nchoice", fontcolor="#4A5568"];
+    accepted -> final [label="after\nimplementation", fontcolor="#4A5568"];
+    
+    // Group outcomes
+    {rank=same; accepted; rejected; withdrawn}
+}

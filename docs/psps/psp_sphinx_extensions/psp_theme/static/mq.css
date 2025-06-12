@@ -1,0 +1,80 @@
+@charset "UTF-8";
+
+/* Media Queries for PSPs */
+
+/* Reduce padding & margins for smaller screens */
+@media (max-width: 40em) {
+    section#psp-page-section {
+        padding: 1rem;
+    }
+    section#psp-page-section > header > h1 {
+        padding-right: 0;
+        border-right: none;
+    }
+    ul.breadcrumbs {
+        padding: 0 0 .5rem;
+    }
+    nav#psp-sidebar {
+        display: none;
+    }
+    pre {
+        font-size: 0.8175rem;
+    }
+    table th,
+    table td {
+        padding: 0 0.1rem;
+    }
+}
+
+@media (min-width: 40em) {
+    section#psp-page-section {
+        display: table;
+        margin: 0 auto;
+        max-width: 75em;
+        padding: 0.5rem 1rem 0;
+        width: 100%;
+    }
+    section#psp-page-section > article {
+        max-width: 37em;
+        width: 74%;
+        float: right;
+        margin-right: 0;
+        font-size: 1rem;
+    }
+    nav#psp-sidebar {
+        width: 24%;
+        float: left;
+        margin-right: 2%;
+    }
+}
+
+@media (min-width: 60em) {
+    section#psp-page-section > article {
+        max-width: 56em;
+        padding-left: 3.2%;
+        padding-right: 3.2%;
+    }
+}
+
+@media print {
+    *,
+    *:before,
+    *:after {
+        color: #000 !important;
+    }
+    body {
+        font-size: 10pt;
+        line-height: 1.67;
+    }
+    section#psp-page-section > header,
+    nav#psp-sidebar {
+        display: none;
+    }
+    section#psp-page-section > article {
+        float: none;
+        max-width: 17.5cm;
+        width: auto;
+        margin: 0;
+        padding: 0;
+    }
+}

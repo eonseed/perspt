@@ -1,0 +1,45 @@
+digraph PSP_Workflow {
+    rankdir=LR;  // Left to Right for more compact horizontal layout
+    fontname="Inter, Segoe UI, Helvetica, Arial";
+    fontsize=12;
+    
+    // Graph styling for web display - transparent background for theme compatibility
+    graph [bgcolor=transparent, pad=0.3, ranksep=0.8, nodesep=0.5, size="10,4!"];
+    node [fontname="Inter, Segoe UI, Helvetica, Arial", fontsize=10, shape=box, style="rounded,filled", width=1.2, height=0.6];
+    edge [fontname="Inter, Segoe UI, Helvetica, Arial", fontsize=9, color="#4A5568", fontcolor="#2D3748"];
+    
+    // Main Process Flow - Dark/Light mode compatible colors
+    start [label="Start", shape=ellipse, fillcolor="#2B6CB0", fontcolor="#FFFFFF", width=0.8];
+    
+    idea [label="Idea\n(Optional)", fillcolor="#BEE3F8", fontcolor="#1A365D"];
+    draft [label="Draft PSP", fillcolor="#FED7AA", fontcolor="#7C2D12"];
+    discussion [label="Discussion", fillcolor="#C6F6D5", fontcolor="#22543D"];
+    decision [label="Decision", fillcolor="#FECACA", fontcolor="#7F1D1D", shape=diamond, width=1.0];
+    
+    accepted [label="Accepted", fillcolor="#9AE6B4", fontcolor="#22543D"];
+    rejected [label="Rejected", fillcolor="#FEB2B2", fontcolor="#7F1D1D"];
+    withdrawn [label="Withdrawn", fillcolor="#FAF089", fontcolor="#744210"];
+    
+    implementation [label="Implementation", fillcolor="#A3BFFA", fontcolor="#2C5282"];
+    final [label="Final", fillcolor="#68D391", fontcolor="#22543D"];
+    
+    // Main flow connections
+    start -> idea [label="optional", fontcolor="#4A5568"];
+    start -> draft [label="direct", fontcolor="#4A5568"];
+    idea -> draft;
+    draft -> discussion;
+    discussion -> decision;
+    
+    decision -> accepted [label="accept", fontcolor="#4A5568"];
+    decision -> rejected [label="reject", fontcolor="#4A5568"];
+    decision -> withdrawn [label="withdraw", fontcolor="#4A5568"];
+    
+    accepted -> implementation [label="if code\nrequired", fontcolor="#4A5568"];
+    accepted -> final [label="if no code\nrequired", fontcolor="#4A5568"];
+    implementation -> final;
+    
+    // Rank same level nodes together for better layout
+    {rank=same; start; idea}
+    {rank=same; accepted; rejected; withdrawn}
+    {rank=same; implementation; final}
+}
