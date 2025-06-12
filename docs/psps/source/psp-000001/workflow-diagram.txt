@@ -1,0 +1,27 @@
+PSP Workflow Diagram
+====================
+
+Phase 1: Idea (Optional)
+  GitHub Issue → Gauge Interest
+
+Phase 2: Draft PSP
+  Author: Fork → Copy Template → Fill Draft → Create Discussion Issue → Submit PR
+  Maintainer: Review → Assign Number → Merge
+
+Phase 3: Discussion  
+  Author: Update Status to "Discussion" → Community discusses in GitHub Issue
+  
+Phase 4: Decision
+  Maintainers: Accept/Reject → Update PSP status
+  
+Phase 5: Implementation (if Accepted)
+  Developer(s): Code changes in separate PR(s) → Reference PSP number
+  
+Phase 6: Finalization
+  Update PSP status to "Final" when implementation complete
+
+Statuses:
+- Draft → Discussion → Accepted/Rejected → Final (if code involved)
+- Draft → Discussion → Withdrawn (author choice)
+
+Types: Feature | Enhancement | UI/UX | API Change | Process

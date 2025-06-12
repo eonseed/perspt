@@ -58,6 +58,13 @@ jobs:
           uv run make html
         fi
 
+    - name: Build PSP documentation (if exists)
+      run: |
+        if [ -d "docs/psps" ]; then
+          cd docs/psps
+          uv run make html
+        fi
+
     - name: Setup Pages
       uses: actions/configure-pages@v4
 
@@ -72,6 +79,12 @@ jobs:
         if [ -d "docs/perspt_book/build/html" ]; then
           mkdir -p _site/book
           cp -r docs/perspt_book/build/html/* _site/book/
+        fi
+        
+        # Copy PSP docs if they exist
+        if [ -d "docs/psps/build/html" ]; then
+          mkdir -p _site/psps
+          cp -r docs/psps/build/html/* _site/psps/
         fi
         
         # Create simple index page
@@ -277,6 +290,16 @@ jobs:
               </div>
             </a>
             
+            <a href="psps/psp-000000.html" class="nav-card" style="display: none;" id="psp-link">
+              <div class="nav-icon">📋</div>
+              <div class="nav-title">PSP Documentation</div>
+              <div class="nav-desc">
+                Perspt Specification Proposals (PSPs) - design documents for significant
+                changes to Perspt. Includes feature proposals, UI/UX improvements,
+                and development process guidelines.
+              </div>
+            </a>
+            
             <script>
                 // Show Perspt Book link only if it exists
                 fetch('book/index.html')
@@ -285,12 +308,26 @@ jobs:
                             document.getElementById('sphinx-link').style.display = 'block';
                         }
                     })
-                    .catch(() => {
-                        // If book doesn't exist, adjust grid layout
+                    .catch(() => {});
+                
+                // Show PSP Documentation link only if it exists  
+                fetch('psps/psp-000000.html')
+                    .then(response => {
+                        if (response.ok) {
+                            document.getElementById('psp-link').style.display = 'block';
+                        }
+                    })
+                    .catch(() => {});
+                
+                // Adjust grid layout if only API docs exist
+                setTimeout(() => {
+                    const visibleCards = document.querySelectorAll('.nav-card[style*="block"]').length + 1; // +1 for API docs
+                    if (visibleCards === 1) {
                         document.querySelector('.nav-grid').style.gridTemplateColumns = '1fr';
                         document.querySelector('.nav-grid').style.maxWidth = '400px';
                         document.querySelector('.nav-grid').style.margin = '3rem auto 0 auto';
-                    });
+                    }
+                }, 100);
             </script>
         </body>
         </html>
