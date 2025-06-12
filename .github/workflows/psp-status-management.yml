@@ -68,13 +68,13 @@ jobs:
           
           # Commit the change
           git add "$psp_file"
-          commit_msg="📋 Update PSP-${psp_number} status to $new_status"
           if [ -n "$reason" ]; then
-            commit_msg="$commit_msg
+            git commit -m "📋 Update PSP-${psp_number} status to $new_status
 
 $reason"
+          else
+            git commit -m "📋 Update PSP-${psp_number} status to $new_status"
           fi
-          git commit -m "$commit_msg"
           git push origin main
           
           echo "✅ PSP-${psp_number} status updated to $new_status"
@@ -198,28 +198,28 @@ $reason"
           
           const issueBody = `## ⏰ Stale PSP Review Required
 
-The following PSPs have been in "Discussion" status for more than 60 days:
+          The following PSPs have been in "Discussion" status for more than 60 days:
 
-${stalePsps.map(num => `- PSP-${num}: [docs/psps/source/psp-${num}*.rst](docs/psps/source/)`).join('\n')}
+          ${stalePsps.map(num => `- PSP-${num}: [docs/psps/source/psp-${num}*.rst](docs/psps/source/)`).join('\n')}
 
-### Recommended Actions
+          ### Recommended Actions
 
-For each stale PSP, consider:
+          For each stale PSP, consider:
 
-1. **Review Discussion:** Check if there's been sufficient community input
-2. **Make Decision:** Accept, reject, or request updates from the author
-3. **Update Status:** Use the "Update PSP Status" workflow dispatch to change status
-4. **Close Discussion Issues:** Close related discussion issues with appropriate labels
+          1. **Review Discussion:** Check if there has been sufficient community input
+          2. **Make Decision:** Accept, reject, or request updates from the author
+          3. **Update Status:** Use the "Update PSP Status" workflow dispatch to change status
+          4. **Close Discussion Issues:** Close related discussion issues with appropriate labels
 
-### How to Update Status
+          ### How to Update Status
 
-Use the "PSP Status Management" workflow dispatch with:
-- PSP number (6 digits)
-- New status (Accepted, Rejected, or Withdrawn)
-- Reason for the change
+          Use the "PSP Status Management" workflow dispatch with:
+          - PSP number (6 digits)
+          - New status (Accepted, Rejected, or Withdrawn)
+          - Reason for the change
 
----
-*This issue was automatically created by the stale PSP checker.*`;
+          ---
+          *This issue was automatically created by the stale PSP checker.*`;
 
           await github.rest.issues.create({
             owner: context.repo.owner,
@@ -249,14 +249,14 @@ Use the "PSP Status Management" workflow dispatch with:
         script: |
           const comment = `📚 **PSP Index Update Reminder**
 
-A new PSP was merged but the PSP index may need manual updating.
+          A new PSP was merged but the PSP index may need manual updating.
 
-Please review and update \`docs/psps/source/psp-000000.rst\` to include:
-- New PSP entry in the numerical index table
-- Entry in the appropriate category section
-- Update any summary counts if needed
+          Please review and update \`docs/psps/source/psp-000000.rst\` to include:
+          - New PSP entry in the numerical index table
+          - Entry in the appropriate category section
+          - Update any summary counts if needed
 
-This helps keep the PSP index current for community reference.`;
+          This helps keep the PSP index current for community reference.`;
 
           await github.rest.issues.createComment({
             owner: context.repo.owner,
