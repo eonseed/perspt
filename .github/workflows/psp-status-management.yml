@@ -1,0 +1,266 @@
+name: PSP Status Management
+
+on:
+  issues:
+    types: [closed, labeled, unlabeled]
+  pull_request:
+    types: [closed]
+  schedule:
+    # Run weekly to check for stale PSPs
+    - cron: '0 9 * * 1'  # Monday at 9 AM UTC
+  workflow_dispatch:
+    inputs:
+      psp_number:
+        description: 'PSP number to update (6 digits)'
+        required: true
+        type: string
+      new_status:
+        description: 'New status for the PSP'
+        required: true
+        type: choice
+        options:
+          - Draft
+          - Discussion
+          - Accepted
+          - Rejected
+          - Final
+          - Withdrawn
+      reason:
+        description: 'Reason for status change'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  update-psp-status-manual:
+    name: Manual PSP Status Update
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Update PSP status
+      run: |
+        psp_number="${{ github.event.inputs.psp_number }}"
+        new_status="${{ github.event.inputs.new_status }}"
+        reason="${{ github.event.inputs.reason }}"
+        
+        # Find the PSP file
+        psp_file=$(find docs/psps/source -name "psp-${psp_number}*.rst" | head -1)
+        
+        if [ -f "$psp_file" ]; then
+          echo "📝 Updating PSP-${psp_number} status to: $new_status"
+          
+          # Update the status
+          sed -i "s/^Status: .*/Status: $new_status/" "$psp_file"
+          
+          # Configure git
+          git config user.name "PSP Status Bot"
+          git config user.email "action@github.com"
+          
+          # Commit the change
+          git add "$psp_file"
+          commit_msg="📋 Update PSP-${psp_number} status to $new_status"
+          if [ -n "$reason" ]; then
+            commit_msg="$commit_msg
+
+$reason"
+          fi
+          git commit -m "$commit_msg"
+          git push origin main
+          
+          echo "✅ PSP-${psp_number} status updated to $new_status"
+        else
+          echo "❌ PSP file not found for number: $psp_number"
+          exit 1
+        fi
+
+  handle-issue-closure:
+    name: Handle PSP Discussion Issue Closure
+    if: github.event_name == 'issues' && github.event.action == 'closed' && contains(github.event.issue.labels.*.name, 'psp-discussion')
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Extract PSP number from issue
+      id: extract_psp
+      run: |
+        title="${{ github.event.issue.title }}"
+        # Extract PSP number from title like "[PSP DISCUSSION] PSP-000042: Title"
+        psp_number=$(echo "$title" | grep -oE 'PSP-[0-9]{6}' | sed 's/PSP-//')
+        
+        if [ -n "$psp_number" ]; then
+          echo "psp_number=$psp_number" >> $GITHUB_OUTPUT
+          echo "🔍 Extracted PSP number: $psp_number"
+        else
+          echo "⚠️  Could not extract PSP number from title: $title"
+        fi
+    
+    - name: Determine outcome and update PSP
+      if: steps.extract_psp.outputs.psp_number != ''
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pspNumber = '${{ steps.extract_psp.outputs.psp_number }}';
+          const issue = context.payload.issue;
+          
+          // Check issue labels to determine outcome
+          const labels = issue.labels.map(l => l.name);
+          let newStatus = 'Discussion';
+          let updateNeeded = false;
+          
+          if (labels.includes('psp-accepted')) {
+            newStatus = 'Accepted';
+            updateNeeded = true;
+          } else if (labels.includes('psp-rejected')) {
+            newStatus = 'Rejected';
+            updateNeeded = true;
+          } else if (labels.includes('psp-withdrawn')) {
+            newStatus = 'Withdrawn';
+            updateNeeded = true;
+          }
+          
+          if (updateNeeded) {
+            // Trigger the manual status update workflow
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'psp-status-management.yml',
+              ref: 'main',
+              inputs: {
+                psp_number: pspNumber,
+                new_status: newStatus,
+                reason: `Status updated based on discussion issue #${issue.number} closure with label: ${newStatus.toLowerCase()}`
+              }
+            });
+            
+            console.log(`🔄 Triggered status update for PSP-${pspNumber} to ${newStatus}`);
+          }
+
+  check-stale-psps:
+    name: Check for Stale PSPs
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Find stale PSPs
+      run: |
+        echo "🔍 Checking for stale PSPs..."
+        
+        # Find PSPs in Discussion status older than 60 days
+        current_date=$(date +%s)
+        sixty_days_ago=$((current_date - 60*24*60*60))
+        
+        for psp_file in docs/psps/source/psp-[0-9][0-9][0-9][0-9][0-9][0-9]*.rst; do
+          if [ -f "$psp_file" ]; then
+            status=$(grep "^Status:" "$psp_file" | sed 's/Status: *//')
+            created=$(grep "^Created:" "$psp_file" | sed 's/Created: *//')
+            psp_number=$(grep "^PSP:" "$psp_file" | sed 's/PSP: *//')
+            
+            if [ "$status" = "Discussion" ]; then
+              # Convert created date to timestamp (assuming YYYY-MM-DD format)
+              if [[ "$created" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+                created_timestamp=$(date -d "$created" +%s 2>/dev/null || echo "0")
+                
+                if [ "$created_timestamp" -lt "$sixty_days_ago" ]; then
+                  echo "⚠️  Stale PSP found: PSP-$psp_number (in Discussion for >60 days)"
+                  echo "$psp_number" >> stale_psps.txt
+                fi
+              fi
+            fi
+          fi
+        done
+        
+        if [ -f "stale_psps.txt" ]; then
+          echo "📋 Stale PSPs found:"
+          cat stale_psps.txt
+        else
+          echo "✅ No stale PSPs found"
+        fi
+        
+    - name: Create issue for stale PSPs
+      if: hashFiles('stale_psps.txt') != ''
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const stalePsps = fs.readFileSync('stale_psps.txt', 'utf8').trim().split('\n');
+          
+          const issueBody = `## ⏰ Stale PSP Review Required
+
+The following PSPs have been in "Discussion" status for more than 60 days:
+
+${stalePsps.map(num => `- PSP-${num}: [docs/psps/source/psp-${num}*.rst](docs/psps/source/)`).join('\n')}
+
+### Recommended Actions
+
+For each stale PSP, consider:
+
+1. **Review Discussion:** Check if there's been sufficient community input
+2. **Make Decision:** Accept, reject, or request updates from the author
+3. **Update Status:** Use the "Update PSP Status" workflow dispatch to change status
+4. **Close Discussion Issues:** Close related discussion issues with appropriate labels
+
+### How to Update Status
+
+Use the "PSP Status Management" workflow dispatch with:
+- PSP number (6 digits)
+- New status (Accepted, Rejected, or Withdrawn)
+- Reason for the change
+
+---
+*This issue was automatically created by the stale PSP checker.*`;
+
+          await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '⏰ Review Required: Stale PSPs in Discussion Status',
+            body: issueBody,
+            labels: ['psp-maintenance', 'needs-review']
+          });
+
+  update-psp-index:
+    name: Update PSP Index
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Check if PSP files were merged
+      id: check_psp
+      run: |
+        # This is a placeholder - in a real implementation, you would
+        # parse the merged files and determine if the index needs updating
+        echo "index_update_needed=false" >> $GITHUB_OUTPUT
+        
+    - name: Create index update reminder
+      if: steps.check_psp.outputs.index_update_needed == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const comment = `📚 **PSP Index Update Reminder**
+
+A new PSP was merged but the PSP index may need manual updating.
+
+Please review and update \`docs/psps/source/psp-000000.rst\` to include:
+- New PSP entry in the numerical index table
+- Entry in the appropriate category section
+- Update any summary counts if needed
+
+This helps keep the PSP index current for community reference.`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.payload.pull_request.number,
+            body: comment
+          });

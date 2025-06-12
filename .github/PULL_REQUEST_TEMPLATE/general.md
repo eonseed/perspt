@@ -1,6 +1,8 @@
 ## Description
 <!-- Provide a brief description of the changes in this PR -->
 
+<!-- 📋 PSP PULL REQUESTS: If this PR contains a PSP document, please use the PSP template instead -->
+
 ## Type of Change
 <!-- Mark the relevant option with an "x" -->
 - [ ] Bug fix (non-breaking change which fixes an issue)
