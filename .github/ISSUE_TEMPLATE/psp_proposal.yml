@@ -1,0 +1,125 @@
+name: PSP Proposal
+description: Propose a new Perspt Specification Proposal (PSP)
+title: "[PSP PROPOSAL] "
+labels: ["psp-proposal", "needs-review"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## ✨ PSP Proposal
+        
+        Thank you for proposing a new Perspt Specification Proposal (PSP)! 
+        
+        **Important:** PSPs are for significant changes only. For minor bug fixes or small enhancements, please use the regular issue templates.
+        
+        This issue will be used for discussion of your PSP. After community feedback, you can submit a PR with the actual PSP document.
+        
+  - type: input
+    id: title
+    attributes:
+      label: PSP Title
+      description: A concise, descriptive title for your PSP
+      placeholder: "e.g., Add Keyboard Shortcuts for File Operations"
+    validations:
+      required: true
+      
+  - type: dropdown
+    id: type
+    attributes:
+      label: PSP Type
+      description: What type of PSP is this?
+      options:
+        - Feature - New functionality or capabilities
+        - Enhancement - Improvements to existing features
+        - UI/UX - User interface and experience changes
+        - API Change - Command-line interface or architecture modifications
+        - Process - Development workflow and governance updates
+    validations:
+      required: true
+      
+  - type: textarea
+    id: abstract
+    attributes:
+      label: Abstract
+      description: A brief 1-2 sentence summary of the proposal and its impact on users
+      placeholder: "This PSP proposes adding keyboard shortcuts for common file operations to improve navigation efficiency in Perspt's file browser interface."
+    validations:
+      required: true
+      
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this PSP solve? Why is this change necessary?
+      placeholder: |
+        - Current situation and limitations
+        - Specific user scenarios that are difficult or impossible
+        - Evidence of community interest (links to issues, discussions, requests)
+        - How this affects users and their workflows
+    validations:
+      required: true
+      
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: High-level description of your proposed solution
+      placeholder: |
+        - What will be different for users?
+        - How will the feature work?
+        - Key design decisions and trade-offs
+    validations:
+      required: true
+      
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider? Why did you choose this one?
+      placeholder: |
+        - Alternative 1: Brief description and why it was not chosen
+        - Alternative 2: Brief description and why it was not chosen
+        
+  - type: textarea
+    id: backwards_compatibility
+    attributes:
+      label: Backwards Compatibility
+      description: How does this affect existing users and their workflows?
+      placeholder: |
+        - Will existing workflows be affected?
+        - Are there any breaking changes?
+        - Migration path for users (if applicable)
+        
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Implementation Complexity
+      description: How complex do you estimate this change to be?
+      options:
+        - Low - Simple configuration or minor change
+        - Medium - New functionality but well-defined scope
+        - High - Major feature requiring significant design
+        - Unknown
+    validations:
+      required: true
+      
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm you have completed these steps
+      options:
+        - label: I have searched for existing PSPs and issues related to this topic
+          required: true
+        - label: This is a significant change that warrants a PSP (not a minor bug fix or enhancement)
+          required: true
+        - label: I am willing to champion this PSP through the discussion and implementation process
+          required: true
+        - label: I understand that creating this issue does not guarantee the PSP will be accepted
+          required: true
+          
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any additional information, mockups, references, or context that would help understand this proposal

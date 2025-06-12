@@ -1,0 +1,147 @@
+name: PSP Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/psps/**'
+      - '.github/workflows/psp-docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "psp-pages"
+  cancel-in-progress: false
+
+jobs:
+  build-psp-docs:
+    name: Build PSP Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Install Graphviz for PSP diagrams
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y graphviz
+
+    - name: Build PSP documentation
+      run: |
+        cd docs/psps
+        echo "🏗️  Building PSP documentation..."
+        uv run make html
+        
+        # Check if build was successful
+        if [ -f "build/html/index.html" ]; then
+          echo "✅ PSP documentation built successfully"
+          ls -la build/html/
+        else
+          echo "❌ PSP documentation build failed"
+          exit 1
+        fi
+
+    - name: Generate PSP diagrams
+      run: |
+        cd docs/psps/source/psp-000001
+        
+        # Generate workflow diagram if Graphviz files exist
+        if [ -f "workflow-diagram.dot" ]; then
+          echo "📊 Generating PSP workflow diagram..."
+          dot -Tsvg workflow-diagram.dot -o workflow-diagram.svg
+          dot -Tpng workflow-diagram.dot -o workflow-diagram.png
+        fi
+        
+        if [ -f "status-flow.dot" ]; then
+          echo "📊 Generating PSP status flow diagram..."
+          dot -Tsvg status-flow.dot -o status-flow.svg
+          dot -Tpng status-flow.dot -o status-flow.png
+        fi
+
+    - name: Validate PSP documents
+      run: |
+        cd docs/psps
+        echo "🔍 Validating PSP documents..."
+        
+        # Check for common PSP format issues
+        for psp_file in source/psp-[0-9][0-9][0-9][0-9][0-9][0-9]*.rst; do
+          if [ -f "$psp_file" ]; then
+            echo "Checking $psp_file..."
+            
+            # Check required fields
+            required_fields=("PSP:" "Title:" "Author:" "Status:" "Type:" "Created:")
+            for field in "${required_fields[@]}"; do
+              if ! grep -q "^$field " "$psp_file"; then
+                echo "❌ Missing required field '$field' in $psp_file"
+                exit 1
+              fi
+            done
+            
+            # Check PSP number format (6 digits)
+            psp_number=$(grep "^PSP:" "$psp_file" | sed 's/PSP: *//')
+            if ! [[ "$psp_number" =~ ^[0-9]{6}$ ]]; then
+              echo "❌ Invalid PSP number format in $psp_file: $psp_number (should be 6 digits)"
+              exit 1
+            fi
+            
+            echo "✅ $psp_file is valid"
+          fi
+        done
+        
+        echo "✅ All PSP documents are valid"
+
+    - name: Check for duplicate PSP numbers
+      run: |
+        cd docs/psps/source
+        
+        # Extract all PSP numbers
+        psp_numbers=$(grep "^PSP:" psp-[0-9][0-9][0-9][0-9][0-9][0-9]*.rst | sed 's/.*PSP: *//' | sort)
+        
+        # Check for duplicates
+        duplicates=$(echo "$psp_numbers" | uniq -d)
+        if [ -n "$duplicates" ]; then
+          echo "❌ Duplicate PSP numbers found:"
+          echo "$duplicates"
+          exit 1
+        else
+          echo "✅ No duplicate PSP numbers found"
+        fi
+
+    - name: Setup Pages
+      uses: actions/configure-pages@v4
+
+    - name: Prepare PSP documentation for Pages
+      run: |
+        mkdir -p _site
+        
+        # Copy PSP documentation
+        cp -r docs/psps/build/html/* _site/
+        
+        echo "📋 PSP documentation prepared for Pages deployment"
+        echo "Entry point will be: psp-000000.html"
+        ls -la _site/
+
+    - name: Upload Pages artifact
+      uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    name: Deploy PSP Documentation to GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-psp-docs
+    steps:
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
