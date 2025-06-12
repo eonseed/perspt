@@ -69,9 +69,7 @@ jobs:
           # Commit the change
           git add "$psp_file"
           if [ -n "$reason" ]; then
-            git commit -m "📋 Update PSP-${psp_number} status to $new_status
-
-$reason"
+            git commit -m "📋 Update PSP-${psp_number} status to $new_status" -m "$reason"
           else
             git commit -m "📋 Update PSP-${psp_number} status to $new_status"
           fi
