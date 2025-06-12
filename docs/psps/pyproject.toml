@@ -1,0 +1,15 @@
+[project]
+name = "perspt-psps"
+version = "0.1.0"
+description = "Perspt Specification Proposals (PSPs) documentation system"
+readme = "README.rst"
+requires-python = ">=3.12"
+dependencies = [
+    "sphinx>=8.2.3",
+    "sphinx-rtd-theme>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "sphinx-autobuild>=2024.10.3",  # For live rebuilding during development
+]

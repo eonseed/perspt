@@ -76,10 +76,12 @@ dist/
 wheels/
 *.egg-info
 docs/perspt_book/.python-version
+docs/psps/.python-version
 
 # venv
 .venv
 docs/perspt_book/.venv
+docs/psps/.venv
 
 #Flask
 instance/
@@ -90,6 +92,7 @@ instance/
 !docs/header.html
 docs/generated/
 docs/perspt_book/build*
+docs/psps/build/*
 docs/book/book/
 target/doc/
 *.html

@@ -1,0 +1,253 @@
+PSP: 000000
+Title: Index of Perspt Specification Proposals (PSPs)
+Author: Vikrant Rathore (@vikrantrathore), Ronak Rathore (@ronakrathore)
+Status: Active
+Type: Process
+Created: 2025-06-11
+Discussion-To: https://github.com/your-org/perspt/issues/PSP-INDEX
+
+========
+Abstract
+========
+
+This PSP contains the index of all Perspt Specification Proposals (PSPs). PSPs are the primary mechanism for proposing significant changes, new features, and design decisions for Perspt. PSP numbers are assigned by maintainers and represent a permanent historical record of the project's evolution.
+
+============
+Introduction
+============
+
+Perspt Specification Proposals (PSPs) provide a structured way to propose, discuss, and document significant changes to Perspt. This index serves as the central directory of all PSPs, organized by number, category, and status. The `version control history <https://github.com/your-org/perspt>`_ of PSP documents represents their complete historical record.
+
+===========
+PSP Process
+===========
+
+PSPs are used for **significant changes only**. Routine bug fixes and minor enhancements go through regular GitHub issues and PRs.
+
+.. rubric:: When to Use a PSP
+
+Create a PSP when proposing:
+
+* **New Features:** Major functionality additions to Perspt
+* **UI/UX Changes:** Significant interface or interaction modifications  
+* **API Changes:** Modifications to core architecture or command-line interface
+* **Process Changes:** Updates to development workflow or governance
+
+.. rubric:: PSP Lifecycle
+
+PSPs follow a simple lifecycle with clear statuses:
+
+* **Draft:** Initial version under development by the author
+* **Discussion:** Ready for community review and feedback
+* **Accepted:** Approved by project maintainers  
+* **Rejected:** Not approved for implementation
+* **Final:** Implemented and merged (for feature PSPs)
+* **Withdrawn:** Removed from consideration by the author
+
+.. rubric:: PSP Workflow
+
+1. **Draft & Submit:** Author creates PSP file and submits PR
+2. **Number Assignment:** Maintainer assigns official PSP number
+3. **Discussion Phase:** Community discusses in dedicated GitHub Issue
+4. **Decision:** Maintainers accept or reject the PSP
+5. **Implementation:** (If accepted) Code changes in separate PR(s)
+6. **Finalization:** PSP status updated to Final upon completion
+
+======
+Topics
+======
+
+PSPs are categorized by their primary focus area:
+
+* **Feature PSPs** - New functionality and capabilities
+* **Enhancement PSPs** - Improvements to existing features
+* **UI/UX PSPs** - User interface and experience changes
+* **API Change PSPs** - Command-line interface or architecture modifications
+* **Process PSPs** - Development workflow and governance updates
+
+==================
+Numerical Index
+==================
+
+The numerical index contains a table of all PSPs, ordered by number.
+
+.. list-table:: 
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000000`
+     - Process
+     - :doc:`Index of Perspt Specification Proposals (PSPs) <psp-000000>`
+     - Vikrant Rathore, Ronak Rathore
+     - Active
+   * - :psp:`000001`
+     - Process
+     - :doc:`PSP Purpose and Guidelines <psp-000001>`
+     - Vikrant Rathore, Ronak Rathore
+     - Active
+
+====================
+Index by Category
+====================
+
+Process PSPs
+============
+
+Process PSPs define development workflows, governance, and meta-processes.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000000`
+     - Process
+     - :doc:`Index of Perspt Specification Proposals (PSPs) <psp-000000>`
+     - Vikrant Rathore, Ronak Rathore
+     - Active
+   * - :psp:`000001`
+     - Process
+     - :doc:`PSP Purpose and Guidelines <psp-000001>`
+     - Vikrant Rathore, Ronak Rathore
+     - Active
+
+Feature PSPs
+============
+
+Feature PSPs introduce new functionality to Perspt.
+
+.. note::
+   No feature PSPs have been created yet.
+
+Enhancement PSPs
+================
+
+Enhancement PSPs improve existing Perspt functionality.
+
+.. note::
+   No enhancement PSPs have been created yet.
+
+UI/UX PSPs
+===========
+
+UI/UX PSPs modify the user interface or user experience.
+
+.. note::
+   No UI/UX PSPs have been created yet.
+
+API Change PSPs
+===============
+
+API Change PSPs modify Perspt's command-line interface or core architecture.
+
+.. note::
+   No API change PSPs have been created yet.
+
+================
+PSP Status Index
+================
+
+Draft PSPs (under development)
+===============================
+
+.. note::
+   No PSPs are currently in draft status.
+
+Discussion PSPs (under review)
+===============================
+
+.. note::
+   No PSPs are currently under discussion.
+
+Accepted PSPs (approved for implementation)
+============================================
+
+.. note::
+   No PSPs have been accepted yet.
+
+Final PSPs (implemented and complete)
+======================================
+
+.. note::
+   No PSPs have been finalized yet.
+
+Rejected PSPs (not approved)
+=============================
+
+.. note::
+   No PSPs have been rejected yet.
+
+Withdrawn PSPs (removed by authors)
+====================================
+
+.. note::
+   No PSPs have been withdrawn yet.
+
+=============
+PSP Types Key
+=============
+
+* **Feature** — New functionality or capabilities for Perspt
+* **Enhancement** — Improvements to existing Perspt features  
+* **UI/UX** — User interface and user experience modifications
+* **API Change** — Command-line interface or architecture changes
+* **Process** — Development workflow, governance, or meta-process updates
+
+==================
+PSP Status Key
+==================
+
+* **Active** — Currently valid process guidance (for Process PSPs)
+* **Draft** — Under development by the author
+* **Discussion** — Under community review and feedback
+* **Accepted** — Approved by maintainers for implementation
+* **Final** — Implementation complete (for feature-related PSPs)
+* **Rejected** — Not approved by maintainers
+* **Withdrawn** — Removed from consideration by the author
+
+================
+Getting Started
+================
+
+To propose a new PSP:
+
+1. **Check if it's significant:** Use PSPs only for major changes, not routine fixes
+2. **Review existing PSPs:** Ensure your idea hasn't been proposed already
+3. **Create an initial discussion:** Consider opening a GitHub Issue first for feedback
+4. **Use the template:** Copy `docs/psps/source/psp-template.rst` to start your PSP
+5. **Follow the workflow:** See PSP-000001 for detailed process guidelines
+
+For questions about the PSP process, see :doc:`PSP-000001 <psp-000001>` or create a GitHub Discussion.
+
+==============
+Authors/Owners
+==============
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Name
+     - GitHub
+     - Email
+   * - Vikrant Rathore
+     - @vikrantrathore
+     - vikrant@perspt.org
+   * - Ronak Rathore  
+     - @ronakrathore
+     - ronak@perspt.org
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.
