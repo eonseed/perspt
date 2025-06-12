@@ -1,0 +1,324 @@
+name: PSP Automation
+
+on:
+  pull_request:
+    types: [opened, synchronize, closed]
+    paths:
+      - 'docs/psps/source/psp-*.rst'
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  detect-psp-pr:
+    name: Detect PSP Pull Request
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      is_psp: ${{ steps.check.outputs.is_psp }}
+      psp_number: ${{ steps.extract.outputs.psp_number }}
+      psp_title: ${{ steps.extract.outputs.psp_title }}
+      psp_type: ${{ steps.extract.outputs.psp_type }}
+      psp_author: ${{ steps.extract.outputs.psp_author }}
+      needs_number: ${{ steps.extract.outputs.needs_number }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Check if PSP-related PR
+      id: check
+      run: |
+        # Check if PR modifies PSP files
+        files=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/source/psp-[0-9]{6}.*\.rst$' || true)
+        if [ -n "$files" ]; then
+          echo "is_psp=true" >> $GITHUB_OUTPUT
+          echo "🔍 Detected PSP file changes: $files"
+        else
+          echo "is_psp=false" >> $GITHUB_OUTPUT
+          echo "ℹ️  No PSP file changes detected"
+        fi
+        
+    - name: Extract PSP metadata
+      id: extract
+      if: steps.check.outputs.is_psp == 'true'
+      run: |
+        # Find the PSP file
+        psp_file=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/source/psp-[0-9]{6}.*\.rst$' | head -1)
+        
+        if [ -n "$psp_file" ]; then
+          echo "📄 Processing PSP file: $psp_file"
+          
+          # Extract PSP number from filename
+          psp_number=$(echo "$psp_file" | grep -oE '[0-9]{6}' | head -1)
+          
+          # Check if using placeholder number (needs assignment)
+          if [ "$psp_number" = "XXXXXX" ] || [ "$psp_number" = "000000" ]; then
+            echo "needs_number=true" >> $GITHUB_OUTPUT
+            echo "⚠️  PSP needs number assignment"
+          else
+            echo "needs_number=false" >> $GITHUB_OUTPUT
+            echo "✅ PSP number: $psp_number"
+          fi
+          
+          # Read file content and extract metadata
+          if [ -f "$psp_file" ]; then
+            # Extract title
+            title=$(grep "^Title:" "$psp_file" | sed 's/Title: *//' | head -1)
+            # Extract type  
+            type=$(grep "^Type:" "$psp_file" | sed 's/Type: *//' | head -1)
+            # Extract author
+            author=$(grep "^Author:" "$psp_file" | sed 's/Author: *//' | head -1)
+            
+            echo "psp_number=$psp_number" >> $GITHUB_OUTPUT
+            echo "psp_title=$title" >> $GITHUB_OUTPUT
+            echo "psp_type=$type" >> $GITHUB_OUTPUT
+            echo "psp_author=$author" >> $GITHUB_OUTPUT
+            
+            echo "📋 PSP Metadata:"
+            echo "   Number: $psp_number"
+            echo "   Title: $title"
+            echo "   Type: $type"
+            echo "   Author: $author"
+          fi
+        fi
+
+  assign-psp-number:
+    name: Assign PSP Number
+    needs: detect-psp-pr
+    if: needs.detect-psp-pr.outputs.is_psp == 'true' && needs.detect-psp-pr.outputs.needs_number == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        
+    - name: Find next PSP number
+      id: next_number
+      run: |
+        # Find the highest existing PSP number
+        highest=0
+        for file in docs/psps/source/psp-[0-9][0-9][0-9][0-9][0-9][0-9]*.rst; do
+          if [ -f "$file" ]; then
+            number=$(echo "$file" | grep -oE '[0-9]{6}' | head -1)
+            if [ "$number" -gt "$highest" ]; then
+              highest="$number"
+            fi
+          fi
+        done
+        
+        # Increment to get next number
+        next_number=$((highest + 1))
+        # Format as 6-digit number
+        next_number_formatted=$(printf "%06d" $next_number)
+        
+        echo "next_number=$next_number_formatted" >> $GITHUB_OUTPUT
+        echo "🔢 Next PSP number: $next_number_formatted"
+        
+    - name: Rename PSP file and update content
+      run: |
+        # Find the PSP file with placeholder number
+        old_file=$(find docs/psps/source -name "psp-XXXXXX*.rst" -o -name "psp-000000*.rst" | head -1)
+        
+        if [ -n "$old_file" ]; then
+          # Extract the title part for new filename
+          title_part=$(echo "$old_file" | sed 's/.*psp-[0-9X]\{6\}[_-]*//' | sed 's/\.rst$//')
+          new_file="docs/psps/source/psp-${{ steps.next_number.outputs.next_number }}"
+          
+          if [ -n "$title_part" ]; then
+            new_file="${new_file}-${title_part}.rst"
+          else
+            new_file="${new_file}.rst"
+          fi
+          
+          echo "📝 Renaming: $old_file → $new_file"
+          
+          # Update PSP number in file content
+          sed -i "s/^PSP: XXXXXX/PSP: ${{ steps.next_number.outputs.next_number }}/" "$old_file"
+          sed -i "s/^PSP: 000000/PSP: ${{ steps.next_number.outputs.next_number }}/" "$old_file"
+          
+          # Rename the file
+          mv "$old_file" "$new_file"
+          
+          # Configure git
+          git config user.name "PSP Bot"
+          git config user.email "action@github.com"
+          
+          # Commit the changes
+          git add "$new_file"
+          git commit -m "🔢 Assign PSP number ${{ steps.next_number.outputs.next_number }}"
+          git push origin ${{ github.head_ref }}
+          
+          echo "✅ PSP number ${{ steps.next_number.outputs.next_number }} assigned"
+        fi
+
+  create-discussion-issue:
+    name: Create Discussion Issue
+    needs: [detect-psp-pr, assign-psp-number]
+    if: always() && needs.detect-psp-pr.outputs.is_psp == 'true' && !cancelled()
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Get PSP number
+      id: psp_number
+      run: |
+        if [ "${{ needs.assign-psp-number.result }}" = "success" ]; then
+          # Use the newly assigned number
+          echo "psp_number=${{ needs.assign-psp-number.outputs.next_number }}" >> $GITHUB_OUTPUT
+        else
+          # Use existing number
+          echo "psp_number=${{ needs.detect-psp-pr.outputs.psp_number }}" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create discussion issue
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pspNumber = '${{ steps.psp_number.outputs.psp_number }}';
+          const pspTitle = '${{ needs.detect-psp-pr.outputs.psp_title }}';
+          const pspType = '${{ needs.detect-psp-pr.outputs.psp_type }}';
+          const prNumber = context.payload.pull_request.number;
+          
+          const issueBody = `## 💬 PSP Discussion: PSP-${pspNumber}
+          
+**PSP Title:** ${pspTitle}
+**PSP Type:** ${pspType}
+**Related PR:** #${prNumber}
+**Status:** Discussion
+
+### Abstract
+_Please refer to the PSP document in PR #${prNumber} for the complete abstract and details._
+
+### Discussion Guidelines
+
+- **Focus on the proposal:** Keep discussion relevant to this specific PSP
+- **Be constructive:** Provide specific feedback and suggestions  
+- **Consider all users:** Think about how this affects different user groups
+- **Technical concerns:** Raise implementation challenges or alternatives
+- **UI/UX feedback:** For interface changes, consider accessibility and usability
+
+### PSP Status Flow
+
+- **Current Status:** Discussion
+- **Next Steps:** Community feedback → Maintainer decision → Implementation (if accepted)
+
+### Related Documentation
+
+- [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
+- [PSP Index](docs/psps/source/psp-000000.rst)
+
+---
+*This issue was automatically created for PSP discussion. The PSP document can be reviewed in PR #${prNumber}.*`;
+
+          const issue = await github.rest.issues.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: `[PSP DISCUSSION] PSP-${pspNumber}: ${pspTitle}`,
+            body: issueBody,
+            labels: ['psp-discussion', 'community-input']
+          });
+          
+          // Add comment to PR linking to discussion
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: prNumber,
+            body: `🗣️ **Discussion Issue Created**\n\nCommunity discussion for this PSP is now available in issue #${issue.data.number}.\n\nPlease continue PSP-related discussions there to keep this PR focused on the document content.`
+          });
+          
+          console.log(`✅ Created discussion issue #${issue.data.number} for PSP-${pspNumber}`);
+
+  update-psp-status:
+    name: Update PSP Status on Merge
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Check for PSP files and update status
+      run: |
+        # Find merged PSP files
+        psp_files=$(find docs/psps/source -name "psp-[0-9][0-9][0-9][0-9][0-9][0-9]*.rst" -newer docs/psps/source/psp-000000.rst 2>/dev/null || true)
+        
+        for psp_file in $psp_files; do
+          if [ -f "$psp_file" ]; then
+            # Check current status
+            current_status=$(grep "^Status:" "$psp_file" | sed 's/Status: *//')
+            
+            if [ "$current_status" = "Draft" ]; then
+              echo "📝 Updating PSP status to Discussion: $psp_file"
+              
+              # Update status to Discussion
+              sed -i 's/^Status: Draft/Status: Discussion/' "$psp_file"
+              
+              # Configure git
+              git config user.name "PSP Bot"
+              git config user.email "action@github.com"
+              
+              # Commit the change
+              git add "$psp_file"
+              git commit -m "📋 Update PSP status to Discussion after merge"
+              git push origin main
+              
+              echo "✅ Updated PSP status to Discussion"
+            fi
+          fi
+        done
+
+  validate-psp-proposal:
+    name: Validate PSP Proposal Issue
+    if: github.event_name == 'issues' && github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'psp-proposal')
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Add helpful comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const comment = `👋 **Thank you for proposing a PSP!**
+
+This proposal will be reviewed by the community and maintainers. Here's what happens next:
+
+## 📋 Next Steps
+
+1. **Community Discussion** - Others can provide feedback on this proposal
+2. **PSP Document Creation** - If there's interest, you can create the formal PSP document
+3. **Review Process** - Maintainers will review and make a decision
+
+## 🔨 Creating the PSP Document
+
+When ready, you can create the formal PSP document:
+
+1. Copy the template: \`docs/psps/source/psp-template.rst\`
+2. Save as: \`docs/psps/source/psp-XXXXXX-your-title.rst\` (use XXXXXX as placeholder)
+3. Fill out all sections based on this proposal
+4. Submit a PR - our automation will assign a PSP number and create a discussion issue
+
+## 📚 Resources
+
+- [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
+- [PSP Template](docs/psps/source/psp-template.rst)
+- [PSP Index](docs/psps/source/psp-000000.rst)
+
+---
+*This comment was automatically added to help guide the PSP process.*`;
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: comment
+          });

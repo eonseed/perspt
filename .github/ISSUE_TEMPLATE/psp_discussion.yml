@@ -1,0 +1,82 @@
+name: PSP Discussion
+description: Discuss a specific PSP document
+title: "[PSP DISCUSSION] PSP-XXXXXX: "
+labels: ["psp-discussion", "community-input"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 💬 PSP Discussion
+        
+        This issue is for discussing a specific PSP document that has been submitted.
+        
+        **For maintainers:** This template is used when a PSP PR is submitted to create the discussion issue.
+        
+  - type: input
+    id: psp_number
+    attributes:
+      label: PSP Number
+      description: The assigned PSP number (6 digits)
+      placeholder: "000042"
+    validations:
+      required: true
+      
+  - type: input
+    id: psp_title
+    attributes:
+      label: PSP Title
+      description: The full title of the PSP
+      placeholder: "Add Keyboard Shortcuts for File Operations"
+    validations:
+      required: true
+      
+  - type: input
+    id: pr_link
+    attributes:
+      label: Related Pull Request
+      description: Link to the PR containing the PSP document
+      placeholder: "https://github.com/your-org/perspt/pull/123"
+    validations:
+      required: true
+      
+  - type: dropdown
+    id: psp_type
+    attributes:
+      label: PSP Type
+      options:
+        - Feature
+        - Enhancement
+        - UI/UX
+        - API Change
+        - Process
+    validations:
+      required: true
+      
+  - type: textarea
+    id: abstract
+    attributes:
+      label: PSP Abstract
+      description: Copy the abstract from the PSP document
+    validations:
+      required: true
+      
+  - type: markdown
+    attributes:
+      value: |
+        ## 📋 Discussion Guidelines
+        
+        - **Focus on the proposal:** Keep discussion relevant to this specific PSP
+        - **Be constructive:** Provide specific feedback and suggestions
+        - **Consider all users:** Think about how this affects different user groups
+        - **Technical concerns:** Raise implementation challenges or alternatives
+        - **UI/UX feedback:** For interface changes, consider accessibility and usability
+        
+        ## 🔄 PSP Status
+        
+        - **Current Status:** Discussion
+        - **Next Steps:** Community feedback → Maintainer decision → Implementation (if accepted)
+        
+        ## 📚 Related Documentation
+        
+        - [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
+        - [PSP Index](docs/psps/source/psp-000000.rst)
