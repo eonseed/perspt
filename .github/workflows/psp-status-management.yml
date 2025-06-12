@@ -2,9 +2,7 @@ name: PSP Status Management
 
 on:
   issues:
-    types: [closed, labeled, unlabeled]
-  pull_request:
-    types: [closed]
+    types: [closed, labeled]
   schedule:
     # Run weekly to check for stale PSPs
     - cron: '0 9 * * 1'  # Monday at 9 AM UTC
@@ -19,7 +17,6 @@ on:
         required: true
         type: choice
         options:
-          - Draft
           - Discussion
           - Accepted
           - Rejected
@@ -57,25 +54,36 @@ jobs:
         psp_file=$(find docs/psps/source -name "psp-${psp_number}*.rst" | head -1)
         
         if [ -f "$psp_file" ]; then
-          echo "📝 Updating PSP-${psp_number} status to: $new_status"
+          # Check current status
+          current_status=$(grep "^Status:" "$psp_file" | sed 's/Status: *//')
           
-          # Update the status
-          sed -i "s/^Status: .*/Status: $new_status/" "$psp_file"
+          echo "📝 PSP-${psp_number} current status: $current_status"
+          echo "📝 Requested new status: $new_status"
           
-          # Configure git
-          git config user.name "PSP Status Bot"
-          git config user.email "action@github.com"
-          
-          # Commit the change
-          git add "$psp_file"
-          if [ -n "$reason" ]; then
-            git commit -m "📋 Update PSP-${psp_number} status to $new_status" -m "$reason"
+          # Only update if status is actually changing
+          if [ "$current_status" != "$new_status" ]; then
+            echo "📝 Updating PSP-${psp_number} status from $current_status to: $new_status"
+            
+            # Update the status
+            sed -i "s/^Status: .*/Status: $new_status/" "$psp_file"
+            
+            # Configure git
+            git config user.name "PSP Status Bot"
+            git config user.email "action@github.com"
+            
+            # Commit the change
+            git add "$psp_file"
+            if [ -n "$reason" ]; then
+              git commit -m "📋 Update PSP-${psp_number} status to $new_status" -m "$reason"
+            else
+              git commit -m "📋 Update PSP-${psp_number} status to $new_status"
+            fi
+            git push origin main
+            
+            echo "✅ PSP-${psp_number} status updated from $current_status to $new_status"
           else
-            git commit -m "📋 Update PSP-${psp_number} status to $new_status"
+            echo "ℹ️  PSP-${psp_number} is already in $new_status status - no update needed"
           fi
-          git push origin main
-          
-          echo "✅ PSP-${psp_number} status updated to $new_status"
         else
           echo "❌ PSP file not found for number: $psp_number"
           exit 1
@@ -225,40 +233,4 @@ jobs:
             title: '⏰ Review Required: Stale PSPs in Discussion Status',
             body: issueBody,
             labels: ['psp-maintenance', 'needs-review']
-          });
-
-  update-psp-index:
-    name: Update PSP Index
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Check if PSP files were merged
-      id: check_psp
-      run: |
-        # This is a placeholder - in a real implementation, you would
-        # parse the merged files and determine if the index needs updating
-        echo "index_update_needed=false" >> $GITHUB_OUTPUT
-        
-    - name: Create index update reminder
-      if: steps.check_psp.outputs.index_update_needed == 'true'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const comment = `📚 **PSP Index Update Reminder**
-
-          A new PSP was merged but the PSP index may need manual updating.
-
-          Please review and update \`docs/psps/source/psp-000000.rst\` to include:
-          - New PSP entry in the numerical index table
-          - Entry in the appropriate category section
-          - Update any summary counts if needed
-
-          This helps keep the PSP index current for community reference.`;
-
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.payload.pull_request.number,
-            body: comment
           });

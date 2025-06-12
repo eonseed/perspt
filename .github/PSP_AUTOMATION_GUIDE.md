@@ -2,6 +2,22 @@
 
 This document explains the GitHub automation workflows for managing Perspt Specification Proposals (PSPs).
 
+## 🚀 Quick Start
+
+**For PSP Authors:**
+1. Create a PR with your Draft PSP file named `psp-0000-your-title.rst`
+2. Use `PSP: 0000` in the file header 
+3. Set `Status: Draft`
+4. Submit PR for maintainer review
+
+**What happens automatically after merge:**
+- PSP gets assigned the next available number
+- Status changes from "Draft" to "Discussion"
+- Discussion issue is created for community feedback
+- PSP file is updated with the Discussion-To link
+
+**No additional PRs needed** - the automation handles all transitions!
+
 ## 🎯 Overview
 
 The PSP automation system provides:
@@ -18,9 +34,10 @@ The PSP automation system provides:
 **Triggers:** PSP file changes in PRs, PSP proposal issues
 **Functions:**
 - Detects PSP-related pull requests
-- Assigns PSP numbers automatically (replaces XXXXXX placeholders)
+- Assigns PSP numbers automatically (replaces 0000 placeholders)
+- Automatically transitions Draft PSPs to Discussion status upon merge
 - Creates discussion issues for community feedback
-- Updates PSP status to "Discussion" when merged
+- Updates PSP files with Discussion-To links
 - Adds helpful comments to PSP proposal issues
 
 ### 2. PSP Documentation (`psp-docs.yml`)
@@ -56,16 +73,19 @@ The PSP automation system provides:
 
 ## 🔄 PSP Lifecycle Automation
 
-### 1. Initial Proposal
+### 1. Initial Proposal (Optional)
 ```
 User creates PSP proposal issue → Auto-comment with guidance
 ```
 
 ### 2. PSP Document Creation
 ```
-User creates PR with PSP file (using XXXXXX) → Workflow detects PSP
-→ Assigns next available PSP number → Creates discussion issue
-→ Adds comment linking PR to discussion
+User creates PR with Draft PSP file (using 0000 placeholder)
+→ Maintainer reviews and merges PR
+→ Workflow assigns next available PSP number
+→ Workflow automatically updates status to "Discussion"  
+→ Workflow creates discussion issue
+→ Workflow updates PSP file with Discussion-To link
 ```
 
 ### 3. Community Discussion
@@ -109,12 +129,12 @@ Implementation PRs reference PSP number → Manual status update to "Final"
 ## 📋 PSP File Requirements
 
 ### Filename Format
-- New PSPs: `psp-XXXXXX-title.rst` (placeholder)
+- New PSPs: `psp-0000-title.rst` (using 0000 placeholder)
 - Assigned: `psp-000042-title.rst` (6-digit number)
 
 ### Required Fields
 ```rst
-PSP: 000042
+PSP: 0000
 Title: Your PSP Title
 Author: Your Name (@github_username)
 Status: Draft
@@ -128,12 +148,29 @@ Discussion-To: (auto-filled by workflow)
 Draft → Discussion → Accepted/Rejected/Withdrawn → Final (if implemented)
 ```
 
+## � Complete PSP Process Flow
+
+The PSP automation provides a streamlined process:
+
+1. **Author submits PR** with Draft PSP file (using `psp-0000-title.rst`)
+2. **Maintainer reviews and merges** the PR
+3. **Automation automatically:**
+   - Assigns next available PSP number
+   - Updates filename and content
+   - Changes status from "Draft" to "Discussion"
+   - Creates discussion issue
+   - Updates PSP file with Discussion-To link
+4. **Community discusses** in the auto-created issue
+5. **Maintainer makes decision** and updates status accordingly
+
+**Key benefit:** Authors only need to submit one PR with a Draft PSP - all status transitions and issue creation happen automatically upon merge.
+
 ## 🔍 Troubleshooting
 
 ### PSP Number Not Assigned
-- Check that filename uses XXXXXX placeholder
+- Check that filename uses 0000 placeholder
 - Ensure PR modifies files in `docs/psps/source/`
-- Workflow only processes files matching `psp-[0-9]{6}*.rst` pattern
+- Workflow processes files matching `psp-0000*.rst` and `psp-XXXXXX*.rst` patterns
 
 ### Discussion Issue Not Created
 - Verify PSP metadata is properly formatted
