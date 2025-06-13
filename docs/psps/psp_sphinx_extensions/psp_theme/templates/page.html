@@ -1,0 +1,17 @@
+{# PSP page template that extends layout #}
+{%- extends "layout.html" %}
+
+{% block sidebar %}
+<div class="toc-container">
+    <h3 class="toc-title">Table of Contents</h3>
+    <div class="toc-content">
+        {{ toc }}
+    </div>
+</div>
+{% endblock %}
+
+{% block body %}
+<article>
+    {{ body }}
+</article>
+{% endblock %}
