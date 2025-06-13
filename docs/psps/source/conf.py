@@ -16,11 +16,18 @@ master_doc = "contents"
 
 # Add any Sphinx extension module names here, as strings.
 extensions = [
-    "psp_sphinx_extensions",
     "sphinx.ext.extlinks",
-    "sphinx.ext.intersphinx",
+    "sphinx.ext.intersphinx", 
     "sphinx.ext.githubpages",
 ]
+
+# Try to add PSP extensions if available
+try:
+    import psp_sphinx_extensions
+    extensions.insert(0, "psp_sphinx_extensions")
+except ImportError:
+    print("Warning: psp_sphinx_extensions not available, continuing without it")
+    pass
 
 # The file extensions of source files. Sphinx uses these suffixes as sources.
 source_suffix = {
@@ -69,8 +76,14 @@ _PSE_PATH = _ROOT / "psp_sphinx_extensions"
 html_math_renderer = "maths_to_html"  # Maths rendering
 
 # Theme settings
-html_theme_path = [os.fspath(_PSE_PATH)]
-html_theme = "psp_theme"  # The actual theme directory (child of html_theme_path)
+_PSE_PATH = _ROOT / "psp_sphinx_extensions"
+if _PSE_PATH.exists():
+    html_theme_path = [os.fspath(_PSE_PATH)]
+    html_theme = "psp_theme"  # The actual theme directory (child of html_theme_path)
+else:
+    # Fallback to default theme if PSP theme not available
+    html_theme = "sphinx_rtd_theme"
+    html_theme_path = []
 html_use_index = False  # Disable index (we use PSP 0)
 html_style = ""  # must be defined here or in theme.conf, but is unused
 html_copy_source = False  # Prevent unneeded source copying - we link direct to GitHub
@@ -81,4 +94,9 @@ html_search_language = None  # Disable search completely
 gettext_auto_build = False  # speed-ups
 
 # Theme template relative paths from `confdir`
-templates_path = [os.fspath(_PSE_PATH / "psp_theme" / "templates")]
+templates_path = []
+_PSE_PATH = _ROOT / "psp_sphinx_extensions"
+if _PSE_PATH.exists():
+    _template_dir = _PSE_PATH / "psp_theme" / "templates"
+    if _template_dir.exists():
+        templates_path = [os.fspath(_template_dir)]
