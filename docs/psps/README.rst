@@ -47,23 +47,34 @@ Building the Documentation
 Creating a New PSP
 ------------------
 
-1. Copy the template:
+1. **Start with Discussion (Optional)**: Create a GitHub Issue to gauge community interest
+
+2. **Create PSP Document**:
 
    .. code-block:: bash
 
-      cp source/psp-template.rst source/psp-XXXXXX-your-title.rst
+      cp source/psp-template.rst source/psp-0000-your-title.rst
 
-2. Fill out the template with your proposal details (use 6-digit PSP numbers)
+3. **Fill out the template**: Use the 6-digit format and set ``Status: Draft``
 
-3. Add the new PSP to ``source/contents.rst``
+4. **Submit Pull Request**: 
+   
+   - **Check the PSP checkbox** in the pull request template
+   - Fill out the **PSP Information** section
+   - Use ``psp-0000-title.rst`` filename format
+   - Set ``Status: Draft`` in your PSP document
 
-4. Create a GitHub Issue for discussion
+5. **Automatic Processing**: Our automation will:
+   
+   - **Detect PSP PRs** based on checkbox selection and PSP file presence
+   - **Validate PSP requirements** ensuring both criteria are met
+   - **Provide guidance** through automated PR comments for proper submission
+   - **Track PSP status** and integrate with project boards
+   - Future enhancements will include automatic numbering and discussion issue creation
 
-5. Submit a Pull Request with your PSP
+6. **Community Discussion**: Participate in the auto-created discussion issue
 
-6. A maintainer will assign an official PSP number (6 digits)
-
-5. A maintainer will assign an official PSP number
+7. **Decision & Implementation**: Maintainers will accept/reject and track implementation
 
 Directory Structure
 ===================
