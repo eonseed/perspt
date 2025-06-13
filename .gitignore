@@ -83,13 +83,13 @@ docs/psps/.python-version
 docs/perspt_book/.venv
 docs/psps/.venv
 
+
 #Flask
 instance/
 .env
 .aider*
 
 # Documentation generated files
-!docs/header.html
 docs/generated/
 docs/perspt_book/build*
 docs/psps/build/*
@@ -98,6 +98,8 @@ target/doc/
 *.html
 *.css.bak
 *.js.bak
+!docs/header.html
+!docs/psps/psp_sphinx_extensions/psp_theme/** 
 
 # mdBook generated files
 book/
