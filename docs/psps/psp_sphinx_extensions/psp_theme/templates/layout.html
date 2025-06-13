@@ -1,0 +1,78 @@
+{# Master template for PSP pages #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>{{ title + " | Perspt Specification Proposals"|safe }}</title>
+    <link rel="shortcut icon" href="{{ pathto('_static/perspt-favicon.png', resource=True) }}">
+    <link rel="canonical" href="https://perspt.dev/psps/{{ pagename }}/">
+    <link rel="stylesheet" href="{{ pathto('_static/style.css', resource=True) }}" type="text/css">
+    <link rel="stylesheet" href="{{ pathto('_static/mq.css', resource=True) }}" type="text/css">
+    <link rel="stylesheet" href="{{ pathto('_static/pygments.css', resource=True) }}" type="text/css" media="(prefers-color-scheme: light)" id="pyg-light">
+    <link rel="stylesheet" href="{{ pathto('_static/pygments_dark.css', resource=True) }}" type="text/css" media="(prefers-color-scheme: dark)" id="pyg-dark">
+    <meta property="og:title" content='{{ title + " | Perspt Specification Proposals"|safe }}'>
+    <meta property="og:description" content="{{ description }}">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://perspt.dev/psps/{{ pagename }}/">
+    <meta property="og:site_name" content="Perspt Specification Proposals (PSPs)">
+    <meta property="og:image" content="https://perspt.dev/psps/_static/og-image.png">
+    <meta property="og:image:alt" content="Perspt PSPs">
+    <meta property="og:image:width" content="200">
+    <meta property="og:image:height" content="200">
+    <meta name="description" content="{{ description }}">
+    <meta name="theme-color" content="#1f2937">
+    <script>
+        // Set initial theme state before page renders to prevent flash
+        (function() {
+            const savedTheme = localStorage.getItem('psp-theme');
+            if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('theme-dark-initial');
+            }
+        })();
+    </script>
+</head>
+<body>
+    <section id="psp-page-section">
+        <header>
+            <h1>Perspt Specification Proposals</h1>
+            <ul class="breadcrumbs">
+                <li><a href="https://perspt.dev/" title="Perspt">Perspt</a> &raquo; </li>
+                <li><a href="{{ pathto("psp-000000") }}">PSP Index</a> &raquo; </li>
+                <li>{{ title.split("–")[0].strip() }}</li>
+            </ul>
+        </header>
+        <div class="psp-layout">
+            <!-- CSS-based theme toggle -->
+            <input type="checkbox" id="theme-toggle" class="theme-toggle-input" />
+            <label for="theme-toggle" class="theme-toggle-label" title="Toggle light/dark theme">
+                <svg aria-hidden="true" class="theme-icon theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="5"/>
+                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+                <svg aria-hidden="true" class="theme-icon theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+                <span class="visually-hidden">Toggle light / dark theme</span>
+            </label>
+            <aside id="psp-sidebar">
+                <nav class="toc-nav">
+                    {% block sidebar %}
+                    {% endblock %}
+                </nav>
+                <div class="sidebar-bottom">
+                    {%- if not pagename.startswith(("404", "numerical", "psp-0000", "topic")) %}
+                    <a id="source" href="https://github.com/perspt/perspt/blob/main/docs/psps/{{ pagename }}.rst">Page Source (GitHub)</a>
+                    {%- endif %}
+                </div>
+            </aside>
+            <main id="psp-content">
+                {% block body %}{{ body }}{% endblock %}
+            </main>
+        </div>
+    </section>
+    <script src="{{ pathto('_static/colour_scheme.js', resource=True) }}"></script>
+    <script src="{{ pathto('_static/wrap_tables.js', resource=True) }}"></script>
+</body>
+</html>
