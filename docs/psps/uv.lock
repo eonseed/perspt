@@ -197,7 +197,7 @@ wheels = [
 [[package]]
 name = "perspt-psps"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "sphinx" },
     { name = "sphinx-rtd-theme" },
