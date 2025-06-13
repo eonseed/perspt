@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       is_psp: ${{ steps.check.outputs.is_psp }}
+      validation_status: ${{ steps.check.outputs.validation_status }}
+      psp_checkbox_checked: ${{ steps.check.outputs.psp_checkbox_checked }}
+      has_psp_files: ${{ steps.check.outputs.has_psp_files }}
       psp_number: ${{ steps.extract.outputs.psp_number }}
       psp_title: ${{ steps.extract.outputs.psp_title }}
       psp_type: ${{ steps.extract.outputs.psp_type }}
@@ -36,14 +39,48 @@ jobs:
     - name: Check if PSP-related PR
       id: check
       run: |
+        # Check PR template checkbox for PSP type
+        pr_body="${{ github.event.pull_request.body }}"
+        is_psp_checked="false"
+        
+        if echo "$pr_body" | grep -q "- \[x\] \*\*PSP\*\*"; then
+          echo "✅ PSP checkbox is checked in PR template"
+          is_psp_checked="true"
+        elif echo "$pr_body" | grep -q "- \[X\] \*\*PSP\*\*"; then
+          echo "✅ PSP checkbox is checked in PR template (uppercase)"
+          is_psp_checked="true"
+        fi
+        
         # Check if PR modifies PSP files (including 0000 placeholder per PSP-000001.rst)
         files=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/source/psp-.*\.rst$' || true)
+        has_psp_files="false"
+        
         if [ -n "$files" ]; then
+          echo "📁 Detected PSP file changes: $files"
+          has_psp_files="true"
+        fi
+        
+        # Set validation flags for downstream jobs
+        echo "psp_checkbox_checked=$is_psp_checked" >> $GITHUB_OUTPUT
+        echo "has_psp_files=$has_psp_files" >> $GITHUB_OUTPUT
+        
+        # True PSP PR requires BOTH checkbox AND files
+        if [ "$is_psp_checked" = "true" ] && [ "$has_psp_files" = "true" ]; then
           echo "is_psp=true" >> $GITHUB_OUTPUT
-          echo "🔍 Detected PSP file changes: $files"
+          echo "validation_status=valid" >> $GITHUB_OUTPUT
+          echo "🔍 Valid PSP pull request (checkbox + files)"
+        elif [ "$is_psp_checked" = "true" ] && [ "$has_psp_files" = "false" ]; then
+          echo "is_psp=false" >> $GITHUB_OUTPUT
+          echo "validation_status=checkbox_only" >> $GITHUB_OUTPUT
+          echo "⚠️  PSP checkbox checked but no PSP files detected - treating as general PR"
+        elif [ "$is_psp_checked" = "false" ] && [ "$has_psp_files" = "true" ]; then
+          echo "is_psp=true" >> $GITHUB_OUTPUT
+          echo "validation_status=files_only" >> $GITHUB_OUTPUT
+          echo "⚠️  PSP files detected but checkbox not checked - processing as PSP anyway"
         else
           echo "is_psp=false" >> $GITHUB_OUTPUT
-          echo "ℹ️  No PSP file changes detected"
+          echo "validation_status=neither" >> $GITHUB_OUTPUT
+          echo "ℹ️  Not a PSP-related pull request"
         fi
         
     - name: Extract PSP metadata
@@ -104,10 +141,119 @@ jobs:
           fi
         fi
 
+  comment-on-psp-pr:
+    name: Comment on PSP Pull Request
+    needs: detect-psp-pr
+    if: (needs.detect-psp-pr.outputs.is_psp == 'true' || needs.detect-psp-pr.outputs.validation_status == 'checkbox_only') && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Add PSP guidance comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pspNumber = '${{ needs.detect-psp-pr.outputs.psp_number }}';
+          const needsNumber = '${{ needs.detect-psp-pr.outputs.needs_number }}';
+          const validationStatus = '${{ needs.detect-psp-pr.outputs.validation_status }}';
+          const checkboxChecked = '${{ needs.detect-psp-pr.outputs.psp_checkbox_checked }}';
+          const hasPspFiles = '${{ needs.detect-psp-pr.outputs.has_psp_files }}';
+          
+          let comment = '';
+          
+          // Handle different validation scenarios
+          if (validationStatus === 'checkbox_only') {
+            comment = `⚠️ **PSP Checkbox Checked but No PSP Files Detected**
+
+            You've checked the PSP checkbox in the pull request template, but this PR doesn't contain any PSP files (\\\`docs/psps/source/psp-*.rst\\\`).
+
+            ## 🔄 **This PR will be treated as a General Pull Request**
+
+            If this is intentional (e.g., you're preparing infrastructure for a future PSP), that's fine! Your PR will follow the normal review process.
+
+            ## 📋 **If you meant to submit a PSP:**
+
+            1. Add your PSP document: \\\`docs/psps/source/psp-0000-your-title.rst\\\`
+            2. Use the [PSP template](docs/psps/source/psp-template.rst) as a starting point
+            3. Fill out all required sections
+            4. The PSP automation will then activate automatically
+
+            ## 📚 **Resources:**
+            - [PSP Template](docs/psps/source/psp-template.rst)
+            - [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
+            - [PSP Examples](docs/psps/source/psp-000000.rst)
+
+            ---
+            *Comment generated because PSP checkbox was checked but no PSP files were found.*`;
+            
+          } else if (validationStatus === 'files_only') {
+            comment = `⚠️ **PSP Files Detected but Checkbox Not Checked**
+
+            This PR contains PSP files but the PSP checkbox wasn't checked in the template.
+
+            ## ✅ **Proceeding as PSP anyway**
+
+            Since PSP files are present, this will be processed as a PSP pull request.
+
+            **Tip:** Next time, please check the PSP checkbox in the pull request template for better workflow clarity.
+
+            ## 📋 What happens next:
+            1. ✅ **PSP Number Assignment** - Your PSP will be assigned the next available number
+            2. ✅ **Status Update** - Status will change from "Draft" to "Discussion" upon merge  
+            3. ✅ **Discussion Issue** - A community discussion issue will be created
+            4. ✅ **Documentation** - PSP will be built and validated automatically
+
+            ---
+            *Comment generated because PSP files were found but checkbox wasn't checked.*`;
+            
+          } else if (validationStatus === 'valid') {
+            comment = `🔍 **PSP Pull Request Detected**
+
+            Thank you for submitting a PSP! This pull request has been correctly identified as PSP-related.
+
+            ## 📋 What happens next:
+            `;
+            
+            if (needsNumber === 'true') {
+              comment += `1. ✅ **PSP Number Assignment** - Your PSP will be assigned the next available number
+            2. ✅ **Status Update** - Status will automatically change from "Draft" to "Discussion" upon merge
+            3. ✅ **Discussion Issue** - A community discussion issue will be created automatically
+            4. ✅ **Documentation** - PSP will be built and validated automatically
+
+            ## ⏳ Before Merge:
+            - Maintainers will review your PSP document
+            - Ensure all required sections are complete
+            - Check that formatting follows the template
+
+            ## 🚀 After Merge:
+            - PSP number will be assigned automatically
+            - Status transitions to "Discussion" 
+            - Community discussion issue created
+            - No additional PRs needed!`;
+            } else {
+              comment += `1. ✅ **PSP Update** - Changes to existing PSP-${pspNumber}
+            2. ✅ **Validation** - Document will be validated automatically
+            3. ✅ **Documentation** - Updated PSP will be built
+
+            This appears to be an update to an existing PSP document.`;
+            }
+            
+            comment += `
+
+            ---
+            *This comment was automatically generated based on your PSP checkbox selection and file detection.*`;
+          }
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: comment
+          });
+
   assign-psp-number:
     name: Assign PSP Number
     needs: detect-psp-pr
-    if: needs.detect-psp-pr.outputs.is_psp == 'true' && needs.detect-psp-pr.outputs.needs_number == 'true'
+    if: needs.detect-psp-pr.outputs.is_psp == 'true' && needs.detect-psp-pr.outputs.needs_number == 'true' && needs.detect-psp-pr.outputs.validation_status != 'checkbox_only'
     runs-on: ubuntu-latest
     outputs:
       next_number: ${{ steps.next_number.outputs.next_number }}
@@ -404,9 +550,18 @@ jobs:
           When ready, you can create the formal PSP document:
 
           1. Copy the template: \\\`docs/psps/source/psp-template.rst\\\`
-          2. Save as: \\\`docs/psps/source/psp-XXXXXX-your-title.rst\\\` (use XXXXXX as placeholder)
+          2. Save as: \\\`docs/psps/source/psp-0000-your-title.rst\\\` (use 0000 as placeholder)
           3. Fill out all sections based on this proposal
-          4. Submit a PR - our automation will assign a PSP number and create a discussion issue
+          4. Create a PR and **check the PSP checkbox** in the pull request template
+          5. Our automation will assign a PSP number and create a discussion issue
+
+          ## 📝 Important: Use the PSP Template
+
+          When creating your PSP pull request:
+          - ✅ Check the **PSP** checkbox in the pull request template
+          - ✅ Fill out the **PSP Information** section
+          - ✅ Use \\\`psp-0000-title.rst\\\` filename format
+          - ✅ Set \\\`Status: Draft\\\` in your PSP document
 
           ## 📚 Resources
 
