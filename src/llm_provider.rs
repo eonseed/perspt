@@ -214,11 +214,11 @@ impl GenAIProvider {
                 "deepseek" => "DEEPSEEK_API_KEY",
                 "ollama" => {
                     log::info!("Ollama provider detected - no API key required for local setup");
-                    return Ok(Self::new()?);
+                    return Self::new();
                 }
                 _ => {
                     log::warn!("Unknown provider type for API key: {}", provider);
-                    return Ok(Self::new()?);
+                    return Self::new();
                 }
             };
 
