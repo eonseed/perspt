@@ -78,7 +78,7 @@ jobs:
             else
               git commit -m "📋 Update PSP-${psp_number} status to $new_status"
             fi
-            git push origin main
+            git push origin master
             
             echo "✅ PSP-${psp_number} status updated from $current_status to $new_status"
           else
@@ -139,7 +139,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'psp-status-management.yml',
-              ref: 'main',
+              ref: 'master',
               inputs: {
                 psp_number: pspNumber,
                 new_status: newStatus,
