@@ -172,6 +172,7 @@ Simplified PSP Workflow
 
 **Phase 2: Draft PSP & PR**
    1. **Author actions:**
+   
       * Fork the repository
       * Copy `docs/psps/source/psp-template.rst` to `docs/psps/source/psp-0000-descriptive-name.rst`
       * Fill out the template with `status: Draft`
@@ -182,10 +183,12 @@ Simplified PSP Workflow
         - Add the PSP file to the PR
 
    2. **Automated PSP detection:**
+   
       * GitHub automation detects PSP PRs based on the checked "PSP" checkbox and presence of PSP files
       * Validation ensures both requirements are met for proper PSP processing
 
    3. **Maintainer review:**
+   
       * Review PR for basic structure and completeness
       * Assign official PSP number (e.g., `0003`)
       * Author updates filename and PSP number in the document
