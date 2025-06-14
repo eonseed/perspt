@@ -42,10 +42,10 @@
 //! ```
 
 // src/config.rs
+use anyhow::Result;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
-use anyhow::Result;
 
 /// Application configuration structure that defines all configurable aspects of Perspt.
 ///
@@ -94,33 +94,33 @@ use anyhow::Result;
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct AppConfig {
     /// Map of provider names to their API base URLs.
-    /// 
+    ///
     /// Example: "openai" -> "<https://api.openai.com/v1>"
     /// This allows for custom endpoints and local installations.
     pub providers: HashMap<String, String>,
-    
+
     /// Universal API key for provider authentication.
-    /// 
+    ///
     /// Individual providers may override this with provider-specific keys.
     /// Can be None if using environment variables or other auth methods.
     pub api_key: Option<String>,
-    
+
     /// Default model identifier to use for LLM requests.
-    /// 
+    ///
     /// This should be a valid model name for the configured provider.
     /// Examples: "gpt-4o-mini", "claude-3-sonnet-20240229", "gemini-pro"
     pub default_model: Option<String>,
-    
+
     /// Name of the default provider configuration to use.
-    /// 
+    ///
     /// This should match a key in the providers HashMap.
     /// Used for provider selection when multiple are configured.
     pub default_provider: Option<String>,
-    
+
     /// Provider type classification for API compatibility.
-    /// 
+    ///
     /// Determines which API interface and authentication method to use.
-    /// Valid values: "openai", "anthropic", "gemini", "groq", "cohere", 
+    /// Valid values: "openai", "anthropic", "gemini", "groq", "cohere",
     /// "xai", "deepseek", "ollama"
     pub provider_type: Option<String>,
 }
@@ -233,25 +233,33 @@ pub fn process_loaded_config(mut config: AppConfig) -> AppConfig {
 /// ```
 pub fn detect_available_provider() -> Option<(String, String)> {
     use std::env;
-    
+
     // Check for API keys in priority order
     let providers_to_check = [
         ("OPENAI_API_KEY", "openai", "gpt-4o-mini"),
-        ("ANTHROPIC_API_KEY", "anthropic", "claude-3-5-sonnet-20241022"),
+        (
+            "ANTHROPIC_API_KEY",
+            "anthropic",
+            "claude-3-5-sonnet-20241022",
+        ),
         ("GEMINI_API_KEY", "gemini", "gemini-1.5-flash"),
         ("GROQ_API_KEY", "groq", "llama-3.1-8b-instant"),
         ("COHERE_API_KEY", "cohere", "command-r-plus"),
         ("XAI_API_KEY", "xai", "grok-beta"),
         ("DEEPSEEK_API_KEY", "deepseek", "deepseek-chat"),
     ];
-    
+
     for (env_var, provider_type, default_model) in providers_to_check {
         if let Ok(_) = env::var(env_var) {
-            log::info!("Auto-detected provider '{}' from environment variable {}", provider_type, env_var);
+            log::info!(
+                "Auto-detected provider '{}' from environment variable {}",
+                provider_type,
+                env_var
+            );
             return Some((provider_type.to_string(), default_model.to_string()));
         }
     }
-    
+
     // Check for Ollama by attempting to detect if it's running locally
     // For now, we'll just check if the user has explicitly set any Ollama-related env vars
     // In a full implementation, we could make an HTTP request to localhost:11434
@@ -259,7 +267,7 @@ pub fn detect_available_provider() -> Option<(String, String)> {
         log::info!("Auto-detected Ollama from OLLAMA_HOST environment variable");
         return Some(("ollama".to_string(), "llama3.2".to_string()));
     }
-    
+
     log::debug!("No providers auto-detected from environment variables");
     None
 }
@@ -334,23 +342,44 @@ pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
         None => {
             // Default configuration with all supported providers (genai 0.3.5)
             let mut providers_map = HashMap::new();
-            providers_map.insert("openai".to_string(), "https://api.openai.com/v1".to_string());
-            providers_map.insert("anthropic".to_string(), "https://api.anthropic.com".to_string());
-            providers_map.insert("gemini".to_string(), "https://generativelanguage.googleapis.com/v1beta".to_string());
-            providers_map.insert("groq".to_string(), "https://api.groq.com/openai/v1".to_string());
-            providers_map.insert("cohere".to_string(), "https://api.cohere.com/v1".to_string());
+            providers_map.insert(
+                "openai".to_string(),
+                "https://api.openai.com/v1".to_string(),
+            );
+            providers_map.insert(
+                "anthropic".to_string(),
+                "https://api.anthropic.com".to_string(),
+            );
+            providers_map.insert(
+                "gemini".to_string(),
+                "https://generativelanguage.googleapis.com/v1beta".to_string(),
+            );
+            providers_map.insert(
+                "groq".to_string(),
+                "https://api.groq.com/openai/v1".to_string(),
+            );
+            providers_map.insert(
+                "cohere".to_string(),
+                "https://api.cohere.com/v1".to_string(),
+            );
             providers_map.insert("xai".to_string(), "https://api.x.ai/v1".to_string());
-            providers_map.insert("deepseek".to_string(), "https://api.deepseek.com/v1".to_string());
-            providers_map.insert("ollama".to_string(), "http://localhost:11434/v1".to_string());
-            
+            providers_map.insert(
+                "deepseek".to_string(),
+                "https://api.deepseek.com/v1".to_string(),
+            );
+            providers_map.insert(
+                "ollama".to_string(),
+                "http://localhost:11434/v1".to_string(),
+            );
+
             // Try to auto-detect provider from environment variables
             if let Some((default_provider_type, default_model)) = detect_available_provider() {
                 AppConfig {
                     providers: providers_map,
                     api_key: None,
-                    default_model: Some(default_model), 
-                    default_provider: Some(default_provider_type.clone()),   
-                    provider_type: Some(default_provider_type),    
+                    default_model: Some(default_model),
+                    default_provider: Some(default_provider_type.clone()),
+                    provider_type: Some(default_provider_type),
                 }
             } else {
                 // No providers auto-detected, create config without provider_type
@@ -358,9 +387,9 @@ pub async fn load_config(config_path: Option<&String>) -> Result<AppConfig> {
                 AppConfig {
                     providers: providers_map,
                     api_key: None,
-                    default_model: None, 
-                    default_provider: None,   
-                    provider_type: None,    
+                    default_model: None,
+                    default_provider: None,
+                    provider_type: None,
                 }
             }
         }
@@ -376,17 +405,22 @@ mod tests {
     #[tokio::test]
     async fn test_load_config_defaults() {
         use std::env;
-        
+
         // Clear all API keys to ensure no auto-detection
         let keys_to_clear = [
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
-            "GROQ_API_KEY", "COHERE_API_KEY", "XAI_API_KEY", 
-            "DEEPSEEK_API_KEY", "OLLAMA_HOST"
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "COHERE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OLLAMA_HOST",
         ];
         for key in &keys_to_clear {
             env::remove_var(key);
         }
-        
+
         let config = load_config(None).await.unwrap();
         // With no API keys, provider_type should be None to trigger "no provider configured" error
         assert_eq!(config.provider_type, None);
@@ -439,7 +473,10 @@ mod tests {
         let config = load_config_from_string_for_test(json_input).await.unwrap();
         assert_eq!(config.provider_type, Some("anthropic".to_string()));
         assert_eq!(config.default_provider, Some("anthropic".to_string()));
-        assert_eq!(config.default_model, Some("claude-3-sonnet-20240229".to_string()));
+        assert_eq!(
+            config.default_model,
+            Some("claude-3-sonnet-20240229".to_string())
+        );
         assert_eq!(config.api_key, Some("test_anthropic_key".to_string()));
     }
 
@@ -474,7 +511,7 @@ mod tests {
         assert_eq!(config.default_provider, Some("gemini".to_string()));
         assert_eq!(config.default_model, Some("gemini-1.5-flash".to_string()));
     }
-    
+
     #[tokio::test]
     async fn test_load_config_from_json_string_provider_type_explicitly_set() {
         let json_input = r#"
@@ -488,7 +525,10 @@ mod tests {
         let config = load_config_from_string_for_test(json_input).await.unwrap();
         assert_eq!(config.provider_type, Some("local_llm".to_string()));
         assert_eq!(config.default_provider, Some("my_local_setup".to_string()));
-        assert_eq!(config.default_model, Some("/path/to/my/model.gguf".to_string()));
+        assert_eq!(
+            config.default_model,
+            Some("/path/to/my/model.gguf".to_string())
+        );
     }
 
     #[tokio::test]
@@ -500,9 +540,11 @@ mod tests {
             "api_key": null
         }
         "#;
-        let config = load_config_from_string_for_test(json_input_no_provider_info).await.unwrap();
+        let config = load_config_from_string_for_test(json_input_no_provider_info)
+            .await
+            .unwrap();
         // Falls back to "openai" as per current process_loaded_config logic
-        assert_eq!(config.provider_type, Some("openai".to_string())); 
+        assert_eq!(config.provider_type, Some("openai".to_string()));
         assert_eq!(config.default_model, Some("some-generic-model".to_string()));
     }
 
@@ -519,8 +561,14 @@ mod tests {
         // According to current logic in process_loaded_config, if default_provider is not recognized,
         // and provider_type is missing, it will default provider_type to "openai".
         assert_eq!(config.provider_type, Some("openai".to_string()));
-        assert_eq!(config.default_provider, Some("custom_local_profile_name".to_string()));
-        assert_eq!(config.default_model, Some("my_custom_model.bin".to_string()));
+        assert_eq!(
+            config.default_provider,
+            Some("custom_local_profile_name".to_string())
+        );
+        assert_eq!(
+            config.default_model,
+            Some("my_custom_model.bin".to_string())
+        );
     }
 
     #[tokio::test]
@@ -541,23 +589,31 @@ mod tests {
     #[tokio::test]
     async fn test_detect_available_provider_openai() {
         use std::env;
-        
+
         // Clear any existing keys first
         let keys_to_clear = [
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
-            "GROQ_API_KEY", "COHERE_API_KEY", "XAI_API_KEY", 
-            "DEEPSEEK_API_KEY", "OLLAMA_HOST"
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "COHERE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OLLAMA_HOST",
         ];
         for key in &keys_to_clear {
             env::remove_var(key);
         }
-        
+
         // Set OpenAI key
         env::set_var("OPENAI_API_KEY", "sk-test123");
-        
+
         let result = detect_available_provider();
-        assert_eq!(result, Some(("openai".to_string(), "gpt-4o-mini".to_string())));
-        
+        assert_eq!(
+            result,
+            Some(("openai".to_string(), "gpt-4o-mini".to_string()))
+        );
+
         // Clean up
         env::remove_var("OPENAI_API_KEY");
     }
@@ -565,23 +621,34 @@ mod tests {
     #[tokio::test]
     async fn test_detect_available_provider_anthropic() {
         use std::env;
-        
+
         // Clear any existing keys first
         let keys_to_clear = [
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
-            "GROQ_API_KEY", "COHERE_API_KEY", "XAI_API_KEY", 
-            "DEEPSEEK_API_KEY", "OLLAMA_HOST"
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "COHERE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OLLAMA_HOST",
         ];
         for key in &keys_to_clear {
             env::remove_var(key);
         }
-        
+
         // Set Anthropic key (should be detected since OpenAI is not set)
         env::set_var("ANTHROPIC_API_KEY", "sk-ant-test123");
-        
+
         let result = detect_available_provider();
-        assert_eq!(result, Some(("anthropic".to_string(), "claude-3-5-sonnet-20241022".to_string())));
-        
+        assert_eq!(
+            result,
+            Some((
+                "anthropic".to_string(),
+                "claude-3-5-sonnet-20241022".to_string()
+            ))
+        );
+
         // Clean up
         env::remove_var("ANTHROPIC_API_KEY");
     }
@@ -589,25 +656,33 @@ mod tests {
     #[tokio::test]
     async fn test_detect_available_provider_priority_order() {
         use std::env;
-        
+
         // Clear any existing keys first
         let keys_to_clear = [
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
-            "GROQ_API_KEY", "COHERE_API_KEY", "XAI_API_KEY", 
-            "DEEPSEEK_API_KEY", "OLLAMA_HOST"
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "COHERE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OLLAMA_HOST",
         ];
         for key in &keys_to_clear {
             env::remove_var(key);
         }
-        
+
         // Set multiple keys - OpenAI should win due to priority order
         env::set_var("ANTHROPIC_API_KEY", "sk-ant-test123");
         env::set_var("OPENAI_API_KEY", "sk-test123");
         env::set_var("GEMINI_API_KEY", "test-gemini-key");
-        
+
         let result = detect_available_provider();
-        assert_eq!(result, Some(("openai".to_string(), "gpt-4o-mini".to_string())));
-        
+        assert_eq!(
+            result,
+            Some(("openai".to_string(), "gpt-4o-mini".to_string()))
+        );
+
         // Clean up
         for key in &keys_to_clear {
             env::remove_var(key);
@@ -617,17 +692,22 @@ mod tests {
     #[tokio::test]
     async fn test_detect_available_provider_none() {
         use std::env;
-        
+
         // Clear all provider keys
         let keys_to_clear = [
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
-            "GROQ_API_KEY", "COHERE_API_KEY", "XAI_API_KEY", 
-            "DEEPSEEK_API_KEY", "OLLAMA_HOST"
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "COHERE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OLLAMA_HOST",
         ];
         for key in &keys_to_clear {
             env::remove_var(key);
         }
-        
+
         let result = detect_available_provider();
         assert_eq!(result, None);
     }
@@ -635,25 +715,33 @@ mod tests {
     #[tokio::test]
     async fn test_load_config_with_auto_detection() {
         use std::env;
-        
+
         // Clear keys first
         let keys_to_clear = [
-            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", 
-            "GROQ_API_KEY", "COHERE_API_KEY", "XAI_API_KEY", 
-            "DEEPSEEK_API_KEY", "OLLAMA_HOST"
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "COHERE_API_KEY",
+            "XAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "OLLAMA_HOST",
         ];
         for key in &keys_to_clear {
             env::remove_var(key);
         }
-        
+
         // Set Anthropic key
         env::set_var("ANTHROPIC_API_KEY", "sk-ant-test123");
-        
+
         let config = load_config(None).await.unwrap();
         assert_eq!(config.provider_type, Some("anthropic".to_string()));
         assert_eq!(config.default_provider, Some("anthropic".to_string()));
-        assert_eq!(config.default_model, Some("claude-3-5-sonnet-20241022".to_string()));
-        
+        assert_eq!(
+            config.default_model,
+            Some("claude-3-5-sonnet-20241022".to_string())
+        );
+
         // Clean up
         for key in &keys_to_clear {
             env::remove_var(key);

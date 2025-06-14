@@ -62,13 +62,13 @@
 //! better debugging and user experience.
 
 // src/main.rs
-use clap::{Arg, Command};
 use anyhow::{Context, Result};
+use clap::{Arg, Command};
 use std::io;
-use std::sync::Arc;
-use tokio::sync::mpsc;
 use std::panic;
+use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::sync::mpsc;
 
 /// End-of-transmission signal used to indicate completion of streaming responses.
 /// This constant is used throughout the application to signal when an LLM has
@@ -120,24 +120,28 @@ fn setup_panic_hook() {
         // Force terminal restoration immediately
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
-        
+
         // Clear the screen and move cursor to start
         print!("\x1b[2J\x1b[H");
-        
+
         // Print a clean error message
         eprintln!();
         eprintln!("🚨 Application Error: External Library Panic");
         eprintln!("═══════════════════════════════════════════");
         eprintln!();
         eprintln!("The application encountered a fatal error in an external library.");
-        eprintln!("This is typically caused by missing environment variables or configuration issues.");
+        eprintln!(
+            "This is typically caused by missing environment variables or configuration issues."
+        );
         eprintln!();
-        
+
         // Extract useful information from panic
         let panic_str = format!("{}", panic_info);
         if panic_str.contains("PROJECT_ID") {
             eprintln!("❌ Missing Google Cloud Configuration:");
-            eprintln!("   Please set the PROJECT_ID environment variable to your Google Cloud project ID");
+            eprintln!(
+                "   Please set the PROJECT_ID environment variable to your Google Cloud project ID"
+            );
             eprintln!("   Example: export PROJECT_ID=your-project-id");
         } else if panic_str.contains("AWS") || panic_str.contains("credentials") {
             eprintln!("❌ Missing AWS Configuration:");
@@ -153,7 +157,7 @@ fn setup_panic_hook() {
             eprintln!("❌ Configuration Error:");
             eprintln!("   {}", panic_str);
         }
-        
+
         eprintln!();
         eprintln!("💡 Troubleshooting Tips:");
         eprintln!("   - Check your provider configuration");
@@ -161,7 +165,7 @@ fn setup_panic_hook() {
         eprintln!("   - Use --help for available options");
         eprintln!("   - Try a different provider (e.g., --provider-type openai)");
         eprintln!();
-        
+
         // Don't call the original hook to avoid double panic output
         std::process::exit(1);
     }));
@@ -230,7 +234,7 @@ fn set_raw_mode_flag(enabled: bool) {
 async fn main() -> Result<()> {
     // Set up panic hook before doing anything else
     setup_panic_hook();
-    
+
     // Initialize logging - set to error level only to avoid TUI interference
     // Logs will only show critical errors
     env_logger::Builder::from_default_env()
@@ -241,48 +245,61 @@ async fn main() -> Result<()> {
     let matches = Command::new("Perspt - Performance LLM Chat CLI")
         .version("0.4.0")
         .author("Vikrant Rathore")
-        .about("A performant CLI for talking to LLMs using the allms crate with unified API support")
+        .about(
+            "A performant CLI for talking to LLMs using the allms crate with unified API support",
+        )
         .arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
                 .value_name("FILE")
-                .help("Configuration file path")
+                .help("Configuration file path"),
         )
         .arg(
             Arg::new("api-key")
                 .short('k')
                 .long("api-key")
                 .value_name("KEY")
-                .help("API key for the LLM provider")
+                .help("API key for the LLM provider"),
         )
         .arg(
             Arg::new("model-name")
                 .short('m')
                 .long("model")
                 .value_name("MODEL")
-                .help("Model name to use")
+                .help("Model name to use"),
         )
         .arg(
             Arg::new("provider-type")
                 .short('p')
                 .long("provider-type")
                 .value_name("TYPE")
-                .help("Provider type: openai, anthropic, gemini, groq, cohere, xai, deepseek, ollama")
-                .value_parser(["openai", "anthropic", "gemini", "groq", "cohere", "xai", "deepseek", "ollama"])
+                .help(
+                    "Provider type: openai, anthropic, gemini, groq, cohere, xai, deepseek, ollama",
+                )
+                .value_parser([
+                    "openai",
+                    "anthropic",
+                    "gemini",
+                    "groq",
+                    "cohere",
+                    "xai",
+                    "deepseek",
+                    "ollama",
+                ]),
         )
         .arg(
             Arg::new("provider")
                 .long("provider")
                 .value_name("PROFILE")
-                .help("Provider profile name from config")
+                .help("Provider profile name from config"),
         )
         .arg(
             Arg::new("list-models")
                 .short('l')
                 .long("list-models")
                 .help("List available models for the configured provider")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .get_matches();
 
@@ -294,7 +311,8 @@ async fn main() -> Result<()> {
     let list_models = matches.get_flag("list-models");
 
     // Load configuration
-    let mut config = config::load_config(config_path).await
+    let mut config = config::load_config(config_path)
+        .await
         .context("Failed to load configuration")?;
 
     // Check if we have a valid provider configuration
@@ -329,7 +347,7 @@ async fn main() -> Result<()> {
         config.provider_type = Some(ptype.clone());
         log::info!("Using provider type from command line: {}", ptype);
     }
-    
+
     if let Some(profile_name) = cli_provider_profile {
         config.default_provider = Some(profile_name.clone());
         log::info!("Using provider profile from command line: {}", profile_name);
@@ -341,9 +359,11 @@ async fn main() -> Result<()> {
     }
 
     // Get model name for the provider - set defaults based on provider type using genai compatible names
-    let model_name_for_provider = config.default_model.clone()
-        .unwrap_or_else(|| {
-            match config.provider_type.as_deref() {
+    let model_name_for_provider =
+        config
+            .default_model
+            .clone()
+            .unwrap_or_else(|| match config.provider_type.as_deref() {
                 Some("openai") => "gpt-4o-mini".to_string(),
                 Some("anthropic") => "claude-3-5-sonnet-20241022".to_string(),
                 Some("gemini") => "gemini-1.5-flash".to_string(),
@@ -353,26 +373,34 @@ async fn main() -> Result<()> {
                 Some("deepseek") => "deepseek-chat".to_string(),
                 Some("ollama") => "llama3.2".to_string(),
                 _ => "gpt-4o-mini".to_string(),
-            }
-        });
-    
+            });
+
     let api_key_string = config.api_key.clone().unwrap_or_default();
 
     // Create the GenAI provider instance with configuration
     let provider = Arc::new(GenAIProvider::new_with_config(
         config.provider_type.as_deref(),
-        config.api_key.as_deref()
+        config.api_key.as_deref(),
     )?);
 
-    log::info!("Created GenAI provider with provider_type: {:?}, has_api_key: {}", 
-        config.provider_type, config.api_key.is_some());
+    log::info!(
+        "Created GenAI provider with provider_type: {:?}, has_api_key: {}",
+        config.provider_type,
+        config.api_key.is_some()
+    );
 
     // Validate the model before starting UI
-    let validated_model = provider.validate_model(&model_name_for_provider, config.provider_type.as_deref()).await
+    let validated_model = provider
+        .validate_model(&model_name_for_provider, config.provider_type.as_deref())
+        .await
         .context("Failed to validate model")?;
-    
+
     if validated_model != model_name_for_provider {
-        log::info!("Model changed from {} to {} after validation", model_name_for_provider, validated_model);
+        log::info!(
+            "Model changed from {} to {} after validation",
+            model_name_for_provider,
+            validated_model
+        );
     }
 
     if list_models {
@@ -381,16 +409,22 @@ async fn main() -> Result<()> {
     }
 
     // Initialize terminal
-    let mut terminal = initialize_terminal()
-        .context("Failed to initialize terminal")?;
+    let mut terminal = initialize_terminal().context("Failed to initialize terminal")?;
 
     // Run the UI - panic handling is done at the LLM provider level and via the global panic hook
-    run_ui(&mut terminal, config, validated_model, api_key_string, provider).await
-        .context("UI execution failed")?;
+    run_ui(
+        &mut terminal,
+        config,
+        validated_model,
+        api_key_string,
+        provider,
+    )
+    .await
+    .context("UI execution failed")?;
 
     // Ensure terminal cleanup
     cleanup_terminal()?;
-    
+
     Ok(())
 }
 
@@ -425,13 +459,10 @@ async fn main() -> Result<()> {
 /// # List Anthropic models
 /// perspt --provider-type anthropic --list-models
 /// ```
-async fn list_available_models(
-    provider: &Arc<GenAIProvider>,
-    _config: &AppConfig,
-) -> Result<()> {
+async fn list_available_models(provider: &Arc<GenAIProvider>, _config: &AppConfig) -> Result<()> {
     // List all providers and their models
     let providers = provider.get_available_providers().await?;
-    
+
     for provider_name in providers {
         println!("Available models for {} provider:", provider_name);
         match provider.get_available_models(&provider_name).await {
@@ -473,7 +504,8 @@ async fn list_available_models(
 /// This function updates the global raw mode flag to enable proper cleanup
 /// in case of panics. The terminal state should always be restored using
 /// `cleanup_terminal()` or the panic handler will handle it automatically.
-fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>> {
+fn initialize_terminal() -> Result<ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>>
+{
     enable_raw_mode().context("Failed to enable raw mode")?;
     set_raw_mode_flag(true);
     let mut stdout = io::stdout();
@@ -557,7 +589,7 @@ fn cleanup_terminal() -> Result<()> {
 async fn initiate_llm_request(
     app: &mut ui::App,
     input_to_send: String,
-    provider: Arc<GenAIProvider>, 
+    provider: Arc<GenAIProvider>,
     model_name: &str,
     tx_llm: &mpsc::UnboundedSender<String>,
 ) {
@@ -566,20 +598,25 @@ async fn initiate_llm_request(
     app.streaming_buffer.clear(); // Clear any previous streaming buffer
 
     log::info!("Initiating LLM request for input: '{}'", input_to_send);
-    app.set_status(format!("Sending: {}...", truncate_message(&input_to_send, 20)), false);
+    app.set_status(
+        format!("Sending: {}...", truncate_message(&input_to_send, 20)),
+        false,
+    );
 
     let model_name_clone = model_name.to_string();
-    let _config_clone = app.config.clone(); 
+    let _config_clone = app.config.clone();
     let tx_clone_for_provider = tx_llm.clone();
     let input_clone = input_to_send.clone();
 
     tokio::spawn(async move {
         // Use the provider's streaming method with proper genai streaming
-        let result = provider.generate_response_stream_to_channel(
-            &model_name_clone,
-            &input_clone,
-            tx_clone_for_provider.clone(),
-        ).await;
+        let result = provider
+            .generate_response_stream_to_channel(
+                &model_name_clone,
+                &input_clone,
+                tx_clone_for_provider.clone(),
+            )
+            .await;
 
         match result {
             Ok(()) => {
@@ -669,10 +706,10 @@ fn truncate_message(s: &str, max_chars: usize) -> String {
 /// application stability. Critical errors are logged for debugging.
 pub async fn handle_events(
     app: &mut ui::App,
-    tx_llm: &mpsc::UnboundedSender<String>, 
+    tx_llm: &mpsc::UnboundedSender<String>,
     _api_key: &String,
     model_name: &String,
-    provider: &Arc<GenAIProvider>, 
+    provider: &Arc<GenAIProvider>,
 ) -> Option<AppEvent> {
     if let Ok(event) = event::read() {
         match event {
@@ -716,13 +753,23 @@ pub async fn handle_events(
                                 app.clear_error();
 
                                 // Start LLM request
-                                initiate_llm_request(app, input_to_send, Arc::clone(provider), model_name, tx_llm).await;
+                                initiate_llm_request(
+                                    app,
+                                    input_to_send,
+                                    Arc::clone(provider),
+                                    model_name,
+                                    tx_llm,
+                                )
+                                .await;
                             } else if app.is_input_disabled && !app.input_text.trim().is_empty() {
                                 // Queue the input if LLM is busy
                                 let input_to_queue = app.input_text.trim().to_string();
                                 app.pending_inputs.push_back(input_to_queue);
                                 app.input_text.clear();
-                                app.set_status(format!("Message queued (queue: {})", app.pending_inputs.len()), false);
+                                app.set_status(
+                                    format!("Message queued (queue: {})", app.pending_inputs.len()),
+                                    false,
+                                );
                             }
                             return Some(AppEvent::Key(key));
                         }
