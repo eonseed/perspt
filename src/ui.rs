@@ -46,23 +46,31 @@
 //! ```
 
 // src/ui.rs
+use anyhow::Result;
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Alignment, Rect},
-    style::{Color, Style, Stylize, Modifier},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap, ScrollbarState, BorderType, Clear, Gauge, Scrollbar, ScrollbarOrientation},
-    Terminal, Frame,
+    widgets::{
+        Block, BorderType, Borders, Clear, Gauge, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Wrap,
+    },
+    Frame, Terminal,
 };
-use std::{collections::VecDeque, io, time::{Duration, Instant}, sync::Arc};
-use anyhow::Result;
+use std::{
+    collections::VecDeque,
+    io,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use crate::config::AppConfig;
 use crate::llm_provider::GenAIProvider;
 use tokio::sync::mpsc;
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyEvent},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     terminal::{self, LeaveAlternateScreen},
     ExecutableCommand,
 };
@@ -202,7 +210,7 @@ pub struct App {
     pub should_quit: bool,
     scroll_state: ScrollbarState,
     pub scroll_position: usize,
-    pub is_input_disabled: bool, 
+    pub is_input_disabled: bool,
     pub pending_inputs: VecDeque<String>,
     pub is_llm_busy: bool,
     pub current_error: Option<ErrorState>,
@@ -322,7 +330,7 @@ impl App {
             cursor_blink_state: true,
             last_cursor_blink: Instant::now(),
             terminal_height: 24, // Default height, will be updated during render
-            terminal_width: 80, // Default width, will be updated during render
+            terminal_width: 80,  // Default width, will be updated during render
         }
     }
 
@@ -350,7 +358,7 @@ impl App {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         // Format as HH:MM
         let hours = (timestamp / 3600) % 24;
         let minutes = (timestamp / 60) % 60;
@@ -382,7 +390,7 @@ impl App {
     ///     content: vec![Line::from("Hello!")],
     ///     timestamp: String::new(), // Will be set automatically
     /// };
-    /// 
+    ///
     /// app.add_message(message);
     /// ```
     pub fn add_message(&mut self, mut message: ChatMessage) {
@@ -421,13 +429,11 @@ impl App {
     /// ```
     pub fn add_error(&mut self, error: ErrorState) {
         self.current_error = Some(error.clone());
-        
-        let error_content = vec![
-            Line::from(vec![
-                Span::styled("❌ Error: ", Style::default().fg(Color::Red).bold()),
-                Span::styled(error.message.clone(), Style::default().fg(Color::Red)),
-            ]),
-        ];
+
+        let error_content = vec![Line::from(vec![
+            Span::styled("❌ Error: ", Style::default().fg(Color::Red).bold()),
+            Span::styled(error.message.clone(), Style::default().fg(Color::Red)),
+        ])];
 
         let mut full_content = error_content;
         if let Some(details) = &error.details {
@@ -629,25 +635,28 @@ impl App {
         // Calculate visible height for the chat area
         let chat_area_height = self.terminal_height.saturating_sub(11).max(1);
         let visible_height = chat_area_height.saturating_sub(2).max(1); // Account for borders
-        
+
         // Calculate terminal width for text wrapping calculations
         let chat_width = self.input_width.saturating_sub(4).max(20); // Account for borders and padding
-        
+
         // Calculate the actual rendered lines accounting for text wrapping
-        let total_rendered_lines: usize = self.chat_history
+        let total_rendered_lines: usize = self
+            .chat_history
             .iter()
             .map(|msg| {
                 let mut lines = 0;
-                
+
                 // Header line (always 1 line)
                 lines += 1;
-                
+
                 // Content lines - account for text wrapping
                 for line in &msg.content {
-                    let line_text = line.spans.iter()
+                    let line_text = line
+                        .spans
+                        .iter()
                         .map(|span| span.content.as_ref())
                         .collect::<String>();
-                    
+
                     if line_text.trim().is_empty() {
                         lines += 1; // Empty lines
                     } else {
@@ -661,14 +670,14 @@ impl App {
                         }
                     }
                 }
-                
+
                 // Separator line after each message (always 1 line)
                 lines += 1;
-                
+
                 lines
             })
             .sum();
-        
+
         // Return scroll position that ensures content is accessible
         // Be more conservative to ensure the last lines are always visible
         if total_rendered_lines > visible_height {
@@ -715,22 +724,25 @@ impl App {
     pub fn update_scroll_state(&mut self) {
         // Calculate terminal width for text wrapping calculations
         let chat_width = self.input_width.saturating_sub(4).max(20); // Account for borders and padding
-        
+
         // Calculate total rendered lines accounting for text wrapping
-        let total_rendered_lines: usize = self.chat_history
+        let total_rendered_lines: usize = self
+            .chat_history
             .iter()
             .map(|msg| {
                 let mut lines = 0;
-                
+
                 // Header line (always 1 line)
                 lines += 1;
-                
+
                 // Content lines - account for text wrapping
                 for line in &msg.content {
-                    let line_text = line.spans.iter()
+                    let line_text = line
+                        .spans
+                        .iter()
                         .map(|span| span.content.as_ref())
                         .collect::<String>();
-                    
+
                     if line_text.trim().is_empty() {
                         lines += 1; // Empty lines
                     } else {
@@ -744,15 +756,16 @@ impl App {
                         }
                     }
                 }
-                
+
                 // Separator line after each message (always 1 line)
                 lines += 1;
-                
+
                 lines
             })
             .sum();
-        
-        self.scroll_state = self.scroll_state
+
+        self.scroll_state = self
+            .scroll_state
             .content_length(total_rendered_lines.max(1))
             .position(self.scroll_position);
     }
@@ -827,7 +840,7 @@ impl App {
     /// Update input scroll to keep cursor visible
     fn update_input_scroll(&mut self) {
         let visible_width = self.input_width.saturating_sub(4); // Account for borders and padding
-        
+
         if self.cursor_position < self.input_scroll_offset {
             self.input_scroll_offset = self.cursor_position;
         } else if self.cursor_position >= self.input_scroll_offset + visible_width {
@@ -871,12 +884,12 @@ impl App {
             log::warn!("Starting new stream while already busy - forcing clean state");
             self.finish_streaming();
         }
-        
+
         self.is_llm_busy = true;
         self.is_input_disabled = true;
         self.response_progress = 0.0;
         self.streaming_buffer.clear();
-        
+
         // Create a new assistant message immediately to ensure we have a dedicated message for this streaming session
         let initial_message = ChatMessage {
             message_type: MessageType::Assistant,
@@ -885,7 +898,7 @@ impl App {
             raw_content: String::new(), // Will be filled as we receive chunks
         };
         self.chat_history.push(initial_message);
-        
+
         self.needs_redraw = true;
         self.typing_indicator = "⠋".to_string(); // Start with first spinner frame
         self.set_status("🚀 Sending request...".to_string(), false);
@@ -894,23 +907,35 @@ impl App {
 
     /// Finish streaming response with clean state reset and final content preservation
     pub fn finish_streaming(&mut self) {
-        log::debug!("Finishing streaming mode, buffer has {} chars", self.streaming_buffer.len());
-        
+        log::debug!(
+            "Finishing streaming mode, buffer has {} chars",
+            self.streaming_buffer.len()
+        );
+
         // CRITICAL FIX: Always force final UI update regardless of throttling
         // This ensures that all accumulated content in the buffer gets transferred to the chat message
         if !self.streaming_buffer.is_empty() {
-            log::debug!("Forcing final UI update with {} chars in buffer", self.streaming_buffer.len());
-            
+            log::debug!(
+                "Forcing final UI update with {} chars in buffer",
+                self.streaming_buffer.len()
+            );
+
             if let Some(last_msg) = self.chat_history.last_mut() {
                 if last_msg.message_type == MessageType::Assistant {
                     // Force final update of the assistant message with complete content
                     last_msg.content = markdown_to_lines(&self.streaming_buffer);
                     last_msg.raw_content = self.streaming_buffer.clone();
                     last_msg.timestamp = Self::get_timestamp();
-                    log::debug!("FINAL UPDATE: Assistant message now has {} lines of content", last_msg.content.len());
+                    log::debug!(
+                        "FINAL UPDATE: Assistant message now has {} lines of content",
+                        last_msg.content.len()
+                    );
                 } else {
                     // This shouldn't happen with our new approach, but handle gracefully
-                    log::warn!("Expected assistant message at end of streaming but found {:?}", last_msg.message_type);
+                    log::warn!(
+                        "Expected assistant message at end of streaming but found {:?}",
+                        last_msg.message_type
+                    );
                     self.add_streaming_message();
                     log::debug!("Added new assistant message with final content");
                 }
@@ -920,12 +945,19 @@ impl App {
                 self.add_streaming_message();
                 log::debug!("Added assistant message to empty chat history");
             }
-            
+
             // Log the final content for debugging
             if let Some(last_msg) = self.chat_history.last() {
                 if last_msg.message_type == MessageType::Assistant {
-                    let content_preview = last_msg.content.iter()
-                        .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect::<String>())
+                    let content_preview = last_msg
+                        .content
+                        .iter()
+                        .map(|line| {
+                            line.spans
+                                .iter()
+                                .map(|span| span.content.as_ref())
+                                .collect::<String>()
+                        })
                         .collect::<Vec<_>>()
                         .join(" ")
                         .chars()
@@ -939,12 +971,12 @@ impl App {
             if let Some(last_msg) = self.chat_history.last() {
                 if last_msg.message_type == MessageType::Assistant {
                     // Check if this looks like our placeholder (empty or just "...")
-                    let is_placeholder = last_msg.content.is_empty() ||
-                        (last_msg.content.len() == 1 && 
-                         last_msg.content[0].spans.len() == 1 &&
-                         (last_msg.content[0].spans[0].content == "..." || 
-                          last_msg.content[0].spans[0].content.trim().is_empty()));
-                    
+                    let is_placeholder = last_msg.content.is_empty()
+                        || (last_msg.content.len() == 1
+                            && last_msg.content[0].spans.len() == 1
+                            && (last_msg.content[0].spans[0].content == "..."
+                                || last_msg.content[0].spans[0].content.trim().is_empty()));
+
                     if is_placeholder {
                         self.chat_history.pop();
                         log::debug!("Removed placeholder assistant message (no content received)");
@@ -953,31 +985,38 @@ impl App {
             }
             log::debug!("No content in streaming buffer to finalize");
         }
-        
+
         // Clear the buffer AFTER ensuring content is saved to prevent race conditions
         self.streaming_buffer.clear();
-        
+
         // Reset streaming state
         self.is_llm_busy = false;
         self.is_input_disabled = false;
         self.response_progress = 1.0; // Show completion
         self.typing_indicator.clear();
-        
+
         // Ensure final content is visible
         self.scroll_to_bottom();
         self.needs_redraw = true;
-        
+
         // Debug: Log final scroll state for long responses
         if !self.streaming_buffer.is_empty() && self.streaming_buffer.len() > 1000 {
-            log::debug!("Final streaming scroll state: position={}, max_scroll={}, buffer_len={}", 
-                       self.scroll_position, self.max_scroll(), self.streaming_buffer.len());
+            log::debug!(
+                "Final streaming scroll state: position={}, max_scroll={}, buffer_len={}",
+                self.scroll_position,
+                self.max_scroll(),
+                self.streaming_buffer.len()
+            );
         }
-        
+
         // Update status
         self.set_status("✅ Ready".to_string(), false);
         self.clear_error();
-        
-        log::debug!("Streaming mode finished successfully, chat history has {} messages", self.chat_history.len());
+
+        log::debug!(
+            "Streaming mode finished successfully, chat history has {} messages",
+            self.chat_history.len()
+        );
     }
 
     /// Update streaming content with optimized rendering and immediate feedback
@@ -986,7 +1025,7 @@ impl App {
         if content.is_empty() {
             return;
         }
-        
+
         // Prevent buffer overflow - if buffer gets too large, start replacing old content
         if self.streaming_buffer.len() + content.len() > MAX_STREAMING_BUFFER_SIZE {
             log::warn!("Streaming buffer approaching limit, truncating old content");
@@ -994,9 +1033,9 @@ impl App {
             let keep_from = self.streaming_buffer.len() / 5;
             self.streaming_buffer = self.streaming_buffer[keep_from..].to_string();
         }
-        
+
         self.streaming_buffer.push_str(content);
-        
+
         // Update the message content with latest streaming data
         if let Some(last_msg) = self.chat_history.last_mut() {
             if last_msg.message_type == MessageType::Assistant {
@@ -1005,19 +1044,24 @@ impl App {
                 last_msg.raw_content = self.streaming_buffer.clone();
                 last_msg.timestamp = Self::get_timestamp();
             } else {
-                log::warn!("Expected assistant message but found {:?}, creating new assistant message", last_msg.message_type);
+                log::warn!(
+                    "Expected assistant message but found {:?}, creating new assistant message",
+                    last_msg.message_type
+                );
                 self.add_streaming_message();
             }
         } else {
-            log::warn!("No messages in chat history during streaming, creating new assistant message");
+            log::warn!(
+                "No messages in chat history during streaming, creating new assistant message"
+            );
             self.add_streaming_message();
         }
-        
+
         // Always scroll to bottom to ensure new content is visible
         self.scroll_to_bottom();
-        
+
         // Mark for UI redraw - use simpler logic for better responsiveness
-        let should_redraw = 
+        let should_redraw =
             // Always update for small content (responsive for short responses)
             self.streaming_buffer.len() < SMALL_BUFFER_THRESHOLD ||
             // Regular interval updates for longer content
@@ -1028,18 +1072,22 @@ impl App {
             content.contains("##") ||      // Headers
             content.ends_with(". ") ||     // Sentence endings
             content.ends_with("? ") ||     // Questions
-            content.ends_with("! ");       // Exclamations
-        
+            content.ends_with("! "); // Exclamations
+
         if should_redraw {
             self.needs_redraw = true;
-            
+
             // Update status with progress info
-            self.set_status(format!("{}  Receiving response... ({} chars, {}% complete)", 
-                self.typing_indicator, 
-                self.streaming_buffer.len(),
-                (self.response_progress * 100.0) as u8
-            ), false);
-            
+            self.set_status(
+                format!(
+                    "{}  Receiving response... ({} chars, {}% complete)",
+                    self.typing_indicator,
+                    self.streaming_buffer.len(),
+                    (self.response_progress * 100.0) as u8
+                ),
+                false,
+            );
+
             // Update progress
             self.response_progress = (self.response_progress + 0.05).min(0.95);
         } else {
@@ -1062,7 +1110,7 @@ impl App {
     /// Tick for animations and periodic updates with smoother frame rate
     pub fn tick(&mut self) {
         let now = Instant::now();
-        
+
         // Handle cursor blinking
         if now.duration_since(self.last_cursor_blink) >= Duration::from_millis(500) {
             self.cursor_blink_state = !self.cursor_blink_state;
@@ -1071,7 +1119,7 @@ impl App {
                 self.needs_redraw = true;
             }
         }
-        
+
         // Increase animation frequency for smoother experience
         if now.duration_since(self.last_animation_tick) >= Duration::from_millis(50) {
             if self.is_llm_busy {
@@ -1108,16 +1156,17 @@ impl App {
     pub fn save_conversation(&self, filename: Option<String>) -> Result<String> {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
-        
+
         // Check if there's any conversation to save (exclude system messages)
-        let has_conversation = self.chat_history.iter().any(|msg| 
-            matches!(msg.message_type, MessageType::User | MessageType::Assistant)
-        );
-        
+        let has_conversation = self
+            .chat_history
+            .iter()
+            .any(|msg| matches!(msg.message_type, MessageType::User | MessageType::Assistant));
+
         if !has_conversation {
             return Err(anyhow::anyhow!("No conversation to save"));
         }
-        
+
         let filename = filename.unwrap_or_else(|| {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -1125,25 +1174,31 @@ impl App {
                 .as_secs();
             format!("conversation_{}.txt", timestamp)
         });
-        
+
         let mut content = String::new();
         content.push_str("Perspt Conversation\n");
         content.push_str(&"=".repeat(18));
         content.push('\n');
         content.push('\n');
-        
+
         for msg in &self.chat_history {
             match msg.message_type {
                 MessageType::User => {
-                    content.push_str(&format!("[{}] User:\n{}\n\n", msg.timestamp, msg.raw_content));
+                    content.push_str(&format!(
+                        "[{}] User:\n{}\n\n",
+                        msg.timestamp, msg.raw_content
+                    ));
                 }
                 MessageType::Assistant => {
-                    content.push_str(&format!("[{}] Assistant:\n{}\n\n", msg.timestamp, msg.raw_content));
+                    content.push_str(&format!(
+                        "[{}] Assistant:\n{}\n\n",
+                        msg.timestamp, msg.raw_content
+                    ));
                 }
                 _ => {} // Skip system messages
             }
         }
-        
+
         fs::write(&filename, content)?;
         Ok(filename)
     }
@@ -1154,15 +1209,15 @@ impl App {
 /// This improved version separates event handling from rendering and provides
 /// immediate feedback for user input without blocking timeouts.
 pub async fn run_ui(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, 
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     config: AppConfig,
-    model_name: String, 
+    model_name: String,
     api_key: String,
-    provider: Arc<GenAIProvider>
+    provider: Arc<GenAIProvider>,
 ) -> Result<()> {
     let mut app = App::new(config);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    
+
     // Create event stream for responsive event handling
     let mut event_stream = EventStream::new();
     let mut tick_interval = tokio::time::interval(Duration::from_millis(50)); // Slower tick for efficiency
@@ -1180,24 +1235,24 @@ pub async fn run_ui(
                     while let Ok(additional_message) = rx.try_recv() {
                         all_messages.push(additional_message);
                     }
-                    
+
                     log::info!("=== UI PROCESSING === {} messages received", all_messages.len());
-                    
+
                     // Process EOT signals FIRST to prevent state confusion
                     let mut content_messages: Vec<String> = Vec::new();
                     let mut eot_count = 0;
                     let mut total_content_chars = 0;
-                    
+
                     for (i, msg) in all_messages.iter().enumerate() {
                         if msg == crate::EOT_SIGNAL {
                             eot_count += 1;
                             log::info!(">>> EOT SIGNAL #{} found at position {} <<<", eot_count, i);
                             if eot_count == 1 {
                                 // Process all accumulated content before first EOT
-                                log::info!("Processing {} content messages before EOT ({} total chars)", 
+                                log::info!("Processing {} content messages before EOT ({} total chars)",
                                           content_messages.len(), total_content_chars);
                                 for (j, content_msg) in content_messages.iter().enumerate() {
-                                    log::debug!("Processing content message {}/{}: {} chars", 
+                                    log::debug!("Processing content message {}/{}: {} chars",
                                                j+1, content_messages.len(), content_msg.len());
                                     handle_llm_response(&mut app, content_msg.clone(), &provider, &model_name, &tx).await;
                                 }
@@ -1214,17 +1269,17 @@ pub async fn run_ui(
                             content_messages.push(msg.clone());
                         }
                     }
-                    
+
                     // If no EOT signal, process remaining content messages
                     if eot_count == 0 {
-                        log::info!("No EOT signal found, processing {} remaining content messages ({} chars)", 
+                        log::info!("No EOT signal found, processing {} remaining content messages ({} chars)",
                                   content_messages.len(), total_content_chars);
                         for (j, content_msg) in content_messages.into_iter().enumerate() {
                             log::debug!("Processing remaining content message {}: {} chars", j+1, content_msg.len());
                             handle_llm_response(&mut app, content_msg, &provider, &model_name, &tx).await;
                         }
                     }
-                    
+
                     app.needs_redraw = true;
                     // Force immediate redraw for streaming responses
                     terminal.draw(|f| {
@@ -1233,7 +1288,7 @@ pub async fn run_ui(
                     app.needs_redraw = false;
                 }
             }
-            
+
             // Second priority: Handle terminal events for user interaction
             event_result = event_stream.next() => {
                 if let Some(Ok(event)) = event_result {
@@ -1253,11 +1308,11 @@ pub async fn run_ui(
                     }
                 }
             }
-            
+
             // Third priority: Regular rendering updates
             _ = render_interval.tick() => {
                 app.tick(); // Handle animations and cursor blinking
-                
+
                 if app.needs_redraw {
                     terminal.draw(|f| {
                         draw_enhanced_ui(f, &mut app, &model_name);
@@ -1265,7 +1320,7 @@ pub async fn run_ui(
                     app.needs_redraw = false;
                 }
             }
-            
+
             // Lowest priority: General tick for cleanup and background tasks
             _ = tick_interval.tick() => {
                 // Additional background processing if needed
@@ -1280,7 +1335,7 @@ pub async fn run_ui(
     // Cleanup terminal
     terminal::disable_raw_mode()?;
     terminal.backend_mut().execute(LeaveAlternateScreen)?;
-    
+
     Ok(())
 }
 
@@ -1323,17 +1378,19 @@ async fn handle_terminal_event(
         Event::Key(key) if key.kind == KeyEventKind::Press => {
             match key.code {
                 // Quit commands
-                KeyCode::Char('q') | KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyCode::Char('q') | KeyCode::Char('c')
+                    if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
                     app.should_quit = true;
                     return Some(AppEvent::Quit);
                 }
-                
+
                 // Help toggle
                 KeyCode::F(1) => {
                     app.show_help = !app.show_help;
                     return Some(AppEvent::Redraw);
                 }
-                
+
                 // Escape key
                 KeyCode::Esc => {
                     if app.show_help {
@@ -1344,7 +1401,7 @@ async fn handle_terminal_event(
                         return Some(AppEvent::Quit);
                     }
                 }
-                
+
                 // Send message
                 KeyCode::Enter => {
                     if let Some(input) = app.take_input() {
@@ -1352,38 +1409,45 @@ async fn handle_terminal_event(
                         if input.starts_with('/') {
                             let command = input.trim_start_matches('/').trim();
                             match command {
-                                "save" => {
-                                    match app.save_conversation(None) {
-                                        Ok(filename) => {
-                                            app.add_message(ChatMessage {
-                                                message_type: MessageType::System,
-                                                content: vec![Line::from(format!("✅ Conversation saved to: {}", filename))],
-                                                timestamp: App::get_timestamp(),
-                                                raw_content: format!("Conversation saved to: {}", filename),
-                                            });
-                                        }
-                                        Err(e) => {
-                                            app.add_message(ChatMessage {
-                                                message_type: MessageType::Error,
-                                                content: vec![Line::from(format!("❌ Error: {}", e))],
-                                                timestamp: App::get_timestamp(),
-                                                raw_content: format!("Error: {}", e),
-                                            });
-                                        }
+                                "save" => match app.save_conversation(None) {
+                                    Ok(filename) => {
+                                        app.add_message(ChatMessage {
+                                            message_type: MessageType::System,
+                                            content: vec![Line::from(format!(
+                                                "✅ Conversation saved to: {}",
+                                                filename
+                                            ))],
+                                            timestamp: App::get_timestamp(),
+                                            raw_content: format!(
+                                                "Conversation saved to: {}",
+                                                filename
+                                            ),
+                                        });
                                     }
-                                }
+                                    Err(e) => {
+                                        app.add_message(ChatMessage {
+                                            message_type: MessageType::Error,
+                                            content: vec![Line::from(format!("❌ Error: {}", e))],
+                                            timestamp: App::get_timestamp(),
+                                            raw_content: format!("Error: {}", e),
+                                        });
+                                    }
+                                },
                                 _ => {
                                     app.add_message(ChatMessage {
                                         message_type: MessageType::Error,
-                                        content: vec![Line::from("❌ Unknown command. Available: /save")],
+                                        content: vec![Line::from(
+                                            "❌ Unknown command. Available: /save",
+                                        )],
                                         timestamp: App::get_timestamp(),
-                                        raw_content: "Unknown command. Available: /save".to_string(),
+                                        raw_content: "Unknown command. Available: /save"
+                                            .to_string(),
                                     });
                                 }
                             }
                             return Some(AppEvent::Redraw);
                         }
-                        
+
                         // Add user message immediately for instant feedback
                         app.add_message(ChatMessage {
                             message_type: MessageType::User,
@@ -1391,7 +1455,7 @@ async fn handle_terminal_event(
                             timestamp: App::get_timestamp(),
                             raw_content: input.clone(),
                         });
-                        
+
                         // Start LLM request
                         app.start_streaming();
                         tokio::spawn(initiate_llm_request_enhanced(
@@ -1400,18 +1464,21 @@ async fn handle_terminal_event(
                             model_name.to_string(),
                             tx.clone(),
                         ));
-                        
+
                         return Some(AppEvent::Redraw);
                     } else if app.is_input_disabled && !app.input_text.trim().is_empty() {
                         // Queue input if busy
                         let input = app.input_text.trim().to_string();
                         app.pending_inputs.push_back(input);
                         app.clear_input();
-                        app.set_status(format!("Message queued ({})", app.pending_inputs.len()), false);
+                        app.set_status(
+                            format!("Message queued ({})", app.pending_inputs.len()),
+                            false,
+                        );
                         return Some(AppEvent::Redraw);
                     }
                 }
-                
+
                 // Character input
                 KeyCode::Char(c) => {
                     if !app.show_help {
@@ -1419,7 +1486,7 @@ async fn handle_terminal_event(
                         return Some(AppEvent::Redraw);
                     }
                 }
-                
+
                 // Backspace
                 KeyCode::Backspace => {
                     if !app.show_help {
@@ -1427,7 +1494,7 @@ async fn handle_terminal_event(
                         return Some(AppEvent::Redraw);
                     }
                 }
-                
+
                 // Delete
                 KeyCode::Delete => {
                     if !app.show_help {
@@ -1435,7 +1502,7 @@ async fn handle_terminal_event(
                         return Some(AppEvent::Redraw);
                     }
                 }
-                
+
                 // Cursor movement
                 KeyCode::Left => {
                     if !app.show_help {
@@ -1466,7 +1533,7 @@ async fn handle_terminal_event(
                     }
                     return Some(AppEvent::Redraw);
                 }
-                
+
                 // Scrolling
                 KeyCode::Up => {
                     app.scroll_up();
@@ -1488,18 +1555,18 @@ async fn handle_terminal_event(
                     }
                     return Some(AppEvent::Redraw);
                 }
-                
+
                 _ => {}
             }
         }
-        
+
         Event::Resize(_, _) => {
             return Some(AppEvent::Redraw);
         }
-        
+
         _ => {}
     }
-    
+
     None
 }
 
@@ -1511,13 +1578,11 @@ async fn initiate_llm_request_enhanced(
     tx: mpsc::UnboundedSender<String>,
 ) {
     // log::info!("Starting enhanced LLM request: {}", input); // Removed to prevent TUI interference
-    
-    let result = provider.generate_response_stream_to_channel(
-        &model_name,
-        &input,
-        tx.clone(),
-    ).await;
-    
+
+    let result = provider
+        .generate_response_stream_to_channel(&model_name, &input, tx.clone())
+        .await;
+
     match result {
         Ok(()) => {
             log::debug!("Streaming completed successfully");
@@ -1541,9 +1606,12 @@ async fn handle_llm_response(
 ) {
     if message == crate::EOT_SIGNAL {
         // End of response - CRITICAL: Ensure this is processed immediately
-        log::info!(">>> RECEIVED EOT SIGNAL - finishing streaming (busy: {}, buffer: {} chars) <<<", 
-                   app.is_llm_busy, app.streaming_buffer.len());
-        
+        log::info!(
+            ">>> RECEIVED EOT SIGNAL - finishing streaming (busy: {}, buffer: {} chars) <<<",
+            app.is_llm_busy,
+            app.streaming_buffer.len()
+        );
+
         // Always finish streaming when we get EOT, even if state seems wrong
         if app.is_llm_busy {
             log::info!("Calling finish_streaming() due to EOT");
@@ -1554,22 +1622,25 @@ async fn handle_llm_response(
             app.is_input_disabled = false;
             app.scroll_to_bottom(); // Ensure we're scrolled to bottom when re-enabling input
         }
-        
+
         // Ensure the UI has processed the finish_streaming state change
         app.needs_redraw = true;
-        
+
         // Process pending inputs ONLY after confirming we're in clean state
         if !app.is_llm_busy && !app.pending_inputs.is_empty() {
             let pending_input = app.pending_inputs.pop_front().unwrap();
-            log::info!("Processing pending input after EOT: {} chars", pending_input.len());
-            
+            log::info!(
+                "Processing pending input after EOT: {} chars",
+                pending_input.len()
+            );
+
             app.add_message(ChatMessage {
                 message_type: MessageType::User,
                 content: vec![Line::from(pending_input.clone())],
                 timestamp: App::get_timestamp(),
                 raw_content: pending_input.clone(),
             });
-            
+
             // Start new streaming session with clean state
             app.start_streaming();
             tokio::spawn(initiate_llm_request_enhanced(
@@ -1596,44 +1667,86 @@ async fn handle_llm_response(
             static TOTAL_CONTENT_RECEIVED: std::cell::Cell<usize> = std::cell::Cell::new(0);
             static CHUNK_COUNT: std::cell::Cell<usize> = std::cell::Cell::new(0);
         }
-        
+
         let chunk_count = CHUNK_COUNT.with(|c| {
             let count = c.get() + 1;
             c.set(count);
             count
         });
-        
+
         let total_received = TOTAL_CONTENT_RECEIVED.with(|t| {
             let total = t.get() + message.len();
             t.set(total);
             total
         });
-        
+
         // Log every 25 chunks or large content chunks
         if chunk_count % 25 == 0 || message.len() > 100 {
-            log::info!("STREAMING: chunk #{}, {} chars, total {} chars, buffer: {} chars", 
-                      chunk_count, message.len(), total_received, app.streaming_buffer.len());
+            log::info!(
+                "STREAMING: chunk #{}, {} chars, total {} chars, buffer: {} chars",
+                chunk_count,
+                message.len(),
+                total_received,
+                app.streaming_buffer.len()
+            );
         }
-        
+
         app.update_streaming_content(&message);
-        app.set_status(format!("{}  Receiving response...", app.typing_indicator), false);
+        app.set_status(
+            format!("{}  Receiving response...", app.typing_indicator),
+            false,
+        );
     }
 }
 
 /// Categorizes error messages into specific error types with helpful details
 fn categorize_error(error_msg: &str) -> ErrorState {
     let error_lower = error_msg.to_lowercase();
-    
-    let (error_type, message, details) = if error_lower.contains("api key") || error_lower.contains("unauthorized") || error_lower.contains("authentication") {
-        (ErrorType::Authentication, "Authentication failed".to_string(), Some("Please check your API key is valid and has the necessary permissions.".to_string()))
+
+    let (error_type, message, details) = if error_lower.contains("api key")
+        || error_lower.contains("unauthorized")
+        || error_lower.contains("authentication")
+    {
+        (
+            ErrorType::Authentication,
+            "Authentication failed".to_string(),
+            Some(
+                "Please check your API key is valid and has the necessary permissions.".to_string(),
+            ),
+        )
     } else if error_lower.contains("rate limit") || error_lower.contains("too many requests") {
-        (ErrorType::RateLimit, "Rate limit exceeded".to_string(), Some("Please wait a moment before sending another request.".to_string()))
-    } else if error_lower.contains("network") || error_lower.contains("connection") || error_lower.contains("timeout") {
-        (ErrorType::Network, "Network error".to_string(), Some("Please check your internet connection and try again.".to_string()))
+        (
+            ErrorType::RateLimit,
+            "Rate limit exceeded".to_string(),
+            Some("Please wait a moment before sending another request.".to_string()),
+        )
+    } else if error_lower.contains("network")
+        || error_lower.contains("connection")
+        || error_lower.contains("timeout")
+    {
+        (
+            ErrorType::Network,
+            "Network error".to_string(),
+            Some("Please check your internet connection and try again.".to_string()),
+        )
     } else if error_lower.contains("model") || error_lower.contains("invalid") {
-        (ErrorType::InvalidModel, "Invalid model or request".to_string(), Some("The specified model may not be available or the request format is incorrect.".to_string()))
-    } else if error_lower.contains("server") || error_lower.contains("5") || error_lower.contains("internal") {
-        (ErrorType::ServerError, "Server error".to_string(), Some("The AI service is experiencing issues. Please try again later.".to_string()))
+        (
+            ErrorType::InvalidModel,
+            "Invalid model or request".to_string(),
+            Some(
+                "The specified model may not be available or the request format is incorrect."
+                    .to_string(),
+            ),
+        )
+    } else if error_lower.contains("server")
+        || error_lower.contains("5")
+        || error_lower.contains("internal")
+    {
+        (
+            ErrorType::ServerError,
+            "Server error".to_string(),
+            Some("The AI service is experiencing issues. Please try again later.".to_string()),
+        )
     } else {
         (ErrorType::Unknown, error_msg.to_string(), None)
     };
@@ -1650,14 +1763,14 @@ fn draw_enhanced_ui(f: &mut Frame, app: &mut App, model_name: &str) {
     // Update terminal dimensions
     app.terminal_height = f.area().height as usize;
     app.terminal_width = f.area().width as usize;
-    
+
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(1),     // Chat area (flexible)
-            Constraint::Length(5),  // Input area (fixed size for better visibility)
-            Constraint::Length(3),  // Status line (increased to prevent overlap)
+            Constraint::Length(3), // Header
+            Constraint::Min(1),    // Chat area (flexible)
+            Constraint::Length(5), // Input area (fixed size for better visibility)
+            Constraint::Length(3), // Status line (increased to prevent overlap)
         ])
         .split(f.area());
 
@@ -1666,13 +1779,13 @@ fn draw_enhanced_ui(f: &mut Frame, app: &mut App, model_name: &str) {
 
     // Header with enhanced styling
     draw_enhanced_header(f, main_chunks[0], model_name, app);
-    
+
     // Chat history with scrollbar
     draw_enhanced_chat_area(f, main_chunks[1], app);
-    
+
     // Enhanced input area with cursor
     draw_enhanced_input_area(f, main_chunks[2], app);
-    
+
     // Status line with progress
     draw_enhanced_status_line(f, main_chunks[3], app);
 
@@ -1700,26 +1813,26 @@ fn draw_enhanced_header(f: &mut Frame, area: Rect, model_name: &str, app: &App) 
         Color::Green
     };
 
-    let header_content = vec![
-        Line::from(vec![
-            Span::styled("🧠 ", Style::default().fg(Color::Magenta)),
-            Span::styled("Perspt", Style::default().fg(Color::Magenta).bold()),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Model: ", Style::default().fg(Color::Gray)),
-            Span::styled(model_name, Style::default().fg(Color::Cyan).bold()),
-            Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Status: ", Style::default().fg(Color::Gray)),
-            Span::styled(status_text, Style::default().fg(status_color).bold()),
-        ]),
-    ];
+    let header_content = vec![Line::from(vec![
+        Span::styled("🧠 ", Style::default().fg(Color::Magenta)),
+        Span::styled("Perspt", Style::default().fg(Color::Magenta).bold()),
+        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Model: ", Style::default().fg(Color::Gray)),
+        Span::styled(model_name, Style::default().fg(Color::Cyan).bold()),
+        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Status: ", Style::default().fg(Color::Gray)),
+        Span::styled(status_text, Style::default().fg(status_color).bold()),
+    ])];
 
     let header = Paragraph::new(header_content)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Cyan))
-            .title(" AI Chat Terminal ")
-            .title_style(Style::default().fg(Color::Magenta).bold()))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" AI Chat Terminal ")
+                .title_style(Style::default().fg(Color::Magenta).bold()),
+        )
         .alignment(Alignment::Center);
 
     f.render_widget(header, area);
@@ -1728,7 +1841,7 @@ fn draw_enhanced_header(f: &mut Frame, area: Rect, model_name: &str, app: &App) 
 /// Enhanced chat area with better scrolling and formatting
 fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
     let mut chat_content: Vec<Line> = Vec::new();
-    
+
     for (_i, msg) in app.chat_history.iter().enumerate() {
         let (icon, style) = match msg.message_type {
             MessageType::User => ("👤", Style::default().fg(Color::Blue).bold()),
@@ -1737,7 +1850,7 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
             MessageType::System => ("ℹ️", Style::default().fg(Color::Cyan).bold()),
             MessageType::Warning => ("⚠️", Style::default().fg(Color::Yellow).bold()),
         };
-        
+
         // Add header line
         chat_content.push(Line::from(vec![
             Span::styled(icon, style),
@@ -1750,36 +1863,45 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
                     MessageType::System => "System",
                     MessageType::Warning => "Warning",
                 },
-                style
+                style,
             ),
-            Span::styled(format!(" • {}", msg.timestamp), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(" • {}", msg.timestamp),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
-        
+
         // Add message content
         chat_content.extend(msg.content.iter().cloned());
-        
+
         // Add separator line after each message for consistency
         chat_content.push(Line::from(""));
     }
 
     // Update the app's input width for accurate scroll calculations
     app.input_width = area.width as usize;
-    
+
     // Ensure scroll position is within bounds
     let max_scroll = app.max_scroll();
     if app.scroll_position > max_scroll {
         app.scroll_position = max_scroll;
     }
-    
+
     // Update scroll state
     app.update_scroll_state();
 
     // Debug: Log scroll information for troubleshooting
     let total_content_lines = chat_content.len();
     let visible_height = area.height.saturating_sub(2) as usize; // Account for borders
-    if total_content_lines > 20 { // Only log for substantial content
-        log::debug!("Scroll debug - total_content: {}, visible_height: {}, scroll_pos: {}, max_scroll: {}", 
-                   total_content_lines, visible_height, app.scroll_position, max_scroll);
+    if total_content_lines > 20 {
+        // Only log for substantial content
+        log::debug!(
+            "Scroll debug - total_content: {}, visible_height: {}, scroll_pos: {}, max_scroll: {}",
+            total_content_lines,
+            visible_height,
+            app.scroll_position,
+            max_scroll
+        );
     }
 
     // Create layout for chat and scrollbar
@@ -1790,12 +1912,14 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Use the calculated scroll position directly
     let chat_paragraph = Paragraph::new(chat_content)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::White))
-            .title(" Conversation ")
-            .title_style(Style::default().fg(Color::White).bold()))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::White))
+                .title(" Conversation ")
+                .title_style(Style::default().fg(Color::White).bold()),
+        )
         .wrap(Wrap { trim: false })
         .scroll((app.scroll_position as u16, 0));
 
@@ -1806,7 +1930,7 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
         .orientation(ScrollbarOrientation::VerticalRight)
         .begin_symbol(Some("↑"))
         .end_symbol(Some("↓"));
-    
+
     f.render_stateful_widget(scrollbar, chat_chunks[1], &mut app.scroll_state);
 }
 
@@ -1815,28 +1939,31 @@ fn draw_enhanced_input_area(f: &mut Frame, area: Rect, app: &App) {
     let input_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Input field
-            Constraint::Length(2),  // Progress bar or hint (properly sized)
+            Constraint::Length(3), // Input field
+            Constraint::Length(2), // Progress bar or hint (properly sized)
         ])
         .split(area);
 
     // Get visible input and cursor position
     let (visible_input, cursor_pos) = app.get_visible_input();
-    
+
     // Input field styling based on state
     let (border_color, title) = if app.is_input_disabled {
         (Color::DarkGray, " Input (Disabled - AI is thinking...) ")
     } else {
-        (Color::Green, " Type your message (Enter to send, F1 for help) ")
+        (
+            Color::Green,
+            " Type your message (Enter to send, F1 for help) ",
+        )
     };
 
     // Create input content with cursor
     let mut input_spans = vec![];
-    
+
     if app.is_input_disabled && visible_input.is_empty() {
         input_spans.push(Span::styled(
             "Waiting for AI response...",
-            Style::default().fg(Color::DarkGray).italic()
+            Style::default().fg(Color::DarkGray).italic(),
         ));
     } else {
         // Split text at cursor position for cursor rendering
@@ -1850,7 +1977,10 @@ fn draw_enhanced_input_area(f: &mut Frame, area: Rect, app: &App) {
         };
 
         if !before_cursor.is_empty() {
-            input_spans.push(Span::styled(before_cursor, Style::default().fg(Color::White)));
+            input_spans.push(Span::styled(
+                before_cursor,
+                Style::default().fg(Color::White),
+            ));
         }
 
         // Cursor character with highlighting and blinking
@@ -1860,25 +1990,27 @@ fn draw_enhanced_input_area(f: &mut Frame, area: Rect, app: &App) {
             } else {
                 Style::default().fg(Color::White).bg(Color::DarkGray)
             };
-            
-            input_spans.push(Span::styled(
-                at_cursor.to_string(),
-                cursor_style
-            ));
+
+            input_spans.push(Span::styled(at_cursor.to_string(), cursor_style));
         }
 
         if !after_cursor.is_empty() {
-            input_spans.push(Span::styled(after_cursor, Style::default().fg(Color::White)));
+            input_spans.push(Span::styled(
+                after_cursor,
+                Style::default().fg(Color::White),
+            ));
         }
     }
 
     let input_paragraph = Paragraph::new(Line::from(input_spans))
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color))
-            .title(title)
-            .title_style(Style::default().fg(border_color)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border_color))
+                .title(title)
+                .title_style(Style::default().fg(border_color)),
+        )
         .wrap(Wrap { trim: false });
 
     f.render_widget(input_paragraph, input_chunks[0]);
@@ -1886,40 +2018,51 @@ fn draw_enhanced_input_area(f: &mut Frame, area: Rect, app: &App) {
     // Progress bar or hint area - properly contained within its own area
     if app.is_llm_busy {
         let progress = Gauge::default()
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::Yellow)))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
             .gauge_style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
             .ratio(app.response_progress)
             .label(format!("{}  Processing response...", app.typing_indicator));
-        
+
         f.render_widget(progress, input_chunks[1]);
     } else if !app.pending_inputs.is_empty() {
         let queue_info = Paragraph::new(Line::from(vec![
             Span::styled("📋 Queued messages: ", Style::default().fg(Color::Blue)),
-            Span::styled(app.pending_inputs.len().to_string(), Style::default().fg(Color::Blue).bold()),
+            Span::styled(
+                app.pending_inputs.len().to_string(),
+                Style::default().fg(Color::Blue).bold(),
+            ),
         ]))
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Blue)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Blue)),
+        )
         .alignment(Alignment::Center);
-        
+
         f.render_widget(queue_info, input_chunks[1]);
     } else {
         // Show helpful hint when idle
         let hint = Paragraph::new(Line::from(vec![
             Span::styled("💡 ", Style::default().fg(Color::Yellow)),
-            Span::styled("Press F1 for help • Use ↑/↓ to scroll chat history", 
-                        Style::default().fg(Color::DarkGray).italic()),
+            Span::styled(
+                "Press F1 for help • Use ↑/↓ to scroll chat history",
+                Style::default().fg(Color::DarkGray).italic(),
+            ),
         ]))
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::DarkGray)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
         .alignment(Alignment::Center);
-        
+
         f.render_widget(hint, input_chunks[1]);
     }
 }
@@ -1941,22 +2084,25 @@ fn draw_enhanced_status_line(f: &mut Frame, area: Rect, app: &App) {
 
         vec![Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::Gray)),
-            Span::styled(&app.status_message, 
-                if app.is_llm_busy { 
-                    Style::default().fg(Color::Yellow) 
-                } else { 
-                    Style::default().fg(Color::Green) 
-                }),
+            Span::styled(
+                &app.status_message,
+                if app.is_llm_busy {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Green)
+                },
+            ),
             Span::styled(queue_info, Style::default().fg(Color::Blue)),
             Span::styled(" │ Ctrl+C to exit", Style::default().fg(Color::Gray)),
         ])]
     };
 
-    let status_paragraph = Paragraph::new(status_content)
-        .block(Block::default()
+    let status_paragraph = Paragraph::new(status_content).block(
+        Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Gray)));
+            .border_style(Style::default().fg(Color::Gray)),
+    );
 
     f.render_widget(status_paragraph, area);
 }
@@ -1985,40 +2131,102 @@ fn draw_enhanced_help_overlay(f: &mut Frame, _app: &App) {
 
     let help_content = vec![
         Line::from(""),
-        Line::from(vec![Span::styled("📖 Perspt Help & Shortcuts", Style::default().fg(Color::Magenta).bold())]),
+        Line::from(vec![Span::styled(
+            "📖 Perspt Help & Shortcuts",
+            Style::default().fg(Color::Magenta).bold(),
+        )]),
         Line::from(""),
-        Line::from(vec![Span::styled("🎹 Input Controls:", Style::default().fg(Color::Yellow).bold())]),
-        Line::from(vec![Span::styled("  Enter     ", Style::default().fg(Color::Cyan)), Span::styled("Send message", Style::default())]),
-        Line::from(vec![Span::styled("  ←/→       ", Style::default().fg(Color::Cyan)), Span::styled("Move cursor", Style::default())]),
-        Line::from(vec![Span::styled("  Home/End  ", Style::default().fg(Color::Cyan)), Span::styled("Start/End of line", Style::default())]),
-        Line::from(vec![Span::styled("  Backspace ", Style::default().fg(Color::Cyan)), Span::styled("Delete before cursor", Style::default())]),
-        Line::from(vec![Span::styled("  Delete    ", Style::default().fg(Color::Cyan)), Span::styled("Delete at cursor", Style::default())]),
+        Line::from(vec![Span::styled(
+            "🎹 Input Controls:",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("  Enter     ", Style::default().fg(Color::Cyan)),
+            Span::styled("Send message", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  ←/→       ", Style::default().fg(Color::Cyan)),
+            Span::styled("Move cursor", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Home/End  ", Style::default().fg(Color::Cyan)),
+            Span::styled("Start/End of line", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Backspace ", Style::default().fg(Color::Cyan)),
+            Span::styled("Delete before cursor", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Delete    ", Style::default().fg(Color::Cyan)),
+            Span::styled("Delete at cursor", Style::default()),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled("📜 Navigation:", Style::default().fg(Color::Yellow).bold())]),
-        Line::from(vec![Span::styled("  ↑/↓       ", Style::default().fg(Color::Cyan)), Span::styled("Scroll chat history", Style::default())]),
-        Line::from(vec![Span::styled("  PgUp/PgDn ", Style::default().fg(Color::Cyan)), Span::styled("Fast scroll", Style::default())]),
+        Line::from(vec![Span::styled(
+            "📜 Navigation:",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("  ↑/↓       ", Style::default().fg(Color::Cyan)),
+            Span::styled("Scroll chat history", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  PgUp/PgDn ", Style::default().fg(Color::Cyan)),
+            Span::styled("Fast scroll", Style::default()),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled("🔧 Application:", Style::default().fg(Color::Yellow).bold())]),
-        Line::from(vec![Span::styled("  F1        ", Style::default().fg(Color::Cyan)), Span::styled("Toggle this help", Style::default())]),
-        Line::from(vec![Span::styled("  Ctrl+C/Q  ", Style::default().fg(Color::Cyan)), Span::styled("Exit application", Style::default())]),
-        Line::from(vec![Span::styled("  Esc       ", Style::default().fg(Color::Cyan)), Span::styled("Close help/Exit", Style::default())]),
+        Line::from(vec![Span::styled(
+            "🔧 Application:",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![
+            Span::styled("  F1        ", Style::default().fg(Color::Cyan)),
+            Span::styled("Toggle this help", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Ctrl+C/Q  ", Style::default().fg(Color::Cyan)),
+            Span::styled("Exit application", Style::default()),
+        ]),
+        Line::from(vec![
+            Span::styled("  Esc       ", Style::default().fg(Color::Cyan)),
+            Span::styled("Close help/Exit", Style::default()),
+        ]),
         Line::from(""),
-        Line::from(vec![Span::styled("✨ Features:", Style::default().fg(Color::Yellow).bold())]),
-        Line::from(vec![Span::styled("  • Real-time streaming responses", Style::default().fg(Color::Green))]),
-        Line::from(vec![Span::styled("  • Input queuing during AI responses", Style::default().fg(Color::Green))]),
-        Line::from(vec![Span::styled("  • Full cursor navigation support", Style::default().fg(Color::Green))]),
-        Line::from(vec![Span::styled("  • Live markdown rendering", Style::default().fg(Color::Green))]),
+        Line::from(vec![Span::styled(
+            "✨ Features:",
+            Style::default().fg(Color::Yellow).bold(),
+        )]),
+        Line::from(vec![Span::styled(
+            "  • Real-time streaming responses",
+            Style::default().fg(Color::Green),
+        )]),
+        Line::from(vec![Span::styled(
+            "  • Input queuing during AI responses",
+            Style::default().fg(Color::Green),
+        )]),
+        Line::from(vec![Span::styled(
+            "  • Full cursor navigation support",
+            Style::default().fg(Color::Green),
+        )]),
+        Line::from(vec![Span::styled(
+            "  • Live markdown rendering",
+            Style::default().fg(Color::Green),
+        )]),
         Line::from(""),
-        Line::from(vec![Span::styled("Press F1 or Esc to close", Style::default().fg(Color::Gray).italic())]),
+        Line::from(vec![Span::styled(
+            "Press F1 or Esc to close",
+            Style::default().fg(Color::Gray).italic(),
+        )]),
     ];
 
     let help_popup = Paragraph::new(help_content)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Double)
-            .border_style(Style::default().fg(Color::Magenta))
-            .title(" Help ")
-            .title_style(Style::default().fg(Color::Magenta).bold()))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Color::Magenta))
+                .title(" Help ")
+                .title_style(Style::default().fg(Color::Magenta).bold()),
+        )
         .wrap(Wrap { trim: true })
         .alignment(Alignment::Left);
 
@@ -2105,44 +2313,49 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut in_code_block = false;
     let mut code_lang = String::new();
-    
+
     for line in markdown.lines() {
         if line.starts_with("```") {
             if in_code_block {
                 // End of code block
                 in_code_block = false;
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "└─────────────┘",
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    )
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "└─────────────┘",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )]));
                 code_lang.clear();
             } else {
                 // Start of code block
                 in_code_block = true;
                 code_lang = line.trim_start_matches("```").to_string();
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        format!("┌─ {} ─┐", if code_lang.is_empty() { "Code" } else { &code_lang }),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    )
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    format!(
+                        "┌─ {} ─┐",
+                        if code_lang.is_empty() {
+                            "Code"
+                        } else {
+                            &code_lang
+                        }
+                    ),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )]));
             }
             continue;
         }
-        
+
         if in_code_block {
             // Code block content
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("│ {}", line),
-                    Style::default().fg(Color::Cyan).bg(Color::DarkGray),
-                )
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("│ {}", line),
+                Style::default().fg(Color::Cyan).bg(Color::DarkGray),
+            )]));
             continue;
         }
-        
+
         // Handle headers
         if line.starts_with('#') {
             let level = line.chars().take_while(|c| *c == '#').count();
@@ -2153,19 +2366,21 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 3 => Color::Blue,
                 _ => Color::Cyan,
             };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{} {}", "#".repeat(level), title),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                )
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("{} {}", "#".repeat(level), title),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            )]));
             continue;
         }
-        
+
         // Handle lists
         if line.trim_start().starts_with('*') || line.trim_start().starts_with('-') {
             let indent = line.len() - line.trim_start().len();
-            let content = line.trim_start().trim_start_matches('*').trim_start_matches('-').trim();
+            let content = line
+                .trim_start()
+                .trim_start_matches('*')
+                .trim_start_matches('-')
+                .trim();
             lines.push(Line::from(vec![
                 Span::raw(" ".repeat(indent)),
                 Span::styled("• ", Style::default().fg(Color::Green)),
@@ -2173,7 +2388,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
             ]));
             continue;
         }
-        
+
         // Handle blockquotes
         if line.trim_start().starts_with('>') {
             let content = line.trim_start().trim_start_matches('>').trim();
@@ -2181,18 +2396,21 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
                 Span::styled("▎ ", Style::default().fg(Color::Blue)),
                 Span::styled(
                     parse_inline_markdown(content),
-                    Style::default().fg(Color::LightBlue).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(Color::LightBlue)
+                        .add_modifier(Modifier::ITALIC),
                 ),
             ]));
             continue;
         }
-        
+
         // Regular paragraph text
         if line.trim().is_empty() {
             // Only add empty line if the previous line was not empty to avoid excessive spacing
             if !lines.is_empty() {
                 if let Some(last_line) = lines.last() {
-                    if !last_line.spans.is_empty() && !last_line.spans[0].content.trim().is_empty() {
+                    if !last_line.spans.is_empty() && !last_line.spans[0].content.trim().is_empty()
+                    {
                         lines.push(Line::from(""));
                     }
                 }
@@ -2201,19 +2419,19 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
             lines.push(Line::from(parse_inline_markdown_to_spans(line)));
         }
     }
-    
+
     lines
 }
 
 /// Parse inline markdown elements like **bold**, *italic*, and `code`
 fn parse_inline_markdown(text: &str) -> String {
     let mut result = text.to_string();
-    
+
     // Remove markdown formatting for plain text
     result = result.replace("**", "");
     result = result.replace("*", "");
     result = result.replace("`", "");
-    
+
     result
 }
 
@@ -2222,7 +2440,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut chars = text.chars().peekable();
     let mut current_text = String::new();
-    
+
     while let Some(ch) = chars.next() {
         match ch {
             '*' => {
@@ -2233,7 +2451,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
                         spans.push(Span::raw(current_text.clone()));
                         current_text.clear();
                     }
-                    
+
                     let mut bold_text = String::new();
                     while let Some(ch) = chars.next() {
                         if ch == '*' && chars.peek() == Some(&'*') {
@@ -2252,7 +2470,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
                         spans.push(Span::raw(current_text.clone()));
                         current_text.clear();
                     }
-                    
+
                     let mut italic_text = String::new();
                     while let Some(ch) = chars.next() {
                         if ch == '*' {
@@ -2272,7 +2490,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
                     spans.push(Span::raw(current_text.clone()));
                     current_text.clear();
                 }
-                
+
                 let mut code_text = String::new();
                 while let Some(ch) = chars.next() {
                     if ch == '`' {
@@ -2290,16 +2508,14 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
             }
         }
     }
-    
+
     if !current_text.is_empty() {
         spans.push(Span::raw(current_text));
     }
-    
+
     if spans.is_empty() {
         spans.push(Span::raw(text.to_string()));
     }
-    
+
     spans
 }
-
-

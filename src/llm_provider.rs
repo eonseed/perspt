@@ -64,12 +64,12 @@
 //! ```
 
 use anyhow::{Context, Result};
-use genai::chat::{ChatMessage, ChatRequest, ChatOptions, ChatStreamEvent};
-use genai::{Client};
-use genai::adapter::AdapterKind;
 use futures::StreamExt;
-use tokio::sync::mpsc;
+use genai::adapter::AdapterKind;
+use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent};
+use genai::Client;
 use std::time::Instant;
+use tokio::sync::mpsc;
 
 /// A comprehensive LLM provider implementation using the modern genai crate.
 ///
@@ -206,7 +206,7 @@ impl GenAIProvider {
         if let (Some(provider), Some(key)) = (provider_type, api_key) {
             let env_var = match provider {
                 "openai" => "OPENAI_API_KEY",
-                "anthropic" => "ANTHROPIC_API_KEY", 
+                "anthropic" => "ANTHROPIC_API_KEY",
                 "gemini" => "GEMINI_API_KEY",
                 "groq" => "GROQ_API_KEY",
                 "cohere" => "COHERE_API_KEY",
@@ -221,7 +221,7 @@ impl GenAIProvider {
                     return Ok(Self::new()?);
                 }
             };
-            
+
             log::info!("Setting {} environment variable for genai client", env_var);
             std::env::set_var(env_var, key);
         }
@@ -269,7 +269,7 @@ impl GenAIProvider {
     ///
     /// ```rust
     /// let provider = GenAIProvider::new()?;
-    /// 
+    ///
     /// // Get OpenAI models
     /// let openai_models = provider.get_available_models("openai").await?;
     /// for model in openai_models {
@@ -281,10 +281,13 @@ impl GenAIProvider {
     /// ```
     pub async fn get_available_models(&self, provider: &str) -> Result<Vec<String>> {
         let adapter_kind = str_to_adapter_kind(provider)?;
-        
-        let models = self.client.all_model_names(adapter_kind).await
+
+        let models = self
+            .client
+            .all_model_names(adapter_kind)
+            .await
             .context(format!("Failed to get models for provider: {}", provider))?;
-            
+
         Ok(models)
     }
 
@@ -328,7 +331,7 @@ impl GenAIProvider {
     ///
     /// ```rust
     /// let provider = GenAIProvider::new_with_config(
-    ///     Some("openai"), 
+    ///     Some("openai"),
     ///     Some("sk-your-key")
     /// )?;
     ///
@@ -340,17 +343,27 @@ impl GenAIProvider {
     /// println!("AI: {}", response);
     /// ```
     pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<String> {
-        let chat_req = ChatRequest::default()
-            .append_message(ChatMessage::user(prompt));
+        let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!("Sending chat request to model: {} with prompt: {}", model, prompt);
+        log::debug!(
+            "Sending chat request to model: {} with prompt: {}",
+            model,
+            prompt
+        );
 
-        let chat_res = self.client.exec_chat(model, chat_req, None).await
-            .context(format!("Failed to execute chat request for model: {}", model))?;
+        let chat_res = self
+            .client
+            .exec_chat(model, chat_req, None)
+            .await
+            .context(format!(
+                "Failed to execute chat request for model: {}",
+                model
+            ))?;
 
-        let content = chat_res.content_text_as_str()
+        let content = chat_res
+            .content_text_as_str()
             .context("No text content in response")?;
-        
+
         log::debug!("Received response with {} characters", content.len());
         Ok(content.to_string())
     }
@@ -460,18 +473,27 @@ impl GenAIProvider {
     /// - Unbounded channels prevent backpressure but require careful memory management
     /// - Logs are at debug level to avoid performance impact in production
     pub async fn generate_response_stream_to_channel(
-        &self, 
-        model: &str, 
+        &self,
+        model: &str,
         prompt: &str,
-        tx: mpsc::UnboundedSender<String>
+        tx: mpsc::UnboundedSender<String>,
     ) -> Result<()> {
-        let chat_req = ChatRequest::default()
-            .append_message(ChatMessage::user(prompt));
+        let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!("Sending streaming chat request to model: {} with prompt: {}", model, prompt);
+        log::debug!(
+            "Sending streaming chat request to model: {} with prompt: {}",
+            model,
+            prompt
+        );
 
-        let chat_res_stream = self.client.exec_chat_stream(model, chat_req, None).await
-            .context(format!("Failed to execute streaming chat request for model: {}", model))?;
+        let chat_res_stream = self
+            .client
+            .exec_chat_stream(model, chat_req, None)
+            .await
+            .context(format!(
+                "Failed to execute streaming chat request for model: {}",
+                model
+            ))?;
 
         // Process the stream with enhanced debugging to identify truncation issues
         let mut stream = chat_res_stream.stream;
@@ -479,14 +501,18 @@ impl GenAIProvider {
         let mut total_content_length = 0;
         let mut stream_ended_explicitly = false;
         let start_time = Instant::now();
-        
-        log::info!("=== STREAM START === Model: {}, Prompt length: {} chars", model, prompt.len());
-        
+
+        log::info!(
+            "=== STREAM START === Model: {}, Prompt length: {} chars",
+            model,
+            prompt.len()
+        );
+
         // CRITICAL FIX: Only rely on genai's ChatStreamEvent signals, not custom timeouts
         // This prevents premature stream termination that causes content spillover
         while let Some(chunk_result) = stream.next().await {
             let elapsed = start_time.elapsed();
-            
+
             match chunk_result {
                 Ok(ChatStreamEvent::Start) => {
                     log::info!(">>> STREAM STARTED for model: {} at {:?}", model, elapsed);
@@ -494,32 +520,43 @@ impl GenAIProvider {
                 Ok(ChatStreamEvent::Chunk(chunk)) => {
                     chunk_count += 1;
                     total_content_length += chunk.content.len();
-                    
+
                     // Enhanced logging: log every 10 chunks AND any large chunks
                     if chunk_count % 10 == 0 || chunk.content.len() > 100 {
                         log::info!("CHUNK #{}: {} chars, total: {} chars, elapsed: {:?}, content preview: '{}'", 
                                   chunk_count, chunk.content.len(), total_content_length, elapsed,
                                   chunk.content.chars().take(50).collect::<String>().replace('\n', "\\n"));
                     }
-                    
+
                     if !chunk.content.is_empty() {
                         // Send content immediately without batching to prevent content loss
                         if tx.send(chunk.content.clone()).is_err() {
-                            log::error!("!!! CHANNEL SEND FAILED for chunk #{} - STOPPING STREAM !!!", chunk_count);
+                            log::error!(
+                                "!!! CHANNEL SEND FAILED for chunk #{} - STOPPING STREAM !!!",
+                                chunk_count
+                            );
                             break;
                         }
-                        
+
                         // Additional detailed logging every 25 chunks
                         if chunk_count % 25 == 0 {
-                            log::info!("=== PROGRESS: {} chunks, {} chars, {:?} elapsed ===", 
-                                       chunk_count, total_content_length, elapsed);
+                            log::info!(
+                                "=== PROGRESS: {} chunks, {} chars, {:?} elapsed ===",
+                                chunk_count,
+                                total_content_length,
+                                elapsed
+                            );
                         }
                     } else {
                         log::debug!("Empty chunk #{} received", chunk_count);
                     }
                 }
                 Ok(ChatStreamEvent::ReasoningChunk(chunk)) => {
-                    log::info!("REASONING CHUNK: {} chars at {:?}", chunk.content.len(), elapsed);
+                    log::info!(
+                        "REASONING CHUNK: {} chars at {:?}",
+                        chunk.content.len(),
+                        elapsed
+                    );
                     // For now, just log reasoning chunks. In future versions we might display them differently.
                 }
                 Ok(ChatStreamEvent::End(_)) => {
@@ -529,7 +566,12 @@ impl GenAIProvider {
                     break;
                 }
                 Err(e) => {
-                    log::error!("!!! STREAM ERROR after {} chunks at {:?}: {} !!!", chunk_count, elapsed, e);
+                    log::error!(
+                        "!!! STREAM ERROR after {} chunks at {:?}: {} !!!",
+                        chunk_count,
+                        elapsed,
+                        e
+                    );
                     let error_msg = format!("Stream error: {}", e);
                     let _ = tx.send(error_msg);
                     return Err(e.into());
@@ -544,49 +586,82 @@ impl GenAIProvider {
                        model, chunk_count, total_content_length, final_elapsed);
         }
 
-        log::info!("=== STREAM COMPLETE === Model: {}, Final: {} chunks, {} chars, {:?} elapsed", 
-                   model, chunk_count, total_content_length, final_elapsed);
-        
+        log::info!(
+            "=== STREAM COMPLETE === Model: {}, Final: {} chunks, {} chars, {:?} elapsed",
+            model,
+            chunk_count,
+            total_content_length,
+            final_elapsed
+        );
+
         // CRITICAL: Send single EOT signal to indicate completion
         // Remove duplicate/backup EOT signals that can cause confusion in the UI
         if tx.send(crate::EOT_SIGNAL.to_string()).is_err() {
             log::error!("!!! FAILED TO SEND EOT SIGNAL - channel may be closed !!!");
             return Err(anyhow::anyhow!("Channel closed during EOT signal send"));
         }
-        
+
         log::info!(">>> EOT SIGNAL SENT for model: {} <<<", model);
         Ok(())
     }
 
     /// Generate response with conversation history
-    pub async fn generate_response_with_history(&self, model: &str, messages: Vec<ChatMessage>) -> Result<String> {
+    pub async fn generate_response_with_history(
+        &self,
+        model: &str,
+        messages: Vec<ChatMessage>,
+    ) -> Result<String> {
         let chat_req = ChatRequest::new(messages);
 
-        log::debug!("Sending chat request to model: {} with conversation history", model);
+        log::debug!(
+            "Sending chat request to model: {} with conversation history",
+            model
+        );
 
-        let chat_res = self.client.exec_chat(model, chat_req, None).await
-            .context(format!("Failed to execute chat request for model: {}", model))?;
+        let chat_res = self
+            .client
+            .exec_chat(model, chat_req, None)
+            .await
+            .context(format!(
+                "Failed to execute chat request for model: {}",
+                model
+            ))?;
 
-        let content = chat_res.content_text_as_str()
+        let content = chat_res
+            .content_text_as_str()
             .context("No text content in response")?;
-        
+
         log::debug!("Received response with {} characters", content.len());
         Ok(content.to_string())
     }
 
     /// Generate response with custom chat options
-    pub async fn generate_response_with_options(&self, model: &str, prompt: &str, options: ChatOptions) -> Result<String> {
-        let chat_req = ChatRequest::default()
-            .append_message(ChatMessage::user(prompt));
+    pub async fn generate_response_with_options(
+        &self,
+        model: &str,
+        prompt: &str,
+        options: ChatOptions,
+    ) -> Result<String> {
+        let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!("Sending chat request to model: {} with custom options", model);
+        log::debug!(
+            "Sending chat request to model: {} with custom options",
+            model
+        );
 
-        let chat_res = self.client.exec_chat(model, chat_req, Some(&options)).await
-            .context(format!("Failed to execute chat request for model: {}", model))?;
+        let chat_res = self
+            .client
+            .exec_chat(model, chat_req, Some(&options))
+            .await
+            .context(format!(
+                "Failed to execute chat request for model: {}",
+                model
+            ))?;
 
-        let content = chat_res.content_text_as_str()
+        let content = chat_res
+            .content_text_as_str()
             .context("No text content in response")?;
-        
+
         log::debug!("Received response with {} characters", content.len());
         Ok(content.to_string())
     }
@@ -595,18 +670,21 @@ impl GenAIProvider {
     pub fn get_supported_providers() -> Vec<&'static str> {
         vec![
             "openai",
-            "anthropic", 
+            "anthropic",
             "gemini",
             "groq",
             "cohere",
             "ollama",
-            "xai"
+            "xai",
         ]
     }
 
     /// Get all available providers (for compatibility with main.rs)
     pub async fn get_available_providers(&self) -> Result<Vec<String>> {
-        Ok(Self::get_supported_providers().iter().map(|s| s.to_string()).collect())
+        Ok(Self::get_supported_providers()
+            .iter()
+            .map(|s| s.to_string())
+            .collect())
     }
 
     /// Test if a model is available and working
