@@ -229,6 +229,8 @@ pub struct App {
     pub last_cursor_blink: Instant,
     pub terminal_height: usize,
     pub terminal_width: usize,
+    pub chat_area_height: usize, // Actual chat area height from layout
+    pub chat_area_width: usize,  // Actual chat area width from layout
 }
 
 impl App {
@@ -329,8 +331,10 @@ impl App {
             input_width: 80, // Default width, will be updated during render
             cursor_blink_state: true,
             last_cursor_blink: Instant::now(),
-            terminal_height: 24, // Default height, will be updated during render
-            terminal_width: 80,  // Default width, will be updated during render
+            terminal_height: 24,  // Default height, will be updated during render
+            terminal_width: 80,   // Default width, will be updated during render
+            chat_area_height: 10, // Default height, will be updated during render
+            chat_area_width: 80,  // Default width, will be updated during render
         }
     }
 
@@ -603,7 +607,10 @@ impl App {
     /// assert_eq!(app.scroll_position, app.max_scroll());
     /// ```
     pub fn scroll_to_bottom(&mut self) {
-        self.scroll_position = self.max_scroll();
+        // Calculate max scroll and add extra lines to ensure last content is visible
+        let max_scroll = self.max_scroll();
+        // Add 3 extra lines to compensate for any calculation inaccuracies
+        self.scroll_position = max_scroll.saturating_add(3);
         self.update_scroll_state();
     }
 
@@ -665,7 +672,8 @@ impl App {
                         if display_width <= chat_width {
                             lines += 1;
                         } else {
-                            let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                            // Use div_ceil for ceiling division (clippy requirement)
+                            let wrapped_lines = display_width.div_ceil(chat_width);
                             lines += wrapped_lines.max(1);
                         }
                     }
@@ -679,10 +687,10 @@ impl App {
             .sum();
 
         // Return scroll position that ensures content is accessible
-        // Be more conservative to ensure the last lines are always visible
+        // Add small buffer for long responses to ensure last lines are visible
         if total_rendered_lines > visible_height {
             let max_scroll = total_rendered_lines.saturating_sub(visible_height);
-            // Reduce max scroll by 2-3 lines to ensure content isn't cut off at bottom
+            // Subtract 1 to ensure the last lines are always visible for long responses
             max_scroll.saturating_sub(1)
         } else {
             0
@@ -751,7 +759,8 @@ impl App {
                         if display_width <= chat_width {
                             lines += 1;
                         } else {
-                            let wrapped_lines = (display_width + chat_width - 1) / chat_width;
+                            // Use div_ceil for ceiling division (clippy requirement)
+                            let wrapped_lines = display_width.div_ceil(chat_width);
                             lines += wrapped_lines.max(1);
                         }
                     }
@@ -995,19 +1004,9 @@ impl App {
         self.response_progress = 1.0; // Show completion
         self.typing_indicator.clear();
 
-        // Ensure final content is visible
+        // CRITICAL: Ensure scroll calculations are done with final content
         self.scroll_to_bottom();
         self.needs_redraw = true;
-
-        // Debug: Log final scroll state for long responses
-        if !self.streaming_buffer.is_empty() && self.streaming_buffer.len() > 1000 {
-            log::debug!(
-                "Final streaming scroll state: position={}, max_scroll={}, buffer_len={}",
-                self.scroll_position,
-                self.max_scroll(),
-                self.streaming_buffer.len()
-            );
-        }
 
         // Update status
         self.set_status("✅ Ready".to_string(), false);
@@ -1364,7 +1363,6 @@ impl EventStream {
 
 /// Application events for the enhanced UI loop
 /// (This duplicate enum has been removed - using the main AppEvent enum above)
-
 /// Handle terminal events with immediate response
 async fn handle_terminal_event(
     app: &mut App,
@@ -1664,8 +1662,8 @@ async fn handle_llm_response(
     } else {
         // Regular streaming content - use thread-local counters for logging
         thread_local! {
-            static TOTAL_CONTENT_RECEIVED: std::cell::Cell<usize> = std::cell::Cell::new(0);
-            static CHUNK_COUNT: std::cell::Cell<usize> = std::cell::Cell::new(0);
+            static TOTAL_CONTENT_RECEIVED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+            static CHUNK_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         }
 
         let chunk_count = CHUNK_COUNT.with(|c| {
@@ -1842,7 +1840,7 @@ fn draw_enhanced_header(f: &mut Frame, area: Rect, model_name: &str, app: &App) 
 fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
     let mut chat_content: Vec<Line> = Vec::new();
 
-    for (_i, msg) in app.chat_history.iter().enumerate() {
+    for msg in app.chat_history.iter() {
         let (icon, style) = match msg.message_type {
             MessageType::User => ("👤", Style::default().fg(Color::Blue).bold()),
             MessageType::Assistant => ("🤖", Style::default().fg(Color::Green).bold()),
@@ -1880,6 +1878,12 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Update the app's input width for accurate scroll calculations
     app.input_width = area.width as usize;
+    // Update the actual chat area dimensions from the layout
+    app.chat_area_height = area.height as usize;
+    app.chat_area_width = area.width as usize;
+
+    // Calculate content size for scroll validation
+    let total_content_lines = chat_content.len();
 
     // Ensure scroll position is within bounds
     let max_scroll = app.max_scroll();
@@ -1891,16 +1895,12 @@ fn draw_enhanced_chat_area(f: &mut Frame, area: Rect, app: &mut App) {
     app.update_scroll_state();
 
     // Debug: Log scroll information for troubleshooting
-    let total_content_lines = chat_content.len();
     let visible_height = area.height.saturating_sub(2) as usize; // Account for borders
     if total_content_lines > 20 {
         // Only log for substantial content
         log::debug!(
-            "Scroll debug - total_content: {}, visible_height: {}, scroll_pos: {}, max_scroll: {}",
-            total_content_lines,
-            visible_height,
-            app.scroll_position,
-            max_scroll
+            "RENDER SCROLL DEBUG - area_height={}, calculated_visible_height={}, total_content_lines={}, scroll_pos={}, max_scroll={}, terminal_height={}",
+            area.height, visible_height, total_content_lines, app.scroll_position, max_scroll, app.terminal_height
         );
     }
 
@@ -2000,7 +2000,7 @@ fn draw_enhanced_input_area(f: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(Color::White),
             ));
         }
-    }
+    } // Close the else block
 
     let input_paragraph = Paragraph::new(Line::from(input_spans))
         .block(
@@ -2472,7 +2472,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
                     }
 
                     let mut italic_text = String::new();
-                    while let Some(ch) = chars.next() {
+                    for ch in chars.by_ref() {
                         if ch == '*' {
                             break;
                         }
@@ -2492,7 +2492,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
                 }
 
                 let mut code_text = String::new();
-                while let Some(ch) = chars.next() {
+                for ch in chars.by_ref() {
                     if ch == '`' {
                         break;
                     }
