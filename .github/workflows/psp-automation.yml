@@ -1,3 +1,11 @@
+# PSP Automation Workflow
+# 
+# DEFENSIVE FIXES APPLIED:
+# - Extract metadata only from first 20 lines to avoid code blocks
+# - Use simple environment variable assignment instead of heredoc format
+# - Strip carriage returns and newlines from extracted values
+# - Use proper quoting and error handling throughout
+
 name: PSP Automation
 
 on:
@@ -117,14 +125,17 @@ jobs:
           
           # Read file content and extract metadata
           if [ -f "$psp_file" ]; then
+            # Extract metadata only from the header (first 20 lines to avoid code blocks)
+            header=$(head -20 "$psp_file")
+            
             # Extract title
-            title=$(grep "^Title:" "$psp_file" | sed 's/Title: *//' | head -1)
+            title=$(echo "$header" | grep "^Title:" | sed 's/Title: *//' | head -1 | tr -d '\r\n')
             # Extract type  
-            type=$(grep "^Type:" "$psp_file" | sed 's/Type: *//' | head -1)
+            type=$(echo "$header" | grep "^Type:" | sed 's/Type: *//' | head -1 | tr -d '\r\n')
             # Extract author
-            author=$(grep "^Author:" "$psp_file" | sed 's/Author: *//' | head -1)
+            author=$(echo "$header" | grep "^Author:" | sed 's/Author: *//' | head -1 | tr -d '\r\n')
             # Extract status
-            status=$(grep "^Status:" "$psp_file" | sed 's/Status: *//' | head -1)
+            status=$(echo "$header" | grep "^Status:" | sed 's/Status: *//' | head -1 | tr -d '\r\n')
             
             echo "psp_number=$psp_number" >> $GITHUB_OUTPUT
             echo "psp_title=$title" >> $GITHUB_OUTPUT
@@ -389,11 +400,14 @@ jobs:
         
         for psp_file in $psp_files; do
           if [ -f "$psp_file" ]; then
+            # Extract metadata only from the header (first 20 lines to avoid code blocks)
+            header=$(head -20 "$psp_file")
+            
             # Check current status
-            current_status=$(grep "^Status:" "$psp_file" | sed 's/Status: *//')
-            psp_number=$(grep "^PSP:" "$psp_file" | sed 's/PSP: *//')
-            psp_title=$(grep "^Title:" "$psp_file" | sed 's/Title: *//')
-            psp_type=$(grep "^Type:" "$psp_file" | sed 's/Type: *//')
+            current_status=$(echo "$header" | grep "^Status:" | sed 's/Status: *//' | tr -d '\r\n')
+            psp_number=$(echo "$header" | grep "^PSP:" | sed 's/PSP: *//' | tr -d '\r\n')
+            psp_title=$(echo "$header" | grep "^Title:" | sed 's/Title: *//' | tr -d '\r\n')
+            psp_type=$(echo "$header" | grep "^Type:" | sed 's/Type: *//' | tr -d '\r\n')
             
             echo "📄 Checking PSP: $psp_file"
             echo "   Number: $psp_number"
@@ -407,7 +421,7 @@ jobs:
             
             # Check if this is a newly merged Draft PSP (either new or just got assigned a number)
             if [ "$current_status" = "Draft" ]; then
-              old_psp_number=$(git show HEAD~1:"$psp_file" 2>/dev/null | grep "^PSP:" | sed 's/PSP: *//' || echo "")
+              old_psp_number=$(git show HEAD~1:"$psp_file" 2>/dev/null | head -20 | grep "^PSP:" | sed 's/PSP: *//' | tr -d '\r\n' || echo "")
               
               # If PSP number changed from 0000/XXXXXX to actual number, or if it's a new Draft PSP
               if [ "$old_psp_number" = "0000" ] || [ "$old_psp_number" = "XXXXXX" ] || [ -z "$old_psp_number" ]; then
@@ -434,35 +448,31 @@ jobs:
                 echo "   PSP_TITLE: '$psp_title'"
                 echo "   PSP_TYPE: '$psp_type'"
                 
-                # Store PSP info for discussion issue creation (properly escaped)
-                echo "PSP_NUMBER=$psp_number" >> $GITHUB_ENV
-                echo "PSP_TITLE<<EOF" >> $GITHUB_ENV
-                echo "$psp_title" >> $GITHUB_ENV
-                echo "EOF" >> $GITHUB_ENV
-                echo "PSP_TYPE<<EOF" >> $GITHUB_ENV
-                echo "$psp_type" >> $GITHUB_ENV
-                echo "EOF" >> $GITHUB_ENV
-                echo "CREATE_DISCUSSION=true" >> $GITHUB_ENV
+                # Store PSP info for discussion issue creation (safely)
+                {
+                  echo "PSP_NUMBER=$psp_number"
+                  echo "PSP_TITLE=$psp_title"
+                  echo "PSP_TYPE=$psp_type"
+                  echo "CREATE_DISCUSSION=true"
+                } >> $GITHUB_ENV
               else
                 echo "ℹ️  PSP-$psp_number is an existing Draft PSP (no status change needed)"
               fi
             elif [ "$current_status" = "Discussion" ]; then
               # Check if this was manually changed from Draft to Discussion in this PR
-              old_status=$(git show HEAD~1:"$psp_file" 2>/dev/null | grep "^Status:" | sed 's/Status: *//' || echo "")
+              old_status=$(git show HEAD~1:"$psp_file" 2>/dev/null | head -20 | grep "^Status:" | sed 's/Status: *//' | tr -d '\r\n' || echo "")
               
               if [ "$old_status" = "Draft" ]; then
                 echo "📝 PSP-$psp_number status manually changed from Draft to Discussion"
                 echo "� Will create discussion issue for manually transitioned PSP"
                 
-                # Store PSP info for discussion issue creation
-                echo "PSP_NUMBER=$psp_number" >> $GITHUB_ENV
-                echo "PSP_TITLE<<EOF" >> $GITHUB_ENV
-                echo "$psp_title" >> $GITHUB_ENV
-                echo "EOF" >> $GITHUB_ENV
-                echo "PSP_TYPE<<EOF" >> $GITHUB_ENV
-                echo "$psp_type" >> $GITHUB_ENV
-                echo "EOF" >> $GITHUB_ENV
-                echo "CREATE_DISCUSSION=true" >> $GITHUB_ENV
+                # Store PSP info for discussion issue creation (safely)
+                {
+                  echo "PSP_NUMBER=$psp_number"
+                  echo "PSP_TITLE=$psp_title"
+                  echo "PSP_TYPE=$psp_type"
+                  echo "CREATE_DISCUSSION=true"
+                } >> $GITHUB_ENV
               else
                 echo "ℹ️  PSP-$psp_number is already in Discussion status"
               fi
