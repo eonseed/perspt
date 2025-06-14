@@ -157,7 +157,7 @@ jobs:
   comment-on-psp-pr:
     name: Comment on PSP Pull Request
     needs: detect-psp-pr
-    if: (needs.detect-psp-pr.outputs.is_psp == 'true' || needs.detect-psp-pr.outputs.validation_status == 'checkbox_only') && github.event.action == 'opened' && (needs.detect-psp-pr.outputs.needs_number == 'true' || needs.detect-psp-pr.outputs.validation_status == 'checkbox_only')
+    if: (needs.detect-psp-pr.outputs.is_psp == 'true' || needs.detect-psp-pr.outputs.validation_status == 'checkbox_only') && github.event.action == 'opened'
     runs-on: ubuntu-latest
     
     steps:
@@ -243,11 +243,20 @@ jobs:
             - Community discussion issue created
             - No additional PRs needed!`;
             } else {
-              comment += `1. ✅ **PSP Update** - Changes to existing PSP-${pspNumber}
+              // Handle update to existing PSP (non-placeholder number)
+              if (pspNumber !== 'XXXXXX' && pspNumber !== '') {
+                comment += `1. ✅ **PSP Update** - Changes to existing PSP-${pspNumber}
             2. ✅ **Validation** - Document will be validated automatically
             3. ✅ **Documentation** - Updated PSP will be built
 
             This appears to be an update to an existing PSP document.`;
+              } else {
+                comment += `1. ✅ **PSP Processing** - Your PSP document will be processed
+            2. ✅ **Validation** - Document will be validated automatically
+            3. ✅ **Documentation** - PSP will be built and published
+
+            This appears to be a new PSP that will receive a number assignment.`;
+              }
             }
             
             comment += `
@@ -391,17 +400,19 @@ jobs:
           exit 1
         fi
         
-        # Extract the title part for new filename
-        title_part=$(echo "$placeholder_file" | sed 's/.*psp-[0-9X]\{4,6\}[_-]*//' | sed 's/\.rst$//')
-        new_file="docs/psps/source/psp-${next_number}"
-        
-        if [ -n "$title_part" ]; then
-          new_file="${new_file}-${title_part}.rst"
-        else
-          new_file="${new_file}.rst"
-        fi
+        # Create new filename with just the PSP number (no title suffix)
+        new_file="docs/psps/source/psp-${next_number}.rst"
         
         echo "📝 Renaming: $placeholder_file → $new_file"
+        
+        # Also remove old file if it was created with title suffix
+        old_filename_pattern="docs/psps/source/psp-${next_number}-*.rst"
+        for old_file in $old_filename_pattern; do
+          if [ -f "$old_file" ] && [ "$old_file" != "$new_file" ]; then
+            echo "🗑️  Removing old file with title suffix: $old_file"
+            rm "$old_file"
+          fi
+        done
         
         # Update PSP number in file content (XXXXXX placeholder)
         sed -i "s/^PSP: XXXXXX/PSP: ${next_number}/" "$placeholder_file"
@@ -425,8 +436,18 @@ jobs:
         git config user.name "PSP Bot"
         git config user.email "action@github.com"
         
-        # Commit the changes
+        # Add both new file and remove any old files with title suffix
         git add "$new_file"
+        
+        # Remove any old files that might exist with title suffixes
+        for old_file in docs/psps/source/psp-${next_number}-*.rst; do
+          if [ -f "$old_file" ] && [ "$old_file" != "$new_file" ]; then
+            echo "🗑️  Removing old file with title suffix: $old_file"
+            git rm "$old_file" 2>/dev/null || rm "$old_file"
+          fi
+        done
+        
+        # Commit the changes
         git commit -m "🔢 Assign PSP number ${next_number} after merge"
         git push origin master
         
@@ -458,6 +479,32 @@ jobs:
         # Get the renamed PSP file from previous job
         new_filename="${{ needs.assign-psp-number.outputs.new_filename }}"
         assigned_number="${{ needs.assign-psp-number.outputs.assigned_number }}"
+        
+        # Verify we have the values we need
+        if [ -z "$new_filename" ] || [ -z "$assigned_number" ]; then
+          echo "❌ Missing required values from assign-psp-number job"
+          echo "   new_filename: '$new_filename'"
+          echo "   assigned_number: '$assigned_number'"
+          exit 1
+        fi
+        
+        # Pull latest changes first (since previous job committed changes)
+        git pull origin master
+        
+        # Debug: List what files actually exist
+        echo "📁 Files in docs/psps/source/ matching pattern psp-${assigned_number}*:"
+        ls -la docs/psps/source/psp-${assigned_number}*.rst 2>/dev/null || echo "No files found matching pattern"
+        
+        # Check if file exists with title suffix and rename if needed
+        if [ ! -f "$new_filename" ]; then
+          # Look for file with title suffix
+          title_suffix_file=$(ls docs/psps/source/psp-${assigned_number}-*.rst 2>/dev/null | head -1)
+          if [ -n "$title_suffix_file" ] && [ -f "$title_suffix_file" ]; then
+            echo "📝 Found file with title suffix: $title_suffix_file"
+            echo "📝 Renaming to expected format: $new_filename"
+            mv "$title_suffix_file" "$new_filename"
+          fi
+        fi
         
         if [ -f "$new_filename" ]; then
           echo "📄 Updating PSP status: $new_filename"
@@ -500,6 +547,8 @@ jobs:
           
         else
           echo "❌ PSP file not found: $new_filename"
+          echo "📁 Files in docs/psps/source/:"
+          ls -la docs/psps/source/ || true
           exit 1
         fi
 
@@ -596,6 +645,20 @@ jobs:
         psp_number="${{ needs.update-psp-status.outputs.psp_number }}"
         issue_url="${{ needs.create-discussion-issue.outputs.issue_url }}"
         new_filename="${{ needs.assign-psp-number.outputs.new_filename }}"
+        
+        # Pull latest changes first (multiple jobs may have made commits)
+        git pull origin master
+        
+        # Check if file exists with title suffix and handle it
+        if [ ! -f "$new_filename" ]; then
+          # Look for file with title suffix (fallback)
+          title_suffix_file=$(ls docs/psps/source/psp-${psp_number}-*.rst 2>/dev/null | head -1)
+          if [ -n "$title_suffix_file" ] && [ -f "$title_suffix_file" ]; then
+            echo "📝 Found file with title suffix: $title_suffix_file"
+            echo "📝 Using file: $title_suffix_file (will rename after update)"
+            new_filename="$title_suffix_file"
+          fi
+        fi
         
         if [ -f "$new_filename" ]; then
           echo "📝 Updating PSP-${psp_number} with Discussion-To field"
@@ -880,9 +943,24 @@ jobs:
           summary += '\n---\n';
           summary += 'For questions about the PSP process, see [PSP-000001](docs/psps/source/psp-000001.rst)';
           
-          await github.rest.issues.createComment({
-            owner: context.repo.owner,
-            repo: context.repo,
-            issue_number: context.issue.number,
-            body: summary
-          });
+          // Only comment if this was a successful PSP operation
+          if (assignResult === 'success' || statusResult === 'success' || discussionResult === 'success') {
+            try {
+              console.log('Repository context:', context.repo);
+              console.log('Payload PR number:', context.payload.pull_request.number);
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: summary
+              });
+            } catch (error) {
+              console.log('Failed to post summary comment:', error.message);
+              console.log('Context repo:', JSON.stringify(context.repo));
+              console.log('Full error:', error);
+              // Don't fail the job if comment posting fails
+            }
+          } else {
+            console.log('No PSP operations performed, skipping summary comment');
+          }
