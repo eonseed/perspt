@@ -250,7 +250,7 @@ pub fn detect_available_provider() -> Option<(String, String)> {
     ];
 
     for (env_var, provider_type, default_model) in providers_to_check {
-        if let Ok(_) = env::var(env_var) {
+        if env::var(env_var).is_ok() {
             log::info!(
                 "Auto-detected provider '{}' from environment variable {}",
                 provider_type,
@@ -263,7 +263,7 @@ pub fn detect_available_provider() -> Option<(String, String)> {
     // Check for Ollama by attempting to detect if it's running locally
     // For now, we'll just check if the user has explicitly set any Ollama-related env vars
     // In a full implementation, we could make an HTTP request to localhost:11434
-    if let Ok(_) = env::var("OLLAMA_HOST") {
+    if env::var("OLLAMA_HOST").is_ok() {
         log::info!("Auto-detected Ollama from OLLAMA_HOST environment variable");
         return Some(("ollama".to_string(), "llama3.2".to_string()));
     }
