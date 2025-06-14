@@ -2,7 +2,7 @@ name: PSP Documentation
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
     paths:
       - 'docs/psps/**'
       - '.github/workflows/psp-docs.yml'
