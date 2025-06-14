@@ -38,15 +38,17 @@ jobs:
         
     - name: Check if PSP-related PR
       id: check
+      env:
+        PR_BODY: ${{ github.event.pull_request.body }}
       run: |
         # Check PR template checkbox for PSP type
-        pr_body="${{ github.event.pull_request.body }}"
+        # Use environment variable to avoid shell injection issues
         is_psp_checked="false"
         
-        if echo "$pr_body" | grep -q "- \[x\] \*\*PSP\*\*"; then
+        if echo "$PR_BODY" | grep -q "- \[x\] \*\*PSP\*\*"; then
           echo "✅ PSP checkbox is checked in PR template"
           is_psp_checked="true"
-        elif echo "$pr_body" | grep -q "- \[X\] \*\*PSP\*\*"; then
+        elif echo "$PR_BODY" | grep -q "- \[X\] \*\*PSP\*\*"; then
           echo "✅ PSP checkbox is checked in PR template (uppercase)"
           is_psp_checked="true"
         fi
