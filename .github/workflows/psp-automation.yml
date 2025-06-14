@@ -258,7 +258,7 @@ jobs:
 
           await github.rest.issues.createComment({
             owner: context.repo.owner,
-            repo: context.repo.repo,
+            repo: context.repo,
             issue_number: context.issue.number,
             body: comment
           });
@@ -304,7 +304,7 @@ jobs:
 
           await github.rest.issues.createComment({
             owner: context.repo.owner,
-            repo: context.repo.repo,
+            repo: context.repo,
             issue_number: context.issue.number,
             body: comment
           });
@@ -409,6 +409,18 @@ jobs:
         # Rename the file
         mv "$placeholder_file" "$new_file"
         
+        # Verify the file was created and has the correct PSP number
+        if [ ! -f "$new_file" ]; then
+          echo "❌ File rename failed: $new_file not found"
+          exit 1
+        fi
+        
+        # Verify PSP number was updated correctly
+        if ! grep -q "^PSP: ${next_number}" "$new_file"; then
+          echo "❌ PSP number update failed in $new_file"
+          exit 1
+        fi
+        
         # Configure git
         git config user.name "PSP Bot"
         git config user.email "action@github.com"
@@ -418,7 +430,7 @@ jobs:
         git commit -m "🔢 Assign PSP number ${next_number} after merge"
         git push origin master
         
-        echo "✅ PSP number ${next_number} assigned and committed to main"
+        echo "✅ PSP number ${next_number} assigned and committed to master"
         
         # Store info for subsequent jobs
         echo "assigned_number=${next_number}" >> $GITHUB_OUTPUT
@@ -427,7 +439,7 @@ jobs:
   update-psp-status:
     name: Update PSP Status to Discussion
     needs: assign-psp-number
-    if: needs.assign-psp-number.outputs.needs_discussion == 'true'
+    if: needs.assign-psp-number.outputs.needs_discussion == 'true' && needs.assign-psp-number.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       psp_number: ${{ steps.update.outputs.psp_number }}
@@ -458,6 +470,18 @@ jobs:
           # Update status from Draft to Discussion
           sed -i 's/^Status: Draft/Status: Discussion/' "$new_filename"
           
+          # Verify the status was updated
+          if ! grep -q "^Status: Discussion" "$new_filename"; then
+            echo "❌ Status update failed - expected 'Status: Discussion' in $new_filename"
+            exit 1
+          fi
+          
+          # Verify we have required metadata
+          if [ -z "$psp_title" ]; then
+            echo "❌ Could not extract PSP title from $new_filename"
+            exit 1
+          fi
+          
           # Configure git
           git config user.name "PSP Bot"
           git config user.email "action@github.com"
@@ -482,7 +506,7 @@ jobs:
   create-discussion-issue:
     name: Create Discussion Issue
     needs: [assign-psp-number, update-psp-status]
-    if: needs.assign-psp-number.outputs.needs_discussion == 'true'
+    if: needs.assign-psp-number.outputs.needs_discussion == 'true' && needs.assign-psp-number.result == 'success' && needs.update-psp-status.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       issue_number: ${{ steps.create.outputs.issue_number }}
@@ -558,7 +582,7 @@ jobs:
   update-discussion-link:
     name: Update PSP with Discussion Link
     needs: [assign-psp-number, update-psp-status, create-discussion-issue]
-    if: needs.assign-psp-number.outputs.needs_discussion == 'true'
+    if: needs.assign-psp-number.outputs.needs_discussion == 'true' && needs.assign-psp-number.result == 'success' && needs.update-psp-status.result == 'success' && needs.create-discussion-issue.result == 'success'
     runs-on: ubuntu-latest
     
     steps:
@@ -798,4 +822,67 @@ jobs:
             repo: context.repo,
             issue_number: context.issue.number,
             body: comment
+          });
+
+  summary:
+    name: PSP Workflow Summary
+    if: always() && github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
+    needs: [assign-psp-number, update-psp-status, create-discussion-issue, update-discussion-link]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Workflow Summary
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const assignResult = '${{ needs.assign-psp-number.result }}';
+          const statusResult = '${{ needs.update-psp-status.result }}';
+          const discussionResult = '${{ needs.create-discussion-issue.result }}';
+          const linkResult = '${{ needs.update-discussion-link.result }}';
+          
+          const assignedNumber = '${{ needs.assign-psp-number.outputs.assigned_number }}';
+          const issueUrl = '${{ needs.create-discussion-issue.outputs.issue_url }}';
+          
+          let summary = '## 🔄 PSP Automation Workflow Summary\n\n';
+          
+          if (assignResult === 'success' && assignedNumber) {
+            summary += `✅ **PSP Number Assigned**: PSP-${assignedNumber}\n`;
+          } else if (assignResult === 'skipped') {
+            summary += '⏭️ **PSP Assignment**: Skipped (no placeholder PSP found)\n';
+          } else {
+            summary += '❌ **PSP Assignment**: Failed\n';
+          }
+          
+          if (statusResult === 'success') {
+            summary += '✅ **Status Update**: Updated to Discussion\n';
+          } else if (statusResult === 'skipped') {
+            summary += '⏭️ **Status Update**: Skipped\n';
+          } else {
+            summary += '⚠️ **Status Update**: Failed (this is not critical)\n';
+          }
+          
+          if (discussionResult === 'success' && issueUrl) {
+            summary += `✅ **Discussion Issue**: Created at ${issueUrl}\n`;
+          } else if (discussionResult === 'skipped') {
+            summary += '⏭️ **Discussion Issue**: Skipped\n';
+          } else {
+            summary += '❌ **Discussion Issue**: Failed to create\n';
+          }
+          
+          if (linkResult === 'success') {
+            summary += '✅ **Discussion Link**: Added to PSP file\n';
+          } else if (linkResult === 'skipped') {
+            summary += '⏭️ **Discussion Link**: Skipped\n';
+          } else {
+            summary += '⚠️ **Discussion Link**: Failed to update (can be done manually)\n';
+          }
+          
+          summary += '\n---\n';
+          summary += 'For questions about the PSP process, see [PSP-000001](docs/psps/source/psp-000001.rst)';
+          
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo,
+            issue_number: context.issue.number,
+            body: summary
           });
