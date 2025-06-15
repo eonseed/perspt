@@ -122,14 +122,14 @@ jobs:
 
     - name: Prepare PSP documentation for Pages
       run: |
-        mkdir -p _site
+        mkdir -p _site/psps
         
         # Copy PSP documentation
-        cp -r docs/psps/build/html/* _site/
+        cp -r docs/psps/build/html/* _site/psps/
         
         echo "📋 PSP documentation prepared for Pages deployment"
         echo "Entry point will be: psp-000000.html"
-        ls -la _site/
+        ls -la _site/psps/
 
     - name: Upload Pages artifact
       uses: actions/upload-pages-artifact@v3
