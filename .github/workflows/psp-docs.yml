@@ -43,7 +43,7 @@ jobs:
         uv run make html
         
         # Check if build was successful
-        if [ -f "build/html/index.html" ]; then
+        if [ -f "build/html/psp-000000.html" ]; then
           echo "✅ PSP documentation built successfully"
           ls -la build/html/
         else
