@@ -103,55 +103,37 @@ jobs:
         if [ -n "$psp_file" ]; then
           echo "📄 Processing PSP file: $psp_file"
           
-          # Extract PSP number/placeholder from filename
-          psp_identifier=$(echo "$psp_file" | sed 's/.*psp-\([^-]*\).*/\1/' | head -1)
+          # Extract metadata from the file header (first 20 lines)
+          header=$(head -20 "$psp_file")
           
-          # Skip PSP-000000 and PSP-000001 as they are already Active
-          if [ "$psp_identifier" = "000000" ] || [ "$psp_identifier" = "000001" ]; then
-            echo "ℹ️  Skipping PSP-$psp_identifier (already Active)"
-            echo "is_psp=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          psp_number=$(echo "$header" | grep "^PSP:" | sed 's/PSP: *//' | tr -d '\r\n')
+          title=$(echo "$header" | grep "^Title:" | sed 's/Title: *//' | head -1 | tr -d '\r\n')
+          type=$(echo "$header" | grep "^Type:" | sed 's/Type: *//' | head -1 | tr -d '\r\n')
+          author=$(echo "$header" | grep "^Author:" | sed 's/Author: *//' | head -1 | tr -d '\r\n')
+          status=$(echo "$header" | grep "^Status:" | sed 's/Status: *//' | head -1 | tr -d '\r\n')
           
           # Check if using placeholder number (needs assignment)
           # Per PSP-000001.rst: authors use "XXXXXX" placeholder for new PSPs
-          if [ "$psp_identifier" = "XXXXXX" ]; then
+          if [ "$psp_number" = "XXXXXX" ]; then
             echo "needs_number=true" >> $GITHUB_OUTPUT
             echo "⚠️  PSP needs number assignment"
-            psp_number="$psp_identifier"
           else
             echo "needs_number=false" >> $GITHUB_OUTPUT
-            echo "✅ PSP number: $psp_identifier"
-            psp_number="$psp_identifier"
+            echo "✅ PSP number: $psp_number"
           fi
           
-          # Read file content and extract metadata
-          if [ -f "$psp_file" ]; then
-            # Extract metadata only from the header (first 20 lines to avoid code blocks)
-            header=$(head -20 "$psp_file")
-            
-            # Extract title
-            title=$(echo "$header" | grep "^Title:" | sed 's/Title: *//' | head -1 | tr -d '\r\n')
-            # Extract type  
-            type=$(echo "$header" | grep "^Type:" | sed 's/Type: *//' | head -1 | tr -d '\r\n')
-            # Extract author
-            author=$(echo "$header" | grep "^Author:" | sed 's/Author: *//' | head -1 | tr -d '\r\n')
-            # Extract status
-            status=$(echo "$header" | grep "^Status:" | sed 's/Status: *//' | head -1 | tr -d '\r\n')
-            
-            echo "psp_number=$psp_number" >> $GITHUB_OUTPUT
-            echo "psp_title=$title" >> $GITHUB_OUTPUT
-            echo "psp_type=$type" >> $GITHUB_OUTPUT
-            echo "psp_author=$author" >> $GITHUB_OUTPUT
-            echo "psp_status=$status" >> $GITHUB_OUTPUT
-            
-            echo "📋 PSP Metadata:"
-            echo "   Number: $psp_number"
-            echo "   Title: $title"
-            echo "   Type: $type"
-            echo "   Author: $author"
-            echo "   Status: $status"
-          fi
+          echo "psp_number=$psp_number" >> $GITHUB_OUTPUT
+          echo "psp_title=$title" >> $GITHUB_OUTPUT
+          echo "psp_type=$type" >> $GITHUB_OUTPUT
+          echo "psp_author=$author" >> $GITHUB_OUTPUT
+          echo "psp_status=$status" >> $GITHUB_OUTPUT
+          
+          echo "📋 PSP Metadata:"
+          echo "   Number: $psp_number"
+          echo "   Title: $title"
+          echo "   Type: $type"
+          echo "   Author: $author"
+          echo "   Status: $status"
         fi
 
   comment-on-psp-pr:
