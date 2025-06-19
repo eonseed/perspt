@@ -4,7 +4,7 @@ Author: Vikrant Rathore (@vikrantrathore)
 Status: Draft
 Type: Feature
 Created: 2025-06-19
-Discussion-To: <Link to GitHub Issue for this PSP>
+Discussion-To: <Link Github>
 
 ========
 Abstract
