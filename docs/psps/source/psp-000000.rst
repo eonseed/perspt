@@ -90,6 +90,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`PSP Purpose and Guidelines <psp-000001>`
      - Vikrant Rathore, Ronak Rathore
      - Active
+   * - :psp:`000002`
+     - UI/UX
+     - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
+     - Vikrant Rathore
+     - Draft
 
 ====================
 Index by Category
@@ -141,8 +146,20 @@ UI/UX PSPs
 
 UI/UX PSPs modify the user interface or user experience.
 
-.. note::
-   No UI/UX PSPs have been created yet.
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000002`
+     - UI/UX
+     - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
+     - Vikrant Rathore
+     - Draft
 
 API Change PSPs
 ===============
@@ -159,8 +176,20 @@ PSP Status Index
 Draft PSPs (under development)
 ===============================
 
-.. note::
-   No PSPs are currently in draft status.
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000002`
+     - UI/UX
+     - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
+     - Vikrant Rathore
+     - Draft
 
 Discussion PSPs (under review)
 ===============================
