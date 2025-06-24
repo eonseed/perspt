@@ -1,10 +1,10 @@
 PSP: 000003
 Title: Simple CLI Mode for Direct Q&A
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Draft
+Status: Discussion
 Type: Feature
 Created: 2025-06-19
-Discussion-To: <Link Github>
+Discussion-To: #41
 
 ========
 Abstract
