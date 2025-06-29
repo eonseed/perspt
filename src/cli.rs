@@ -86,7 +86,7 @@ pub async fn run_simple_cli(
                 .create(true)
                 .append(true)
                 .open(path)
-                .with_context(|| format!("Failed to open log file: {}", path))?,
+                .with_context(|| format!("Failed to open log file: {path}"))?,
         )
     } else {
         None
@@ -98,9 +98,9 @@ pub async fn run_simple_cli(
 
     // Print welcome message
     println!("Perspt Simple CLI Mode");
-    println!("Model: {}", model_name);
+    println!("Model: {model_name}");
     if let Some(ref log_path) = log_file {
-        println!("Logging to: {}", log_path);
+        println!("Logging to: {log_path}");
     }
     println!("Type 'exit' or press Ctrl+D to quit.");
     println!();
@@ -137,7 +137,7 @@ pub async fn run_simple_cli(
 
         // Log user input if logging is enabled
         if let Some(ref mut file) = log_handle {
-            writeln!(file, "> {}", trimmed_input).context("Failed to write to log file")?;
+            writeln!(file, "> {trimmed_input}").context("Failed to write to log file")?;
         }
 
         // Create channel for streaming response
@@ -165,7 +165,7 @@ pub async fn run_simple_cli(
             }
 
             // Print the chunk immediately for real-time streaming
-            print!("{}", chunk);
+            print!("{chunk}");
             std::io::stdout().flush()?;
             full_response.push_str(&chunk);
             response_started = true;
@@ -182,21 +182,21 @@ pub async fn run_simple_cli(
             Ok(Err(e)) => {
                 // LLM request failed
                 if !response_started {
-                    println!("Error: {}", e);
+                    println!("Error: {e}");
                 } else {
-                    println!("\nError during response: {}", e);
+                    println!("\nError during response: {e}");
                 }
             }
             Err(e) => {
                 // Task panicked or was cancelled
-                println!("Request failed: {}", e);
+                println!("Request failed: {e}");
             }
         }
 
         // Log the full response if logging is enabled
         if let Some(ref mut file) = log_handle {
             if !full_response.is_empty() {
-                writeln!(file, "{}", full_response).context("Failed to write to log file")?;
+                writeln!(file, "{full_response}").context("Failed to write to log file")?;
             }
             writeln!(file) // Add blank line between exchanges
                 .context("Failed to write to log file")?;
