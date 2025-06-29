@@ -23,13 +23,13 @@
 //! perspt --simple-cli --log-file session.txt
 //! ```
 
+use crate::llm_provider::GenAIProvider;
+use crate::EOT_SIGNAL;
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
-use crate::llm_provider::GenAIProvider;
-use crate::EOT_SIGNAL;
 
 /// Runs the simple CLI mode for direct Q&A interaction.
 ///
@@ -112,9 +112,11 @@ pub async fn run_simple_cli(
         user_input.clear();
 
         // Read user input
-        let bytes_read = stdin_reader.read_line(&mut user_input).await
+        let bytes_read = stdin_reader
+            .read_line(&mut user_input)
+            .await
             .context("Failed to read from stdin")?;
-        
+
         if bytes_read == 0 {
             // User pressed Ctrl+D (EOF)
             println!(); // Add newline for clean exit
@@ -122,12 +124,12 @@ pub async fn run_simple_cli(
         }
 
         let trimmed_input = user_input.trim();
-        
+
         // Skip empty input
         if trimmed_input.is_empty() {
             continue;
         }
-        
+
         // Check for exit command
         if trimmed_input.eq_ignore_ascii_case("exit") {
             break;
@@ -135,8 +137,7 @@ pub async fn run_simple_cli(
 
         // Log user input if logging is enabled
         if let Some(ref mut file) = log_handle {
-            writeln!(file, "> {}", trimmed_input)
-                .context("Failed to write to log file")?;
+            writeln!(file, "> {}", trimmed_input).context("Failed to write to log file")?;
         }
 
         // Create channel for streaming response
@@ -150,11 +151,7 @@ pub async fn run_simple_cli(
         // Spawn async task for LLM request
         let request_handle = tokio::spawn(async move {
             provider_clone
-                .generate_response_stream_to_channel(
-                    &model_name_clone,
-                    &input_clone,
-                    tx,
-                )
+                .generate_response_stream_to_channel(&model_name_clone, &input_clone, tx)
                 .await
         });
 
@@ -166,7 +163,7 @@ pub async fn run_simple_cli(
             if chunk == EOT_SIGNAL {
                 break;
             }
-            
+
             // Print the chunk immediately for real-time streaming
             print!("{}", chunk);
             std::io::stdout().flush()?;
@@ -199,8 +196,7 @@ pub async fn run_simple_cli(
         // Log the full response if logging is enabled
         if let Some(ref mut file) = log_handle {
             if !full_response.is_empty() {
-                writeln!(file, "{}", full_response)
-                    .context("Failed to write to log file")?;
+                writeln!(file, "{}", full_response).context("Failed to write to log file")?;
             }
             writeln!(file) // Add blank line between exchanges
                 .context("Failed to write to log file")?;
