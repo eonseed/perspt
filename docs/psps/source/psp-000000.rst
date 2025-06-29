@@ -99,7 +99,7 @@ The numerical index contains a table of all PSPs, ordered by number.
      - Feature
      - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
      - Vikrant Rathore
-    - Active
+     - Active
 
 ====================
 Index by Category
@@ -144,11 +144,11 @@ Feature PSPs introduce new functionality to Perspt.
      - Title
      - Author(s)
      - Status
-  * - :psp:`000003`
-    - Feature
-    - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
-    - Vikrant Rathore
-    - Active
+   * - :psp:`000003`
+     - Feature
+     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+     - Vikrant Rathore
+     - Active
 
 Enhancement PSPs
 ================
