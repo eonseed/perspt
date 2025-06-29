@@ -58,6 +58,7 @@ Project Structure
    perspt/
    ├── src/
    │   ├── main.rs          # Entry point, CLI parsing, panic handling
+   │   ├── cli.rs           # Simple CLI mode implementation (NEW in v0.4.5)
    │   ├── config.rs        # Configuration management and validation
    │   ├── llm_provider.rs  # GenAI provider abstraction and implementation
    │   └── ui.rs            # Terminal UI with Ratatui and real-time streaming

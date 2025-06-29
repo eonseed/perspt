@@ -77,6 +77,8 @@ providers directly in your terminal using a modern, unified interface powered by
      - **Zero-Config Startup:** Automatic provider detection from environment variables - just set your API key and run ``perspt``!
    * - 🎨
      - **Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui
+   * - 🖥️
+     - **Simple CLI Mode:** NEW! Minimal command-line mode for direct Q&A, scripting, and accessibility - perfect for Unix workflows
    * - ⚡
      - **Streaming Responses:** Real-time streaming of LLM responses for an interactive experience
    * - 🔀
@@ -87,9 +89,9 @@ providers directly in your terminal using a modern, unified interface powered by
      - **Configurable:** Flexible configuration via JSON files or command-line arguments
    * - 🔄
      - **Input Queuing:** Type new questions while AI is responding - inputs are queued and processed sequentially
-   * - �
+   * - 💾
      - **Save Conversations:** Export chat sessions to text files with ``/save`` command for archival and reference
-   * - �📜
+   * - 📜
      - **Markdown Rendering:** Beautiful markdown support directly in the terminal
    * - 🛡️
      - **Graceful Error Handling:** Robust handling of network issues, API errors, and edge cases
