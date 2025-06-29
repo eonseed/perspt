@@ -21,7 +21,7 @@ High-Level Architecture
 
    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
    │   User Input    │    │  Configuration  │    │   AI Providers  │
-   │     (CLI)       │    │    Manager      │    │   (OpenAI,etc.) │
+   │   (CLI/Simple)  │    │    Manager      │    │   (OpenAI,etc.) │
    └─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
              │                      │                      │
              v                      v                      v
@@ -29,6 +29,7 @@ High-Level Architecture
    │                    Core Application                             │
    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
    │  │ UI Manager  │  │ LLM Bridge  │  │ Config Mgr  │              │
+   │  │   / CLI     │  │             │  │             │              │
    │  └─────────────┘  └─────────────┘  └─────────────┘              │
    └─────────────────────────────────────────────────────────────────┘
              │                      │                      │
@@ -48,10 +49,11 @@ The application entry point and orchestration layer.
 
 **Responsibilities**:
 
-- Command-line argument parsing
-- Application initialization
-- Main event loop coordination
-- Graceful shutdown handling
+- Command-line argument parsing with clap derive macros
+- Application initialization and mode selection (TUI vs Simple CLI)
+- Main event loop coordination for both interface modes
+- Graceful shutdown handling with terminal restoration
+- Comprehensive panic handling with contextual error messages
 
 **Key Functions**:
 
@@ -69,10 +71,19 @@ The application entry point and orchestration layer.
 
        // Parse CLI arguments with clap
        let matches = Command::new("Perspt - Performance LLM Chat CLI")
-           .version("0.4.0")
+           .version("0.4.5")
            .author("Vikrant Rathore")
            .about("A performant CLI for talking to LLMs using the genai crate")
-           // ... argument definitions
+           .arg(Arg::new("simple-cli")
+               .long("simple-cli")
+               .help("Use simple command-line interface instead of TUI")
+               .action(ArgAction::SetTrue))
+           .arg(Arg::new("log-file")
+               .long("log-file")
+               .help("Log conversation to file (Simple CLI mode only)")
+               .value_name("FILE")
+               .action(ArgAction::Set))
+           // ... other argument definitions
            .get_matches();
 
        // Load configuration and create provider
@@ -82,10 +93,17 @@ The application entry point and orchestration layer.
            config.api_key.as_deref()
        )?);
 
-       // Initialize terminal and run UI
-       let mut terminal = initialize_terminal()?;
-       run_ui(&mut terminal, config, model_name, api_key, provider).await?;
-       cleanup_terminal()?;
+       // Route to appropriate interface mode
+       if matches.get_flag("simple-cli") {
+           // Simple CLI mode - minimal Unix-style interface
+           let log_file = matches.get_one::<String>("log-file").cloned();
+           cli::run_simple_cli(config, model_name, api_key, provider, log_file).await?;
+       } else {
+           // TUI mode - rich terminal interface
+           let mut terminal = initialize_terminal()?;
+           run_ui(&mut terminal, config, model_name, api_key, provider).await?;
+           cleanup_terminal()?;
+       }
        
        Ok(())
    }
@@ -97,7 +115,15 @@ The application entry point and orchestration layer.
            let _ = execute!(io::stdout(), LeaveAlternateScreen);
            
            // Provide contextual error messages and recovery tips
-           // ...
+           let panic_str = format!("{}", panic_info);
+           if panic_str.contains("PROJECT_ID") {
+               eprintln!("💡 Tip: Set PROJECT_ID environment variable for Google Gemini");
+           } else if panic_str.contains("API key") {
+               eprintln!("💡 Tip: Set your provider's API key environment variable");
+           } else if panic_str.contains("model") {
+               eprintln!("💡 Tip: Use --list-models to see available models");
+           }
+           // ... more context-specific help
        }));
    }
 
@@ -472,6 +498,8 @@ Data Flow
 Real-time Message Processing Pipeline
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+**TUI Mode (Terminal User Interface)**:
+
 1. **User Input Capture**:
 
    .. code-block:: text
@@ -495,6 +523,26 @@ Real-time Message Processing Pipeline
    .. code-block:: text
 
       Streaming chunks → UI update → Markdown rendering → Terminal display
+
+**Simple CLI Mode (NEW in v0.4.5)**:
+
+1. **Input Processing**:
+
+   .. code-block:: text
+
+      stdin readline → Input validation → Command processing → LLM request
+
+2. **Streaming Response**:
+
+   .. code-block:: text
+
+      LLM response chunks → Real-time stdout display → Session logging (optional)
+
+3. **Session Management**:
+
+   .. code-block:: text
+
+      User input → Log timestamp → AI response → Log timestamp → File flush
 
 Streaming Response Flow
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -1233,3 +1281,164 @@ For developers looking to contribute or extend Perspt:
 - :doc:`../api/index` - API reference and integration guides
 
 The architecture is designed to be extensible and maintainable, making it easy to add new features while preserving the core performance and reliability characteristics.
+
+cli.rs
+~~~~~~
+
+**NEW in v0.4.5** - Minimal command-line interface for Unix-style interactions.
+
+**Responsibilities**:
+
+- Unix-style prompt interface (``>``) for direct Q&A
+- Session logging with timestamped conversations
+- Scriptable interface for automation and workflows
+- Accessibility-friendly text-only output
+- Integration with existing provider and configuration systems
+
+**Key Functions**:
+
+.. code-block:: rust
+
+   pub async fn run_simple_cli(
+       config: AppConfig,
+       model_name: String,
+       api_key: String,
+       provider: Arc<GenAIProvider>,
+       log_file: Option<String>,
+   ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+       let mut session_log = if let Some(log_path) = log_file {
+           Some(SessionLogger::new(log_path)?)
+       } else {
+           None
+       };
+
+       println!("Perspt Simple CLI Mode");
+       println!("Model: {}", model_name);
+       println!("Type 'exit' or press Ctrl+D to quit.\n");
+
+       loop {
+           // Display prompt
+           print!("> ");
+           io::stdout().flush()?;
+
+           // Read user input
+           let mut input = String::new();
+           match io::stdin().read_line(&mut input) {
+               Ok(0) => break, // EOF (Ctrl+D)
+               Ok(_) => {
+                   let input = input.trim();
+                   if input.is_empty() { continue; }
+                   if input == "exit" { break; }
+
+                   // Log user input
+                   if let Some(ref mut logger) = session_log {
+                       logger.log_user_input(input)?;
+                   }
+
+                   // Process with LLM
+                   match process_simple_request(input, &model_name, &provider).await {
+                       Ok(response) => {
+                           println!("{}", response);
+                           if let Some(ref mut logger) = session_log {
+                               logger.log_ai_response(&response)?;
+                           }
+                       }
+                       Err(e) => {
+                           eprintln!("Error: {}", e);
+                       }
+                   }
+                   println!(); // Add spacing between exchanges
+               }
+               Err(e) => {
+                   eprintln!("Input error: {}", e);
+                   break;
+               }
+           }
+       }
+
+       println!("Goodbye!");
+       Ok(())
+   }
+
+   async fn process_simple_request(
+       input: &str,
+       model: &str,
+       provider: &GenAIProvider,
+   ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+       let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+       
+       // Start streaming request
+       provider.generate_response_stream_to_channel(model, input, tx).await?;
+       
+       // Collect streaming response
+       let mut full_response = String::new();
+       while let Some(chunk) = rx.recv().await {
+           if chunk == "<<EOT>>" { break; }
+           print!("{}", chunk);
+           io::stdout().flush()?;
+           full_response.push_str(&chunk);
+       }
+       
+       Ok(full_response)
+   }
+
+**Session Logging Implementation**:
+
+.. code-block:: rust
+
+   struct SessionLogger {
+       file: File,
+   }
+
+   impl SessionLogger {
+       pub fn new(log_path: String) -> Result<Self, std::io::Error> {
+           let file = OpenOptions::new()
+               .create(true)
+               .append(true)
+               .open(log_path)?;
+           Ok(Self { file })
+       }
+
+       pub fn log_user_input(&mut self, input: &str) -> Result<(), std::io::Error> {
+           let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+           writeln!(self.file, "[{}] User: {}", timestamp, input)?;
+           self.file.flush()?;
+           Ok(())
+       }
+
+       pub fn log_ai_response(&mut self, response: &str) -> Result<(), std::io::Error> {
+           let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+           writeln!(self.file, "[{}] Assistant: {}", timestamp, response)?;
+           writeln!(self.file)?; // Add spacing
+           self.file.flush()?;
+           Ok(())
+       }
+   }
+
+**Design Rationale**:
+
+- **Unix Philosophy**: Simple, composable tool that follows Unix conventions
+- **Streaming Support**: Real-time response display using the same streaming infrastructure as TUI mode
+- **Scriptable**: Perfect for automation, shell integration, and batch processing
+- **Accessibility**: Text-only output that works well with screen readers and accessibility tools
+- **Session Logging**: Built-in conversation logging for documentation and audit trails
+
+**Usage Patterns**:
+
+.. code-block:: bash
+
+   # Basic simple CLI mode
+   perspt --simple-cli
+
+   # With session logging
+   perspt --simple-cli --log-file session.txt
+
+   # Scripting integration
+   echo "What is quantum computing?" | perspt --simple-cli
+
+   # Chained queries
+   {
+     echo "What is machine learning?"
+     echo "Give me 3 examples"
+     echo "exit"
+   } | perspt --simple-cli --log-file ml-explanation.txt

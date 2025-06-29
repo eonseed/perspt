@@ -6,6 +6,63 @@ All notable changes to Perspt will be documented in this file.
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
+[0.4.6] - 2025-06-29
+--------------------
+
+Added
+~~~~~
+
+- **🖥️ Simple CLI Mode (PSP-000003)**: Brand new minimal command-line interface for direct Q&A without TUI overlay
+  
+  - ``--simple-cli`` flag enables Unix-style prompt interface perfect for scripting and automation
+  - ``--log-file <FILE>`` option provides built-in session logging with timestamps
+  - Real-time streaming responses in simple text format for immediate feedback
+  - Clean exit handling with ``Ctrl+D``, ``exit`` command, or ``Ctrl+C`` interrupt
+  - Works seamlessly with all existing providers, models, and authentication methods
+  - Perfect for accessibility needs, scripting workflows, and Unix philosophy adherents
+
+- **Scripting and Automation Support**: Simple CLI mode enables powerful automation scenarios
+  
+  - Pipe questions directly: ``echo "Question?" | perspt --simple-cli``
+  - Batch processing with session logging for documentation and audit trails
+  - Environment integration with aliases and shell scripts
+  - Robust error handling that doesn't terminate sessions
+
+- **Enhanced Accessibility**: Simple CLI mode provides better screen reader compatibility and simpler interaction model
+
+Technical Details
+~~~~~~~~~~~~~~~~
+
+- New ``cli.rs`` module implementing async command-line loop with streaming support
+- Integration with existing ``GenAIProvider`` for consistent behavior across interface modes
+- Comprehensive error handling with graceful degradation for individual request failures
+- Session logging format compatible with standard text processing tools
+
+Changed
+~~~~~~~
+
+- **Enhanced CLI Argument Support**: Added ``--simple-cli`` and ``--log-file`` arguments with proper validation
+- **Updated Documentation**: Comprehensive updates to README and Perspt book covering simple CLI mode usage
+- **Improved Help Text**: Clear descriptions of new simple CLI mode options and use cases
+
+Examples and Use Cases
+~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # Basic usage
+   perspt --simple-cli
+
+   # With session logging
+   perspt --simple-cli --log-file research-session.txt
+
+   # Scripting integration
+   echo "Explain quantum computing" | perspt --simple-cli
+
+   # Environment setup
+   alias ai="perspt --simple-cli"
+   ai-log() { perspt --simple-cli --log-file "$1"; }
+
 [0.4.2] - 2025-06-09
 --------------------
 

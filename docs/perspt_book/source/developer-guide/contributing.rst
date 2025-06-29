@@ -1146,3 +1146,256 @@ Ready to contribute? Here's your next steps:
 6. **Submit your PR** with tests and documentation
 
 Welcome to the Perspt development community! 🎉
+
+Contributing to Simple CLI Mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**NEW in v0.4.6** - The Simple CLI mode offers several areas for contribution:
+
+**Areas for Enhancement**:
+
+1. **Command Extensions**:
+   - Additional built-in commands (``/history``, ``/config``, ``/provider``)
+   - Command auto-completion
+   - Command history navigation
+
+2. **Session Management**:
+   - Enhanced logging formats (JSON, CSV, Markdown)
+   - Session resumption capabilities
+   - Multi-session management
+
+3. **Accessibility Improvements**:
+   - Screen reader optimizations
+   - High contrast mode support
+   - Keyboard navigation enhancements
+
+4. **Scripting Integration**:
+   - Better shell integration
+   - Environment variable templating
+   - Batch processing improvements
+
+**Development Guidelines for CLI Features**:
+
+.. code-block:: rust
+
+   // Example: Adding a new CLI command
+   // In src/cli.rs
+
+   async fn process_cli_command(
+       command: &str,
+       session_log: &mut Option<SessionLogger>,
+       app_state: &mut CliAppState, // New state management
+   ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+       let parts: Vec<&str> = command.splitn(2, ' ').collect();
+       
+       match parts[0] {
+           // Existing commands...
+           
+           "/history" => {
+               // NEW: Show conversation history
+               display_conversation_history(&app_state.conversation_history);
+               Ok(true)
+           }
+           "/config" => {
+               // NEW: Show current configuration
+               display_current_config(&app_state.config);
+               Ok(true)
+           }
+           "/provider" => {
+               // NEW: Switch providers dynamically
+               if let Some(provider_name) = parts.get(1) {
+                   switch_provider(provider_name, app_state).await?;
+                   println!("Switched to provider: {}", provider_name);
+               } else {
+                   println!("Current provider: {}", app_state.current_provider());
+               }
+               Ok(true)
+           }
+           _ => {
+               println!("Unknown command: {}. Type /help for available commands.", parts[0]);
+               Ok(true)
+           }
+       }
+   }
+
+   // State management for CLI mode
+   pub struct CliAppState {
+       pub config: AppConfig,
+       pub conversation_history: Vec<ConversationEntry>,
+       pub current_provider: String,
+       pub session_stats: SessionStats,
+   }
+
+   impl CliAppState {
+       pub fn new(config: AppConfig) -> Self {
+           Self {
+               current_provider: config.provider_type.clone().unwrap_or_default(),
+               config,
+               conversation_history: Vec::new(),
+               session_stats: SessionStats::new(),
+           }
+       }
+
+       pub fn add_conversation_entry(&mut self, user_input: String, ai_response: String) {
+           self.conversation_history.push(ConversationEntry {
+               timestamp: SystemTime::now(),
+               user_input,
+               ai_response,
+           });
+           self.session_stats.increment_exchange_count();
+       }
+   }
+
+**Testing Requirements for CLI Contributions**:
+
+.. code-block:: rust
+
+   // All CLI contributions should include tests
+   #[cfg(test)]
+   mod cli_contribution_tests {
+       use super::*;
+
+       #[test]
+       fn test_new_command_parsing() {
+           // Test new command syntax
+           assert!(matches!(parse_command("/newcommand arg"), Ok(Command::NewCommand(_))));
+       }
+
+       #[tokio::test]
+       async fn test_new_command_execution() {
+           let mut app_state = CliAppState::new(test_config());
+           let result = process_cli_command("/newcommand test", &mut None, &mut app_state).await;
+           assert!(result.is_ok());
+       }
+
+       #[test]
+       fn test_accessibility_compliance() {
+           // Ensure new features maintain accessibility
+           let output = execute_command_with_screen_reader_simulation("/newcommand");
+           assert!(is_screen_reader_friendly(&output));
+       }
+   }
+
+**Code Style for CLI Contributions**:
+
+.. code-block:: rust
+
+   // Follow these patterns for CLI code
+   
+   // 1. Clear error messages with helpful context
+   fn handle_cli_error(error: &dyn std::error::Error) -> String {
+       match error.to_string().as_str() {
+           msg if msg.contains("network") => {
+               "❌ Network error. Check your internet connection and try again.".to_string()
+           }
+           msg if msg.contains("api key") => {
+               "❌ API key error. Verify your API key is set correctly.".to_string()
+           }
+           _ => format!("❌ Error: {}", error),
+       }
+   }
+
+   // 2. Consistent prompt and output formatting
+   fn display_cli_prompt(provider: &str, model: &str) {
+       println!("Perspt Simple CLI Mode");
+       println!("Provider: {} | Model: {}", provider, model);
+       println!("Type 'exit' or press Ctrl+D to quit.\n");
+   }
+
+   // 3. Graceful handling of edge cases
+   fn sanitize_cli_input(input: &str) -> Result<String, CliError> {
+       let trimmed = input.trim();
+       
+       if trimmed.is_empty() {
+           return Err(CliError::EmptyInput);
+       }
+       
+       if trimmed.len() > MAX_INPUT_LENGTH {
+           return Err(CliError::InputTooLong(trimmed.len()));
+       }
+       
+       // Remove potentially problematic characters while preserving meaning
+       let sanitized = trimmed
+           .chars()
+           .filter(|c| c.is_ascii() && (!c.is_control() || *c == '\n' || *c == '\t'))
+           .collect::<String>();
+       
+       Ok(sanitized)
+   }
+
+**Documentation Requirements**:
+
+When contributing CLI features, please include:
+
+1. **Inline Documentation**:
+
+   .. code-block:: rust
+
+      /// Processes user commands in Simple CLI mode
+      /// 
+      /// # Arguments
+      /// 
+      /// * `command` - The command string starting with '/'
+      /// * `session_log` - Optional session logger for recording commands
+      /// * `app_state` - Mutable reference to CLI application state
+      /// 
+      /// # Returns
+      /// 
+      /// * `Ok(true)` - Continue CLI session
+      /// * `Ok(false)` - Exit CLI session
+      /// * `Err(e)` - Command processing error
+      /// 
+      /// # Examples
+      /// 
+      /// ```rust
+      /// let result = process_cli_command("/help", &mut None, &mut app_state).await?;
+      /// assert_eq!(result, Ok(true));
+      /// ```
+      pub async fn process_cli_command(
+          command: &str,
+          session_log: &mut Option<SessionLogger>,
+          app_state: &mut CliAppState,
+      ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>
+
+2. **User Documentation**: Update the user guide with new commands and usage examples
+
+3. **Integration Examples**: Provide shell script examples showing how to use new features
+
+**Pull Request Guidelines for CLI Features**:
+
+1. **Feature Description**: Clearly describe the CLI enhancement and its use cases
+2. **Backward Compatibility**: Ensure changes don't break existing CLI workflows
+3. **Accessibility Testing**: Verify features work with screen readers and accessibility tools
+4. **Performance Testing**: Test with large inputs and long sessions
+5. **Cross-Platform Testing**: Verify functionality on Windows, macOS, and Linux
+
+**Example Pull Request Template for CLI Features**:
+
+.. code-block:: markdown
+
+   ## CLI Feature: [Feature Name]
+
+   ### Description
+   Brief description of the new CLI feature or enhancement.
+
+   ### Use Cases
+   - [ ] Scripting and automation workflows
+   - [ ] Accessibility improvements
+   - [ ] Developer productivity enhancements
+   - [ ] Integration with external tools
+
+   ### Testing
+   - [ ] Unit tests for new functionality
+   - [ ] Integration tests with sample scripts
+   - [ ] Accessibility testing with screen reader simulation
+   - [ ] Cross-platform compatibility testing
+
+   ### Documentation
+   - [ ] Updated inline documentation
+   - [ ] Updated user guide with examples
+   - [ ] Shell script examples in `/examples/` directory
+
+   ### Backward Compatibility
+   - [ ] Existing CLI workflows continue to work
+   - [ ] Configuration file compatibility maintained
+   - [ ] Command line argument compatibility preserved

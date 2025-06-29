@@ -23,6 +23,7 @@
 ## ✨ Features
 
 -   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui with smooth scrolling and custom markdown rendering.
+-   **🖥️ Simple CLI Mode:** New minimal command-line mode for direct Q&A without TUI overlay - perfect for scripting, accessibility, or Unix-style workflows.
 -   **⚡ Advanced Streaming:** Real-time streaming of LLM responses with support for reasoning chunks and proper event handling.
 -   **🤖 Automatic Provider Detection:** Zero-config startup that automatically detects and uses available providers based on environment variables (set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc. and just run `perspt`!).
 -   **🔀 Latest Provider Support**: Built on the modern `genai` crate with support for cutting-edge models:
@@ -34,12 +35,12 @@
     -   **XAI** (Grok models and more)
     -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner, and more)
     -   **Ollama** (Local models: Llama, Mistral, Code Llama, Vicuna, and custom models)
--   **🔧 Robust CLI Options**: Full command-line support for API keys, models, and provider types that actually work.
+-   **🔧 Robust CLI Options**: Full command-line support for API keys, models, provider types, and the new simple CLI mode that actually work.
 -   **🔄 Flexible Authentication**: API keys work via CLI arguments, environment variables, or configuration files.
 -   **⚙️ Smart Configuration:** Intelligent configuration loading with fallbacks and validation.
 -   **🔄 Input Queuing:** Type and submit new questions even while the AI is generating a previous response.
--   **� Conversation Export:** Save your chat conversations to text files using the `/save` command with timestamped filenames.
--   **�💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
+-   **💾 Conversation Export:** Save your chat conversations to text files using the `/save` command with timestamped filenames.
+-   **💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
 -   **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering with proper streaming buffer management.
 -   **🛡️ Graceful Error Handling:** Robust handling of network issues, API errors, edge cases with user-friendly error messages.
 -   **📚 Extensive Documentation:** Comprehensive code documentation and user guides.
@@ -442,7 +443,150 @@ target/release/perspt --provider-type ollama --list-models
 - **Proper Error Handling**: Clear error messages when models don't exist or aren't available
 - **Reasoning Model Support**: Full support for models with reasoning capabilities and special event handling
 
-## 💬 Chat Interface & Commands
+## �️ Simple CLI Mode - New in v0.4.5!
+
+**NEW FEATURE**: Perspt now includes a minimal command-line interface mode for direct Q&A without the TUI overlay. Perfect for scripting, accessibility needs, or users who prefer Unix-style command prompts.
+
+### 🎯 When to Use Simple CLI Mode
+
+- **🤖 Scripting & Automation**: Integrate Perspt into shell scripts and workflows
+- ♿ **Accessibility**: Simple, scrolling console output for users with accessibility needs
+- **📝 Logging & Auditing**: Keep detailed records of AI interactions for documentation
+- **⚡ Quick Queries**: Fast, lightweight interface for simple questions
+- **🐧 Unix Philosophy**: Clean, composable tool that follows Unix conventions
+
+### 🚀 Simple CLI Usage
+
+**Basic Simple CLI Mode:**
+```bash
+# Start simple CLI mode (uses default provider and model)
+perspt --simple-cli
+
+# With specific provider and model
+perspt --simple-cli --provider-type openai --model gpt-4o-mini
+
+# With Gemini
+perspt --simple-cli --provider-type gemini --model gemini-1.5-flash
+
+# With local Ollama (no API key needed)
+perspt --simple-cli --provider-type ollama --model llama3.2
+```
+
+**With Session Logging:**
+```bash
+# Log entire session to a file
+perspt --simple-cli --log-file my-session.txt
+
+# Timestamped log files for organization
+perspt --simple-cli --log-file "$(date +%Y%m%d_%H%M%S)_ai_session.txt"
+
+# Combined with specific provider
+perspt --simple-cli --provider-type anthropic --model claude-3-5-sonnet-20241022 --log-file claude-session.txt
+```
+
+**Scripting Examples:**
+```bash
+# Pipe questions directly to Perspt
+echo "What is the capital of France?" | perspt --simple-cli
+
+# Use in shell scripts
+#!/bin/bash
+question="Explain quantum computing in simple terms"
+echo "$question" | perspt --simple-cli --log-file quantum-explanation.txt
+
+# Chain multiple questions
+{
+  echo "What is machine learning?"
+  echo "Give me 3 examples"
+  echo "exit"
+} | perspt --simple-cli
+```
+
+### 🎨 Simple CLI Interface
+
+The simple CLI provides a clean, minimal interface:
+
+```text
+Perspt Simple CLI Mode
+Model: gpt-4o-mini
+Type 'exit' or press Ctrl+D to quit.
+
+> What is the meaning of life?
+The meaning of life is a profound philosophical question that has been 
+contemplated by humans throughout history. Different perspectives offer 
+various interpretations...
+
+> How do I exit?
+You can exit by typing 'exit' or pressing Ctrl+D.
+
+> exit
+Goodbye!
+```
+
+### 📋 Simple CLI Features
+
+- **🎯 Unix-like Prompt**: Simple `> ` prompt that's familiar and non-intrusive
+- **⚡ Real-time Streaming**: Same streaming technology as TUI mode for responsive interaction
+- **📝 Session Logging**: Optional logging of both user input and AI responses
+- **🚪 Clean Exit**: Proper handling of `Ctrl+D`, `exit` command, or `Ctrl+C`
+- **🔧 Full Configuration**: Works with all providers, models, and authentication methods
+- **🔄 Error Resilience**: Individual request errors don't terminate the session
+
+### 💡 Simple CLI vs TUI Mode
+
+| Feature | Simple CLI Mode | TUI Mode |
+|---------|----------------|----------|
+| **Interface** | Minimal prompt | Rich terminal UI |
+| **Scrolling** | Natural terminal | Built-in history |
+| **Markdown** | Raw text | Rendered formatting |
+| **Navigation** | Terminal native | Keyboard shortcuts |
+| **Logging** | Built-in option | Manual `/save` command |
+| **Scripting** | Excellent | Not suitable |
+| **Accessibility** | High | Moderate |
+| **Resource Usage** | Minimal | Moderate |
+
+### 🔧 Advanced Simple CLI Usage
+
+**Environment Integration:**
+```bash
+# Set up environment for regular use
+export OPENAI_API_KEY="your-key"
+alias ai="perspt --simple-cli"
+alias ai-log="perspt --simple-cli --log-file"
+
+# Now use anywhere
+ai
+ai-log research-session.txt
+```
+
+**Configuration File for Simple CLI:**
+```json
+{
+  "provider_type": "openai",
+  "default_model": "gpt-4o-mini",
+  "api_key": "your-api-key"
+}
+```
+
+```bash
+# Use with simple CLI
+perspt --simple-cli --config simple-cli-config.json
+```
+
+### 🚨 Migration from TUI to Simple CLI
+
+If you prefer the simple CLI mode, you can make it your default:
+
+```bash
+# Create an alias for simple CLI as default
+echo 'alias perspt="perspt --simple-cli"' >> ~/.bashrc  # or ~/.zshrc
+source ~/.bashrc
+
+# Now 'perspt' starts in simple CLI mode by default
+perspt --provider-type openai --model gpt-4o-mini
+```
+
+## �💬 Chat Interface & Commands
 
 ### Built-in Commands
 
@@ -670,9 +814,35 @@ Perspt includes a custom-built markdown parser optimized for terminal rendering:
 - Visual feedback during model processing
 - Proper terminal restoration on all exit paths
 
-## 🔥 Recent Major Updates (v0.4.0)
+## 🔥 Recent Major Updates (v0.4.5)
 
-### Migration to genai Crate
+### New Simple CLI Mode (PSP-000003)
+
+We've added a new **Simple CLI Mode** that provides a minimal, Unix-like command prompt interface for direct Q&A without the TUI overlay:
+
+**🎯 New Features:**
+1. ✅ **`--simple-cli` Flag**: Enable minimal command-line mode for direct interaction
+2. ✅ **`--log-file <FILE>` Option**: Optional session logging with timestamped conversations
+3. ✅ **Unix-style Interface**: Simple `> ` prompt with clean text output
+4. ✅ **Scripting Support**: Perfect for automation, piping, and shell integration
+5. ✅ **Accessibility**: Simple scrolling output for users with accessibility needs
+
+**🚀 Usage Examples:**
+```bash
+# Basic simple CLI mode
+perspt --simple-cli
+
+# With session logging  
+perspt --simple-cli --log-file session.txt
+
+# Perfect for scripting
+echo "What is quantum computing?" | perspt --simple-cli
+
+# Works with all providers
+perspt --simple-cli --provider-type anthropic --model claude-3-5-sonnet-20241022
+```
+
+### Migration to genai Crate (v0.4.0)
 
 We've migrated from the `allms` crate to the modern **genai** crate (v0.3.5), bringing significant improvements:
 

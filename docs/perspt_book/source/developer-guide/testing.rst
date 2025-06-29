@@ -1045,3 +1045,357 @@ Next Steps
 - :doc:`architecture` - Understanding the codebase for better testing
 - :doc:`extending` - Testing custom plugins and extensions
 - :doc:`../api/index` - API reference for testing integration points
+
+Testing Simple CLI Mode
+~~~~~~~~~~~~~~~~~~~~~~
+
+**NEW in v0.4.5** - Comprehensive testing for the Simple CLI mode requires specific strategies:
+
+**Unit Tests for CLI Module**:
+
+.. code-block:: rust
+
+   // In src/cli.rs - Unit tests
+   #[cfg(test)]
+   mod tests {
+       use super::*;
+       use std::io::{self, Cursor};
+       use tokio::sync::mpsc;
+
+       #[tokio::test]
+       async fn test_simple_cli_input_processing() {
+           let input = "What is Rust?";
+           let (tx, mut rx) = mpsc::unbounded_channel();
+           
+           // Mock provider response
+           let mock_provider = create_mock_provider();
+           
+           let result = process_simple_request(input, "test-model", &mock_provider).await;
+           assert!(result.is_ok());
+           
+           // Verify streaming response collection
+           let response = result.unwrap();
+           assert!(!response.is_empty());
+       }
+
+       #[test]
+       fn test_session_logger_creation() {
+           let temp_file = std::env::temp_dir().join("test_session.txt");
+           let logger = SessionLogger::new(temp_file.to_string_lossy().to_string());
+           assert!(logger.is_ok());
+           
+           // Cleanup
+           let _ = std::fs::remove_file(temp_file);
+       }
+
+       #[test]
+       fn test_cli_command_parsing() {
+           assert!(is_exit_command("exit"));
+           assert!(is_exit_command("EXIT"));
+           assert!(!is_exit_command("exit please"));
+           assert!(!is_exit_command(""));
+       }
+
+       #[tokio::test]
+       async fn test_streaming_response_collection() {
+           let (tx, mut rx) = mpsc::unbounded_channel();
+           
+           // Simulate streaming chunks
+           tx.send("Hello ".to_string()).unwrap();
+           tx.send("world!".to_string()).unwrap();
+           tx.send("<<EOT>>".to_string()).unwrap();
+           drop(tx);
+           
+           let mut response = String::new();
+           while let Some(chunk) = rx.recv().await {
+               if chunk == "<<EOT>>" { break; }
+               response.push_str(&chunk);
+           }
+           
+           assert_eq!(response, "Hello world!");
+       }
+
+       fn create_mock_provider() -> Arc<MockGenAIProvider> {
+           // Create mock provider for testing
+           Arc::new(MockGenAIProvider::new())
+       }
+       
+       fn is_exit_command(input: &str) -> bool {
+           input.trim().to_lowercase() == "exit"
+       }
+   }
+
+**Integration Tests for CLI Workflows**:
+
+.. code-block:: rust
+
+   // tests/cli_integration_tests.rs
+   use perspt::cli::run_simple_cli;
+   use perspt::config::AppConfig;
+   use std::process::{Command, Stdio};
+   use std::io::Write;
+   use tempfile::NamedTempFile;
+
+   #[tokio::test]
+   async fn test_simple_cli_session_logging() {
+       let log_file = NamedTempFile::new().unwrap();
+       let log_path = log_file.path().to_string_lossy().to_string();
+       
+       // Create test configuration
+       let config = AppConfig {
+           provider_type: Some("openai".to_string()),
+           api_key: Some("test-key".to_string()),
+           default_model: Some("gpt-3.5-turbo".to_string()),
+           // ... other fields
+       };
+       
+       // Simulate CLI session with scripted input
+       let script = "Hello\nexit\n";
+       let mut child = Command::new("target/debug/perspt")
+           .args(&["--simple-cli", "--log-file", &log_path])
+           .stdin(Stdio::piped())
+           .stdout(Stdio::piped())
+           .stderr(Stdio::piped())
+           .spawn()
+           .expect("Failed to start perspt");
+       
+       if let Some(stdin) = child.stdin.as_mut() {
+           stdin.write_all(script.as_bytes()).unwrap();
+       }
+       
+       let output = child.wait_with_output().unwrap();
+       assert!(output.status.success());
+       
+       // Verify log file contents
+       let log_contents = std::fs::read_to_string(&log_path).unwrap();
+       assert!(log_contents.contains("User: Hello"));
+       assert!(log_contents.contains("Assistant:"));
+   }
+
+   #[test]
+   fn test_cli_argument_parsing() {
+       let output = Command::new("target/debug/perspt")
+           .args(&["--simple-cli", "--help"])
+           .output()
+           .expect("Failed to execute perspt");
+       
+       assert!(output.status.success());
+       let stdout = String::from_utf8(output.stdout).unwrap();
+       assert!(stdout.contains("simple-cli"));
+       assert!(stdout.contains("log-file"));
+   }
+
+   #[test]
+   fn test_exit_command_handling() {
+       let output = Command::new("target/debug/perspt")
+           .args(&["--simple-cli"])
+           .stdin(Stdio::piped())
+           .stdout(Stdio::piped())
+           .stderr(Stdio::piped())
+           .spawn()
+           .expect("Failed to start perspt");
+       
+       // Send exit command
+       if let Some(stdin) = output.stdin.as_mut() {
+           stdin.write_all(b"exit\n").unwrap();
+       }
+       
+       let result = output.wait_with_output().unwrap();
+       assert!(result.status.success());
+       
+       let stdout = String::from_utf8(result.stdout).unwrap();
+       assert!(stdout.contains("Goodbye!"));
+   }
+
+**Scripting Tests**:
+
+.. code-block:: bash
+
+   #!/bin/bash
+   # tests/test_cli_scripting.sh
+   
+   set -e
+   
+   echo "Testing Simple CLI scripting capabilities..."
+   
+   # Test basic input/output
+   echo "What is 2+2?" | timeout 30s target/debug/perspt --simple-cli > /tmp/test_output.txt
+   
+   if grep -q "4" /tmp/test_output.txt; then
+       echo "✅ Basic math test passed"
+   else
+       echo "❌ Basic math test failed"
+       exit 1
+   fi
+   
+   # Test session logging
+   LOG_FILE="/tmp/test_session_$(date +%s).txt"
+   echo -e "Hello\nexit" | timeout 30s target/debug/perspt --simple-cli --log-file "$LOG_FILE"
+   
+   if [ -f "$LOG_FILE" ] && grep -q "User: Hello" "$LOG_FILE"; then
+       echo "✅ Session logging test passed"
+   else
+       echo "❌ Session logging test failed"
+       exit 1
+   fi
+   
+   # Test piping multiple questions
+   {
+       echo "What is machine learning?"
+       echo "Give a brief example"
+       echo "exit"
+   } | timeout 60s target/debug/perspt --simple-cli --log-file "/tmp/multi_test.txt"
+   
+   if grep -q "machine learning" /tmp/multi_test.txt; then
+       echo "✅ Multi-question test passed"
+   else
+       echo "❌ Multi-question test failed"
+       exit 1
+   fi
+   
+   echo "All CLI scripting tests passed!"
+
+**Accessibility Testing**:
+
+.. code-block:: rust
+
+   // tests/accessibility_tests.rs
+   use std::process::{Command, Stdio};
+   use std::io::Write;
+
+   #[test]
+   fn test_screen_reader_compatibility() {
+       // Test that Simple CLI output is screen reader friendly
+       let mut child = Command::new("target/debug/perspt")
+           .args(&["--simple-cli"])
+           .stdin(Stdio::piped())
+           .stdout(Stdio::piped())
+           .stderr(Stdio::piped())
+           .spawn()
+           .expect("Failed to start perspt");
+       
+       if let Some(stdin) = child.stdin.as_mut() {
+           stdin.write_all(b"Hello\nexit\n").unwrap();
+       }
+       
+       let output = child.wait_with_output().unwrap();
+       let stdout = String::from_utf8(output.stdout).unwrap();
+       
+       // Verify output contains clear prompt markers
+       assert!(stdout.contains("> "));
+       assert!(stdout.contains("Perspt Simple CLI Mode"));
+       assert!(stdout.contains("Type 'exit' or press Ctrl+D to quit"));
+       
+       // Ensure no ANSI escape codes that might confuse screen readers
+       assert!(!stdout.contains("\x1b["));
+   }
+
+   #[test]
+   fn test_keyboard_navigation() {
+       // Test that common accessibility keyboard patterns work
+       let test_inputs = vec![
+           "\n",           // Empty input handling
+           "   \n",        // Whitespace handling
+           "\x04",         // Ctrl+D (EOF)
+           "exit\n",       // Standard exit
+       ];
+       
+       for input in test_inputs {
+           let output = Command::new("target/debug/perspt")
+               .args(&["--simple-cli"])
+               .stdin(Stdio::piped())
+               .stdout(Stdio::piped())
+               .stderr(Stdio::piped())
+               .spawn()
+               .expect("Failed to start perspt");
+           
+           if let Some(stdin) = output.stdin.as_mut() {
+               stdin.write_all(input.as_bytes()).unwrap();
+           }
+           
+           let result = output.wait_with_output().unwrap();
+           // Should handle all inputs gracefully without crashing
+           assert!(result.status.success() || result.status.code() == Some(0));
+       }
+   }
+
+**Performance Tests for CLI Mode**:
+
+.. code-block:: rust
+
+   // benches/cli_benchmarks.rs
+   use criterion::{black_box, criterion_group, criterion_main, Criterion};
+   use perspt::cli::SessionLogger;
+   use std::time::Instant;
+
+   fn benchmark_session_logging(c: &mut Criterion) {
+       c.bench_function("session_logging", |b| {
+           let temp_file = std::env::temp_dir().join("bench_session.txt");
+           let mut logger = SessionLogger::new(temp_file.to_string_lossy().to_string()).unwrap();
+           
+           b.iter(|| {
+               logger.log_user_input(black_box("Test input message")).unwrap();
+               logger.log_ai_response(black_box("Test AI response")).unwrap();
+           });
+           
+           let _ = std::fs::remove_file(temp_file);
+       });
+   }
+
+   fn benchmark_input_processing(c: &mut Criterion) {
+       c.bench_function("input_processing", |b| {
+           b.iter(|| {
+               let input = black_box("What is quantum computing?");
+               // Benchmark input validation and sanitization
+               let sanitized = input.trim().to_string();
+               sanitized
+           });
+       });
+   }
+
+   criterion_group!(benches, benchmark_session_logging, benchmark_input_processing);
+   criterion_main!(benches);
+
+**Mock Provider for Testing**:
+
+.. code-block:: rust
+
+   // In src/llm_provider.rs - Mock provider for testing
+   #[cfg(test)]
+   pub struct MockGenAIProvider {
+       responses: Vec<String>,
+       current_index: std::sync::atomic::AtomicUsize,
+   }
+
+   #[cfg(test)]
+   impl MockGenAIProvider {
+       pub fn new() -> Self {
+           Self {
+               responses: vec![
+                   "Hello! How can I help you?".to_string(),
+                   "That's a great question!".to_string(),
+                   "I'm happy to assist with that.".to_string(),
+               ],
+               current_index: std::sync::atomic::AtomicUsize::new(0),
+           }
+       }
+
+       pub async fn generate_response_stream_to_channel(
+           &self,
+           _model: &str,
+           _prompt: &str,
+           tx: tokio::sync::mpsc::UnboundedSender<String>,
+       ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+           let index = self.current_index.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+           let response = &self.responses[index % self.responses.len()];
+           
+           // Simulate streaming by sending chunks
+           for chunk in response.split_whitespace() {
+               tx.send(format!("{} ", chunk))?;
+               tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+           }
+           
+           tx.send("<<EOT>>".to_string())?;
+           Ok(())
+       }
+   }

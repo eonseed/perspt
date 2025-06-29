@@ -103,6 +103,10 @@ Perspt supports comprehensive command-line arguments that actually work with the
    # Discovery
    perspt --list-models|-l          # List available models
 
+   # Interface Modes  
+   perspt --simple-cli              # Enable simple CLI mode
+   perspt --log-file FILE           # Session logging (requires --simple-cli)
+
 **Supported Provider Types**
 
 .. code-block:: bash
@@ -120,14 +124,17 @@ Perspt supports comprehensive command-line arguments that actually work with the
 
 .. code-block:: bash
 
-   # Quick reasoning with o1-mini
-   perspt -p openai -m o1-mini
+   # TUI mode with specific provider
+   perspt -p openai -m gpt-4o-mini
    
-   # Creative writing with Claude
-   perspt -p anthropic -m claude-3-5-sonnet-20241022
+   # Simple CLI mode with logging
+   perspt --simple-cli --log-file session.txt
    
-   # Fast local inference  
-   perspt -p ollama -m llama3.2
+   # Creative writing with Claude in simple CLI
+   perspt --simple-cli -p anthropic -m claude-3-5-sonnet-20241022
+   
+   # Fast local inference in simple CLI
+   perspt --simple-cli -p ollama -m llama3.2
    
    # Validate model before starting
    perspt -p google -m gemini-2.0-flash-exp --list-models
@@ -574,3 +581,309 @@ Once you're comfortable with basic usage:
 - **Provider Deep-Dive**: Explore specific provider capabilities in :doc:`providers`  
 - **Troubleshooting**: Get help with specific issues in :doc:`troubleshooting`
 - **Configuration**: Set up custom configurations in :doc:`../configuration`
+
+Simple CLI Mode - Direct Q&A Interface
+----------------------------------------
+
+**NEW in v0.4.5**: Perspt now includes a minimal command-line interface mode for direct question-and-answer interaction without the TUI overlay. This mode follows the Unix philosophy of simple, composable tools and is perfect for scripting, accessibility needs, or users who prefer command-line interfaces.
+
+When to Use Simple CLI Mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The simple CLI mode is ideal for:
+
+- **🤖 Scripting & Automation**: Integrate Perspt into shell scripts, CI/CD pipelines, or automated workflows
+- **♿ Accessibility**: Simple, scrolling console output for users with screen readers or accessibility needs
+- **📝 Logging & Documentation**: Built-in session logging for keeping detailed records of AI interactions
+- **⚡ Quick Queries**: Lightweight interface for fast, one-off questions without UI overhead  
+- **🐧 Unix Philosophy**: Clean, composable tool that works well with pipes, redirects, and other command-line tools
+
+Basic Simple CLI Usage
+~~~~~~~~~~~~~~~~~~~~~~
+
+**Starting Simple CLI Mode**
+
+.. code-block:: bash
+
+   # Basic simple CLI mode (uses auto-detected provider)
+   perspt --simple-cli
+
+   # With specific provider and model
+   perspt --simple-cli --provider-type openai --model gpt-4o-mini
+
+   # With Gemini
+   perspt --simple-cli --provider-type gemini --model gemini-1.5-flash
+
+   # With local Ollama (no API key needed)
+   perspt --simple-cli --provider-type ollama --model llama3.2
+
+**Interactive Session Example**
+
+.. code-block:: text
+
+   $ perspt --simple-cli --provider-type openai --model gpt-4o-mini
+   Perspt Simple CLI Mode
+   Model: gpt-4o-mini
+   Type 'exit' or press Ctrl+D to quit.
+
+   > What is the capital of France?
+   Paris is the capital and largest city of France. It's located in the 
+   north-central part of the country on the Seine River...
+
+   > How many people live there?
+   The city of Paris proper has a population of approximately 2.1 million 
+   people as of recent estimates. However, the Greater Paris metropolitan 
+   area (Île-de-France region) has a much larger population...
+
+   > exit
+   Goodbye!
+
+Session Logging
+~~~~~~~~~~~~~~~
+
+One of the key features of simple CLI mode is built-in session logging:
+
+**Basic Logging**
+
+.. code-block:: bash
+
+   # Log entire session to a file
+   perspt --simple-cli --log-file my-session.txt
+
+   # Use timestamped filenames for organization
+   perspt --simple-cli --log-file "$(date +%Y%m%d_%H%M%S)_ai_session.txt"
+
+   # Combined with specific provider
+   perspt --simple-cli --provider-type anthropic --model claude-3-5-sonnet-20241022 --log-file claude-session.txt
+
+**Log File Format**
+
+The log files contain both user input and AI responses in a clean, readable format:
+
+.. code-block:: text
+
+   > What is machine learning?
+   Machine learning is a subset of artificial intelligence (AI) that involves 
+   training algorithms to recognize patterns in data and make predictions or 
+   decisions without being explicitly programmed for each specific task...
+
+   > Give me 3 practical examples
+   Here are three practical examples of machine learning in everyday use:
+
+   1. **Email Spam Detection**: Email services like Gmail use machine learning...
+   2. **Recommendation Systems**: Platforms like Netflix, Spotify, and Amazon...
+   3. **Voice Assistants**: Siri, Alexa, and Google Assistant use machine learning...
+
+   > 
+
+Scripting and Automation
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The simple CLI mode excels at scripting and automation scenarios:
+
+**Direct Input via Pipes**
+
+.. code-block:: bash
+
+   # Pipe a single question
+   echo "What is quantum computing?" | perspt --simple-cli
+
+   # Use in shell scripts
+   #!/bin/bash
+   question="Explain the difference between REST and GraphQL APIs"
+   echo "$question" | perspt --simple-cli --log-file api-explanation.txt
+
+**Multiple Questions**
+
+.. code-block:: bash
+
+   # Chain multiple questions with automatic exit
+   {
+     echo "What is Docker?"
+     echo "How is it different from virtual machines?"
+     echo "Give me a simple Docker example"
+     echo "exit"
+   } | perspt --simple-cli --log-file docker-tutorial.txt
+
+**Environment Integration**
+
+.. code-block:: bash
+
+   # Set up environment for regular use
+   export OPENAI_API_KEY="your-key"
+   alias ai="perspt --simple-cli"
+   alias ai-log="perspt --simple-cli --log-file"
+
+   # Now use anywhere
+   ai
+   ai-log research-session.txt
+
+   # Add to your .bashrc or .zshrc for permanent setup
+   echo 'alias ai="perspt --simple-cli"' >> ~/.bashrc
+
+Advanced Simple CLI Features
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Error Handling**
+
+Unlike the TUI mode, simple CLI mode is designed to be resilient for scripting:
+
+.. code-block:: text
+
+   > This might cause an error
+   Error: Rate limit exceeded. Please try again in a few moments.
+
+   > This question works fine
+   [Normal response continues...]
+
+   > exit
+   Goodbye!
+
+Individual request errors don't terminate the session, making it suitable for long-running scripts.
+
+**Exit Methods**
+
+Simple CLI mode supports multiple exit methods for different use cases:
+
+.. code-block:: bash
+
+   # Method 1: Type 'exit' command
+   > exit
+
+   # Method 2: Send EOF (Ctrl+D on Unix, Ctrl+Z on Windows)
+   > ^D
+
+   # Method 3: Interrupt signal (Ctrl+C)
+   > ^C
+
+**Configuration Files**
+
+Create dedicated configuration files for simple CLI use:
+
+.. code-block:: json
+
+   {
+     "provider_type": "openai",
+     "default_model": "gpt-4o-mini",
+     "api_key": "your-api-key"
+   }
+
+.. code-block:: bash
+
+   # Save as simple-cli-config.json and use
+   perspt --simple-cli --config simple-cli-config.json
+
+Simple CLI vs TUI Mode Comparison
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 35 35
+
+   * - Feature
+     - Simple CLI Mode
+     - TUI Mode
+   * - **Interface Style**
+     - Minimal Unix prompt
+     - Rich terminal UI
+   * - **Scrolling**
+     - Natural terminal scrolling
+     - Built-in history navigation
+   * - **Markdown Rendering**
+     - Raw text output
+     - Formatted rendering
+   * - **Session Management**
+     - Built-in logging option
+     - Manual ``/save`` command
+   * - **Scripting Support**
+     - Excellent (pipes, redirects)
+     - Not suitable
+   * - **Accessibility**
+     - High (screen reader friendly)
+     - Moderate
+   * - **Resource Usage**
+     - Minimal overhead
+     - Moderate (UI rendering)
+   * - **Background Operation**
+     - Foreground only
+     - Visual feedback
+   * - **Multi-line Input**
+     - Line-by-line
+     - Rich text editing
+
+Use Case Examples
+~~~~~~~~~~~~~~~~
+
+**Documentation Generation**
+
+.. code-block:: bash
+
+   # Generate documentation for a project
+   {
+     echo "Explain the architecture of a REST API"
+     echo "What are the best practices for REST API design?"
+     echo "How do you handle authentication in REST APIs?"
+     echo "exit"
+   } | perspt --simple-cli --log-file rest-api-docs.txt
+
+**Code Review Assistant**
+
+.. code-block:: bash
+
+   # Review code with AI assistance
+   {
+     echo "Review this Python function for potential issues:"
+     cat my_function.py
+     echo "exit"
+   } | perspt --simple-cli --provider-type openai --model gpt-4o --log-file code-review.txt
+
+**Learning and Research**
+
+.. code-block:: bash
+
+   # Research session with logging
+   perspt --simple-cli --provider-type anthropic --model claude-3-5-sonnet-20241022 \
+         --log-file "$(date +%Y%m%d)_learning_session.txt"
+
+**Quick Consultations**
+
+.. code-block:: bash
+
+   # Quick question without UI overhead
+   echo "What's the best way to optimize PostgreSQL queries?" | perspt --simple-cli
+
+Troubleshooting Simple CLI Mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Common Issues**
+
+.. code-block:: bash
+
+   # Test if simple CLI mode works
+   perspt --simple-cli --provider-type openai --list-models
+
+   # Verify logging permissions
+   touch test-log.txt && rm test-log.txt
+
+   # Check if provider is properly configured
+   perspt --simple-cli --provider-type your-provider --model your-model
+
+**Performance Tips**
+
+- Use faster models like ``gpt-4o-mini`` or ``gemini-1.5-flash`` for quick queries
+- For local usage, ``ollama`` with ``llama3.2`` provides excellent performance
+- Log files are appended to, so you can continue sessions across multiple runs
+
+**Integration with Other Tools**
+
+.. code-block:: bash
+
+   # Use with jq for structured output (if AI returns JSON)
+   echo "Return the top 3 programming languages as JSON" | \
+   perspt --simple-cli | jq '.languages[]'
+
+   # Use with grep for filtering
+   echo "List 10 Linux commands" | perspt --simple-cli | grep -E "^[0-9]+"
+
+   # Combine with watch for monitoring
+   watch -n 300 'echo "What is the current status of the Python package index?" | perspt --simple-cli'
