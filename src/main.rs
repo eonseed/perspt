@@ -425,11 +425,7 @@ async fn main() -> Result<()> {
 
     if simple_cli_mode {
         // Run the simple CLI mode
-        cli::run_simple_cli(
-            provider,
-            validated_model,
-            log_file,
-        ).await?;
+        cli::run_simple_cli(provider, validated_model, log_file).await?;
         return Ok(());
     }
 
