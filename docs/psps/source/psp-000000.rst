@@ -95,6 +95,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
      - Vikrant Rathore
      - Draft
+   * - :psp:`000003`
+     - Feature
+     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+     - Vikrant Rathore
+     - Discussion
 
 ====================
 Index by Category
@@ -130,8 +135,20 @@ Feature PSPs
 
 Feature PSPs introduce new functionality to Perspt.
 
-.. note::
-   No feature PSPs have been created yet.
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000003`
+     - Feature
+     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+     - Vikrant Rathore
+     - Discussion
 
 Enhancement PSPs
 ================
@@ -194,8 +211,23 @@ Draft PSPs (under development)
 Discussion PSPs (under review)
 ===============================
 
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000003`
+     - Feature
+     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+     - Vikrant Rathore
+     - Discussion
+
 .. note::
-   No PSPs are currently under discussion.
+   No other PSPs are currently under discussion.
 
 Accepted PSPs (approved for implementation)
 ============================================

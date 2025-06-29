@@ -1578,3 +1578,230 @@ To get started with your own extensions, we recommend:
 4. Examine the configuration system in ``src/config.rs``
 5. Run the test suite to understand the expected behavior
 6. Start with small modifications and gradually build up complexity
+
+Extending Simple CLI Mode
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**NEW in v0.4.5** - The Simple CLI mode can be extended with custom commands and enhanced functionality:
+
+**Adding Custom CLI Commands**:
+
+.. code-block:: rust
+
+   // In cli.rs - Extend command processing
+   pub async fn run_simple_cli_with_commands(
+       config: AppConfig,
+       model_name: String,
+       api_key: String,
+       provider: Arc<GenAIProvider>,
+       log_file: Option<String>,
+   ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+       // ... existing setup code ...
+
+       loop {
+           print!("> ");
+           io::stdout().flush()?;
+
+           let mut input = String::new();
+           match io::stdin().read_line(&mut input) {
+               Ok(0) => break,
+               Ok(_) => {
+                   let input = input.trim();
+                   if input.is_empty() { continue; }
+                   if input == "exit" { break; }
+
+                   // Handle custom commands
+                   if input.starts_with('/') {
+                       match process_cli_command(input, &mut session_log).await {
+                           Ok(should_continue) => {
+                               if !should_continue { break; }
+                               continue;
+                           }
+                           Err(e) => {
+                               eprintln!("Command error: {}", e);
+                               continue;
+                           }
+                       }
+                   }
+
+                   // Handle regular conversation
+                   // ... existing processing code ...
+               }
+               Err(e) => break,
+           }
+       }
+
+       Ok(())
+   }
+
+   async fn process_cli_command(
+       command: &str,
+       session_log: &mut Option<SessionLogger>,
+   ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+       let parts: Vec<&str> = command.splitn(2, ' ').collect();
+       
+       match parts[0] {
+           "/help" => {
+               println!("Available commands:");
+               println!("  /help     - Show this help");
+               println!("  /clear    - Clear conversation history");
+               println!("  /save     - Save current session to file");
+               println!("  /model    - Show current model info");
+               println!("  /exit     - Exit the application");
+               Ok(true)
+           }
+           "/clear" => {
+               // Clear screen using ANSI escape codes
+               print!("\x1B[2J\x1B[1;1H");
+               io::stdout().flush()?;
+               println!("Conversation cleared.");
+               Ok(true)
+           }
+           "/save" => {
+               let filename = parts.get(1)
+                   .map(|s| s.to_string())
+                   .unwrap_or_else(|| {
+                       format!("session_{}.txt", 
+                           SystemTime::now()
+                               .duration_since(UNIX_EPOCH)
+                               .unwrap()
+                               .as_secs())
+                   });
+               
+               if let Some(ref logger) = session_log {
+                   println!("Session saved to: {}", filename);
+               } else {
+                   println!("No session log active. Use --log-file to enable logging.");
+               }
+               Ok(true)
+           }
+           "/model" => {
+               println!("Current model: {}", /* current model info */);
+               println!("Provider: {}", /* current provider */);
+               Ok(true)
+           }
+           "/exit" => {
+               println!("Goodbye!");
+               Ok(false)
+           }
+           _ => {
+               println!("Unknown command: {}. Type /help for available commands.", parts[0]);
+               Ok(true)
+           }
+       }
+   }
+
+**Enhanced Session Logging**:
+
+.. code-block:: rust
+
+   // Enhanced session logger with metadata
+   pub struct EnhancedSessionLogger {
+       file: File,
+       session_start: SystemTime,
+       command_count: u32,
+   }
+
+   impl EnhancedSessionLogger {
+       pub fn new(log_path: String) -> Result<Self, std::io::Error> {
+           let mut file = OpenOptions::new()
+               .create(true)
+               .append(true)
+               .open(&log_path)?;
+           
+           // Write session header
+           let start_time = SystemTime::now();
+           let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+           writeln!(file, "=== Perspt Simple CLI Session Started: {} ===", timestamp)?;
+           writeln!(file, "Log file: {}", log_path)?;
+           writeln!(file)?;
+           file.flush()?;
+           
+           Ok(Self {
+               file,
+               session_start: start_time,
+               command_count: 0,
+           })
+       }
+
+       pub fn log_command(&mut self, command: &str) -> Result<(), std::io::Error> {
+           self.command_count += 1;
+           let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+           writeln!(self.file, "[{}] Command {}: {}", timestamp, self.command_count, command)?;
+           self.file.flush()?;
+           Ok(())
+       }
+
+       pub fn log_session_stats(&mut self) -> Result<(), std::io::Error> {
+           let duration = self.session_start.elapsed().unwrap_or_default();
+           let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+           
+           writeln!(self.file)?;
+           writeln!(self.file, "=== Session Ended: {} ===", timestamp)?;
+           writeln!(self.file, "Duration: {:?}", duration)?;
+           writeln!(self.file, "Total commands: {}", self.command_count)?;
+           self.file.flush()?;
+           Ok(())
+       }
+   }
+
+**Scriptable Integration Examples**:
+
+.. code-block:: bash
+
+   # Custom script for batch AI queries
+   #!/bin/bash
+   
+   QUESTIONS=(
+       "What is machine learning?"
+       "Explain deep learning in simple terms"
+       "What are neural networks?"
+   )
+   
+   LOG_FILE="ai_learning_session_$(date +%Y%m%d_%H%M%S).txt"
+   
+   for question in "${QUESTIONS[@]}"; do
+       echo "Processing: $question"
+       echo "$question" | perspt --simple-cli --log-file "$LOG_FILE"
+       echo "---" >> "$LOG_FILE"
+   done
+   
+   echo "Batch processing complete. Results in: $LOG_FILE"
+
+**Integration with External Tools**:
+
+.. code-block:: rust
+
+   // External tool integration example
+   pub async fn process_with_external_tool(
+       input: &str,
+       tool_name: &str,
+   ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+       match tool_name {
+           "json_format" => {
+               // Use jq or similar tool to format JSON responses
+               let output = Command::new("jq")
+                   .arg(".")
+                   .stdin(Stdio::piped())
+                   .stdout(Stdio::piped())
+                   .spawn()?;
+               
+               // Process with external tool
+               // ... implementation ...
+               Ok(formatted_output)
+           }
+           "markdown_render" => {
+               // Use pandoc or similar for markdown conversion
+               let output = Command::new("pandoc")
+                   .arg("-f").arg("markdown")
+                   .arg("-t").arg("plain")
+                   .stdin(Stdio::piped())
+                   .stdout(Stdio::piped())
+                   .spawn()?;
+               
+               // ... implementation ...
+               Ok(rendered_output)
+           }
+           _ => Err("Unknown tool".into())
+       }
+   }
