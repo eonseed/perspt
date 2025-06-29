@@ -86,6 +86,7 @@ use crate::config::AppConfig;
 use crate::llm_provider::GenAIProvider;
 use crate::ui::{run_ui, AppEvent};
 
+mod cli;
 mod config;
 mod llm_provider;
 mod ui;
@@ -300,6 +301,19 @@ async fn main() -> Result<()> {
                 .help("List available models for the configured provider")
                 .action(clap::ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("simple-cli")
+                .long("simple-cli")
+                .help("Run in simple CLI mode for direct Q&A")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("log-file")
+                .long("log-file")
+                .value_name("FILE")
+                .help("Optional file to log the CLI session")
+                .requires("simple-cli"),
+        )
         .get_matches();
 
     let config_path = matches.get_one::<String>("config");
@@ -308,6 +322,8 @@ async fn main() -> Result<()> {
     let cli_provider_profile = matches.get_one::<String>("provider");
     let cli_provider_type = matches.get_one::<String>("provider-type");
     let list_models = matches.get_flag("list-models");
+    let simple_cli_mode = matches.get_flag("simple-cli");
+    let log_file = matches.get_one::<String>("log-file").cloned();
 
     // Load configuration
     let mut config = config::load_config(config_path)
@@ -404,6 +420,12 @@ async fn main() -> Result<()> {
 
     if list_models {
         list_available_models(&provider, &config).await?;
+        return Ok(());
+    }
+
+    if simple_cli_mode {
+        // Run the simple CLI mode
+        cli::run_simple_cli(provider, validated_model, log_file).await?;
         return Ok(());
     }
 

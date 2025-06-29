@@ -126,7 +126,10 @@ Method 3: Download Binary
 Your First Conversation
 -----------------------
 
-Let's start your first AI conversation with Perspt!
+Let's start your first AI conversation with Perspt! You can choose between two interface modes:
+
+1. **Interactive TUI Mode** - Rich terminal interface with markdown rendering (default)
+2. **Simple CLI Mode** - Minimal command-line interface for scripting and accessibility (NEW!)
 
 Zero-Config Quick Start
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -147,16 +150,31 @@ Zero-Config Quick Start
 
 .. tabs::
 
-   .. tab:: OpenAI (Recommended)
+   .. tab:: Interactive TUI Mode (Default)
+
+      Rich terminal interface with markdown rendering and scrollable history:
 
       .. code-block:: bash
 
          # Set your API key
          export OPENAI_API_KEY="sk-your-actual-api-key-here"
          
-         # Launch Perspt - that's it!
+         # Launch Perspt in TUI mode (default)
          perspt
          # Automatically uses OpenAI with gpt-4o-mini
+
+   .. tab:: Simple CLI Mode (NEW!)
+
+      Minimal command-line interface perfect for scripting and accessibility:
+
+      .. code-block:: bash
+
+         # Set your API key
+         export OPENAI_API_KEY="sk-your-actual-api-key-here"
+         
+         # Launch Perspt in simple CLI mode
+         perspt --simple-cli
+         # Unix-style prompt with streaming responses
 
    .. tab:: Anthropic Claude
 
@@ -165,8 +183,11 @@ Zero-Config Quick Start
          # Set your API key
          export ANTHROPIC_API_KEY="sk-ant-your-key"
          
-         # Launch Perspt - zero config needed!
+         # TUI mode (default)
          perspt
+         
+         # Simple CLI mode
+         perspt --simple-cli
          # Automatically uses Anthropic with claude-3-5-sonnet-20241022
 
    .. tab:: Google Gemini
@@ -176,8 +197,11 @@ Zero-Config Quick Start
          # Set your API key
          export GEMINI_API_KEY="your-gemini-key"
          
-         # Launch Perspt
+         # TUI mode (default)
          perspt
+         
+         # Simple CLI mode with logging
+         perspt --simple-cli --log-file gemini-session.txt
          # Automatically uses Gemini with gemini-1.5-flash
 
    .. tab:: Ollama (Local)
@@ -187,8 +211,11 @@ Zero-Config Quick Start
          # Just make sure Ollama is running
          ollama serve
          
-         # Launch Perspt (no API key needed!)
+         # TUI mode (default)
          perspt
+         
+         # Simple CLI mode for scripting
+         perspt --simple-cli
          # Auto-detects Ollama if no other providers found
 
 Step 1: Set Your API Key (Manual Configuration)
@@ -206,6 +233,10 @@ If you prefer manual configuration or want to override automatic detection:
 
 Step 2: Launch Perspt
 ~~~~~~~~~~~~~~~~~~~~~
+
+Choose between TUI mode (rich interface) or Simple CLI mode (minimal interface):
+
+**TUI Mode (Default)**
 
 .. code-block:: bash
 
@@ -234,6 +265,34 @@ You should see a welcome screen like this:
    └──────────────────────────────────────────────────────────┘
 
    You: 
+
+**Simple CLI Mode (NEW!)**
+
+.. code-block:: bash
+
+   # Start simple CLI mode
+   perspt --simple-cli
+
+   # With session logging
+   perspt --simple-cli --log-file my-session.txt
+
+You should see a minimal interface like this:
+
+.. code-block:: text
+
+   Perspt Simple CLI Mode
+   Model: gpt-4o-mini
+   Type 'exit' or press Ctrl+D to quit.
+
+   > 
+
+The simple CLI mode is perfect for:
+
+- **Scripting and automation**
+- **Accessibility (screen readers)**
+- **Unix-style workflows**
+- **Session logging**
+- **Lightweight usage**
 
 Step 3: Start Chatting
 ~~~~~~~~~~~~~~~~~~~~~~

@@ -252,9 +252,7 @@ pub fn detect_available_provider() -> Option<(String, String)> {
     for (env_var, provider_type, default_model) in providers_to_check {
         if env::var(env_var).is_ok() {
             log::info!(
-                "Auto-detected provider '{}' from environment variable {}",
-                provider_type,
-                env_var
+                "Auto-detected provider '{provider_type}' from environment variable {env_var}",
             );
             return Some((provider_type.to_string(), default_model.to_string()));
         }
