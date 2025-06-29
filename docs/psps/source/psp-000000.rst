@@ -99,7 +99,7 @@ The numerical index contains a table of all PSPs, ordered by number.
      - Feature
      - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
      - Vikrant Rathore
-     - Discussion
+    - Active
 
 ====================
 Index by Category
@@ -144,11 +144,11 @@ Feature PSPs introduce new functionality to Perspt.
      - Title
      - Author(s)
      - Status
-   * - :psp:`000003`
-     - Feature
-     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
-     - Vikrant Rathore
-     - Discussion
+  * - :psp:`000003`
+    - Feature
+    - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+    - Vikrant Rathore
+    - Active
 
 Enhancement PSPs
 ================
@@ -211,20 +211,6 @@ Draft PSPs (under development)
 Discussion PSPs (under review)
 ===============================
 
-.. list-table::
-   :header-rows: 1
-   :widths: 5 10 45 30 10
-
-   * - Number
-     - Type
-     - Title
-     - Author(s)
-     - Status
-   * - :psp:`000003`
-     - Feature
-     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
-     - Vikrant Rathore
-     - Discussion
 
 .. note::
    No other PSPs are currently under discussion.
@@ -238,8 +224,21 @@ Accepted PSPs (approved for implementation)
 Final PSPs (implemented and complete)
 ======================================
 
-.. note::
-   No PSPs have been finalized yet.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000003`
+     - Feature
+     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+     - Vikrant Rathore
+     - Active
 
 Rejected PSPs (not approved)
 =============================
@@ -302,10 +301,10 @@ Authors/Owners
      - Email
    * - Vikrant Rathore
      - @vikrantrathore
-     - vikrant@perspt.org
+     - vikrant@vyomtech.com
    * - Ronak Rathore  
      - @ronakrathore
-     - ronak@perspt.org
+     - ronak@vyomtech.com
 
 =========
 Copyright
