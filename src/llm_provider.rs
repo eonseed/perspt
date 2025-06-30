@@ -345,17 +345,13 @@ impl GenAIProvider {
     pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<String> {
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!(
-            "Sending chat request to model: {model} with prompt: {prompt}"
-        );
+        log::debug!("Sending chat request to model: {model} with prompt: {prompt}");
 
         let chat_res = self
             .client
             .exec_chat(model, chat_req, None)
             .await
-            .context(format!(
-                "Failed to execute chat request for model: {model}"
-            ))?;
+            .context(format!("Failed to execute chat request for model: {model}"))?;
 
         let content = chat_res
             .content_text_as_str()
@@ -477,9 +473,7 @@ impl GenAIProvider {
     ) -> Result<()> {
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!(
-            "Sending streaming chat request to model: {model} with prompt: {prompt}"
-        );
+        log::debug!("Sending streaming chat request to model: {model} with prompt: {prompt}");
 
         let chat_res_stream = self
             .client
@@ -594,17 +588,13 @@ impl GenAIProvider {
     ) -> Result<String> {
         let chat_req = ChatRequest::new(messages);
 
-        log::debug!(
-            "Sending chat request to model: {model} with conversation history"
-        );
+        log::debug!("Sending chat request to model: {model} with conversation history");
 
         let chat_res = self
             .client
             .exec_chat(model, chat_req, None)
             .await
-            .context(format!(
-                "Failed to execute chat request for model: {model}"
-            ))?;
+            .context(format!("Failed to execute chat request for model: {model}"))?;
 
         let content = chat_res
             .content_text_as_str()
@@ -623,17 +613,13 @@ impl GenAIProvider {
     ) -> Result<String> {
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!(
-            "Sending chat request to model: {model} with custom options"
-        );
+        log::debug!("Sending chat request to model: {model} with custom options");
 
         let chat_res = self
             .client
             .exec_chat(model, chat_req, Some(&options))
             .await
-            .context(format!(
-                "Failed to execute chat request for model: {model}"
-            ))?;
+            .context(format!("Failed to execute chat request for model: {model}"))?;
 
         let content = chat_res
             .content_text_as_str()
