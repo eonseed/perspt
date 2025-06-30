@@ -136,7 +136,7 @@ fn setup_panic_hook() {
         eprintln!();
 
         // Extract useful information from panic
-        let panic_str = format!("{}", panic_info);
+        let panic_str = format!("{panic_info}");
         if panic_str.contains("PROJECT_ID") {
             eprintln!("❌ Missing Google Cloud Configuration:");
             eprintln!(
