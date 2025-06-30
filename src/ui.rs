@@ -366,7 +366,7 @@ impl App {
         // Format as HH:MM
         let hours = (timestamp / 3600) % 24;
         let minutes = (timestamp / 60) % 60;
-        format!("{:02}:{:02}", hours, minutes)
+        format!("{hours:02}:{minutes:02}")
     }
 
     /// Adds a new message to the chat history.
@@ -972,7 +972,7 @@ impl App {
                         .chars()
                         .take(100)
                         .collect::<String>();
-                    log::debug!("Final message content preview: {}...", content_preview);
+                    log::debug!("Final message content preview: {content_preview}...");
                 }
             }
         } else {
@@ -1171,7 +1171,7 @@ impl App {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            format!("conversation_{}.txt", timestamp)
+            format!("conversation_{timestamp}.txt")
         });
 
         let mut content = String::new();
@@ -1245,7 +1245,7 @@ pub async fn run_ui(
                     for (i, msg) in all_messages.iter().enumerate() {
                         if msg == crate::EOT_SIGNAL {
                             eot_count += 1;
-                            log::info!(">>> EOT SIGNAL #{} found at position {} <<<", eot_count, i);
+                            log::info!(">>> EOT SIGNAL #{eot_count} found at position {i} <<<");
                             if eot_count == 1 {
                                 // Process all accumulated content before first EOT
                                 log::info!("Processing {} content messages before EOT ({} total chars)",
@@ -1261,7 +1261,7 @@ pub async fn run_ui(
                                 break; // Stop processing after first EOT
                             } else {
                                 // Ignore duplicate EOT signals
-                                log::warn!("Ignoring duplicate EOT signal #{}", eot_count);
+                                log::warn!("Ignoring duplicate EOT signal #{eot_count}");
                             }
                         } else {
                             total_content_chars += msg.len();
@@ -1412,22 +1412,20 @@ async fn handle_terminal_event(
                                         app.add_message(ChatMessage {
                                             message_type: MessageType::System,
                                             content: vec![Line::from(format!(
-                                                "✅ Conversation saved to: {}",
-                                                filename
+                                                "✅ Conversation saved to: {filename}"
                                             ))],
                                             timestamp: App::get_timestamp(),
                                             raw_content: format!(
-                                                "Conversation saved to: {}",
-                                                filename
+                                                "Conversation saved to: {filename}"
                                             ),
                                         });
                                     }
                                     Err(e) => {
                                         app.add_message(ChatMessage {
                                             message_type: MessageType::Error,
-                                            content: vec![Line::from(format!("❌ Error: {}", e))],
+                                            content: vec![Line::from(format!("❌ Error: {e}"))],
                                             timestamp: App::get_timestamp(),
-                                            raw_content: format!("Error: {}", e),
+                                            raw_content: format!("Error: {e}"),
                                         });
                                     }
                                 },
@@ -1587,8 +1585,8 @@ async fn initiate_llm_request_enhanced(
             // EOT signal is now sent by the provider itself, no need to send it here
         }
         Err(e) => {
-            log::error!("LLM request failed: {}", e);
-            let _ = tx.send(format!("Error: {}", e));
+            log::error!("LLM request failed: {e}");
+            let _ = tx.send(format!("Error: {e}"));
             let _ = tx.send(crate::EOT_SIGNAL.to_string());
         }
     }
@@ -1655,7 +1653,7 @@ async fn handle_llm_response(
     } else if message.starts_with("Error: ") && message.len() > 7 {
         // Handle errors
         let error_msg = &message[7..];
-        log::error!("Received error message: {}", error_msg);
+        log::error!("Received error message: {error_msg}");
         let error_state = categorize_error(error_msg);
         app.add_error(error_state);
         app.finish_streaming();
@@ -2350,7 +2348,7 @@ fn markdown_to_lines(markdown: &str) -> Vec<Line<'static>> {
         if in_code_block {
             // Code block content
             lines.push(Line::from(vec![Span::styled(
-                format!("│ {}", line),
+                format!("│ {line}"),
                 Style::default().fg(Color::Cyan).bg(Color::DarkGray),
             )]));
             continue;
@@ -2499,7 +2497,7 @@ fn parse_inline_markdown_to_spans(text: &str) -> Vec<Span<'static>> {
                     code_text.push(ch);
                 }
                 spans.push(Span::styled(
-                    format!(" {} ", code_text),
+                    format!(" {code_text} "),
                     Style::default().fg(Color::Green).bg(Color::DarkGray),
                 ));
             }
