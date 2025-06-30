@@ -155,7 +155,7 @@ fn setup_panic_hook() {
             eprintln!("   Please check the documentation for your chosen provider.");
         } else {
             eprintln!("❌ Configuration Error:");
-            eprintln!("   {}", panic_str);
+            eprintln!("   {panic_str}");
         }
 
         eprintln!();
@@ -360,17 +360,17 @@ async fn main() -> Result<()> {
 
     if let Some(ptype) = cli_provider_type {
         config.provider_type = Some(ptype.clone());
-        log::info!("Using provider type from command line: {}", ptype);
+        log::info!("Using provider type from command line: {ptype}");
     }
 
     if let Some(profile_name) = cli_provider_profile {
         config.default_provider = Some(profile_name.clone());
-        log::info!("Using provider profile from command line: {}", profile_name);
+        log::info!("Using provider profile from command line: {profile_name}");
     }
 
     if let Some(model_val) = cli_model_name {
         config.default_model = Some(model_val.clone());
-        log::info!("Using model from command line: {}", model_val);
+        log::info!("Using model from command line: {model_val}");
     }
 
     // Get model name for the provider - set defaults based on provider type using genai compatible names
@@ -412,9 +412,7 @@ async fn main() -> Result<()> {
 
     if validated_model != model_name_for_provider {
         log::info!(
-            "Model changed from {} to {} after validation",
-            model_name_for_provider,
-            validated_model
+            "Model changed from {model_name_for_provider} to {validated_model} after validation"
         );
     }
 
@@ -485,15 +483,15 @@ async fn list_available_models(provider: &Arc<GenAIProvider>, _config: &AppConfi
     let providers = provider.get_available_providers().await?;
 
     for provider_name in providers {
-        println!("Available models for {} provider:", provider_name);
+        println!("Available models for {provider_name} provider:");
         match provider.get_available_models(&provider_name).await {
             Ok(models) => {
                 for model in models {
-                    println!("  - {}", model);
+                    println!("  - {model}");
                 }
             }
             Err(e) => {
-                println!("  Error fetching models: {}", e);
+                println!("  Error fetching models: {e}");
             }
         }
         println!();
@@ -618,7 +616,7 @@ async fn initiate_llm_request(
     app.is_input_disabled = true;
     app.streaming_buffer.clear(); // Clear any previous streaming buffer
 
-    log::info!("Initiating LLM request for input: '{}'", input_to_send);
+    log::info!("Initiating LLM request for input: '{input_to_send}'");
     app.set_status(
         format!("Sending: {}...", truncate_message(&input_to_send, 20)),
         false,
@@ -645,8 +643,8 @@ async fn initiate_llm_request(
                 // EOT signal is now sent by the provider itself, no need to send it here
             }
             Err(e) => {
-                log::error!("LLM request failed: {}", e);
-                let error_msg = format!("Error: {}", e);
+                log::error!("LLM request failed: {e}");
+                let error_msg = format!("Error: {e}");
                 let _ = tx_clone_for_provider.send(error_msg);
                 let _ = tx_clone_for_provider.send(EOT_SIGNAL.to_string());
             }

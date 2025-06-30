@@ -217,12 +217,12 @@ impl GenAIProvider {
                     return Self::new();
                 }
                 _ => {
-                    log::warn!("Unknown provider type for API key: {}", provider);
+                    log::warn!("Unknown provider type for API key: {provider}");
                     return Self::new();
                 }
             };
 
-            log::info!("Setting {} environment variable for genai client", env_var);
+            log::info!("Setting {env_var} environment variable for genai client");
             std::env::set_var(env_var, key);
         }
 
@@ -286,7 +286,7 @@ impl GenAIProvider {
             .client
             .all_model_names(adapter_kind)
             .await
-            .context(format!("Failed to get models for provider: {}", provider))?;
+            .context(format!("Failed to get models for provider: {provider}"))?;
 
         Ok(models)
     }
@@ -346,9 +346,7 @@ impl GenAIProvider {
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
         log::debug!(
-            "Sending chat request to model: {} with prompt: {}",
-            model,
-            prompt
+            "Sending chat request to model: {model} with prompt: {prompt}"
         );
 
         let chat_res = self
@@ -356,8 +354,7 @@ impl GenAIProvider {
             .exec_chat(model, chat_req, None)
             .await
             .context(format!(
-                "Failed to execute chat request for model: {}",
-                model
+                "Failed to execute chat request for model: {model}"
             ))?;
 
         let content = chat_res
@@ -481,9 +478,7 @@ impl GenAIProvider {
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
         log::debug!(
-            "Sending streaming chat request to model: {} with prompt: {}",
-            model,
-            prompt
+            "Sending streaming chat request to model: {model} with prompt: {prompt}"
         );
 
         let chat_res_stream = self
@@ -491,8 +486,7 @@ impl GenAIProvider {
             .exec_chat_stream(model, chat_req, None)
             .await
             .context(format!(
-                "Failed to execute streaming chat request for model: {}",
-                model
+                "Failed to execute streaming chat request for model: {model}"
             ))?;
 
         // Process the stream with enhanced debugging to identify truncation issues
@@ -515,7 +509,7 @@ impl GenAIProvider {
 
             match chunk_result {
                 Ok(ChatStreamEvent::Start) => {
-                    log::info!(">>> STREAM STARTED for model: {} at {:?}", model, elapsed);
+                    log::info!(">>> STREAM STARTED for model: {model} at {elapsed:?}");
                 }
                 Ok(ChatStreamEvent::Chunk(chunk)) => {
                     chunk_count += 1;
@@ -532,8 +526,7 @@ impl GenAIProvider {
                         // Send content immediately without batching to prevent content loss
                         if tx.send(chunk.content.clone()).is_err() {
                             log::error!(
-                                "!!! CHANNEL SEND FAILED for chunk #{} - STOPPING STREAM !!!",
-                                chunk_count
+                                "!!! CHANNEL SEND FAILED for chunk #{chunk_count} - STOPPING STREAM !!!"
                             );
                             break;
                         }
@@ -541,14 +534,11 @@ impl GenAIProvider {
                         // Additional detailed logging every 25 chunks
                         if chunk_count % 25 == 0 {
                             log::info!(
-                                "=== PROGRESS: {} chunks, {} chars, {:?} elapsed ===",
-                                chunk_count,
-                                total_content_length,
-                                elapsed
+                                "=== PROGRESS: {chunk_count} chunks, {total_content_length} chars, {elapsed:?} elapsed ==="
                             );
                         }
                     } else {
-                        log::debug!("Empty chunk #{} received", chunk_count);
+                        log::debug!("Empty chunk #{chunk_count} received");
                     }
                 }
                 Ok(ChatStreamEvent::ReasoningChunk(chunk)) => {
@@ -560,19 +550,15 @@ impl GenAIProvider {
                     // For now, just log reasoning chunks. In future versions we might display them differently.
                 }
                 Ok(ChatStreamEvent::End(_)) => {
-                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {} after {} chunks, {} chars, {:?} elapsed", 
-                               model, chunk_count, total_content_length, elapsed);
+                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, {total_content_length} chars, {elapsed:?} elapsed");
                     stream_ended_explicitly = true;
                     break;
                 }
                 Err(e) => {
                     log::error!(
-                        "!!! STREAM ERROR after {} chunks at {:?}: {} !!!",
-                        chunk_count,
-                        elapsed,
-                        e
+                        "!!! STREAM ERROR after {chunk_count} chunks at {elapsed:?}: {e} !!!"
                     );
-                    let error_msg = format!("Stream error: {}", e);
+                    let error_msg = format!("Stream error: {e}");
                     let _ = tx.send(error_msg);
                     return Err(e.into());
                 }
@@ -582,16 +568,11 @@ impl GenAIProvider {
         // Stream ended - either explicitly via End event or stream exhaustion
         let final_elapsed = start_time.elapsed();
         if !stream_ended_explicitly {
-            log::warn!("!!! STREAM ENDED IMPLICITLY (exhausted) for model: {} after {} chunks, {} chars, {:?} elapsed !!!", 
-                       model, chunk_count, total_content_length, final_elapsed);
+            log::warn!("!!! STREAM ENDED IMPLICITLY (exhausted) for model: {model} after {chunk_count} chunks, {total_content_length} chars, {final_elapsed:?} elapsed !!!");
         }
 
         log::info!(
-            "=== STREAM COMPLETE === Model: {}, Final: {} chunks, {} chars, {:?} elapsed",
-            model,
-            chunk_count,
-            total_content_length,
-            final_elapsed
+            "=== STREAM COMPLETE === Model: {model}, Final: {chunk_count} chunks, {total_content_length} chars, {final_elapsed:?} elapsed"
         );
 
         // CRITICAL: Send single EOT signal to indicate completion
@@ -601,7 +582,7 @@ impl GenAIProvider {
             return Err(anyhow::anyhow!("Channel closed during EOT signal send"));
         }
 
-        log::info!(">>> EOT SIGNAL SENT for model: {} <<<", model);
+        log::info!(">>> EOT SIGNAL SENT for model: {model} <<<");
         Ok(())
     }
 
@@ -614,8 +595,7 @@ impl GenAIProvider {
         let chat_req = ChatRequest::new(messages);
 
         log::debug!(
-            "Sending chat request to model: {} with conversation history",
-            model
+            "Sending chat request to model: {model} with conversation history"
         );
 
         let chat_res = self
@@ -623,8 +603,7 @@ impl GenAIProvider {
             .exec_chat(model, chat_req, None)
             .await
             .context(format!(
-                "Failed to execute chat request for model: {}",
-                model
+                "Failed to execute chat request for model: {model}"
             ))?;
 
         let content = chat_res
@@ -645,8 +624,7 @@ impl GenAIProvider {
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
         log::debug!(
-            "Sending chat request to model: {} with custom options",
-            model
+            "Sending chat request to model: {model} with custom options"
         );
 
         let chat_res = self
@@ -654,8 +632,7 @@ impl GenAIProvider {
             .exec_chat(model, chat_req, Some(&options))
             .await
             .context(format!(
-                "Failed to execute chat request for model: {}",
-                model
+                "Failed to execute chat request for model: {model}"
             ))?;
 
         let content = chat_res
@@ -691,11 +668,11 @@ impl GenAIProvider {
     pub async fn test_model(&self, model: &str) -> Result<bool> {
         match self.generate_response_simple(model, "Hello").await {
             Ok(_) => {
-                log::info!("Model {} is available and working", model);
+                log::info!("Model {model} is available and working");
                 Ok(true)
             }
             Err(e) => {
-                log::warn!("Model {} test failed: {}", model, e);
+                log::warn!("Model {model} test failed: {e}");
                 Ok(false)
             }
         }
@@ -719,7 +696,7 @@ impl GenAIProvider {
         }
 
         // If all else fails, use the original model and let it fail with a proper error
-        log::warn!("Could not validate model {}, proceeding anyway", model);
+        log::warn!("Could not validate model {model}, proceeding anyway");
         Ok(model.to_string())
     }
 }
