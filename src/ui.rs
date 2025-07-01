@@ -369,6 +369,43 @@ impl App {
         format!("{hours:02}:{minutes:02}")
     }
 
+    /// Triggers the Easter egg by displaying the dedication message.
+    pub fn trigger_easter_egg(&mut self) {
+        let dedication_msg = ChatMessage {
+            message_type: MessageType::System,
+            content: vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("💝 ", Style::default().fg(Color::Magenta)),
+                    Span::styled("Special Dedication", Style::default().fg(Color::Magenta).bold()),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("✨ ", Style::default().fg(Color::Yellow)),
+                    Span::styled("This application is lovingly dedicated to", Style::default().fg(Color::Cyan)),
+                ]),
+                Line::from(vec![
+                    Span::styled("   my wonderful mother and grandma", Style::default().fg(Color::Cyan).italic()),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("🌟 ", Style::default().fg(Color::Yellow)),
+                    Span::styled("Thank you for your endless love, wisdom, and support", Style::default().fg(Color::Green)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("💖 ", Style::default().fg(Color::Red)),
+                    Span::styled("With all my love and gratitude", Style::default().fg(Color::Magenta).italic()),
+                ]),
+                Line::from(""),
+            ],
+            timestamp: Self::get_timestamp(),
+            raw_content: "💝 Special Dedication\n\n✨ This application is lovingly dedicated to\n   my wonderful mother and grandma\n\n🌟 Thank you for your endless love, wisdom, and support\n\n💖 With all my love and gratitude".to_string(),
+        };
+
+        self.add_message(dedication_msg);
+    }
+
     /// Adds a new message to the chat history.
     ///
     /// Automatically timestamps the message and scrolls the view to the bottom
@@ -1403,6 +1440,12 @@ async fn handle_terminal_event(
                 // Send message
                 KeyCode::Enter => {
                     if let Some(input) = app.take_input() {
+                        // Check for Easter egg exact sequence "l-o-v-e"
+                        if input.eq_ignore_ascii_case("l-o-v-e") {
+                            app.trigger_easter_egg();
+                            return Some(AppEvent::Redraw);
+                        }
+
                         // Handle commands starting with /
                         if input.starts_with('/') {
                             let command = input.trim_start_matches('/').trim();

@@ -96,6 +96,9 @@ pub async fn run_simple_cli(
     let mut stdin_reader = BufReader::new(stdin);
     let mut user_input = String::new();
 
+    // Easter egg state tracking
+    let mut easter_egg_triggered = false;
+
     // Print welcome message
     println!("Perspt Simple CLI Mode");
     println!("Model: {model_name}");
@@ -133,6 +136,12 @@ pub async fn run_simple_cli(
         // Check for exit command
         if trimmed_input.eq_ignore_ascii_case("exit") {
             break;
+        }
+
+        // Check for Easter egg exact sequence "l-o-v-e"
+        if check_easter_egg_exact_sequence(trimmed_input, &mut easter_egg_triggered) {
+            display_cli_easter_egg();
+            continue;
         }
 
         // Log user input if logging is enabled
@@ -205,4 +214,44 @@ pub async fn run_simple_cli(
 
     println!("Goodbye!");
     Ok(())
+}
+
+/// Checks for the Easter egg exact sequence "l-o-v-e".
+///
+/// This function checks if the input exactly matches "l-o-v-e" (case-insensitive).
+///
+/// # Arguments
+///
+/// * `input` - The user input to check
+/// * `triggered` - Mutable reference to the triggered state
+///
+/// # Returns
+///
+/// * `bool` - True if the Easter egg sequence was detected and triggered
+fn check_easter_egg_exact_sequence(input: &str, triggered: &mut bool) -> bool {
+    // Don't trigger again if already triggered in this session
+    if *triggered {
+        return false;
+    }
+
+    if input.eq_ignore_ascii_case("l-o-v-e") {
+        *triggered = true;
+        return true;
+    }
+
+    false
+}
+
+/// Displays the Easter egg dedication message in CLI mode.
+fn display_cli_easter_egg() {
+    println!();
+    println!("💝 \x1b[35;1mSpecial Dedication\x1b[0m");
+    println!();
+    println!("✨ \x1b[36mThis application is lovingly dedicated to\x1b[0m");
+    println!("   \x1b[36;3mmy wonderful mother and grandma\x1b[0m");
+    println!();
+    println!("🌟 \x1b[32mThank you for your endless love, wisdom, and support\x1b[0m");
+    println!();
+    println!("💖 \x1b[35;3mWith all my love and gratitude\x1b[0m");
+    println!();
 }

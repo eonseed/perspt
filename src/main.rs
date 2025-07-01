@@ -756,6 +756,14 @@ pub async fn handle_events(
                 KeyCode::Enter => {
                     if !app.is_input_disabled && !app.input_text.trim().is_empty() {
                         let input_to_send = app.input_text.trim().to_string();
+
+                        // Check for Easter egg exact sequence "l-o-v-e"
+                        if input_to_send.eq_ignore_ascii_case("l-o-v-e") {
+                            app.input_text.clear();
+                            app.trigger_easter_egg();
+                            return Some(AppEvent::Key(key));
+                        }
+
                         app.input_text.clear();
 
                         // Add user message to chat history
