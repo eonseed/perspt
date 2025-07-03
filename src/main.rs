@@ -330,7 +330,28 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to load configuration")?;
 
-    // Check if we have a valid provider configuration
+    // Apply CLI overrides BEFORE checking provider configuration
+    if let Some(key) = cli_api_key {
+        config.api_key = Some(key.clone());
+        log::info!("Using API key from command line argument");
+    }
+
+    if let Some(ptype) = cli_provider_type {
+        config.provider_type = Some(ptype.clone());
+        log::info!("Using provider type from command line: {ptype}");
+    }
+
+    if let Some(profile_name) = cli_provider_profile {
+        config.default_provider = Some(profile_name.clone());
+        log::info!("Using provider profile from command line: {profile_name}");
+    }
+
+    if let Some(model_val) = cli_model_name {
+        config.default_model = Some(model_val.clone());
+        log::info!("Using model from command line: {model_val}");
+    }
+
+    // Check if we have a valid provider configuration (after CLI overrides)
     if config.provider_type.is_none() {
         eprintln!("❌ No LLM provider configured!");
         eprintln!();
@@ -350,27 +371,6 @@ async fn main() -> Result<()> {
         eprintln!("  3. Create a config.json file with provider settings");
         eprintln!();
         return Err(anyhow::anyhow!("No provider configured"));
-    }
-
-    // Apply CLI overrides
-    if let Some(key) = cli_api_key {
-        config.api_key = Some(key.clone());
-        log::info!("Using API key from command line argument");
-    }
-
-    if let Some(ptype) = cli_provider_type {
-        config.provider_type = Some(ptype.clone());
-        log::info!("Using provider type from command line: {ptype}");
-    }
-
-    if let Some(profile_name) = cli_provider_profile {
-        config.default_provider = Some(profile_name.clone());
-        log::info!("Using provider profile from command line: {profile_name}");
-    }
-
-    if let Some(model_val) = cli_model_name {
-        config.default_model = Some(model_val.clone());
-        log::info!("Using model from command line: {model_val}");
     }
 
     // Get model name for the provider - set defaults based on provider type using genai compatible names
@@ -404,7 +404,13 @@ async fn main() -> Result<()> {
         config.api_key.is_some()
     );
 
-    // Validate the model before starting UI
+    // Handle list-models command before model validation
+    if list_models {
+        list_available_models(&provider, &config).await?;
+        return Ok(());
+    }
+
+    // Validate the model before starting UI (only if not listing models)
     let validated_model = provider
         .validate_model(&model_name_for_provider, config.provider_type.as_deref())
         .await
@@ -414,11 +420,6 @@ async fn main() -> Result<()> {
         log::info!(
             "Model changed from {model_name_for_provider} to {validated_model} after validation"
         );
-    }
-
-    if list_models {
-        list_available_models(&provider, &config).await?;
-        return Ok(());
     }
 
     if simple_cli_mode {
@@ -478,23 +479,75 @@ async fn main() -> Result<()> {
 /// # List Anthropic models
 /// perspt --provider-type anthropic --list-models
 /// ```
-async fn list_available_models(provider: &Arc<GenAIProvider>, _config: &AppConfig) -> Result<()> {
-    // List all providers and their models
-    let providers = provider.get_available_providers().await?;
-
-    for provider_name in providers {
-        println!("Available models for {provider_name} provider:");
-        match provider.get_available_models(&provider_name).await {
+async fn list_available_models(provider: &Arc<GenAIProvider>, config: &AppConfig) -> Result<()> {
+    // If a specific provider was configured, list models for that provider only
+    if let Some(provider_type) = &config.provider_type {
+        println!("Available models for {provider_type} provider:");
+        match provider.get_available_models(provider_type).await {
             Ok(models) => {
-                for model in models {
-                    println!("  - {model}");
+                if models.is_empty() {
+                    println!("  No models found or API authentication required");
+                    println!("  Try setting the appropriate API key environment variable:");
+                    match provider_type.as_str() {
+                        "openai" => println!("  export OPENAI_API_KEY=sk-your-key"),
+                        "anthropic" => println!("  export ANTHROPIC_API_KEY=sk-ant-your-key"),
+                        "gemini" => println!("  export GEMINI_API_KEY=your-key"),
+                        "groq" => println!("  export GROQ_API_KEY=your-key"),
+                        "cohere" => println!("  export COHERE_API_KEY=your-key"),
+                        "xai" => println!("  export XAI_API_KEY=your-key"),
+                        "deepseek" => println!("  export DEEPSEEK_API_KEY=your-key"),
+                        "ollama" => println!("  Ensure Ollama is running locally on port 11434"),
+                        _ => {}
+                    }
+                } else {
+                    for model in models {
+                        println!("  - {model}");
+                    }
                 }
             }
             Err(e) => {
                 println!("  Error fetching models: {e}");
+                println!("  This usually means:");
+                println!("  1. No API key is configured for this provider");
+                println!("  2. The API key is invalid");
+                println!("  3. Network connectivity issues");
+                println!();
+                println!("  Try setting the API key:");
+                match provider_type.as_str() {
+                    "openai" => println!("     export OPENAI_API_KEY=sk-your-key"),
+                    "anthropic" => println!("     export ANTHROPIC_API_KEY=sk-ant-your-key"),
+                    "gemini" => println!("     export GEMINI_API_KEY=your-key"),
+                    "groq" => println!("     export GROQ_API_KEY=your-key"),
+                    "cohere" => println!("     export COHERE_API_KEY=your-key"),
+                    "xai" => println!("     export XAI_API_KEY=your-key"),
+                    "deepseek" => println!("     export DEEPSEEK_API_KEY=your-key"),
+                    "ollama" => println!("     Ensure Ollama is running: ollama serve"),
+                    _ => {}
+                }
             }
         }
-        println!();
+    } else {
+        // List all providers and their models if no specific provider
+        let providers = provider.get_available_providers().await?;
+
+        for provider_name in providers {
+            println!("Available models for {provider_name} provider:");
+            match provider.get_available_models(&provider_name).await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        println!("  No models found or authentication required");
+                    } else {
+                        for model in models {
+                            println!("  - {model}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("  Error fetching models: {e}");
+                }
+            }
+            println!();
+        }
     }
     Ok(())
 }
