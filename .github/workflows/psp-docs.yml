@@ -132,7 +132,7 @@ jobs:
         ls -la _site/psps/
 
     - name: Upload Pages artifact
-      uses: actions/upload-pages-artifact@v3
+      uses: actions/upload-pages-artifact@v4
 
   deploy:
     name: Deploy PSP Documentation to GitHub Pages
