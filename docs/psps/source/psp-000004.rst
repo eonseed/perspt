@@ -4,7 +4,7 @@ Author: Vikrant Rathore (@vikrantrathore)
 Status: Discussion
 Type: Feature
 Created: 2025-12-18
-Discussion-To: <Link to GitHub Issue for this PSP>
+Discussion-To: https://github.com/eonseed/perspt/issues/60
 
 ========
 Abstract
