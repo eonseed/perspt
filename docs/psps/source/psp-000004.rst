@@ -164,6 +164,61 @@ The agent follows a rigorous, session-based workflow to ensure safety and transp
 
 *   **Fast Analytics:** The columnar format allows the `Reviewer` and `Supervisor` agents to run complex heuristics on session history with sub-millisecond latency.
 
+Retry and Escalation Policy
+---------------------------
+
+To prevent infinite loops and provide clear failure semantics, the agent follows a strict escalation policy:
+
+*   **Compilation Error:** If the same error persists after 3 fix attempts, the task is marked ``FAILED`` and the user is prompted for manual intervention.
+*   **Tool Use Failure:** If a tool (e.g., ``run_command``, ``apply_patch``) fails 5 times consecutively, the session pauses and logs the failure for debugging.
+*   **Reviewer Rejection:** If the Reviewer rejects the Coder's output 3 times for the same task, the system escalates to the user with a summary of the disagreement and proposed alternatives.
+*   **Budget Exhaustion:** If the token budget (``--max-cost``) or step limit (``--max-steps``) is exceeded, the session terminates gracefully, saving all progress to the State Database.
+
+All terminal states (``FAILED``, ``PAUSED``, ``COMPLETED``) are persisted and can be resumed via ``perspt agent resume <session_id>``.
+
+Orchestration State Machine
+---------------------------
+
+The multi-agent workflow follows a deterministic state machine to ensure predictable behavior:
+
+.. code-block:: text
+
+    +-------------+     +------------+     +-------------+     +-----------+
+    | TASK_QUEUED | --> | PLANNING   | --> | CODING      | --> | REVIEWING |
+    +-------------+     +------------+     +-------------+     +-----------+
+          |                   |                  |                   |
+          v                   v                  v                   v
+    [User Cancels]      [Plan Rejected]    [Compile Fail]     [Review Fail]
+          |                   |                  |                   |
+          v                   v                  v                   v
+    +-------------+     +------------+     +-------------+     +-----------+
+    |   ABORTED   |     |   FAILED   |     | RETRY(<=3)  |     | RETRY     |
+    +-------------+     +------------+     +-------------+     +-----------+
+                                                 |                   |
+                                                 v                   v
+                                           [Retry Limit]       [Retry Limit]
+                                                 |                   |
+                                                 v                   v
+                                           +------------+     +------------+
+                                           |   FAILED   |     | ESCALATED  |
+                                           +------------+     +------------+
+                                                                    |
+                                                                    v
+                                                              [User Input]
+                                                                    |
+                                                                    v
+                                                              +-----------+
+                                                              | COMPLETED |
+                                                              +-----------+
+
+**Valid Transitions:**
+
+*   ``TASK_QUEUED`` -> ``PLANNING`` (on session start)
+*   ``PLANNING`` -> ``CODING`` (on plan approval) or ``FAILED`` (on rejection)
+*   ``CODING`` -> ``REVIEWING`` (on successful compile) or ``RETRY`` (on compile fail)
+*   ``REVIEWING`` -> ``COMPLETED`` (on approval) or ``RETRY`` (on rejection)
+*   ``RETRY`` -> ``CODING``/``REVIEWING`` (retry attempt) or ``FAILED``/``ESCALATED`` (budget exhausted)
+
 .. rubric:: UI/UX Design
 
 To provide a superior developer experience, the Perspt CLI features a rich TUI for reviewing agent actions.
@@ -220,13 +275,43 @@ As a TUI-based proposal, accessibility is prioritized:
         async fn process(&self, ctx: &AgentContext) -> Result<AgentMessage>;
     }
 
+**GenAIProvider Concurrency Strategy**
+
+To support multi-agent orchestration, ``GenAIProvider`` will be refactored to be thread-safe:
+
+*   **Approach:** Stateless instances with shared configuration.
+*   **Implementation:** Each agent (Planner, Coder, Reviewer) receives its own ``GenAIProvider`` instance, cloned from a template configuration. The provider itself is stateless; rate limiting and connection pooling are handled internally via ``Arc<RwLock<...>>`` for shared state (e.g., token counters).
+*   **Rationale:** This avoids complex ``Send + Sync`` gymnastics while ensuring each agent can operate independently without contention.
+
+.. code-block:: rust
+
+    // Example: Creating agent-specific providers
+    let config = ProviderConfig::from_env()?;
+    let planner_provider = GenAIProvider::new(config.clone());
+    let coder_provider = GenAIProvider::new(config.clone());
+    let reviewer_provider = GenAIProvider::new(config.clone());
+
+    // Each provider is independent; shared state (if any) uses Arc internally
+
 **Sandboxing Strategy**
 
 To match the security standards of the Codex CLI, Perspt agents must not run arbitrary shell commands on the host machine without safeguards.
 
-*   **Phase 1 (MVP):** "User-Approved Execution". The agent creates a shell script or proposes a command, and the CLI asks the user `[Y/n]` before determining to run it.
+*   **Phase 1 (MVP):** "User-Approved Execution". The agent creates a shell script or proposes a command, and the CLI asks the user ``[Y/n]`` before determining to run it.
+
+    **Command Sanitization (Phase 1):**
+    Before presenting the ``[Y/n]`` prompt, all proposed commands will be parsed and validated:
+
+    *   **Shell Parsing:** Use the ``shell-words`` crate to tokenize the command and detect compound statements.
+    *   **Suspicious Pattern Detection:** Reject or warn on commands containing:
+        *   Backticks (`` ` ``) or ``$()`` subshell expansion.
+        *   Command chaining (``&&``, ``||``, ``;``) unless explicitly whitelisted.
+        *   Redirections to sensitive paths (``~/.ssh``, ``/etc``).
+        *   Network access via ``curl``, ``wget``, or ``nc`` without user acknowledgment.
+    *   **Display Normalization:** Commands are displayed in a canonicalized form to prevent visual obfuscation attacks.
+
 *   **Phase 2:** Docker-based sandbox. The agent operates inside a disposable container with the project volume mounted.
-*   **Phase 3:** Native sandboxing (e.g., `bubblewrap` crate on Linux, `sandbox-mac` on macOS).
+*   **Phase 3:** Native sandboxing (e.g., ``bubblewrap`` crate on Linux, ``sandbox-mac`` on macOS).
 
 **Tooling Integration**
 
@@ -368,20 +453,60 @@ To support this, we will utilize a curated stack of well-maintained, production-
 *   **`portable-pty`:** For capturing and interacting with real-world terminal output within the agent sandbox.
 *   **`nucleo-matcher`:** For blazingly fast fuzzy matching during context retrieval.
 
-Comparison with SOTA Tools (Late 2025)
-====================================
+.. list-table:: Comparison with SOTA Tools (Late 2025)
+   :header-rows: 1
+   :widths: 20 18 18 14 30
 
-| Feature | Claude Code | Gemini-CLI | Aider | Perspt Agent CLI |
-|:--------|:------------|:-----------|:------|:-----------------|
-| **SOTA Models** | Claude 4.5 Opus | Gemini 3 Flash | LLM Direct | **Agnostic (GPT-5.2/Claude 4.5)**|
-| **Persistence** | `CLAUDE.md` | `GEMINI.md` | Git History | **DuckDB + `PERSPT.md`**|
-| **Search** | **ripgrep** | Simple Grep | ripgrep | **ripgrep + Agentic SQL**|
-| **Analytics** | Basic Logs | Basic Logs | None | **NLQ (Text-to-SQL)** |
-| **UI Type** | Virtual DOM (Ink) | Plain Terminal | Plain Terminal | **TUI (Ratatui)** |
-| **Orchestration** | Multi-Agent | Single Agent | Single Agent | **Solo/Team Toggle** |
-| **Reasoning** | Deep Thinking | Large Context | LLM Direct | **Explicit Design Phase**|
-| **Security** | Managed API | Managed API | None | **Native Landlock** |
-| **Open Source** | No | **Yes (Apache 2.0)** | **Yes (Apache 2.0)**| **Yes (MIT/Apache)** |
+   * - Feature
+     - Claude Code
+     - Gemini-CLI
+     - Aider
+     - Perspt Agent CLI
+   * - SOTA Models
+     - Claude 4.5 Opus
+     - Gemini 3 Flash
+     - LLM Direct
+     - **Agnostic (GPT-5.2/Claude 4.5)**
+   * - Persistence
+     - ``CLAUDE.md``
+     - ``GEMINI.md``
+     - Git History
+     - **DuckDB + PERSPT.md**
+   * - Search
+     - **ripgrep**
+     - Simple Grep
+     - ripgrep
+     - **ripgrep + Agentic SQL**
+   * - Analytics
+     - Basic Logs
+     - Basic Logs
+     - None
+     - **NLQ (Text-to-SQL)**
+   * - UI Type
+     - Virtual DOM (Ink)
+     - Plain Terminal
+     - Plain Terminal
+     - **TUI (Ratatui)**
+   * - Orchestration
+     - Multi-Agent
+     - Single Agent
+     - Single Agent
+     - **Solo/Team Toggle**
+   * - Reasoning
+     - Deep Thinking
+     - Large Context
+     - LLM Direct
+     - **Explicit Design Phase**
+   * - Security
+     - Managed API
+     - Managed API
+     - None
+     - **Native Landlock**
+   * - Open Source
+     - No
+     - **Yes (Apache 2.0)**
+     - **Yes (Apache 2.0)**
+     - **Yes (MIT/Apache)**
 
 This proposal aligns Perspt with the state-of-the-art in high-performance coding tools while maintaining its unique model-agnostic flexibility.
 
