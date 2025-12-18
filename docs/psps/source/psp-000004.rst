@@ -1,7 +1,7 @@
-PSP: XXXXXX
+PSP: 000004
 Title: Multi-Agent Coding Workflow and CLI Expansion
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Draft
+Status: Discussion
 Type: Feature
 Created: 2025-12-18
 Discussion-To: <Link to GitHub Issue for this PSP>
