@@ -224,21 +224,21 @@ The multi-agent workflow follows a deterministic state machine to ensure predict
 To provide a superior developer experience, the Perspt CLI features a rich TUI for reviewing agent actions.
 
 **User Goals:**
-*   Review agent-proposed changes with high confidence.
-*   Monitor agent progress and token expenditure in real-time.
-*   Interact with the agent via a natural language query interface for session insights.
+   *   Review agent-proposed changes with high confidence.
+   *   Monitor agent progress and token expenditure in real-time.
+   *   Interact with the agent via a natural language query interface for session insights.
 
 **Interaction Flow:**
-*   Users trigger the agent via `perspt agent <task>`.
-*   Interactive review mode permits line-by-line or chunk-by-line staging.
-*   TUI dashboard provides persistent status monitoring.
+   *   Users trigger the agent via `perspt agent <task>`.
+   *   Interactive review mode permits line-by-line or chunk-by-line staging.
+   *   TUI dashboard provides persistent status monitoring.
 
 .. rubric:: Accessibility Considerations
 
 As a TUI-based proposal, accessibility is prioritized:
-*   **Screen Reader Friendly:** All TUI elements use standard ANSI escaping that translates correctly to modern accessible terminals.
-*   **Keyboard Navigation:** All agent reviews and menus are 100% keyboard-operable, following `vi` or standard arrow-key bindings.
-*   **Color Contrast:** All status indicators (Success/Failure/Warning) use high-contrast color palettes with secondary text markers to ensure usability for color-blind developers.
+   *   **Screen Reader Friendly:** All TUI elements use standard ANSI escaping that translates correctly to modern accessible terminals.
+   *   **Keyboard Navigation:** All agent reviews and menus are 100% keyboard-operable, following `vi` or standard arrow-key bindings.
+   *   **Color Contrast:** All status indicators (Success/Failure/Warning) use high-contrast color palettes with secondary text markers to ensure usability for color-blind developers.
 
 .. rubric:: Technical Specification
 
