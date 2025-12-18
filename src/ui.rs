@@ -1101,7 +1101,7 @@ impl App {
             // Always update for small content (responsive for short responses)
             self.streaming_buffer.len() < SMALL_BUFFER_THRESHOLD ||
             // Regular interval updates for longer content
-            self.streaming_buffer.len() % UI_UPDATE_INTERVAL == 0 ||
+            self.streaming_buffer.len().is_multiple_of(UI_UPDATE_INTERVAL) ||
             // Content-based triggers for better UX
             content.contains('\n') ||      // Line breaks
             content.contains("```") ||     // Code blocks
@@ -1720,7 +1720,7 @@ async fn handle_llm_response(
         });
 
         // Log every 25 chunks or large content chunks
-        if chunk_count % 25 == 0 || message.len() > 100 {
+        if chunk_count.is_multiple_of(25) || message.len() > 100 {
             log::info!(
                 "STREAMING: chunk #{}, {} chars, total {} chars, buffer: {} chars",
                 chunk_count,
