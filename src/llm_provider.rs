@@ -354,7 +354,7 @@ impl GenAIProvider {
             .context(format!("Failed to execute chat request for model: {model}"))?;
 
         let content = chat_res
-            .content_text_as_str()
+            .first_text()
             .context("No text content in response")?;
 
         log::debug!("Received response with {} characters", content.len());
@@ -548,6 +548,10 @@ impl GenAIProvider {
                     stream_ended_explicitly = true;
                     break;
                 }
+                Ok(ChatStreamEvent::ToolCallChunk(_)) => {
+                    // Tool calls are not yet supported in streaming mode for legacy client
+                    log::debug!("Tool call chunk received (ignored)");
+                }
                 Err(e) => {
                     log::error!(
                         "!!! STREAM ERROR after {chunk_count} chunks at {elapsed:?}: {e} !!!"
@@ -597,7 +601,7 @@ impl GenAIProvider {
             .context(format!("Failed to execute chat request for model: {model}"))?;
 
         let content = chat_res
-            .content_text_as_str()
+            .first_text()
             .context("No text content in response")?;
 
         log::debug!("Received response with {} characters", content.len());
@@ -622,7 +626,7 @@ impl GenAIProvider {
             .context(format!("Failed to execute chat request for model: {model}"))?;
 
         let content = chat_res
-            .content_text_as_str()
+            .first_text()
             .context("No text content in response")?;
 
         log::debug!("Received response with {} characters", content.len());
