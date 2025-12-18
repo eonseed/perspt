@@ -100,6 +100,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
      - Vikrant Rathore
      - Active
+   * - :psp:`000004`
+     - Feature
+     - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
+     - Vikrant Rathore
+     - Draft
 
 ====================
 Index by Category
@@ -149,6 +154,11 @@ Feature PSPs introduce new functionality to Perspt.
      - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
      - Vikrant Rathore
      - Active
+   * - :psp:`000004`
+     - Feature
+     - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
+     - Vikrant Rathore
+     - Draft
 
 Enhancement PSPs
 ================
@@ -205,6 +215,11 @@ Draft PSPs (under development)
    * - :psp:`000002`
      - UI/UX
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
+     - Vikrant Rathore
+     - Draft
+   * - :psp:`000004`
+     - Feature
+     - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
      - Vikrant Rathore
      - Draft
 

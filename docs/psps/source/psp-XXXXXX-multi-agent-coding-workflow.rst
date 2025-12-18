@@ -1,0 +1,453 @@
+PSP: XXXXXX
+Title: Multi-Agent Coding Workflow and CLI Expansion
+Author: Vikrant Rathore (@vikrantrathore)
+Status: Draft
+Type: Feature
+Created: 2025-12-18
+Discussion-To: <Link to GitHub Issue for this PSP>
+
+========
+Abstract
+========
+
+This PSP proposes a significant expansion of Perspt's capabilities from a chat-focused TUI/CLI into a full-featured agentic coding tool. Inspired by the architecture of OpenAI's Rust-based Codex CLI, this proposal introduces a robust multi-agent workflow system where specialized agents (Planner, Coder, Reviewer) collaborate to solve complex coding tasks. This includes a new `agent` subcommand, a secure runtime environment, and a structured inter-agent communication protocol.
+
+==========
+Motivation
+==========
+
+While Perspt's current TUI provides an excellent interface for direct user-LLM interaction, complex software engineering tasks require more than a single conversational turn. They often involve:
+
+1.  **Multi-step Reasoning:** Breaking a problem into a plan, implementation, and verification.
+2.  **Context Management:** Reading multiple files, understanding project structure, and maintaining state across a workflow.
+3.  **Safety & Execution:** Running code/tests to verify correctness, which requires a secure environment.
+4.  **Specialization:** Different "personas" or prompts for planning vs. coding vs. reviewing.
+
+**Inspiration from OpenAI's Codex CLI (Rust):**
+Research into the recent Rust rewrite of OpenAI's Codex CLI highlights several key architectural advantages that Perspt should adopt:
+
+*   **Native Performance:** Rust provides the speed and memory safety required for low-latency agent loops and handling large context.
+*   **Zero-Dependency:** A single binary distribution is superior to complex Python/Node environments for developer tools.
+*   **Sandboxing:** Essential for an agent that writes and possibly executes code. The Codex CLI uses native OS capabilities (Seatbelt/Landlock) for security.
+*   **Wire Protocol:** An extensible protocol allowing agents to be composed or extended in other languages.
+
+By evolving Perspt in this direction, we transform it from a "chat tool" into a "coding partner" capable of autonomous task execution.
+
+================
+Proposed Changes
+================
+
+.. rubric:: Functional Specification
+
+The proposed architecture introduces a new `agent` module in the Rust codebase, centered around a `Supervisor` that manages the lifecycle and state of a multi-agent workflow.
+
+**Three Layers of Abstraction:**
+
+1.  **CLI Interface (`perspt agent <subcommand>`):** The user entry point for defining tasks and managing running jobs.
+2.  **Orchestration Layer (`Supervisor`):** Manages the "Context", dispatches tasks to agents, and aggregates results. Supports **Solo Mode** (unified agent) and **Team Mode** (multi-agent).
+3.  **Project Memory (`PERSPT.md`):** Inspired by `CLAUDE.md`, a hierarchical memory file that stores project-specific instructions, architectural context, and coding standards. This is the "Ground Truth" for the agent.
+4.  **Execution Layer (`Runtime`):** A sandboxed environment (using Docker or native isolation) where file I/O and command execution occur.
+
+Execution Modes
+===============
+
+To balance performance and reliability, Perspt supports two orchestration modes:
+
+*   **Solo Mode (Default for minor tasks):** A single "Engineer" agent handles planning, coding, and verification in a tight loop. Minimizes token overhead and communication latency.
+*   **Team Mode (Default for major refactors):** The full Supervisor-Planner-Coder-Reviewer ensemble. Recommended for tasks affecting >5 files or involving ambiguous design choices.
+
+Agent Control Plane (CLI)
+=========================
+
+The CLI provides a "Management Plane" for interacting with backgrounded or long-running agent tasks:
+
+.. code-block:: bash
+
+   # List all active and past sessions
+   perspt agent list
+
+   # View live logs or "attach" to an agent's terminal stream
+   perspt agent attach <session_id>
+
+   # Forcefully stop an autonomous agent
+   perspt agent stop <session_id>
+
+   # Inspect the current Task List and state
+   perspt agent status <session_id>
+
+
+CLI Command Structure
+=====================
+
+We will introduce a new top-level subcommand `agent` with the following subcommands:
+
+.. code-block:: bash
+
+   # Start an interactive agent session for a specific task
+   perspt agent run "Refactor the authentication middleware to use JWT"
+
+   # Execute a predefined workflow from a file
+   perspt agent file workflow.yaml
+
+   # Start in "server" mode to listen for external commands (Wire Protocol support)
+   perspt agent serve --port 3000
+
+Modular Architecture (Workspace)
+================================
+
+Following Codex's workspace pattern (`codex-rs` root with many sub-crates), Perspt will adopt a modular structure to enforce separation of concerns:
+
+*   `perspt-core`: Shared types, context management, and LLM traits.
+*   `perspt-agent`: The specific agent logic (Planner, Coder, Reviewer).
+*   `perspt-tui`: The Ratatui-based user interface.
+*   `perspt-sandbox`: Platform-specific sandboxing logic (Landlock/Seatbelt).
+*   `perspt-policy`: The Starlark execution policy engine.
+*   `perspt-lsp`: LSP client integration.
+
+Workflow Design
+===============
+
+The agent follows a rigorous, session-based workflow to ensure safety and transparency:
+
+1.  **Task Ingestion:**
+    The user provides a high-level coding task via CLI or file.
+
+2.  **Analysis & Context Loading:**
+    The `Planner` agent analyzes the request and scans the codebase using a two-pronged approach:
+    *   **Ripgrep Context Retrieval:** Leverages the `grep` and `ignore` crate ecosystem (as used in Claude Code) for blazingly fast, `.gitignore`-aware text searching to find relevant file paths and code snippets.
+    *   **Tree-sitter Structural Analysis:** Uses `tree-sitter` to understand the structural context (classes, functions, dependencies) of the files identified by Ripgrep.
+
+3.  **Deep Thinking & Planning:**
+    The agent enters a "Deep Thinking" phase (using models specifically tuned for reasoning, like **Claude 4.5 Opus**, **GPT-5.2 Thinking**, or **Gemini 3 Pro**) to create a **compositional execution plan**. This plan is stored directly in the **State Database** rather than a loose file.
+
+4.  **Plan Review (with Auto-Approve):**
+    The CLI presents the plan to the user.
+    *   **Interactive Mode:** User reviews, edits, and approves the plan.
+    *   **Auto-Approve:** If verified safe or configured via settings (e.g., `auto_approve_plan = true`), this step proceeds automatically.
+
+5.  **Task Graph Generation:**
+    Upon approval, the plan is committed to the **State Database** as a graph of granular tasks with clear dependencies and success criteria.
+
+6.  **Multi-Agent Execution Loop:**
+    The `Supervisor` iterates through the tasks in the **State Database**, coordinating specialized agents:
+    *   **Coder:** Writes code and tests based on the task definition.
+    *   **Reviewer:** Validates changes against the plan's constraints.
+    *   **Supervisor:** Commits the status (Success/Failure) back to the DB.
+
+7.  **Git Safeguards:**
+    To ensure repository integrity, the agent follows strict Git rules:
+    *   No `force push` or `commit --amend` without explicit user per-action approval.
+    *   Automatic creation of "Recovery Branches" before major refactors.
+    *   Integration with pre-commit hooks; if they fail, the agent attempts to fix the violation in a new commit.
+
+8.  **Session Isolation & Persistence (Dual-DB Architecture):**
+    Perspt employs a dual-database strategy using **DuckDB**:
+    *   **Global Knowledge Store (`~/.perspt/knowledge.db`):** A centralized database that stores cross-project memories, user preference patterns, and historical task successes/failures for long-term learning.
+    *   **Project Session Store (`.perspt/state.db`):** A local columnar database for the current workspace. DuckDB's `ATTACH` capability allows these stores to be queried together seamlessly.
+
+9.  **Agentic SQL Context Retrieval:**
+    Agents (Planner or Coder) can utilize the analytical store as a first-class context tool:
+    *   **Code Search:** Query indexed AST structures or dependency graphs for faster local context than raw `ripgrep`.
+    *   **Pattern Matching:** "Find similar functions in other projects that solved a similar task X."
+    *   **Failure Analysis:** "Query history to see why previous attempts at this refactor failed."
+
+10. **Session Insight (Natural Language SQL):**
+    By using DuckDB, the CLI enables a "Developer Oracle" mode. Users can ask questions about the session (e.g., "Which tests failed most often during the refactor?") and the agent will:
+    *   Generate a DuckDB-optimized SQL query.
+    *   Execute it against the session's analytical store.
+    *   Present the results in a formatted table or summary.
+
+11. **Concurrency & Self-Correction:**
+    *   **Retry Budget:** Max 3 attempts to fix the same compilation error; max 5 "Tool Use" failures before pausing.
+    *   **Vectorized Engine:** DuckDB's engine is used for multi-threaded analytical queries.
+    *   **State Manager (Actor):** A dedicated actor owns the write connection to prevent file-level write conflicts.
+
+*   **Fast Analytics:** The columnar format allows the `Reviewer` and `Supervisor` agents to run complex heuristics on session history with sub-millisecond latency.
+
+.. rubric:: UI/UX Design
+
+To provide a superior developer experience, the Perspt CLI features a rich TUI for reviewing agent actions.
+
+**User Goals:**
+*   Review agent-proposed changes with high confidence.
+*   Monitor agent progress and token expenditure in real-time.
+*   Interact with the agent via a natural language query interface for session insights.
+
+**Interaction Flow:**
+*   Users trigger the agent via `perspt agent <task>`.
+*   Interactive review mode permits line-by-line or chunk-by-line staging.
+*   TUI dashboard provides persistent status monitoring.
+
+.. rubric:: Accessibility Considerations
+
+As a TUI-based proposal, accessibility is prioritized:
+*   **Screen Reader Friendly:** All TUI elements use standard ANSI escaping that translates correctly to modern accessible terminals.
+*   **Keyboard Navigation:** All agent reviews and menus are 100% keyboard-operable, following `vi` or standard arrow-key bindings.
+*   **Color Contrast:** All status indicators (Success/Failure/Warning) use high-contrast color palettes with secondary text markers to ensure usability for color-blind developers.
+
+.. rubric:: Technical Specification
+
+**New Module: `src/agent.rs`**
+
+.. code-block:: rust
+
+    /// Represents the different roles an agent can take
+    pub enum AgentRole {
+        Supervisor,
+        Planner,
+        Coder,
+        Reviewer,
+    }
+
+    /// A structured message in the agent conversation
+    pub struct AgentMessage {
+        pub role: AgentRole,
+        pub content: String,
+        pub tool_calls: Vec<ToolCall>,
+    }
+
+    /// The state of the current workspace/task
+    pub struct AgentContext {
+        pub working_dir: PathBuf,
+        pub files: HashMap<PathBuf, String>, // Cache of read files
+        pub history: Vec<AgentMessage>,
+        pub budget: TokenBudget,
+    }
+
+    /// The trait that all specific agents implements
+    #[async_trait]
+    pub trait Agent {
+        async fn process(&self, ctx: &AgentContext) -> Result<AgentMessage>;
+    }
+
+**Sandboxing Strategy**
+
+To match the security standards of the Codex CLI, Perspt agents must not run arbitrary shell commands on the host machine without safeguards.
+
+*   **Phase 1 (MVP):** "User-Approved Execution". The agent creates a shell script or proposes a command, and the CLI asks the user `[Y/n]` before determining to run it.
+*   **Phase 2:** Docker-based sandbox. The agent operates inside a disposable container with the project volume mounted.
+*   **Phase 3:** Native sandboxing (e.g., `bubblewrap` crate on Linux, `sandbox-mac` on macOS).
+
+**Tooling Integration**
+
+The agents will have access to a specific set of tools, implemented as Rust functions exposed to the LLM:
+
+*   `read_file(path)`
+*   `search_code(query)`
+*   `apply_patch(path, diff)`
+*   `run_command(cmd)` (Protected by sandbox/approval)
+
+Execpolicy & Sandboxing
+=======================
+
+To match the rigorous security of Codex, Perspt will implement a multi-layered security model:
+
+**1. Execution Policy (`execpolicy`):**
+   We will adopt a rule-based policy engine using **Starlark** (via the `starlark` crate), allowing users to define granular permissions.
+   *   Example: Allow `git fetch` but prompt for `git push`.
+   *   Policies are stored in `~/.perspt/rules` and support pattern matching.
+
+**2. OS-Level Sandboxing:**
+   *   **Linux:** Use `landlock` to restrict file access to the specific project directory.
+   *   **macOS:** Use `sandbox-exec` (Seatbelt) profiles.
+   *   **Windows:** Use Job Objects or restrictive tokens (via `codex-windows-sandbox` equivalent).
+
+Beautiful Diffs & Interactive UI
+================================
+
+To provide a superior developer experience, the Perspt CLI will feature a rich TUI for reviewing agent actions:
+
+**1. Syntax-Highlighted Diffs:**
+   Instead of using heavy regex-based highlighters, we will use **`tree-sitter-highlight`** (as used by Codex) for ast-based, error-tolerant highlighting. We will use `similar` for computing minimal diffs. The UI will render:
+   *   Side-by-side or unified diff views (configurable).
+   *   Color-coded additions (green) and deletions (red).
+   *   Context lines to show where the change fits.
+
+**2. Rich Interactive Components:**
+   To match the "wow" factor of modern agents (Claude Code / Codex), we will utilize the extended Ratatui ecosystem:
+   *   **`tachyonfx`:** For smooth micro-animations and shader-like transitions during state changes (e.g., when the "Think" phase completes).
+   *   **`tui-textarea`:** For high-quality, editor-like text input in the TUI, supporting standard keybindings and multi-line editing.
+   *   **`tui-popup` / `tui-prompts`:** For clean, accessible overlays and modal dialogs during high-stakes actions like Git pushes.
+   *   **`ratatui-throbber`:** For non-blocking progress indicators that maintain visual responsiveness during LSP/LLM latency.
+
+**3. Interactive Review Mode:**
+   When the agent proposes changes, the CLI will enter a "Review Mode" similar to `git add -p` but enhanced:
+   *   `[y]`: Accept the change.
+   *   `[n]`: Reject the change.
+   *   `[e]`: Edit the generated code in `$EDITOR` before accepting.
+   *   `[d]`: View detailed diff.
+
+**4. Action Dashboard:**
+   A TUI dashboard (built with `ratatui`) will show:
+   *   Current Plan Status (e.g., "Step 2/5: Refactoring User Struct").
+   *   Active Agent (e.g., "Coder is writing...").
+   *   Token Usage and Cost Estimate.
+
+Automated Workflow
+==================
+
+For advanced use cases, users can enable different levels of automation:
+
+*   **Interactive (Default):** The agent pauses for approval before *every* file write or command execution.
+*   **Semi-Auto (`--auto-approve-safe`):** The agent automatically executes "safe" actions (reading files, runnings tests, creating new files) but asks for confirmation before modifying existing code or deleting files.
+*   **Fully Autonomous (`--auto-mode`):** The agent proceeds without interruption until the task is complete or a critical error occurs. Users can set a "Budget Cap" (e.g., `--max-steps 50` or `--max-cost $2.00`) to prevent runaway loops.
+
+Code Intelligence & Verification
+================================
+
+To ensure generated code is syntactically correct and functional, the agent environment will integrate advanced code intelligence tools:
+
+**1. Language Server Protocol (LSP) Integration:**
+   The `Coder` agent will interface with Language Servers (e.g., `rust-analyzer`, `gopls`, `pyright`) to:
+   *   Validate syntax and types in real-time.
+   *   Query definitions and references for better context.
+   *   Receive diagnostics (errors, warnings) immediately after code generation.
+
+**2. Tree-sitter Parsing:**
+   We will use `tree-sitter` for robust, error-tolerant parsing of source files. This allows the agents to:
+   *   Perform structural edits (e.g., "replace function X") rather than fragile line-based regex replacements.
+   *   Identify relevant code blocks (functions, classes) for context window optimization.
+   *   Verify that generated code maintains valid syntax structure before saving.
+
+**3. Compilation and Runtime Verification:**
+   The workflow includes a self-correction loop driven by compilers and linters:
+   *   **Pre-commit:** Run `cargo check`, `eslint`, or `pylint` on modified files.
+   *   **Post-commit:** Execute unit tests (`cargo test`, `pytest`) if available.
+   *   **Execution:** Capabilities to run the generated program (with user permission), capture `stdout` and `stderr`, and feed any runtime errors back to the agent for autonomous fixing.
+
+Model Context Protocol (MCP) Integration
+========================================
+
+Perspt will implement the **Model Context Protocol (MCP)** to act as an MCP Client, allowing the agent to connect to external "Context Servers". This massively expands the agent's capabilities beyond the local filesystem.
+
+**Implementation Strategy:**
+*   **Crate:** Use `rmcp` (Rust Model Context Protocol), the same SDK used by Codex.
+*   **Role:** Perspt acts as the *Host*/*Client*.
+*   **Capabilities:**
+    *   **External Tools:** Connect to MCP servers for PostgreSQL, GitHub, Slack, etc., giving the agent strictly typed tools to query these systems.
+    *   **Resource Access:** Read documentation or code snippets from remote repositories via MCP Resources.
+    *   **Configuration:** Users can define MCP servers in `~/.perspt/config.toml` (e.g., `[mcp.servers.github] command = "docker run ..."`).
+
+Rust Crate Dependencies
+=======================
+
+To support this, we will utilize a curated stack of well-maintained, production-grade Rust crates:
+
+**Core LLM Abstraction:**
+
+*   **`genai` (v0.4+):** The multi-AI provider library supporting GPT-5, Claude 4.5, Gemini 3, tool calling, and streaming. **Note:** Perspt's current `genai = "0.3.5"` must be upgraded to `0.4.x` to enable native tool calling and support for new model APIs.
+
+**TUI & UX:**
+
+*   **`ratatui` & `crossterm`:** The gold standard for high-performance terminal UI and cross-platform backend.
+*   **`tachyonfx` & `tui-textarea`:** For implementing the "rich" TUI features (animations, editor-grade input).
+
+**Code Intelligence & Search:**
+
+*   **`grep` ecosystem (`grep-searcher`, `grep-regex`, `ignore`):** The same high-performance engines that power `ripgrep`, used for lightning-fast context retrieval.
+*   **`tree-sitter` & `tree-sitter-highlight`:** For language-agnostic code analysis and error-tolerant highlighting.
+*   **`lsp-types` & `tower-lsp`:** For robust, type-safe Language Server Protocol client integration.
+
+**Protocols & Interop:**
+
+*   **`rmcp` (Official SDK):** The official Rust implementation of the Model Context Protocol (v0.11+).
+
+**Security & Policy:**
+
+*   **`starlark` (Meta/ByteDance):** A mature, secure embedded language for defining execution policies.
+*   **`landlock` / `sandbox-mac`:** For native, OS-level execution sandboxing.
+
+**State & Persistence:**
+
+*   **`duckdb`:** A vectorized engine for managing analytical session state and Text-to-SQL querying.
+*   **`tokio`:** The de-facto standard for asynchronous task orchestration.
+
+**Utilities:**
+
+*   **`similar`:** Fast diffing algorithm used by high-performance tools like `uv` and `codex`.
+*   **`portable-pty`:** For capturing and interacting with real-world terminal output within the agent sandbox.
+*   **`nucleo-matcher`:** For blazingly fast fuzzy matching during context retrieval.
+
+Comparison with SOTA Tools (Late 2025)
+====================================
+
+| Feature | Claude Code | Gemini-CLI | Aider | Perspt Agent CLI |
+|:--------|:------------|:-----------|:------|:-----------------|
+| **SOTA Models** | Claude 4.5 Opus | Gemini 3 Flash | LLM Direct | **Agnostic (GPT-5.2/Claude 4.5)**|
+| **Persistence** | `CLAUDE.md` | `GEMINI.md` | Git History | **DuckDB + `PERSPT.md`**|
+| **Search** | **ripgrep** | Simple Grep | ripgrep | **ripgrep + Agentic SQL**|
+| **Analytics** | Basic Logs | Basic Logs | None | **NLQ (Text-to-SQL)** |
+| **UI Type** | Virtual DOM (Ink) | Plain Terminal | Plain Terminal | **TUI (Ratatui)** |
+| **Orchestration** | Multi-Agent | Single Agent | Single Agent | **Solo/Team Toggle** |
+| **Reasoning** | Deep Thinking | Large Context | LLM Direct | **Explicit Design Phase**|
+| **Security** | Managed API | Managed API | None | **Native Landlock** |
+| **Open Source** | No | **Yes (Apache 2.0)** | **Yes (Apache 2.0)**| **Yes (MIT/Apache)** |
+
+This proposal aligns Perspt with the state-of-the-art in high-performance coding tools while maintaining its unique model-agnostic flexibility.
+
+========================
+Reference Implementation
+========================
+
+The implementation will begin with `src/agent/mod.rs` and `src/agent/context.rs`.
+
+**Step 1: The `agent` module**
+
+We will refactor the existing `GenAIProvider` to be clonable and thread-safe for orchestrating multiple agents.
+
+**Step 2: The Supervisor/Orchestrator**
+
+.. code-block:: rust
+
+    // Pseudo-code for the main agent loop with mode support
+    pub async fn run_agent_session(task: String, mode: ExecutionMode) -> Result<()> {
+        let mut session = AgentSession::new(task, mode)?;
+        
+        // 1. Deep Thinking & Planning
+        let plan = session.planner.create_plan(&session.context).await?;
+        session.db.save_plan(&plan).await?;
+        
+        // 2. User/Auto Review
+        if !session.is_auto_approve() {
+            session.tui.review_plan(&plan).await?;
+        }
+
+        // 3. Execution (Solo or Team)
+        while let Some(task) = session.get_next_task().await? {
+            session.tui.update_status(&task);
+            
+            let result = match mode {
+                ExecutionMode::Solo => session.solo_engineer.execute(task).await?,
+                ExecutionMode::Team => session.supervisor.delegate(task).await?,
+            };
+
+            // 4. Verification Check
+            if let Err(e) = session.verifier.verify(&result).await? {
+                session.handle_correction(e).await?;
+            }
+            
+            session.db.log_event(result).await?;
+        }
+
+        Ok(())
+    }
+
+=========
+Rationale
+=========
+
+1.  **Feature Parity with SOTA:** The industry is moving towards agentic workflows (Devin, Cursor, Copilot Workspace). A simple chat loop is no longer sufficient for a "coding tool".
+2.  **Rust Advantage:** Leveraging Rust allows us to process large context windows (100k+ tokens) and handle complex file operations with minimal overhead, a significant advantage over Python-based agents like Auto-GPT.
+3.  **Extensibility:** By defining a clear `Agent` trait and message protocol, we pave the way for community-contributed agents (e.g., a "Security Auditor" agent or a "Documentation Writer" agent).
+
+=======================
+Backwards Compatibility
+=======================
+
+This is a purely additive change. The existing `perspt` (TUI) and `perspt --simple-cli` modes will remain unaffected. The `agent` subcommand is modular. Users who do not use the agent features will not see any change in behavior or performance.
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.
