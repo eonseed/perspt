@@ -403,6 +403,7 @@ jobs:
         # Commit the changes
         git add "$new_file"
         git commit -m "🔢 Assign PSP number ${next_number} after merge"
+        git pull --rebase origin master
         git push origin master
         
         echo "✅ PSP number ${next_number} assigned and committed to master"
@@ -475,6 +476,7 @@ jobs:
           # Commit the status change
           git add "$new_filename"
           git commit -m "📋 Update PSP-${assigned_number} status to Discussion after merge"
+          git pull --rebase origin master
           git push origin master
           
           echo "✅ Updated PSP-${assigned_number} status to Discussion"
@@ -606,6 +608,7 @@ jobs:
           # Commit the change
           git add "$new_filename"
           git commit -m "📋 Add Discussion-To link for PSP-${psp_number}"
+          git pull --rebase origin master
           git push origin master
           
           echo "✅ Updated PSP-${psp_number} with discussion issue link"
