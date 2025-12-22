@@ -1,0 +1,30 @@
+[package]
+name = "perspt-cli"
+version = "0.4.8"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "CLI entry point for Perspt"
+
+[[bin]]
+name = "perspt"
+path = "src/main.rs"
+
+[dependencies]
+perspt-core = { path = "../perspt-core" }
+perspt-tui = { path = "../perspt-tui" }
+perspt-agent = { path = "../perspt-agent" }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Async
+tokio = { version = "1.42", features = ["full"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Utilities
+anyhow = "1.0"
+dirs = "5.0"

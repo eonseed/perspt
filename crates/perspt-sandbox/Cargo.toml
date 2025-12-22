@@ -1,0 +1,15 @@
+[package]
+name = "perspt-sandbox"
+version = "0.1.0"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "Sandboxed command execution for Perspt"
+
+[dependencies]
+# Shell parsing for command string
+shell-words = "1.1"
+
+# Utilities
+anyhow = "1.0"
+log = "0.4"
