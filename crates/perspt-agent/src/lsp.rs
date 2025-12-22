@@ -238,6 +238,7 @@ impl Drop for LspClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lsp_types::Range;
 
     #[test]
     fn test_syntactic_energy_calculation() {
