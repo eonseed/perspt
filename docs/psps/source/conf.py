@@ -19,6 +19,8 @@ extensions = [
     "sphinx.ext.extlinks",
     "sphinx.ext.intersphinx", 
     "sphinx.ext.githubpages",
+    "sphinx.ext.graphviz",
+    "sphinx.ext.imgconverter",
 ]
 
 # Try to add PSP extensions if available
@@ -100,3 +102,87 @@ if _PSE_PATH.exists():
     _template_dir = _PSE_PATH / "psp_theme" / "templates"
     if _template_dir.exists():
         templates_path = [os.fspath(_template_dir)]
+
+# -- Options for LaTeX output ------------------------------------------------
+
+latex_engine = "lualatex"
+
+
+def get_psp_metadata(filename):
+    """Extract metadata from PSP .rst file."""
+    metadata = {"PSP": "XXXXXX", "Title": "Untitled PSP", "Author": "Unknown"}
+    try:
+        with open(filename, "r", encoding="utf-8") as f:
+            for _ in range(20):  # Check first 20 lines
+                line = f.readline()
+                if not line:
+                    break
+                for key in metadata:
+                    if line.startswith(f"{key}:"):
+                        val = line.split(":", 1)[1].strip()
+                        # Escape special LaTeX characters
+                        val = val.replace("&", "\\&")
+                        metadata[key] = val
+    except Exception:
+        pass
+    return metadata
+
+
+# Find all PSP documents and create a separate PDF for each
+latex_documents = []
+source_dir = Path(__file__).resolve().parent
+for psp_path in sorted(source_dir.glob("psp-??????.rst")):
+    meta = get_psp_metadata(psp_path)
+    # entry: (startdocname, targetname, title, author, theme)
+    item = (
+        psp_path.stem,
+        f"{psp_path.stem}.tex",
+        f"PSP {meta['PSP']}: {meta['Title']}",
+        meta["Author"],
+        "howto",  # 'howto' style is better for single documents than 'manual'
+    )
+    latex_documents.append(item)
+
+latex_elements = {
+    "papersize": "letterpaper",
+    "pointsize": "11pt",
+    "geometry": "\\usepackage[margin=1in, headheight=14pt]{geometry}",
+    "preamble": r"""
+\usepackage{fancyhdr}
+\usepackage{fontspec}
+\usepackage{graphicx}
+
+% Use a monospaced font if available, fallback to courier
+\setmonofont{Courier New}[
+    BoldFont={Courier New Bold},
+    ItalicFont={Courier New Italic},
+    BoldItalicFont={Courier New Bold Italic}
+]
+
+% Force monospaced throughout
+\renewcommand{\familydefault}{\ttdefault}
+
+\fancypagestyle{normal}{
+    \fancyhf{}
+    \fancyhead[L]{Perspt Specification Proposal}
+    \fancyhead[R]{Internet-Draft}
+    \fancyfoot[C]{\thepage}
+    \renewcommand{\headrulewidth}{0.4pt}
+    \renewcommand{\footrulewidth}{0pt}
+}
+\pagestyle{normal}
+
+% Simplify titles
+\usepackage{titling}
+\pretitle{\begin{center}\huge\bfseries}
+\posttitle{\end{center}\vspace{1em}}
+\preauthor{\begin{center}\large}
+\postauthor{\end{center}}
+\predate{\begin{center}\large}
+\postdate{\end{center}}
+
+\setcounter{secnumdepth}{-1}
+""",
+    "maketitle": r"\maketitle",
+    "figure_align": "htbp",
+}

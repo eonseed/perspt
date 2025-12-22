@@ -10,7 +10,7 @@ Discussion-To: https://github.com/eonseed/perspt/issues/60
 Abstract
 ========
 
-This PSP proposes a significant expansion of Perspt's capabilities from a chat-focused TUI/CLI into a full-featured agentic coding tool. Inspired by the architecture of OpenAI's Rust-based Codex CLI, this proposal introduces a robust multi-agent workflow system where specialized agents (Planner, Coder, Reviewer) collaborate to solve complex coding tasks. This includes a new `agent` subcommand, a secure runtime environment, and a structured inter-agent communication protocol.
+This PSP proposes a significant expansion of Perspt's capabilities from a chat-focused TUI/CLI into a high-performance agentic coding tool. Inspired by the **"Stability is All You Need"** paper and OpenAI's Rust-based Codex CLI, this proposal introduces a robust multi-agent orchestration system based on the **Stabilized Recursive Barrier Network (SRBN)**. This implementation provides a deterministic "Chain of Control" where specialized agent nodes collaborate via a structured **TaskGraph**, governed by active **Constraint Barriers** and **Sheaf-Theoretic Consistency**. This ensures that Perspt remains stable and reliable even during complex, long-horizon software engineering tasks.
 
 ==========
 Motivation
@@ -19,19 +19,19 @@ Motivation
 While Perspt's current TUI provides an excellent interface for direct user-LLM interaction, complex software engineering tasks require more than a single conversational turn. They often involve:
 
 1.  **Multi-step Reasoning:** Breaking a problem into a plan, implementation, and verification.
-2.  **Context Management:** Reading multiple files, understanding project structure, and maintaining state across a workflow.
-3.  **Safety & Execution:** Running code/tests to verify correctness, which requires a secure environment.
-4.  **Specialization:** Different "personas" or prompts for planning vs. coding vs. reviewing.
+2.  **Context Management:** Reading multiple files, maintaining state across a workflow.
+3.  **Safety & Execution:** Running code/tests to verify correctness in a secure environment.
+4.  **Stability (The SRBN Advantage):** Standard agentic loops often fall into the **Entropy Trap**, where small reasoning errors compound into hallucinations. By adopting SRBN, Perspt introduces "Restorative Forces" (Flow Barriers) that push the agent back to a valid state whenever it drifts.
 
 **Inspiration from OpenAI's Codex CLI (Rust):**
-Research into the recent Rust rewrite of OpenAI's Codex CLI highlights several key architectural advantages that Perspt should adopt:
+Perspt adopts several key architectural advantages from the Codex CLI to support this stability:
 
-*   **Native Performance:** Rust provides the speed and memory safety required for low-latency agent loops and handling large context.
-*   **Zero-Dependency:** A single binary distribution is superior to complex Python/Node environments for developer tools.
-*   **Sandboxing:** Essential for an agent that writes and possibly executes code. The Codex CLI uses native OS capabilities (Seatbelt/Landlock) for security.
-*   **Wire Protocol:** An extensible protocol allowing agents to be composed or extended in other languages.
+*   **Native Performance:** Rust provides the speed and memory safety required for low-latency control loops and large context.
+*   **Zero-Dependency:** A single binary distribution is superior for developer tools.
+*   **Sandboxing:** Essential for an agent that writes and possibly executes code. Perspt uses native OS capabilities (Seatbelt/Landlock) for security.
+*   **Wire Protocol:** An extensible protocol allowing agents/barriers to be composed or extended in other languages.
 
-By evolving Perspt in this direction, we transform it from a "chat tool" into a "coding partner" capable of autonomous task execution.
+By evolving Perspt in this direction, we transform it from a "chat tool" into a "cybernetic coding partner" capable of autonomous, stable task execution.
 
 ================
 Proposed Changes
@@ -39,22 +39,23 @@ Proposed Changes
 
 .. rubric:: Functional Specification
 
-The proposed architecture introduces a new `agent` module in the Rust codebase, centered around a `Supervisor` that manages the lifecycle and state of a multi-agent workflow.
+The proposed architecture introduces a new `agent` module in the Rust codebase, centered around an **SRBNOrchestrator** (the Supervisor) that manages the lifecycle and state of a multi-agent workflow.
 
 **Three Layers of Abstraction:**
 
-1.  **CLI Interface (`perspt agent <subcommand>`):** The user entry point for defining tasks and managing running jobs.
-2.  **Orchestration Layer (`Supervisor`):** Manages the "Context", dispatches tasks to agents, and aggregates results. Supports **Solo Mode** (unified agent) and **Team Mode** (multi-agent).
-3.  **Project Memory (`PERSPT.md`):** Inspired by `CLAUDE.md`, a hierarchical memory file that stores project-specific instructions, architectural context, and coding standards. This is the "Ground Truth" for the agent.
+1.  **CLI Interface (`perspt agent <subcommand>`):** The user entry point for defining tasks and managing running jobs. Support for **Declarative Workflow Manifests** via YAML.
+2.  **Orchestration Layer (`SRBNOrchestrator`):** Manages the `TaskGraph` (topology), dispatches tasks to `SRBNNodes` (agents), and aggregates results. Enforces **Sheaf Consistency** across multi-level plans.
+3.  **Project Memory (`PERSPT.md`):** Inspired by `CLAUDE.md`, a hierarchical memory file that stores project-specific instructions and architectural context.
 4.  **Execution Layer (`Runtime`):** A sandboxed environment (using Docker or native isolation) where file I/O and command execution occur.
 
 Execution Modes
 ===============
 
-To balance performance and reliability, Perspt supports two orchestration modes:
+To balance performance and reliability, Perspt supports three orchestration modes:
 
-*   **Solo Mode (Default for minor tasks):** A single "Engineer" agent handles planning, coding, and verification in a tight loop. Minimizes token overhead and communication latency.
-*   **Team Mode (Default for major refactors):** The full Supervisor-Planner-Coder-Reviewer ensemble. Recommended for tasks affecting >5 files or involving ambiguous design choices.
+*   **Solo Mode (Default for minor tasks):** A single "Engineer" node handles planning, coding, and verification in a tight loop.
+*   **Team Mode (Default for major refactors):** The full ensemble (Planner, Coder, Reviewer) collaborating via a standard task graph.
+*   **Custom Manifest Mode:** Executes a user-defined **SRBN Workflow Manifest** (YAML). This allows users to define custom topologies of agents and quality barriers for domain-specific long-horizon tasks (e.g., Architect -> Developer -> QA).
 
 Agent Control Plane (CLI)
 =========================
@@ -102,65 +103,81 @@ Following Codex's workspace pattern (`codex-rs` root with many sub-crates), Pers
 *   `perspt-tui`: The Ratatui-based user interface.
 *   `perspt-sandbox`: Platform-specific sandboxing logic (Landlock/Seatbelt).
 *   `perspt-policy`: The Starlark execution policy engine.
-*   `perspt-lsp`: LSP client integration.
 
-Workflow Design
-===============
+Stability Control Algorithms
+============================
 
-The agent follows a rigorous, session-based workflow to ensure safety and transparency:
 
-1.  **Task Ingestion:**
-    The user provides a high-level coding task via CLI or file.
+To achieve a deterministic "Chain of Control" at scale, Perspt implements a hierarchical control framework that translates tool-driven engineering feedback into stability metrics.
 
-2.  **Analysis & Context Loading:**
-    The `Planner` agent analyzes the request and scans the codebase using a two-pronged approach:
-    *   **Ripgrep Context Retrieval:** Leverages the `grep` and `ignore` crate ecosystem (as used in Claude Code) for blazingly fast, `.gitignore`-aware text searching to find relevant file paths and code snippets.
-    *   **Tree-sitter Structural Analysis:** Uses `tree-sitter` to understand the structural context (classes, functions, dependencies) of the files identified by Ripgrep.
+**1. Hierarchical Contract-Based Lyapunov Energy ($V(x)$):**
+The stability of each task node is governed by a local energy function $V(x)$, representing the distance to a **Behavioral Contract** (defined by the Architect during the planning phase). This approach ensures $O(1)$ verification overhead per leaf node, making it scalable for large codebases.
 
-3.  **Deep Thinking & Planning:**
-    The agent enters a "Deep Thinking" phase (using models specifically tuned for reasoning, like **Claude 4.5 Opus**, **GPT-5.2 Thinking**, or **Gemini 3 Pro**) to create a **compositional execution plan**. This plan is stored directly in the **State Database** rather than a loose file.
+*   **Syntactic Component ($V_{syn}$):** Mapping for discrete tool feedback (LSP Diagnostics, Compiler errors). Each issue is weighted by its severity (Error > Warning > Hint).
+*   **Structural Component ($V_{str}$):** Measures the violation of the node's **Architectural Contract** (e.g., specific function signatures, required exports, or type invariants). This utilizes **LSP Symbol Analysis** and structural fingerprinting.
+*   **Logic Component ($V_{log}$):** Aggregate score of **Weighted Test Results**. Critical path tests (identified by the Planner) trigger higher energy penalties than edge cases.
+*   **Composite Formula:** $V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log}$.
+*   **Default Weights:** $\alpha = 1.0$, $\beta = 0.5$, $\gamma = 2.0$. Logic failures are most critical. These are CLI-overridable via ``--energy-weights``.
+*   **Stability Threshold ($\epsilon$):** Default: ``0.1``. A node is stable when $V(x) < \epsilon$. Override via ``--stability-threshold``.
 
-4.  **Plan Review (with Auto-Approve):**
-    The CLI presents the plan to the user.
-    *   **Interactive Mode:** User reviews, edits, and approves the plan.
-    *   **Auto-Approve:** If verified safe or configured via settings (e.g., `auto_approve_plan = true`), this step proceeds automatically.
+**2. LSP-First Sensor Strategy:**
+Perspt acts as a native **Language Server Client**. This provides the "Sensor Architecture" for the SRBN:
+*   Real-time syntax and semantic diagnostics are ingested directly from servers like `rust-analyzer` or `pyright`.
+*   The system uses LSP features (Definition, Type Definition, References) to verify structural and logic consistency across the workspace.
+*   **Stability Hazard:** If a required Language Server is offline, the CLI issues a "Sensor Failure" warning and blocks the control loop until the sensor is restored.
 
-5.  **Task Graph Generation:**
-    Upon approval, the plan is committed to the **State Database** as a graph of granular tasks with clear dependencies and success criteria.
+**3. The Restorative Force ($-\nabla V(x)$):**
+When $V(x) > \epsilon$ (stability threshold), the **Verifier** generates a composite correction instruction. This instruction combines the specific LSP error message and the failed Architectural Contract property, providing the LLM Actuator with the exact vector field required for convergence.
 
-6.  **Multi-Agent Execution Loop:**
-    The `Supervisor` iterates through the tasks in the **State Database**, coordinating specialized agents:
-    *   **Coder:** Writes code and tests based on the task definition.
-    *   **Reviewer:** Validates changes against the plan's constraints.
-    *   **Supervisor:** Commits the status (Success/Failure) back to the DB.
+.. note::
+   **Terminology:** The **Verifier** role in this PSP is the implementation of the "Frozen Barrier Network" concept from the "Stability is All You Need" paper. It acts as an independent, high-speed sensor that computes $V(x)$ and provides restorative feedback to the Actuator.
 
-7.  **Git Safeguards:**
-    To ensure repository integrity, the agent follows strict Git rules:
-    *   No `force push` or `commit --amend` without explicit user per-action approval.
-    *   Automatic creation of "Recovery Branches" before major refactors.
-    *   Integration with pre-commit hooks; if they fail, the agent attempts to fix the violation in a new commit.
+Workflow Design: The SRBN Loop
+==============================
 
-8.  **Session Isolation & Persistence (Dual-DB Architecture):**
-    Perspt employs a dual-database strategy using **DuckDB**:
-    *   **Global Knowledge Store (`~/.perspt/knowledge.db`):** A centralized database that stores cross-project memories, user preference patterns, and historical task successes/failures for long-term learning.
-    *   **Project Session Store (`.perspt/state.db`):** A local columnar database for the current workspace. DuckDB's `ATTACH` capability allows these stores to be queried together seamlessly.
+The agent follows a rigorous, control-theoretic loop to ensure stability during long-horizon task execution. This process is gated by human oversight at critical architectural boundaries, with optional automation via the `--auto-approve` flag.
 
-9.  **Agentic SQL Context Retrieval:**
-    Agents (Planner or Coder) can utilize the analytical store as a first-class context tool:
-    *   **Code Search:** Query indexed AST structures or dependency graphs for faster local context than raw `ripgrep`.
-    *   **Pattern Matching:** "Find similar functions in other projects that solved a similar task X."
-    *   **Failure Analysis:** "Query history to see why previous attempts at this refactor failed."
+1.  **Architecture Sheafification (The Contract):**
+    The user's high-level task is first analyzed by the **Architect (Deep Reasoning Model)**. It produces:
 
-10. **Session Insight (Natural Language SQL):**
-    By using DuckDB, the CLI enables a "Developer Oracle" mode. Users can ask questions about the session (e.g., "Which tests failed most often during the refactor?") and the agent will:
-    *   Generate a DuckDB-optimized SQL query.
-    *   Execute it against the session's analytical store.
-    *   Present the results in a formatted table or summary.
+    *   A **Task DAG** managed by the `petgraph` crate.
+    *   A **Behavioral Contract** for each node, containing:
 
-11. **Concurrency & Self-Correction:**
-    *   **Retry Budget:** Max 3 attempts to fix the same compilation error; max 5 "Tool Use" failures before pausing.
-    *   **Vectorized Engine:** DuckDB's engine is used for multi-threaded analytical queries.
-    *   **State Manager (Actor):** A dedicated actor owns the write connection to prevent file-level write conflicts.
+        *   ``context_files``: Files the LLM **must read** for context.
+        *   ``output_targets``: Files the LLM **must modify** (focuses scope).
+        *   ``interface_signature``: The required public API (hard constraint for sheaf consistency).
+        *   ``invariants``: Semantic constraints (e.g., "Use RS256 algorithm") that guide without dictating code.
+        *   ``forbidden_patterns``: Anti-patterns to reject (e.g., "no `unwrap()` in error paths").
+        *   ``weighted_tests``: Test cases with criticality labels (Critical, High, Low).
+
+    *   **Architecture Approval Gate:** The system blocks and presents the top-level plan. If ``--auto-approve`` is set, the system autonomously picks the highest-alignment plan and proceeds.
+
+2.  **Recursive Sub-graph Execution:**
+    Components are decomposed and executed based on their topological order in the `petgraph` DAG.
+    *   **Complexity Gating:** If a component's sub-graph exceeds a complexity threshold $K$ (e.g. depth $>3$ or width $>5$), the CLI pauses for sub-plan approval (unless `--auto-approve` is enabled).
+
+3.  **Speculative Generation (Drift):**
+    The **Actuator (Coding Model)** generates implementations to satisfy the local contract. The **Fast Speculator** runs lookahead branches.
+
+4.  **Stability Verification (The Sensor):**
+    The **Verifier** computes the node's local **Lyapunov Energy** $V(x)$ from three source streams:
+    - **LSP Sink:** Ingests diagnostics from the Language Server.
+    - **Structural Sink:** Checks signature and type compliance against the contract.
+    - **Logic Sink:** Executes **Weighted Test Suites**. Failures in "Critical" tests (as labeled by the Architect) increase energy significantly.
+
+5.  **Convergence & Self-Correction:**
+    If $V(x) > \epsilon$, the node re-generates until $V(x)$ dissipates.
+    *   **Auto-Decision:** In `--auto-approve` mode, the system automatically accepts the first solution where $V(x) < \epsilon$.
+    *   **Strategic Escalation:** Even in auto-mode, if $V(x)$ does not decrease after 3 attempts (Stability Divergence), the system **blocks** and alerts the user.
+
+6.  **Sheaf Validation (Post-Subgraph Consistency):**
+    After all children of a parent node converge, a **Sheaf Validation** step ensures global coherence:
+    *   **Type Consistency:** The Verifier checks that exported interfaces match imported expectations across module boundaries (using LSP ``textDocument/definition``).
+    *   **Dependency Analysis:** Uses ``petgraph::algo::is_cyclic_directed`` to detect circular dependencies.
+    *   **Failure Handling:** If sheaf validation fails, the parent node's energy $V(parent)$ is spiked, and failing children are re-queued with an updated contract specifying the required interface correction.
+
+7.  **Merkle Ledger & Session Persistence:**
+    Stable states are committed to the **Merkle Ledger** in **DuckDB**. In lookahead branches, if energy spikes, the system **Ratchets** back to the last stable hash.
 
 *   **Fast Analytics:** The columnar format allows the `Reviewer` and `Supervisor` agents to run complex heuristics on session history with sub-millisecond latency.
 
@@ -179,45 +196,182 @@ All terminal states (``FAILED``, ``PAUSED``, ``COMPLETED``) are persisted and ca
 Orchestration State Machine
 ---------------------------
 
-The multi-agent workflow follows a deterministic state machine to ensure predictable behavior:
+The multi-agent workflow follows a deterministic state machine aligned with the 7-step SRBN loop:
 
-.. code-block:: text
+.. graphviz::
+   :caption: SRBN Orchestration State Machine
+   :align: center
 
-    +-------------+     +------------+     +-------------+     +-----------+
-    | TASK_QUEUED | --> | PLANNING   | --> | CODING      | --> | REVIEWING |
-    +-------------+     +------------+     +-------------+     +-----------+
-          |                   |                  |                   |
-          v                   v                  v                   v
-    [User Cancels]      [Plan Rejected]    [Compile Fail]     [Review Fail]
-          |                   |                  |                   |
-          v                   v                  v                   v
-    +-------------+     +------------+     +-------------+     +-----------+
-    |   ABORTED   |     |   FAILED   |     | RETRY(<=3)  |     | RETRY     |
-    +-------------+     +------------+     +-------------+     +-----------+
-                                                 |                   |
-                                                 v                   v
-                                           [Retry Limit]       [Retry Limit]
-                                                 |                   |
-                                                 v                   v
-                                           +------------+     +------------+
-                                           |   FAILED   |     | ESCALATED  |
-                                           +------------+     +------------+
-                                                                    |
-                                                                    v
-                                                              [User Input]
-                                                                    |
-                                                                    v
-                                                              +-----------+
-                                                              | COMPLETED |
-                                                              +-----------+
+   digraph srbn_states {
+       // Layout
+       rankdir=TB;
+       bgcolor="transparent";
+       newrank=true;
+       nodesep=0.8;
+       ranksep=0.6;
+       
+       // Global node style
+       node [
+           shape=box,
+           style="rounded,filled",
+           fontname="Arial",
+           fontsize=10,
+           margin="0.15,0.1"
+       ];
+       
+       // Global edge style - bright colors for dark mode
+       edge [
+           fontname="Arial",
+           fontsize=9,
+           color="#5C6BC0",
+           fontcolor="#5C6BC0"
+       ];
+
+       // ====== NODES ======
+       // Row 1
+       { rank=same; ABORTED; TASK_QUEUED; }
+       TASK_QUEUED [label="TASK_QUEUED", fillcolor="#E8EAF6", color="#3F51B5"];
+       ABORTED [label="ABORTED", fillcolor="#ECEFF1", color="#78909C"];
+
+       // Row 2
+       { rank=same; FAILED; PLANNING; }
+       PLANNING [label="PLANNING", fillcolor="#E1BEE7", color="#9C27B0"];
+       FAILED [label="FAILED", fillcolor="#FFCDD2", color="#E53935"];
+
+       // Row 3
+       CODING [label="CODING", fillcolor="#BBDEFB", color="#1E88E5"];
+
+       // Row 4
+       { rank=same; VERIFYING; RETRY; }
+       VERIFYING [label="VERIFYING", fillcolor="#B2DFDB", color="#00897B"];
+       RETRY [label="RETRY", fillcolor="#FFE0B2", color="#FB8C00"];
+
+       // Row 5
+       { rank=same; SHEAF_CHK; ESCALATED; }
+       SHEAF_CHK [label="SHEAF_CHK", fillcolor="#B3E5FC", color="#039BE5"];
+       ESCALATED [label="ESCALATED", fillcolor="#FFCCBC", color="#F4511E"];
+
+       // Row 6
+       COMMITTING [label="COMMITTING", fillcolor="#C8E6C9", color="#43A047"];
+
+       // Row 7
+       COMPLETED [label="COMPLETED", fillcolor="#A5D6A7", color="#2E7D32"];
+
+       // ====== EDGES ======
+       
+       // --- LEFT SIDE: Failures & Loops ---
+       TASK_QUEUED -> ABORTED [
+           label="cancel",
+           color="#78909C",
+           fontcolor="#78909C"
+       ];
+       PLANNING -> FAILED [
+           label="rejected",
+           color="#E53935",
+           fontcolor="#E53935"
+       ];
+       COMMITTING -> CODING [
+           label="next node",
+           style=dashed,
+           color="#1E88E5",
+           fontcolor="#1E88E5",
+           constraint=false
+       ];
+       ESCALATED -> FAILED [
+           label="abort",
+           color="#E53935",
+           fontcolor="#E53935",
+           constraint=false
+       ];
+       
+       // --- CENTER: Happy Path ---
+       TASK_QUEUED -> PLANNING [
+           label="start",
+           color="#9C27B0",
+           fontcolor="#9C27B0"
+       ];
+       PLANNING -> CODING [
+           label="approved",
+           color="#1E88E5",
+           fontcolor="#1E88E5"
+       ];
+       CODING -> VERIFYING [
+           label="draft",
+           color="#00897B",
+           fontcolor="#00897B"
+       ];
+       VERIFYING -> SHEAF_CHK [
+           label="V(x) < ε",
+           color="#00897B",
+           fontcolor="#00897B"
+       ];
+       SHEAF_CHK -> COMMITTING [
+           label="sheaf OK",
+           color="#43A047",
+           fontcolor="#43A047"
+       ];
+       COMMITTING -> COMPLETED [
+           label="all done",
+           color="#2E7D32",
+           fontcolor="#2E7D32"
+       ];
+       
+       // --- RIGHT SIDE: Error Recovery ---
+       VERIFYING -> RETRY [
+           label="V(x) > ε",
+           color="#FB8C00",
+           fontcolor="#FB8C00"
+       ];
+       SHEAF_CHK -> RETRY [
+           label="sheaf fail",
+           color="#FB8C00",
+           fontcolor="#FB8C00",
+           constraint=false
+       ];
+       RETRY -> CODING [
+           label="attempt",
+           style=dashed,
+           color="#1E88E5",
+           fontcolor="#1E88E5",
+           constraint=false
+       ];
+       RETRY -> ESCALATED [
+           label="limit",
+           color="#F4511E",
+           fontcolor="#F4511E"
+       ];
+       ESCALATED -> COMPLETED [
+           label="user fix",
+           color="#2E7D32",
+           fontcolor="#2E7D32",
+           constraint=false
+       ];
+   }
+
+**State Descriptions:**
+
+*   ``TASK_QUEUED``: Initial state. Task is received but not yet processed.
+*   ``PLANNING``: Architect produces Task DAG and Behavioral Contracts. Blocks for approval (unless ``--auto-approve``).
+*   ``CODING``: Actuator generates code for current node.
+*   ``VERIFYING``: Verifier computes Lyapunov Energy $V(x)$.
+*   ``RETRY``: Re-generation attempt after $V(x) > \epsilon$. Max 3 attempts.
+*   ``SHEAF_CHK``: Sheaf Validation after sub-graph converges. Checks cross-node consistency.
+*   ``COMMITTING``: Stable state. Code is committed to Merkle Ledger.
+*   ``ESCALATED``: Stability diverged. User intervention required.
+*   ``COMPLETED``: Task finished successfully.
+*   ``FAILED``: Unrecoverable error (plan rejected, budget exhausted).
+*   ``ABORTED``: User cancelled.
 
 **Valid Transitions:**
 
 *   ``TASK_QUEUED`` -> ``PLANNING`` (on session start)
-*   ``PLANNING`` -> ``CODING`` (on plan approval) or ``FAILED`` (on rejection)
-*   ``CODING`` -> ``REVIEWING`` (on successful compile) or ``RETRY`` (on compile fail)
-*   ``REVIEWING`` -> ``COMPLETED`` (on approval) or ``RETRY`` (on rejection)
-*   ``RETRY`` -> ``CODING``/``REVIEWING`` (retry attempt) or ``FAILED``/``ESCALATED`` (budget exhausted)
+*   ``PLANNING`` -> ``CODING`` (on plan approval) | ``FAILED`` (on rejection)
+*   ``CODING`` -> ``VERIFYING`` (draft complete)
+*   ``VERIFYING`` -> ``SHEAF_CHK`` (if $V(x) < \epsilon$) | ``RETRY`` (if $V(x) > \epsilon$)
+*   ``RETRY`` -> ``CODING`` (retry attempt) | ``ESCALATED`` (retry limit)
+*   ``SHEAF_CHK`` -> ``COMMITTING`` (sheaf OK) | ``RETRY`` (sheaf fail, re-queue children)
+*   ``COMMITTING`` -> ``CODING`` (next node) | ``COMPLETED`` (all nodes done)
+*   ``ESCALATED`` -> ``COMPLETED`` (user provides fix) | ``FAILED`` (user aborts)
 
 .. rubric:: UI/UX Design
 
@@ -246,30 +400,56 @@ As a TUI-based proposal, accessibility is prioritized:
 
 .. code-block:: rust
 
-    /// Represents the different roles an agent can take
-    pub enum AgentRole {
-        Supervisor,
-        Planner,
-        Coder,
-        Reviewer,
+    /// The fundamental unit of control
+    pub struct SRBNNode {
+        pub node_id: String,
+        pub goal: String,                    // High-level intent for LLM reasoning
+        pub context_files: Vec<PathBuf>,     // Files LLM MUST read for context
+        pub output_targets: Vec<PathBuf>,    // Files LLM MUST modify
+        pub contract: BehavioralContract,
+        pub tier: ModelTier,
+        pub monitor: StabilityMonitor,
     }
 
-    /// A structured message in the agent conversation
-    pub struct AgentMessage {
-        pub role: AgentRole,
-        pub content: String,
-        pub tool_calls: Vec<ToolCall>,
+    /// Constraints for correctness without over-specification
+    pub struct BehavioralContract {
+        pub interface_signature: String,      // Required public API (hard constraint)
+        pub invariants: Vec<String>,          // Semantic constraints ("Use RS256 algorithm")
+        pub forbidden_patterns: Vec<String>,  // Anti-patterns to reject ("no unwrap()")
+        pub weighted_tests: Vec<WeightedTest>,
+        pub energy_weights: (f32, f32, f32),  // alpha, beta, gamma (default: 1.0, 0.5, 2.0)
     }
 
-    /// The state of the current workspace/task
+    pub enum ModelTier {
+        Architect,   // Planner & Graph Designer (Deep Reasoning)
+        Actuator,    // Implementation (Coding Model)
+        Verifier,    // LSP + Contract Checker (Sensor / Barrier)
+        Speculator,  // Fast lookahead for speculation
+    }
+
+    /// Local energy telemetry
+    pub struct StabilityMonitor {
+        pub energy_history: Vec<f32>,      // Trace of V(x)
+        pub attempt_count: usize,          // Convergence iterations
+        pub stable: bool,                  // Is V(x) < epsilon?
+        pub stability_epsilon: f32,        // Default: 0.1
+    }
+
+    /// The execution engine
+    pub struct SRBNOrchestrator {
+        pub graph: StableGraph<SRBNNode, Dependency>, // Managed by petgraph
+        pub context: AgentContext,
+        pub auto_approve: bool,            // --auto-approve flag
+    }
+
+    /// Topological state of the current workspace
     pub struct AgentContext {
         pub working_dir: PathBuf,
-        pub files: HashMap<PathBuf, String>, // Cache of read files
         pub history: Vec<AgentMessage>,
-        pub budget: TokenBudget,
+        pub merkle_root: [u8; 32],
+        pub complexity_K: usize, // Sub-graph approval threshold
     }
 
-    /// The trait that all specific agents implements
     #[async_trait]
     pub trait Agent {
         async fn process(&self, ctx: &AgentContext) -> Result<AgentMessage>;
@@ -371,34 +551,27 @@ To provide a superior developer experience, the Perspt CLI will feature a rich T
 Automated Workflow
 ==================
 
-For advanced use cases, users can enable different levels of automation:
+For advanced use cases, Perspt supports three levels of automation:
 
-*   **Interactive (Default):** The agent pauses for approval before *every* file write or command execution.
-*   **Semi-Auto (`--auto-approve-safe`):** The agent automatically executes "safe" actions (reading files, runnings tests, creating new files) but asks for confirmation before modifying existing code or deleting files.
-*   **Fully Autonomous (`--auto-mode`):** The agent proceeds without interruption until the task is complete or a critical error occurs. Users can set a "Budget Cap" (e.g., `--max-steps 50` or `--max-cost $2.00`) to prevent runaway loops.
+*   **Interactive (Default):** The agent blocks for user approval before architectural sheafification and recursive sub-graph execution.
+*   **Semi-Auto (`--auto-approve-safe`):** The system automatically executes read-only tools and small file edits but persists sub-graph approval gates.
+*   **Fully Autonomous (`--auto-approve`):** The system autonomously gates decisions based on stability metrics ($V(x) < \epsilon$). It only escalates to the user if stability **diverges** across three corrective attempts.
 
 Code Intelligence & Verification
 ================================
 
-To ensure generated code is syntactically correct and functional, the agent environment will integrate advanced code intelligence tools:
+To ensure generated code is functional at scale, Perspt implements an LSP-driven verification loop, adopting the **Native Client Architecture** pioneered by the **Zed Editor**.
 
-**1. Language Server Protocol (LSP) Integration:**
-   The `Coder` agent will interface with Language Servers (e.g., `rust-analyzer`, `gopls`, `pyright`) to:
-   *   Validate syntax and types in real-time.
-   *   Query definitions and references for better context.
-   *   Receive diagnostics (errors, warnings) immediately after code generation.
+**1. Native LSP Client:**
+Perspt implements a native **LSP Client** leveraging the permissive `lsp-types` crate (MIT), similar to Zed's implementation, to ensure LGPL v3 compliance.
+- **Architecture:** Manages Language Servers (`rust-analyzer`, `pyright`) as async sidecar processes via `tokio`, bypassing the need for heavy node.js wrappers.
+- **Syntactic Stability:** Subscribes to `textDocument/publishDiagnostics` to detect errors immediately.
+- **Contract Matching:** Uses LSP symbols to verify that the Actuator has satisfied the Architect's **Behavioral Contract** (signatures, types, and invariants).
 
-**2. Tree-sitter Parsing:**
-   We will use `tree-sitter` for robust, error-tolerant parsing of source files. This allows the agents to:
-   *   Perform structural edits (e.g., "replace function X") rather than fragile line-based regex replacements.
-   *   Identify relevant code blocks (functions, classes) for context window optimization.
-   *   Verify that generated code maintains valid syntax structure before saving.
-
-**3. Compilation and Runtime Verification:**
-   The workflow includes a self-correction loop driven by compilers and linters:
-   *   **Pre-commit:** Run `cargo check`, `eslint`, or `pylint` on modified files.
-   *   **Post-commit:** Execute unit tests (`cargo test`, `pytest`) if available.
-   *   **Execution:** Capabilities to run the generated program (with user permission), capture `stdout` and `stderr`, and feed any runtime errors back to the agent for autonomous fixing.
+**2. Weighted Execution Verification:**
+The `Verifier` executes test suites with **Weighted Progress Metrics**:
+- **Criticality Labels:** Tests covering the core logic or interface contracts are assigned higher weights. Failure in these tests causes a significant spike in Lyapunov Energy.
+- **Coverage Invariants:** Stability is only achieved when the code coverage meets the levels defined in the architectural sheaf.
 
 Model Context Protocol (MCP) Integration
 ========================================
@@ -406,12 +579,14 @@ Model Context Protocol (MCP) Integration
 Perspt will implement the **Model Context Protocol (MCP)** to act as an MCP Client, allowing the agent to connect to external "Context Servers". This massively expands the agent's capabilities beyond the local filesystem.
 
 **Implementation Strategy:**
+
 *   **Crate:** Use `rmcp` (Rust Model Context Protocol), the same SDK used by Codex.
 *   **Role:** Perspt acts as the *Host*/*Client*.
 *   **Capabilities:**
+
     *   **External Tools:** Connect to MCP servers for PostgreSQL, GitHub, Slack, etc., giving the agent strictly typed tools to query these systems.
     *   **Resource Access:** Read documentation or code snippets from remote repositories via MCP Resources.
-    *   **Configuration:** Users can define MCP servers in `~/.perspt/config.toml` (e.g., `[mcp.servers.github] command = "docker run ..."`).
+    *   **Configuration:** Users can define MCP servers in ``~/.perspt/config.toml`` (e.g., ``[mcp.servers.github] command = "docker run ..."``).
 
 Rust Crate Dependencies
 =======================
@@ -449,6 +624,7 @@ To support this, we will utilize a curated stack of well-maintained, production-
 
 **Utilities:**
 
+*   **`petgraph`:** Directed Acyclic Graph (DAG) management for task dependencies and complexity analysis.
 *   **`similar`:** Fast diffing algorithm used by high-performance tools like `uv` and `codex`.
 *   **`portable-pty`:** For capturing and interacting with real-world terminal output within the agent sandbox.
 *   **`nucleo-matcher`:** For blazingly fast fuzzy matching during context retrieval.
@@ -471,42 +647,37 @@ To support this, we will utilize a curated stack of well-maintained, production-
      - ``CLAUDE.md``
      - ``GEMINI.md``
      - Git History
-     - **DuckDB + PERSPT.md**
-   * - Search
-     - **ripgrep**
-     - Simple Grep
-     - ripgrep
-     - **ripgrep + Agentic SQL**
-   * - Analytics
-     - Basic Logs
-     - Basic Logs
-     - None
-     - **NLQ (Text-to-SQL)**
-   * - UI Type
-     - Virtual DOM (Ink)
-     - Plain Terminal
-     - Plain Terminal
-     - **TUI (Ratatui)**
+     - **DuckDB + Merkle Ledger**
+   * - Stability
+     - Basic Retries
+     - Large Context
+     - Human in loop
+     - **Composite Lyapunov Energy (LSP)**
+   * - Control Type
+     - Probabilistic
+     - Probabilistic
+     - Human-driven
+     - **Deterministic Control (SRBN)**
    * - Orchestration
      - Multi-Agent
      - Single Agent
      - Single Agent
-     - **Solo/Team Toggle**
-   * - Reasoning
-     - Deep Thinking
-     - Large Context
-     - LLM Direct
-     - **Explicit Design Phase**
+     - **Contract-Based Sheafification**
+   * - Graph Core
+     - Internal
+     - None
+     - None
+     - **petgraph (DAG)**
+   * - Verification
+     - Tool Calls
+     - None
+     - Test Suite
+     - **Native LSP Client**
    * - Security
      - Managed API
      - Managed API
      - None
      - **Native Landlock**
-   * - Open Source
-     - No
-     - **Yes (Apache 2.0)**
-     - **Yes (Apache 2.0)**
-     - **Yes (MIT/Apache)**
 
 This proposal aligns Perspt with the state-of-the-art in high-performance coding tools while maintaining its unique model-agnostic flexibility.
 
@@ -514,46 +685,57 @@ This proposal aligns Perspt with the state-of-the-art in high-performance coding
 Reference Implementation
 ========================
 
-The implementation will begin with `src/agent/mod.rs` and `src/agent/context.rs`.
+The implementation will begin with `src/agent/mod.rs` and `src/agent/orchestrator.rs`.
 
-**Step 1: The `agent` module**
+**Step 1: The `SRBNOrchestrator`**
 
-We will refactor the existing `GenAIProvider` to be clonable and thread-safe for orchestrating multiple agents.
+We will refactor the existing `GenAIProvider` to be clonable and thread-safe for orchestrating multiple nodes.
 
-**Step 2: The Supervisor/Orchestrator**
+**Step 2: The Control Loop**
 
 .. code-block:: rust
 
-    // Pseudo-code for the main agent loop with mode support
-    pub async fn run_agent_session(task: String, mode: ExecutionMode) -> Result<()> {
-        let mut session = AgentSession::new(task, mode)?;
+    // Pseudo-code for the main SRBN control loop
+    pub async fn run_srbn_session(task: String, auto_approve: bool) -> Result<()> {
+        let mut orchestrator = SRBNOrchestrator::new(auto_approve);
         
-        // 1. Deep Thinking & Planning
-        let plan = session.planner.create_plan(&session.context).await?;
-        session.db.save_plan(&plan).await?;
+        // 1. Architecture Sheafification (Planner)
+        let graph = orchestrator.plan_architecture(task).await?;
         
-        // 2. User/Auto Review
-        if !session.is_auto_approve() {
-            session.tui.review_plan(&plan).await?;
+        if !auto_approve {
+            orchestrator.prompt_approval(&graph).await?;
         }
 
-        // 3. Execution (Solo or Team)
-        while let Some(task) = session.get_next_task().await? {
-            session.tui.update_status(&task);
+        // 2. Hierarchical Execution (Actuator + Verifier)
+        let mut topo = Topo::new(&graph);
+        while let Some(node_idx) = topo.next(&graph) {
+            let node = &graph[node_idx];
             
-            let result = match mode {
-                ExecutionMode::Solo => session.solo_engineer.execute(task).await?,
-                ExecutionMode::Team => session.supervisor.delegate(task).await?,
-            };
+            loop {
+                // A. Coding (Actuator)
+                let draft = node.actuator.generate_code().await?;
+                
+                // B. Stability Sensing (LSP + Contract)
+                let v_syn = lsp.get_diagnostics(&draft).await?.to_energy();
+                let v_str = verifier.check_contract(&draft, &node.contract).await?;
+                let v_log = verifier.run_weighted_tests(&draft, &node.contract).await?;
+                
+                let v_total = v_syn + v_str + v_log;
 
-            // 4. Verification Check
-            if let Err(e) = session.verifier.verify(&result).await? {
-                session.handle_correction(e).await?;
+                if v_total < THRESHOLD {
+                    orchestrator.commit_node(node_idx, draft).await?;
+                    break;
+                } else {
+                    // C. Restorative Step
+                    let restorative_force = verifier.get_correction(v_total).await?;
+                    node.actuator.apply_force(restorative_force);
+                    
+                    if node.stability_diverged() {
+                        return Err(Error::StabilityDivergence(node_idx));
+                    }
+                }
             }
-            
-            session.db.log_event(result).await?;
         }
-
         Ok(())
     }
 
