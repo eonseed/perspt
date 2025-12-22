@@ -34,7 +34,7 @@ pub struct ArchitectAgent {
 impl ArchitectAgent {
     pub fn new(provider: Arc<GenAIProvider>, model: Option<String>) -> Self {
         Self {
-            model: model.unwrap_or_else(|| "claude-3-5-sonnet-20241022".to_string()),
+            model: model.unwrap_or_else(|| "gemini-2.0-flash".to_string()),
             provider,
         }
     }
@@ -105,7 +105,7 @@ pub struct ActuatorAgent {
 impl ActuatorAgent {
     pub fn new(provider: Arc<GenAIProvider>, model: Option<String>) -> Self {
         Self {
-            model: model.unwrap_or_else(|| "gpt-4o".to_string()),
+            model: model.unwrap_or_else(|| "gemini-2.0-flash".to_string()),
             provider,
         }
     }
@@ -189,7 +189,7 @@ pub struct VerifierAgent {
 impl VerifierAgent {
     pub fn new(provider: Arc<GenAIProvider>, model: Option<String>) -> Self {
         Self {
-            model: model.unwrap_or_else(|| "gpt-4o-mini".to_string()),
+            model: model.unwrap_or_else(|| "gemini-2.0-flash-lite".to_string()),
             provider,
         }
     }
@@ -277,7 +277,7 @@ pub struct SpeculatorAgent {
 impl SpeculatorAgent {
     pub fn new(provider: Arc<GenAIProvider>, model: Option<String>) -> Self {
         Self {
-            model: model.unwrap_or_else(|| "gemini-2.0-flash".to_string()),
+            model: model.unwrap_or_else(|| "gemini-2.0-flash-lite".to_string()),
             provider,
         }
     }
