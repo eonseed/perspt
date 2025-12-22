@@ -21,6 +21,8 @@ extensions = [
     "sphinx.ext.githubpages",
     "sphinx.ext.graphviz",
     "sphinx.ext.imgconverter",
+    "sphinx.ext.mathjax",
+    "sphinx_math_dollar",
 ]
 
 # Try to add PSP extensions if available
@@ -75,7 +77,8 @@ extlinks = {
 _PSE_PATH = _ROOT / "psp_sphinx_extensions"
 
 # HTML output settings
-html_math_renderer = "maths_to_html"  # Maths rendering
+# HTML output settings
+# html_math_renderer = "maths_to_html"  # Maths rendering
 
 # Theme settings
 _PSE_PATH = _ROOT / "psp_sphinx_extensions"
