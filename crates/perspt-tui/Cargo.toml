@@ -1,0 +1,22 @@
+[package]
+name = "perspt-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "Ratatui-based TUI for Perspt"
+
+[dependencies]
+perspt-core = { path = "../perspt-core" }
+
+# UI components
+ratatui = "0.29"
+crossterm = "0.29"
+pulldown-cmark = "0.13"
+
+# Async
+tokio = { version = "1.42", features = ["full"] }
+
+# Utilities
+anyhow = "1.0"
+log = "0.4"
