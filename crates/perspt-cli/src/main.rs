@@ -49,6 +49,10 @@ enum Commands {
         #[arg(short, long)]
         yes: bool,
 
+        /// Auto-approve only safe (read-only) operations
+        #[arg(long)]
+        auto_approve_safe: bool,
+
         /// Maximum complexity K for sub-graph approval
         #[arg(short = 'k', long, default_value = "5")]
         complexity: usize,
@@ -56,6 +60,22 @@ enum Commands {
         /// Execution mode: cautious, balanced, or yolo
         #[arg(short, long, default_value = "balanced")]
         mode: String,
+
+        /// Energy weights α,β,γ (comma-separated, e.g., "1.0,0.5,2.0")
+        #[arg(long, default_value = "1.0,0.5,2.0")]
+        energy_weights: String,
+
+        /// Stability threshold ε (default: 0.1)
+        #[arg(long, default_value = "0.1")]
+        stability_threshold: f32,
+
+        /// Maximum cost in USD (0 = unlimited)
+        #[arg(long, default_value = "0")]
+        max_cost: f32,
+
+        /// Maximum steps/iterations (0 = unlimited)
+        #[arg(long, default_value = "0")]
+        max_steps: usize,
     },
 
     /// Initialize project configuration
@@ -130,8 +150,13 @@ async fn main() -> Result<()> {
             task,
             workdir,
             yes,
+            auto_approve_safe: _,
             complexity,
             mode,
+            energy_weights: _,
+            stability_threshold: _,
+            max_cost: _,
+            max_steps: _,
         }) => commands::agent::run(task, workdir, yes, complexity, mode).await,
         Some(Commands::Init { memory, rules }) => commands::init::run(memory, rules).await,
         Some(Commands::Config { show, set, edit }) => commands::config::run(show, set, edit).await,
