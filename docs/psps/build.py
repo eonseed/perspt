@@ -12,7 +12,7 @@ def create_parser():
     """Create argument parser."""
     parser = argparse.ArgumentParser(description="Build PSP documentation")
     parser.add_argument(
-        "-b", "--builder", 
+        "-b", "--builder",
         default="html",
         help="Builder to use (default: html)"
     )
@@ -72,4 +72,5 @@ if __name__ == "__main__":
     )
     app.build()
 
-    create_index_file(build_directory / sphinx_builder, sphinx_builder)
+    if sphinx_builder in ["html", "dirhtml"]:
+        create_index_file(build_directory / sphinx_builder, sphinx_builder)
