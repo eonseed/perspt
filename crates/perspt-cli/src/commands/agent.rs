@@ -42,22 +42,49 @@ pub async fn run(
     log::info!("  Complexity K: {}", complexity_k);
     log::info!("  Mode: {:?}", exec_mode);
 
-    // Create and run the orchestrator
-    let mut orchestrator = perspt_agent::SRBNOrchestrator::new(working_dir, auto_approve);
+    // Create the orchestrator
+    let mut orchestrator = perspt_agent::SRBNOrchestrator::new(working_dir.clone(), auto_approve);
 
     // Set complexity threshold
     orchestrator.context.complexity_k = complexity_k;
 
-    // Run with the Agent TUI
     println!("🚀 SRBN Agent starting...");
     println!("   Session: {}", orchestrator.session_id());
+    println!("   Task: {}", task);
+    println!();
 
-    // Run agent TUI
-    perspt_tui::run_agent_tui()?;
+    // Check if we should run in TUI mode or headless mode
+    let is_tty = atty::is(atty::Stream::Stdout);
 
-    // After TUI exits, run the actual orchestrator
-    // orchestrator.run(task).await?;
+    if is_tty && !auto_approve {
+        // Interactive mode with TUI
+        println!("Running in interactive TUI mode...");
+        println!("(Use --yes flag to run headlessly)");
+        perspt_tui::run_agent_tui()?;
+    } else {
+        // Headless mode - run orchestrator directly
+        println!(
+            "Running in headless mode (auto-approve={})...",
+            auto_approve
+        );
+        println!();
 
+        // Run the SRBN control loop
+        match orchestrator.run(task.clone()).await {
+            Ok(()) => {
+                println!();
+                println!("✅ Task completed successfully!");
+                println!("   Nodes processed: {}", orchestrator.node_count());
+            }
+            Err(e) => {
+                println!();
+                println!("❌ Task failed: {}", e);
+                return Err(e);
+            }
+        }
+    }
+
+    println!();
     println!("✓ Agent session completed");
     Ok(())
 }
