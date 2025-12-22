@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -200,6 +200,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "sphinx" },
+    { name = "sphinx-math-dollar" },
     { name = "sphinx-rtd-theme" },
 ]
 
@@ -212,6 +213,7 @@ dev = [
 requires-dist = [
     { name = "sphinx", specifier = ">=8.2.3" },
     { name = "sphinx-autobuild", marker = "extra == 'dev'", specifier = ">=2024.10.3" },
+    { name = "sphinx-math-dollar", specifier = ">=1.2.1" },
     { name = "sphinx-rtd-theme", specifier = ">=2.0.0" },
 ]
 provides-extras = ["dev"]
@@ -310,6 +312,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a5/2c/155e1de2c1ba96a72e5dba152c509a8b41e047ee5c2def9e9f0d812f8be7/sphinx_autobuild-2024.10.3.tar.gz", hash = "sha256:248150f8f333e825107b6d4b86113ab28fa51750e5f9ae63b59dc339be951fb1", size = 14023, upload-time = "2024-10-02T23:15:30.172Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/18/c0/eba125db38c84d3c74717008fd3cb5000b68cd7e2cbafd1349c6a38c3d3b/sphinx_autobuild-2024.10.3-py3-none-any.whl", hash = "sha256:158e16c36f9d633e613c9aaf81c19b0fc458ca78b112533b20dafcda430d60fa", size = 11908, upload-time = "2024-10-02T23:15:28.739Z" },
+]
+
+[[package]]
+name = "sphinx-math-dollar"
+version = "1.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sphinx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/63/9227668066d044b6b6a582f000ade4b9e679978466555710dd2a15f21a3a/sphinx-math-dollar-1.2.1.tar.gz", hash = "sha256:03427240f21fdf23c7b8415289aa1a0e307ac32c198e02f840c59a4b1b0d950c", size = 25758, upload-time = "2022-04-25T21:48:38.71Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/58/f4df1f1cd8a2bd7c5720870fcd1373fbd6de934f74c887bbc40eef9d8328/sphinx_math_dollar-1.2.1-py3-none-any.whl", hash = "sha256:0b1523a4d7023b9020ddf3a9301f651d64427a0f1d802af534a87eaf24fbdf19", size = 8074, upload-time = "2022-04-25T21:48:47.289Z" },
 ]
 
 [[package]]
