@@ -41,6 +41,15 @@ impl SRBNOrchestrator {
         context.working_dir = working_dir;
         context.auto_approve = auto_approve;
 
+        // Create a shared LLM provider - agents will use this for LLM calls
+        // In production, this would be configured from environment/config
+        let provider = std::sync::Arc::new(
+            perspt_core::llm_provider::GenAIProvider::new().unwrap_or_else(|e| {
+                log::warn!("Failed to create GenAIProvider: {}, using default", e);
+                perspt_core::llm_provider::GenAIProvider::new().expect("GenAI must initialize")
+            }),
+        );
+
         Self {
             graph: DiGraph::new(),
             node_indices: HashMap::new(),
@@ -48,9 +57,9 @@ impl SRBNOrchestrator {
             auto_approve,
             lsp_clients: HashMap::new(),
             agents: vec![
-                Box::new(ArchitectAgent::new(None)),
-                Box::new(ActuatorAgent::new(None)),
-                Box::new(VerifierAgent::new(None)),
+                Box::new(ArchitectAgent::new(provider.clone(), None)),
+                Box::new(ActuatorAgent::new(provider.clone(), None)),
+                Box::new(VerifierAgent::new(provider, None)),
             ],
         }
     }
