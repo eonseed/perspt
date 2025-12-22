@@ -4,6 +4,7 @@
 
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, VerifierAgent};
 use crate::lsp::LspClient;
+use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode};
 use anyhow::{Context, Result};
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -32,13 +33,15 @@ pub struct SRBNOrchestrator {
     lsp_clients: HashMap<String, LspClient>,
     /// Agents for different roles
     agents: Vec<Box<dyn Agent>>,
+    /// Agent tools for file/command operations
+    tools: AgentTools,
 }
 
 impl SRBNOrchestrator {
     /// Create a new orchestrator
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
         let mut context = AgentContext::default();
-        context.working_dir = working_dir;
+        context.working_dir = working_dir.clone();
         context.auto_approve = auto_approve;
 
         // Create a shared LLM provider - agents will use this for LLM calls
@@ -49,6 +52,9 @@ impl SRBNOrchestrator {
                 perspt_core::llm_provider::GenAIProvider::new().expect("GenAI must initialize")
             }),
         );
+
+        // Create agent tools for file/command operations
+        let tools = AgentTools::new(working_dir.clone(), !auto_approve);
 
         Self {
             graph: DiGraph::new(),
@@ -61,6 +67,7 @@ impl SRBNOrchestrator {
                 Box::new(ActuatorAgent::new(provider.clone(), None)),
                 Box::new(VerifierAgent::new(provider, None)),
             ],
+            tools,
         }
     }
 
@@ -177,8 +184,108 @@ impl SRBNOrchestrator {
         let node = &self.graph[idx];
         let message = actuator.process(node, &self.context).await?;
 
+        // Extract code blocks from the LLM response and write to files
+        let content = &message.content;
+
+        // Parse code blocks in format: ```python\n...``` or ```\n...```
+        // Also look for file path patterns like "File: path/to/file.py"
+        if let Some(code_info) = self.extract_code_from_response(content) {
+            log::info!("Extracted code for file: {}", code_info.0);
+
+            // Create a tool call to write the file
+            let mut args = HashMap::new();
+            args.insert("path".to_string(), code_info.0.clone());
+            args.insert("content".to_string(), code_info.1.clone());
+
+            let call = ToolCall {
+                name: "apply_patch".to_string(),
+                arguments: args,
+            };
+
+            let result = self.tools.execute(&call).await;
+            if result.success {
+                log::info!("✓ Wrote file: {}", code_info.0);
+                println!("   📝 Wrote file: {}", code_info.0);
+            } else {
+                log::warn!("Failed to write file: {:?}", result.error);
+            }
+        } else {
+            log::debug!(
+                "No code block found in response, response length: {}",
+                content.len()
+            );
+            println!("   ℹ No file changes detected in response");
+        }
+
         self.context.history.push(message);
         Ok(())
+    }
+
+    /// Extract code from LLM response
+    /// Returns (filename, code_content) if found
+    fn extract_code_from_response(&self, content: &str) -> Option<(String, String)> {
+        // Look for patterns like:
+        // File: hello_world.py
+        // ```python
+        // def hello():
+        //     print("Hello World")
+        // ```
+
+        let lines: Vec<&str> = content.lines().collect();
+        let mut file_path: Option<String> = None;
+        let mut in_code_block = false;
+        let mut code_lines: Vec<&str> = Vec::new();
+        let mut code_lang = String::new();
+
+        for line in &lines {
+            // Look for file path patterns
+            if line.starts_with("File:") || line.starts_with("**File:") || line.starts_with("file:")
+            {
+                let path = line
+                    .trim_start_matches("File:")
+                    .trim_start_matches("**File:")
+                    .trim_start_matches("file:")
+                    .trim_start_matches("**")
+                    .trim_end_matches("**")
+                    .trim();
+                if !path.is_empty() {
+                    file_path = Some(path.to_string());
+                }
+            }
+
+            // Parse code blocks
+            if line.starts_with("```") && !in_code_block {
+                in_code_block = true;
+                code_lang = line.trim_start_matches('`').to_string();
+                continue;
+            }
+
+            if line.starts_with("```") && in_code_block {
+                in_code_block = false;
+                // If we found code, return it
+                if !code_lines.is_empty() {
+                    let code = code_lines.join("\n");
+                    // Generate filename from language if not found
+                    let filename = file_path
+                        .clone()
+                        .unwrap_or_else(|| match code_lang.as_str() {
+                            "python" | "py" => "main.py".to_string(),
+                            "rust" | "rs" => "main.rs".to_string(),
+                            "javascript" | "js" => "main.js".to_string(),
+                            "typescript" | "ts" => "main.ts".to_string(),
+                            _ => "output.txt".to_string(),
+                        });
+                    return Some((filename, code));
+                }
+                continue;
+            }
+
+            if in_code_block {
+                code_lines.push(line);
+            }
+        }
+
+        None
     }
 
     /// Step 4: Stability Verification
