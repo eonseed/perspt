@@ -3,192 +3,243 @@
 SRBN Architecture
 =================
 
-The **Stabilized Recursive Barrier Network (SRBN)** is Perspt's autonomous
-coding engine, implementing the Flow Barrier Control (FBC) theory from PSP-000004.
+The **Stabilized Recursive Barrier Network (SRBN)** is Perspt's core innovation for 
+autonomous coding with mathematically guaranteed stability.
 
 Overview
 --------
 
-SRBN treats code generation as a **dynamical system** that must be stabilized.
-The goal is to drive the system to a state where ``V(x) < ε`` (energy below threshold).
+SRBN ensures that AI-generated code converges to a stable state before being committed,
+using concepts from control theory (Lyapunov stability) and software verification (LSP, tests).
 
-.. code-block:: text
+.. graphviz::
+   :align: center
+   :caption: SRBN Architecture
 
-   ┌─────────────┐
-   │  PLANNING   │ ← Architect decomposes task into TaskPlan (JSON)
-   └──────┬──────┘
-          │
-   ┌──────▼──────┐
-   │   CODING    │ ← Actuator generates code for each sub-task
-   └──────┬──────┘
-          │
-   ┌──────▼──────┐
-   │  VERIFYING  │ ← LSP diagnostics compute V(x) energy
-   └──────┬──────┘
-          │
-          ▼
-      V(x) < ε? ───No──→ RETRY (with error feedback)
-          │
-         Yes
-          │
-   ┌──────▼──────┐
-   │ COMMITTING  │ ← Merkle Ledger records changes
-   └─────────────┘
+   digraph srbn {
+       rankdir=TB;
+       compound=true;
+       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+       
+       subgraph cluster_models {
+           label="Model Tiers";
+           style=dashed;
+           arch [label="Architect\n(Deep Reasoning)", fillcolor="#E8F5E9"];
+           act [label="Actuator\n(Code Generation)", fillcolor="#E3F2FD"];
+           ver [label="Verifier\n(Stability Check)", fillcolor="#F3E5F5"];
+           spec [label="Speculator\n(Fast Lookahead)", fillcolor="#FFF3E0"];
+       }
+       
+       subgraph cluster_barriers {
+           label="Stability Barriers";
+           style=dashed;
+           lsp [label="LSP\n(V_syn)", fillcolor="#FFECB3"];
+           tests [label="Tests\n(V_log)", fillcolor="#FFECB3"];
+           struct [label="Structure\n(V_str)", fillcolor="#FFECB3"];
+       }
+       
+       subgraph cluster_output {
+           label="Output";
+           style=dashed;
+           ledger [label="Merkle Ledger", fillcolor="#C8E6C9"];
+       }
+       
+       arch -> act;
+       act -> lsp;
+       act -> tests;
+       act -> struct;
+       lsp -> ver;
+       tests -> ver;
+       struct -> ver;
+       ver -> act [label="retry", style=dashed];
+       ver -> ledger [label="stable"];
+   }
 
-Energy Model
-------------
+The Control Loop
+----------------
 
-The total Lyapunov energy is:
+The SRBN control loop executes 5 phases for each task:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 5 20 75
+
+   * - #
+     - Phase
+     - Description
+   * - 1
+     - **Sheafification**
+     - Architect model decomposes task into a JSON ``TaskPlan`` with dependency graph
+   * - 2
+     - **Speculation**
+     - Actuator model generates code for each node with tool calls (write_file, etc.)
+   * - 3
+     - **Verification**
+     - Compute Lyapunov Energy V(x) from LSP diagnostics, structure, and tests
+   * - 4
+     - **Convergence**
+     - If V(x) > ε, retry with error feedback; otherwise proceed
+   * - 5
+     - **Commit**
+     - Record changes in Merkle Ledger with cryptographic integrity
+
+Lyapunov Energy
+---------------
+
+The stability of generated code is measured using a Lyapunov energy function:
+
+.. admonition:: Energy Formula
+   :class: important
+
+   **V(x) = α·V_syn + β·V_str + γ·V_log**
+
+   Default weights: α = 1.0, β = 0.5, γ = 2.0
+
+Components
+~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 25 60
+
+   * - Component
+     - Source
+     - Description
+   * - **V_syn**
+     - LSP Diagnostics
+     - Count of errors and warnings from ``ty`` (Python type checker)
+   * - **V_str**
+     - Structural Analysis
+     - Code complexity, dead code, pattern violations
+   * - **V_log**
+     - Test Failures
+     - Weighted sum of pytest failures (critical tests have higher weight)
+
+Convergence Criterion
+~~~~~~~~~~~~~~~~~~~~~
+
+The system is considered stable when:
 
 .. math::
 
-   V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log}
+   V(x) \leq \varepsilon
 
-.. list-table:: Energy Components
-   :widths: 15 50 15 20
+Default: ε = 0.1
+
+Model Tiers
+-----------
+
+SRBN uses multiple specialized models:
+
+.. list-table::
    :header-rows: 1
+   :widths: 20 30 50
 
-   * - Symbol
-     - Source
-     - Weight
-     - Calculation
-   * - V_syn
-     - LSP diagnostics
-     - α = 1.0
-     - errors × 1.0 + warnings × 0.1
-   * - V_str
-     - Structural analysis
-     - β = 0.5
-     - (placeholder)
-   * - V_log
-     - Test failures
-     - γ = 2.0
-     - Σ(criticality_weight)
+   * - Tier
+     - Purpose
+     - Recommended Model
+   * - **Architect**
+     - Deep reasoning, task decomposition
+     - GPT-5.2, Claude Opus 4.5
+   * - **Actuator**
+     - Code generation, tool calls
+     - Claude Opus 4.5, GPT-5.2
+   * - **Verifier**
+     - Stability analysis
+     - Gemini 3 Pro
+   * - **Speculator**
+     - Fast lookahead, branch prediction
+     - Gemini 3 Flash, Groq Llama
 
-**Stability Condition**: The system is stable when ``V(x) < 0.1`` (default ε).
+Configure model tiers via CLI:
+
+.. code-block:: bash
+
+   perspt agent \
+     --architect-model gpt-5.2 \
+     --actuator-model claude-opus-4.5 \
+     --verifier-model gemini-3-pro \
+     --speculator-model gemini-3-flash \
+     "Build a REST API"
 
 Retry Policy
 ------------
 
-Different error types have different retry limits per PSP-000004:
+SRBN implements bounded retries per PSP-0004:
 
 .. list-table::
-   :widths: 30 20 50
    :header-rows: 1
+   :widths: 30 20 50
 
    * - Error Type
      - Max Retries
-     - Then
-   * - Compilation/type errors
+     - Escalation
+   * - Compilation errors (LSP)
      - 3
-     - Escalate to user
-   * - Tool failures
+     - Escalate to user with context
+   * - Tool failures (file ops)
      - 5
-     - Escalate to user
+     - Escalate with error logs
    * - Review rejections
      - 3
-     - Escalate to user
+     - Escalate with diff summary
 
-Workspace Crates
-----------------
+TaskPlan Structure
+------------------
 
-Perspt is organized as a Cargo workspace with specialized crates:
+The Architect generates a JSON TaskPlan:
 
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
+.. code-block:: json
 
-   * - Crate
-     - Purpose
-   * - ``perspt-cli``
-     - CLI entry point, argument parsing, mode routing
-   * - ``perspt-core``
-     - Configuration, LLM provider abstraction (genai crate)
-   * - ``perspt-tui``
-     - Terminal UI (Ratatui), Agent dashboard, Task tree
-   * - ``perspt-agent``
-     - SRBN orchestrator, tools, LSP client, test runner
-   * - ``perspt-policy``
-     - Security sandbox, file path validation
-   * - ``perspt-sandbox``
-     - Process isolation (future: WASM/containers)
-
-Key Components
---------------
-
-SRBNOrchestrator
-~~~~~~~~~~~~~~~~
-
-The main control loop in ``perspt-agent/src/orchestrator.rs``:
-
-.. code-block:: rust
-
-   impl SRBNOrchestrator {
-       pub async fn execute_task(&mut self, task: &str) -> Result<()> {
-           // 1. Sheafification: Get plan from Architect
-           let plan = self.architect.plan(task).await?;
-           
-           // 2. For each node in plan
-           for node in plan.nodes {
-               // 3. Speculation: Generate code
-               let code = self.actuator.generate(&node).await?;
-               
-               // 4. Verification: Compute V(x)
-               let energy = self.stability_monitor.compute_energy()?;
-               
-               // 5. Convergence loop
-               while energy > self.epsilon {
-                   let code = self.actuator.fix_errors(&diagnostics).await?;
-                   energy = self.stability_monitor.compute_energy()?;
-               }
-               
-               // 6. Commit to ledger
-               self.ledger.record(&node, &code)?;
-           }
+   {
+     "nodes": [
+       {
+         "id": 1,
+         "description": "Create Calculator class",
+         "type": "create",
+         "files": ["calculator.py"],
+         "dependencies": []
+       },
+       {
+         "id": 2,
+         "description": "Add arithmetic methods",
+         "type": "modify",
+         "files": ["calculator.py"],
+         "dependencies": [1]
+       },
+       {
+         "id": 3,
+         "description": "Write unit tests",
+         "type": "create",
+         "files": ["test_calculator.py"],
+         "dependencies": [2]
        }
+     ]
    }
 
-LspClient
-~~~~~~~~~
+Merkle Ledger
+-------------
 
-Python type checking via ``ty`` in ``perspt-agent/src/lsp.rs``:
+All changes are recorded in a Merkle tree for:
 
-- Spawns ``ty server`` subprocess
-- Sends ``textDocument/didOpen`` on file write
-- Polls ``textDocument/diagnostic`` for errors
-- Extracts error messages for LLM correction prompts
+- **Integrity** — Cryptographic verification of change history
+- **Rollback** — Revert to any previous state
+- **Audit** — Complete trail of AI-generated changes
 
-PythonTestRunner
-~~~~~~~~~~~~~~~~
+.. code-block:: bash
 
-pytest execution in ``perspt-agent/src/test_runner.rs``:
+   # View recent commits
+   perspt ledger --recent
 
-- Creates ``pyproject.toml`` if missing
-- Runs ``uv sync --dev`` to install pytest
-- Executes ``uv run pytest --tb=short``
-- Parses failures and computes V_log
+   # Rollback to commit
+   perspt ledger --rollback abc123
 
-Extending Perspt
-----------------
-
-Adding a New Tool
-~~~~~~~~~~~~~~~~~
-
-1. Add tool struct in ``perspt-agent/src/tools.rs``
-2. Implement the tool's ``execute`` method
-3. Register in ``AgentTools::new()``
-4. Add to Architect's tool list in prompts
-
-Adding a New LSP Server
-~~~~~~~~~~~~~~~~~~~~~~~
-
-1. Add language detection in ``LspClient::detect_language()``
-2. Configure server spawn command
-3. Map diagnostic codes to error severity
+   # Statistics
+   perspt ledger --stats
 
 See Also
 --------
 
-- :doc:`/tutorials/agent-mode` - Hands-on Agent Mode tutorial
-- :doc:`/howto/agent-options` - CLI options reference
-- `PSP-000004 <https://github.com/eonseed/perspt/blob/master/docs/psps/source/psp-000004.rst>`_ - Full specification
+- :doc:`psp-process` - The PSP-0004 specification
+- :doc:`../api/perspt-agent` - API documentation
+- :doc:`../tutorials/agent-mode` - Tutorial walkthrough

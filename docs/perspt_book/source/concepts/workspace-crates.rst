@@ -1,139 +1,202 @@
 .. _workspace-crates:
 
-Workspace & Crates
-==================
+Workspace Crates
+================
 
-Perspt is organized as a Cargo workspace with modular crates for maintainability.
+Perspt is organized as a **6-crate Cargo workspace** for modularity and maintainability.
 
 Crate Overview
 --------------
 
-.. code-block:: text
+.. graphviz::
+   :align: center
+   :caption: Crate Dependency Graph
 
-   perspt/
-   ├── Cargo.toml              # Workspace root
-   └── crates/
-       ├── perspt-cli/         # Binary entry point
-       ├── perspt-core/        # Shared configuration & LLM
-       ├── perspt-tui/         # Terminal UI
-       ├── perspt-agent/       # SRBN engine
-       ├── perspt-policy/      # Security rules
-       └── perspt-sandbox/     # Process isolation
+   digraph workspace {
+       rankdir=TB;
+       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+       edge [color="#666666"];
+       
+       cli [label="perspt-cli\n━━━━━━━━━\nCLI Entry Point\n8 Subcommands", fillcolor="#4ECDC4"];
+       core [label="perspt-core\n━━━━━━━━━\nGenAIProvider\nConfig, Memory", fillcolor="#45B7D1"];
+       tui [label="perspt-tui\n━━━━━━━━━\nAgentApp\nDashboard", fillcolor="#96CEB4"];
+       agent [label="perspt-agent\n━━━━━━━━━\nOrchestrator\nLSP, Tools", fillcolor="#FFEAA7"];
+       policy [label="perspt-policy\n━━━━━━━━━\nPolicyEngine\nSanitizer", fillcolor="#DDA0DD"];
+       sandbox [label="perspt-sandbox\n━━━━━━━━━\nSandboxedCommand", fillcolor="#F8B739"];
+       
+       cli -> core;
+       cli -> tui;
+       cli -> agent;
+       agent -> core;
+       agent -> policy;
+       agent -> sandbox;
+   }
 
-perspt-cli
-----------
-
-**Purpose**: CLI entry point and mode routing.
-
-**Key files**:
-
-- ``src/main.rs`` - Argument parsing with clap, mode dispatch
-- ``src/agent_cli.rs`` - Agent mode CLI handling
-
-**Dependencies**: perspt-core, perspt-tui, perspt-agent
-
-perspt-core
------------
-
-**Purpose**: Shared configuration and LLM provider abstraction.
-
-**Key files**:
-
-- ``src/config.rs`` - JSON config, env vars, provider detection
-- ``src/llm_provider.rs`` - genai crate wrapper, streaming
-
-**Features**:
-
-- Zero-config provider detection from environment
-- Model validation before connection
-- Streaming response handling
-
-perspt-tui
-----------
-
-**Purpose**: Terminal user interface.
-
-**Key files**:
-
-- ``src/app.rs`` - TUI application state
-- ``src/ui.rs`` - Ratatui layout and rendering
-- ``src/agent_app.rs`` - Agent mode dashboard
-- ``src/task_tree.rs`` - Plan visualization
-
-perspt-agent
-------------
-
-**Purpose**: SRBN autonomous coding engine.
-
-**Key files**:
-
-- ``src/orchestrator.rs`` - Main SRBN control loop
-- ``src/agent.rs`` - Architect and Actuator LLM roles
-- ``src/tools.rs`` - File, search, command tools
-- ``src/lsp.rs`` - LSP client for Python (ty)
-- ``src/test_runner.rs`` - pytest execution
-- ``src/ledger.rs`` - Merkle change log
-- ``src/types.rs`` - TaskPlan, Energy, RetryPolicy
-
-perspt-policy
+Crate Details
 -------------
 
-**Purpose**: Security rules and path validation.
+perspt-cli
+~~~~~~~~~~
 
-**Key files**:
+**Purpose**: Command-line interface entry point
 
-- ``src/lib.rs`` - PathPolicy for workspace restrictions
+**Location**: ``crates/perspt-cli/``
 
-**Rules**:
+**Key Components**:
 
-- Only allow writes within workspace directory
-- Block access to system paths (``/etc``, ``/usr``, etc.)
-- Validate command arguments
+- ``main.rs`` — CLI argument parsing with clap
+- ``commands/`` — Subcommand implementations
+
+**Subcommands**:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Command
+     - Function
+   * - ``chat``
+     - Launch interactive TUI
+   * - ``agent``
+     - Run SRBN orchestrator
+   * - ``init``
+     - Initialize project config
+   * - ``config``
+     - Manage configuration
+   * - ``ledger``
+     - Query Merkle ledger
+   * - ``status``
+     - Show agent status
+   * - ``abort``
+     - Cancel current session
+   * - ``resume``
+     - Resume interrupted session
+
+perspt-core
+~~~~~~~~~~~
+
+**Purpose**: Core abstractions for LLM interaction
+
+**Location**: ``crates/perspt-core/``
+
+**Key Components**:
+
+- ``config.rs`` — Simple Config struct
+- ``llm_provider.rs`` — Thread-safe GenAIProvider
+- ``memory.rs`` — Conversation memory
+
+**Thread Safety**: GenAIProvider uses ``Arc<RwLock<SharedState>>`` for concurrent access.
+
+perspt-agent
+~~~~~~~~~~~~
+
+**Purpose**: SRBN autonomous coding engine
+
+**Location**: ``crates/perspt-agent/``
+
+**Key Components**:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 10 65
+
+   * - Module
+     - Size
+     - Description
+   * - ``orchestrator.rs``
+     - 34KB
+     - SRBN control loop, model tiers
+   * - ``lsp.rs``
+     - 28KB
+     - LSP client for Python (``ty``)
+   * - ``tools.rs``
+     - 12KB
+     - Agent tools (read, write, search, shell)
+   * - ``types.rs``
+     - 24KB
+     - TaskPlan, Node, Energy types
+   * - ``ledger.rs``
+     - 6KB
+     - Merkle change tracking
+   * - ``test_runner.rs``
+     - 15KB
+     - pytest integration
+   * - ``context_retriever.rs``
+     - 10KB
+     - Code context extraction
+
+perspt-tui
+~~~~~~~~~~
+
+**Purpose**: Terminal UI components
+
+**Location**: ``crates/perspt-tui/``
+
+**Key Components**:
+
+- ``agent_app.rs`` — Main agent TUI
+- ``dashboard.rs`` — Status metrics
+- ``diff_viewer.rs`` — File diff display
+- ``review_modal.rs`` — Change approval
+- ``task_tree.rs`` — Task hierarchy
+
+perspt-policy
+~~~~~~~~~~~~~
+
+**Purpose**: Security policy enforcement
+
+**Location**: ``crates/perspt-policy/``
+
+**Key Components**:
+
+- ``engine.rs`` — Starlark policy evaluator
+- ``sanitize.rs`` — Command sanitization
 
 perspt-sandbox
---------------
+~~~~~~~~~~~~~~
 
-**Purpose**: Process isolation (future).
+**Purpose**: Process isolation
 
-**Planned features**:
+**Location**: ``crates/perspt-sandbox/``
 
-- WASM-based tool execution
-- Container isolation for untrusted code
-- Resource limits (CPU, memory, time)
+**Key Component**: ``command.rs`` — Sandboxed command execution with resource limits
+
+Building Individual Crates
+--------------------------
+
+.. code-block:: bash
+
+   # Build specific crate
+   cargo build -p perspt-cli
+   cargo build -p perspt-agent
+
+   # Run tests for crate
+   cargo test -p perspt-core
+
+   # Generate docs for crate
+   cargo doc -p perspt-agent --open
 
 Adding a New Crate
 ------------------
 
-1. Create directory: ``mkdir crates/perspt-newcrate``
-
-2. Add to workspace ``Cargo.toml``:
+1. Create directory: ``crates/perspt-newcrate/``
+2. Add ``Cargo.toml`` with package metadata
+3. Register in root ``Cargo.toml``:
 
    .. code-block:: toml
 
       [workspace]
       members = [
-          "crates/perspt-cli",
+          "crates/perspt-core",
           "crates/perspt-newcrate",  # Add here
-          # ...
+          ...
       ]
 
-3. Create ``crates/perspt-newcrate/Cargo.toml``
+4. Add dependencies to consuming crates
 
-4. Add as dependency where needed
+See Also
+--------
 
-Build Commands
---------------
-
-.. code-block:: bash
-
-   # Build all crates
-   cargo build --workspace
-
-   # Build specific crate
-   cargo build -p perspt-agent
-
-   # Run tests
-   cargo test --workspace
-
-   # Check without building
-   cargo check --workspace
+- :doc:`../developer-guide/architecture` - Architecture overview
+- :doc:`../developer-guide/extending` - Extension guide
+- :doc:`../api/index` - Per-crate API reference

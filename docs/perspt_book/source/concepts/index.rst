@@ -1,15 +1,9 @@
-.. _concepts:
+.. _concepts-index:
 
 Concepts
 ========
 
-Understand the theory behind Perspt's design and architecture.
-
-.. toctree::
-   :maxdepth: 2
-
-   srbn-architecture
-   workspace-crates
+Understanding the foundations of Perspt.
 
 .. grid:: 2
    :gutter: 3
@@ -18,10 +12,24 @@ Understand the theory behind Perspt's design and architecture.
       :link: srbn-architecture
       :link-type: doc
 
-      The Stabilized Recursive Barrier Network engine that powers Agent Mode.
+      The Stabilized Recursive Barrier Network engine for autonomous coding.
 
-   .. grid-item-card:: 📦 Workspace & Crates
+   .. grid-item-card:: 📦 Workspace Crates
       :link: workspace-crates
       :link-type: doc
 
-      Code organization and how to extend Perspt.
+      The 6-crate modular architecture.
+
+   .. grid-item-card:: 📋 PSP Process
+      :link: psp-process
+      :link-type: doc
+
+      Perspt Specification Proposals for design and development.
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+
+   srbn-architecture
+   workspace-crates
+   psp-process

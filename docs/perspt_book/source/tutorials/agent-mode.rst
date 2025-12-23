@@ -1,260 +1,257 @@
-.. _agent-mode:
+.. _tutorial-agent-mode:
 
-Agent Mode: Autonomous Coding Assistant
-=======================================
+Agent Mode Tutorial
+===================
 
-.. versionadded:: 0.5.0
+Master autonomous code generation with SRBN.
 
-**Agent Mode** uses the **Stabilized Recursive Barrier Network (SRBN)** to autonomously
-decompose coding tasks, generate code, and verify correctness via LSP diagnostics.
+Overview
+--------
 
-This implements the FBC (Flow Barrier Control) theory from PSP-000004, where
-code generation is treated as a dynamical system that must be stabilized.
+Agent Mode lets Perspt autonomously write, test, and verify code using the 
+**Stabilized Recursive Barrier Network (SRBN)** engine.
 
-Quick Start
+Prerequisites
+-------------
+
+- Perspt v0.5.0+ installed
+- API key for a capable model (GPT-5.2, Claude Opus 4.5 recommended)
+- Python 3.9+ (for LSP integration)
+
+Basic Usage
 -----------
 
 .. code-block:: bash
 
-   # Basic agent mode - create a Python project
-   perspt agent "Create a Python calculator with add, subtract, multiply, divide"
+   # Simple task
+   perspt agent "Create a Python calculator"
 
-   # With explicit workspace directory
-   perspt agent -w /path/to/project "Add unit tests for the existing API"
+   # With workspace
+   perspt agent -w ./my-project "Add unit tests"
 
-   # Auto-approve all actions (no prompts)
-   perspt agent -y "Refactor the parser for better error handling"
+   # Auto-approve all
+   perspt agent -y "Refactor error handling"
 
-How SRBN Works
---------------
+Step-by-Step Example
+--------------------
 
-The SRBN control loop implements a **Lyapunov stability framework** where code
-generation is treated as a dynamical system. The goal is to drive the system
-to a stable state where `V(x) < ε` (energy below threshold).
+Let's create a Python calculator:
 
-Control Loop Steps
-~~~~~~~~~~~~~~~~~~
+Step 1: Start the Agent
+~~~~~~~~~~~~~~~~~~~~~~~
 
-1. **Sheafification** - The Architect LLM decomposes the task into a JSON TaskPlan
-2. **Speculation** - The Actuator LLM generates code for each sub-task
-3. **Verification** - LSP diagnostics compute Lyapunov Energy V(x)
-4. **Convergence** - If V(x) > ε, feed errors back to LLM and retry
-5. **Commit** - When stable, record changes in Merkle Ledger
+.. code-block:: bash
 
-Lyapunov Energy
-~~~~~~~~~~~~~~~
+   mkdir calculator-demo && cd calculator-demo
+   perspt agent "Create a Python calculator with add, subtract, multiply, divide operations. Include type hints and a comprehensive test suite."
 
-The total energy is computed as:
+Step 2: Watch the SRBN Loop
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. math::
+The agent will:
 
-   V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log}
+1. **Sheafify**: Decompose into subtasks
 
-.. list-table:: Energy Components
-   :widths: 15 50 15
+   .. code-block:: json
+
+      {
+        "nodes": [
+          {"id": 1, "description": "Create Calculator class"},
+          {"id": 2, "description": "Add arithmetic methods"},
+          {"id": 3, "description": "Write unit tests"}
+        ]
+      }
+
+2. **Speculate**: Generate code for each node
+
+3. **Verify**: Check with LSP and tests
+
+   .. code-block:: text
+
+      V(x) = 1.0·V_syn + 0.5·V_str + 2.0·V_log
+      V_syn = 0 (no LSP errors)
+      V_str = 0.1 (clean structure)
+      V_log = 0 (all tests pass)
+      V(x) = 0.05 < ε (stable!)
+
+4. **Commit**: Record in ledger
+
+Step 3: Review Changes
+~~~~~~~~~~~~~~~~~~~~~~
+
+When prompted, review the generated code:
+
+.. code-block:: text
+
+   ╭─────────────────────────────────────────────────────╮
+   │  Review Changes                                     │
+   ╞═════════════════════════════════════════════════════╡
+   │  + calculator.py   (new file, 45 lines)            │
+   │  + test_calculator.py (new file, 62 lines)         │
+   │                                                     │
+   │  [y] Approve  [n] Reject  [d] View Diff            │
+   ╰─────────────────────────────────────────────────────╯
+
+Step 4: Check Results
+~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: bash
+
+   # View generated files
+   ls -la
+   # calculator.py
+   # test_calculator.py
+
+   # Run tests
+   python -m pytest test_calculator.py -v
+
+Model Tier Configuration
+------------------------
+
+Use specialized models for different SRBN phases:
+
+.. code-block:: bash
+
+   perspt agent \
+     --architect-model gpt-5.2 \
+     --actuator-model claude-opus-4.5 \
+     --verifier-model gemini-3-pro \
+     --speculator-model gemini-3-flash \
+     "Build a REST API"
+
+.. list-table::
    :header-rows: 1
+   :widths: 20 40 40
 
-   * - Component
-     - Source
-     - Default Weight
-   * - V_syn
-     - LSP diagnostics (errors × 1.0, warnings × 0.1)
-     - α = 1.0
-   * - V_str
-     - Structural analysis (placeholder for future)
-     - β = 0.5
-   * - V_log
-     - Test failures weighted by criticality
-     - γ = 2.0
+   * - Tier
+     - Purpose
+     - Recommendation
+   * - Architect
+     - Task decomposition
+     - Deep reasoning (GPT-5.2)
+   * - Actuator
+     - Code generation
+     - Strong coding (Claude)
+   * - Verifier
+     - Stability check
+     - Fast analysis (Gemini Pro)
+   * - Speculator
+     - Branch prediction
+     - Ultra-fast (Gemini Flash)
 
-Agent Mode Options
-------------------
+Energy Tuning
+-------------
 
-.. code-block:: bash
-
-   perspt agent [OPTIONS] <TASK>
-
-.. list-table:: Command Options
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Option
-     - Description
-   * - ``-w, --workspace <DIR>``
-     - Working directory (default: current directory)
-   * - ``-y, --yes``
-     - Auto-approve all actions without prompting
-   * - ``-k, --complexity <K>``
-     - Max tasks before requiring approval (default: 5)
-   * - ``--architect-model <M>``
-     - Model for task planning/decomposition
-   * - ``--actuator-model <M>``
-     - Model for code generation
-   * - ``--max-tokens <N>``
-     - Token budget limit (default: 100000)
-   * - ``--max-cost <USD>``
-     - Maximum cost in dollars
-
-Examples
---------
-
-Python Project with Tests
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Customize the Lyapunov energy weights:
 
 .. code-block:: bash
 
-   # Create a workspace
-   mkdir myproject && cd myproject
+   # Prioritize test passing (higher γ)
+   perspt agent --energy-weights "1.0,0.5,3.0" "Add tests"
 
-   # Let the agent create a Flask API with tests
-   perspt agent -y "Create a REST API with Flask including:
-   - GET /health endpoint
-   - POST /users endpoint  
-   - Unit tests for all endpoints"
+   # Prioritize type safety (higher α)
+   perspt agent --energy-weights "2.0,0.5,1.0" "Add type hints"
 
-Model Selection
-~~~~~~~~~~~~~~~
-
-Use different models for planning vs code generation:
-
-.. code-block:: bash
-
-   # Use GPT-4o for planning, GPT-4o-mini for code
-   perspt agent --architect-model gpt-4o --actuator-model gpt-4o-mini \
-     "Implement a binary search tree with insert, search, delete"
-
-Complexity Gating
-~~~~~~~~~~~~~~~~~
-
-Pause for approval when plans exceed a task threshold:
-
-.. code-block:: bash
-
-   # Pause if plan has more than 3 tasks
-   perspt agent -k 3 "Build authentication module with JWT and refresh tokens"
-
-LSP Integration
+Execution Modes
 ---------------
 
-Agent mode uses the ``ty`` type checker for Python to detect errors in real-time.
-The LSP client is automatically started and monitors generated files.
-
-Supported LSP Features:
-
-- **textDocument/diagnostic** - Error/warning detection
-- **textDocument/definition** - Go to definition
-- **textDocument/references** - Find all references
-- **textDocument/hover** - Type information
-
-Automatic Correction
-~~~~~~~~~~~~~~~~~~~~
-
-When LSP detects errors, the agent:
-
-1. Extracts diagnostic messages (file, line, error text)
-2. Constructs a correction prompt with the error context
-3. Calls the LLM to regenerate the code
-4. Writes the corrected file
-5. Re-verifies until stable or max retries reached
-
-Retry Policy
-------------
-
-Per PSP-000004, different error types have different retry limits:
-
-.. list-table:: Retry Limits
-   :widths: 30 20 50
+.. list-table::
    :header-rows: 1
+   :widths: 20 80
 
-   * - Error Type
-     - Max Retries
-     - Action on Exhaustion
-   * - Compilation/type errors
-     - 3
-     - Escalate to user
-   * - Tool failures
-     - 5
-     - Escalate to user
-   * - Review rejections
-     - 3
-     - Escalate to user
-
-Token Budget & Cost Control
----------------------------
-
-Control spending with token and cost limits:
+   * - Mode
+     - Behavior
+   * - ``cautious``
+     - Prompt for approval on every change
+   * - ``balanced``
+     - Prompt when complexity > K (default)
+   * - ``yolo``
+     - Auto-approve everything (dangerous!)
 
 .. code-block:: bash
 
-   # Limit total tokens
-   perspt agent --max-tokens 50000 "Write a simple script"
+   perspt agent --mode cautious "Modify database schema"
 
-   # Limit by dollar cost
-   perspt agent --max-cost 1.00 "Create a complex module"
+Complexity Threshold
+--------------------
 
-The token budget tracks:
-
-- Input tokens (prompt)
-- Output tokens (response)
-- Estimated cost (based on model pricing)
-
-When the budget is exhausted, the agent will stop and report status.
-
-Test Runner Integration
------------------------
-
-Agent mode includes a Python test runner using ``uv`` and ``pytest``:
+Control when to prompt for approval:
 
 .. code-block:: bash
 
-   # The agent can auto-generate and run tests
-   perspt agent -y "Create a calculator module with unit tests"
+   # Approve up to 3 files without prompting
+   perspt agent -k 3 "Refactor module"
 
-The test runner:
+   # Always prompt (k=0)
+   perspt agent -k 0 "Any task"
 
-1. Auto-creates ``pyproject.toml`` if missing
-2. Installs pytest via ``uv sync --dev``
-3. Runs ``uv run pytest`` and parses results
-4. Calculates V_log from test failures
+Cost and Step Limits
+--------------------
 
-V_log Calculation
-~~~~~~~~~~~~~~~~~
+.. code-block:: bash
 
-Test failures are weighted by criticality (from behavioral contracts):
+   # Maximum $5 cost
+   perspt agent --max-cost 5.0 "Large refactor"
 
-- **Critical**: weight = 10.0
-- **High**: weight = 3.0
-- **Low**: weight = 1.0
+   # Maximum 10 iterations
+   perspt agent --max-steps 10 "Iterative improvement"
 
-``V_log = γ × Σ(criticality_weight)``
+Managing Sessions
+-----------------
 
-Architecture
-------------
+.. code-block:: bash
 
-Agent mode uses these components:
+   # Check status
+   perspt status
 
-.. list-table:: Components
-   :widths: 25 75
-   :header-rows: 1
+   # Abort current
+   perspt abort
 
-   * - Component
-     - Purpose
-   * - ``SRBNOrchestrator``
-     - Main control loop implementing the 7-step SRBN workflow
-   * - ``LspClient``
-     - LSP client for Python (ty) with diagnostic extraction
-   * - ``PythonTestRunner``
-     - pytest execution via uv with V_log calculation
-   * - ``ContextRetriever``
-     - Code search via grep crate for LLM context
-   * - ``MerkleLedger``
-     - Immutable log of all file changes
-   * - ``AgentTools``
-     - File read/write, search, command execution
+   # Resume interrupted
+   perspt resume
+
+Change Tracking
+---------------
+
+.. code-block:: bash
+
+   # View history
+   perspt ledger --recent
+
+   # Rollback
+   perspt ledger --rollback abc123
+
+   # Statistics
+   perspt ledger --stats
+
+Best Practices
+--------------
+
+1. **Start small**: Test with simple tasks first
+2. **Use workspace**: Always specify ``-w`` for clarity
+3. **Set limits**: Use ``--max-cost`` and ``--max-steps``
+4. **Review carefully**: Check diffs before approving
+5. **Use tiers**: Match models to task requirements
+6. **Track changes**: Use ``perspt ledger`` regularly
+
+Troubleshooting
+---------------
+
+**Agent stuck in retry loop**:
+
+- Check LSP is working: ``ty check file.py``
+- Lower stability threshold: ``--stability-threshold 0.5``
+- Reduce energy weights for less strict verification
+
+**High energy despite clean code**:
+
+- Check test failures: ``pytest -v``
+- Review LSP diagnostics
+- Adjust weights: ``--energy-weights "0.5,0.5,1.0"``
 
 See Also
 --------
 
-- :doc:`/concepts/srbn-architecture` - Technical details of SRBN
-- :doc:`/howto/configuration` - Configuration options for agent mode
-- `PSP-000004 <https://github.com/eonseed/perspt/blob/master/docs/psps/source/psp-000004.rst>`_ - Full specification
+- :doc:`../concepts/srbn-architecture` - SRBN details
+- :doc:`../howto/agent-options` - Full CLI reference
+- :doc:`../api/perspt-agent` - API documentation
