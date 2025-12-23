@@ -5,11 +5,16 @@ edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
 description = "SRBN Orchestrator and Agent logic for Perspt"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-agent"
+keywords = ["agent", "srbn", "llm", "coding"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-perspt-core = { path = "../perspt-core" }
-perspt-policy = { path = "../perspt-policy" }
-perspt-sandbox = { path = "../perspt-sandbox" }
+perspt-core = { version = "0.1.0", path = "../perspt-core" }
+perspt-policy = { version = "0.1.0", path = "../perspt-policy" }
+perspt-sandbox = { version = "0.1.0", path = "../perspt-sandbox" }
 
 # Graph management
 petgraph = "0.6"

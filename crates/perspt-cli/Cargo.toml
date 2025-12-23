@@ -4,16 +4,21 @@ version = "0.5.0"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
-description = "CLI entry point for Perspt"
+description = "CLI entry point for Perspt - A stability-aware AI coding assistant"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-cli"
+keywords = ["cli", "ai", "llm", "coding", "terminal"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "perspt"
 path = "src/main.rs"
 
 [dependencies]
-perspt-core = { path = "../perspt-core" }
-perspt-tui = { path = "../perspt-tui" }
-perspt-agent = { path = "../perspt-agent" }
+perspt-core = { version = "0.1.0", path = "../perspt-core" }
+perspt-tui = { version = "0.1.0", path = "../perspt-tui" }
+perspt-agent = { version = "0.1.0", path = "../perspt-agent" }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

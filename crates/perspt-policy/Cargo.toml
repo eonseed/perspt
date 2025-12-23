@@ -5,6 +5,11 @@ edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
 description = "Starlark execution policy engine for Perspt"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-policy"
+keywords = ["policy", "starlark", "security", "rules"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Starlark policy engine
