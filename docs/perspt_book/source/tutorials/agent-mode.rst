@@ -255,6 +255,6 @@ Agent mode uses these components:
 See Also
 --------
 
-- :doc:`/developer-guide/architecture` - Technical details of SRBN
-- :doc:`/configuration` - Configuration options for agent mode
+- :doc:`/concepts/srbn-architecture` - Technical details of SRBN
+- :doc:`/howto/configuration` - Configuration options for agent mode
 - `PSP-000004 <https://github.com/eonseed/perspt/blob/master/docs/psps/source/psp-000004.rst>`_ - Full specification
