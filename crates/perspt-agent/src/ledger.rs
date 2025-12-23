@@ -45,10 +45,10 @@ impl MerkleLedger {
             db_path: db_path.to_string(),
             current_session: None,
         };
-        
+
         // Initialize schema
         ledger.init_schema()?;
-        
+
         Ok(ledger)
     }
 
@@ -62,14 +62,14 @@ impl MerkleLedger {
         // Note: In a real implementation, this would use duckdb crate
         // For now, we'll use a file-based approach with JSON
         log::info!("Initializing Merkle Ledger at: {}", self.db_path);
-        
+
         // Create the ledger directory if needed
         if self.db_path != ":memory:" {
             if let Some(parent) = Path::new(&self.db_path).parent() {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        
+
         Ok(())
     }
 
@@ -84,10 +84,10 @@ impl MerkleLedger {
             total_nodes: 0,
             completed_nodes: 0,
         };
-        
+
         self.current_session = Some(record);
         log::info!("Started session: {}", session_id);
-        
+
         Ok(())
     }
 
@@ -99,7 +99,8 @@ impl MerkleLedger {
         parent_hash: Option<[u8; 32]>,
         energy: f32,
     ) -> Result<String> {
-        let session_id = self.current_session
+        let session_id = self
+            .current_session
             .as_ref()
             .map(|s| s.session_id.clone())
             .unwrap_or_else(|| "unknown".to_string());
@@ -116,7 +117,7 @@ impl MerkleLedger {
         };
 
         log::info!("Committed node {} with energy {:.4}", node_id, energy);
-        
+
         // Update session progress
         if let Some(ref mut session) = self.current_session {
             session.completed_nodes += 1;
@@ -130,7 +131,11 @@ impl MerkleLedger {
         if let Some(ref mut session) = self.current_session {
             session.ended_at = Some(chrono_timestamp());
             session.status = status.to_string();
-            log::info!("Ended session {} with status: {}", session.session_id, status);
+            log::info!(
+                "Ended session {} with status: {}",
+                session.session_id,
+                status
+            );
         }
         Ok(())
     }
@@ -138,7 +143,11 @@ impl MerkleLedger {
     /// Get recent commits for a session
     pub fn get_recent_commits(&self, session_id: &str, limit: usize) -> Vec<MerkleCommit> {
         // Placeholder - would query DuckDB
-        log::debug!("Getting recent {} commits for session {}", limit, session_id);
+        log::debug!(
+            "Getting recent {} commits for session {}",
+            limit,
+            session_id
+        );
         Vec::new()
     }
 
@@ -204,13 +213,13 @@ mod tests {
     #[test]
     fn test_session_lifecycle() {
         let mut ledger = MerkleLedger::in_memory().unwrap();
-        
+
         ledger.start_session("test-123", "Test task").unwrap();
         assert!(ledger.current_session.is_some());
-        
+
         ledger.commit_node("node-1", [0u8; 32], None, 0.05).unwrap();
         assert_eq!(ledger.current_session.as_ref().unwrap().completed_nodes, 1);
-        
+
         ledger.end_session("COMPLETED").unwrap();
         assert_eq!(ledger.current_session.as_ref().unwrap().status, "COMPLETED");
     }
