@@ -11,7 +11,7 @@ pub mod types;
 
 pub use agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
 pub use ledger::{MerkleCommit, MerkleLedger, SessionRecord};
-pub use lsp::LspClient;
+pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use orchestrator::SRBNOrchestrator;
 pub use tools::{AgentTools, ToolCall, ToolDefinition, ToolResult};
 pub use types::{

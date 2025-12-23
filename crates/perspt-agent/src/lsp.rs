@@ -16,6 +16,19 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 
+/// Simplified document symbol information for agent use
+#[derive(Debug, Clone)]
+pub struct DocumentSymbolInfo {
+    /// Symbol name (e.g., function name, class name)
+    pub name: String,
+    /// Symbol kind (e.g., "Function", "Class", "Variable")
+    pub kind: String,
+    /// Range in the document
+    pub range: lsp_types::Range,
+    /// Optional detail (e.g., type signature)
+    pub detail: Option<String>,
+}
+
 /// LSP Client for real-time diagnostics and symbol information
 pub struct LspClient {
     /// Server stdin writer
@@ -545,6 +558,206 @@ impl LspClient {
             }),
         )
         .await
+    }
+
+    // =========================================================================
+    // Enhanced LSP Tools (PSP-4 Phase 2)
+    // =========================================================================
+
+    /// Go to definition of symbol at position
+    /// Uses textDocument/definition LSP request
+    pub async fn goto_definition(
+        &mut self,
+        path: &Path,
+        line: u32,
+        character: u32,
+    ) -> Option<Vec<lsp_types::Location>> {
+        if !self.is_ready() {
+            return None;
+        }
+
+        let uri = format!("file://{}", path.display());
+
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        });
+
+        match self
+            .send_request::<Option<lsp_types::GotoDefinitionResponse>>(
+                "textDocument/definition",
+                params,
+            )
+            .await
+        {
+            Ok(Some(response)) => {
+                // Convert GotoDefinitionResponse to Vec<Location>
+                match response {
+                    lsp_types::GotoDefinitionResponse::Scalar(loc) => Some(vec![loc]),
+                    lsp_types::GotoDefinitionResponse::Array(locs) => Some(locs),
+                    lsp_types::GotoDefinitionResponse::Link(links) => Some(
+                        links
+                            .into_iter()
+                            .map(|l| lsp_types::Location {
+                                uri: l.target_uri,
+                                range: l.target_selection_range,
+                            })
+                            .collect(),
+                    ),
+                }
+            }
+            Ok(None) => None,
+            Err(e) => {
+                log::warn!("goto_definition failed: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Find all references to symbol at position
+    /// Uses textDocument/references LSP request
+    pub async fn find_references(
+        &mut self,
+        path: &Path,
+        line: u32,
+        character: u32,
+        include_declaration: bool,
+    ) -> Vec<lsp_types::Location> {
+        if !self.is_ready() {
+            return Vec::new();
+        }
+
+        let uri = format!("file://{}", path.display());
+
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character },
+            "context": { "includeDeclaration": include_declaration }
+        });
+
+        match self
+            .send_request::<Option<Vec<lsp_types::Location>>>("textDocument/references", params)
+            .await
+        {
+            Ok(Some(locs)) => locs,
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                log::warn!("find_references failed: {}", e);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Get hover information (type, docs) at position
+    /// Uses textDocument/hover LSP request
+    pub async fn hover(&mut self, path: &Path, line: u32, character: u32) -> Option<String> {
+        if !self.is_ready() {
+            return None;
+        }
+
+        let uri = format!("file://{}", path.display());
+
+        let params = json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        });
+
+        match self
+            .send_request::<Option<lsp_types::Hover>>("textDocument/hover", params)
+            .await
+        {
+            Ok(Some(hover)) => {
+                // Extract text from hover contents
+                match hover.contents {
+                    lsp_types::HoverContents::Scalar(content) => {
+                        Some(Self::extract_marked_string(&content))
+                    }
+                    lsp_types::HoverContents::Array(contents) => Some(
+                        contents
+                            .iter()
+                            .map(|c| Self::extract_marked_string(c))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                    ),
+                    lsp_types::HoverContents::Markup(markup) => Some(markup.value),
+                }
+            }
+            Ok(None) => None,
+            Err(e) => {
+                log::warn!("hover failed: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Extract text from MarkedString
+    fn extract_marked_string(content: &lsp_types::MarkedString) -> String {
+        match content {
+            lsp_types::MarkedString::String(s) => s.clone(),
+            lsp_types::MarkedString::LanguageString(ls) => {
+                format!("```{}\n{}\n```", ls.language, ls.value)
+            }
+        }
+    }
+
+    /// Get all symbols in a document
+    /// Uses textDocument/documentSymbol LSP request
+    pub async fn get_symbols(&mut self, path: &Path) -> Vec<DocumentSymbolInfo> {
+        if !self.is_ready() {
+            return Vec::new();
+        }
+
+        let uri = format!("file://{}", path.display());
+
+        let params = json!({
+            "textDocument": { "uri": uri }
+        });
+
+        match self
+            .send_request::<Option<lsp_types::DocumentSymbolResponse>>(
+                "textDocument/documentSymbol",
+                params,
+            )
+            .await
+        {
+            Ok(Some(response)) => match response {
+                lsp_types::DocumentSymbolResponse::Flat(symbols) => symbols
+                    .into_iter()
+                    .map(|s| DocumentSymbolInfo {
+                        name: s.name,
+                        kind: format!("{:?}", s.kind),
+                        range: s.location.range,
+                        detail: None,
+                    })
+                    .collect(),
+                lsp_types::DocumentSymbolResponse::Nested(symbols) => {
+                    Self::flatten_document_symbols(&symbols)
+                }
+            },
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                log::warn!("get_symbols failed: {}", e);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Flatten nested document symbols into a list
+    fn flatten_document_symbols(symbols: &[lsp_types::DocumentSymbol]) -> Vec<DocumentSymbolInfo> {
+        let mut result = Vec::new();
+        for sym in symbols {
+            result.push(DocumentSymbolInfo {
+                name: sym.name.clone(),
+                kind: format!("{:?}", sym.kind),
+                range: sym.range,
+                detail: sym.detail.clone(),
+            });
+            // Recursively add children
+            if let Some(ref children) = sym.children {
+                result.extend(Self::flatten_document_symbols(children));
+            }
+        }
+        result
     }
 
     /// Shutdown the language server
