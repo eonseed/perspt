@@ -1,0 +1,21 @@
+[package]
+name = "perspt-policy"
+version = "0.1.0"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "Starlark execution policy engine for Perspt"
+
+[dependencies]
+# Starlark policy engine
+starlark = "0.12"
+
+# Shell parsing
+shell-words = "1.1"
+
+# Home directory detection
+dirs = "5.0"
+
+# Utilities
+anyhow = "1.0"
+log = "0.4"
