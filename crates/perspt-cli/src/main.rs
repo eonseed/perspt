@@ -154,14 +154,31 @@ enum Commands {
         /// Session ID to resume
         session_id: Option<String>,
     },
+
+    /// Simple CLI chat mode (no TUI)
+    SimpleChat {
+        /// Model to use for chat
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Log session to file
+        #[arg(long)]
+        log_file: Option<std::path::PathBuf>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging
-    let log_level = if cli.verbose { "debug" } else { "info" };
+    // Initialize logging - use error level for simple-chat to suppress INFO logs
+    let log_level = if cli.verbose {
+        "debug"
+    } else if matches!(cli.command, Some(Commands::SimpleChat { .. })) {
+        "error"
+    } else {
+        "info"
+    };
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     match cli.command {
@@ -207,5 +224,9 @@ async fn main() -> Result<()> {
         Some(Commands::Status) => commands::status::run().await,
         Some(Commands::Abort { force }) => commands::abort::run(force).await,
         Some(Commands::Resume { session_id }) => commands::resume::run(session_id).await,
+        Some(Commands::SimpleChat { model, log_file }) => {
+            commands::simple_chat::run(commands::simple_chat::SimpleChatArgs { model, log_file })
+                .await
+        }
     }
 }
