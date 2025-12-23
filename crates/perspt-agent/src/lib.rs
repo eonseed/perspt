@@ -3,6 +3,7 @@
 //! Implements the Stabilized Recursive Barrier Network for multi-agent coding.
 
 pub mod agent;
+pub mod context_retriever;
 pub mod ledger;
 pub mod lsp;
 pub mod orchestrator;
@@ -10,6 +11,7 @@ pub mod tools;
 pub mod types;
 
 pub use agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
+pub use context_retriever::{ContextRetriever, SearchHit};
 pub use ledger::{MerkleCommit, MerkleLedger, SessionRecord};
 pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use orchestrator::SRBNOrchestrator;
