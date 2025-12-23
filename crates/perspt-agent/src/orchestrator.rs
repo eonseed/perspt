@@ -5,7 +5,7 @@
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
 use crate::lsp::LspClient;
 use crate::tools::{AgentTools, ToolCall};
-use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode};
+use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Topo, Walker};
@@ -41,6 +41,8 @@ pub struct SRBNOrchestrator {
     file_version: i32,
     /// LLM provider for correction calls
     provider: std::sync::Arc<perspt_core::llm_provider::GenAIProvider>,
+    /// Architect model name for planning
+    architect_model: String,
     /// Actuator model name for corrections
     actuator_model: String,
 }
@@ -76,8 +78,11 @@ impl SRBNOrchestrator {
         // Create agent tools for file/command operations
         let tools = AgentTools::new(working_dir.clone(), !auto_approve);
 
-        // Store the actuator model for correction calls (use default if not specified)
-        let correction_model = actuator_model
+        // Store model names for direct LLM calls
+        let stored_architect_model = architect_model
+            .clone()
+            .unwrap_or_else(|| ModelTier::Architect.default_model().to_string());
+        let stored_actuator_model = actuator_model
             .clone()
             .unwrap_or_else(|| ModelTier::Actuator.default_model().to_string());
 
@@ -97,7 +102,8 @@ impl SRBNOrchestrator {
             last_written_file: None,
             file_version: 0,
             provider,
-            actuator_model: correction_model,
+            architect_model: stored_architect_model,
+            actuator_model: stored_actuator_model,
         }
     }
 
@@ -151,28 +157,257 @@ impl SRBNOrchestrator {
 
     /// Step 1: Architecture Sheafification
     ///
-    /// The Architect analyzes the task and produces a Task DAG
+    /// The Architect analyzes the task and produces a structured Task DAG.
+    /// This step retries until a valid JSON plan is produced or max attempts reached.
     async fn step_sheafify(&mut self, task: String) -> Result<()> {
         log::info!("Step 1: Sheafification - Planning task decomposition");
+        println!("   🏗️ Architect is analyzing the task...");
 
-        // Create the root planning node
-        let root_node = SRBNNode::new("root".to_string(), task.clone(), ModelTier::Architect);
-        let root_idx = self.add_node(root_node);
+        const MAX_ATTEMPTS: usize = 3;
+        let mut last_error: Option<String> = None;
 
-        // Get the architect agent
-        let architect = &self.agents[0];
+        for attempt in 1..=MAX_ATTEMPTS {
+            log::info!(
+                "Sheafification attempt {}/{}: requesting structured plan",
+                attempt,
+                MAX_ATTEMPTS
+            );
 
-        // Process with architect (would normally call LLM)
-        let root = &self.graph[root_idx];
-        let message = architect.process(root, &self.context).await?;
+            // Build the structured prompt
+            let prompt = self.build_architect_prompt(&task, last_error.as_deref())?;
 
-        // Record message in history
-        self.context.history.push(message);
+            // Call the Architect
+            let response = self
+                .provider
+                .generate_response_simple(&self.get_architect_model(), &prompt)
+                .await
+                .context("Failed to get Architect response")?;
 
-        // Mark root as planned
-        self.graph[root_idx].state = NodeState::Planning;
+            log::debug!("Architect response length: {} chars", response.len());
+
+            // Try to parse the JSON plan
+            match self.parse_task_plan(&response) {
+                Ok(plan) => {
+                    // Validate the plan
+                    if let Err(e) = plan.validate() {
+                        log::warn!("Plan validation failed (attempt {}): {}", attempt, e);
+                        last_error = Some(format!("Validation error: {}", e));
+
+                        if attempt >= MAX_ATTEMPTS {
+                            println!(
+                                "   ❌ Failed to get valid plan after {} attempts",
+                                MAX_ATTEMPTS
+                            );
+                            // Fall back to single-task execution
+                            return self.create_fallback_task(&task);
+                        }
+                        continue;
+                    }
+
+                    // Check complexity gating
+                    if plan.len() > self.context.complexity_k && !self.auto_approve {
+                        println!(
+                            "   ⚠️ Plan has {} tasks (exceeds K={}). Approve? [y/n]",
+                            plan.len(),
+                            self.context.complexity_k
+                        );
+                        // TODO: Implement interactive approval
+                        // For now, auto-approve in headless mode
+                    }
+
+                    println!("   ✅ Architect produced plan with {} task(s)", plan.len());
+
+                    // Create nodes from the plan
+                    self.create_nodes_from_plan(&plan)?;
+                    return Ok(());
+                }
+                Err(e) => {
+                    log::warn!("Plan parsing failed (attempt {}): {}", attempt, e);
+                    last_error = Some(format!("JSON parse error: {}", e));
+
+                    if attempt >= MAX_ATTEMPTS {
+                        println!("   ⚠️ Could not parse structured plan, using single task");
+                        return self.create_fallback_task(&task);
+                    }
+                }
+            }
+        }
+
+        // Should not reach here
+        self.create_fallback_task(&task)
+    }
+
+    /// Build the Architect prompt requesting structured JSON output
+    fn build_architect_prompt(&self, task: &str, last_error: Option<&str>) -> Result<String> {
+        let error_feedback = if let Some(e) = last_error {
+            format!(
+                "\n## Previous Attempt Failed\nError: {}\nPlease fix the JSON format and try again.\n",
+                e
+            )
+        } else {
+            String::new()
+        };
+
+        let prompt = format!(
+            r#"You are an Architect agent in a multi-agent coding system.
+
+## Task
+{task}
+
+## Working Directory
+{working_dir}
+{error_feedback}
+## Instructions
+Analyze this task and produce a structured execution plan as JSON.
+
+
+1. Break down the task into atomic subtasks
+2. Each subtask should produce one or more files
+3. Include unit tests where appropriate
+4. Specify dependencies between tasks
+5. Output ONLY valid JSON (no markdown, no explanation)
+
+## Output Format
+Respond with ONLY a JSON object in this exact format:
+```json
+{{
+  "tasks": [
+    {{
+      "id": "task_1",
+      "goal": "Description of what this task accomplishes",
+      "context_files": ["existing_file.py"],
+      "output_files": ["new_file.py"],
+      "dependencies": [],
+      "task_type": "code",
+      "contract": {{
+        "interface_signature": "def function_name(arg: Type) -> ReturnType",
+        "invariants": ["Must handle edge cases"],
+        "forbidden_patterns": ["no bare except"],
+        "tests": [
+          {{"name": "test_function_name", "criticality": "Critical"}}
+        ]
+      }}
+    }},
+    {{
+      "id": "test_1",
+      "goal": "Unit tests for task_1",
+      "context_files": ["new_file.py"],
+      "output_files": ["test_new_file.py"],
+      "dependencies": ["task_1"],
+      "task_type": "unit_test"
+    }}
+  ]
+}}
+```
+
+Valid task_type values: "code", "unit_test", "integration_test", "refactor", "documentation"
+Valid criticality values: "Critical", "High", "Low"
+
+IMPORTANT: Output ONLY the JSON, no other text."#,
+            task = task,
+            working_dir = self.context.working_dir.display(),
+            error_feedback = error_feedback
+        );
+
+        Ok(prompt)
+    }
+
+    /// Parse JSON response into TaskPlan
+    fn parse_task_plan(&self, content: &str) -> Result<TaskPlan> {
+        // Try to extract JSON from markdown code block if present
+        let json_str = if let Some(start) = content.find("```json") {
+            let start = start + 7;
+            if let Some(end_offset) = content[start..].find("```") {
+                content[start..start + end_offset].trim()
+            } else {
+                content[start..].trim()
+            }
+        } else if let Some(start) = content.find("```") {
+            // Try generic code block
+            let start = start + 3;
+            // Skip language identifier if present
+            let start = content[start..]
+                .find('\n')
+                .map(|n| start + n + 1)
+                .unwrap_or(start);
+            if let Some(end_offset) = content[start..].find("```") {
+                content[start..start + end_offset].trim()
+            } else {
+                content[start..].trim()
+            }
+        } else if content.trim().starts_with('{') {
+            // Direct JSON
+            content.trim()
+        } else {
+            // Try to find JSON object anywhere in the content
+            if let Some(start) = content.find('{') {
+                if let Some(end) = content.rfind('}') {
+                    &content[start..=end]
+                } else {
+                    content.trim()
+                }
+            } else {
+                content.trim()
+            }
+        };
+
+        log::debug!(
+            "Attempting to parse JSON: {}...",
+            &json_str[..json_str.len().min(200)]
+        );
+
+        serde_json::from_str(json_str).context("Failed to parse TaskPlan JSON")
+    }
+
+    /// Create SRBN nodes from a parsed TaskPlan
+    fn create_nodes_from_plan(&mut self, plan: &TaskPlan) -> Result<()> {
+        log::info!("Creating {} nodes from plan", plan.len());
+
+        // Create all nodes first
+        let mut node_map: HashMap<String, NodeIndex> = HashMap::new();
+
+        for task in &plan.tasks {
+            let node = task.to_srbn_node(ModelTier::Actuator);
+            let idx = self.add_node(node);
+            node_map.insert(task.id.clone(), idx);
+            log::info!("  Created node: {} - {}", task.id, task.goal);
+        }
+
+        // Wire up dependencies
+        for task in &plan.tasks {
+            for dep_id in &task.dependencies {
+                if let (Some(&from_idx), Some(&to_idx)) =
+                    (node_map.get(dep_id), node_map.get(&task.id))
+                {
+                    self.graph.add_edge(
+                        from_idx,
+                        to_idx,
+                        Dependency {
+                            kind: "depends_on".to_string(),
+                        },
+                    );
+                    log::debug!("  Wired dependency: {} -> {}", dep_id, task.id);
+                }
+            }
+        }
 
         Ok(())
+    }
+
+    /// Create a fallback single-task execution when plan parsing fails
+    fn create_fallback_task(&mut self, task: &str) -> Result<()> {
+        log::warn!("Using fallback single-task execution");
+        println!("   📝 Using simplified single-task execution");
+
+        let root_node = SRBNNode::new("root".to_string(), task.to_string(), ModelTier::Actuator);
+        self.add_node(root_node);
+
+        Ok(())
+    }
+
+    /// Get the Architect model name
+    fn get_architect_model(&self) -> String {
+        self.architect_model.clone()
     }
 
     /// Execute a single node through the control loop
