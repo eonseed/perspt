@@ -19,7 +19,7 @@ pub use orchestrator::SRBNOrchestrator;
 pub use test_runner::{PythonTestRunner, TestFailure, TestResults, TestRunner};
 pub use tools::{AgentTools, ToolCall, ToolDefinition, ToolResult};
 pub use types::{
-    AgentContext, AgentMessage, BehavioralContract, Criticality, EnergyComponents, ModelTier,
-    NodeState, PlannedContract, PlannedTask, PlannedTest, SRBNNode, StabilityMonitor, TaskPlan,
-    TaskType, TokenBudget, WeightedTest,
+    AgentContext, AgentMessage, BehavioralContract, Criticality, EnergyComponents, ErrorType,
+    ModelTier, NodeState, PlannedContract, PlannedTask, PlannedTest, RetryPolicy, SRBNNode,
+    StabilityMonitor, TaskPlan, TaskType, TokenBudget, WeightedTest,
 };

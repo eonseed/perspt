@@ -112,6 +112,141 @@ impl BehavioralContract {
     }
 }
 
+/// Error type for determining retry limits per PSP-4
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ErrorType {
+    /// Compilation/syntax/type errors (3 attempts)
+    Compilation,
+    /// Tool execution failures (5 attempts)
+    ToolFailure,
+    /// User/reviewer rejection (3 rejections)
+    ReviewRejection,
+    /// Unknown/other errors (3 attempts default)
+    Other,
+}
+
+impl Default for ErrorType {
+    fn default() -> Self {
+        ErrorType::Compilation
+    }
+}
+
+/// Retry policy configuration per PSP-4 specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryPolicy {
+    /// Max retries for compilation errors (default: 3)
+    pub max_compilation_retries: usize,
+    /// Max retries for tool failures (default: 5)
+    pub max_tool_retries: usize,
+    /// Max reviewer rejections before escalation (default: 3)
+    pub max_review_rejections: usize,
+    /// Current consecutive failures by type
+    pub compilation_failures: usize,
+    pub tool_failures: usize,
+    pub review_rejections: usize,
+    /// Last error type encountered
+    pub last_error_type: Option<ErrorType>,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            // PSP-4 specified limits
+            max_compilation_retries: 3,
+            max_tool_retries: 5,
+            max_review_rejections: 3,
+            compilation_failures: 0,
+            tool_failures: 0,
+            review_rejections: 0,
+            last_error_type: None,
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Record a failure of a specific type
+    pub fn record_failure(&mut self, error_type: ErrorType) {
+        self.last_error_type = Some(error_type);
+        match error_type {
+            ErrorType::Compilation => self.compilation_failures += 1,
+            ErrorType::ToolFailure => self.tool_failures += 1,
+            ErrorType::ReviewRejection => self.review_rejections += 1,
+            ErrorType::Other => self.compilation_failures += 1, // Treat as compilation
+        }
+    }
+
+    /// Reset failures of a specific type (on success)
+    pub fn reset_failures(&mut self, error_type: ErrorType) {
+        match error_type {
+            ErrorType::Compilation => self.compilation_failures = 0,
+            ErrorType::ToolFailure => self.tool_failures = 0,
+            ErrorType::ReviewRejection => self.review_rejections = 0,
+            ErrorType::Other => self.compilation_failures = 0,
+        }
+    }
+
+    /// Reset all failure counters
+    pub fn reset_all(&mut self) {
+        self.compilation_failures = 0;
+        self.tool_failures = 0;
+        self.review_rejections = 0;
+        self.last_error_type = None;
+    }
+
+    /// Check if we should escalate for a specific error type
+    pub fn should_escalate(&self, error_type: ErrorType) -> bool {
+        match error_type {
+            ErrorType::Compilation | ErrorType::Other => {
+                self.compilation_failures >= self.max_compilation_retries
+            }
+            ErrorType::ToolFailure => self.tool_failures >= self.max_tool_retries,
+            ErrorType::ReviewRejection => self.review_rejections >= self.max_review_rejections,
+        }
+    }
+
+    /// Check if any error type has exceeded its limit
+    pub fn any_exceeded(&self) -> bool {
+        self.compilation_failures >= self.max_compilation_retries
+            || self.tool_failures >= self.max_tool_retries
+            || self.review_rejections >= self.max_review_rejections
+    }
+
+    /// Get the current failure count for an error type
+    pub fn failure_count(&self, error_type: ErrorType) -> usize {
+        match error_type {
+            ErrorType::Compilation | ErrorType::Other => self.compilation_failures,
+            ErrorType::ToolFailure => self.tool_failures,
+            ErrorType::ReviewRejection => self.review_rejections,
+        }
+    }
+
+    /// Get remaining attempts for an error type
+    pub fn remaining_attempts(&self, error_type: ErrorType) -> usize {
+        match error_type {
+            ErrorType::Compilation | ErrorType::Other => self
+                .max_compilation_retries
+                .saturating_sub(self.compilation_failures),
+            ErrorType::ToolFailure => self.max_tool_retries.saturating_sub(self.tool_failures),
+            ErrorType::ReviewRejection => self
+                .max_review_rejections
+                .saturating_sub(self.review_rejections),
+        }
+    }
+
+    /// Get a formatted summary
+    pub fn summary(&self) -> String {
+        format!(
+            "Retries: comp {}/{}, tool {}/{}, review {}/{}",
+            self.compilation_failures,
+            self.max_compilation_retries,
+            self.tool_failures,
+            self.max_tool_retries,
+            self.review_rejections,
+            self.max_review_rejections
+        )
+    }
+}
+
 /// Stability monitor for tracking Lyapunov Energy
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StabilityMonitor {
@@ -123,8 +258,10 @@ pub struct StabilityMonitor {
     pub stable: bool,
     /// Stability threshold (epsilon)
     pub stability_epsilon: f32,
-    /// Maximum retry attempts before escalation
+    /// Maximum retry attempts before escalation (legacy, use retry_policy)
     pub max_retries: usize,
+    /// Retry policy with PSP-4 compliant limits
+    pub retry_policy: RetryPolicy,
 }
 
 impl StabilityMonitor {
@@ -136,6 +273,7 @@ impl StabilityMonitor {
             stable: false,
             stability_epsilon: 0.1,
             max_retries: 3,
+            retry_policy: RetryPolicy::default(),
         }
     }
 
@@ -146,9 +284,28 @@ impl StabilityMonitor {
         self.stable = energy < self.stability_epsilon;
     }
 
+    /// Record a failure with error type
+    pub fn record_failure(&mut self, error_type: ErrorType) {
+        self.retry_policy.record_failure(error_type);
+    }
+
     /// Check if we should escalate (exceeded retries without stability)
     pub fn should_escalate(&self) -> bool {
-        self.attempt_count >= self.max_retries && !self.stable
+        // Legacy check or new policy check
+        (self.attempt_count >= self.max_retries && !self.stable) || self.retry_policy.any_exceeded()
+    }
+
+    /// Check if we should escalate for a specific error type
+    pub fn should_escalate_for(&self, error_type: ErrorType) -> bool {
+        self.retry_policy.should_escalate(error_type)
+    }
+
+    /// Get remaining attempts for current error type
+    pub fn remaining_attempts(&self) -> usize {
+        match self.retry_policy.last_error_type {
+            Some(et) => self.retry_policy.remaining_attempts(et),
+            None => self.max_retries.saturating_sub(self.attempt_count),
+        }
     }
 
     /// Get the current energy level (last recorded)
