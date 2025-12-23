@@ -323,3 +323,193 @@ impl EnergyComponents {
         contract.alpha() * self.v_syn + contract.beta() * self.v_str + contract.gamma() * self.v_log
     }
 }
+
+// =============================================================================
+// Task Plan Types - Structured output from Architect
+// =============================================================================
+
+/// Task type classification for planning
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskType {
+    /// Implementation code
+    Code,
+    /// Unit tests
+    UnitTest,
+    /// Integration/E2E tests
+    IntegrationTest,
+    /// Refactoring existing code
+    Refactor,
+    /// Documentation
+    Documentation,
+}
+
+impl Default for TaskType {
+    fn default() -> Self {
+        TaskType::Code
+    }
+}
+
+/// Structured task plan from Architect
+/// Output as JSON for reliable parsing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskPlan {
+    /// List of tasks to execute
+    pub tasks: Vec<PlannedTask>,
+}
+
+impl TaskPlan {
+    /// Create an empty plan
+    pub fn new() -> Self {
+        Self { tasks: Vec::new() }
+    }
+
+    /// Get the total number of tasks
+    pub fn len(&self) -> usize {
+        self.tasks.len()
+    }
+
+    /// Check if plan is empty
+    pub fn is_empty(&self) -> bool {
+        self.tasks.is_empty()
+    }
+
+    /// Get task by ID
+    pub fn get_task(&self, id: &str) -> Option<&PlannedTask> {
+        self.tasks.iter().find(|t| t.id == id)
+    }
+
+    /// Validate the plan structure
+    pub fn validate(&self) -> Result<(), String> {
+        if self.tasks.is_empty() {
+            return Err("Plan has no tasks".to_string());
+        }
+
+        // Check for duplicate IDs
+        let mut seen_ids = std::collections::HashSet::new();
+        for task in &self.tasks {
+            if !seen_ids.insert(&task.id) {
+                return Err(format!("Duplicate task ID: {}", task.id));
+            }
+            if task.goal.is_empty() {
+                return Err(format!("Task {} has empty goal", task.id));
+            }
+        }
+
+        // Check for invalid dependencies
+        for task in &self.tasks {
+            for dep in &task.dependencies {
+                if !seen_ids.contains(dep) {
+                    return Err(format!("Task {} has unknown dependency: {}", task.id, dep));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for TaskPlan {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A planned task from the Architect
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannedTask {
+    /// Unique task identifier (e.g., "task_1", "test_auth")
+    pub id: String,
+    /// Human-readable goal description
+    pub goal: String,
+    /// Files to read for context
+    #[serde(default)]
+    pub context_files: Vec<String>,
+    /// Files to create or modify
+    #[serde(default)]
+    pub output_files: Vec<String>,
+    /// Task IDs this depends on (must complete first)
+    #[serde(default)]
+    pub dependencies: Vec<String>,
+    /// Type of task
+    #[serde(default)]
+    pub task_type: TaskType,
+    /// Behavioral contract for this task
+    #[serde(default)]
+    pub contract: PlannedContract,
+}
+
+impl PlannedTask {
+    /// Create a simple task
+    pub fn new(id: impl Into<String>, goal: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            goal: goal.into(),
+            context_files: Vec::new(),
+            output_files: Vec::new(),
+            dependencies: Vec::new(),
+            task_type: TaskType::Code,
+            contract: PlannedContract::default(),
+        }
+    }
+
+    /// Convert to SRBNNode
+    pub fn to_srbn_node(&self, tier: ModelTier) -> SRBNNode {
+        let mut node = SRBNNode::new(self.id.clone(), self.goal.clone(), tier);
+        node.context_files = self.context_files.iter().map(PathBuf::from).collect();
+        node.output_targets = self.output_files.iter().map(PathBuf::from).collect();
+        node.contract = self.contract.to_behavioral_contract();
+        node
+    }
+}
+
+/// Contract specified in the plan
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PlannedContract {
+    /// Required public API signature
+    #[serde(default)]
+    pub interface_signature: Option<String>,
+    /// Semantic constraints
+    #[serde(default)]
+    pub invariants: Vec<String>,
+    /// Patterns to avoid
+    #[serde(default)]
+    pub forbidden_patterns: Vec<String>,
+    /// Test cases with criticality
+    #[serde(default)]
+    pub tests: Vec<PlannedTest>,
+}
+
+impl PlannedContract {
+    /// Convert to BehavioralContract
+    pub fn to_behavioral_contract(&self) -> BehavioralContract {
+        BehavioralContract {
+            interface_signature: self.interface_signature.clone().unwrap_or_default(),
+            invariants: self.invariants.clone(),
+            forbidden_patterns: self.forbidden_patterns.clone(),
+            weighted_tests: self
+                .tests
+                .iter()
+                .map(|t| WeightedTest {
+                    test_name: t.name.clone(),
+                    criticality: t.criticality,
+                })
+                .collect(),
+            energy_weights: (1.0, 0.5, 2.0),
+        }
+    }
+}
+
+/// A test case in the plan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannedTest {
+    /// Test name or pattern
+    pub name: String,
+    /// Criticality level
+    #[serde(default = "default_criticality")]
+    pub criticality: Criticality,
+}
+
+fn default_criticality() -> Criticality {
+    Criticality::High
+}
