@@ -22,13 +22,16 @@ pub enum ModelTier {
 
 impl ModelTier {
     /// Get the recommended model for this tier
+    /// Default: gemini-flash-lite-latest for all tiers (can be overridden via CLI)
     pub fn default_model(&self) -> &'static str {
-        match self {
-            ModelTier::Architect => "claude-3-5-sonnet-20241022",
-            ModelTier::Actuator => "gpt-4o",
-            ModelTier::Verifier => "gpt-4o-mini",
-            ModelTier::Speculator => "gemini-2.0-flash",
-        }
+        // Use gemini-flash-lite-latest as the default for all tiers
+        // This can be overridden per-tier via CLI: --architect-model, --actuator-model, etc.
+        Self::default_model_name()
+    }
+
+    /// Get the default model name (static, for use when no instance is available)
+    pub fn default_model_name() -> &'static str {
+        "gemini-flash-lite-latest"
     }
 }
 
@@ -259,6 +262,9 @@ pub struct AgentContext {
     pub session_id: String,
     /// Auto-approve mode
     pub auto_approve: bool,
+    /// Last diagnostics from LSP (for correction prompts)
+    #[serde(skip)]
+    pub last_diagnostics: Vec<lsp_types::Diagnostic>,
 }
 
 impl Default for AgentContext {
@@ -270,6 +276,7 @@ impl Default for AgentContext {
             complexity_k: 5, // Default from PSP
             session_id: uuid::Uuid::new_v4().to_string(),
             auto_approve: false,
+            last_diagnostics: Vec::new(),
         }
     }
 }
