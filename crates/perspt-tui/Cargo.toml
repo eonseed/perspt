@@ -5,9 +5,14 @@ edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
 description = "Ratatui-based TUI for Perspt"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-tui"
+keywords = ["tui", "terminal", "ui", "ratatui"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-perspt-core = { path = "../perspt-core" }
+perspt-core = { version = "0.1.0", path = "../perspt-core" }
 
 # UI components
 ratatui = "0.29"

@@ -5,6 +5,11 @@ edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
 description = "Sandboxed command execution for Perspt"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-sandbox"
+keywords = ["sandbox", "command", "execution", "security"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Shell parsing for command string
