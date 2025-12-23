@@ -74,27 +74,23 @@ providers directly in your terminal using a modern, unified interface powered by
    :header-rows: 0
 
    * - 🤖
-     - **Zero-Config Startup:** Automatic provider detection from environment variables - just set your API key and run ``perspt``!
+     - **SRBN Agent Mode:** NEW! Autonomous coding assistant using Stabilized Recursive Barrier Networks - decomposes tasks, generates code, and verifies via LSP
+   * - 🔬
+     - **LSP Integration:** Real-time type checking via ``ty`` for Python with automatic error correction
+   * - 🧪
+     - **Test Runner:** Integrated pytest execution with V_log (Logic Energy) calculation from weighted tests
    * - 🎨
      - **Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui
    * - 🖥️
-     - **Simple CLI Mode:** NEW! Minimal command-line mode for direct Q&A, scripting, and accessibility - perfect for Unix workflows
+     - **Simple CLI Mode:** Minimal command-line mode for direct Q&A, scripting, and accessibility
    * - ⚡
      - **Streaming Responses:** Real-time streaming of LLM responses for an interactive experience
    * - 🔀
      - **Multiple Provider Support:** Seamlessly switch between OpenAI, Anthropic, Google, Groq, Cohere, XAI, DeepSeek, and Ollama
-   * - 🚀
-     - **Dynamic Model Discovery:** Automatically discovers available models without manual updates
-   * - ⚙️
-     - **Configurable:** Flexible configuration via JSON files or command-line arguments
-   * - 🔄
-     - **Input Queuing:** Type new questions while AI is responding - inputs are queued and processed sequentially
-   * - 💾
-     - **Save Conversations:** Export chat sessions to text files with ``/save`` command for archival and reference
-   * - 📜
-     - **Markdown Rendering:** Beautiful markdown support directly in the terminal
-   * - 🛡️
-     - **Graceful Error Handling:** Robust handling of network issues, API errors, and edge cases
+   * - 📊
+     - **Token Budget Tracking:** Configurable limits for tokens and cost control with usage monitoring
+   * - 🔧
+     - **Retry Policy:** PSP-4 compliant retry limits (3 for compilation, 5 for tools) with automatic escalation
 
 🎯 Supported AI Providers
 --------------------------

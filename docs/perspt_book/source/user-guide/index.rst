@@ -10,6 +10,7 @@ This comprehensive user guide covers everything you need to know to use Perspt e
    :caption: User Guide Contents
 
    basic-usage
+   agent-mode
    advanced-features
    providers
    troubleshooting
@@ -17,16 +18,17 @@ This comprehensive user guide covers everything you need to know to use Perspt e
 Overview
 --------
 
-Perspt is a high-performance terminal-based chat application built with Rust that provides a unified interface for interacting with multiple Large Language Model (LLM) providers. Using the modern `genai` crate (v0.3.5), Perspt offers seamless access to the latest AI models with enhanced streaming capabilities, robust error handling, and intuitive CLI functionality.
+Perspt is a high-performance terminal-based application built with Rust that provides a unified interface for interacting with multiple Large Language Model (LLM) providers. Using the modern `genai` crate (v0.3.5), Perspt offers seamless access to the latest AI models with enhanced streaming capabilities, robust error handling, and intuitive CLI functionality.
 
 **Key Features:**
 
+- **SRBN Agent Mode**: Autonomous coding assistant using Stabilized Recursive Barrier Networks (v0.5.0)
 - **Multi-Provider Support**: OpenAI, Anthropic, Google, Groq, Cohere, XAI, and Ollama
+- **LSP Integration**: Real-time type checking via ty for Python
+- **Test Runner**: Integrated pytest execution with V_log energy calculation
 - **Latest Models**: Support for reasoning models (o1-mini, o1-preview, o3-mini), GPT-4.1, Claude 3.5, Gemini 2.5 Pro
-- **Real-time Streaming**: Enhanced streaming with proper reasoning chunk handling
-- **Robust CLI**: Working command-line arguments with model validation
+- **Token Budget**: Configurable limits for tokens and cost control
 - **Beautiful UI**: Responsive terminal interface with markdown rendering
-- **Conversation Saving**: Export chat sessions to text files with ``/save`` command
 
 .. grid:: 2
    :gutter: 3
@@ -36,6 +38,12 @@ Perspt is a high-performance terminal-based chat application built with Rust tha
       :link-type: doc
 
       Learn the fundamentals of chatting with AI models, keyboard shortcuts, and everyday usage patterns.
+
+   .. grid-item-card:: 🤖 Agent Mode
+      :link: agent-mode
+      :link-type: doc
+
+      Autonomous coding assistant using SRBN - decomposes tasks, generates code, and verifies via LSP.
 
    .. grid-item-card:: ⚡ Advanced Features
       :link: advanced-features
