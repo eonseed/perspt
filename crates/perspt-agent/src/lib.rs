@@ -21,5 +21,5 @@ pub use tools::{AgentTools, ToolCall, ToolDefinition, ToolResult};
 pub use types::{
     AgentContext, AgentMessage, BehavioralContract, Criticality, EnergyComponents, ModelTier,
     NodeState, PlannedContract, PlannedTask, PlannedTest, SRBNNode, StabilityMonitor, TaskPlan,
-    TaskType, WeightedTest,
+    TaskType, TokenBudget, WeightedTest,
 };

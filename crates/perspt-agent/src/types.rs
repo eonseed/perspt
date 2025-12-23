@@ -247,6 +247,122 @@ impl NodeState {
     }
 }
 
+/// Token budget tracking for cost control
+///
+/// Tracks input/output token usage and enforces limits per PSP-4 --max-cost.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenBudget {
+    /// Maximum total tokens allowed (input + output)
+    pub max_tokens: usize,
+    /// Maximum cost in dollars (optional)
+    pub max_cost_usd: Option<f64>,
+    /// Input tokens used
+    pub input_tokens_used: usize,
+    /// Output tokens used
+    pub output_tokens_used: usize,
+    /// Estimated cost so far (in USD)
+    pub cost_usd: f64,
+    /// Cost per 1K input tokens (varies by model)
+    pub input_cost_per_1k: f64,
+    /// Cost per 1K output tokens (varies by model)
+    pub output_cost_per_1k: f64,
+}
+
+impl Default for TokenBudget {
+    fn default() -> Self {
+        Self {
+            max_tokens: 100_000, // 100K default (PSP-4 mentions 100k+ context)
+            max_cost_usd: None,  // No cost limit by default
+            input_tokens_used: 0,
+            output_tokens_used: 0,
+            cost_usd: 0.0,
+            // Default to Gemini Flash pricing (roughly)
+            input_cost_per_1k: 0.075 / 1000.0, // $0.075 per 1M = $0.000075 per 1K
+            output_cost_per_1k: 0.30 / 1000.0, // $0.30 per 1M = $0.0003 per 1K
+        }
+    }
+}
+
+impl TokenBudget {
+    /// Create a new token budget with limits
+    pub fn new(max_tokens: usize, max_cost_usd: Option<f64>) -> Self {
+        Self {
+            max_tokens,
+            max_cost_usd,
+            ..Default::default()
+        }
+    }
+
+    /// Record token usage from an LLM call
+    pub fn record_usage(&mut self, input_tokens: usize, output_tokens: usize) {
+        self.input_tokens_used += input_tokens;
+        self.output_tokens_used += output_tokens;
+
+        // Update cost estimate
+        let input_cost = (input_tokens as f64 / 1000.0) * self.input_cost_per_1k;
+        let output_cost = (output_tokens as f64 / 1000.0) * self.output_cost_per_1k;
+        self.cost_usd += input_cost + output_cost;
+    }
+
+    /// Get total tokens used
+    pub fn total_tokens_used(&self) -> usize {
+        self.input_tokens_used + self.output_tokens_used
+    }
+
+    /// Get remaining token budget
+    pub fn remaining_tokens(&self) -> usize {
+        self.max_tokens.saturating_sub(self.total_tokens_used())
+    }
+
+    /// Check if budget is exhausted
+    pub fn is_exhausted(&self) -> bool {
+        self.total_tokens_used() >= self.max_tokens
+    }
+
+    /// Check if cost limit exceeded
+    pub fn cost_exceeded(&self) -> bool {
+        if let Some(max_cost) = self.max_cost_usd {
+            self.cost_usd >= max_cost
+        } else {
+            false
+        }
+    }
+
+    /// Check if we should stop due to budget
+    pub fn should_stop(&self) -> bool {
+        self.is_exhausted() || self.cost_exceeded()
+    }
+
+    /// Get budget usage percentage
+    pub fn usage_percent(&self) -> f32 {
+        if self.max_tokens == 0 {
+            0.0
+        } else {
+            (self.total_tokens_used() as f32 / self.max_tokens as f32) * 100.0
+        }
+    }
+
+    /// Set model-specific pricing
+    pub fn set_pricing(&mut self, input_per_1k: f64, output_per_1k: f64) {
+        self.input_cost_per_1k = input_per_1k;
+        self.output_cost_per_1k = output_per_1k;
+    }
+
+    /// Get formatted summary
+    pub fn summary(&self) -> String {
+        format!(
+            "Tokens: {}/{} ({:.1}%), Cost: ${:.4}{}",
+            self.total_tokens_used(),
+            self.max_tokens,
+            self.usage_percent(),
+            self.cost_usd,
+            self.max_cost_usd
+                .map(|m| format!(" / ${:.2}", m))
+                .unwrap_or_default()
+        )
+    }
+}
+
 /// Agent context containing workspace state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentContext {
@@ -265,6 +381,8 @@ pub struct AgentContext {
     /// Last diagnostics from LSP (for correction prompts)
     #[serde(skip)]
     pub last_diagnostics: Vec<lsp_types::Diagnostic>,
+    /// Token budget for cost control
+    pub token_budget: TokenBudget,
 }
 
 impl Default for AgentContext {
@@ -277,6 +395,7 @@ impl Default for AgentContext {
             session_id: uuid::Uuid::new_v4().to_string(),
             auto_approve: false,
             last_diagnostics: Vec::new(),
+            token_budget: TokenBudget::default(),
         }
     }
 }
