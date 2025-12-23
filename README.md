@@ -22,28 +22,20 @@
 
 ## ✨ Features
 
+-   **🤖 SRBN Agent Mode:** NEW! Autonomous coding assistant using Stabilized Recursive Barrier Networks - decomposes tasks, generates code, verifies via LSP, and self-corrects errors.
 -   **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui with smooth scrolling and custom markdown rendering.
--   **🖥️ Simple CLI Mode:** New minimal command-line mode for direct Q&A without TUI overlay - perfect for scripting, accessibility, or Unix-style workflows.
+-   **🖥️ Simple CLI Mode:** Minimal command-line mode for direct Q&A without TUI overlay - perfect for scripting, accessibility, or Unix-style workflows.
 -   **⚡ Advanced Streaming:** Real-time streaming of LLM responses with support for reasoning chunks and proper event handling.
--   **🤖 Automatic Provider Detection:** Zero-config startup that automatically detects and uses available providers based on environment variables (set `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc. and just run `perspt`!).
--   **🔀 Latest Provider Support**: Built on the modern `genai` crate with support for cutting-edge models:
-    -   **OpenAI** (GPT-4, GPT-4-turbo, GPT-3.5-turbo, GPT-4o, GPT-4o-mini, **GPT-4.1**, **o1-mini**, **o1-preview**, **o3-mini**, and more)
-    -   **Anthropic** (Claude-3 Opus, Sonnet, Haiku, Claude-3.5 Sonnet, Claude-3.5 Haiku, and more)
-    -   **Google Gemini** (Gemini-1.5-pro, Gemini-1.5-flash, **Gemini-2.0-flash**, **Gemini-2.5-Pro**, and more)
-    -   **Groq** (Llama models with ultra-fast inference, Mixtral, Gemma, and more)
-    -   **Cohere** (Command models, Command-R, Command-R+, and more)
-    -   **XAI** (Grok models and more)
-    -   **DeepSeek** (DeepSeek-chat, DeepSeek-reasoner, and more)
-    -   **Ollama** (Local models: Llama, Mistral, Code Llama, Vicuna, and custom models)
--   **🔧 Robust CLI Options**: Full command-line support for API keys, models, provider types, and the new simple CLI mode that actually work.
--   **🔄 Flexible Authentication**: API keys work via CLI arguments, environment variables, or configuration files.
--   **⚙️ Smart Configuration:** Intelligent configuration loading with fallbacks and validation.
--   **🔄 Input Queuing:** Type and submit new questions even while the AI is generating a previous response.
--   **💾 Conversation Export:** Save your chat conversations to text files using the `/save` command with timestamped filenames.
--   **💅 Enhanced UI Feedback:** Visual indicators for processing states and improved responsiveness.
--   **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering with proper streaming buffer management.
--   **🛡️ Graceful Error Handling:** Robust handling of network issues, API errors, edge cases with user-friendly error messages.
--   **📚 Extensive Documentation:** Comprehensive code documentation and user guides.
+-   **🔬 LSP Integration:** Built-in Language Server Protocol client using `ty` for Python - provides real-time type checking and error detection.
+-   **🧪 Test Runner:** Integrated pytest runner with V_log (Logic Energy) calculation from weighted test failures.
+-   **🤖 Automatic Provider Detection:** Zero-config startup that detects and uses available providers based on environment variables.
+-   **🔀 Latest Provider Support**: Built on the modern `genai` crate with support for cutting-edge models.
+-   **📊 Token Budget Tracking:** Tracks input/output tokens and cost estimation with configurable limits.
+-   **🔧 Retry Policy:** PSP-4 compliant retry limits (3 for compilation, 5 for tools) with automatic escalation.
+-   **💾 Conversation Export:** Save your chat conversations to text files using the `/save` command.
+-   **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering.
+-   **🛡️ Graceful Error Handling:** Robust handling of network issues, API errors, and edge cases.
+
 
 ## 🚀 Getting Started
 
@@ -586,7 +578,76 @@ source ~/.bashrc
 perspt --provider-type openai --model gpt-4o-mini
 ```
 
-## �💬 Chat Interface & Commands
+## 🤖 Agent Mode - Autonomous Coding Assistant (v0.5.0)
+
+**Agent Mode** uses the **Stabilized Recursive Barrier Network (SRBN)** to autonomously decompose coding tasks, generate code, and verify correctness via LSP diagnostics.
+
+### Quick Start
+
+```bash
+# Basic agent mode - create a Python project
+perspt agent "Create a Python calculator with add, subtract, multiply, divide"
+
+# With explicit workspace directory
+perspt agent -w /path/to/project "Add unit tests for the existing API"
+
+# Auto-approve all actions (no prompts)
+perspt agent -y "Refactor the parser for better error handling"
+```
+
+### How SRBN Works
+
+The SRBN control loop executes these steps for each task:
+
+1. **Sheafification** - Architect decomposes task into JSON TaskPlan
+2. **Speculation** - Actuator generates code for each sub-task
+3. **Verification** - LSP diagnostics compute Lyapunov Energy V(x)
+4. **Convergence** - If V(x) > ε, retry with error feedback
+5. **Commit** - When stable, record changes in Merkle Ledger
+
+**Lyapunov Energy**: `V(x) = α·V_syn + β·V_str + γ·V_log`
+
+| Component | Source | Default Weight |
+|-----------|--------|----------------|
+| V_syn | LSP diagnostics (errors, warnings) | α = 1.0 |
+| V_str | Structural analysis | β = 0.5 |
+| V_log | Test failures (weighted by criticality) | γ = 2.0 |
+
+### Agent Mode Options
+
+```bash
+perspt agent [OPTIONS] <TASK>
+
+Options:
+  -w, --workspace <DIR>      Working directory (default: current)
+  -y, --yes                  Auto-approve all actions
+  -k, --complexity <K>       Max tasks before approval (default: 5)
+  --architect-model <M>      Model for planning
+  --actuator-model <M>       Model for code generation
+  --max-tokens <N>           Token budget limit (default: 100000)
+  --max-cost <USD>           Maximum cost in dollars
+```
+
+### Examples
+
+```bash
+# Python project with tests
+perspt agent -w ./myproject "Create a REST API with Flask and unit tests"
+
+# Specific model selection
+perspt agent --architect-model gpt-4o --actuator-model gpt-4o-mini \
+  "Implement a binary search tree"
+```
+
+### Retry Policy (PSP-4)
+
+| Error Type | Max Retries | Action on Exhaustion |
+|------------|-------------|---------------------|
+| Compilation errors | 3 | Escalate to user |
+| Tool failures | 5 | Escalate to user |
+| Review rejections | 3 | Escalate to user |
+
+## 💬 Chat Interface & Commands
 
 ### Built-in Commands
 
