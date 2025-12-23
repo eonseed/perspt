@@ -2,7 +2,7 @@
 //!
 //! Manages the Task DAG and orchestrates agent execution following the 7-step control loop.
 
-use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, VerifierAgent};
+use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
 use crate::lsp::LspClient;
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode};
@@ -35,11 +35,31 @@ pub struct SRBNOrchestrator {
     agents: Vec<Box<dyn Agent>>,
     /// Agent tools for file/command operations
     tools: AgentTools,
+    /// Last written file path (for LSP tracking)
+    last_written_file: Option<PathBuf>,
+    /// File version counter for LSP
+    file_version: i32,
+    /// LLM provider for correction calls
+    provider: std::sync::Arc<perspt_core::llm_provider::GenAIProvider>,
+    /// Actuator model name for corrections
+    actuator_model: String,
 }
 
 impl SRBNOrchestrator {
-    /// Create a new orchestrator
+    /// Create a new orchestrator with default models
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
+        Self::new_with_models(working_dir, auto_approve, None, None, None, None)
+    }
+
+    /// Create a new orchestrator with custom model configuration
+    pub fn new_with_models(
+        working_dir: PathBuf,
+        auto_approve: bool,
+        architect_model: Option<String>,
+        actuator_model: Option<String>,
+        verifier_model: Option<String>,
+        speculator_model: Option<String>,
+    ) -> Self {
         let mut context = AgentContext::default();
         context.working_dir = working_dir.clone();
         context.auto_approve = auto_approve;
@@ -56,6 +76,11 @@ impl SRBNOrchestrator {
         // Create agent tools for file/command operations
         let tools = AgentTools::new(working_dir.clone(), !auto_approve);
 
+        // Store the actuator model for correction calls (use default if not specified)
+        let correction_model = actuator_model
+            .clone()
+            .unwrap_or_else(|| ModelTier::Actuator.default_model().to_string());
+
         Self {
             graph: DiGraph::new(),
             node_indices: HashMap::new(),
@@ -63,11 +88,16 @@ impl SRBNOrchestrator {
             auto_approve,
             lsp_clients: HashMap::new(),
             agents: vec![
-                Box::new(ArchitectAgent::new(provider.clone(), None)),
-                Box::new(ActuatorAgent::new(provider.clone(), None)),
-                Box::new(VerifierAgent::new(provider, None)),
+                Box::new(ArchitectAgent::new(provider.clone(), architect_model)),
+                Box::new(ActuatorAgent::new(provider.clone(), actuator_model)),
+                Box::new(VerifierAgent::new(provider.clone(), verifier_model)),
+                Box::new(SpeculatorAgent::new(provider.clone(), speculator_model)),
             ],
             tools,
+            last_written_file: None,
+            file_version: 0,
+            provider,
+            actuator_model: correction_model,
         }
     }
 
@@ -192,6 +222,9 @@ impl SRBNOrchestrator {
         if let Some(code_info) = self.extract_code_from_response(content) {
             log::info!("Extracted code for file: {}", code_info.0);
 
+            // Build full path
+            let full_path = self.context.working_dir.join(&code_info.0);
+
             // Create a tool call to write the file
             let mut args = HashMap::new();
             args.insert("path".to_string(), code_info.0.clone());
@@ -206,6 +239,21 @@ impl SRBNOrchestrator {
             if result.success {
                 log::info!("✓ Wrote file: {}", code_info.0);
                 println!("   📝 Wrote file: {}", code_info.0);
+
+                // Track the written file for LSP verification
+                self.last_written_file = Some(full_path.clone());
+                self.file_version += 1;
+
+                // Notify LSP of file change (if LSP is running)
+                if let Some(client) = self.lsp_clients.get_mut("python") {
+                    if self.file_version == 1 {
+                        let _ = client.did_open(&full_path, &code_info.1).await;
+                    } else {
+                        let _ = client
+                            .did_change(&full_path, &code_info.1, self.file_version)
+                            .await;
+                    }
+                }
             } else {
                 log::warn!("Failed to write file: {:?}", result.error);
             }
@@ -300,24 +348,45 @@ impl SRBNOrchestrator {
         let mut energy = EnergyComponents::default();
 
         // V_syn: From LSP diagnostics
-        // In a real implementation, this would query the LSP client
-        energy.v_syn = 0.0;
+        if let Some(ref path) = self.last_written_file {
+            // Try to get diagnostics from LSP
+            if let Some(client) = self.lsp_clients.get("python") {
+                // Small delay to let LSP analyze the file
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
-        // V_str: From structural contract verification
-        energy.v_str = 0.0;
+                let path_str = path.to_string_lossy().to_string();
+                let diagnostics = client.get_diagnostics(&path_str).await;
 
-        // V_log: From test execution
-        energy.v_log = 0.0;
+                if !diagnostics.is_empty() {
+                    energy.v_syn = LspClient::calculate_syntactic_energy(&diagnostics);
+                    log::info!(
+                        "LSP found {} diagnostics, V_syn={:.2}",
+                        diagnostics.len(),
+                        energy.v_syn
+                    );
+                    println!("   🔍 LSP found {} diagnostics:", diagnostics.len());
+                    for d in &diagnostics {
+                        println!("      - [{:?}] {}", d.severity, d.message);
+                    }
+
+                    // Store diagnostics for correction prompt
+                    self.context.last_diagnostics = diagnostics;
+                } else {
+                    log::info!("LSP reports no errors (diagnostics vector is empty)");
+                }
+            } else {
+                log::debug!("No LSP client available for Python");
+            }
+        }
 
         let node = &self.graph[idx];
-        let total = energy.total(&node.contract);
         log::info!(
-            "Energy for {}: V_syn={}, V_str={}, V_log={}, Total={}",
+            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, Total={:.2}",
             node.node_id,
             energy.v_syn,
             energy.v_str,
             energy.v_log,
-            total
+            energy.total(&node.contract)
         );
 
         Ok(energy)
@@ -339,31 +408,237 @@ impl SRBNOrchestrator {
         let node = &mut self.graph[idx];
         node.monitor.record_energy(total);
         let node_id = node.node_id.clone();
+        let goal = node.goal.clone();
+        let epsilon = node.monitor.stability_epsilon;
         let attempt_count = node.monitor.attempt_count;
         let stable = node.monitor.stable;
         let should_escalate = node.monitor.should_escalate();
 
         if stable {
-            log::info!("Node {} is stable (V(x) < ε)", node_id);
+            log::info!(
+                "Node {} is stable (V(x)={:.2} < ε={:.2})",
+                node_id,
+                total,
+                epsilon
+            );
+            println!("   ✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon);
             return Ok(true);
         }
 
         if should_escalate {
             log::warn!(
-                "Node {} failed to converge after {} attempts",
+                "Node {} failed to converge after {} attempts (V(x)={:.2})",
                 node_id,
+                attempt_count,
+                total
+            );
+            println!(
+                "   ⚠️ Escalating: failed to converge after {} attempts",
                 attempt_count
             );
             return Ok(false);
         }
 
-        // Retry with restorative feedback
+        // === CORRECTION LOOP ===
         self.graph[idx].state = NodeState::Retry;
-        log::info!("Retrying node {} (attempt {})", node_id, attempt_count);
+        log::info!(
+            "V(x)={:.2} > ε={:.2}, regenerating with feedback (attempt {})",
+            total,
+            epsilon,
+            attempt_count
+        );
+        println!(
+            "   🔄 V(x)={:.2} > ε={:.2}, sending errors to LLM (attempt {})",
+            total, epsilon, attempt_count
+        );
 
-        // In a real implementation, we would loop back to speculation
-        // For now, assume success
-        Ok(true)
+        // Build correction prompt with diagnostics
+        let correction_prompt = self.build_correction_prompt(&node_id, &goal, &energy)?;
+
+        log::info!(
+            "--- CORRECTION PROMPT ---\n{}\n-------------------------",
+            correction_prompt
+        );
+        println!(
+            "--- CORRECTION PROMPT ---\n{}\n-------------------------",
+            correction_prompt
+        );
+
+        // Call LLM for corrected code
+        let corrected = self.call_llm_for_correction(&correction_prompt).await?;
+
+        // Extract and apply diff
+        if let Some((filename, new_code)) = self.extract_code_from_response(&corrected) {
+            let full_path = self.context.working_dir.join(&filename);
+
+            // Write corrected file
+            let mut args = HashMap::new();
+            args.insert("path".to_string(), filename.clone());
+            args.insert("content".to_string(), new_code.clone());
+
+            let call = ToolCall {
+                name: "apply_patch".to_string(),
+                arguments: args,
+            };
+
+            let result = self.tools.execute(&call).await;
+            if result.success {
+                log::info!("✓ Applied correction to: {}", filename);
+                println!("   📝 Applied correction to: {}", filename);
+
+                // Update tracking
+                self.last_written_file = Some(full_path.clone());
+                self.file_version += 1;
+
+                // Notify LSP of file change
+                if let Some(client) = self.lsp_clients.get_mut("python") {
+                    let _ = client
+                        .did_change(&full_path, &new_code, self.file_version)
+                        .await;
+                }
+            }
+        }
+
+        // Re-verify (recursive correction loop)
+        let new_energy = self.step_verify(idx).await?;
+        Box::pin(self.step_converge(idx, new_energy)).await
+    }
+
+    /// Build a correction prompt with diagnostic details
+    fn build_correction_prompt(
+        &self,
+        node_id: &str,
+        goal: &str,
+        energy: &EnergyComponents,
+    ) -> Result<String> {
+        let diagnostics = &self.context.last_diagnostics;
+
+        // Read current code
+        let current_code = if let Some(ref path) = self.last_written_file {
+            std::fs::read_to_string(path).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let file_path = self
+            .last_written_file
+            .as_ref()
+            .map(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .unwrap_or_else(|| "main.py".to_string());
+
+        let mut prompt = format!(
+            r#"## Code Correction Required
+
+The code you generated has {} error(s) detected by the Python type checker.
+Your task is to fix ALL errors and return the complete corrected file.
+
+### Original Goal
+{}
+
+### Current Code (with errors)
+File: {}
+```python
+{}
+```
+
+### Detected Errors (V_syn = {:.2})
+"#,
+            diagnostics.len(),
+            goal,
+            file_path,
+            current_code,
+            energy.v_syn
+        );
+
+        // Add each diagnostic with specific fix direction
+        for (i, diag) in diagnostics.iter().enumerate() {
+            let fix_direction = self.get_fix_direction(diag);
+            prompt.push_str(&format!(
+                r#"
+#### Error {}
+- **Location**: Line {}, Column {}
+- **Severity**: {}
+- **Message**: {}
+- **How to fix**: {}
+"#,
+                i + 1,
+                diag.range.start.line + 1,
+                diag.range.start.character + 1,
+                severity_to_str(diag.severity),
+                diag.message,
+                fix_direction
+            ));
+        }
+
+        prompt.push_str(
+            r#"
+### Fix Requirements
+1. Fix ALL errors listed above - do not leave any unfixed
+2. Maintain the original functionality and goal
+3. Add proper type annotations if missing
+4. Import any missing modules
+5. Return the COMPLETE corrected file, not just snippets
+
+### Output Format
+Provide the complete corrected file:
+
+File: [same filename]
+```python
+[complete corrected code]
+```
+"#,
+        );
+
+        Ok(prompt)
+    }
+
+    /// Map diagnostic message patterns to specific fix directions
+    fn get_fix_direction(&self, diag: &lsp_types::Diagnostic) -> String {
+        let msg = diag.message.to_lowercase();
+
+        if msg.contains("undefined") || msg.contains("unresolved") || msg.contains("not defined") {
+            "Define the missing variable/function, or import it from the correct module".into()
+        } else if msg.contains("type") && (msg.contains("expected") || msg.contains("incompatible"))
+        {
+            "Change the value or add a type conversion to match the expected type".into()
+        } else if msg.contains("import") || msg.contains("no module named") {
+            "Add the correct import statement at the top of the file".into()
+        } else if msg.contains("argument") && (msg.contains("missing") || msg.contains("expected"))
+        {
+            "Provide all required arguments to the function call".into()
+        } else if msg.contains("return") && msg.contains("type") {
+            "Ensure the return statement returns a value of the declared return type".into()
+        } else if msg.contains("attribute") {
+            "Check if the object has this attribute, or fix the object type".into()
+        } else if msg.contains("syntax") {
+            "Fix the syntax error - check for missing colons, parentheses, or indentation".into()
+        } else if msg.contains("indentation") {
+            "Fix the indentation to match Python's indentation rules (4 spaces per level)".into()
+        } else if msg.contains("parameter") {
+            "Check the function signature and update parameter types/names".into()
+        } else {
+            format!("Review and fix: {}", diag.message)
+        }
+    }
+
+    /// Call LLM for code correction (uses stored provider with exponential backoff retry)
+    async fn call_llm_for_correction(&self, prompt: &str) -> Result<String> {
+        log::debug!(
+            "Sending correction request to LLM model: {}",
+            self.actuator_model
+        );
+        let response = self
+            .provider
+            .generate_response_simple(&self.actuator_model, prompt)
+            .await?;
+        log::debug!("Received correction response with {} chars", response.len());
+
+        Ok(response)
     }
 
     /// Step 6: Sheaf Validation
@@ -405,6 +680,37 @@ impl SRBNOrchestrator {
     /// Get node count
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
+    }
+
+    /// Start Python LSP (ty) for type checking
+    pub async fn start_python_lsp(&mut self) -> Result<()> {
+        log::info!("Starting ty language server for Python");
+
+        let mut client = LspClient::new("ty");
+        match client.start(&self.context.working_dir).await {
+            Ok(()) => {
+                log::info!("ty language server started successfully");
+                self.lsp_clients.insert("python".to_string(), client);
+            }
+            Err(e) => {
+                log::warn!("Failed to start ty: {} (continuing without LSP)", e);
+                // Continue without LSP - it's optional
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Convert diagnostic severity to string
+fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static str {
+    match severity {
+        Some(lsp_types::DiagnosticSeverity::ERROR) => "ERROR",
+        Some(lsp_types::DiagnosticSeverity::WARNING) => "WARNING",
+        Some(lsp_types::DiagnosticSeverity::INFORMATION) => "INFO",
+        Some(lsp_types::DiagnosticSeverity::HINT) => "HINT",
+        Some(_) => "OTHER",
+        None => "UNKNOWN",
     }
 }
 

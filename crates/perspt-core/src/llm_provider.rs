@@ -117,25 +117,91 @@ impl GenAIProvider {
     }
 
     /// Generates a simple text response without streaming.
+    /// Includes exponential backoff retry for rate limits and transient errors.
     pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<String> {
+        self.generate_response_with_retry(model, prompt, 3).await
+    }
+
+    /// Generates a response with configurable retry count and exponential backoff.
+    pub async fn generate_response_with_retry(
+        &self,
+        model: &str,
+        prompt: &str,
+        max_retries: usize,
+    ) -> Result<String> {
         self.increment_request().await;
 
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
 
-        log::debug!("Sending chat request to model: {model} with prompt: {prompt}");
+        log::debug!(
+            "Sending chat request to model: {model} with prompt length: {} chars",
+            prompt.len()
+        );
 
-        let chat_res = self
-            .client
-            .exec_chat(model, chat_req, None)
-            .await
-            .context(format!("Failed to execute chat request for model: {model}"))?;
+        let mut last_error: Option<anyhow::Error> = None;
+        let mut retry_count = 0;
 
-        let content = chat_res
-            .first_text()
-            .context("No text content in response")?;
+        while retry_count <= max_retries {
+            if retry_count > 0 {
+                // Exponential backoff: 1s, 2s, 4s, 8s, ... (capped at 16s)
+                let delay_secs = std::cmp::min(1u64 << (retry_count - 1), 16);
+                log::warn!(
+                    "Retry {}/{} for model {} after {}s delay (previous error: {:?})",
+                    retry_count,
+                    max_retries,
+                    model,
+                    delay_secs,
+                    last_error.as_ref().map(|e| e.to_string())
+                );
+                println!(
+                    "   ⏳ Rate limited, retrying in {}s (attempt {}/{})",
+                    delay_secs, retry_count, max_retries
+                );
+                tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
+            }
 
-        log::debug!("Received response with {} characters", content.len());
-        Ok(content.to_string())
+            match self.client.exec_chat(model, chat_req.clone(), None).await {
+                Ok(chat_res) => {
+                    let content = chat_res
+                        .first_text()
+                        .context("No text content in response")?;
+                    log::debug!("Received response with {} characters", content.len());
+                    return Ok(content.to_string());
+                }
+                Err(e) => {
+                    let err_str = e.to_string();
+
+                    // Check if it's a retryable error (rate limit, server error, network)
+                    let is_retryable = err_str.contains("429")
+                        || err_str.contains("rate limit")
+                        || err_str.contains("Rate limit")
+                        || err_str.contains("RESOURCE_EXHAUSTED")
+                        || err_str.contains("500")
+                        || err_str.contains("502")
+                        || err_str.contains("503")
+                        || err_str.contains("504")
+                        || err_str.contains("timeout")
+                        || err_str.contains("connection");
+
+                    if is_retryable && retry_count < max_retries {
+                        log::warn!("Retryable error for model {}: {}", model, err_str);
+                        last_error = Some(anyhow::anyhow!("{}", err_str));
+                        retry_count += 1;
+                        continue;
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "Failed to execute chat request for model {}: {}",
+                            model,
+                            err_str
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Should not reach here, but handle gracefully
+        Err(last_error
+            .unwrap_or_else(|| anyhow::anyhow!("Unknown error after {} retries", max_retries)))
     }
 
     /// Generates a streaming response and sends chunks via mpsc channel.

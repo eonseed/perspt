@@ -61,6 +61,26 @@ enum Commands {
         #[arg(short, long, default_value = "balanced")]
         mode: String,
 
+        /// Model to use for ALL agent tiers (overrides per-tier settings)
+        #[arg(long)]
+        model: Option<String>,
+
+        /// Model for Architect tier (deep reasoning/planning)
+        #[arg(long)]
+        architect_model: Option<String>,
+
+        /// Model for Actuator tier (code generation)
+        #[arg(long)]
+        actuator_model: Option<String>,
+
+        /// Model for Verifier tier (stability checking)
+        #[arg(long)]
+        verifier_model: Option<String>,
+
+        /// Model for Speculator tier (fast lookahead/exploration)
+        #[arg(long)]
+        speculator_model: Option<String>,
+
         /// Energy weights α,β,γ (comma-separated, e.g., "1.0,0.5,2.0")
         #[arg(long, default_value = "1.0,0.5,2.0")]
         energy_weights: String,
@@ -153,11 +173,30 @@ async fn main() -> Result<()> {
             auto_approve_safe: _,
             complexity,
             mode,
+            model,
+            architect_model,
+            actuator_model,
+            verifier_model,
+            speculator_model,
             energy_weights: _,
             stability_threshold: _,
             max_cost: _,
             max_steps: _,
-        }) => commands::agent::run(task, workdir, yes, complexity, mode).await,
+        }) => {
+            commands::agent::run(
+                task,
+                workdir,
+                yes,
+                complexity,
+                mode,
+                model,
+                architect_model,
+                actuator_model,
+                verifier_model,
+                speculator_model,
+            )
+            .await
+        }
         Some(Commands::Init { memory, rules }) => commands::init::run(memory, rules).await,
         Some(Commands::Config { show, set, edit }) => commands::config::run(show, set, edit).await,
         Some(Commands::Ledger {
