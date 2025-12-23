@@ -2,7 +2,7 @@
 //!
 //! Persistent storage for session history, commits, and Merkle proofs.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::Path;
 
 /// Merkle commit record

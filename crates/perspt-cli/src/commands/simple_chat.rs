@@ -26,7 +26,7 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
 
     // Create provider
     let provider = Arc::new(
-        GenAIProvider::new_with_config(Some(&provider_type), None)
+        GenAIProvider::new_with_config(Some(provider_type), None)
             .context("Failed to create LLM provider. Ensure an API key is set.")?,
     );
 

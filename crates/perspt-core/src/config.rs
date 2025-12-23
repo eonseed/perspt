@@ -1,7 +1,6 @@
 //! Configuration types for Perspt
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize)]
