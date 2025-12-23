@@ -71,7 +71,7 @@ impl PolicyEngine {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().map_or(false, |ext| ext == "star") {
+            if path.extension().is_some_and(|ext| ext == "star") {
                 match self.load_policy_file(&path) {
                     Ok(module) => {
                         self.policies.push(module);
@@ -105,7 +105,7 @@ impl PolicyEngine {
                 .map_err(|e| anyhow::anyhow!("Eval error: {}", e))?;
         }
 
-        Ok(module.freeze()?)
+        module.freeze()
     }
 
     /// Create the globals for Starlark evaluation

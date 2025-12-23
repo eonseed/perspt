@@ -6,6 +6,51 @@ All notable changes to Perspt will be documented in this file.
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
+[0.5.0] - 2025-12-23
+--------------------
+
+Added
+~~~~~
+
+- **SRBN Agent Mode (PSP-000004)**: Stabilized Recursive Barrier Network for autonomous coding
+  
+  - Lyapunov energy-based stability verification
+  - Multi-tier model architecture (Architect, Actuator, Verifier, Speculator)
+  - LSP integration via ``ty`` server for real-time type checking
+  - pytest integration for test-driven verification
+  - Merkle ledger for change tracking and rollbacks
+
+- **6-Crate Workspace Architecture**: Complete restructure for modularity
+  
+  - ``perspt-cli``: CLI entry point with subcommands
+  - ``perspt-core``: LLM provider abstraction
+  - ``perspt-tui``: Terminal UI (Ratatui-based)
+  - ``perspt-agent``: SRBN orchestration engine
+  - ``perspt-policy``: Starlark-based policy engine
+  - ``perspt-sandbox``: Process isolation
+
+Changed
+~~~~~~~
+
+- **BREAKING**: ``--simple-cli`` flag replaced with ``simple-chat`` subcommand
+  
+  .. code-block:: bash
+
+     # Old (deprecated)
+     perspt --simple-cli
+
+     # New
+     perspt simple-chat
+
+- **Default model**: Now ``gemini-2.0-flash-lite`` with auto-detection
+- **Documentation**: Complete rewrite using 4C/ID methodology
+
+Removed
+~~~~~~~
+
+- Legacy single-binary ``src/`` implementation (now in ``crates/``)
+- Old configuration format (use ``perspt.toml`` or env vars)
+
 [0.4.6] - 2025-06-29
 --------------------
 

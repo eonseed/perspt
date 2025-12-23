@@ -109,7 +109,7 @@ impl SandboxedCommand for BasicSandbox {
         let duration = start.elapsed();
 
         // Check timeout (basic implementation - doesn't actually kill on timeout)
-        let timed_out = self.timeout.map_or(false, |t| duration > t);
+        let timed_out = self.timeout.is_some_and(|t| duration > t);
 
         Ok(CommandResult {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),

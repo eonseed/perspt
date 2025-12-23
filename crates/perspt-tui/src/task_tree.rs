@@ -5,7 +5,7 @@
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Span,
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
@@ -52,20 +52,12 @@ pub struct TaskNode {
 }
 
 /// Task tree viewer state
+#[derive(Default)]
 pub struct TaskTree {
     /// Flattened list of tasks for display
     pub tasks: Vec<TaskNode>,
     /// Selection state
     pub state: ListState,
-}
-
-impl Default for TaskTree {
-    fn default() -> Self {
-        Self {
-            tasks: Vec::new(),
-            state: ListState::default(),
-        }
-    }
 }
 
 impl TaskTree {

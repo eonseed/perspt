@@ -25,6 +25,7 @@ impl ExecutionMode {
 }
 
 /// Run the SRBN agent on a task
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     task: String,
     workdir: Option<PathBuf>,
