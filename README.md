@@ -13,7 +13,7 @@
 
 ## 🎯 Why Perspt?
 
-- **🚀 Latest Model Support**: Built on the modern `genai` crate with support for latest reasoning models like Google's Gemini 2.5 Pro and OpenAI's o1-mini
+- **🚀 Latest Model Support**: Built on the modern `genai` crate with support for state-of-the-art models like **OpenAI GPT-5.2**, **Google Gemini 3**, and **Anthropic Claude Opus 4.5**
 - **⚡ Real-time Streaming**: Ultra-responsive streaming responses with proper reasoning chunk handling
 - **🛡️ Rock-solid Reliability**: Comprehensive panic recovery and error handling that keeps your terminal safe
 - **🎨 Beautiful Interface**: Modern terminal UI with markdown rendering and smooth animations
@@ -70,9 +70,9 @@ export OPENAI_API_KEY="sk-your-openai-key"
 
 - **Rust:** Ensure you have the Rust toolchain installed. Get it from [rustup.rs](https://rustup.rs/).
 - **🔑 LLM API Key:** For cloud providers, you'll need an API key:
-  - **OpenAI**: [platform.openai.com](https://platform.openai.com) (supports o1-mini, o1-preview, o3-mini, GPT-4.1)
-  - **Anthropic**: [console.anthropic.com](https://console.anthropic.com)
-  - **Google Gemini**: [aistudio.google.com](https://aistudio.google.com) (supports Gemini 2.5 Pro)
+  - **OpenAI**: [platform.openai.com](https://platform.openai.com) (supports GPT-5.2, o3-mini, o1-preview)
+  - **Anthropic**: [console.anthropic.com](https://console.anthropic.com) (supports Claude Opus 4.5)
+  - **Google Gemini**: [aistudio.google.com](https://aistudio.google.com) (supports Gemini 3 Flash/Pro)
   - **Groq**: [console.groq.com](https://console.groq.com)
   - **Cohere**: [dashboard.cohere.com](https://dashboard.cohere.com)
   - **XAI**: [console.x.ai](https://console.x.ai)
@@ -107,14 +107,14 @@ export OPENAI_API_KEY="sk-your-key"
 ```json
 {
   "provider_type": "openai",
-  "default_model": "gpt-4o-mini",
+  "default_model": "gpt-5.2",
   "api_key": "sk-your-api-key"
 }
 ```
 
 **CLI Arguments:**
 ```bash
-perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
+perspt --provider-type anthropic --model claude-opus-4.5
 perspt --list-models  # List available models
 ```
 
@@ -125,7 +125,7 @@ perspt --list-models  # List available models
 | `-c, --config <FILE>` | Path to configuration file |
 | `-p, --provider-type <TYPE>` | Provider: openai, anthropic, gemini, groq, cohere, xai, deepseek, ollama |
 | `-k, --api-key <KEY>` | API key for the provider |
-| `-m, --model <MODEL>` | Model name (e.g., gpt-4o-mini, claude-3-5-sonnet-20241022) |
+| `-m, --model <MODEL>` | Model name (e.g., gpt-5.2, claude-opus-4.5) |
 | `--provider <PROFILE>` | Provider profile from config |
 | `-l, --list-models` | List available models |
 | `--simple-cli` | Use simple CLI mode (no TUI) |
