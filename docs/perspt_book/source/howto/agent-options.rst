@@ -1,9 +1,9 @@
-.. _agent-options:
+.. _howto-agent-options:
 
-Agent Mode Options
-==================
+Agent Options
+=============
 
-Complete reference for ``perspt agent`` command.
+Complete reference for SRBN agent configuration.
 
 Basic Usage
 -----------
@@ -12,84 +12,196 @@ Basic Usage
 
    perspt agent [OPTIONS] <TASK>
 
-Options
--------
+Required Arguments
+------------------
 
 .. list-table::
-   :widths: 30 15 55
+   :widths: 20 80
+
+   * - ``<TASK>``
+     - Task description or path to task file
+
+Model Selection
+---------------
+
+.. list-table::
    :header-rows: 1
+   :widths: 30 70
 
    * - Option
-     - Default
      - Description
-   * - ``-w, --workspace <DIR>``
-     - ``./``
-     - Working directory for generated files
-   * - ``-y, --yes``
-     - false
-     - Auto-approve all actions
-   * - ``-k, --complexity <K>``
-     - 5
-     - Max tasks before requiring approval
-   * - ``--architect-model <M>``
-     - (provider default)
-     - Model for task decomposition
-   * - ``--actuator-model <M>``
-     - (provider default)
+   * - ``--model <MODEL>``
+     - Override ALL model tiers
+   * - ``--architect-model <MODEL>``
+     - Model for task decomposition (deep reasoning)
+   * - ``--actuator-model <MODEL>``
      - Model for code generation
-   * - ``--max-tokens <N>``
-     - 100000
-     - Token budget limit
-   * - ``--max-cost <USD>``
-     - (none)
-     - Maximum cost in dollars
+   * - ``--verifier-model <MODEL>``
+     - Model for stability checking
+   * - ``--speculator-model <MODEL>``
+     - Model for fast lookahead
 
-Examples
---------
-
-**Basic code generation**:
-
-.. code-block:: bash
-
-   perspt agent "Create a Python calculator"
-
-**With workspace and auto-approve**:
-
-.. code-block:: bash
-
-   perspt agent -w ./myproject -y "Add unit tests"
-
-**Cost-controlled**:
-
-.. code-block:: bash
-
-   perspt agent --max-cost 0.50 "Write a simple script"
-
-**Different models for planning vs coding**:
+**Example**:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gpt-4o \
-     --actuator-model gpt-4o-mini \
-     "Implement binary search tree"
+     --architect-model gpt-5.2 \
+     --actuator-model claude-opus-4.5 \
+     "Build REST API"
 
-Token Budget
-------------
+Execution Control
+-----------------
 
-The token budget tracks total usage across all LLM calls:
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
 
-- Input tokens (prompts)
-- Output tokens (responses)
-- Estimated cost
+   * - Option
+     - Description
+   * - ``-w, --workdir <DIR>``
+     - Working directory (default: current)
+   * - ``-y, --yes``
+     - Auto-approve all actions
+   * - ``--auto-approve-safe``
+     - Auto-approve read-only operations only
+   * - ``-k, --complexity <K>``
+     - Max tasks before approval prompt (default: 5)
+   * - ``--mode <MODE>``
+     - Execution mode: ``cautious``, ``balanced``, ``yolo``
 
-When exhausted, agent stops and reports status.
+**Modes**:
 
-Retry Behavior
---------------
+.. list-table::
+   :widths: 20 80
 
-Per PSP-000004:
+   * - ``cautious``
+     - Prompt for every change
+   * - ``balanced``
+     - Prompt when complexity > K (default)
+   * - ``yolo``
+     - Auto-approve everything (⚠️ dangerous)
 
-- **Compilation errors**: 3 retries → escalate
-- **Tool failures**: 5 retries → escalate
-- **Review rejections**: 3 retries → escalate
+SRBN Parameters
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Option
+     - Description
+   * - ``--energy-weights <α,β,γ>``
+     - Lyapunov weights (default: ``1.0,0.5,2.0``)
+   * - ``--stability-threshold <ε>``
+     - Convergence threshold (default: ``0.1``)
+
+**Energy Formula**: V(x) = α·V_syn + β·V_str + γ·V_log
+
+**Tuning Examples**:
+
+.. code-block:: bash
+
+   # Prioritize tests (raise γ)
+   perspt agent --energy-weights "1.0,0.5,3.0" "Add tests"
+
+   # Prioritize type safety (raise α)
+   perspt agent --energy-weights "2.0,0.5,1.0" "Add type hints"
+
+   # More lenient (raise ε)
+   perspt agent --stability-threshold 0.5 "Quick prototype"
+
+Limits
+------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Option
+     - Description
+   * - ``--max-cost <USD>``
+     - Maximum cost in dollars (0 = unlimited)
+   * - ``--max-steps <N>``
+     - Maximum iterations (0 = unlimited)
+
+**Example**:
+
+.. code-block:: bash
+
+   perspt agent --max-cost 5.0 --max-steps 20 "Large refactor"
+
+Session Management
+------------------
+
+.. code-block:: bash
+
+   # Check current status
+   perspt status
+
+   # Cancel current session
+   perspt abort
+   perspt abort --force  # No confirmation
+
+   # Resume interrupted session
+   perspt resume
+   perspt resume <session_id>
+
+Ledger Operations
+-----------------
+
+.. code-block:: bash
+
+   # View recent changes
+   perspt ledger --recent
+
+   # Rollback to commit
+   perspt ledger --rollback <hash>
+
+   # Statistics
+   perspt ledger --stats
+
+Full Examples
+-------------
+
+**Conservative approach**:
+
+.. code-block:: bash
+
+   perspt agent \
+     --mode cautious \
+     -k 1 \
+     --max-cost 1.0 \
+     --max-steps 10 \
+     -w ./project \
+     "Add input validation"
+
+**Fast prototyping**:
+
+.. code-block:: bash
+
+   perspt agent -y \
+     --model gemini-3-flash \
+     --stability-threshold 0.5 \
+     "Create boilerplate"
+
+**Production-grade**:
+
+.. code-block:: bash
+
+   perspt agent \
+     --architect-model gpt-5.2 \
+     --actuator-model claude-opus-4.5 \
+     --verifier-model gemini-3-pro \
+     --energy-weights "2.0,1.0,3.0" \
+     --stability-threshold 0.05 \
+     --max-cost 10.0 \
+     -w ./project \
+     "Implement authentication system"
+
+See Also
+--------
+
+- :doc:`../concepts/srbn-architecture` - SRBN details
+- :doc:`../tutorials/agent-mode` - Tutorial
+- :doc:`configuration` - Config file

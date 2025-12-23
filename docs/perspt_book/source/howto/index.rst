@@ -1,34 +1,42 @@
-.. _howto:
+.. _howto-index:
 
 How-To Guides
 =============
 
-Step-by-step guides for common tasks.
+Task-oriented guides for common operations.
 
-.. toctree::
-   :maxdepth: 2
-
-   configuration
-   providers
-   agent-options
-
-.. grid:: 3
+.. grid:: 2
    :gutter: 3
 
    .. grid-item-card:: ⚙️ Configuration
       :link: configuration
       :link-type: doc
 
-      Set up API keys, models, and preferences.
+      Set up providers, models, and preferences.
 
-   .. grid-item-card:: 🔀 Providers
+   .. grid-item-card:: 🔌 Providers
       :link: providers
       :link-type: doc
 
-      Configure OpenAI, Anthropic, Google, and others.
+      Connect to OpenAI, Anthropic, Google, and more.
 
    .. grid-item-card:: 🤖 Agent Options
       :link: agent-options
       :link-type: doc
 
-      Token budgets, retry policies, and LSP settings.
+      Configure SRBN agent parameters.
+
+   .. grid-item-card:: 🔒 Security Rules
+      :link: security-rules
+      :link-type: doc
+
+      Set up Starlark policy rules.
+
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+
+   configuration
+   providers
+   agent-options
+   security-rules

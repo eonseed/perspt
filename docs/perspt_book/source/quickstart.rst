@@ -8,70 +8,153 @@ Get Perspt running in 5 minutes.
 Prerequisites
 -------------
 
-- **Rust 1.82+** (for building from source)
-- **API key** from any provider, or **Ollama** for local models
+.. list-table::
+   :widths: 20 80
 
-Install
--------
+   * - **Rust 1.82+**
+     - `rustup.rs <https://rustup.rs/>`_ for building from source
+   * - **API Key**
+     - From any provider (OpenAI, Anthropic, Google, etc.) OR Ollama for local models
+
+Installation
+------------
+
+.. tab-set::
+
+   .. tab-item:: From Source (Recommended)
+
+      .. code-block:: bash
+
+         git clone https://github.com/eonseed/perspt.git
+         cd perspt
+         cargo build --release
+
+   .. tab-item:: Cargo Install
+
+      .. code-block:: bash
+
+         cargo install perspt
+
+   .. tab-item:: With Ollama (No API Key)
+
+      .. code-block:: bash
+
+         # Install Ollama
+         brew install ollama  # macOS
+         
+         # Start and pull a model
+         ollama serve
+         ollama pull llama3.2
+
+Set Your API Key
+----------------
 
 .. code-block:: bash
 
-   git clone https://github.com/eonseed/perspt.git
-   cd perspt
-   cargo build --release
+   # Choose your provider
+   export OPENAI_API_KEY="sk-..."        # OpenAI
+   export ANTHROPIC_API_KEY="sk-ant-..." # Anthropic
+   export GEMINI_API_KEY="..."           # Google
 
 Run Your First Chat
 -------------------
 
 .. code-block:: bash
 
-   # Set your API key
-   export OPENAI_API_KEY="sk-..."
-
-   # Start chatting
+   # Start the TUI
    ./target/release/perspt
 
-That's it! Type a message and press Enter.
+   # Or with a specific model
+   perspt chat --model gpt-5.2
+
+Type your message and press **Enter**. Press **Esc** to exit.
 
 Try Agent Mode
 --------------
 
 .. versionadded:: 0.5.0
 
-Let Perspt autonomously write and verify code:
+Let Perspt autonomously write code:
 
 .. code-block:: bash
 
+   # Basic task
    perspt agent "Create a Python calculator with add, subtract, multiply, divide"
+
+   # With workspace directory
+   perspt agent -w ./my-project "Add unit tests for the API"
+
+   # Auto-approve all changes
+   perspt agent -y "Refactor the parser for better error handling"
 
 The SRBN engine will:
 
-1. Decompose the task into sub-tasks
-2. Generate code for each sub-task
-3. Verify with LSP diagnostics
-4. Retry until stable
+1. **Sheafify** — Decompose task into sub-tasks
+2. **Speculate** — Generate code for each sub-task
+3. **Verify** — Check with LSP and tests
+4. **Converge** — Retry until V(x) < ε
+5. **Commit** — Record in Merkle ledger
 
-See :doc:`tutorials/agent-mode` for a full walkthrough.
+.. seealso:: :doc:`tutorials/agent-mode` for a full walkthrough.
 
 Choose Your Mode
 ----------------
 
 .. list-table::
-   :widths: 20 40 40
    :header-rows: 1
+   :widths: 15 35 50
 
    * - Mode
      - Command
      - Best For
-   * - **TUI**
-     - ``perspt``
-     - Interactive chat with markdown
-   * - **Simple CLI**
-     - ``perspt --simple-cli``
-     - Scripting, accessibility
+   * - **Chat TUI**
+     - ``perspt`` or ``perspt chat``
+     - Interactive conversations with markdown rendering
    * - **Agent**
-     - ``perspt agent "task"``
-     - Autonomous code generation
+     - ``perspt agent "<task>"``
+     - Autonomous code generation and modification
+   * - **Status**
+     - ``perspt status``
+     - Check current agent session status
+
+Essential Commands
+------------------
+
+.. code-block:: bash
+
+   # Configuration
+   perspt config --show           # View current config
+   perspt config --edit           # Edit in $EDITOR
+   perspt init --memory --rules   # Initialize project
+
+   # Agent management
+   perspt status                  # Current session status
+   perspt abort                   # Cancel current session
+   perspt resume                  # Resume interrupted session
+
+   # Change tracking
+   perspt ledger --recent         # View recent changes
+   perspt ledger --rollback abc   # Rollback to commit
+
+Key Bindings (Chat TUI)
+-----------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Key
+     - Action
+   * - **Enter**
+     - Send message
+   * - **Esc**
+     - Exit application
+   * - **↑/↓**
+     - Scroll chat history
+   * - **Page Up/Down**
+     - Fast scroll
+   * - **/save**
+     - Save conversation (command)
 
 Next Steps
 ----------
@@ -83,10 +166,22 @@ Next Steps
       :link: tutorials/index
       :link-type: doc
 
-      Learn through hands-on examples.
+      Step-by-step learning guides.
 
    .. grid-item-card:: ⚙️ Configuration
       :link: howto/configuration
       :link-type: doc
 
-      Set up providers and preferences.
+      Customize providers and models.
+
+   .. grid-item-card:: 🤖 Agent Deep Dive
+      :link: tutorials/agent-mode
+      :link-type: doc
+
+      Master autonomous coding.
+
+   .. grid-item-card:: 🏗️ Architecture
+      :link: developer-guide/architecture
+      :link-type: doc
+
+      Understand the 6-crate design.

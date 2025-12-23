@@ -1,40 +1,47 @@
-.. _first-chat:
+.. _tutorial-first-chat:
 
-First Chat Tutorial
-===================
+First Chat
+==========
 
-Get chatting with an AI in 5 minutes.
+Your first conversation with an LLM using Perspt.
+
+Prerequisites
+-------------
+
+- Perspt installed (see :doc:`../quickstart`)
+- An API key for any provider
 
 Step 1: Set Your API Key
 ------------------------
 
-.. tabs::
+Choose your provider and set the environment variable:
 
-   .. tab:: OpenAI
+.. tab-set::
 
-      .. code-block:: bash
-
-         export OPENAI_API_KEY="sk-your-key-here"
-
-   .. tab:: Anthropic
+   .. tab-item:: OpenAI
 
       .. code-block:: bash
 
-         export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+         export OPENAI_API_KEY="sk-..."
 
-   .. tab:: Google
-
-      .. code-block:: bash
-
-         export GEMINI_API_KEY="your-key-here"
-
-   .. tab:: Ollama (Local)
+   .. tab-item:: Anthropic
 
       .. code-block:: bash
 
-         # No API key needed - just start Ollama
+         export ANTHROPIC_API_KEY="sk-ant-..."
+
+   .. tab-item:: Google
+
+      .. code-block:: bash
+
+         export GEMINI_API_KEY="..."
+
+   .. tab-item:: Ollama (Local)
+
+      .. code-block:: bash
+
+         # No key needed, just ensure Ollama is running
          ollama serve
-         ollama pull llama3.2
 
 Step 2: Launch Perspt
 ---------------------
@@ -43,83 +50,106 @@ Step 2: Launch Perspt
 
    perspt
 
-You'll see:
+Or with a specific model:
+
+.. code-block:: bash
+
+   perspt chat --model gpt-5.2
+
+Step 3: The TUI Interface
+-------------------------
+
+You'll see the Perspt TUI:
 
 .. code-block:: text
 
-   Perspt v0.5.0 - Performance LLM Chat CLI
-   Provider: OpenAI | Model: gpt-4o-mini | Status: Connected ✓
+   ┌─────────────────────────────────────────────────────────────┐
+   │  Perspt v0.5.0 - gpt-5.2                     Tokens: 0     │
+   ├─────────────────────────────────────────────────────────────┤
+   │                                                             │
+   │                                                             │
+   │                   Welcome to Perspt!                        │
+   │            Your Terminal's Window to the AI World           │
+   │                                                             │
+   │                                                             │
+   ├─────────────────────────────────────────────────────────────┤
+   │  > Type your message here...                                │
+   └─────────────────────────────────────────────────────────────┘
 
-   >
-
-Step 3: Start Chatting
+Step 4: Send a Message
 ----------------------
 
-Type a message and press Enter:
+Type your message and press **Enter**:
 
 .. code-block:: text
 
-   > What is Rust?
+   > What is the capital of France?
 
-   Rust is a systems programming language focused on safety,
-   concurrency, and performance...
+The response will stream in real-time with markdown rendering.
 
-   > Can you show me a simple example?
+Step 5: Continue the Conversation
+---------------------------------
 
-   Here's a simple "Hello, World!" in Rust:
+Keep chatting! The conversation history is maintained:
 
-   ```rust
-   fn main() {
-       println!("Hello, World!");
-   }
-   ```
+.. code-block:: text
 
-Step 4: Save Your Conversation
+   > And what's the population?
+
+   The population of Paris is approximately 2.1 million in the city
+   proper, and about 12 million in the metropolitan area.
+
+Step 6: Save Your Conversation
 ------------------------------
 
 Use the ``/save`` command:
 
 .. code-block:: text
 
+   > /save my_chat.md
+
+Or with automatic timestamp:
+
+.. code-block:: text
+
    > /save
-   💾 Conversation saved to: conversation_1735123456.txt
 
-   > /save my-notes.txt
-   💾 Conversation saved to: my-notes.txt
+Step 7: Exit
+------------
 
-Keyboard Shortcuts
-------------------
+Press **Esc** or **Ctrl+C** to exit cleanly.
+
+Key Bindings Reference
+----------------------
 
 .. list-table::
-   :widths: 20 80
    :header-rows: 1
+   :widths: 20 80
 
    * - Key
      - Action
    * - **Enter**
      - Send message
-   * - **Ctrl+C**
-     - Exit
+   * - **Esc**
+     - Exit application
    * - **↑/↓**
-     - Scroll history
+     - Scroll chat history
    * - **Page Up/Down**
      - Fast scroll
+   * - **Ctrl+C**
+     - Force exit
 
-Try Simple CLI Mode
--------------------
+Tips
+----
 
-For scripting or accessibility:
-
-.. code-block:: bash
-
-   perspt --simple-cli
-
-   # With session logging
-   perspt --simple-cli --log-file session.txt
+1. **Markdown works**: Use ``code``, **bold**, and lists in your prompts
+2. **Long responses**: Scroll up to see earlier content
+3. **Token tracking**: Watch the token counter in the header
+4. **Model switching**: Use ``perspt chat --model <name>`` for different models
 
 Next Steps
 ----------
 
-- :doc:`agent-mode` - Autonomous code generation
-- :doc:`local-models` - Set up Ollama
-- :doc:`/howto/providers` - Configure other providers
+- :doc:`local-models` — Use Ollama for offline AI
+- :doc:`agent-mode` — Try autonomous code generation
+- :doc:`../howto/configuration` — Customize your setup

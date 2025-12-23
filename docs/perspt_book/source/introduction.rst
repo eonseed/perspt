@@ -16,228 +16,235 @@ Introduction to Perspt
    </div>
 
 What is Perspt?
-----------------
+---------------
 
-**Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum **P**\ ertaining **T**\ houghts) represents 
-a paradigm shift in how developers and AI enthusiasts interact with Large Language Models. Born from the need for a 
-unified, fast, and beautiful terminal-based interface to the AI world, Perspt bridges the gap between raw API calls 
-and user-friendly AI interaction. Built on the modern ``genai`` crate, it provides cutting-edge support for the latest 
-reasoning models like GPT-4.1, o1-preview, o3-mini, and Gemini 2.5 Pro.
+**Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum **P**\ ertaining **T**\ houghts) is a 
+high-performance, terminal-based interface to Large Language Models with **autonomous coding capabilities**.
 
-Philosophy & Vision
+.. admonition:: Version 0.5.0 Highlights
+   :class: tip
+
+   - **SRBN Agent Mode** — Autonomous coding with Lyapunov stability guarantees
+   - **6-Crate Architecture** — Modular, extensible workspace design
+   - **LSP Integration** — Real-time type checking with ``ty`` server
+   - **Latest Models** — GPT-5.2, Claude Opus 4.5, Gemini 3
+
+Architecture
+------------
+
+Perspt is built as a **6-crate Rust workspace**:
+
+.. graphviz::
+   :align: center
+   :caption: Perspt Architecture Overview
+
+   digraph arch {
+       rankdir=TB;
+       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+       
+       subgraph cluster_cli {
+           label="User Interface";
+           style=dashed;
+           cli [label="perspt-cli\n8 commands", fillcolor="#4ECDC4"];
+           tui [label="perspt-tui\nTerminal UI", fillcolor="#96CEB4"];
+       }
+       
+       subgraph cluster_core {
+           label="Core Engine";
+           style=dashed;
+           core [label="perspt-core\nLLM Provider", fillcolor="#45B7D1"];
+           agent [label="perspt-agent\nSRBN Engine", fillcolor="#FFEAA7"];
+       }
+       
+       subgraph cluster_security {
+           label="Security";
+           style=dashed;
+           policy [label="perspt-policy\nPolicy Engine", fillcolor="#DDA0DD"];
+           sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
+       }
+       
+       cli -> tui;
+       cli -> agent;
+       agent -> core;
+       agent -> policy;
+       agent -> sandbox;
+   }
+
+Key Features
+------------
+
+.. list-table::
+   :widths: 5 25 70
+   :class: borderless
+
+   * - 🤖
+     - **SRBN Agent Mode**
+     - Autonomous coding with stability guarantees. Decomposes tasks, generates code, verifies with LSP.
+   * - 🔌
+     - **Multi-Provider**
+     - OpenAI GPT-5.2, Anthropic Claude Opus 4.5, Google Gemini 3, Groq, Cohere, XAI, DeepSeek, Ollama.
+   * - 🔬
+     - **LSP Integration**
+     - Real-time Python type checking using ``ty`` server. Computes syntax energy V_syn.
+   * - 🧪
+     - **Test Runner**
+     - pytest integration with weighted failure scoring for logic energy V_log.
+   * - 📝
+     - **Merkle Ledger**
+     - Git-style change tracking with rollback support.
+   * - 🔒
+     - **Security**
+     - Starlark policy rules and command sanitization.
+   * - 💰
+     - **Token Budget**
+     - Cost tracking with per-request limits.
+   * - 🎨
+     - **Beautiful TUI**
+     - Ratatui-based with markdown rendering, diff viewer, task tree.
+
+SRBN: Stabilized Recursive Barrier Network
+------------------------------------------
+
+The core innovation in Perspt v0.5.0 is the SRBN control loop:
+
+.. graphviz::
+   :align: center
+   :caption: SRBN Control Flow
+
+   digraph srbn {
+       rankdir=LR;
+       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+       
+       task [label="Task", shape=ellipse, fillcolor="#E3F2FD"];
+       sheaf [label="Sheafify\n(Architect)", fillcolor="#E8F5E9"];
+       spec [label="Speculate\n(Actuator)", fillcolor="#FFF3E0"];
+       verify [label="Verify\n(LSP + Tests)", fillcolor="#F3E5F5"];
+       check [label="V(x) > ε?", shape=diamond, fillcolor="#FFECB3"];
+       commit [label="Commit\n(Ledger)", fillcolor="#C8E6C9"];
+       
+       task -> sheaf;
+       sheaf -> spec;
+       spec -> verify;
+       verify -> check;
+       check -> spec [label="retry", style=dashed, color="#E53935"];
+       check -> commit [label="stable"];
+   }
+
+**Lyapunov Energy**: V(x) = α·V_syn + β·V_str + γ·V_log
+
+- **V_syn**: LSP diagnostics (errors, warnings)
+- **V_str**: Structural analysis
+- **V_log**: Test failures (weighted by criticality)
+
+CLI Commands
+------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 45 40
+
+   * - Command
+     - Description
+     - Example
+   * - ``chat``
+     - Interactive TUI
+     - ``perspt chat``
+   * - ``agent``
+     - Autonomous coding
+     - ``perspt agent "create calculator"``
+   * - ``init``
+     - Project setup
+     - ``perspt init --memory``
+   * - ``config``
+     - Configuration
+     - ``perspt config --show``
+   * - ``ledger``
+     - Change history
+     - ``perspt ledger --recent``
+   * - ``status``
+     - Agent status
+     - ``perspt status``
+   * - ``abort``
+     - Cancel session
+     - ``perspt abort``
+   * - ``resume``
+     - Resume session
+     - ``perspt resume``
+
+Supported Providers
 -------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
+
+   * - Provider
+     - Environment Variable
+     - Models (2025)
+   * - OpenAI
+     - ``OPENAI_API_KEY``
+     - GPT-5.2, o3-mini, o1-preview
+   * - Anthropic
+     - ``ANTHROPIC_API_KEY``
+     - Claude Opus 4.5
+   * - Google
+     - ``GEMINI_API_KEY``
+     - Gemini 3 Flash, Gemini 3 Pro
+   * - Groq
+     - ``GROQ_API_KEY``
+     - Llama 3.x (ultra-fast)
+   * - Cohere
+     - ``COHERE_API_KEY``
+     - Command R+
+   * - XAI
+     - ``XAI_API_KEY``
+     - Grok
+   * - DeepSeek
+     - ``DEEPSEEK_API_KEY``
+     - DeepSeek Coder
+   * - Ollama
+     - *(none)*
+     - Local models
+
+Philosophy
+----------
 
 .. epigraph::
 
-   
    | *The keyboard hums, the screen aglow,*
    | *AI's wisdom, a steady flow.*
-   | *Will robots take over, it's quite the fright,*
-   | *Or just provide insights, day and night?*
-   | *We ponder and chat, with code as our guide,*
-   | *Is AI our helper or our human pride?*
+   | *Through SRBN's loop, stability we find,*
+   | *Code that works, refined and aligned.*
 
-   -The Perspt Manifesto
+   — The Perspt Manifesto
 
-In an era where artificial intelligence is rapidly transforming how we work, learn, and create, Perspt embodies the 
-belief that the most powerful tools should be accessible, fast, and delightful to use. We envision a world where 
-interacting with AI is as natural as opening a terminal and starting a conversation.
+Perspt embodies the belief that AI tools should be:
 
-Why Perspt?
------------
+- **Fast** — Rust-native performance
+- **Stable** — Lyapunov-guaranteed convergence  
+- **Secure** — Policy-controlled execution
+- **Extensible** — Modular crate architecture
 
-The Modern Developer's Dilemma
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Next Steps
+----------
 
-Today's developers face several challenges when working with AI:
-
-.. grid:: 2
+.. grid:: 3
    :gutter: 3
 
-   .. grid-item-card:: 🔧 Tool Fragmentation
-      
-      Multiple providers, different APIs, inconsistent interfaces. Switching between OpenAI, Anthropic, Google, 
-      and others requires learning different tools and maintaining separate configurations.
+   .. grid-item-card:: 🚀 Quick Start
+      :link: quickstart
+      :link-type: doc
 
-   .. grid-item-card:: 🐌 Performance Issues
-      
-      Web-based interfaces can be slow, unreliable, and resource-heavy. Developers need something that matches 
-      the speed of their terminal workflow.
+      Get running in 5 minutes.
 
-   .. grid-item-card:: 🎨 Poor Terminal Integration
-      
-      Most AI tools don't integrate well with terminal-based workflows, forcing context switches that break 
-      concentration and productivity.
+   .. grid-item-card:: 🤖 Agent Mode
+      :link: tutorials/agent-mode
+      :link-type: doc
 
-   .. grid-item-card:: 🔒 Vendor Lock-in
-      
-      Many tools tie you to specific providers or models, making it difficult to experiment with different 
-      AI capabilities or switch providers based on use case.
+      Autonomous code generation.
 
-The Perspt Solution
-~~~~~~~~~~~~~~~~~~~
+   .. grid-item-card:: 📖 Architecture
+      :link: developer-guide/architecture
+      :link-type: doc
 
-Perspt addresses these challenges through:
-
-**Unified Interface**
-   A single, consistent interface for all major LLM providers. Switch between GPT-4, Claude, Gemini, 
-   and others without changing your workflow.
-
-**Terminal-Native Design**
-   Built specifically for terminal users who value speed, keyboard shortcuts, and seamless integration 
-   with existing development workflows.
-
-**Performance First**
-   Written in Rust for maximum performance. Streaming responses, efficient memory usage, and instant startup times.
-
-**Provider Agnostic**
-   Leverages the modern `genai <https://crates.io/crates/genai>`_ crate for automatic support of new models 
-   and providers, including cutting-edge reasoning models and ultra-fast inference platforms.
-
-**Beautiful UX**
-   Rich markdown rendering, syntax highlighting, and a responsive interface powered by Ratatui make 
-   AI interaction delightful.
-
-Core Principles
----------------
-
-Simplicity
-~~~~~~~~~~
-
-Perspt follows the Unix philosophy: do one thing and do it well. It's designed to be a straightforward, 
-powerful chat interface without unnecessary complexity.
-
-.. code-block:: bash
-
-   # Simple as it gets
-   perspt
-   # Start chatting immediately
-
-Performance
-~~~~~~~~~~~
-
-Every design decision prioritizes speed and efficiency:
-
-- **Rust foundation** for memory safety and performance
-- **Streaming responses** for immediate feedback
-- **Minimal resource usage** - runs efficiently even on modest hardware
-- **Fast startup** - be chatting within seconds
-
-Extensibility
-~~~~~~~~~~~~~
-
-Built with the future in mind:
-
-- **Plugin architecture** ready for extensions
-- **Provider abstraction** makes adding new AI services trivial
-- **Configuration flexibility** adapts to any workflow
-- **Open source** encourages community contributions
-
-Developer Experience
-~~~~~~~~~~~~~~~~~~~~
-
-Created by developers, for developers:
-
-- **Terminal-first design** respects your workflow
-- **Keyboard-driven** interface for maximum efficiency
-- **Comprehensive error handling** with helpful messages
-- **Detailed documentation** and examples
-
-Use Cases
----------
-
-Perspt excels in various scenarios:
-
-.. tabs::
-
-   .. tab:: Development
-
-      - **Code review and analysis**
-      - **Architecture discussions**
-      - **Bug troubleshooting**
-      - **Documentation generation**
-      - **Learning new technologies**
-
-   .. tab:: Research
-
-      - **Literature reviews**
-      - **Concept exploration**
-      - **Data analysis discussions**
-      - **Hypothesis testing**
-      - **Academic writing assistance**
-
-   .. tab:: Creative Work
-
-      - **Content brainstorming**
-      - **Writing assistance**
-      - **Creative problem solving**
-      - **Idea validation**
-      - **Story development**
-
-   .. tab:: Daily Tasks
-
-      - **Quick questions**
-      - **Email drafting**
-      - **Decision making**
-      - **Learning and tutorials**
-      - **General assistance**
-
-The Technology Stack
---------------------
-
-Perspt is built on a foundation of cutting-edge technologies:
-
-**Rust Core**
-   Memory-safe, performant, and reliable. Rust ensures Perspt is fast, secure, and maintainable.
-
-**Ratatui TUI Framework**
-   Rich terminal user interfaces with responsive design, smooth animations, and beautiful rendering.
-
-**genai Crate Integration**
-   Unified access to multiple LLM providers through a single, modern Rust API with support for cutting-edge reasoning models.
-
-**Tokio Async Runtime**
-   Efficient handling of concurrent operations, streaming responses, and network communication.
-
-**Serde JSON**
-   Robust configuration management and API communication with excellent error handling.
-
-Community & Philosophy
------------------------
-
-Perspt is more than just a tool—it's a community of developers, researchers, and AI enthusiasts who believe 
-in the power of accessible, high-quality tools. We embrace:
-
-**Open Source Values**
-   Transparency, collaboration, and shared ownership of the tools we use daily.
-
-**Inclusive Design**
-   Tools should work for everyone, regardless of technical background or accessibility needs.
-
-**Continuous Learning**
-   The AI landscape evolves rapidly, and our tools should evolve with it.
-
-**Quality Over Quantity**
-   Better to have fewer features that work exceptionally well than many features that work poorly.
-
-What's Next?
-------------
-
-Ready to dive in? Here's your path forward:
-
-1. **Installation**: Follow our :doc:`installation` guide to get Perspt running on your system
-2. **Quick Start**: Jump into the :doc:`getting-started` tutorial for your first AI conversation
-3. **Configuration**: Learn about :doc:`configuration` options to customize your experience
-4. **User Guide**: Explore the complete :doc:`user-guide/index` for advanced features
-5. **Development**: Interested in contributing? Check out our :doc:`developer-guide/index`
-
-.. note::
-   Perspt is actively developed and maintained. Join our community to stay updated on new features, 
-   share feedback, and contribute to the project's evolution.
-
-.. seealso::
-   
-   - :doc:`getting-started` - Get up and running in minutes
-   - :doc:`installation` - Detailed installation instructions
-   - :doc:`user-guide/index` - Complete user documentation
-   - :doc:`developer-guide/index` - Developer and contributor resources
+      Understand the 6-crate design.
