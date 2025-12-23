@@ -1,210 +1,138 @@
-.. Perspt Documentation master file
+.. Perspt documentation master file
 
-👁️ Perspt: Your Terminal's Window to the AI World 🤖
-=====================================================
+Perspt Documentation
+====================
 
-.. raw:: html
+**Your Terminal's Window to the AI World** 🤖
 
-   <div align="center">
-   <h3>
-   <em>"The keyboard hums, the screen aglow,<br>
-   AI's wisdom, a steady flow.<br>
-   Will robots take over, it's quite the fright,<br>
-   Or just provide insights, day and night?<br>
-   We ponder and chat, with code as our guide,<br>
-   Is AI our helper or our human pride?"</em>
-   </h3>
-   </div>
+Perspt is a high-performance terminal-based LLM interface with autonomous coding capabilities 
+powered by the **SRBN (Stabilized Recursive Barrier Network)** engine.
 
-**Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum **P**\ ertaining **T**\ houghts) is a 
-high-performance command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). 
-Built with Rust for maximum speed and reliability, it allows you to chat with the latest AI models from multiple 
-providers directly in your terminal using a modern, unified interface powered by the cutting-edge ``genai`` crate.
+.. grid:: 3
+   :gutter: 3
 
-.. only:: html
+   .. grid-item-card:: 🚀 Quick Start
+      :link: quickstart
+      :link-type: doc
 
-   .. grid:: 2
-      :gutter: 3
+      Install and chat in 5 minutes.
 
-      .. grid-item-card:: 🚀 Quick Start
-         :link: getting-started
-         :link-type: doc
-         
-         Get up and running with Perspt in minutes. Install, configure, and start chatting with AI models.
+   .. grid-item-card:: 🤖 Agent Mode
+      :link: tutorials/agent-mode
+      :link-type: doc
 
-      .. grid-item-card:: 📚 User Guide
-         :link: user-guide/index
-         :link-type: doc
-         
-         Complete guide to using Perspt effectively, from basic chat to advanced features.
+      Autonomous code generation with SRBN.
 
-      .. grid-item-card:: 🛠 Developer Guide
-         :link: developer-guide/index
-         :link-type: doc
-         
-         Deep dive into Perspt's architecture, contribute to the project, and extend functionality.
+   .. grid-item-card:: 📖 Architecture
+      :link: developer-guide/architecture
+      :link-type: doc
 
-      .. grid-item-card:: 📖 API Reference
-         :link: api/index
-         :link-type: doc
-         
-         Comprehensive API documentation generated from source code comments.
+      6-crate workspace design.
 
-.. only:: latex
-
-   .. rubric:: Documentation Navigation
-
-   * **🚀 Quick Start**: Get up and running with Perspt in minutes. Install, configure, and start chatting with AI models.
-     (See chapter: :ref:`getting-started`)
-   
-   * **📚 User Guide**: Complete guide to using Perspt effectively, from basic chat to advanced features.
-     (See chapter: :ref:`user-guide`)
-   
-   * **🛠 Developer Guide**: Deep dive into Perspt's architecture, contribute to the project, and extend functionality.
-     (See chapter: :ref:`developer-guide`)
-   
-   * **📖 API Reference**: Comprehensive API documentation generated from source code comments.
-     (See chapter: :ref:`api-reference`)
-
-✨ Key Features
----------------
+Key Features
+------------
 
 .. list-table::
-   :widths: 20 80
-   :header-rows: 0
+   :widths: 5 95
+   :class: borderless
 
    * - 🤖
-     - **Zero-Config Startup:** Automatic provider detection from environment variables - just set your API key and run ``perspt``!
+     - **SRBN Agent Mode** — Autonomous coding with Lyapunov stability guarantees (v0.5.0)
+   * - 🔌
+     - **Multi-Provider** — OpenAI GPT-5.2, Claude Opus 4.5, Gemini 3, Groq, Ollama
+   * - 🔬
+     - **LSP Integration** — Real-time type checking via ``ty`` server
+   * - 🧪
+     - **Test Runner** — pytest integration with V_log energy
+   * - 💰
+     - **Token Budget** — Cost control with usage monitoring
    * - 🎨
-     - **Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui
-   * - 🖥️
-     - **Simple CLI Mode:** NEW! Minimal command-line mode for direct Q&A, scripting, and accessibility - perfect for Unix workflows
-   * - ⚡
-     - **Streaming Responses:** Real-time streaming of LLM responses for an interactive experience
-   * - 🔀
-     - **Multiple Provider Support:** Seamlessly switch between OpenAI, Anthropic, Google, Groq, Cohere, XAI, DeepSeek, and Ollama
-   * - 🚀
-     - **Dynamic Model Discovery:** Automatically discovers available models without manual updates
-   * - ⚙️
-     - **Configurable:** Flexible configuration via JSON files or command-line arguments
-   * - 🔄
-     - **Input Queuing:** Type new questions while AI is responding - inputs are queued and processed sequentially
-   * - 💾
-     - **Save Conversations:** Export chat sessions to text files with ``/save`` command for archival and reference
-   * - 📜
-     - **Markdown Rendering:** Beautiful markdown support directly in the terminal
-   * - 🛡️
-     - **Graceful Error Handling:** Robust handling of network issues, API errors, and edge cases
+     - **Beautiful TUI** — Ratatui-based with diff viewer and task tree
+   * - 🔒
+     - **Security** — Policy engine with command sanitization
 
-🎯 Supported AI Providers
---------------------------
-
-.. tabs::
-
-   .. tab:: OpenAI
-
-      - **GPT-4.1** - Latest and most advanced model
-      - **GPT-4o series** - GPT-4o, GPT-4o-mini for fast responses
-      - **o1 reasoning models** - o1-preview, o1-mini, o3-mini
-      - **GPT-4 series** - GPT-4-turbo, GPT-4 for complex tasks
-      - Latest model variants automatically supported
-
-   .. tab:: Anthropic
-
-      - Claude 3.5 (latest Sonnet, Haiku)
-      - Claude 3 (Opus, Sonnet, Haiku)
-      - Latest Claude models
-
-   .. tab:: Google
-
-      - **Gemini 2.5 Pro** - Latest multimodal model
-      - Gemini Pro, Gemini 1.5 Pro/Flash
-      - PaLM models
-
-   .. tab:: Ollama (Local)
-
-      - **Llama 3.2** - Latest Meta model
-      - **CodeLlama** - Code-specialized models
-      - **Mistral** - Fast and capable models
-      - **Qwen** - Multilingual models
-      - All popular open-source models
-
-   .. tab:: Cloud Providers
-
-      - **Groq**: Ultra-fast Llama 3.x inference
-      - **Cohere**: Command R/R+ models
-      - **XAI**: Grok models
-      - **DeepSeek**: Advanced reasoning models
-
-.. note::
-   Perspt leverages the powerful `genai <https://crates.io/crates/genai>`_ crate for unified LLM access, 
-   ensuring automatic support for new models and providers with cutting-edge features like reasoning model support.
-
-📋 Perspt
----------
+----
 
 .. toctree::
    :maxdepth: 2
-   :caption: Getting Started
+   :caption: 📚 Getting Started
+   :hidden:
 
    introduction
-   getting-started
+   quickstart
    installation
+   getting-started
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 🎓 Tutorials
+   :hidden:
+
+   tutorials/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 📖 User Guide
+   :hidden:
+
+   user-guide/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 💡 Concepts
+   :hidden:
+
+   concepts/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 🔧 How-To Guides
+   :hidden:
+
+   howto/index
    configuration
 
 .. toctree::
    :maxdepth: 2
-   :caption: User Guide
+   :caption: 📋 Reference
+   :hidden:
 
-   user-guide/index
-   user-guide/basic-usage
-   user-guide/advanced-features
-   user-guide/providers
-   user-guide/troubleshooting
+   reference/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: Developer Guide
-
-   developer-guide/index
-   developer-guide/architecture
-   developer-guide/contributing
-   developer-guide/extending
-   developer-guide/testing
-
-.. toctree::
-   :maxdepth: 2
-   :caption: API Reference
+   :caption: 🔌 API Reference
+   :hidden:
 
    api/index
-   api/modules
-   api/config
-   api/llm-provider
-   api/ui
-   api/main
+
+.. toctree::
+   :maxdepth: 2
+   :caption: 🛠️ Developer Guide
+   :hidden:
+
+   developer-guide/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: Appendices
+   :caption: 📎 Appendices
+   :hidden:
 
    changelog
    license
    acknowledgments
 
-`Download as PDF <https://github.com/eonseed/perspt/raw/master/docs/perspt.pdf>`_
+Quick Links
+-----------
 
-🔗 Quick Links
----------------
+- `GitHub Repository <https://github.com/eonseed/perspt>`_
+- `Crates.io <https://crates.io/crates/perspt>`_
+- `PSP Process <https://github.com/eonseed/perspt/tree/master/docs/psps>`_
+- `Issue Tracker <https://github.com/eonseed/perspt/issues>`_
 
-- **Repository:** `GitHub <https://github.com/eonseed/perspt>`_
-- **Crates.io:** `perspt <https://crates.io/crates/perspt>`_
-- **Issues:** `Bug Reports & Feature Requests <https://github.com/eonseed/perspt/issues>`_
-- **Discussions:** `Community Chat <https://github.com/eonseed/perspt/discussions>`_
-
-Indices and Tables
-==================
+Indices
+-------
 
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-

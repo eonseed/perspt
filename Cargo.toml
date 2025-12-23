@@ -1,4 +1,24 @@
-# Cargo.toml
+# Cargo.toml - Perspt Workspace
+[workspace]
+resolver = "2"
+members = [
+    "crates/perspt-core",
+    "crates/perspt-tui",
+    "crates/perspt-agent",
+    "crates/perspt-policy",
+    "crates/perspt-sandbox",
+    "crates/perspt-cli",
+]
+
+[workspace.package]
+version = "0.4.8"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://eonseed.github.io/perspt/"
+
+# Keep the original package for backwards compatibility during migration
 [package]
 name = "perspt"
 version = "0.4.8"
@@ -10,10 +30,13 @@ repository = "https://github.com/eonseed/perspt"
 homepage = "https://eonseed.github.io/perspt/"
 readme = "README.md"
 keywords = ["terminal", "cli", "ai", "llm", "chat"]
-categories = ["command-line-utilities", "text-processing", "api-bindings", "visualization"]
-exclude = [
-    "docs/screencast/*",
+categories = [
+    "command-line-utilities",
+    "text-processing",
+    "api-bindings",
+    "visualization",
 ]
+exclude = ["docs/screencast/*"]
 
 [dependencies]
 # LLM unified interface - using genai for better model support
