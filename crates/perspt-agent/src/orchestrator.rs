@@ -62,9 +62,11 @@ impl SRBNOrchestrator {
         verifier_model: Option<String>,
         speculator_model: Option<String>,
     ) -> Self {
-        let mut context = AgentContext::default();
-        context.working_dir = working_dir.clone();
-        context.auto_approve = auto_approve;
+        let context = AgentContext {
+            working_dir: working_dir.clone(),
+            auto_approve,
+            ..Default::default()
+        };
 
         // Create a shared LLM provider - agents will use this for LLM calls
         // In production, this would be configured from environment/config
@@ -742,7 +744,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     /// Build a correction prompt with diagnostic details
     fn build_correction_prompt(
         &self,
-        node_id: &str,
+        _node_id: &str,
         goal: &str,
         energy: &EnergyComponents,
     ) -> Result<String> {

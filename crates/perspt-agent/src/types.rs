@@ -113,9 +113,10 @@ impl BehavioralContract {
 }
 
 /// Error type for determining retry limits per PSP-4
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ErrorType {
     /// Compilation/syntax/type errors (3 attempts)
+    #[default]
     Compilation,
     /// Tool execution failures (5 attempts)
     ToolFailure,
@@ -123,12 +124,6 @@ pub enum ErrorType {
     ReviewRejection,
     /// Unknown/other errors (3 attempts default)
     Other,
-}
-
-impl Default for ErrorType {
-    fn default() -> Self {
-        ErrorType::Compilation
-    }
 }
 
 /// Retry policy configuration per PSP-4 specification
@@ -605,10 +600,11 @@ impl EnergyComponents {
 // =============================================================================
 
 /// Task type classification for planning
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskType {
     /// Implementation code
+    #[default]
     Code,
     /// Unit tests
     UnitTest,
@@ -618,12 +614,6 @@ pub enum TaskType {
     Refactor,
     /// Documentation
     Documentation,
-}
-
-impl Default for TaskType {
-    fn default() -> Self {
-        TaskType::Code
-    }
 }
 
 /// Structured task plan from Architect

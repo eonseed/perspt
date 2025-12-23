@@ -19,7 +19,7 @@ pub enum ReviewDecision {
     Skip,
 }
 
-/// Review modal state
+#[derive(Default)]
 pub struct ReviewModal {
     /// Whether the modal is visible
     pub visible: bool,
@@ -31,18 +31,6 @@ pub struct ReviewModal {
     pub affected_files: Vec<String>,
     /// Selected action (0 = approve, 1 = reject, 2 = request changes)
     pub selected: usize,
-}
-
-impl Default for ReviewModal {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            title: String::new(),
-            description: String::new(),
-            affected_files: Vec::new(),
-            selected: 0,
-        }
-    }
 }
 
 impl ReviewModal {
@@ -140,7 +128,7 @@ impl ReviewModal {
         frame.render_widget(description, chunks[1]);
 
         // Buttons
-        let buttons = vec![("✓ Approve", 0), ("✗ Reject", 1), ("📝 Request Changes", 2)];
+        let buttons = [("✓ Approve", 0), ("✗ Reject", 1), ("📝 Request Changes", 2)];
 
         let button_chunks = Layout::default()
             .direction(Direction::Horizontal)

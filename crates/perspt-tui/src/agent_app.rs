@@ -4,7 +4,7 @@
 
 use crate::dashboard::Dashboard;
 use crate::diff_viewer::DiffViewer;
-use crate::review_modal::{ReviewDecision, ReviewModal};
+use crate::review_modal::ReviewModal;
 use crate::task_tree::{TaskStatus, TaskTree};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::{

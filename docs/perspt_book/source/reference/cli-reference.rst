@@ -52,6 +52,8 @@ Commands Overview
      - Abort current agent session
    * - ``resume``
      - Resume paused or crashed session
+   * - ``simple-chat``
+     - Simple CLI chat mode (no TUI)
 
 perspt chat
 -----------
@@ -256,6 +258,30 @@ Resume a paused or crashed session.
 
    * - ``[SESSION_ID]``
      - Session ID to resume (optional, uses latest if omitted)
+
+perspt simple-chat
+-----------------
+
+**Usage**: ``perspt simple-chat [OPTIONS]``
+
+Simple command-line chat mode for scripting and automation.
+No TUI - just a prompt with streaming responses.
+
+.. list-table::
+   :widths: 25 75
+
+   * - ``-m, --model <MODEL>``
+     - Model to use for chat
+   * - ``--log-file <FILE>``
+     - Log session to file
+
+**Examples**:
+
+.. code-block:: bash
+
+   perspt simple-chat
+   perspt simple-chat --log-file session.txt
+   echo "Explain Rust" | perspt simple-chat
 
 Exit Codes
 ----------

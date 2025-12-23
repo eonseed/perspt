@@ -16,6 +16,11 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 
+/// Type alias for pending LSP requests map
+type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>;
+/// Type alias for diagnostics map
+type DiagnosticsMap = Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>;
+
 /// Simplified document symbol information for agent use
 #[derive(Debug, Clone)]
 pub struct DocumentSymbolInfo {
@@ -169,8 +174,8 @@ impl LspClient {
     /// Handle incoming LSP message
     async fn handle_message(
         msg: Value,
-        pending_requests: &Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>,
-        diagnostics: &Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
+        pending_requests: &PendingRequests,
+        diagnostics: &DiagnosticsMap,
     ) {
         if let Some(id) = msg.get("id").and_then(|id| id.as_u64()) {
             // It's a response
@@ -675,7 +680,7 @@ impl LspClient {
                     lsp_types::HoverContents::Array(contents) => Some(
                         contents
                             .iter()
-                            .map(|c| Self::extract_marked_string(c))
+                            .map(Self::extract_marked_string)
                             .collect::<Vec<_>>()
                             .join("\n"),
                     ),
@@ -774,7 +779,7 @@ impl LspClient {
 impl Drop for LspClient {
     fn drop(&mut self) {
         if let Some(ref mut process) = self.process {
-            let _ = process.kill();
+            drop(process.kill());
         }
     }
 }

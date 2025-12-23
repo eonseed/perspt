@@ -128,8 +128,8 @@ perspt --list-models  # List available models
 | `-m, --model <MODEL>` | Model name (e.g., gpt-5.2, claude-opus-4.5) |
 | `--provider <PROFILE>` | Provider profile from config |
 | `-l, --list-models` | List available models |
-| `--simple-cli` | Use simple CLI mode (no TUI) |
-| `--log-file <FILE>` | Log session to file (simple-cli only) |
+| `simple-chat` | Use simple CLI mode (no TUI) |
+| `--log-file <FILE>` | Log session to file (simple-chat only) |
 
 ## 🤖 Agent Mode - Autonomous Coding Assistant (v0.5.0)
 
@@ -195,13 +195,13 @@ A minimal, Unix-like command prompt interface for direct Q&A:
 
 ```bash
 # Basic simple CLI mode
-perspt --simple-cli
+perspt simple-chat
 
 # With session logging
-perspt --simple-cli --log-file session.txt
+perspt simple-chat --log-file session.txt
 
 # Perfect for scripting
-echo "What is quantum computing?" | perspt --simple-cli
+echo "What is quantum computing?" | perspt simple-chat
 ```
 
 ## 💬 Chat Interface & Commands

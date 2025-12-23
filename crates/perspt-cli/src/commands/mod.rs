@@ -7,4 +7,5 @@ pub mod config;
 pub mod init;
 pub mod ledger;
 pub mod resume;
+pub mod simple_chat;
 pub mod status;

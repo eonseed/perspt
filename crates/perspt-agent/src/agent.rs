@@ -316,9 +316,6 @@ impl Agent for SpeculatorAgent {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
     // Note: Integration tests would require actual API keys
     // These are unit tests for the prompt building logic
 

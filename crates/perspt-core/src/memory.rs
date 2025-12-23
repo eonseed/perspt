@@ -52,8 +52,8 @@ impl ProjectMemory {
             }
 
             // Detect section headers
-            if trimmed.starts_with("# ") {
-                memory.name = Some(trimmed[2..].to_string());
+            if let Some(name) = trimmed.strip_prefix("# ") {
+                memory.name = Some(name.to_string());
                 continue;
             }
 

@@ -53,7 +53,7 @@ impl DiffLine {
     }
 }
 
-/// Diff viewer state
+#[derive(Default)]
 pub struct DiffViewer {
     /// Diff hunks to display
     pub hunks: Vec<DiffHunk>,
@@ -61,16 +61,6 @@ pub struct DiffViewer {
     pub scroll: usize,
     /// Currently selected hunk index
     pub selected_hunk: usize,
-}
-
-impl Default for DiffViewer {
-    fn default() -> Self {
-        Self {
-            hunks: Vec::new(),
-            scroll: 0,
-            selected_hunk: 0,
-        }
-    }
 }
 
 impl DiffViewer {
@@ -106,10 +96,8 @@ impl DiffViewer {
                 if let Some(ref mut hunk) = current_hunk {
                     hunk.lines.push(DiffLine::new(line, DiffLineType::Removed));
                 }
-            } else {
-                if let Some(ref mut hunk) = current_hunk {
-                    hunk.lines.push(DiffLine::new(line, DiffLineType::Context));
-                }
+            } else if let Some(ref mut hunk) = current_hunk {
+                hunk.lines.push(DiffLine::new(line, DiffLineType::Context));
             }
         }
 

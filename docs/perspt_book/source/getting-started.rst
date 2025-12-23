@@ -173,7 +173,7 @@ Zero-Config Quick Start
          export OPENAI_API_KEY="sk-your-actual-api-key-here"
          
          # Launch Perspt in simple CLI mode
-         perspt --simple-cli
+         perspt simple-chat
          # Unix-style prompt with streaming responses
 
    .. tab:: Anthropic Claude
@@ -187,7 +187,7 @@ Zero-Config Quick Start
          perspt
          
          # Simple CLI mode
-         perspt --simple-cli
+         perspt simple-chat
          # Automatically uses Anthropic with claude-3-5-sonnet-20241022
 
    .. tab:: Google Gemini
@@ -201,7 +201,7 @@ Zero-Config Quick Start
          perspt
          
          # Simple CLI mode with logging
-         perspt --simple-cli --log-file gemini-session.txt
+         perspt simple-chat --log-file gemini-session.txt
          # Automatically uses Gemini with gemini-1.5-flash
 
    .. tab:: Ollama (Local)
@@ -215,7 +215,7 @@ Zero-Config Quick Start
          perspt
          
          # Simple CLI mode for scripting
-         perspt --simple-cli
+         perspt simple-chat
          # Auto-detects Ollama if no other providers found
 
 Step 1: Set Your API Key (Manual Configuration)
@@ -271,10 +271,10 @@ You should see a welcome screen like this:
 .. code-block:: bash
 
    # Start simple CLI mode
-   perspt --simple-cli
+   perspt simple-chat
 
    # With session logging
-   perspt --simple-cli --log-file my-session.txt
+   perspt simple-chat --log-file my-session.txt
 
 You should see a minimal interface like this:
 

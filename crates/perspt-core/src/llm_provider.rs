@@ -16,18 +16,10 @@ use tokio::sync::{mpsc, RwLock};
 pub const EOT_SIGNAL: &str = "<|EOT|>";
 
 /// Shared state for rate limiting and token counting
+#[derive(Default)]
 struct SharedState {
     total_tokens_used: usize,
     request_count: usize,
-}
-
-impl Default for SharedState {
-    fn default() -> Self {
-        Self {
-            total_tokens_used: 0,
-            request_count: 0,
-        }
-    }
 }
 
 /// Thread-safe LLM provider implementation using Arc<RwLock<>>.
@@ -258,13 +250,11 @@ impl GenAIProvider {
                         );
                     }
 
-                    if !chunk.content.is_empty() {
-                        if tx.send(chunk.content.clone()).is_err() {
-                            log::error!(
-                                "!!! CHANNEL SEND FAILED for chunk #{chunk_count} - STOPPING STREAM !!!"
-                            );
-                            break;
-                        }
+                    if !chunk.content.is_empty() && tx.send(chunk.content.clone()).is_err() {
+                        log::error!(
+                            "!!! CHANNEL SEND FAILED for chunk #{chunk_count} - STOPPING STREAM !!!"
+                        );
+                        break;
                     }
                 }
                 Ok(ChatStreamEvent::ReasoningChunk(chunk)) => {

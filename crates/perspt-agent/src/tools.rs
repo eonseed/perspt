@@ -3,7 +3,6 @@
 //! Tools available to agents for interacting with the workspace.
 //! Implements: read_file, search_code, apply_patch, run_command
 
-use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

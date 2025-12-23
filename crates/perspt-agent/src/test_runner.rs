@@ -301,11 +301,9 @@ python_functions = ["test_*"]
                                 results.skipped = n;
                             }
                         }
-                    } else if parts[i] == "error" || parts[i] == "errors" {
-                        if i > 0 {
-                            if let Ok(n) = parts[i - 1].trim_matches(',').parse::<usize>() {
-                                results.failed += n;
-                            }
+                    } else if (parts[i] == "error" || parts[i] == "errors") && i > 0 {
+                        if let Ok(n) = parts[i - 1].trim_matches(',').parse::<usize>() {
+                            results.failed += n;
                         }
                     }
                 }
@@ -438,13 +436,11 @@ mod tests {
             ..Default::default()
         };
 
-        let contract = BehavioralContract {
-            weighted_tests: vec![WeightedTest {
-                test_name: "test_critical_feature".to_string(),
-                criticality: Criticality::Critical,
-            }],
-            ..Default::default()
-        };
+        let mut contract = BehavioralContract::new();
+        contract.weighted_tests = vec![WeightedTest {
+            test_name: "test_critical_feature".to_string(),
+            criticality: Criticality::Critical,
+        }];
 
         let v_log = runner.calculate_v_log(&results, &contract);
         // gamma (2.0) * Critical weight (10.0) = 20.0
