@@ -92,7 +92,7 @@ impl ChatApp {
         input.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Message (Esc to send) "),
+                .title(" Message (Shift+Enter to send) "),
         );
         input.set_cursor_line_style(Style::default());
 
@@ -165,17 +165,10 @@ impl ChatApp {
                         (KeyModifiers::CONTROL, KeyCode::Char('q')) => {
                             self.should_quit = true;
                         }
-                        // Send message: Ctrl+Enter, Alt+Enter, or Escape
-                        (KeyModifiers::CONTROL, KeyCode::Enter)
-                        | (KeyModifiers::ALT, KeyCode::Enter) => {
+                        // Send message: Shift+Enter (primary), also Ctrl+Enter
+                        (KeyModifiers::SHIFT, KeyCode::Enter)
+                        | (KeyModifiers::CONTROL, KeyCode::Enter) => {
                             if !self.is_streaming {
-                                self.send_message().await?;
-                            }
-                        }
-                        // Escape key to send (common pattern)
-                        (_, KeyCode::Esc) => {
-                            if !self.is_streaming && !self.input.lines().join("").trim().is_empty()
-                            {
                                 self.send_message().await?;
                             }
                         }
@@ -224,7 +217,7 @@ impl ChatApp {
         self.input.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Message (Esc to send) "),
+                .title(" Message (Shift+Enter to send) "),
         );
 
         // Start streaming
