@@ -22,6 +22,21 @@ pulldown-cmark = "0.13"
 # Async
 tokio = { version = "1.42", features = ["full"] }
 
+# Rich Input
+tui-textarea = "0.7"
+
+# Diff Computation
+similar = "2.6"
+
+# Syntax Highlighting
+syntect = "5.2"
+
+# Async Indicators (0.9.0 for ratatui 0.29 compat)
+throbber-widgets-tui = "0.9"
+
+# Markdown Rendering (terminal)
+termimad = "0.30"
+
 # Utilities
 anyhow = "1.0"
 log = "0.4"
