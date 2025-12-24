@@ -32,7 +32,7 @@ pub async fn run() -> Result<()> {
 /// Detect provider and default model from environment variables
 fn detect_provider_from_env() -> (&'static str, &'static str) {
     if std::env::var("GEMINI_API_KEY").is_ok() {
-        ("gemini", "gemini-2.0-flash")
+        ("gemini", "gemini-flash-lite-latest")
     } else if std::env::var("OPENAI_API_KEY").is_ok() {
         ("openai", "gpt-4o-mini")
     } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {

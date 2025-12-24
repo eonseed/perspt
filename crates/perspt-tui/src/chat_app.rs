@@ -92,7 +92,7 @@ impl ChatApp {
         input.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Message (Ctrl+Enter to send) "),
+                .title(" Message (Esc to send) "),
         );
         input.set_cursor_line_style(Style::default());
 
@@ -158,17 +158,28 @@ impl ChatApp {
 
                     // Handle special keys
                     match (key.modifiers, key.code) {
+                        // Quit
                         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
                             self.should_quit = true;
                         }
                         (KeyModifiers::CONTROL, KeyCode::Char('q')) => {
                             self.should_quit = true;
                         }
-                        (KeyModifiers::CONTROL, KeyCode::Enter) => {
+                        // Send message: Ctrl+Enter, Alt+Enter, or Escape
+                        (KeyModifiers::CONTROL, KeyCode::Enter)
+                        | (KeyModifiers::ALT, KeyCode::Enter) => {
                             if !self.is_streaming {
                                 self.send_message().await?;
                             }
                         }
+                        // Escape key to send (common pattern)
+                        (_, KeyCode::Esc) => {
+                            if !self.is_streaming && !self.input.lines().join("").trim().is_empty()
+                            {
+                                self.send_message().await?;
+                            }
+                        }
+                        // Scroll
                         (_, KeyCode::PageUp) => {
                             self.scroll_up(10);
                         }
@@ -213,7 +224,7 @@ impl ChatApp {
         self.input.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Message (Ctrl+Enter to send) "),
+                .title(" Message (Esc to send) "),
         );
 
         // Start streaming
