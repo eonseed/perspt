@@ -334,17 +334,18 @@ impl DiffViewer {
         // Tabs for view mode
         let tab_titles = vec!["Unified", "Side-by-Side"];
         let tabs = Tabs::new(tab_titles)
-            .block(Block::default().borders(Borders::ALL).title("View Mode"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("View Mode")
+                    .border_style(self.theme.border),
+            )
             .select(match self.view_mode {
                 DiffViewMode::Unified => 0,
                 DiffViewMode::SideBySide => 1,
             })
             .style(Style::default().fg(Color::White))
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            );
+            .highlight_style(self.theme.highlight);
         frame.render_widget(tabs, chunks[0]);
 
         // Diff content
@@ -426,7 +427,7 @@ impl DiffViewer {
                 Block::default()
                     .title(title)
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(96, 125, 139))),
+                    .border_style(self.theme.border),
             )
             .scroll((scroll as u16, 0));
 
