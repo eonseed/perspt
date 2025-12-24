@@ -92,7 +92,7 @@ impl ChatApp {
         input.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Message (Enter to send, Shift+Enter for newline) "),
+                .title(" Enter=send | Shift+Enter=newline "),
         );
         input.set_cursor_line_style(Style::default());
 
@@ -151,47 +151,71 @@ impl ChatApp {
             };
 
             if event::poll(timeout)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind != KeyEventKind::Press {
-                        continue;
-                    }
+                match event::read()? {
+                    Event::Key(key) => {
+                        if key.kind != KeyEventKind::Press {
+                            continue;
+                        }
 
-                    // Handle special keys
-                    match key.code {
-                        // Quit: Ctrl+C or Ctrl+Q
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            self.should_quit = true;
-                        }
-                        KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            self.should_quit = true;
-                        }
-                        // Enter: Send message (without modifiers)
-                        KeyCode::Enter if key.modifiers.is_empty() => {
-                            if !self.is_streaming {
-                                self.send_message().await?;
+                        // Handle special keys based on key code
+                        match key.code {
+                            // Quit: Ctrl+C or Ctrl+Q
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.should_quit = true;
                             }
-                        }
-                        // Shift+Enter: Insert newline (forward to textarea)
-                        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                            if !self.is_streaming {
-                                // Manually insert newline
-                                self.input.insert_newline();
+                            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.should_quit = true;
                             }
-                        }
-                        // Scroll
-                        KeyCode::PageUp => {
-                            self.scroll_up(10);
-                        }
-                        KeyCode::PageDown => {
-                            self.scroll_down(10);
-                        }
-                        _ => {
-                            // Forward other keys to textarea if not streaming
-                            if !self.is_streaming {
-                                self.input.input(Event::Key(key));
+                            // Enter handling: Send message unless Shift/Ctrl/Alt is held
+                            KeyCode::Enter => {
+                                if key.modifiers.is_empty() {
+                                    // Plain Enter: Send message
+                                    if !self.is_streaming {
+                                        self.send_message().await?;
+                                    }
+                                } else {
+                                    // Any modifier + Enter: Insert newline
+                                    if !self.is_streaming {
+                                        self.input.insert_newline();
+                                    }
+                                }
+                            }
+                            // Scroll with PageUp/PageDown
+                            KeyCode::PageUp => {
+                                self.scroll_up(10);
+                            }
+                            KeyCode::PageDown => {
+                                self.scroll_down(10);
+                            }
+                            // Scroll with Ctrl+Up/Down
+                            KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.scroll_up(1);
+                            }
+                            KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                self.scroll_down(1);
+                            }
+                            _ => {
+                                // Forward other keys to textarea if not streaming
+                                if !self.is_streaming {
+                                    self.input.input(Event::Key(key));
+                                }
                             }
                         }
                     }
+                    // Mouse scroll events
+                    Event::Mouse(mouse) => {
+                        use ratatui::crossterm::event::MouseEventKind;
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => {
+                                self.scroll_up(3);
+                            }
+                            MouseEventKind::ScrollDown => {
+                                self.scroll_down(3);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
                 }
             }
 
@@ -223,7 +247,7 @@ impl ChatApp {
         self.input.set_block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Message (Enter to send, Shift+Enter for newline) "),
+                .title(" Enter=send | Shift+Enter=newline "),
         );
 
         // Start streaming
