@@ -33,6 +33,7 @@ impl ActiveTab {
         }
     }
 
+    #[allow(dead_code)]
     fn from_index(i: usize) -> Self {
         match i {
             0 => ActiveTab::Dashboard,
