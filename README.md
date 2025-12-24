@@ -154,17 +154,21 @@ The SRBN control loop executes these steps for each task:
 
 1. **Sheafification** - Architect decomposes task into JSON TaskPlan
 2. **Speculation** - Actuator generates code for each sub-task
-3. **Verification** - LSP diagnostics compute Lyapunov Energy V(x)
-4. **Convergence** - If V(x) > ε, retry with error feedback
+3. **Verification** - LSP diagnostics compute Lyapunov Energy $V(x)$
+4. **Convergence** - If $V(x) > \epsilon$, retry with error feedback
 5. **Commit** - When stable, record changes in Merkle Ledger
 
-**Lyapunov Energy**: `V(x) = α·V_syn + β·V_str + γ·V_log`
+**Lyapunov Energy**:
+
+```math
+V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log}
+```
 
 | Component | Source | Default Weight |
 |-----------|--------|----------------|
-| V_syn | LSP diagnostics (errors, warnings) | α = 1.0 |
-| V_str | Structural analysis | β = 0.5 |
-| V_log | Test failures (weighted by criticality) | γ = 2.0 |
+| $V_{syn}$ | LSP diagnostics (errors, warnings) | $\alpha = 1.0$ |
+| $V_{str}$ | Structural analysis | $\beta = 0.5$ |
+| $V_{log}$ | Test failures (weighted by criticality) | $\gamma = 2.0$ |
 
 ### Agent Mode Options
 
