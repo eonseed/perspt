@@ -17,7 +17,7 @@ perspt-policy = { version = "0.1.0", path = "../perspt-policy" }
 perspt-sandbox = { version = "0.1.0", path = "../perspt-sandbox" }
 
 # Graph management
-petgraph = "0.6"
+petgraph = "0.8"
 
 # State persistence
 duckdb = "1.1"
@@ -41,7 +41,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 log = "0.4"
 # Code search (ripgrep library facade)
-grep = "0.3"
+grep = "0.4"
 ignore = "0.4"
 
 [dev-dependencies]
