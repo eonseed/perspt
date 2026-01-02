@@ -19,7 +19,7 @@ starlark = "0.12"
 shell-words = "1.1"
 
 # Home directory detection
-dirs = "5.0"
+dirs = "6.0"
 
 # Utilities
 anyhow = "1.0"
