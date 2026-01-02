@@ -381,7 +381,7 @@ impl ReviewModal {
                 } else {
                     Modifier::empty()
                 }))
-                .alignment(ratatui::layout::Alignment::Center)
+                .alignment(ratatui::layout::HorizontalAlignment::Center)
                 .block(Block::default().borders(Borders::ALL).border_style(
                     Style::default().fg(if is_selected { bg } else { Color::DarkGray }),
                 ));
