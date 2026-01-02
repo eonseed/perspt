@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 perspt-core = { version = "0.1.0", path = "../perspt-core" }
 
 # UI components
-ratatui = "0.29"
+ratatui = "0.30"
 crossterm = "0.29"
 pulldown-cmark = "0.13"
 
