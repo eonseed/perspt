@@ -8,6 +8,7 @@ pub mod chat_app;
 pub mod dashboard;
 pub mod diff_viewer;
 pub mod review_modal;
+pub mod simple_input;
 pub mod task_tree;
 pub mod telemetry;
 pub mod theme;

@@ -1,15 +1,16 @@
 //! Chat Application for Perspt TUI
 //!
-//! Provides an interactive chat interface with streaming LLM responses,
-//! markdown rendering, and syntax-highlighted code blocks.
+//! An elegant chat interface with markdown rendering, syntax highlighting,
+//! and reliable key handling.
 
+use crate::simple_input::SimpleInput;
 use crate::theme::{icons, Theme};
 use anyhow::Result;
 use perspt_core::{GenAIProvider, EOT_SIGNAL};
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
+    style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     DefaultTerminal, Frame,
@@ -17,7 +18,6 @@ use ratatui::{
 use std::sync::Arc;
 use throbber_widgets_tui::{Throbber, ThrobberState};
 use tokio::sync::mpsc;
-use tui_textarea::TextArea;
 
 /// Role of a chat message
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,12 +57,12 @@ impl ChatMessage {
     }
 }
 
-/// Chat application state
+/// Elegant Chat application state
 pub struct ChatApp {
     /// Chat message history
     messages: Vec<ChatMessage>,
-    /// Text input area
-    input: TextArea<'static>,
+    /// Simple input widget
+    input: SimpleInput,
     /// Scroll offset for message display
     scroll_offset: usize,
     /// Buffer for streaming response
@@ -76,6 +76,7 @@ pub struct ChatApp {
     /// Throbber state for loading animation
     throbber_state: ThrobberState,
     /// Theme for styling
+    #[allow(dead_code)]
     theme: Theme,
     /// Should quit the application
     should_quit: bool,
@@ -88,19 +89,11 @@ pub struct ChatApp {
 impl ChatApp {
     /// Create a new chat application
     pub fn new(provider: GenAIProvider, model: String) -> Self {
-        let mut input = TextArea::default();
-        input.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Enter=send | Shift+Enter=newline "),
-        );
-        input.set_cursor_line_style(Style::default());
-
         Self {
             messages: vec![ChatMessage::system(
-                "Welcome to Perspt! Type your message and press Ctrl+Enter to send.",
+                "Welcome to Perspt! Type your message and press Enter to send.",
             )],
-            input,
+            input: SimpleInput::new(),
             scroll_offset: 0,
             streaming_buffer: String::new(),
             is_streaming: false,
@@ -122,30 +115,25 @@ impl ChatApp {
 
             // Handle streaming updates
             if let Some(ref mut rx) = self.stream_rx {
-                // Non-blocking check for stream data
                 match rx.try_recv() {
                     Ok(chunk) => {
                         if chunk == EOT_SIGNAL {
-                            // Streaming complete
                             self.finalize_streaming();
                         } else {
                             self.streaming_buffer.push_str(&chunk);
                         }
-                        continue; // Immediately re-render
+                        continue;
                     }
-                    Err(mpsc::error::TryRecvError::Empty) => {
-                        // No data yet, continue to event handling
-                    }
+                    Err(mpsc::error::TryRecvError::Empty) => {}
                     Err(mpsc::error::TryRecvError::Disconnected) => {
-                        // Channel closed unexpectedly
                         self.finalize_streaming();
                     }
                 }
             }
 
-            // Handle input events with timeout for streaming updates
+            // Event handling
             let timeout = if self.is_streaming {
-                std::time::Duration::from_millis(50)
+                std::time::Duration::from_millis(16) // ~60fps for smooth streaming
             } else {
                 std::time::Duration::from_millis(100)
             };
@@ -157,69 +145,69 @@ impl ChatApp {
                             continue;
                         }
 
-                        // Handle special keys based on key code
                         match key.code {
-                            // Quit: Ctrl+C or Ctrl+Q
+                            // Quit
                             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 self.should_quit = true;
                             }
                             KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                                 self.should_quit = true;
                             }
-                            // Enter handling: Send message unless Shift/Ctrl/Alt is held
-                            KeyCode::Enter => {
-                                if key.modifiers.is_empty() {
-                                    // Plain Enter: Send message
-                                    if !self.is_streaming {
-                                        self.send_message().await?;
-                                    }
-                                } else {
-                                    // Any modifier + Enter: Insert newline
-                                    if !self.is_streaming {
-                                        self.input.insert_newline();
-                                    }
+                            // Send message on Enter
+                            KeyCode::Enter if !self.is_streaming => {
+                                if !self.input.is_empty() {
+                                    self.send_message().await?;
                                 }
                             }
-                            // Scroll with PageUp/PageDown
-                            KeyCode::PageUp => {
-                                self.scroll_up(10);
+                            // Newline with Ctrl+J (reliable across terminals)
+                            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if !self.is_streaming {
+                                    self.input.insert_newline();
+                                }
                             }
-                            KeyCode::PageDown => {
-                                self.scroll_down(10);
+                            // Also support Ctrl+Enter for newline
+                            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                if !self.is_streaming {
+                                    self.input.insert_newline();
+                                }
                             }
-                            // Scroll with Ctrl+Up/Down
+                            // Scroll
+                            KeyCode::PageUp => self.scroll_up(10),
+                            KeyCode::PageDown => self.scroll_down(10),
                             KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                self.scroll_up(1);
+                                self.scroll_up(1)
                             }
                             KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                self.scroll_down(1);
+                                self.scroll_down(1)
                             }
-                            _ => {
-                                // Forward other keys to textarea if not streaming
+                            // Input navigation
+                            KeyCode::Left => self.input.move_left(),
+                            KeyCode::Right => self.input.move_right(),
+                            KeyCode::Up => self.input.move_up(),
+                            KeyCode::Down => self.input.move_down(),
+                            KeyCode::Home => self.input.move_home(),
+                            KeyCode::End => self.input.move_end(),
+                            // Text editing
+                            KeyCode::Backspace => self.input.backspace(),
+                            KeyCode::Delete => self.input.delete(),
+                            KeyCode::Char(c) => {
                                 if !self.is_streaming {
-                                    self.input.input(Event::Key(key));
+                                    self.input.insert_char(c);
                                 }
-                            }
-                        }
-                    }
-                    // Mouse scroll events
-                    Event::Mouse(mouse) => {
-                        use ratatui::crossterm::event::MouseEventKind;
-                        match mouse.kind {
-                            MouseEventKind::ScrollUp => {
-                                self.scroll_up(3);
-                            }
-                            MouseEventKind::ScrollDown => {
-                                self.scroll_down(3);
                             }
                             _ => {}
                         }
                     }
+                    Event::Mouse(mouse) => match mouse.kind {
+                        MouseEventKind::ScrollUp => self.scroll_up(3),
+                        MouseEventKind::ScrollDown => self.scroll_down(3),
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
 
-            // Update throbber animation
+            // Update throbber
             if self.is_streaming {
                 self.throbber_state.calc_next();
             }
@@ -232,47 +220,51 @@ impl ChatApp {
         Ok(())
     }
 
-    /// Send the current input as a message
+    /// Send the current message to the LLM
     async fn send_message(&mut self) -> Result<()> {
-        let content = self.input.lines().join("\n").trim().to_string();
-        if content.is_empty() {
+        let user_message = self.input.text().trim().to_string();
+        if user_message.is_empty() {
             return Ok(());
         }
 
         // Add user message
-        self.messages.push(ChatMessage::user(content.clone()));
+        self.messages.push(ChatMessage::user(user_message.clone()));
+        self.input.clear();
 
-        // Clear input
-        self.input = TextArea::default();
-        self.input.set_block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Enter=send | Shift+Enter=newline "),
-        );
+        // Build context
+        let context: Vec<String> = self
+            .messages
+            .iter()
+            .filter(|m| m.role != MessageRole::System)
+            .map(|m| {
+                format!(
+                    "{}: {}",
+                    match m.role {
+                        MessageRole::User => "User",
+                        MessageRole::Assistant => "Assistant",
+                        MessageRole::System => "System",
+                    },
+                    m.content
+                )
+            })
+            .collect();
 
         // Start streaming
         self.is_streaming = true;
         self.streaming_buffer.clear();
+        self.scroll_to_bottom();
 
-        // Create channel for streaming
         let (tx, rx) = mpsc::unbounded_channel();
         self.stream_rx = Some(rx);
 
-        // Spawn streaming task
         let provider = Arc::clone(&self.provider);
         let model = self.model.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = provider
-                .generate_response_stream_to_channel(&model, &content, tx)
-                .await
-            {
-                log::error!("Streaming error: {}", e);
-            }
+            let _ = provider
+                .generate_response_stream_to_channel(&model, &context.join("\n"), tx)
+                .await;
         });
-
-        // Scroll to bottom
-        self.scroll_to_bottom();
 
         Ok(())
     }
@@ -289,36 +281,39 @@ impl ChatApp {
         self.scroll_to_bottom();
     }
 
-    /// Scroll up by n lines
+    /// Scroll up
     fn scroll_up(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
 
-    /// Scroll down by n lines
+    /// Scroll down
     fn scroll_down(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
-        // Cap at total lines
-        if self.scroll_offset > self.total_lines.saturating_sub(10) {
-            self.scroll_offset = self.total_lines.saturating_sub(10);
+        let max = self.total_lines.saturating_sub(10);
+        if self.scroll_offset > max {
+            self.scroll_offset = max;
         }
     }
 
-    /// Scroll to bottom of messages
+    /// Scroll to bottom
     fn scroll_to_bottom(&mut self) {
-        self.scroll_offset = self.total_lines.saturating_sub(10);
+        // Set to max value - will be capped during render based on actual content
+        self.scroll_offset = usize::MAX / 2;
     }
 
     /// Render the chat application
     fn render(&mut self, frame: &mut Frame) {
         let size = frame.area();
 
-        // Main layout: Header, Messages, Input
+        // Calculate input height dynamically
+        let input_height = (self.input.line_count() as u16 + 2).clamp(3, 10);
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Header
-                Constraint::Min(10),   // Messages
-                Constraint::Length(5), // Input
+                Constraint::Length(3),            // Header
+                Constraint::Min(10),              // Messages
+                Constraint::Length(input_height), // Input
             ])
             .split(size);
 
@@ -327,161 +322,215 @@ impl ChatApp {
         self.render_input(frame, chunks[2]);
     }
 
-    /// Render the header bar
+    /// Render elegant header
     fn render_header(&self, frame: &mut Frame, area: Rect) {
-        let header_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-            .split(area);
+        let header = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(96, 125, 139)))
+            .title(Span::styled(
+                format!(" {} Perspt Chat ", icons::ROCKET),
+                Style::default()
+                    .fg(Color::Rgb(129, 199, 132))
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .title_alignment(ratatui::layout::HorizontalAlignment::Left);
 
-        // Title
-        let title = Paragraph::new(format!("{} Perspt Chat", icons::ROCKET))
-            .style(self.theme.user_message)
-            .block(Block::default().borders(Borders::ALL));
-        frame.render_widget(title, header_chunks[0]);
+        let model_display = format!(" {} ", self.model);
+        let model_span = Span::styled(
+            model_display,
+            Style::default()
+                .fg(Color::Rgb(176, 190, 197))
+                .add_modifier(Modifier::ITALIC),
+        );
 
-        // Model info / status
-        let status_text = if self.is_streaming {
-            format!("Streaming... {}", self.model)
-        } else {
-            self.model.clone()
+        // Render block
+        frame.render_widget(header, area);
+
+        // Render model name on right side
+        let model_area = Rect {
+            x: area.x + area.width - self.model.len() as u16 - 4,
+            y: area.y,
+            width: self.model.len() as u16 + 3,
+            height: 1,
         };
-
-        let status = Paragraph::new(status_text)
-            .style(self.theme.muted)
-            .block(Block::default().borders(Borders::ALL).title("Model"));
-        frame.render_widget(status, header_chunks[1]);
+        frame.render_widget(Paragraph::new(model_span), model_area);
     }
 
-    /// Render the messages area
+    /// Render messages with markdown support
     fn render_messages(&mut self, frame: &mut Frame, area: Rect) {
-        let inner_area = area.inner(ratatui::layout::Margin {
-            vertical: 1,
-            horizontal: 1,
-        });
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(96, 125, 139)))
+            .title(Span::styled(
+                " Messages ",
+                Style::default().fg(Color::Rgb(176, 190, 197)),
+            ));
 
-        // Build message display
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
         let mut lines: Vec<Line> = Vec::new();
 
         for msg in &self.messages {
-            let (icon, style) = match msg.role {
-                MessageRole::User => (icons::USER, self.theme.user_message),
-                MessageRole::Assistant => (icons::ASSISTANT, self.theme.assistant_message),
-                MessageRole::System => (icons::SYSTEM, self.theme.system_message),
+            // Message header with role
+            let (icon, header_style, content_style) = match msg.role {
+                MessageRole::User => (
+                    icons::USER,
+                    Style::default()
+                        .fg(Color::Rgb(129, 199, 132))
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(Color::Rgb(224, 247, 250)),
+                ),
+                MessageRole::Assistant => (
+                    icons::ASSISTANT,
+                    Style::default()
+                        .fg(Color::Rgb(144, 202, 249))
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(Color::Rgb(189, 189, 189)),
+                ),
+                MessageRole::System => (
+                    icons::SYSTEM,
+                    Style::default()
+                        .fg(Color::Rgb(176, 190, 197))
+                        .add_modifier(Modifier::ITALIC),
+                    Style::default().fg(Color::Rgb(158, 158, 158)),
+                ),
             };
 
-            // Message header
-            lines.push(Line::from(vec![
-                Span::styled(format!("─── {} ", icon), style),
-                Span::styled(
+            // Add separator line
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "━━━ {} {} ━━━",
+                    icon,
                     match msg.role {
                         MessageRole::User => "You",
                         MessageRole::Assistant => "Assistant",
                         MessageRole::System => "System",
-                    },
-                    style.add_modifier(Modifier::BOLD),
+                    }
                 ),
-                Span::styled(" ───", style),
-            ]));
+                header_style,
+            )));
 
-            // Message content
-            for line in msg.content.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", line),
-                    self.theme.assistant_message,
-                )));
+            // Render message content (with markdown for assistant)
+            if msg.role == MessageRole::Assistant {
+                // Use tui-markdown for assistant messages
+                let rendered = tui_markdown::from_str(&msg.content);
+                for line in rendered.lines {
+                    lines.push(line.clone());
+                }
+            } else {
+                // Plain text for user/system
+                for line in msg.content.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        content_style,
+                    )));
+                }
             }
 
             lines.push(Line::default()); // Spacing
         }
 
-        // Add streaming buffer if active
+        // Add streaming content
         if self.is_streaming && !self.streaming_buffer.is_empty() {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("─── {} ", icons::ASSISTANT),
-                    self.theme.assistant_message,
-                ),
-                Span::styled(
-                    "Assistant",
-                    self.theme.assistant_message.add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" ───", self.theme.assistant_message),
-            ]));
+            lines.push(Line::from(Span::styled(
+                format!("━━━ {} Assistant ━━━", icons::ASSISTANT),
+                Style::default()
+                    .fg(Color::Rgb(144, 202, 249))
+                    .add_modifier(Modifier::BOLD),
+            )));
 
-            for line in self.streaming_buffer.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", line),
-                    self.theme.assistant_message,
-                )));
+            let rendered = tui_markdown::from_str(&self.streaming_buffer);
+            for line in rendered.lines {
+                lines.push(line.clone());
             }
 
-            // Cursor indicator
+            // Streaming cursor
             lines.push(Line::from(Span::styled(
-                format!("  {}", icons::CURSOR),
-                self.theme.cursor,
+                "▌",
+                Style::default()
+                    .fg(Color::Rgb(129, 212, 250))
+                    .add_modifier(Modifier::SLOW_BLINK),
             )));
         }
 
-        // Add throbber if streaming
+        // Add throbber if loading
         if self.is_streaming && self.streaming_buffer.is_empty() {
             let throbber = Throbber::default()
-                .label("Thinking...")
-                .style(self.theme.warning);
+                .label(" Thinking...")
+                .style(Style::default().fg(Color::Rgb(255, 183, 77)));
             frame.render_stateful_widget(
                 throbber,
-                Rect::new(area.x + 2, area.y + area.height - 2, 20, 1),
-                &mut self.throbber_state,
+                Rect::new(inner.x + 1, inner.y + 1, 20, 1),
+                &mut self.throbber_state.clone(),
             );
         }
 
         self.total_lines = lines.len();
 
         // Apply scroll
-        let visible_lines = (inner_area.height as usize).saturating_sub(2);
+        let visible_lines = inner.height as usize;
         let max_scroll = self.total_lines.saturating_sub(visible_lines);
         let scroll = self.scroll_offset.min(max_scroll);
 
         let paragraph = Paragraph::new(Text::from(lines))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Chat History "),
-            )
             .wrap(Wrap { trim: false })
             .scroll((scroll as u16, 0));
 
-        frame.render_widget(paragraph, area);
+        frame.render_widget(paragraph, inner);
 
         // Scrollbar
-        let scrollbar = Scrollbar::default()
-            .orientation(ScrollbarOrientation::VerticalRight)
-            .begin_symbol(Some("↑"))
-            .end_symbol(Some("↓"));
-        let mut scrollbar_state = ScrollbarState::new(self.total_lines).position(scroll);
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        if self.total_lines > visible_lines {
+            let scrollbar = Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::default().fg(Color::Rgb(96, 125, 139)));
+            let mut state = ScrollbarState::new(self.total_lines).position(scroll);
+            frame.render_stateful_widget(scrollbar, area.inner(Margin::new(0, 1)), &mut state);
+        }
     }
 
-    /// Render the input area
+    /// Render input area
     fn render_input(&self, frame: &mut Frame, area: Rect) {
         if self.is_streaming {
-            // Show streaming indicator instead of input
-            let streaming_indicator = Paragraph::new("⏳ Receiving response... (Ctrl+C to cancel)")
-                .style(self.theme.muted)
-                .block(Block::default().borders(Borders::ALL).title(" Input "));
-            frame.render_widget(streaming_indicator, area);
+            // Show streaming indicator
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Rgb(96, 125, 139)))
+                .title(Span::styled(
+                    " Receiving response... ",
+                    Style::default().fg(Color::Rgb(255, 183, 77)),
+                ));
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+
+            let text = Paragraph::new("Press Ctrl+C to cancel")
+                .style(Style::default().fg(Color::Rgb(120, 144, 156)));
+            frame.render_widget(text, inner);
         } else {
-            frame.render_widget(&self.input, area);
+            // Render input with hint
+            self.input
+                .render(frame, area, "Enter=send │ Ctrl+J=newline");
         }
     }
 }
 
-/// Run the chat TUI with streaming support
+/// Run the chat TUI
 pub async fn run_chat_tui(provider: GenAIProvider, model: String) -> Result<()> {
+    use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+    use ratatui::crossterm::execute;
+    use std::io::stdout;
+
+    // Enable mouse capture
+    execute!(stdout(), EnableMouseCapture)?;
+
     let mut terminal = ratatui::init();
     let mut app = ChatApp::new(provider, model);
 
     let result = app.run(&mut terminal).await;
+
+    // Restore terminal
     ratatui::restore();
+    execute!(stdout(), DisableMouseCapture)?;
+
     result
 }
