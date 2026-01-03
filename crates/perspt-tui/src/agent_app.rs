@@ -363,37 +363,32 @@ impl AgentApp {
     }
 
     fn handle_page_up(&mut self) {
-        match self.active_tab {
-            ActiveTab::Diff => self.diff_viewer.page_up(10),
-            _ => {}
+        if self.active_tab == ActiveTab::Diff {
+            self.diff_viewer.page_up(10);
         }
     }
 
     fn handle_page_down(&mut self) {
-        match self.active_tab {
-            ActiveTab::Diff => self.diff_viewer.page_down(10),
-            _ => {}
+        if self.active_tab == ActiveTab::Diff {
+            self.diff_viewer.page_down(10);
         }
     }
 
     fn handle_select(&mut self) {
-        match self.active_tab {
-            ActiveTab::Tasks => self.task_tree.toggle_collapse(),
-            _ => {}
+        if self.active_tab == ActiveTab::Tasks {
+            self.task_tree.toggle_collapse();
         }
     }
 
     fn handle_left(&mut self) {
-        match self.active_tab {
-            ActiveTab::Diff => self.diff_viewer.prev_hunk(),
-            _ => {}
+        if self.active_tab == ActiveTab::Diff {
+            self.diff_viewer.prev_hunk();
         }
     }
 
     fn handle_right(&mut self) {
-        match self.active_tab {
-            ActiveTab::Diff => self.diff_viewer.next_hunk(),
-            _ => {}
+        if self.active_tab == ActiveTab::Diff {
+            self.diff_viewer.next_hunk();
         }
     }
 

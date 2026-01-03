@@ -236,11 +236,10 @@ impl DiffViewer {
                     (DiffLineType::Context, Some(o), Some(n))
                 };
 
-                // Remove the +/- prefix for display
-                let content = if line.len() > 1 && (line.starts_with('+') || line.starts_with('-'))
+                // Remove the +/- or space prefix for display
+                let content = if line.len() > 1
+                    && (line.starts_with('+') || line.starts_with('-') || line.starts_with(' '))
                 {
-                    &line[1..]
-                } else if line.starts_with(' ') && line.len() > 1 {
                     &line[1..]
                 } else {
                     line
