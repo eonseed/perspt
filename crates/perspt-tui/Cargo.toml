@@ -45,3 +45,7 @@ tui-markdown = "0.3.6"
 # Utilities
 anyhow = "1.0"
 log = "0.4"
+
+# Text Wrapping for Virtual Scrolling
+textwrap = "0.16"
+unicode-width = "0.2"

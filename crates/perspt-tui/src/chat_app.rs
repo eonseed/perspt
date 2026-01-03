@@ -16,12 +16,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     DefaultTerminal, Frame,
 };
 use std::sync::Arc;
 use throbber_widgets_tui::{Throbber, ThrobberState};
 use tokio::sync::mpsc;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Role of a chat message
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,14 +87,16 @@ pub struct ChatApp {
     should_quit: bool,
     /// Receiver for streaming chunks
     stream_rx: Option<mpsc::UnboundedReceiver<String>>,
-    /// Total lines in messages (for scrolling)
-    total_lines: usize,
+    /// Total visual lines in messages (for scrolling) - after wrapping
+    total_visual_lines: usize,
     /// Auto-scroll to bottom flag (set during streaming)
     auto_scroll: bool,
     /// Visible height of message area (updated during render)
     visible_height: usize,
     /// Flag to indicate a message send is pending (for async handling)
     pending_send: bool,
+    /// Last viewport width used for wrapping (to detect resize)
+    last_viewport_width: usize,
 }
 
 impl ChatApp {
@@ -113,10 +116,11 @@ impl ChatApp {
             theme: Theme::default(),
             should_quit: false,
             stream_rx: None,
-            total_lines: 0,
+            total_visual_lines: 0,
             auto_scroll: true, // Start with auto-scroll enabled
             visible_height: 20,
             pending_send: false,
+            last_viewport_width: 80,
         }
     }
 
@@ -127,12 +131,14 @@ impl ChatApp {
             terminal.draw(|frame| self.render(frame))?;
 
             // Handle streaming updates - drain ALL pending chunks before rendering
+            let mut just_finalized = false;
             if let Some(ref mut rx) = self.stream_rx {
                 loop {
                     match rx.try_recv() {
                         Ok(chunk) => {
                             if chunk == EOT_SIGNAL {
                                 self.finalize_streaming();
+                                just_finalized = true;
                                 break;
                             } else {
                                 self.streaming_buffer.push_str(&chunk);
@@ -141,10 +147,16 @@ impl ChatApp {
                         Err(mpsc::error::TryRecvError::Empty) => break,
                         Err(mpsc::error::TryRecvError::Disconnected) => {
                             self.finalize_streaming();
+                            just_finalized = true;
                             break;
                         }
                     }
                 }
+            }
+
+            // Immediate re-render after finalization to show final content without delay
+            if just_finalized {
+                terminal.draw(|frame| self.render(frame))?;
             }
 
             // Event handling
@@ -448,7 +460,7 @@ impl ChatApp {
     /// Scroll down
     fn scroll_down(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
-        let max = self.total_lines.saturating_sub(self.visible_height);
+        let max = self.total_visual_lines.saturating_sub(self.visible_height);
         if self.scroll_offset >= max {
             self.scroll_offset = max;
             self.auto_scroll = true; // Re-enable auto-scroll when at bottom
@@ -458,6 +470,55 @@ impl ChatApp {
     /// Enable auto-scroll to bottom (actual scroll happens in render)
     fn scroll_to_bottom(&mut self) {
         self.auto_scroll = true;
+    }
+
+    /// Wrap a single line of text to fit within the given width.
+    /// Returns a vector of wrapped lines (as owned Strings).
+    fn wrap_text_to_width(text: &str, width: usize) -> Vec<String> {
+        if width == 0 {
+            return vec![text.to_string()];
+        }
+
+        let mut result = Vec::new();
+        let mut current_line = String::new();
+        let mut current_width = 0;
+
+        for word in text.split_inclusive(|c: char| c.is_whitespace()) {
+            let word_width = word.width();
+
+            if current_width + word_width > width && !current_line.is_empty() {
+                // Push current line and start new one
+                result.push(std::mem::take(&mut current_line));
+                current_width = 0;
+            }
+
+            // Handle very long words that exceed width
+            if word_width > width {
+                // Split the word character by character
+                for ch in word.chars() {
+                    let ch_width = ch.width().unwrap_or(1);
+                    if current_width + ch_width > width && !current_line.is_empty() {
+                        result.push(std::mem::take(&mut current_line));
+                        current_width = 0;
+                    }
+                    current_line.push(ch);
+                    current_width += ch_width;
+                }
+            } else {
+                current_line.push_str(word);
+                current_width += word_width;
+            }
+        }
+
+        if !current_line.is_empty() {
+            result.push(current_line);
+        }
+
+        if result.is_empty() {
+            result.push(String::new());
+        }
+
+        result
     }
 
     /// Render the chat application
@@ -515,7 +576,7 @@ impl ChatApp {
         frame.render_widget(Paragraph::new(model_span), model_area);
     }
 
-    /// Render messages with markdown support
+    /// Render messages with markdown support and virtual scrolling
     fn render_messages(&mut self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
             .borders(Borders::ALL)
@@ -528,7 +589,15 @@ impl ChatApp {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let mut lines: Vec<Line> = Vec::new();
+        let viewport_width = inner.width as usize;
+        let viewport_height = inner.height as usize;
+
+        // Update cached width for resize detection
+        self.last_viewport_width = viewport_width;
+        self.visible_height = viewport_height;
+
+        // Step 1: Collect all logical lines as (text, style) tuples
+        let mut logical_lines: Vec<(String, Style)> = Vec::new();
 
         for msg in &self.messages {
             // Message header with role
@@ -556,8 +625,8 @@ impl ChatApp {
                 ),
             };
 
-            // Add separator line
-            lines.push(Line::from(Span::styled(
+            // Add separator line (headers don't wrap - they're short)
+            logical_lines.push((
                 format!(
                     "━━━ {} {} ━━━",
                     icon,
@@ -568,52 +637,73 @@ impl ChatApp {
                     }
                 ),
                 header_style,
-            )));
+            ));
 
-            // Render message content (with markdown for assistant)
+            // Render message content
             if msg.role == MessageRole::Assistant {
-                // Use tui-markdown for assistant messages
+                // For assistant messages, extract text from tui-markdown rendered output
                 let rendered = tui_markdown::from_str(&msg.content);
                 for line in rendered.lines {
-                    lines.push(line.clone());
+                    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                    logical_lines.push((text, content_style));
                 }
             } else {
                 // Plain text for user/system
                 for line in msg.content.lines() {
-                    lines.push(Line::from(Span::styled(
-                        format!("  {}", line),
-                        content_style,
-                    )));
+                    logical_lines.push((format!("  {}", line), content_style));
                 }
             }
 
-            lines.push(Line::default()); // Spacing
+            logical_lines.push((String::new(), Style::default())); // Spacing
         }
 
         // Add streaming content
         if self.is_streaming && !self.streaming_buffer.is_empty() {
-            lines.push(Line::from(Span::styled(
+            let header_style = Style::default()
+                .fg(Color::Rgb(144, 202, 249))
+                .add_modifier(Modifier::BOLD);
+            let content_style = Style::default().fg(Color::Rgb(189, 189, 189));
+
+            logical_lines.push((
                 format!("━━━ {} Assistant ━━━", icons::ASSISTANT),
-                Style::default()
-                    .fg(Color::Rgb(144, 202, 249))
-                    .add_modifier(Modifier::BOLD),
-            )));
+                header_style,
+            ));
 
             let rendered = tui_markdown::from_str(&self.streaming_buffer);
             for line in rendered.lines {
-                lines.push(line.clone());
+                let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                logical_lines.push((text, content_style));
             }
 
             // Streaming cursor
-            lines.push(Line::from(Span::styled(
-                "▌",
+            logical_lines.push((
+                "▌".to_string(),
                 Style::default()
                     .fg(Color::Rgb(129, 212, 250))
                     .add_modifier(Modifier::SLOW_BLINK),
-            )));
+            ));
         }
 
-        // Add throbber if loading
+        // Step 2: Wrap each logical line to visual lines
+        let mut visual_lines: Vec<(String, Style)> = Vec::new();
+
+        for (text, style) in logical_lines {
+            if text.is_empty() {
+                // Empty line stays as is
+                visual_lines.push((text, style));
+            } else if text.width() <= viewport_width {
+                // Line fits, no wrapping needed
+                visual_lines.push((text, style));
+            } else {
+                // Need to wrap - create new lines from wrapped text
+                let wrapped = Self::wrap_text_to_width(&text, viewport_width);
+                for wrapped_line in wrapped {
+                    visual_lines.push((wrapped_line, style));
+                }
+            }
+        }
+
+        // Handle throbber when loading with empty buffer
         if self.is_streaming && self.streaming_buffer.is_empty() {
             let throbber = Throbber::default()
                 .label(" Thinking...")
@@ -625,37 +715,39 @@ impl ChatApp {
             );
         }
 
-        self.total_lines = lines.len();
+        // Step 3: Calculate scroll position using visual line count
+        let total_visual = visual_lines.len();
+        self.total_visual_lines = total_visual;
 
-        // Update visible height for scroll calculations
-        let visible_lines = inner.height as usize;
-        self.visible_height = visible_lines;
+        let max_scroll = total_visual.saturating_sub(viewport_height);
 
-        // Calculate max scroll position
-        let max_scroll = self.total_lines.saturating_sub(visible_lines);
-
-        // Apply auto-scroll if enabled
-        let scroll = if self.auto_scroll {
+        let scroll_pos = if self.auto_scroll {
             max_scroll
         } else {
             self.scroll_offset.min(max_scroll)
         };
 
         // Update scroll_offset to actual position
-        self.scroll_offset = scroll;
+        self.scroll_offset = scroll_pos;
 
-        let paragraph = Paragraph::new(Text::from(lines))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll as u16, 0));
+        // Step 4: Slice visible range and convert to Lines (virtual scrolling - key fix!)
+        let visible_lines: Vec<Line> = visual_lines
+            .into_iter()
+            .skip(scroll_pos)
+            .take(viewport_height)
+            .map(|(text, style)| Line::from(Span::styled(text, style)))
+            .collect();
 
+        // Step 5: Render only the visible slice (NO Paragraph::scroll needed!)
+        let paragraph = Paragraph::new(Text::from(visible_lines));
         frame.render_widget(paragraph, inner);
 
-        // Scrollbar
-        if self.total_lines > visible_lines {
+        // Scrollbar with accurate visual line count
+        if total_visual > viewport_height {
             let scrollbar = Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .thumb_style(Style::default().fg(Color::Rgb(96, 125, 139)));
-            let mut state = ScrollbarState::new(self.total_lines).position(scroll);
+            let mut state = ScrollbarState::new(total_visual).position(scroll_pos);
             frame.render_stateful_widget(scrollbar, area.inner(Margin::new(0, 1)), &mut state);
         }
     }
