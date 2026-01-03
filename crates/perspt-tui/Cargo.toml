@@ -16,11 +16,13 @@ perspt-core = { version = "0.1.0", path = "../perspt-core" }
 
 # UI components
 ratatui = "0.30"
-crossterm = "0.29"
+crossterm = { version = "0.29", features = ["event-stream"] }
 pulldown-cmark = "0.13"
 
 # Async
 tokio = { version = "1.42", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
 
 # Rich Input
 tui-textarea = "0.7"

@@ -34,19 +34,36 @@ pub enum AppMode {
 /// }
 /// ```
 pub async fn run_chat_tui(provider: GenAIProvider, model: String) -> Result<()> {
-    use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+    use crossterm::event::{
+        DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    };
     use ratatui::crossterm::execute;
     use std::io::stdout;
 
     // Enable mouse capture for scroll wheel support
     execute!(stdout(), EnableMouseCapture)?;
 
+    // Enable bracketed paste for multi-line paste handling
+    execute!(stdout(), EnableBracketedPaste)?;
+
+    // Enable keyboard enhancement for better modifier detection
+    // This allows reliable Ctrl+Enter, Shift+Tab detection
+    let _ = execute!(
+        stdout(),
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+        )
+    );
+
     let mut terminal = ratatui::init();
     let mut app = ChatApp::new(provider, model);
 
     let result = app.run(&mut terminal).await;
 
-    // Disable mouse capture and restore terminal
+    // Restore terminal
+    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     ratatui::restore();
     execute!(stdout(), DisableMouseCapture)?;
 

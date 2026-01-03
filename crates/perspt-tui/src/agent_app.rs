@@ -1,14 +1,17 @@
 //! Agent App - Main TUI Application
 //!
 //! Coordinates all TUI components for the Agent mode with full keyboard navigation.
+//! Now with async event-driven architecture support.
 
+use crate::app_event::{AgentStateUpdate, AppEvent};
 use crate::dashboard::Dashboard;
 use crate::diff_viewer::DiffViewer;
 use crate::review_modal::{ReviewDecision, ReviewModal, StabilityMetrics};
 use crate::task_tree::{TaskStatus, TaskTree};
 use crate::telemetry::EnergyComponents;
+use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEventKind};
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
+    crossterm::event::{self, Event},
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Tabs},
@@ -153,6 +156,121 @@ impl AgentApp {
             }
         }
         Ok(())
+    }
+
+    /// Handle an AppEvent from the async event loop
+    ///
+    /// Returns `true` to continue running, `false` to quit.
+    pub fn handle_app_event(&mut self, event: AppEvent) -> bool {
+        match event {
+            AppEvent::Terminal(crossterm_event) => self.handle_terminal_event(crossterm_event),
+            AppEvent::AgentUpdate(update) => {
+                self.handle_agent_update(update);
+                true
+            }
+            AppEvent::Tick => {
+                // Update animations if needed
+                true
+            }
+            AppEvent::Quit => false,
+            AppEvent::Error(e) => {
+                self.dashboard.log(format!("Error: {}", e));
+                true
+            }
+            // Stream events not used in agent mode
+            AppEvent::StreamChunk(_) | AppEvent::StreamComplete => true,
+        }
+    }
+
+    /// Handle a terminal event
+    fn handle_terminal_event(&mut self, event: CrosstermEvent) -> bool {
+        match event {
+            CrosstermEvent::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    return true;
+                }
+
+                // Handle modal first if visible
+                if self.review_modal.visible {
+                    match key.code {
+                        KeyCode::Left => self.review_modal.select_left(),
+                        KeyCode::Right => self.review_modal.select_right(),
+                        KeyCode::Char(c) => {
+                            if let Some(decision) = self.review_modal.handle_key(c) {
+                                self.handle_review_decision(decision);
+                                self.review_modal.hide();
+                            }
+                        }
+                        KeyCode::Enter => {
+                            let decision = self.review_modal.get_decision();
+                            self.handle_review_decision(decision);
+                            self.review_modal.hide();
+                        }
+                        KeyCode::Esc => self.review_modal.hide(),
+                        _ => {}
+                    }
+                    return true;
+                }
+
+                match key.code {
+                    // Quit
+                    KeyCode::Char('q') => return false,
+                    // Pause/Resume
+                    KeyCode::Char('p') => self.paused = !self.paused,
+                    // Tab navigation
+                    KeyCode::Tab => self.next_tab(),
+                    KeyCode::BackTab => self.prev_tab(),
+                    KeyCode::Char('1') => self.active_tab = ActiveTab::Dashboard,
+                    KeyCode::Char('2') => self.active_tab = ActiveTab::Tasks,
+                    KeyCode::Char('3') => self.active_tab = ActiveTab::Diff,
+                    // Vertical navigation (vim-style)
+                    KeyCode::Up | KeyCode::Char('k') => self.handle_up(),
+                    KeyCode::Down | KeyCode::Char('j') => self.handle_down(),
+                    // Page navigation
+                    KeyCode::PageUp => self.handle_page_up(),
+                    KeyCode::PageDown => self.handle_page_down(),
+                    // Task tree specific
+                    KeyCode::Char(' ') | KeyCode::Enter => self.handle_select(),
+                    // Approve current
+                    KeyCode::Char('a') => self.show_approval_modal(),
+                    // Toggle diff view mode
+                    KeyCode::Char('v') if self.active_tab == ActiveTab::Diff => {
+                        self.diff_viewer.toggle_view_mode();
+                    }
+                    // Navigation within task tree
+                    KeyCode::Left | KeyCode::Char('h') => self.handle_left(),
+                    KeyCode::Right | KeyCode::Char('l') => self.handle_right(),
+                    _ => {}
+                }
+            }
+            CrosstermEvent::Resize(_, _) => {
+                // Terminal resize - render will handle it
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Handle agent state updates
+    fn handle_agent_update(&mut self, update: AgentStateUpdate) {
+        match update {
+            AgentStateUpdate::TaskStatusChanged { task_id, status } => {
+                self.task_tree.update_status(&task_id, status);
+            }
+            AgentStateUpdate::EnergyUpdated(energy) => {
+                self.dashboard.update_energy(energy);
+            }
+            AgentStateUpdate::Log(msg) => {
+                self.dashboard.log(msg);
+            }
+            AgentStateUpdate::NodeCompleted(node_id) => {
+                self.dashboard.completed_nodes += 1;
+                self.dashboard.log(format!("✓ Node {} completed", node_id));
+            }
+            AgentStateUpdate::Complete => {
+                self.dashboard.log("🎉 Orchestration complete!".to_string());
+            }
+        }
     }
 
     fn handle_review_decision(&mut self, decision: ReviewDecision) {
