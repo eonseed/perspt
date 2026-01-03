@@ -67,6 +67,7 @@ pub struct TaskNode {
 }
 
 /// Task tree viewer state with expand/collapse support
+#[derive(Default)]
 pub struct TaskTree {
     /// All task nodes indexed by ID
     nodes: HashMap<String, TaskNode>,
@@ -80,19 +81,6 @@ pub struct TaskTree {
     pub state: ListState,
     /// Theme for styling
     theme: Theme,
-}
-
-impl Default for TaskTree {
-    fn default() -> Self {
-        Self {
-            nodes: HashMap::new(),
-            roots: Vec::new(),
-            collapsed: HashSet::new(),
-            visible_tasks: Vec::new(),
-            state: ListState::default(),
-            theme: Theme::default(),
-        }
-    }
 }
 
 impl TaskTree {
