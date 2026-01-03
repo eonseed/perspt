@@ -328,24 +328,38 @@ Congratulations! 🎉 You've successfully started your first conversation with P
 Basic Commands
 --------------
 
-While chatting, you can use these keyboard shortcuts:
+While chatting in TUI mode, you can use these keyboard shortcuts:
 
 .. list-table::
-   :widths: 20 80
+   :widths: 25 75
    :header-rows: 1
 
    * - Shortcut
      - Action
    * - **Enter**
      - Send your message
-   * - **Ctrl+C**
+   * - **Ctrl+J** or **Ctrl+Enter**
+     - Insert a newline in the input
+   * - **PageUp / PageDown**
+     - Scroll through chat history (10 lines)
+   * - **Ctrl+Up / Ctrl+Down**
+     - Scroll through chat history (1 line)
+   * - **Mouse wheel**
+     - Scroll through chat history (3 lines)
+   * - **Ctrl+C** or **Ctrl+Q**
      - Exit Perspt
-   * - **↑/↓ Arrow Keys**
-     - Scroll through chat history
-   * - **Page Up/Down**
-     - Scroll chat quickly
-   * - **Ctrl+L**
-     - Clear the screen
+
+TUI Scrolling Behavior
+~~~~~~~~~~~~~~~~~~~~~~
+
+The chat interface features intelligent scrolling:
+
+- **Auto-scroll during streaming**: New AI response content is automatically scrolled into view
+- **Manual scroll disables auto-scroll**: Scrolling up lets you read previous content without interruption
+- **Return to bottom**: Scrolling to the end of the conversation re-enables auto-scroll
+
+The TUI uses virtual scrolling to efficiently handle very long conversations, rendering
+only the visible portion of the chat history.
 
 Switching Models
 ----------------

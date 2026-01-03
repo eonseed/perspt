@@ -59,14 +59,30 @@ Key Actions
 .. list-table::
    :widths: 30 70
 
-   * - **Scroll up/down**
-     - View previous messages
-   * - **Esc**
+   * - **Enter**
+     - Send message
+   * - **Ctrl+J** or **Ctrl+Enter**
+     - Insert newline in input
+   * - **PageUp / PageDown**
+     - Scroll message history (10 lines)
+   * - **Ctrl+Up / Ctrl+Down**
+     - Scroll message history (1 line)
+   * - **Mouse Scroll**
+     - Scroll message history (3 lines)
+   * - **Ctrl+C** or **Ctrl+Q**
      - Exit Perspt
-   * - **/save**
-     - Save conversation
-   * - **/clear**
-     - Clear history
+
+Scrolling Behavior
+------------------
+
+The chat interface features intelligent auto-scroll:
+
+- **During streaming**: Automatically scrolls to show new content
+- **Manual scroll up**: Disables auto-scroll so you can read previous messages
+- **Scroll to bottom**: Re-enables auto-scroll when you reach the end
+
+The TUI uses virtual scrolling to handle very long conversations efficiently,
+rendering only the visible portion of the message history.
 
 Saving Conversations
 --------------------
