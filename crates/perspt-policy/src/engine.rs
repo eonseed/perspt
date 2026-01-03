@@ -105,7 +105,7 @@ impl PolicyEngine {
                 .map_err(|e| anyhow::anyhow!("Eval error: {}", e))?;
         }
 
-        module.freeze()
+        Ok(module.freeze()?)
     }
 
     /// Create the globals for Starlark evaluation

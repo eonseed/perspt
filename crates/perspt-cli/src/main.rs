@@ -171,10 +171,15 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging - use error level for simple-chat to suppress INFO logs
+    // Initialize logging
+    // Suppress logs for TUI modes (Chat, Agent) to prevent bleeding into terminal
     let log_level = if cli.verbose {
         "debug"
+    } else if matches!(cli.command, None | Some(Commands::Chat { .. })) {
+        // Chat mode uses TUI - suppress all logs
+        "off"
     } else if matches!(cli.command, Some(Commands::SimpleChat { .. })) {
+        // Simple chat only shows errors
         "error"
     } else {
         "info"

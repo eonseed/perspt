@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Starlark policy engine
-starlark = "0.12"
+starlark = "0.13"
 
 # Shell parsing
 shell-words = "1.1"
