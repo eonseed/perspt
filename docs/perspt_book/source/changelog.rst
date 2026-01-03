@@ -6,6 +6,43 @@ All notable changes to Perspt will be documented in this file.
 The format is based on `Keep a Changelog <https://keepachangelog.com/en/1.0.0/>`_,
 and this project adheres to `Semantic Versioning <https://semver.org/spec/v2.0.0.html>`_.
 
+[0.5.1] - 2026-01-04
+--------------------
+
+Fixed
+~~~~~
+
+- **TUI Virtual Scrolling**: Complete refactor of chat message rendering to fix truncation and scroll bugs
+  
+  - Implemented virtual scrolling with manual viewport slicing (inspired by Codex TUI architecture)
+  - Fixed logical vs visual line mismatch that caused auto-scroll to stop before reaching bottom
+  - Eliminated u16 overflow in scroll offset (now uses usize for unlimited line counts)
+  - Added immediate re-render after stream finalization to eliminate "wait for next query" lag
+  - Added ``textwrap`` and ``unicode-width`` dependencies for accurate text wrapping
+
+- **Clippy Compliance**: Resolved all clippy warnings in perspt-tui crate
+  
+  - Converted single-arm match statements to if expressions
+  - Simplified duplicate conditional branches
+  - Applied derive(Default) where appropriate
+
+Technical Details
+~~~~~~~~~~~~~~~~~
+
+The chat TUI now uses a "transcript" rendering model:
+
+1. **Line Collection**: All messages are collected as (text, style) tuples
+2. **Manual Wrapping**: Text is wrapped to viewport width using Unicode-aware width calculations
+3. **Viewport Slicing**: Only visible lines are rendered (skip/take based on scroll offset)
+4. **No Paragraph::scroll()**: Removes reliance on Ratatui's internal scroll which had u16 limits
+
+This ensures:
+
+- Long AI responses display completely without truncation
+- Auto-scroll reaches the true bottom of content
+- Scrollbar accurately reflects position in large conversations
+- Terminal resize is handled gracefully
+
 [0.5.0] - 2025-12-23
 --------------------
 
