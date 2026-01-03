@@ -1,12 +1,74 @@
 //! Theme module for consistent styling across the TUI
 //!
 //! Provides semantic colors optimized for dark terminal backgrounds.
+//! Inspired by Codex CLI's beautiful and responsive design.
 
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::symbols;
+use ratatui::widgets::BorderType;
+
+/// Semantic color palette for consistent theming
+#[derive(Debug, Clone, Copy)]
+pub struct Palette {
+    /// Primary brand color
+    pub primary: Color,
+    /// Secondary accent color
+    pub secondary: Color,
+    /// Surface/background tint
+    pub surface: Color,
+    /// Text on surface
+    pub on_surface: Color,
+    /// Muted text
+    pub on_surface_muted: Color,
+    /// Border color
+    pub border: Color,
+    /// Border color when focused
+    pub border_focused: Color,
+    /// Success/green
+    pub success: Color,
+    /// Warning/amber
+    pub warning: Color,
+    /// Error/red
+    pub error: Color,
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Self::dark()
+    }
+}
+
+impl Palette {
+    /// Dark theme palette
+    pub fn dark() -> Self {
+        Self {
+            primary: Color::Rgb(129, 199, 132),          // Soft green
+            secondary: Color::Rgb(144, 202, 249),        // Soft blue
+            surface: Color::Rgb(40, 42, 54),             // Dark background
+            on_surface: Color::Rgb(248, 248, 242),       // Off-white
+            on_surface_muted: Color::Rgb(120, 144, 156), // Dim gray
+            border: Color::Rgb(96, 125, 139),            // Blue-gray
+            border_focused: Color::Rgb(129, 199, 132),   // Green when focused
+            success: Color::Rgb(102, 187, 106),          // Green
+            warning: Color::Rgb(255, 183, 77),           // Amber
+            error: Color::Rgb(239, 83, 80),              // Red
+        }
+    }
+}
+
+/// Rounded border set for modern appearance
+pub const ROUNDED_BORDERS: symbols::border::Set = symbols::border::ROUNDED;
+
+/// Get rounded border type
+pub const fn rounded_border_type() -> BorderType {
+    BorderType::Rounded
+}
 
 /// Theme configuration for the TUI
 #[derive(Debug, Clone)]
 pub struct Theme {
+    /// Color palette
+    pub palette: Palette,
     /// User message styling
     pub user_message: Style,
     /// Assistant message styling
@@ -35,6 +97,12 @@ pub struct Theme {
     pub muted: Style,
     /// Streaming cursor
     pub cursor: Style,
+    /// Tab active style
+    pub tab_active: Style,
+    /// Tab inactive style
+    pub tab_inactive: Style,
+    /// User message background tint
+    pub user_message_bg: Style,
 }
 
 impl Default for Theme {
@@ -46,45 +114,55 @@ impl Default for Theme {
 impl Theme {
     /// Dark theme optimized for modern terminals (Ghostty, iTerm2, etc.)
     pub fn dark() -> Self {
+        let palette = Palette::dark();
+
         Self {
+            palette,
             // Messages
             user_message: Style::default()
-                .fg(Color::Rgb(129, 199, 132)) // Soft green
+                .fg(palette.primary)
                 .add_modifier(Modifier::BOLD),
-            assistant_message: Style::default().fg(Color::Rgb(144, 202, 249)), // Soft blue
-            system_message: Style::default().fg(Color::Rgb(176, 190, 197)),    // Blue-gray
+            assistant_message: Style::default().fg(palette.secondary),
+            system_message: Style::default().fg(Color::Rgb(176, 190, 197)),
 
             // Code
-            code_block: Style::default()
-                .fg(Color::Rgb(248, 248, 242)) // Off-white
-                .bg(Color::Rgb(40, 42, 54)), // Dark background
+            code_block: Style::default().fg(palette.on_surface).bg(palette.surface),
 
             // Status
-            success: Style::default().fg(Color::Rgb(102, 187, 106)), // Green
-            warning: Style::default().fg(Color::Rgb(255, 183, 77)),  // Amber
-            error: Style::default().fg(Color::Rgb(239, 83, 80)),     // Red
+            success: Style::default().fg(palette.success),
+            warning: Style::default().fg(palette.warning),
+            error: Style::default().fg(palette.error),
 
             // Energy levels (Lyapunov)
             energy_high: Style::default()
-                .fg(Color::Rgb(239, 83, 80)) // Red - unstable
+                .fg(palette.error)
                 .add_modifier(Modifier::BOLD),
-            energy_medium: Style::default().fg(Color::Rgb(255, 183, 77)), // Amber - converging
+            energy_medium: Style::default().fg(palette.warning),
             energy_low: Style::default()
-                .fg(Color::Rgb(102, 187, 106)) // Green - stable
+                .fg(palette.success)
                 .add_modifier(Modifier::BOLD),
 
             // UI elements
-            border: Style::default().fg(Color::Rgb(96, 125, 139)), // Blue-gray
+            border: Style::default().fg(palette.border),
             highlight: Style::default()
-                .fg(Color::Rgb(224, 247, 250)) // Cyan tint
-                .bg(Color::Rgb(55, 71, 79)) // Dark selection
+                .fg(Color::Rgb(224, 247, 250))
+                .bg(Color::Rgb(55, 71, 79))
                 .add_modifier(Modifier::BOLD),
-            muted: Style::default().fg(Color::Rgb(120, 144, 156)), // Dim gray
+            muted: Style::default().fg(palette.on_surface_muted),
 
             // Cursor for streaming
             cursor: Style::default()
-                .fg(Color::Rgb(129, 212, 250)) // Light cyan
+                .fg(Color::Rgb(129, 212, 250))
                 .add_modifier(Modifier::SLOW_BLINK),
+
+            // Tab styling
+            tab_active: Style::default()
+                .fg(palette.primary)
+                .add_modifier(Modifier::BOLD),
+            tab_inactive: Style::default().fg(palette.on_surface_muted),
+
+            // User message background (subtle tint)
+            user_message_bg: Style::default().bg(Color::Rgb(30, 35, 40)), // Slightly lighter than terminal bg
         }
     }
 
@@ -128,4 +206,9 @@ pub mod icons {
     pub const ENERGY: &str = "⚡";
     pub const STABLE: &str = "🔒";
     pub const CURSOR: &str = "▌";
+    /// Tree guide characters
+    pub const TREE_BRANCH: &str = "├─";
+    pub const TREE_LAST: &str = "└─";
+    pub const TREE_LINE: &str = "│ ";
+    pub const TREE_SPACE: &str = "  ";
 }

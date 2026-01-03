@@ -1,14 +1,18 @@
 //! Chat Application for Perspt TUI
 //!
 //! An elegant chat interface with markdown rendering, syntax highlighting,
-//! and reliable key handling.
+//! and reliable key handling. Now with async event-driven architecture.
 
+use crate::app_event::AppEvent;
 use crate::simple_input::SimpleInput;
 use crate::theme::{icons, Theme};
 use anyhow::Result;
+use crossterm::event::{
+    Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
+};
 use perspt_core::{GenAIProvider, EOT_SIGNAL};
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind},
+    crossterm::event::{self, Event},
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
@@ -84,6 +88,12 @@ pub struct ChatApp {
     stream_rx: Option<mpsc::UnboundedReceiver<String>>,
     /// Total lines in messages (for scrolling)
     total_lines: usize,
+    /// Auto-scroll to bottom flag (set during streaming)
+    auto_scroll: bool,
+    /// Visible height of message area (updated during render)
+    visible_height: usize,
+    /// Flag to indicate a message send is pending (for async handling)
+    pending_send: bool,
 }
 
 impl ChatApp {
@@ -104,6 +114,9 @@ impl ChatApp {
             should_quit: false,
             stream_rx: None,
             total_lines: 0,
+            auto_scroll: true, // Start with auto-scroll enabled
+            visible_height: 20,
+            pending_send: false,
         }
     }
 
@@ -113,20 +126,23 @@ impl ChatApp {
             // Render
             terminal.draw(|frame| self.render(frame))?;
 
-            // Handle streaming updates
+            // Handle streaming updates - drain ALL pending chunks before rendering
             if let Some(ref mut rx) = self.stream_rx {
-                match rx.try_recv() {
-                    Ok(chunk) => {
-                        if chunk == EOT_SIGNAL {
-                            self.finalize_streaming();
-                        } else {
-                            self.streaming_buffer.push_str(&chunk);
+                loop {
+                    match rx.try_recv() {
+                        Ok(chunk) => {
+                            if chunk == EOT_SIGNAL {
+                                self.finalize_streaming();
+                                break;
+                            } else {
+                                self.streaming_buffer.push_str(&chunk);
+                            }
                         }
-                        continue;
-                    }
-                    Err(mpsc::error::TryRecvError::Empty) => {}
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
-                        self.finalize_streaming();
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => {
+                            self.finalize_streaming();
+                            break;
+                        }
                     }
                 }
             }
@@ -220,6 +236,148 @@ impl ChatApp {
         Ok(())
     }
 
+    /// Handle an AppEvent from the async event loop
+    ///
+    /// Returns `true` to continue running, `false` to quit.
+    pub fn handle_app_event(&mut self, event: AppEvent) -> bool {
+        match event {
+            AppEvent::Terminal(crossterm_event) => self.handle_terminal_event(crossterm_event),
+            AppEvent::StreamChunk(chunk) => {
+                self.streaming_buffer.push_str(&chunk);
+                true
+            }
+            AppEvent::StreamComplete => {
+                self.finalize_streaming();
+                true
+            }
+            AppEvent::Tick => {
+                if self.is_streaming {
+                    self.throbber_state.calc_next();
+                }
+                true
+            }
+            AppEvent::Quit => false,
+            AppEvent::Error(e) => {
+                // Log error but continue
+                log::error!("App error: {}", e);
+                true
+            }
+            AppEvent::AgentUpdate(_) => true, // Not used in chat mode
+        }
+    }
+
+    /// Handle a terminal event (key press, mouse, resize)
+    fn handle_terminal_event(&mut self, event: CrosstermEvent) -> bool {
+        match event {
+            CrosstermEvent::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    return true;
+                }
+
+                match key.code {
+                    // Quit
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return false;
+                    }
+                    KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return false;
+                    }
+                    // Send message on Enter (needs special handling - sets pending_send flag)
+                    KeyCode::Enter if !self.is_streaming => {
+                        if !self.input.is_empty() {
+                            self.pending_send = true;
+                        }
+                    }
+                    // Newline with Ctrl+J
+                    KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if !self.is_streaming {
+                            self.input.insert_newline();
+                        }
+                    }
+                    // Ctrl+Enter for newline
+                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        if !self.is_streaming {
+                            self.input.insert_newline();
+                        }
+                    }
+                    // Scroll
+                    KeyCode::PageUp => self.scroll_up(10),
+                    KeyCode::PageDown => self.scroll_down(10),
+                    KeyCode::Up if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.scroll_up(1)
+                    }
+                    KeyCode::Down if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.scroll_down(1)
+                    }
+                    // Input navigation
+                    KeyCode::Left => self.input.move_left(),
+                    KeyCode::Right => self.input.move_right(),
+                    KeyCode::Up => self.input.move_up(),
+                    KeyCode::Down => self.input.move_down(),
+                    KeyCode::Home => self.input.move_home(),
+                    KeyCode::End => self.input.move_end(),
+                    // Text editing
+                    KeyCode::Backspace => self.input.backspace(),
+                    KeyCode::Delete => self.input.delete(),
+                    KeyCode::Char(c) => {
+                        if !self.is_streaming {
+                            self.input.insert_char(c);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            CrosstermEvent::Mouse(mouse) => match mouse.kind {
+                MouseEventKind::ScrollUp => self.scroll_up(3),
+                MouseEventKind::ScrollDown => self.scroll_down(3),
+                _ => {}
+            },
+            CrosstermEvent::Resize(_, _) => {
+                // Terminal resize - render will handle it
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Check if a message send is pending (set by Enter key in handle_terminal_event)
+    pub fn is_send_pending(&self) -> bool {
+        self.pending_send
+    }
+
+    /// Clear the pending send flag
+    pub fn clear_pending_send(&mut self) {
+        self.pending_send = false;
+    }
+
+    /// Check and process pending stream chunks
+    pub fn process_stream_chunks(&mut self) {
+        if let Some(ref mut rx) = self.stream_rx {
+            loop {
+                match rx.try_recv() {
+                    Ok(chunk) => {
+                        if chunk == EOT_SIGNAL {
+                            self.finalize_streaming();
+                            break;
+                        } else {
+                            self.streaming_buffer.push_str(&chunk);
+                        }
+                    }
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                        self.finalize_streaming();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check if a render is needed
+    pub fn needs_render(&self) -> bool {
+        self.is_streaming || self.pending_send
+    }
+
     /// Send the current message to the LLM
     async fn send_message(&mut self) -> Result<()> {
         let user_message = self.input.text().trim().to_string();
@@ -281,24 +439,25 @@ impl ChatApp {
         self.scroll_to_bottom();
     }
 
-    /// Scroll up
+    /// Scroll up (disables auto-scroll)
     fn scroll_up(&mut self, n: usize) {
+        self.auto_scroll = false; // User is manually scrolling
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
 
     /// Scroll down
     fn scroll_down(&mut self, n: usize) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
-        let max = self.total_lines.saturating_sub(10);
-        if self.scroll_offset > max {
+        let max = self.total_lines.saturating_sub(self.visible_height);
+        if self.scroll_offset >= max {
             self.scroll_offset = max;
+            self.auto_scroll = true; // Re-enable auto-scroll when at bottom
         }
     }
 
-    /// Scroll to bottom
+    /// Enable auto-scroll to bottom (actual scroll happens in render)
     fn scroll_to_bottom(&mut self) {
-        // Set to max value - will be capped during render based on actual content
-        self.scroll_offset = usize::MAX / 2;
+        self.auto_scroll = true;
     }
 
     /// Render the chat application
@@ -468,10 +627,22 @@ impl ChatApp {
 
         self.total_lines = lines.len();
 
-        // Apply scroll
+        // Update visible height for scroll calculations
         let visible_lines = inner.height as usize;
+        self.visible_height = visible_lines;
+
+        // Calculate max scroll position
         let max_scroll = self.total_lines.saturating_sub(visible_lines);
-        let scroll = self.scroll_offset.min(max_scroll);
+
+        // Apply auto-scroll if enabled
+        let scroll = if self.auto_scroll {
+            max_scroll
+        } else {
+            self.scroll_offset.min(max_scroll)
+        };
+
+        // Update scroll_offset to actual position
+        self.scroll_offset = scroll;
 
         let paragraph = Paragraph::new(Text::from(lines))
             .wrap(Wrap { trim: false })
