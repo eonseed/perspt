@@ -13,6 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 perspt-core = { version = "0.1.0", path = "../perspt-core" }
+perspt-agent = { version = "0.1.0", path = "../perspt-agent" }
 
 # UI components
 ratatui = "0.30"

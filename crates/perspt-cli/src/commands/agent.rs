@@ -98,10 +98,22 @@ pub async fn run(
     let is_tty = atty::is(atty::Stream::Stdout);
 
     if is_tty && !auto_approve {
-        // Interactive mode with TUI
+        // Interactive mode with TUI - run orchestrator with TUI integration
         println!("Running in interactive TUI mode...");
         println!("(Use --yes flag to run headlessly)");
-        perspt_tui::run_agent_tui()?;
+        println!();
+
+        // Start Python LSP (ty) for type checking
+        println!("   🔍 Starting ty language server for Python...");
+        if let Err(e) = orchestrator.start_python_lsp().await {
+            log::warn!("Failed to start ty: {}", e);
+            println!("   ⚠️ Continuing without LSP (ty not available)");
+        } else {
+            println!("   ✅ ty language server ready");
+        }
+
+        // Run with TUI integration
+        perspt_tui::run_agent_tui_with_orchestrator(orchestrator, task).await?;
     } else {
         // Headless mode - run orchestrator directly
         println!(

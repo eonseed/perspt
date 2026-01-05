@@ -45,6 +45,10 @@ pub struct SRBNOrchestrator {
     architect_model: String,
     /// Actuator model name for corrections
     actuator_model: String,
+    /// Event sender for TUI updates (optional)
+    event_sender: Option<perspt_core::events::channel::EventSender>,
+    /// Action receiver for TUI commands (optional)
+    action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
 }
 
 impl SRBNOrchestrator {
@@ -106,6 +110,8 @@ impl SRBNOrchestrator {
             provider,
             architect_model: stored_architect_model,
             actuator_model: stored_actuator_model,
+            event_sender: None,
+            action_receiver: None,
         }
     }
 
@@ -115,6 +121,90 @@ impl SRBNOrchestrator {
         let idx = self.graph.add_node(node);
         self.node_indices.insert(node_id, idx);
         idx
+    }
+
+    /// Connect TUI channels for interactive control
+    pub fn connect_tui(
+        &mut self,
+        event_sender: perspt_core::events::channel::EventSender,
+        action_receiver: perspt_core::events::channel::ActionReceiver,
+    ) {
+        self.tools.set_event_sender(event_sender.clone());
+        self.event_sender = Some(event_sender);
+        self.action_receiver = Some(action_receiver);
+    }
+
+    /// Emit an event to the TUI (if connected)
+    fn emit_event(&self, event: perspt_core::AgentEvent) {
+        if let Some(ref sender) = self.event_sender {
+            let _ = sender.send(event);
+        }
+    }
+
+    /// Emit a log message to TUI
+    fn emit_log(&self, msg: impl Into<String>) {
+        self.emit_event(perspt_core::AgentEvent::Log(msg.into()));
+    }
+
+    /// Request approval from user and await response
+    /// Returns true if approved, false if rejected
+    async fn await_approval(
+        &mut self,
+        action_type: perspt_core::ActionType,
+        description: String,
+        diff: Option<String>,
+    ) -> bool {
+        // If auto_approve is enabled, skip approval
+        if self.auto_approve {
+            return true;
+        }
+
+        // If no TUI connected, default to approve (headless with --yes)
+        if self.action_receiver.is_none() {
+            return true;
+        }
+
+        // Generate unique request ID
+        let request_id = uuid::Uuid::new_v4().to_string();
+
+        // Emit approval request
+        self.emit_event(perspt_core::AgentEvent::ApprovalRequest {
+            request_id: request_id.clone(),
+            node_id: "current".to_string(),
+            action_type,
+            description,
+            diff,
+        });
+
+        // Wait for response
+        if let Some(ref mut receiver) = self.action_receiver {
+            while let Some(action) = receiver.recv().await {
+                match action {
+                    perspt_core::AgentAction::Approve { request_id: rid } if rid == request_id => {
+                        self.emit_log("✓ Approved by user");
+                        return true;
+                    }
+                    perspt_core::AgentAction::Reject {
+                        request_id: rid,
+                        reason,
+                    } if rid == request_id => {
+                        let msg = reason.unwrap_or_else(|| "User rejected".to_string());
+                        self.emit_log(format!("✗ Rejected: {}", msg));
+                        return false;
+                    }
+                    perspt_core::AgentAction::Abort => {
+                        self.emit_log("⚠️ Session aborted by user");
+                        return false;
+                    }
+                    _ => {
+                        // Ignore other actions while waiting for this specific approval
+                        continue;
+                    }
+                }
+            }
+        }
+
+        false // Channel closed
     }
 
     /// Add a dependency edge between nodes
@@ -141,19 +231,132 @@ impl SRBNOrchestrator {
     /// Run the complete SRBN control loop
     pub async fn run(&mut self, task: String) -> Result<()> {
         log::info!("Starting SRBN execution for task: {}", task);
+        self.emit_log(format!("🚀 Starting task: {}", task));
+
+        // Step 0: Project Initialization
+        self.step_init_project(&task).await?;
 
         // Step 1: Architecture Sheafification
         self.step_sheafify(task).await?;
 
+        // Emit task nodes to TUI after sheafification
+        for (node_id, _) in &self.node_indices {
+            if let Some(idx) = self.node_indices.get(node_id) {
+                if let Some(node) = self.graph.node_weight(*idx) {
+                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                        node_id: node.node_id.clone(),
+                        status: perspt_core::NodeStatus::Pending,
+                    });
+                }
+            }
+        }
+
         // Step 2-7: Execute nodes in topological order
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
+        let total_nodes = indices.len();
 
-        for idx in indices {
-            self.execute_node(idx).await?;
+        for (i, idx) in indices.iter().enumerate() {
+            // Emit running status
+            if let Some(node) = self.graph.node_weight(*idx) {
+                self.emit_log(format!("📝 [{}/{}] {}", i + 1, total_nodes, node.goal));
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: node.node_id.clone(),
+                    status: perspt_core::NodeStatus::Running,
+                });
+            }
+
+            self.execute_node(*idx).await?;
+
+            // Emit completed status
+            if let Some(node) = self.graph.node_weight(*idx) {
+                self.emit_event(perspt_core::AgentEvent::NodeCompleted {
+                    node_id: node.node_id.clone(),
+                    goal: node.goal.clone(),
+                });
+            }
         }
 
         log::info!("SRBN execution completed");
+        self.emit_event(perspt_core::AgentEvent::Complete {
+            success: true,
+            message: format!("Completed {} nodes", total_nodes),
+        });
+        Ok(())
+    }
+
+    /// Step 0: Project Initialization
+    /// Checks for existing project or initializes new one based on task
+    async fn step_init_project(&mut self, task: &str) -> Result<()> {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+
+        // 1. Check if project already exists
+        if let Some(plugin) = registry.detect(&self.context.working_dir) {
+            self.emit_log(format!("📂 Detected existing {} project", plugin.name()));
+            return Ok(());
+        }
+
+        // 2. If empty, heuristically detect language from task
+        let task_lower = task.to_lowercase();
+        let plugin_name = if task_lower.contains("rust") {
+            Some("rust")
+        } else if task_lower.contains("python")
+            || task_lower.contains("flask")
+            || task_lower.contains("django")
+        {
+            Some("python")
+        } else if task_lower.contains("javascript")
+            || task_lower.contains("typescript")
+            || task_lower.contains("node")
+            || task_lower.contains("react")
+        {
+            Some("javascript")
+        } else {
+            None
+        };
+
+        if let Some(name) = plugin_name {
+            if let Some(plugin) = registry.get(name) {
+                self.emit_log(format!("🌱 Initializing new {} project", name));
+
+                let opts = perspt_core::plugin::InitOptions {
+                    name: "perspt_app".to_string(), // Safe default name
+                    ..Default::default()
+                };
+
+                let cmd = plugin.init_command(&opts);
+
+                // Request approval for init
+                let approved = self
+                    .await_approval(
+                        perspt_core::ActionType::Command {
+                            command: cmd.clone(),
+                        },
+                        format!("Initialize {} project", name),
+                        None,
+                    )
+                    .await;
+
+                if approved {
+                    // Run command
+                    let mut args = HashMap::new();
+                    args.insert("command".to_string(), cmd.clone());
+                    let call = ToolCall {
+                        name: "run_command".to_string(),
+                        arguments: args,
+                    };
+                    let result = self.tools.execute(&call).await;
+                    if result.success {
+                        self.emit_log("✅ Project initialized");
+                    } else {
+                        self.emit_log(format!("❌ Init failed: {:?}", result.error));
+                    }
+                }
+            }
+        } else {
+            self.emit_log("ℹ️ No language detected, skipping project init");
+        }
+
         Ok(())
     }
 
@@ -217,7 +420,13 @@ impl SRBNOrchestrator {
                         // For now, auto-approve in headless mode
                     }
 
-                    println!("   ✅ Architect produced plan with {} task(s)", plan.len());
+                    self.emit_log(format!(
+                        "✅ Architect produced plan with {} task(s)",
+                        plan.len()
+                    ));
+
+                    // Emit plan generated event
+                    self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan.clone()));
 
                     // Create nodes from the plan
                     self.create_nodes_from_plan(&plan)?;
@@ -397,9 +606,24 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     }
 
     /// Create a fallback single-task execution when plan parsing fails
+    /// Create a fallback single-task execution when plan parsing fails
     fn create_fallback_task(&mut self, task: &str) -> Result<()> {
         log::warn!("Using fallback single-task execution");
-        println!("   📝 Using simplified single-task execution");
+        self.emit_log("📝 Using simplified single-task execution");
+
+        // Emit minimal plan
+        let mut plan = perspt_core::types::TaskPlan::new();
+        plan.tasks.push(perspt_core::types::PlannedTask {
+            id: "root".to_string(),
+            goal: task.to_string(),
+            context_files: vec![],
+            output_files: vec![],
+            dependencies: vec![],
+            task_type: perspt_core::types::TaskType::Code,
+            contract: Default::default(),
+            command_contract: None,
+        });
+        self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan));
 
         let root_node = SRBNNode::new("root".to_string(), task.to_string(), ModelTier::Actuator);
         self.add_node(root_node);
@@ -451,16 +675,71 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         let node = &self.graph[idx];
         let message = actuator.process(node, &self.context).await?;
 
-        // Extract code blocks from the LLM response and write to files
         let content = &message.content;
 
-        // Parse code blocks in format: ```python\n...``` or ```\n...```
-        // Also look for file path patterns like "File: path/to/file.py"
-        if let Some(code_info) = self.extract_code_from_response(content) {
+        // Check for [COMMAND] blocks first (for TaskType::Command)
+        if let Some(command) = self.extract_command_from_response(content) {
+            log::info!("Extracted command: {}", command);
+            self.emit_log(format!("🔧 Command proposed: {}", command));
+
+            // Request approval before executing command
+            let approved = self
+                .await_approval(
+                    perspt_core::ActionType::Command {
+                        command: command.clone(),
+                    },
+                    format!("Execute shell command: {}", command),
+                    None,
+                )
+                .await;
+
+            if !approved {
+                self.emit_log("⏭️ Command skipped (not approved)");
+                return Ok(());
+            }
+
+            // Execute command via AgentTools
+            let mut args = HashMap::new();
+            args.insert("command".to_string(), command.clone());
+
+            let call = ToolCall {
+                name: "run_command".to_string(),
+                arguments: args,
+            };
+
+            let result = self.tools.execute(&call).await;
+            if result.success {
+                log::info!("✓ Command succeeded: {}", command);
+                self.emit_log(format!("✅ Command succeeded: {}", command));
+                self.emit_log(result.output);
+            } else {
+                log::warn!("Command failed: {:?}", result.error);
+                self.emit_log(format!("❌ Command failed: {:?}", result.error));
+            }
+        }
+        // Then check for file code blocks (for TaskType::Code)
+        else if let Some(code_info) = self.extract_code_from_response(content) {
             log::info!("Extracted code for file: {}", code_info.0);
+            self.emit_log(format!("📝 File proposed: {}", code_info.0));
 
             // Build full path
             let full_path = self.context.working_dir.join(&code_info.0);
+
+            // Request approval before writing file
+            let approved = self
+                .await_approval(
+                    perspt_core::ActionType::FileWrite {
+                        path: code_info.0.clone(),
+                    },
+                    format!("Write file: {}", code_info.0),
+                    Some(code_info.1.clone()),
+                )
+                .await;
+
+            if !approved {
+                self.emit_log("⏭️ File write skipped (not approved)");
+                return Ok(());
+            }
 
             // Create a tool call to write the file
             let mut args = HashMap::new();
@@ -475,7 +754,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             let result = self.tools.execute(&call).await;
             if result.success {
                 log::info!("✓ Wrote file: {}", code_info.0);
-                println!("   📝 Wrote file: {}", code_info.0);
+                self.emit_log(format!("✅ Wrote file: {}", code_info.0));
 
                 // Track the written file for LSP verification
                 self.last_written_file = Some(full_path.clone());
@@ -493,10 +772,11 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 }
             } else {
                 log::warn!("Failed to write file: {:?}", result.error);
+                self.emit_log(format!("❌ Failed to write file: {:?}", result.error));
             }
         } else {
             log::debug!(
-                "No code block found in response, response length: {}",
+                "No code block or command found in response, response length: {}",
                 content.len()
             );
             println!("   ℹ No file changes detected in response");
@@ -504,6 +784,28 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         self.context.history.push(message);
         Ok(())
+    }
+
+    /// Extract command from LLM response
+    /// Looks for [COMMAND] pattern
+    fn extract_command_from_response(&self, content: &str) -> Option<String> {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("[COMMAND]") {
+                return Some(trimmed.trim_start_matches("[COMMAND]").trim().to_string());
+            }
+            // Also support ```bash blocks with a command annotation
+            if trimmed.starts_with("$ ") || trimmed.starts_with("➜ ") {
+                return Some(
+                    trimmed
+                        .trim_start_matches("$ ")
+                        .trim_start_matches("➜ ")
+                        .trim()
+                        .to_string(),
+                );
+            }
+        }
+        None
     }
 
     /// Extract code from LLM response
@@ -575,7 +877,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
     /// Step 4: Stability Verification
     ///
-    /// Computes Lyapunov Energy V(x) from LSP diagnostics and tests
+    /// Computes Lyapunov Energy V(x) from LSP diagnostics, contracts, and tests
     async fn step_verify(&mut self, idx: NodeIndex) -> Result<EnergyComponents> {
         log::info!("Step 4: Verification - Computing stability energy");
 
@@ -614,15 +916,31 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             } else {
                 log::debug!("No LSP client available for Python");
             }
+
+            // V_str: Check forbidden patterns in written file
+            let node = &self.graph[idx];
+            if !node.contract.forbidden_patterns.is_empty() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    for pattern in &node.contract.forbidden_patterns {
+                        if content.contains(pattern) {
+                            energy.v_str += 0.5;
+                            log::warn!("Forbidden pattern found: '{}'", pattern);
+                            println!("   ⚠️ Forbidden pattern: '{}'", pattern);
+                        }
+                    }
+                }
+            }
         }
 
         let node = &self.graph[idx];
         log::info!(
-            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, Total={:.2}",
+            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, V_boot={:.2}, V_sheaf={:.2}, Total={:.2}",
             node.node_id,
             energy.v_syn,
             energy.v_str,
             energy.v_log,
+            energy.v_boot,
+            energy.v_sheaf,
             energy.total(&node.contract)
         );
 

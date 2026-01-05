@@ -179,6 +179,11 @@ impl AgentApp {
             }
             // Stream events not used in agent mode
             AppEvent::StreamChunk(_) | AppEvent::StreamComplete => true,
+            // Handle core events from new event system
+            AppEvent::CoreEvent(core_event) => {
+                self.handle_core_event(core_event);
+                true
+            }
         }
     }
 
@@ -269,6 +274,67 @@ impl AgentApp {
             }
             AgentStateUpdate::Complete => {
                 self.dashboard.log("🎉 Orchestration complete!".to_string());
+            }
+        }
+    }
+
+    /// Handle core events from perspt_core::AgentEvent
+    fn handle_core_event(&mut self, event: perspt_core::AgentEvent) {
+        use perspt_core::AgentEvent;
+        match event {
+            AgentEvent::PlanGenerated(plan) => {
+                let count = plan.len();
+                self.task_tree.populate_from_plan(plan);
+                self.dashboard.total_nodes = count;
+                self.dashboard
+                    .log(format!("📋 Loaded plan with {} tasks", count));
+            }
+            AgentEvent::TaskStatusChanged { node_id, status } => {
+                // Convert NodeStatus to TaskStatus
+                let task_status = match status {
+                    perspt_core::NodeStatus::Pending => TaskStatus::Pending,
+                    perspt_core::NodeStatus::Running => TaskStatus::Running,
+                    perspt_core::NodeStatus::Verifying => TaskStatus::Verifying,
+                    perspt_core::NodeStatus::Completed => TaskStatus::Completed,
+                    perspt_core::NodeStatus::Failed => TaskStatus::Failed,
+                    perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,
+                };
+                self.task_tree.update_status(&node_id, task_status);
+            }
+            AgentEvent::EnergyUpdated { energy, .. } => {
+                self.dashboard.update_energy(energy);
+            }
+            AgentEvent::Log(msg) => {
+                self.dashboard.log(msg);
+            }
+            AgentEvent::NodeCompleted { node_id, goal } => {
+                self.dashboard.completed_nodes += 1;
+                self.dashboard.log(format!("✓ {} - {}", node_id, goal));
+            }
+            AgentEvent::ApprovalRequest {
+                description, diff, ..
+            } => {
+                // Show approval modal with stability metrics
+                let metrics = StabilityMetrics {
+                    energy: EnergyComponents::default(),
+                    is_stable: false,
+                    threshold: 0.1,
+                    attempts: 1,
+                    max_attempts: 3,
+                };
+                self.review_modal.show_with_stability(
+                    "Approval Required".to_string(),
+                    description,
+                    diff.map(|d| vec![d]).unwrap_or_default(),
+                    metrics,
+                );
+            }
+            AgentEvent::Complete { success, message } => {
+                let emoji = if success { "🎉" } else { "❌" };
+                self.dashboard.log(format!("{} {}", emoji, message));
+            }
+            AgentEvent::Error(e) => {
+                self.dashboard.log(format!("⚠️ Error: {}", e));
             }
         }
     }
@@ -436,78 +502,100 @@ impl AgentApp {
     }
 }
 
-/// Run the agent TUI with demo data
+/// Run the agent TUI with demo data (Legacy - Unused)
 pub fn run_agent_tui() -> io::Result<()> {
     let mut terminal = ratatui::init();
     let mut app = AgentApp::new();
 
-    // Demo task tree with parent relationships
-    app.task_tree.add_task_with_parent(
-        "root".to_string(),
-        "Implement authentication system".to_string(),
-        None,
-        0,
-    );
-    app.task_tree.add_task_with_parent(
-        "auth-1".to_string(),
-        "Create JWT module".to_string(),
-        Some("root".to_string()),
-        1,
-    );
-    app.task_tree.add_task_with_parent(
-        "auth-2".to_string(),
-        "Add password hashing with bcrypt".to_string(),
-        Some("root".to_string()),
-        1,
-    );
-    app.task_tree.add_task_with_parent(
-        "auth-3".to_string(),
-        "Implement session management".to_string(),
-        Some("root".to_string()),
-        1,
-    );
-    app.task_tree.add_task_with_parent(
-        "jwt-1".to_string(),
-        "Define token structure".to_string(),
-        Some("auth-1".to_string()),
-        2,
-    );
-    app.task_tree.add_task_with_parent(
-        "jwt-2".to_string(),
-        "Add token validation".to_string(),
-        Some("auth-1".to_string()),
-        2,
-    );
-
-    // Update statuses and energy
-    app.task_tree.update_status("root", TaskStatus::Running);
-    app.task_tree.update_status("auth-1", TaskStatus::Completed);
-    app.task_tree.update_status("jwt-1", TaskStatus::Completed);
-    app.task_tree.update_status("jwt-2", TaskStatus::Completed);
-    app.task_tree.update_status("auth-2", TaskStatus::Running);
-    app.task_tree.update_energy("auth-2", 0.35);
-
-    // Dashboard data
-    app.dashboard.total_nodes = 6;
-    app.dashboard.completed_nodes = 3;
-    app.dashboard.current_node = Some("auth-2".to_string());
-    app.dashboard.update_energy(0.35);
     app.dashboard
-        .log("Started task: Implement authentication".to_string());
-    app.dashboard.log("OK: JWT module completed".to_string());
-    app.dashboard.log("OK: Token structure defined".to_string());
-    app.dashboard.log("OK: Token validation added".to_string());
-    app.dashboard
-        .log("Running: Password hashing...".to_string());
+        .log("⚠️ Legacy TUI mode - Please use 'perspt agent <task>'".to_string());
 
-    // Demo diff
-    app.diff_viewer.compute_diff(
-        "src/auth.rs",
-        "use std::collections::HashMap;\n\nfn main() {\n    println!(\"Hello\");\n}\n",
-        "use std::collections::HashMap;\nuse bcrypt::{hash, verify};\n\nfn main() {\n    let password = \"secret\";\n    let hashed = hash(password, 10).unwrap();\n    println!(\"Hash: {}\", hashed);\n}\n",
-    );
+    // Minimal event loop
+    loop {
+        terminal.draw(|frame| app.render(frame))?;
 
-    let result = app.run(&mut terminal);
+        if crossterm::event::poll(std::time::Duration::from_millis(100))? {
+            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                if key.kind == crossterm::event::KeyEventKind::Press {
+                    if key.code == crossterm::event::KeyCode::Char('q') {
+                        break;
+                    }
+                }
+            }
+        }
+    }
     ratatui::restore();
-    result
+    Ok(())
+}
+
+/// Run the agent TUI with a real SRBNOrchestrator
+///
+/// This function connects the TUI to the orchestrator via channels,
+/// allowing real-time updates and interactive control.
+pub async fn run_agent_tui_with_orchestrator(
+    mut orchestrator: perspt_agent::SRBNOrchestrator,
+    task: String,
+) -> anyhow::Result<()> {
+    use crate::app_event::AppEvent;
+    use perspt_core::events::channel;
+
+    // Create channels for bidirectional communication
+    let (event_sender, mut event_receiver) = channel::event_channel();
+    let (action_sender, action_receiver) = channel::action_channel();
+
+    // Connect orchestrator to TUI
+    orchestrator.connect_tui(event_sender, action_receiver);
+
+    // Spawn orchestrator in background task
+    let orchestrator_handle = tokio::spawn(async move { orchestrator.run(task).await });
+
+    // Initialize terminal
+    let mut terminal = ratatui::init();
+    let mut app = AgentApp::new();
+
+    // Store action sender for TUI to use
+    let _action_sender = action_sender;
+
+    // Main event loop
+    loop {
+        // Render
+        terminal.draw(|frame| app.render(frame))?;
+
+        // Handle events with timeout for responsiveness
+        tokio::select! {
+            // Terminal events
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                if crossterm::event::poll(std::time::Duration::from_millis(0))? {
+                    if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                        if key.kind == crossterm::event::KeyEventKind::Press {
+                            if !app.handle_terminal_event(crossterm::event::Event::Key(key)) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Orchestrator events
+            Some(event) = event_receiver.recv() => {
+                app.handle_app_event(AppEvent::CoreEvent(event));
+            }
+        }
+
+        if app.should_quit {
+            break;
+        }
+
+        // Check if orchestrator finished
+        if orchestrator_handle.is_finished() {
+            app.dashboard.log("🏁 Orchestrator finished".to_string());
+            // Allow user to review results before exit
+        }
+    }
+
+    ratatui::restore();
+
+    // Wait for orchestrator to complete or abort
+    orchestrator_handle.abort();
+
+    Ok(())
 }

@@ -18,8 +18,11 @@ pub enum AppEvent {
     /// Stream completed (EOT received)
     StreamComplete,
 
-    /// Agent state update (for Agent mode)
+    /// Agent state update (for Agent mode - legacy)
     AgentUpdate(AgentStateUpdate),
+
+    /// Core agent event from SRBNOrchestrator (new event system)
+    CoreEvent(perspt_core::AgentEvent),
 
     /// Periodic tick for animations (throbber, cursor blink)
     Tick,

@@ -109,6 +109,21 @@ impl TaskTree {
         self.rebuild_visible();
     }
 
+    /// Populate tree from TaskPlan
+    pub fn populate_from_plan(&mut self, plan: perspt_core::types::TaskPlan) {
+        self.clear();
+        for task in plan.tasks {
+            // Determine depth/parent based on dependencies if needed,
+            // but for now we list them flat at root level
+            // as complexity K limits usually result in a sequence
+            self.add_task(task.id, task.goal, 0);
+        }
+        // Selection reset
+        if !self.visible_tasks.is_empty() {
+            self.state.select(Some(0));
+        }
+    }
+
     /// Add a task with parent relationship
     pub fn add_task_with_parent(
         &mut self,
