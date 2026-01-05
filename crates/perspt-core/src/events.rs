@@ -59,6 +59,11 @@ pub enum ActionType {
     Command { command: String },
     /// Multiple files in a sub-graph
     SubGraph { node_count: usize },
+    /// Project initialization (with editable name)
+    ProjectInit {
+        command: String,
+        suggested_name: String,
+    },
 }
 
 /// Actions sent from TUI to Orchestrator
@@ -66,6 +71,11 @@ pub enum ActionType {
 pub enum AgentAction {
     /// Approve a pending request
     Approve { request_id: String },
+    /// Approve with an edited value (e.g., project name)
+    ApproveWithEdit {
+        request_id: String,
+        edited_value: String,
+    },
     /// Reject a pending request
     Reject {
         request_id: String,
