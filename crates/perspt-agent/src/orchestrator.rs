@@ -303,12 +303,123 @@ impl SRBNOrchestrator {
         // 1. Check if project already exists
         if let Some(plugin) = registry.detect(&self.context.working_dir) {
             self.emit_log(format!("📂 Detected existing {} project", plugin.name()));
+
+            // For existing projects, check if tooling sync is needed
+            match plugin.check_tooling_action(&self.context.working_dir) {
+                perspt_core::plugin::ProjectAction::ExecCommand {
+                    command,
+                    description,
+                } => {
+                    self.emit_log(format!("🔧 Tooling action needed: {}", description));
+
+                    // Request approval for tooling sync
+                    let approved = self
+                        .await_approval(
+                            perspt_core::ActionType::Command {
+                                command: command.clone(),
+                            },
+                            description.clone(),
+                            None,
+                        )
+                        .await;
+
+                    if approved {
+                        let mut args = HashMap::new();
+                        args.insert("command".to_string(), command.clone());
+                        let call = ToolCall {
+                            name: "run_command".to_string(),
+                            arguments: args,
+                        };
+                        let result = self.tools.execute(&call).await;
+                        if result.success {
+                            self.emit_log(format!("✅ {}", description));
+                        } else {
+                            self.emit_log(format!("❌ Failed: {:?}", result.error));
+                        }
+                    }
+                }
+                perspt_core::plugin::ProjectAction::NoAction => {
+                    self.emit_log("✓ Project tooling is up to date");
+                }
+            }
+
             return Ok(());
         }
 
-        // 2. If empty, heuristically detect language from task
+        // 2. If no project detected, heuristically detect language from task
+        let plugin_name = self.detect_language_from_task(task);
+
+        if let Some(name) = plugin_name {
+            if let Some(plugin) = registry.get(name) {
+                self.emit_log(format!("🌱 Initializing new {} project", name));
+
+                // Check if working directory is empty
+                let is_empty = std::fs::read_dir(&self.context.working_dir)
+                    .map(|mut i| i.next().is_none())
+                    .unwrap_or(true);
+
+                let project_name = if is_empty {
+                    ".".to_string() // Init in current directory
+                } else {
+                    "perspt_app".to_string() // Fallback to subfolder
+                };
+
+                let opts = perspt_core::plugin::InitOptions {
+                    name: project_name.clone(),
+                    is_empty_dir: is_empty,
+                    ..Default::default()
+                };
+
+                // Use the new get_init_action method
+                match plugin.get_init_action(&opts) {
+                    perspt_core::plugin::ProjectAction::ExecCommand {
+                        command,
+                        description,
+                    } => {
+                        // Request approval for init
+                        let approved = self
+                            .await_approval(
+                                perspt_core::ActionType::Command {
+                                    command: command.clone(),
+                                },
+                                description.clone(),
+                                None,
+                            )
+                            .await;
+
+                        if approved {
+                            // Run command
+                            let mut args = HashMap::new();
+                            args.insert("command".to_string(), command.clone());
+                            let call = ToolCall {
+                                name: "run_command".to_string(),
+                                arguments: args,
+                            };
+                            let result = self.tools.execute(&call).await;
+                            if result.success {
+                                self.emit_log("✅ Project initialized");
+                            } else {
+                                self.emit_log(format!("❌ Init failed: {:?}", result.error));
+                            }
+                        }
+                    }
+                    perspt_core::plugin::ProjectAction::NoAction => {
+                        self.emit_log("ℹ️ No initialization action needed");
+                    }
+                }
+            }
+        } else {
+            self.emit_log("ℹ️ No language detected, skipping project init");
+        }
+
+        Ok(())
+    }
+
+    /// Detect language from task description using heuristics
+    fn detect_language_from_task(&self, task: &str) -> Option<&'static str> {
         let task_lower = task.to_lowercase();
-        let plugin_name = if task_lower.contains("rust") || task_lower.contains("cargo") {
+
+        if task_lower.contains("rust") || task_lower.contains("cargo") {
             Some("rust")
         } else if task_lower.contains("python")
             || task_lower.contains("flask")
@@ -347,74 +458,12 @@ impl SRBNOrchestrator {
             || task_lower.contains("nextjs")
         {
             Some("javascript")
-        } else {
+        } else if task_lower.contains("app") || task_lower.contains("application") {
             // Default to Python for generic "app" or "application" tasks
-            // since Python is the most versatile for quick prototyping
-            if task_lower.contains("app") || task_lower.contains("application") {
-                Some("python")
-            } else {
-                None
-            }
-        };
-
-        if let Some(name) = plugin_name {
-            if let Some(plugin) = registry.get(name) {
-                self.emit_log(format!("🌱 Initializing new {} project", name));
-
-                // Check if working directory is empty
-                let is_empty = std::fs::read_dir(&self.context.working_dir)
-                    .map(|mut i| i.next().is_none())
-                    .unwrap_or(true);
-
-                let project_name = if is_empty {
-                    ".".to_string() // Init in current directory
-                } else {
-                    "perspt_app".to_string() // Fallback to subfolder
-                };
-
-                let opts = perspt_core::plugin::InitOptions {
-                    name: project_name.clone(),
-                    ..Default::default()
-                };
-
-                let cmd = if name == "python" && is_empty {
-                    "uv init .".to_string()
-                } else {
-                    plugin.init_command(&opts)
-                };
-
-                // Request approval for init
-                let approved = self
-                    .await_approval(
-                        perspt_core::ActionType::Command {
-                            command: cmd.clone(),
-                        },
-                        format!("Initialize {} project in '{}'", name, project_name),
-                        None,
-                    )
-                    .await;
-
-                if approved {
-                    // Run command
-                    let mut args = HashMap::new();
-                    args.insert("command".to_string(), cmd.clone());
-                    let call = ToolCall {
-                        name: "run_command".to_string(),
-                        arguments: args,
-                    };
-                    let result = self.tools.execute(&call).await;
-                    if result.success {
-                        self.emit_log("✅ Project initialized");
-                    } else {
-                        self.emit_log(format!("❌ Init failed: {:?}", result.error));
-                    }
-                }
-            }
+            Some("python")
         } else {
-            self.emit_log("ℹ️ No language detected, skipping project init");
+            None
         }
-
-        Ok(())
     }
 
     /// Step 1: Architecture Sheafification
@@ -518,6 +567,9 @@ impl SRBNOrchestrator {
             String::new()
         };
 
+        // Gather existing project context
+        let project_context = self.gather_project_context();
+
         let prompt = format!(
             r#"You are an Architect agent in a multi-agent coding system.
 
@@ -526,16 +578,24 @@ impl SRBNOrchestrator {
 
 ## Working Directory
 {working_dir}
+
+## Existing Project Structure
+{project_context}
 {error_feedback}
 ## Instructions
 Analyze this task and produce a structured execution plan as JSON.
-
 
 1. Break down the task into atomic subtasks
 2. Each subtask should produce one or more files
 3. Include unit tests where appropriate
 4. Specify dependencies between tasks
 5. Output ONLY valid JSON (no markdown, no explanation)
+
+## CRITICAL CONSTRAINTS
+- DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
+- The system handles project initialization separately via CLI tools (uv, npm, cargo)
+- Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
+- If you need to add dependencies, include them in the task goal description (e.g., "Add requests library for HTTP calls")
 
 ## Output Format
 Respond with ONLY a JSON object in this exact format:
@@ -576,10 +636,66 @@ Valid criticality values: "Critical", "High", "Low"
 IMPORTANT: Output ONLY the JSON, no other text."#,
             task = task,
             working_dir = self.context.working_dir.display(),
+            project_context = project_context,
             error_feedback = error_feedback
         );
 
         Ok(prompt)
+    }
+
+    /// Gather existing project context for the Architect prompt
+    fn gather_project_context(&self) -> String {
+        let mut context_lines = Vec::new();
+        let working_dir = &self.context.working_dir;
+
+        // Check for key project files
+        let key_files = [
+            "pyproject.toml",
+            "Cargo.toml",
+            "package.json",
+            "requirements.txt",
+            "uv.lock",
+            "Cargo.lock",
+            "package-lock.json",
+        ];
+
+        for file in &key_files {
+            if working_dir.join(file).exists() {
+                context_lines.push(format!("- {} (exists)", file));
+            }
+        }
+
+        // List top-level directories
+        if let Ok(entries) = std::fs::read_dir(working_dir) {
+            let mut dirs = Vec::new();
+            let mut files = Vec::new();
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue; // Skip hidden files/dirs
+                }
+                if entry.path().is_dir() {
+                    dirs.push(name);
+                } else if !key_files.contains(&name.as_str()) {
+                    files.push(name);
+                }
+            }
+
+            if !dirs.is_empty() {
+                context_lines.push(format!("- Directories: {}", dirs.join(", ")));
+            }
+            if !files.is_empty() && files.len() <= 10 {
+                context_lines.push(format!("- Files: {}", files.join(", ")));
+            } else if !files.is_empty() {
+                context_lines.push(format!("- Files: {} files (truncated)", files.len()));
+            }
+        }
+
+        if context_lines.is_empty() {
+            "Empty directory (greenfield project)".to_string()
+        } else {
+            context_lines.join("\n")
+        }
     }
 
     /// Parse JSON response into TaskPlan
