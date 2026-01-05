@@ -101,7 +101,11 @@ impl LanguagePlugin for RustPlugin {
     }
 
     fn init_command(&self, opts: &InitOptions) -> String {
-        format!("cargo new {}", opts.name)
+        if opts.name == "." || opts.name == "./" {
+            "cargo init .".to_string()
+        } else {
+            format!("cargo new {}", opts.name)
+        }
     }
 
     fn test_command(&self) -> String {
@@ -141,8 +145,13 @@ impl LanguagePlugin for PythonPlugin {
 
     fn init_command(&self, opts: &InitOptions) -> String {
         if opts.package_manager.as_deref() == Some("poetry") {
-            format!("poetry new {}", opts.name)
+            if opts.name == "." || opts.name == "./" {
+                "poetry init".to_string()
+            } else {
+                format!("poetry new {}", opts.name)
+            }
         } else {
+            // uv init supports "." for current directory
             format!("uv init {}", opts.name)
         }
     }

@@ -38,9 +38,9 @@ pub enum AppEvent {
 #[derive(Debug, Clone)]
 pub enum AgentStateUpdate {
     /// Task status changed
-    TaskStatusChanged { task_id: String, status: TaskStatus },
+    Status { node_id: String, status: TaskStatus },
     /// Energy value updated
-    EnergyUpdated(f32),
+    Energy { node_id: String, energy: f32 },
     /// Log message
     Log(String),
     /// Node completed

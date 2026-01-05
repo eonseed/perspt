@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 perspt-core = { version = "0.1.0", path = "../perspt-core" }
 perspt-policy = { version = "0.1.0", path = "../perspt-policy" }
 perspt-sandbox = { version = "0.1.0", path = "../perspt-sandbox" }
+perspt-store = { version = "0.1.0", path = "../perspt-store" }
 
 # Graph management
 petgraph = "0.8"

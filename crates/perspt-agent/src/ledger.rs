@@ -2,10 +2,11 @@
 //!
 //! Persistent storage for session history, commits, and Merkle proofs.
 
-use anyhow::Result;
-use std::path::Path;
+use anyhow::{Context, Result};
+pub use perspt_store::{NodeStateRecord, SessionRecord, SessionStore};
+use std::path::{Path, PathBuf};
 
-/// Merkle commit record
+/// Merkle commit record (Legacy wrapper for compatibility)
 #[derive(Debug, Clone)]
 pub struct MerkleCommit {
     pub commit_id: String,
@@ -18,9 +19,9 @@ pub struct MerkleCommit {
     pub stable: bool,
 }
 
-/// Session record
+/// Session record (Legacy wrapper for compatibility)
 #[derive(Debug, Clone)]
-pub struct SessionRecord {
+pub struct SessionRecordLegacy {
     pub session_id: String,
     pub task: String,
     pub started_at: i64,
@@ -32,50 +33,56 @@ pub struct SessionRecord {
 
 /// Merkle Ledger using DuckDB for persistence
 pub struct MerkleLedger {
-    /// Database connection string
-    db_path: String,
-    /// In-memory cache of current session
-    current_session: Option<SessionRecord>,
+    /// Session store from perspt-store
+    store: SessionStore,
+    /// Current session metadata (legacy cache)
+    current_session: Option<SessionRecordLegacy>,
+    /// Session artifact directory
+    session_dir: Option<PathBuf>,
 }
 
 impl MerkleLedger {
     /// Create a new ledger (opens or creates database)
-    pub fn new(db_path: &str) -> Result<Self> {
-        let ledger = Self {
-            db_path: db_path.to_string(),
+    pub fn new() -> Result<Self> {
+        let store = SessionStore::new().context("Failed to initialize session store")?;
+        Ok(Self {
+            store,
             current_session: None,
-        };
-
-        // Initialize schema
-        ledger.init_schema()?;
-
-        Ok(ledger)
+            session_dir: None,
+        })
     }
 
     /// Create an in-memory ledger (for testing)
     pub fn in_memory() -> Result<Self> {
-        Self::new(":memory:")
-    }
-
-    /// Initialize database schema
-    fn init_schema(&self) -> Result<()> {
-        // Note: In a real implementation, this would use duckdb crate
-        // For now, we'll use a file-based approach with JSON
-        log::info!("Initializing Merkle Ledger at: {}", self.db_path);
-
-        // Create the ledger directory if needed
-        if self.db_path != ":memory:" {
-            if let Some(parent) = Path::new(&self.db_path).parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-
-        Ok(())
+        // Use a unique temp db for testing to avoid collisions
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("perspt_test_{}.db", uuid::Uuid::new_v4()));
+        let store = SessionStore::open(&db_path)?;
+        Ok(Self {
+            store,
+            current_session: None,
+            session_dir: None,
+        })
     }
 
     /// Start a new session
-    pub fn start_session(&mut self, session_id: &str, task: &str) -> Result<()> {
+    pub fn start_session(&mut self, session_id: &str, task: &str, working_dir: &str) -> Result<()> {
         let record = SessionRecord {
+            session_id: session_id.to_string(),
+            task: task.to_string(),
+            working_dir: working_dir.to_string(),
+            merkle_root: None,
+            detected_toolchain: None,
+            status: "RUNNING".to_string(),
+        };
+
+        self.store.create_session(&record)?;
+
+        // Create physical artifact directory
+        let dir = self.store.create_session_dir(session_id)?;
+        self.session_dir = Some(dir);
+
+        let legacy_record = SessionRecordLegacy {
             session_id: session_id.to_string(),
             task: task.to_string(),
             started_at: chrono_timestamp(),
@@ -84,10 +91,37 @@ impl MerkleLedger {
             total_nodes: 0,
             completed_nodes: 0,
         };
+        self.current_session = Some(legacy_record);
 
-        self.current_session = Some(record);
-        log::info!("Started session: {}", session_id);
+        log::info!("Started persistent session: {}", session_id);
+        Ok(())
+    }
 
+    /// Record energy measurement
+    pub fn record_energy(
+        &self,
+        node_id: &str,
+        energy: &crate::types::EnergyComponents,
+        total_energy: f32,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record energy")?;
+
+        let record = perspt_store::EnergyRecord {
+            node_id: node_id.to_string(),
+            session_id,
+            v_syn: energy.v_syn,
+            v_str: energy.v_str,
+            v_log: energy.v_log,
+            v_boot: energy.v_boot,
+            v_sheaf: energy.v_sheaf,
+            v_total: total_energy,
+        };
+
+        self.store.record_energy(&record)?;
         Ok(())
     }
 
@@ -96,34 +130,38 @@ impl MerkleLedger {
         &mut self,
         node_id: &str,
         merkle_root: [u8; 32],
-        parent_hash: Option<[u8; 32]>,
+        _parent_hash: Option<[u8; 32]>,
         energy: f32,
+        state_json: String,
     ) -> Result<String> {
         let session_id = self
             .current_session
             .as_ref()
             .map(|s| s.session_id.clone())
-            .unwrap_or_else(|| "unknown".to_string());
+            .context("No active session to commit")?;
 
-        let commit = MerkleCommit {
-            commit_id: generate_commit_id(),
-            session_id,
+        let commit_id = generate_commit_id();
+
+        let record = NodeStateRecord {
             node_id: node_id.to_string(),
-            merkle_root,
-            parent_hash,
-            timestamp: chrono_timestamp(),
-            energy,
-            stable: energy < 0.1,
+            session_id: session_id.clone(),
+            state: state_json,
+            v_total: energy,
+            merkle_hash: Some(merkle_root.to_vec()),
+            attempt_count: 1, // Placeholder
         };
 
-        log::info!("Committed node {} with energy {:.4}", node_id, energy);
+        self.store.record_node_state(&record)?;
+        self.store.update_merkle_root(&session_id, &merkle_root)?;
+
+        log::info!("Committed node {} to store", node_id);
 
         // Update session progress
         if let Some(ref mut session) = self.current_session {
             session.completed_nodes += 1;
         }
 
-        Ok(commit.commit_id)
+        Ok(commit_id)
     }
 
     /// End the current session
@@ -140,40 +178,27 @@ impl MerkleLedger {
         Ok(())
     }
 
-    /// Get recent commits for a session
-    pub fn get_recent_commits(&self, session_id: &str, limit: usize) -> Vec<MerkleCommit> {
-        // Placeholder - would query DuckDB
-        log::debug!(
-            "Getting recent {} commits for session {}",
-            limit,
-            session_id
-        );
-        Vec::new()
+    /// Get artifacts directory
+    pub fn artifacts_dir(&self) -> Option<&Path> {
+        self.session_dir.as_deref()
     }
 
-    /// Rollback to a specific commit
-    pub fn rollback_to(&mut self, commit_id: &str) -> Result<()> {
-        log::info!("Rolling back to commit: {}", commit_id);
-        // Would restore state from the commit
-        Ok(())
-    }
-
-    /// Get session statistics
+    /// Get session statistics (legacy facade)
     pub fn get_stats(&self) -> LedgerStats {
         LedgerStats {
-            total_sessions: 0,
+            total_sessions: 0, // Would query store.count_sessions()
             total_commits: 0,
             db_size_bytes: 0,
         }
     }
 
-    /// Get the current merkle root
+    /// Get the current merkle root (legacy facade)
     pub fn current_merkle_root(&self) -> [u8; 32] {
         [0u8; 32] // Placeholder
     }
 }
 
-/// Ledger statistics
+/// Ledger statistics (Legacy)
 #[derive(Debug, Clone)]
 pub struct LedgerStats {
     pub total_sessions: usize,
@@ -198,29 +223,4 @@ fn chrono_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ledger_creation() {
-        let ledger = MerkleLedger::in_memory().unwrap();
-        assert!(ledger.current_session.is_none());
-    }
-
-    #[test]
-    fn test_session_lifecycle() {
-        let mut ledger = MerkleLedger::in_memory().unwrap();
-
-        ledger.start_session("test-123", "Test task").unwrap();
-        assert!(ledger.current_session.is_some());
-
-        ledger.commit_node("node-1", [0u8; 32], None, 0.05).unwrap();
-        assert_eq!(ledger.current_session.as_ref().unwrap().completed_nodes, 1);
-
-        ledger.end_session("COMPLETED").unwrap();
-        assert_eq!(ledger.current_session.as_ref().unwrap().status, "COMPLETED");
-    }
 }

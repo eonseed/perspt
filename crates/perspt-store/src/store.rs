@@ -45,9 +45,11 @@ pub struct EnergyRecord {
     pub v_total: f32,
 }
 
+use std::sync::Mutex;
+
 /// Session store for SRBN persistence
 pub struct SessionStore {
-    conn: Connection,
+    conn: Mutex<Connection>,
 }
 
 impl SessionStore {
@@ -67,10 +69,12 @@ impl SessionStore {
         let conn = Connection::open(path).context("Failed to open DuckDB")?;
         init_schema(&conn)?;
 
-        Ok(Self { conn })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
-    /// Get the default database path (~/.local/share/perspt/perspt.db)
+    /// Get the default database path (~/.local/share/perspt/perspt.db or similar)
     pub fn default_db_path() -> Result<PathBuf> {
         let data_dir = dirs::data_local_dir()
             .context("Could not find local data directory")?
@@ -80,7 +84,7 @@ impl SessionStore {
 
     /// Create a new session
     pub fn create_session(&self, session: &SessionRecord) -> Result<()> {
-        self.conn.execute(
+        self.conn.lock().unwrap().execute(
             r#"
             INSERT INTO sessions (session_id, task, working_dir, merkle_root, detected_toolchain, status)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -89,7 +93,7 @@ impl SessionStore {
                 &session.session_id,
                 &session.task,
                 &session.working_dir,
-                &session.merkle_root.as_ref().map(|v| hex::encode(v)).unwrap_or_default(),
+                &session.merkle_root.as_ref().map(hex::encode).unwrap_or_default(),
                 &session.detected_toolchain.clone().unwrap_or_default(),
                 &session.status,
             ],
@@ -99,7 +103,7 @@ impl SessionStore {
 
     /// Update session merkle root
     pub fn update_merkle_root(&self, session_id: &str, merkle_root: &[u8]) -> Result<()> {
-        self.conn.execute(
+        self.conn.lock().unwrap().execute(
             "UPDATE sessions SET merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
             [hex::encode(merkle_root), session_id.to_string()],
         )?;
@@ -108,7 +112,7 @@ impl SessionStore {
 
     /// Record node state
     pub fn record_node_state(&self, record: &NodeStateRecord) -> Result<()> {
-        self.conn.execute(
+        self.conn.lock().unwrap().execute(
             r#"
             INSERT INTO node_states (node_id, session_id, state, v_total, merkle_hash, attempt_count)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -118,7 +122,7 @@ impl SessionStore {
                 &record.session_id,
                 &record.state,
                 &record.v_total.to_string(),
-                &record.merkle_hash.as_ref().map(|v| hex::encode(v)).unwrap_or_default(),
+                &record.merkle_hash.as_ref().map(hex::encode).unwrap_or_default(),
                 &record.attempt_count.to_string(),
             ],
         )?;
@@ -127,7 +131,7 @@ impl SessionStore {
 
     /// Record energy measurement
     pub fn record_energy(&self, record: &EnergyRecord) -> Result<()> {
-        self.conn.execute(
+        self.conn.lock().unwrap().execute(
             r#"
             INSERT INTO energy_history (node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -155,7 +159,8 @@ impl SessionStore {
 
     /// Get session by ID
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionRecord>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
             "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status FROM sessions WHERE session_id = ?"
         )?;
 
@@ -176,9 +181,29 @@ impl SessionStore {
         }
     }
 
-    /// Get energy history for a node
+    /// Get the directory for session artifacts (~/.local/share/perspt/sessions/<id>)
+    pub fn get_session_dir(&self, session_id: &str) -> Result<PathBuf> {
+        let data_dir = dirs::data_local_dir()
+            .context("Could not find local data directory")?
+            .join("perspt")
+            .join("sessions")
+            .join(session_id);
+        Ok(data_dir)
+    }
+
+    /// Ensure a session directory exists and return the path
+    pub fn create_session_dir(&self, session_id: &str) -> Result<PathBuf> {
+        let dir = self.get_session_dir(session_id)?;
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir).context("Failed to create session directory")?;
+        }
+        Ok(dir)
+    }
+
+    /// Get energy history for a node (query)
     pub fn get_energy_history(&self, session_id: &str, node_id: &str) -> Result<Vec<EnergyRecord>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
             "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM energy_history WHERE session_id = ? AND node_id = ? ORDER BY timestamp"
         )?;
 

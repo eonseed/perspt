@@ -113,41 +113,61 @@ impl ActuatorAgent {
     fn build_coding_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
         let contract = &node.contract;
 
+        // Determine target file from output_targets or generate default
+        let target_file = node
+            .output_targets
+            .first()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "main.py".to_string());
+
         format!(
             r#"You are an Actuator agent responsible for implementing code.
 
 ## Task
-Goal: {}
+Goal: {goal}
 
 ## Behavioral Contract
-Interface Signature: {}
-Invariants: {:?}
-Forbidden Patterns: {:?}
+Interface Signature: {interface}
+Invariants: {invariants:?}
+Forbidden Patterns: {forbidden:?}
 
 ## Context
-Working Directory: {:?}
-Files to Read: {:?}
-Files to Modify: {:?}
+Working Directory: {working_dir:?}
+Files to Read: {context_files:?}
+Target Output File: {target_file}
 
 ## Instructions
 1. Implement the required functionality
 2. Follow the interface signature exactly
 3. Maintain all specified invariants
 4. Avoid all forbidden patterns
-5. Write clean, documented code
+5. Write clean, well-documented, production-quality code
+6. Include proper imports at the top of the file
+7. Add type annotations if missing
+8. Import any missing modules
 
 ## Output Format
-Provide the complete implementation with:
-- File path
-- Code content
-- Brief explanation of changes"#,
-            node.goal,
-            contract.interface_signature,
-            contract.invariants,
-            contract.forbidden_patterns,
-            ctx.working_dir,
-            node.context_files,
-            node.output_targets,
+You MUST output the code in this EXACT format:
+
+File: {target_file}
+```python
+# Your complete implementation here
+# Include ALL necessary imports
+# Include the COMPLETE file, not just snippets
+```
+
+IMPORTANT:
+- The "File:" line MUST appear before the code block
+- Provide the COMPLETE corrected file, not just snippets
+- Include all imports at the top
+- Do not skip any functions or classes"#,
+            goal = node.goal,
+            interface = contract.interface_signature,
+            invariants = contract.invariants,
+            forbidden = contract.forbidden_patterns,
+            working_dir = ctx.working_dir,
+            context_files = node.context_files,
+            target_file = target_file,
         )
     }
 }
