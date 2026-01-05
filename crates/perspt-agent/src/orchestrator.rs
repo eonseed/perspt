@@ -19,6 +19,17 @@ pub struct Dependency {
     pub kind: String,
 }
 
+/// Result of an approval request
+#[derive(Debug, Clone)]
+pub enum ApprovalResult {
+    /// User approved the action
+    Approved,
+    /// User approved with an edited value (e.g., project name)
+    ApprovedWithEdit(String),
+    /// User rejected the action
+    Rejected,
+}
+
 /// The SRBN Orchestrator - manages the agent workflow
 pub struct SRBNOrchestrator {
     /// Task DAG managed by petgraph
@@ -150,21 +161,21 @@ impl SRBNOrchestrator {
     }
 
     /// Request approval from user and await response
-    /// Returns true if approved, false if rejected
+    /// Returns ApprovalResult with optional edited value
     async fn await_approval(
         &mut self,
         action_type: perspt_core::ActionType,
         description: String,
         diff: Option<String>,
-    ) -> bool {
+    ) -> ApprovalResult {
         // If auto_approve is enabled, skip approval
         if self.auto_approve {
-            return true;
+            return ApprovalResult::Approved;
         }
 
         // If no TUI connected, default to approve (headless with --yes)
         if self.action_receiver.is_none() {
-            return true;
+            return ApprovalResult::Approved;
         }
 
         // Generate unique request ID
@@ -185,7 +196,14 @@ impl SRBNOrchestrator {
                 match action {
                     perspt_core::AgentAction::Approve { request_id: rid } if rid == request_id => {
                         self.emit_log("✓ Approved by user");
-                        return true;
+                        return ApprovalResult::Approved;
+                    }
+                    perspt_core::AgentAction::ApproveWithEdit {
+                        request_id: rid,
+                        edited_value,
+                    } if rid == request_id => {
+                        self.emit_log(format!("✓ Approved with edit: {}", edited_value));
+                        return ApprovalResult::ApprovedWithEdit(edited_value);
                     }
                     perspt_core::AgentAction::Reject {
                         request_id: rid,
@@ -193,11 +211,11 @@ impl SRBNOrchestrator {
                     } if rid == request_id => {
                         let msg = reason.unwrap_or_else(|| "User rejected".to_string());
                         self.emit_log(format!("✗ Rejected: {}", msg));
-                        return false;
+                        return ApprovalResult::Rejected;
                     }
                     perspt_core::AgentAction::Abort => {
                         self.emit_log("⚠️ Session aborted by user");
-                        return false;
+                        return ApprovalResult::Rejected;
                     }
                     _ => {
                         // Ignore other actions while waiting for this specific approval
@@ -207,7 +225,7 @@ impl SRBNOrchestrator {
             }
         }
 
-        false // Channel closed
+        ApprovalResult::Rejected // Channel closed
     }
 
     /// Add a dependency edge between nodes
@@ -313,7 +331,7 @@ impl SRBNOrchestrator {
                     self.emit_log(format!("🔧 Tooling action needed: {}", description));
 
                     // Request approval for tooling sync
-                    let approved = self
+                    let approval_result = self
                         .await_approval(
                             perspt_core::ActionType::Command {
                                 command: command.clone(),
@@ -323,7 +341,10 @@ impl SRBNOrchestrator {
                         )
                         .await;
 
-                    if approved {
+                    if matches!(
+                        approval_result,
+                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                    ) {
                         let mut args = HashMap::new();
                         args.insert("command".to_string(), command.clone());
                         let call = ToolCall {
@@ -338,6 +359,7 @@ impl SRBNOrchestrator {
                         }
                     }
                 }
+
                 perspt_core::plugin::ProjectAction::NoAction => {
                     self.emit_log("✓ Project tooling is up to date");
                 }
@@ -377,28 +399,56 @@ impl SRBNOrchestrator {
                         command,
                         description,
                     } => {
-                        // Request approval for init
-                        let approved = self
+                        // Request approval for init with editable project name
+                        let result = self
                             .await_approval(
-                                perspt_core::ActionType::Command {
+                                perspt_core::ActionType::ProjectInit {
                                     command: command.clone(),
+                                    suggested_name: project_name.clone(),
                                 },
                                 description.clone(),
                                 None,
                             )
                             .await;
 
-                        if approved {
+                        // Determine final project name (may be edited by user)
+                        let final_name = match &result {
+                            ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
+                            _ => project_name.clone(),
+                        };
+
+                        if matches!(
+                            result,
+                            ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                        ) {
+                            // Regenerate command if name was edited
+                            let final_command = if final_name != project_name {
+                                let edited_opts = perspt_core::plugin::InitOptions {
+                                    name: final_name.clone(),
+                                    is_empty_dir: is_empty,
+                                    ..Default::default()
+                                };
+                                match plugin.get_init_action(&edited_opts) {
+                                    perspt_core::plugin::ProjectAction::ExecCommand {
+                                        command,
+                                        ..
+                                    } => command,
+                                    _ => command.clone(),
+                                }
+                            } else {
+                                command.clone()
+                            };
+
                             // Run command
                             let mut args = HashMap::new();
-                            args.insert("command".to_string(), command.clone());
+                            args.insert("command".to_string(), final_command.clone());
                             let call = ToolCall {
                                 name: "run_command".to_string(),
                                 arguments: args,
                             };
                             let result = self.tools.execute(&call).await;
                             if result.success {
-                                self.emit_log("✅ Project initialized");
+                                self.emit_log(format!("✅ Project '{}' initialized", final_name));
                             } else {
                                 self.emit_log(format!("❌ Init failed: {:?}", result.error));
                             }
@@ -513,53 +563,82 @@ Project name:"#,
         fallback
     }
 
-    /// Extract project name from task using common patterns (no LLM)
+    /// Extract project name from task using stop-word removal (no LLM)
     fn extract_name_heuristic(&self, task: &str) -> Option<String> {
         let task_lower = task.to_lowercase();
 
-        // Common patterns: "create a todo app", "build weather cli", etc.
-        let patterns = [
-            // "create/build/make a X app/cli/api"
-            r"(?:create|build|make|implement|develop|write)\s+(?:a\s+)?(.+?)\s*(?:app|application|cli|api|service|tool|project|backend|frontend|server|client)?$",
-            // "X app/cli in python/rust"
-            r"(.+?)\s+(?:app|application|cli|api|service|tool|project)\s+(?:in|using|with)",
-            // Just "X app"
-            r"(.+?)\s+(?:app|application|cli|api|service|tool|project)$",
+        // Stop words to remove
+        let stop_words = [
+            // Verbs
+            "create",
+            "build",
+            "make",
+            "implement",
+            "develop",
+            "write",
+            "design",
+            "add",
+            "setup",
+            "set",
+            "up",
+            "generate",
+            "please",
+            "can",
+            "you",
+            // Articles
+            "a",
+            "an",
+            "the",
+            "this",
+            "that",
+            // Prepositions
+            "in",
+            "on",
+            "for",
+            "with",
+            "using",
+            "to",
+            "from",
+            // Languages (we don't want these in folder names)
+            "python",
+            "rust",
+            "javascript",
+            "typescript",
+            "node",
+            "nodejs",
+            "react",
+            "vue",
+            "angular",
+            "django",
+            "flask",
+            "fastapi",
+            // Generic terms
+            "simple",
+            "basic",
+            "new",
+            "my",
+            "our",
+            "your",
         ];
 
-        for pattern in &patterns {
-            if let Ok(re) = regex::Regex::new(pattern) {
-                if let Some(caps) = re.captures(&task_lower) {
-                    if let Some(matched) = caps.get(1) {
-                        let raw_name = matched.as_str().trim();
-                        // Clean up and convert to snake_case
-                        let cleaned = self.to_snake_case(raw_name);
-                        if let Some(validated) = self.validate_project_name(&cleaned) {
-                            return Some(validated);
-                        }
-                    }
-                }
-            }
+        // Split into words and filter
+        let words: Vec<&str> = task_lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .filter(|w| !stop_words.contains(w))
+            .filter(|w| w.len() > 1) // Skip single chars
+            .take(3) // Max 3 words
+            .collect();
+
+        if words.is_empty() {
+            return None;
         }
 
-        None
-    }
+        // Join words with underscore
+        let name = words.join("_");
 
-    /// Convert a string to snake_case
-    fn to_snake_case(&self, s: &str) -> String {
-        s.chars()
-            .filter_map(|c| {
-                if c.is_alphanumeric() {
-                    Some(c.to_ascii_lowercase())
-                } else if c.is_whitespace() || c == '-' {
-                    Some('_')
-                } else {
-                    None
-                }
-            })
-            .collect::<String>()
-            .trim_matches('_')
-            .to_string()
+        // Validate
+        self.validate_project_name(&name)
     }
 
     /// Validate and sanitize a project name
@@ -975,7 +1054,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             self.emit_log(format!("🔧 Command proposed: {}", command));
 
             // Request approval before executing command
-            let approved = self
+            let approval_result = self
                 .await_approval(
                     perspt_core::ActionType::Command {
                         command: command.clone(),
@@ -985,7 +1064,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 )
                 .await;
 
-            if !approved {
+            if !matches!(
+                approval_result,
+                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+            ) {
                 self.emit_log("⏭️ Command skipped (not approved)");
                 return Ok(());
             }
@@ -1018,7 +1100,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             let full_path = self.context.working_dir.join(&code_info.0);
 
             // Request approval before writing file
-            let approved = self
+            let approval_result = self
                 .await_approval(
                     perspt_core::ActionType::FileWrite {
                         path: code_info.0.clone(),
@@ -1028,7 +1110,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 )
                 .await;
 
-            if !approved {
+            if !matches!(
+                approval_result,
+                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+            ) {
                 self.emit_log("⏭️ File write skipped (not approved)");
                 return Ok(());
             }
