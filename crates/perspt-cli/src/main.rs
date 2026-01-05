@@ -175,8 +175,11 @@ async fn main() -> Result<()> {
     // Suppress logs for TUI modes (Chat, Agent) to prevent bleeding into terminal
     let log_level = if cli.verbose {
         "debug"
-    } else if matches!(cli.command, None | Some(Commands::Chat { .. })) {
-        // Chat mode uses TUI - suppress all logs
+    } else if matches!(
+        cli.command,
+        None | Some(Commands::Chat { .. }) | Some(Commands::Agent { .. })
+    ) {
+        // Chat and Agent modes use TUI - suppress all logs
         "off"
     } else if matches!(cli.command, Some(Commands::SimpleChat { .. })) {
         // Simple chat only shows errors

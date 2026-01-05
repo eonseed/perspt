@@ -47,6 +47,19 @@ impl TaskStatus {
     }
 }
 
+impl From<perspt_core::NodeStatus> for TaskStatus {
+    fn from(status: perspt_core::NodeStatus) -> Self {
+        match status {
+            perspt_core::NodeStatus::Pending => TaskStatus::Pending,
+            perspt_core::NodeStatus::Running => TaskStatus::Running,
+            perspt_core::NodeStatus::Verifying => TaskStatus::Verifying,
+            perspt_core::NodeStatus::Completed => TaskStatus::Completed,
+            perspt_core::NodeStatus::Failed => TaskStatus::Failed,
+            perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,
+        }
+    }
+}
+
 /// A task node for the tree view
 #[derive(Debug, Clone)]
 pub struct TaskNode {

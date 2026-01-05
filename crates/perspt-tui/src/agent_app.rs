@@ -6,10 +6,10 @@
 use crate::app_event::{AgentStateUpdate, AppEvent};
 use crate::dashboard::Dashboard;
 use crate::diff_viewer::DiffViewer;
-use crate::review_modal::{ReviewDecision, ReviewModal, StabilityMetrics};
+use crate::review_modal::{ReviewDecision, ReviewModal};
 use crate::task_tree::{TaskStatus, TaskTree};
-use crate::telemetry::EnergyComponents;
-use crossterm::event::{Event as CrosstermEvent, KeyCode, KeyEventKind};
+use crossterm::event::{KeyCode, KeyEventKind};
+use perspt_core::AgentEvent;
 use ratatui::{
     crossterm::event::{self, Event},
     layout::{Constraint, Direction, Layout},
@@ -48,16 +48,20 @@ impl ActiveTab {
 
 /// Agent app state
 pub struct AgentApp {
-    /// Current tab
-    pub active_tab: ActiveTab,
     /// Dashboard component
     pub dashboard: Dashboard,
     /// Task tree component
     pub task_tree: TaskTree,
     /// Diff viewer component
     pub diff_viewer: DiffViewer,
-    /// Review modal
+    /// Review modal component
     pub review_modal: ReviewModal,
+    /// Sender for action feedback to orchestrator
+    pub action_sender: Option<perspt_core::events::channel::ActionSender>,
+    /// Active tab
+    pub active_tab: ActiveTab,
+    /// Pending approval request ID
+    pub pending_request_id: Option<String>,
     /// Should quit
     pub should_quit: bool,
     /// Is paused
@@ -72,6 +76,8 @@ impl Default for AgentApp {
             task_tree: TaskTree::new(),
             diff_viewer: DiffViewer::new(),
             review_modal: ReviewModal::new(),
+            action_sender: None,
+            pending_request_id: None,
             should_quit: false,
             paused: false,
         }
@@ -82,6 +88,11 @@ impl AgentApp {
     /// Create a new agent app
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set action sender
+    pub fn set_action_sender(&mut self, sender: perspt_core::events::channel::ActionSender) {
+        self.action_sender = Some(sender);
     }
 
     /// Run the app main loop
@@ -144,13 +155,6 @@ impl AgentApp {
                     KeyCode::Char(' ') | KeyCode::Enter => self.handle_select(),
                     // Approve current
                     KeyCode::Char('a') => self.show_approval_modal(),
-                    // Toggle diff view mode
-                    KeyCode::Char('v') if self.active_tab == ActiveTab::Diff => {
-                        self.diff_viewer.toggle_view_mode();
-                    }
-                    // Navigation within task tree
-                    KeyCode::Left | KeyCode::Char('h') => self.handle_left(),
-                    KeyCode::Right | KeyCode::Char('l') => self.handle_right(),
                     _ => {}
                 }
             }
@@ -158,194 +162,79 @@ impl AgentApp {
         Ok(())
     }
 
-    /// Handle an AppEvent from the async event loop
-    ///
-    /// Returns `true` to continue running, `false` to quit.
-    pub fn handle_app_event(&mut self, event: AppEvent) -> bool {
+    /// Handle logical app events
+    pub fn handle_app_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::Terminal(crossterm_event) => self.handle_terminal_event(crossterm_event),
-            AppEvent::AgentUpdate(update) => {
-                self.handle_agent_update(update);
-                true
-            }
-            AppEvent::Tick => {
-                // Update animations if needed
-                true
-            }
-            AppEvent::Quit => false,
-            AppEvent::Error(e) => {
-                self.dashboard.log(format!("Error: {}", e));
-                true
-            }
-            // Stream events not used in agent mode
-            AppEvent::StreamChunk(_) | AppEvent::StreamComplete => true,
-            // Handle core events from new event system
-            AppEvent::CoreEvent(core_event) => {
-                self.handle_core_event(core_event);
-                true
-            }
-        }
-    }
-
-    /// Handle a terminal event
-    fn handle_terminal_event(&mut self, event: CrosstermEvent) -> bool {
-        match event {
-            CrosstermEvent::Key(key) => {
-                if key.kind != KeyEventKind::Press {
-                    return true;
-                }
-
-                // Handle modal first if visible
-                if self.review_modal.visible {
-                    match key.code {
-                        KeyCode::Left => self.review_modal.select_left(),
-                        KeyCode::Right => self.review_modal.select_right(),
-                        KeyCode::Char(c) => {
-                            if let Some(decision) = self.review_modal.handle_key(c) {
-                                self.handle_review_decision(decision);
-                                self.review_modal.hide();
-                            }
-                        }
-                        KeyCode::Enter => {
-                            let decision = self.review_modal.get_decision();
-                            self.handle_review_decision(decision);
-                            self.review_modal.hide();
-                        }
-                        KeyCode::Esc => self.review_modal.hide(),
-                        _ => {}
-                    }
-                    return true;
-                }
-
-                match key.code {
-                    // Quit
-                    KeyCode::Char('q') => return false,
-                    // Pause/Resume
-                    KeyCode::Char('p') => self.paused = !self.paused,
-                    // Tab navigation
-                    KeyCode::Tab => self.next_tab(),
-                    KeyCode::BackTab => self.prev_tab(),
-                    KeyCode::Char('1') => self.active_tab = ActiveTab::Dashboard,
-                    KeyCode::Char('2') => self.active_tab = ActiveTab::Tasks,
-                    KeyCode::Char('3') => self.active_tab = ActiveTab::Diff,
-                    // Vertical navigation (vim-style)
-                    KeyCode::Up | KeyCode::Char('k') => self.handle_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.handle_down(),
-                    // Page navigation
-                    KeyCode::PageUp => self.handle_page_up(),
-                    KeyCode::PageDown => self.handle_page_down(),
-                    // Task tree specific
-                    KeyCode::Char(' ') | KeyCode::Enter => self.handle_select(),
-                    // Approve current
-                    KeyCode::Char('a') => self.show_approval_modal(),
-                    // Toggle diff view mode
-                    KeyCode::Char('v') if self.active_tab == ActiveTab::Diff => {
-                        self.diff_viewer.toggle_view_mode();
-                    }
-                    // Navigation within task tree
-                    KeyCode::Left | KeyCode::Char('h') => self.handle_left(),
-                    KeyCode::Right | KeyCode::Char('l') => self.handle_right(),
-                    _ => {}
-                }
-            }
-            CrosstermEvent::Resize(_, _) => {
-                // Terminal resize - render will handle it
-            }
+            AppEvent::CoreEvent(core_event) => self.handle_core_event(core_event),
+            AppEvent::AgentUpdate(update) => self.handle_agent_update(update),
             _ => {}
         }
-        true
     }
 
-    /// Handle agent state updates
-    fn handle_agent_update(&mut self, update: AgentStateUpdate) {
-        match update {
-            AgentStateUpdate::TaskStatusChanged { task_id, status } => {
-                self.task_tree.update_status(&task_id, status);
-            }
-            AgentStateUpdate::EnergyUpdated(energy) => {
-                self.dashboard.update_energy(energy);
-            }
-            AgentStateUpdate::Log(msg) => {
-                self.dashboard.log(msg);
-            }
-            AgentStateUpdate::NodeCompleted(node_id) => {
-                self.dashboard.completed_nodes += 1;
-                self.dashboard.log(format!("✓ Node {} completed", node_id));
-            }
-            AgentStateUpdate::Complete => {
-                self.dashboard.log("🎉 Orchestration complete!".to_string());
-            }
-        }
-    }
-
-    /// Handle core events from perspt_core::AgentEvent
-    fn handle_core_event(&mut self, event: perspt_core::AgentEvent) {
-        use perspt_core::AgentEvent;
+    /// Handle events from the SRBN Orchestrator
+    fn handle_core_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::PlanGenerated(plan) => {
-                let count = plan.len();
-                self.task_tree.populate_from_plan(plan);
-                self.dashboard.total_nodes = count;
                 self.dashboard
-                    .log(format!("📋 Loaded plan with {} tasks", count));
+                    .log(format!("Plan generated with {} tasks", plan.tasks.len()));
+                self.task_tree.populate_from_plan(plan.clone());
             }
             AgentEvent::TaskStatusChanged { node_id, status } => {
-                // Convert NodeStatus to TaskStatus
-                let task_status = match status {
-                    perspt_core::NodeStatus::Pending => TaskStatus::Pending,
-                    perspt_core::NodeStatus::Running => TaskStatus::Running,
-                    perspt_core::NodeStatus::Verifying => TaskStatus::Verifying,
-                    perspt_core::NodeStatus::Completed => TaskStatus::Completed,
-                    perspt_core::NodeStatus::Failed => TaskStatus::Failed,
-                    perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,
-                };
-                self.task_tree.update_status(&node_id, task_status);
+                self.task_tree.update_status(&node_id, status.into());
+                self.dashboard
+                    .log(format!("🔄 Task {} -> {:?}", node_id, status));
             }
-            AgentEvent::EnergyUpdated { energy, .. } => {
-                self.dashboard.update_energy(energy);
-            }
-            AgentEvent::Log(msg) => {
-                self.dashboard.log(msg);
+            AgentEvent::Log(message) => {
+                self.dashboard.log(message);
             }
             AgentEvent::NodeCompleted { node_id, goal } => {
-                self.dashboard.completed_nodes += 1;
+                self.task_tree
+                    .update_status(&node_id, TaskStatus::Completed);
                 self.dashboard.log(format!("✓ {} - {}", node_id, goal));
             }
             AgentEvent::ApprovalRequest {
-                description, diff, ..
+                request_id,
+                node_id,
+                action_type,
+                description,
+                diff: _,
             } => {
-                // Show approval modal with stability metrics
-                let metrics = StabilityMetrics {
-                    energy: EnergyComponents::default(),
-                    is_stable: false,
-                    threshold: 0.1,
-                    attempts: 1,
-                    max_attempts: 3,
+                self.pending_request_id = Some(request_id);
+                // Map ActionType to a set of files or something similar for the modal
+                let files = match action_type {
+                    perspt_core::ActionType::FileWrite { path } => vec![path],
+                    _ => vec![],
                 };
-                self.review_modal.show_with_stability(
-                    "Approval Required".to_string(),
-                    description,
-                    diff.map(|d| vec![d]).unwrap_or_default(),
-                    metrics,
-                );
+                self.review_modal
+                    .show(format!("Approval: {}", node_id), description, files);
             }
             AgentEvent::Complete { success, message } => {
                 let emoji = if success { "🎉" } else { "❌" };
-                self.dashboard.log(format!("{} {}", emoji, message));
+                self.dashboard
+                    .log(format!("{} Session Complete: {}", emoji, message));
             }
-            AgentEvent::Error(e) => {
-                self.dashboard.log(format!("⚠️ Error: {}", e));
-            }
+            _ => {}
         }
     }
 
     fn handle_review_decision(&mut self, decision: ReviewDecision) {
+        let request_id = self.pending_request_id.take();
+
         match decision {
             ReviewDecision::Approve => {
                 self.dashboard.log("✓ Changes approved".to_string());
+                if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
+                    let _ = sender.send(perspt_core::AgentAction::Approve { request_id: rid });
+                }
             }
             ReviewDecision::Reject => {
                 self.dashboard.log("✗ Changes rejected".to_string());
+                if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
+                    let _ = sender.send(perspt_core::AgentAction::Reject {
+                        request_id: rid,
+                        reason: Some("User rejected in TUI".to_string()),
+                    });
+                }
             }
             ReviewDecision::Edit => {
                 self.dashboard.log("📝 Opening in editor...".to_string());
@@ -359,41 +248,27 @@ impl AgentApp {
         }
     }
 
-    fn show_approval_modal(&mut self) {
-        // Get current task info if available
-        let (title, description, files) = if let Some(task) = self.task_tree.selected_task() {
-            (
-                format!("Approve: {}", task.goal),
-                format!(
-                    "Task '{}' has produced changes. Review and approve?",
-                    task.id
-                ),
-                vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
-            )
-        } else {
-            (
-                "Approve Changes?".to_string(),
-                "Review the changes below and approve to continue.".to_string(),
-                vec!["file1.rs".to_string(), "file2.rs".to_string()],
-            )
-        };
-
-        // Create stability metrics from dashboard
-        let stability = StabilityMetrics {
-            energy: EnergyComponents {
-                v_syn: 0.02,
-                v_str: 0.01,
-                v_log: 0.03,
-                total: self.dashboard.energy,
-            },
-            is_stable: self.dashboard.stable,
-            threshold: 0.1,
-            attempts: 1,
-            max_attempts: 3,
-        };
-
-        self.review_modal
-            .show_with_stability(title, description, files, stability);
+    fn handle_agent_update(&mut self, update: AgentStateUpdate) {
+        match update {
+            AgentStateUpdate::Energy { node_id, energy } => {
+                self.dashboard.update_energy(energy);
+                self.dashboard.current_node = Some(node_id.clone());
+                self.task_tree.update_energy(&node_id, energy);
+            }
+            AgentStateUpdate::Status { node_id, status } => {
+                self.task_tree.update_status(&node_id, status);
+            }
+            AgentStateUpdate::Log(msg) => {
+                self.dashboard.log(msg);
+            }
+            AgentStateUpdate::NodeCompleted(node_id) => {
+                self.dashboard.log(format!("Node {} completed", node_id));
+            }
+            AgentStateUpdate::Complete => {
+                self.dashboard.log("Orchestration complete".to_string());
+                self.dashboard.status = "Complete".to_string();
+            }
+        }
     }
 
     fn next_tab(&mut self) {
@@ -430,108 +305,79 @@ impl AgentApp {
 
     fn handle_page_up(&mut self) {
         if self.active_tab == ActiveTab::Diff {
-            self.diff_viewer.page_up(10);
+            self.diff_viewer.page_up(20);
         }
     }
 
     fn handle_page_down(&mut self) {
         if self.active_tab == ActiveTab::Diff {
-            self.diff_viewer.page_down(10);
+            self.diff_viewer.page_down(20);
         }
     }
 
     fn handle_select(&mut self) {
         if self.active_tab == ActiveTab::Tasks {
-            self.task_tree.toggle_collapse();
+            if let Some(node) = self.task_tree.selected_task() {
+                self.dashboard.log(format!("Selected: {}", node.id));
+            }
         }
     }
 
-    fn handle_left(&mut self) {
-        if self.active_tab == ActiveTab::Diff {
-            self.diff_viewer.prev_hunk();
-        }
+    fn show_approval_modal(&mut self) {
+        // Placeholder for manual approval trigger if needed
+        self.dashboard
+            .log("Manual approval modal Not Implemented".to_string());
     }
 
-    fn handle_right(&mut self) {
-        if self.active_tab == ActiveTab::Diff {
-            self.diff_viewer.next_hunk();
+    pub fn handle_terminal_event(&mut self, event: crossterm::event::Event) -> bool {
+        // Legacy bridge for run_agent_tui_with_orchestrator
+        if let crossterm::event::Event::Key(key) = event {
+            if key.code == KeyCode::Char('q') {
+                return false;
+            }
         }
+        true
     }
 
-    /// Render the app
-    fn render(&mut self, frame: &mut Frame) {
-        let size = frame.area();
-
-        // Main layout
+    pub fn render(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3), // Tabs
-                Constraint::Min(10),   // Content
-            ])
-            .split(size);
+            .constraints([Constraint::Length(3), Constraint::Min(0)])
+            .split(frame.area());
 
-        // Tabs with keyboard hints
-        let titles = vec!["Dashboard [1]", "Tasks [2]", "Diff [3]"];
-        let pause_indicator = if self.paused { " ⏸ PAUSED" } else { "" };
+        // Header with Tabs
+        let titles = vec!["[1] Dashboard", "[2] Task Tree", "[3] Diff Viewer"];
         let tabs = Tabs::new(titles)
             .block(
                 Block::default()
-                    .title(format!("🚀 SRBN Agent{}", pause_indicator))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(96, 125, 139))),
+                    .title(" perspt Agent mode "),
             )
             .select(self.active_tab.index())
-            .style(Style::default().fg(Color::White))
+            .style(Style::default().fg(Color::Cyan))
             .highlight_style(
                 Style::default()
-                    .fg(Color::Rgb(129, 212, 250))
-                    .add_modifier(Modifier::BOLD),
+                    .add_modifier(Modifier::BOLD)
+                    .bg(Color::Black)
+                    .fg(Color::Yellow),
             );
         frame.render_widget(tabs, chunks[0]);
 
-        // Content based on active tab
+        // Main Content
         match self.active_tab {
             ActiveTab::Dashboard => self.dashboard.render(frame, chunks[1]),
             ActiveTab::Tasks => self.task_tree.render(frame, chunks[1]),
             ActiveTab::Diff => self.diff_viewer.render(frame, chunks[1]),
         }
 
-        // Modal overlay
-        self.review_modal.render(frame, size);
-    }
-}
-
-/// Run the agent TUI with demo data (Legacy - Unused)
-pub fn run_agent_tui() -> io::Result<()> {
-    let mut terminal = ratatui::init();
-    let mut app = AgentApp::new();
-
-    app.dashboard
-        .log("⚠️ Legacy TUI mode - Please use 'perspt agent <task>'".to_string());
-
-    // Minimal event loop
-    loop {
-        terminal.draw(|frame| app.render(frame))?;
-
-        if crossterm::event::poll(std::time::Duration::from_millis(100))? {
-            if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                if key.kind == crossterm::event::KeyEventKind::Press {
-                    if key.code == crossterm::event::KeyCode::Char('q') {
-                        break;
-                    }
-                }
-            }
+        // Modals
+        if self.review_modal.visible {
+            self.review_modal.render(frame, frame.area());
         }
     }
-    ratatui::restore();
-    Ok(())
 }
 
 /// Run the agent TUI with a real SRBNOrchestrator
-///
-/// This function connects the TUI to the orchestrator via channels,
-/// allowing real-time updates and interactive control.
 pub async fn run_agent_tui_with_orchestrator(
     mut orchestrator: perspt_agent::SRBNOrchestrator,
     task: String,
@@ -546,15 +392,13 @@ pub async fn run_agent_tui_with_orchestrator(
     // Connect orchestrator to TUI
     orchestrator.connect_tui(event_sender, action_receiver);
 
-    // Spawn orchestrator in background task
-    let orchestrator_handle = tokio::spawn(async move { orchestrator.run(task).await });
-
-    // Initialize terminal
+    // Initializing terminal
     let mut terminal = ratatui::init();
     let mut app = AgentApp::new();
+    app.set_action_sender(action_sender);
 
-    // Store action sender for TUI to use
-    let _action_sender = action_sender;
+    // Spawn orchestrator in background task
+    let orchestrator_handle = tokio::spawn(async move { orchestrator.run(task).await });
 
     // Main event loop
     loop {
@@ -568,8 +412,39 @@ pub async fn run_agent_tui_with_orchestrator(
                 if crossterm::event::poll(std::time::Duration::from_millis(0))? {
                     if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
                         if key.kind == crossterm::event::KeyEventKind::Press {
-                            if !app.handle_terminal_event(crossterm::event::Event::Key(key)) {
-                                break;
+                            // Map Key Events to app state
+                            if key.code == KeyCode::Char('q') {
+                                app.should_quit = true;
+                            }
+                            // Pass keys to modal if visible
+                            if app.review_modal.visible {
+                                match key.code {
+                                    KeyCode::Left => app.review_modal.select_left(),
+                                    KeyCode::Right => app.review_modal.select_right(),
+                                    KeyCode::Char(c) => {
+                                        if let Some(decision) = app.review_modal.handle_key(c) {
+                                            app.handle_review_decision(decision);
+                                            app.review_modal.hide();
+                                        }
+                                    }
+                                    KeyCode::Enter => {
+                                        let decision = app.review_modal.get_decision();
+                                        app.handle_review_decision(decision);
+                                        app.review_modal.hide();
+                                    }
+                                    KeyCode::Esc => app.review_modal.hide(),
+                                    _ => {}
+                                }
+                            } else {
+                                match key.code {
+                                    KeyCode::Tab => app.next_tab(),
+                                    KeyCode::Char('1') => app.active_tab = ActiveTab::Dashboard,
+                                    KeyCode::Char('2') => app.active_tab = ActiveTab::Tasks,
+                                    KeyCode::Char('3') => app.active_tab = ActiveTab::Diff,
+                                    KeyCode::Up | KeyCode::Char('k') => app.handle_up(),
+                                    KeyCode::Down | KeyCode::Char('j') => app.handle_down(),
+                                    _ => {}
+                                }
                             }
                         }
                     }
@@ -587,15 +462,11 @@ pub async fn run_agent_tui_with_orchestrator(
 
         // Check if orchestrator finished
         if orchestrator_handle.is_finished() {
-            app.dashboard.log("🏁 Orchestrator finished".to_string());
-            // Allow user to review results before exit
+            // app.dashboard.log("🏁 Orchestrator finished".to_string());
         }
     }
 
     ratatui::restore();
-
-    // Wait for orchestrator to complete or abort
     orchestrator_handle.abort();
-
     Ok(())
 }

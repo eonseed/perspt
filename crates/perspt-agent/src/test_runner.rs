@@ -210,7 +210,6 @@ python_functions = ["test_*"]
     /// If environment is not set up, will attempt to set it up first.
     pub async fn run_pytest(&self, test_args: &[&str]) -> Result<TestResults> {
         log::info!("Running pytest in {}", self.working_dir.display());
-        println!("   🧪 Running tests...");
 
         // Ensure environment is set up
         if !self.has_pytest().await {
@@ -245,13 +244,14 @@ python_functions = ["test_*"]
         let mut results = self.parse_pytest_output(&combined, duration_ms);
         results.run_succeeded = true; // We got output, run worked
 
-        // Print summary
+        // Log summary
         if results.all_passed() {
-            println!("   ✅ Tests passed: {}/{}", results.passed, results.total);
+            log::info!("✅ Tests passed: {}/{}", results.passed, results.total);
         } else {
-            println!(
-                "   ❌ Tests failed: {} passed, {} failed",
-                results.passed, results.failed
+            log::info!(
+                "❌ Tests failed: {} passed, {} failed",
+                results.passed,
+                results.failed
             );
         }
 

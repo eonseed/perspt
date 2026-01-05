@@ -49,6 +49,8 @@ pub struct SRBNOrchestrator {
     event_sender: Option<perspt_core::events::channel::EventSender>,
     /// Action receiver for TUI commands (optional)
     action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
+    /// Persistence ledger
+    pub ledger: crate::ledger::MerkleLedger,
 }
 
 impl SRBNOrchestrator {
@@ -112,6 +114,7 @@ impl SRBNOrchestrator {
             actuator_model: stored_actuator_model,
             event_sender: None,
             action_receiver: None,
+            ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
         }
     }
 
@@ -233,14 +236,21 @@ impl SRBNOrchestrator {
         log::info!("Starting SRBN execution for task: {}", task);
         self.emit_log(format!("🚀 Starting task: {}", task));
 
-        // Step 0: Project Initialization
+        // Step 0: Project Initialization - Start session first
+        let session_id = uuid::Uuid::new_v4().to_string();
+        self.ledger.start_session(
+            &session_id,
+            &task,
+            &self.context.working_dir.to_string_lossy(),
+        )?;
+
         self.step_init_project(&task).await?;
 
         // Step 1: Architecture Sheafification
         self.step_sheafify(task).await?;
 
         // Emit task nodes to TUI after sheafification
-        for (node_id, _) in &self.node_indices {
+        for node_id in self.node_indices.keys() {
             if let Some(idx) = self.node_indices.get(node_id) {
                 if let Some(node) = self.graph.node_weight(*idx) {
                     self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
@@ -298,33 +308,80 @@ impl SRBNOrchestrator {
 
         // 2. If empty, heuristically detect language from task
         let task_lower = task.to_lowercase();
-        let plugin_name = if task_lower.contains("rust") {
+        let plugin_name = if task_lower.contains("rust") || task_lower.contains("cargo") {
             Some("rust")
         } else if task_lower.contains("python")
             || task_lower.contains("flask")
             || task_lower.contains("django")
+            || task_lower.contains("fastapi")
+            || task_lower.contains("pytorch")
+            || task_lower.contains("tensorflow")
+            || task_lower.contains("pandas")
+            || task_lower.contains("numpy")
+            || task_lower.contains("scikit")
+            || task_lower.contains("sklearn")
+            || task_lower.contains("ml ")
+            || task_lower.contains("machine learning")
+            || task_lower.contains("deep learning")
+            || task_lower.contains("neural")
+            || task_lower.contains("dcf")
+            || task_lower.contains("data science")
+            || task_lower.contains("jupyter")
+            || task_lower.contains("notebook")
+            || task_lower.contains("streamlit")
+            || task_lower.contains("gradio")
+            || task_lower.contains("huggingface")
+            || task_lower.contains("transformers")
+            || task_lower.contains("llm")
+            || task_lower.contains("langchain")
+            || task_lower.contains("pydantic")
         {
             Some("python")
         } else if task_lower.contains("javascript")
             || task_lower.contains("typescript")
             || task_lower.contains("node")
             || task_lower.contains("react")
+            || task_lower.contains("vue")
+            || task_lower.contains("angular")
+            || task_lower.contains("next.js")
+            || task_lower.contains("nextjs")
         {
             Some("javascript")
         } else {
-            None
+            // Default to Python for generic "app" or "application" tasks
+            // since Python is the most versatile for quick prototyping
+            if task_lower.contains("app") || task_lower.contains("application") {
+                Some("python")
+            } else {
+                None
+            }
         };
 
         if let Some(name) = plugin_name {
             if let Some(plugin) = registry.get(name) {
                 self.emit_log(format!("🌱 Initializing new {} project", name));
 
+                // Check if working directory is empty
+                let is_empty = std::fs::read_dir(&self.context.working_dir)
+                    .map(|mut i| i.next().is_none())
+                    .unwrap_or(true);
+
+                let project_name = if is_empty {
+                    ".".to_string() // Init in current directory
+                } else {
+                    "perspt_app".to_string() // Fallback to subfolder
+                };
+
                 let opts = perspt_core::plugin::InitOptions {
-                    name: "perspt_app".to_string(), // Safe default name
+                    name: project_name.clone(),
                     ..Default::default()
                 };
 
-                let cmd = plugin.init_command(&opts);
+                let cmd = if name == "python" && is_empty {
+                    "uv init .".to_string()
+                } else {
+                    plugin.init_command(&opts)
+                };
 
                 // Request approval for init
                 let approved = self
@@ -332,7 +389,7 @@ impl SRBNOrchestrator {
                         perspt_core::ActionType::Command {
                             command: cmd.clone(),
                         },
-                        format!("Initialize {} project", name),
+                        format!("Initialize {} project in '{}'", name, project_name),
                         None,
                     )
                     .await;
@@ -366,7 +423,7 @@ impl SRBNOrchestrator {
     /// This step retries until a valid JSON plan is produced or max attempts reached.
     async fn step_sheafify(&mut self, task: String) -> Result<()> {
         log::info!("Step 1: Sheafification - Planning task decomposition");
-        println!("   🏗️ Architect is analyzing the task...");
+        self.emit_log("🏗️ Architect is analyzing the task...".to_string());
 
         const MAX_ATTEMPTS: usize = 3;
         let mut last_error: Option<String> = None;
@@ -399,10 +456,10 @@ impl SRBNOrchestrator {
                         last_error = Some(format!("Validation error: {}", e));
 
                         if attempt >= MAX_ATTEMPTS {
-                            println!(
-                                "   ❌ Failed to get valid plan after {} attempts",
+                            self.emit_log(format!(
+                                "❌ Failed to get valid plan after {} attempts",
                                 MAX_ATTEMPTS
-                            );
+                            ));
                             // Fall back to single-task execution
                             return self.create_fallback_task(&task);
                         }
@@ -411,11 +468,11 @@ impl SRBNOrchestrator {
 
                     // Check complexity gating
                     if plan.len() > self.context.complexity_k && !self.auto_approve {
-                        println!(
-                            "   ⚠️ Plan has {} tasks (exceeds K={}). Approve? [y/n]",
+                        self.emit_log(format!(
+                            "⚠️ Plan has {} tasks (exceeds K={})",
                             plan.len(),
                             self.context.complexity_k
-                        );
+                        ));
                         // TODO: Implement interactive approval
                         // For now, auto-approve in headless mode
                     }
@@ -437,7 +494,9 @@ impl SRBNOrchestrator {
                     last_error = Some(format!("JSON parse error: {}", e));
 
                     if attempt >= MAX_ATTEMPTS {
-                        println!("   ⚠️ Could not parse structured plan, using single task");
+                        self.emit_log(
+                            "⚠️ Could not parse structured plan, using single task".to_string(),
+                        );
                         return self.create_fallback_task(&task);
                     }
                 }
@@ -779,7 +838,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 "No code block or command found in response, response length: {}",
                 content.len()
             );
-            println!("   ℹ No file changes detected in response");
+            self.emit_log("ℹ️ No file changes detected in response".to_string());
         }
 
         self.context.history.push(message);
@@ -860,7 +919,13 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                             "rust" | "rs" => "main.rs".to_string(),
                             "javascript" | "js" => "main.js".to_string(),
                             "typescript" | "ts" => "main.ts".to_string(),
-                            _ => "output.txt".to_string(),
+                            _ => {
+                                if let Some(dir) = self.ledger.artifacts_dir() {
+                                    dir.join("output.txt").to_string_lossy().to_string()
+                                } else {
+                                    "output.txt".to_string()
+                                }
+                            }
                         });
                     return Some((filename, code));
                 }
@@ -903,9 +968,13 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                         diagnostics.len(),
                         energy.v_syn
                     );
-                    println!("   🔍 LSP found {} diagnostics:", diagnostics.len());
+                    self.emit_log(format!("🔍 LSP found {} diagnostics:", diagnostics.len()));
                     for d in &diagnostics {
-                        println!("      - [{:?}] {}", d.severity, d.message);
+                        self.emit_log(format!(
+                            "   - [{}] {}",
+                            severity_to_str(d.severity),
+                            d.message
+                        ));
                     }
 
                     // Store diagnostics for correction prompt
@@ -925,7 +994,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                         if content.contains(pattern) {
                             energy.v_str += 0.5;
                             log::warn!("Forbidden pattern found: '{}'", pattern);
-                            println!("   ⚠️ Forbidden pattern: '{}'", pattern);
+                            self.emit_log(format!("⚠️ Forbidden pattern: '{}'", pattern));
                         }
                     }
                 }
@@ -933,6 +1002,14 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         }
 
         let node = &self.graph[idx];
+        // Record energy in persistent ledger
+        if let Err(e) =
+            self.ledger
+                .record_energy(&node.node_id, &energy, energy.total(&node.contract))
+        {
+            log::error!("Failed to record energy: {}", e);
+        }
+
         log::info!(
             "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, V_boot={:.2}, V_sheaf={:.2}, Total={:.2}",
             node.node_id,
@@ -976,7 +1053,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 total,
                 epsilon
             );
-            println!("   ✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon);
+            self.emit_log(format!("✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon));
             return Ok(true);
         }
 
@@ -987,10 +1064,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 attempt_count,
                 total
             );
-            println!(
-                "   ⚠️ Escalating: failed to converge after {} attempts",
+            self.emit_log(format!(
+                "⚠️ Escalating: failed to converge after {} attempts",
                 attempt_count
-            );
+            ));
             return Ok(false);
         }
 
@@ -1002,10 +1079,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             epsilon,
             attempt_count
         );
-        println!(
-            "   🔄 V(x)={:.2} > ε={:.2}, sending errors to LLM (attempt {})",
+        self.emit_log(format!(
+            "🔄 V(x)={:.2} > ε={:.2}, sending errors to LLM (attempt {})",
             total, epsilon, attempt_count
-        );
+        ));
 
         // Build correction prompt with diagnostics
         let correction_prompt = self.build_correction_prompt(&node_id, &goal, &energy)?;
@@ -1014,10 +1091,8 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             "--- CORRECTION PROMPT ---\n{}\n-------------------------",
             correction_prompt
         );
-        println!(
-            "--- CORRECTION PROMPT ---\n{}\n-------------------------",
-            correction_prompt
-        );
+        // Don't emit the full correction prompt to TUI - it's too verbose
+        self.emit_log("📤 Sending correction prompt to LLM...".to_string());
 
         // Call LLM for corrected code
         let corrected = self.call_llm_for_correction(&correction_prompt).await?;
@@ -1039,7 +1114,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             let result = self.tools.execute(&call).await;
             if result.success {
                 log::info!("✓ Applied correction to: {}", filename);
-                println!("   📝 Applied correction to: {}", filename);
+                self.emit_log(format!("📝 Applied correction to: {}", filename));
 
                 // Update tracking
                 self.last_written_file = Some(full_path.clone());
