@@ -361,7 +361,8 @@ impl SRBNOrchestrator {
                 let project_name = if is_empty {
                     ".".to_string() // Init in current directory
                 } else {
-                    "perspt_app".to_string() // Fallback to subfolder
+                    // Suggest a meaningful project name from the task
+                    self.suggest_project_name(task).await
                 };
 
                 let opts = perspt_core::plugin::InitOptions {
@@ -466,7 +467,123 @@ impl SRBNOrchestrator {
         }
     }
 
-    /// Step 1: Architecture Sheafification
+    /// Suggest a meaningful project name from the task description
+    async fn suggest_project_name(&self, task: &str) -> String {
+        // 1. Try heuristic extraction first (fast, no LLM)
+        if let Some(name) = self.extract_name_heuristic(task) {
+            self.emit_log(format!("📁 Suggested project folder: {}", name));
+            return name;
+        }
+
+        // 2. Fallback to LLM for complex tasks
+        let prompt = format!(
+            r#"Extract a short project name from this task description.
+Rules:
+- Use snake_case (lowercase with underscores)
+- Maximum 30 characters
+- Must be a valid folder name (letters, numbers, underscores only)
+- Return ONLY the name, nothing else
+
+Task: "{}"
+
+Project name:"#,
+            task
+        );
+
+        match self
+            .provider
+            .generate_response_simple(&self.actuator_model, &prompt)
+            .await
+        {
+            Ok(response) => {
+                let suggested = response.trim().to_lowercase();
+                if let Some(validated) = self.validate_project_name(&suggested) {
+                    self.emit_log(format!("📁 Suggested project folder: {}", validated));
+                    return validated;
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to get project name from LLM: {}", e);
+            }
+        }
+
+        // 3. Final fallback
+        let fallback = "perspt_app".to_string();
+        self.emit_log(format!("📁 Using default folder: {}", fallback));
+        fallback
+    }
+
+    /// Extract project name from task using common patterns (no LLM)
+    fn extract_name_heuristic(&self, task: &str) -> Option<String> {
+        let task_lower = task.to_lowercase();
+
+        // Common patterns: "create a todo app", "build weather cli", etc.
+        let patterns = [
+            // "create/build/make a X app/cli/api"
+            r"(?:create|build|make|implement|develop|write)\s+(?:a\s+)?(.+?)\s*(?:app|application|cli|api|service|tool|project|backend|frontend|server|client)?$",
+            // "X app/cli in python/rust"
+            r"(.+?)\s+(?:app|application|cli|api|service|tool|project)\s+(?:in|using|with)",
+            // Just "X app"
+            r"(.+?)\s+(?:app|application|cli|api|service|tool|project)$",
+        ];
+
+        for pattern in &patterns {
+            if let Ok(re) = regex::Regex::new(pattern) {
+                if let Some(caps) = re.captures(&task_lower) {
+                    if let Some(matched) = caps.get(1) {
+                        let raw_name = matched.as_str().trim();
+                        // Clean up and convert to snake_case
+                        let cleaned = self.to_snake_case(raw_name);
+                        if let Some(validated) = self.validate_project_name(&cleaned) {
+                            return Some(validated);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Convert a string to snake_case
+    fn to_snake_case(&self, s: &str) -> String {
+        s.chars()
+            .filter_map(|c| {
+                if c.is_alphanumeric() {
+                    Some(c.to_ascii_lowercase())
+                } else if c.is_whitespace() || c == '-' {
+                    Some('_')
+                } else {
+                    None
+                }
+            })
+            .collect::<String>()
+            .trim_matches('_')
+            .to_string()
+    }
+
+    /// Validate and sanitize a project name
+    fn validate_project_name(&self, name: &str) -> Option<String> {
+        // Must start with letter, contain only letters/numbers/underscores
+        let cleaned: String = name
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_')
+            .take(30)
+            .collect();
+
+        if cleaned.is_empty() {
+            return None;
+        }
+
+        // Ensure it starts with a letter
+        let first = cleaned.chars().next()?;
+        if !first.is_alphabetic() {
+            return None;
+        }
+
+        Some(cleaned)
+    }
+
     ///
     /// The Architect analyzes the task and produces a structured Task DAG.
     /// This step retries until a valid JSON plan is produced or max attempts reached.
