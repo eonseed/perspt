@@ -8,6 +8,7 @@ members = [
     "crates/perspt-policy",
     "crates/perspt-sandbox",
     "crates/perspt-cli",
+    "crates/perspt-store",
 ]
 
 [workspace.package]

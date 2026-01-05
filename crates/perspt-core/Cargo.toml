@@ -30,5 +30,8 @@ lsp-types = "0.97"
 # Logging
 log = "0.4"
 
+# UUID for session IDs
+uuid = { version = "1.11", features = ["v4"] }
+
 # Utilities
 anyhow = "1.0"
