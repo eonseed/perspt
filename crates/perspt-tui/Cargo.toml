@@ -39,7 +39,7 @@ syntect = "5.2"
 throbber-widgets-tui = "0.10"
 
 # Markdown Rendering (terminal)
-termimad = "0.30"
+termimad = "0.34"
 
 # Markdown to Ratatui Text
 tui-markdown = "0.3.6"
