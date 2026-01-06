@@ -12,7 +12,7 @@ Guide for extending and contributing to Perspt.
       :link: architecture
       :link-type: doc
 
-      6-crate workspace design and SRBN engine.
+      7-crate workspace design and SRBN engine.
 
    .. grid-item-card:: 🤝 Contributing
       :link: contributing

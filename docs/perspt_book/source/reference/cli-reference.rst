@@ -52,6 +52,8 @@ Commands Overview
      - Abort current agent session
    * - ``resume``
      - Resume paused or crashed session
+   * - ``logs``
+     - View LLM request/response logs
    * - ``simple-chat``
      - Simple CLI chat mode (no TUI)
 
@@ -141,6 +143,16 @@ Run the SRBN agent for autonomous coding.
      - Maximum cost in dollars (0 = unlimited)
    * - ``--max-steps <N>``
      - Maximum iterations (0 = unlimited)
+
+**Execution Options**:
+
+.. list-table::
+   :widths: 30 70
+
+   * - ``--defer-tests``
+     - Defer tests until sheaf validation (faster iteration)
+   * - ``--log-llm``
+     - Log all LLM requests/responses to database
 
 **Examples**:
 
@@ -282,6 +294,49 @@ No TUI - just a prompt with streaming responses.
    perspt simple-chat
    perspt simple-chat --log-file session.txt
    echo "Explain Rust" | perspt simple-chat
+
+perspt logs
+-----------
+
+**Usage**: ``perspt logs [OPTIONS] [SESSION_ID]``
+
+View and analyze LLM request/response logs from agent sessions.
+
+**Arguments**:
+
+.. list-table::
+   :widths: 25 75
+
+   * - ``[SESSION_ID]``
+     - Session ID to view (optional)
+
+**Options**:
+
+.. list-table::
+   :widths: 25 75
+
+   * - ``--last``
+     - Show logs from most recent session
+   * - ``--stats``
+     - Show usage statistics instead of individual requests
+   * - ``--tui``
+     - Launch interactive TUI logs viewer
+
+**Examples**:
+
+.. code-block:: bash
+
+   # View most recent session logs
+   perspt logs --last
+
+   # Interactive TUI viewer
+   perspt logs --tui
+
+   # Usage statistics
+   perspt logs --stats
+
+   # Specific session
+   perspt logs abc123-session-id
 
 Exit Codes
 ----------

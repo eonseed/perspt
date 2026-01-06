@@ -3,7 +3,7 @@
 Workspace Crates
 ================
 
-Perspt is organized as a **6-crate Cargo workspace** for modularity and maintainability.
+Perspt is organized as a **7-crate Cargo workspace** for modularity and maintainability.
 
 Crate Overview
 --------------
@@ -23,13 +23,16 @@ Crate Overview
        agent [label="perspt-agent\n━━━━━━━━━\nOrchestrator\nLSP, Tools", fillcolor="#FFEAA7"];
        policy [label="perspt-policy\n━━━━━━━━━\nPolicyEngine\nSanitizer", fillcolor="#DDA0DD"];
        sandbox [label="perspt-sandbox\n━━━━━━━━━\nSandboxedCommand", fillcolor="#F8B739"];
+       store [label="perspt-store\n━━━━━━━━━\nSession Persistence\nLLM Logging", fillcolor="#FFD700"];
        
        cli -> core;
        cli -> tui;
        cli -> agent;
+       cli -> store;
        agent -> core;
        agent -> policy;
        agent -> sandbox;
+       agent -> store;
    }
 
 Crate Details
@@ -160,6 +163,35 @@ perspt-sandbox
 **Location**: ``crates/perspt-sandbox/``
 
 **Key Component**: ``command.rs`` — Sandboxed command execution with resource limits
+
+perspt-store
+~~~~~~~~~~~~
+
+**Purpose**: DuckDB-based session persistence and LLM logging
+
+**Location**: ``crates/perspt-store/``
+
+**Key Components**:
+
+- ``store.rs`` — SessionStore with CRUD operations
+- ``schema.rs`` — Database schema initialization
+
+**Key Types**:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``SessionRecord``
+     - Session metadata (id, task, status, timestamps)
+   * - ``LlmRequestRecord``
+     - LLM request/response with latency and tokens
+   * - ``EnergyRecord``
+     - Energy history for stability tracking
+   * - ``NodeStateRecord``
+     - SRBN node state snapshots
 
 Building Individual Crates
 --------------------------

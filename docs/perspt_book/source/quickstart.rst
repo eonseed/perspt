@@ -184,4 +184,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 6-crate design.
+      Understand the 7-crate design.

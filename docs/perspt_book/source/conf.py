@@ -27,6 +27,7 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.ifconfig',
     'sphinx.ext.githubpages',
+    'sphinx.ext.graphviz',
     'myst_parser',
     'sphinx_copybutton',
     'sphinx_design',
@@ -222,6 +223,27 @@ latex_elements = {
 \newunicodechar{✨}{{\emojifont ✨}}
 \newunicodechar{⚡}{{\emojifont ⚡}}
 \newunicodechar{⚙}{{\emojifont ⚙}}
+\newunicodechar{🔌}{{\emojifont 🔌}}
+\newunicodechar{🔬}{{\emojifont 🔬}}
+\newunicodechar{🧪}{{\emojifont 🧪}}
+\newunicodechar{📝}{{\emojifont 📝}}
+\newunicodechar{💰}{{\emojifont 💰}}
+\newunicodechar{🖥}{{\emojifont 🖥}}
+\newunicodechar{💾}{{\emojifont 💾}}
+\newunicodechar{🤝}{{\emojifont 🤝}}
+\newunicodechar{🧩}{{\emojifont 🧩}}
+\newunicodechar{⚠}{{\emojifont ⚠}}
+\newunicodechar{✅}{{\emojifont ✅}}
+\newunicodechar{❗}{{\emojifont ❗}}
+\newunicodechar{💡}{{\emojifont 💡}}
+\newunicodechar{🎓}{{\emojifont 🎓}}
+\newunicodechar{📎}{{\emojifont 📎}}
+\newunicodechar{🧠}{{\emojifont 🧠}}
+\newunicodechar{💻}{{\emojifont 💻}}
+\newunicodechar{⌨}{{\emojifont ⌨}}
+\newunicodechar{❌}{{\emojifont ❌}}
+\newunicodechar{✗}{{\emojifont ✗}}
+\newunicodechar{️}{{}}  % Variation selector - render as nothing
 
 % Emoji command for manual usage
 \newcommand{\emoji}[1]{{\emojifont #1}}
@@ -279,6 +301,11 @@ napoleon_use_rtype = True
 napoleon_preprocess_types = False
 napoleon_type_aliases = None
 napoleon_attr_annotations = True
+
+# Graphviz configuration for diagram rendering
+graphviz_output_format = 'png'  # PNG for HTML
+graphviz_dot = '/opt/homebrew/bin/dot'
+graphviz_dot_args = ['-Gdpi=150']  # Higher DPI for better PDF quality
 
 # MyST parser configuration
 myst_enable_extensions = [
