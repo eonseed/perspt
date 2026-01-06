@@ -47,6 +47,19 @@ impl TaskStatus {
     }
 }
 
+impl From<perspt_core::NodeStatus> for TaskStatus {
+    fn from(status: perspt_core::NodeStatus) -> Self {
+        match status {
+            perspt_core::NodeStatus::Pending => TaskStatus::Pending,
+            perspt_core::NodeStatus::Running => TaskStatus::Running,
+            perspt_core::NodeStatus::Verifying => TaskStatus::Verifying,
+            perspt_core::NodeStatus::Completed => TaskStatus::Completed,
+            perspt_core::NodeStatus::Failed => TaskStatus::Failed,
+            perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,
+        }
+    }
+}
+
 /// A task node for the tree view
 #[derive(Debug, Clone)]
 pub struct TaskNode {
@@ -107,6 +120,41 @@ impl TaskTree {
 
         self.nodes.insert(id, node);
         self.rebuild_visible();
+    }
+
+    /// Populate tree from TaskPlan using dependency information for tree structure
+    pub fn populate_from_plan(&mut self, plan: perspt_core::types::TaskPlan) {
+        self.clear();
+
+        // Build a map of task ID to dependencies for depth calculation
+        let mut depth_map: HashMap<String, usize> = HashMap::new();
+
+        // First pass: insert all tasks with initial depth based on dependencies
+        for task in &plan.tasks {
+            // Calculate depth: max depth of dependencies + 1, or 0 if no deps
+            let depth = if task.dependencies.is_empty() {
+                0
+            } else {
+                task.dependencies
+                    .iter()
+                    .filter_map(|dep_id| depth_map.get(dep_id))
+                    .max()
+                    .map(|d| d + 1)
+                    .unwrap_or(0)
+            };
+            depth_map.insert(task.id.clone(), depth);
+
+            // Use first dependency as parent (for tree visualization)
+            // This creates a logical parent-child relationship
+            let parent_id = task.dependencies.first().cloned();
+
+            self.add_task_with_parent(task.id.clone(), task.goal.clone(), parent_id, depth);
+        }
+
+        // Selection reset
+        if !self.visible_tasks.is_empty() {
+            self.state.select(Some(0));
+        }
     }
 
     /// Add a task with parent relationship

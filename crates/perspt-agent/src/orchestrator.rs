@@ -3,7 +3,9 @@
 //! Manages the Task DAG and orchestrates agent execution following the 7-step control loop.
 
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
+use crate::context_retriever::ContextRetriever;
 use crate::lsp::LspClient;
+use crate::test_runner::PythonTestRunner;
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
@@ -11,12 +13,24 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Topo, Walker};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// Dependency edge type
 #[derive(Debug, Clone)]
 pub struct Dependency {
     /// Dependency type description
     pub kind: String,
+}
+
+/// Result of an approval request
+#[derive(Debug, Clone)]
+pub enum ApprovalResult {
+    /// User approved the action
+    Approved,
+    /// User approved with an edited value (e.g., project name)
+    ApprovedWithEdit(String),
+    /// User rejected the action
+    Rejected,
 }
 
 /// The SRBN Orchestrator - manages the agent workflow
@@ -45,6 +59,12 @@ pub struct SRBNOrchestrator {
     architect_model: String,
     /// Actuator model name for corrections
     actuator_model: String,
+    /// Event sender for TUI updates (optional)
+    event_sender: Option<perspt_core::events::channel::EventSender>,
+    /// Action receiver for TUI commands (optional)
+    action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
+    /// Persistence ledger
+    pub ledger: crate::ledger::MerkleLedger,
 }
 
 impl SRBNOrchestrator {
@@ -106,6 +126,9 @@ impl SRBNOrchestrator {
             provider,
             architect_model: stored_architect_model,
             actuator_model: stored_actuator_model,
+            event_sender: None,
+            action_receiver: None,
+            ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
         }
     }
 
@@ -115,6 +138,97 @@ impl SRBNOrchestrator {
         let idx = self.graph.add_node(node);
         self.node_indices.insert(node_id, idx);
         idx
+    }
+
+    /// Connect TUI channels for interactive control
+    pub fn connect_tui(
+        &mut self,
+        event_sender: perspt_core::events::channel::EventSender,
+        action_receiver: perspt_core::events::channel::ActionReceiver,
+    ) {
+        self.tools.set_event_sender(event_sender.clone());
+        self.event_sender = Some(event_sender);
+        self.action_receiver = Some(action_receiver);
+    }
+
+    /// Emit an event to the TUI (if connected)
+    fn emit_event(&self, event: perspt_core::AgentEvent) {
+        if let Some(ref sender) = self.event_sender {
+            let _ = sender.send(event);
+        }
+    }
+
+    /// Emit a log message to TUI
+    fn emit_log(&self, msg: impl Into<String>) {
+        self.emit_event(perspt_core::AgentEvent::Log(msg.into()));
+    }
+
+    /// Request approval from user and await response
+    /// Returns ApprovalResult with optional edited value
+    async fn await_approval(
+        &mut self,
+        action_type: perspt_core::ActionType,
+        description: String,
+        diff: Option<String>,
+    ) -> ApprovalResult {
+        // If auto_approve is enabled, skip approval
+        if self.auto_approve {
+            return ApprovalResult::Approved;
+        }
+
+        // If no TUI connected, default to approve (headless with --yes)
+        if self.action_receiver.is_none() {
+            return ApprovalResult::Approved;
+        }
+
+        // Generate unique request ID
+        let request_id = uuid::Uuid::new_v4().to_string();
+
+        // Emit approval request
+        self.emit_event(perspt_core::AgentEvent::ApprovalRequest {
+            request_id: request_id.clone(),
+            node_id: "current".to_string(),
+            action_type,
+            description,
+            diff,
+        });
+
+        // Wait for response
+        if let Some(ref mut receiver) = self.action_receiver {
+            while let Some(action) = receiver.recv().await {
+                match action {
+                    perspt_core::AgentAction::Approve { request_id: rid } if rid == request_id => {
+                        self.emit_log("✓ Approved by user");
+                        return ApprovalResult::Approved;
+                    }
+                    perspt_core::AgentAction::ApproveWithEdit {
+                        request_id: rid,
+                        edited_value,
+                    } if rid == request_id => {
+                        self.emit_log(format!("✓ Approved with edit: {}", edited_value));
+                        return ApprovalResult::ApprovedWithEdit(edited_value);
+                    }
+                    perspt_core::AgentAction::Reject {
+                        request_id: rid,
+                        reason,
+                    } if rid == request_id => {
+                        let msg = reason.unwrap_or_else(|| "User rejected".to_string());
+                        self.emit_log(format!("✗ Rejected: {}", msg));
+                        return ApprovalResult::Rejected;
+                    }
+                    perspt_core::AgentAction::Abort => {
+                        self.emit_log("⚠️ Session aborted by user");
+                        return ApprovalResult::Rejected;
+                    }
+                    _ => {
+                        // Ignore other actions while waiting for this specific approval
+                        continue;
+                    }
+                }
+            }
+        }
+
+        ApprovalResult::Rejected // Channel closed
     }
 
     /// Add a dependency edge between nodes
@@ -141,29 +255,429 @@ impl SRBNOrchestrator {
     /// Run the complete SRBN control loop
     pub async fn run(&mut self, task: String) -> Result<()> {
         log::info!("Starting SRBN execution for task: {}", task);
+        self.emit_log(format!("🚀 Starting task: {}", task));
+
+        // Step 0: Project Initialization - Start session first
+        let session_id = uuid::Uuid::new_v4().to_string();
+        self.context.session_id = session_id.clone();
+        self.ledger.start_session(
+            &session_id,
+            &task,
+            &self.context.working_dir.to_string_lossy(),
+        )?;
+
+        // Log that LLM request logging is enabled (persistence happens immediately per-request)
+        if self.context.log_llm {
+            self.emit_log("📝 LLM request logging enabled".to_string());
+        }
+
+        self.step_init_project(&task).await?;
 
         // Step 1: Architecture Sheafification
         self.step_sheafify(task).await?;
 
+        // Emit task nodes to TUI after sheafification
+        for node_id in self.node_indices.keys() {
+            if let Some(idx) = self.node_indices.get(node_id) {
+                if let Some(node) = self.graph.node_weight(*idx) {
+                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                        node_id: node.node_id.clone(),
+                        status: perspt_core::NodeStatus::Pending,
+                    });
+                }
+            }
+        }
+
         // Step 2-7: Execute nodes in topological order
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
+        let total_nodes = indices.len();
 
-        for idx in indices {
-            self.execute_node(idx).await?;
+        for (i, idx) in indices.iter().enumerate() {
+            // Emit running status
+            if let Some(node) = self.graph.node_weight(*idx) {
+                self.emit_log(format!("📝 [{}/{}] {}", i + 1, total_nodes, node.goal));
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: node.node_id.clone(),
+                    status: perspt_core::NodeStatus::Running,
+                });
+            }
+
+            self.execute_node(*idx).await?;
+
+            // Emit completed status
+            if let Some(node) = self.graph.node_weight(*idx) {
+                self.emit_event(perspt_core::AgentEvent::NodeCompleted {
+                    node_id: node.node_id.clone(),
+                    goal: node.goal.clone(),
+                });
+            }
         }
 
         log::info!("SRBN execution completed");
+
+        self.emit_event(perspt_core::AgentEvent::Complete {
+            success: true,
+            message: format!("Completed {} nodes", total_nodes),
+        });
         Ok(())
     }
 
-    /// Step 1: Architecture Sheafification
+    /// Step 0: Project Initialization
+    /// Checks for existing project or initializes new one based on task
+    async fn step_init_project(&mut self, task: &str) -> Result<()> {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+
+        // 1. Check if project already exists
+        if let Some(plugin) = registry.detect(&self.context.working_dir) {
+            self.emit_log(format!("📂 Detected existing {} project", plugin.name()));
+
+            // For existing projects, check if tooling sync is needed
+            match plugin.check_tooling_action(&self.context.working_dir) {
+                perspt_core::plugin::ProjectAction::ExecCommand {
+                    command,
+                    description,
+                } => {
+                    self.emit_log(format!("🔧 Tooling action needed: {}", description));
+
+                    // Request approval for tooling sync
+                    let approval_result = self
+                        .await_approval(
+                            perspt_core::ActionType::Command {
+                                command: command.clone(),
+                            },
+                            description.clone(),
+                            None,
+                        )
+                        .await;
+
+                    if matches!(
+                        approval_result,
+                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                    ) {
+                        let mut args = HashMap::new();
+                        args.insert("command".to_string(), command.clone());
+                        let call = ToolCall {
+                            name: "run_command".to_string(),
+                            arguments: args,
+                        };
+                        let result = self.tools.execute(&call).await;
+                        if result.success {
+                            self.emit_log(format!("✅ {}", description));
+                        } else {
+                            self.emit_log(format!("❌ Failed: {:?}", result.error));
+                        }
+                    }
+                }
+
+                perspt_core::plugin::ProjectAction::NoAction => {
+                    self.emit_log("✓ Project tooling is up to date");
+                }
+            }
+
+            return Ok(());
+        }
+
+        // 2. If no project detected, heuristically detect language from task
+        let plugin_name = self.detect_language_from_task(task);
+
+        if let Some(name) = plugin_name {
+            if let Some(plugin) = registry.get(name) {
+                self.emit_log(format!("🌱 Initializing new {} project", name));
+
+                // Check if working directory is empty
+                let is_empty = std::fs::read_dir(&self.context.working_dir)
+                    .map(|mut i| i.next().is_none())
+                    .unwrap_or(true);
+
+                let project_name = if is_empty {
+                    ".".to_string() // Init in current directory
+                } else {
+                    // Suggest a meaningful project name from the task
+                    self.suggest_project_name(task).await
+                };
+
+                let opts = perspt_core::plugin::InitOptions {
+                    name: project_name.clone(),
+                    is_empty_dir: is_empty,
+                    ..Default::default()
+                };
+
+                // Use the new get_init_action method
+                match plugin.get_init_action(&opts) {
+                    perspt_core::plugin::ProjectAction::ExecCommand {
+                        command,
+                        description,
+                    } => {
+                        // Request approval for init with editable project name
+                        let result = self
+                            .await_approval(
+                                perspt_core::ActionType::ProjectInit {
+                                    command: command.clone(),
+                                    suggested_name: project_name.clone(),
+                                },
+                                description.clone(),
+                                None,
+                            )
+                            .await;
+
+                        // Determine final project name (may be edited by user)
+                        let final_name = match &result {
+                            ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
+                            _ => project_name.clone(),
+                        };
+
+                        if matches!(
+                            result,
+                            ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                        ) {
+                            // Regenerate command if name was edited
+                            let final_command = if final_name != project_name {
+                                let edited_opts = perspt_core::plugin::InitOptions {
+                                    name: final_name.clone(),
+                                    is_empty_dir: is_empty,
+                                    ..Default::default()
+                                };
+                                match plugin.get_init_action(&edited_opts) {
+                                    perspt_core::plugin::ProjectAction::ExecCommand {
+                                        command,
+                                        ..
+                                    } => command,
+                                    _ => command.clone(),
+                                }
+                            } else {
+                                command.clone()
+                            };
+
+                            // Run command
+                            let mut args = HashMap::new();
+                            args.insert("command".to_string(), final_command.clone());
+                            let call = ToolCall {
+                                name: "run_command".to_string(),
+                                arguments: args,
+                            };
+                            let result = self.tools.execute(&call).await;
+                            if result.success {
+                                self.emit_log(format!("✅ Project '{}' initialized", final_name));
+                            } else {
+                                self.emit_log(format!("❌ Init failed: {:?}", result.error));
+                            }
+                        }
+                    }
+                    perspt_core::plugin::ProjectAction::NoAction => {
+                        self.emit_log("ℹ️ No initialization action needed");
+                    }
+                }
+            }
+        } else {
+            self.emit_log("ℹ️ No language detected, skipping project init");
+        }
+
+        Ok(())
+    }
+
+    /// Detect language from task description using heuristics
+    fn detect_language_from_task(&self, task: &str) -> Option<&'static str> {
+        let task_lower = task.to_lowercase();
+
+        if task_lower.contains("rust") || task_lower.contains("cargo") {
+            Some("rust")
+        } else if task_lower.contains("python")
+            || task_lower.contains("flask")
+            || task_lower.contains("django")
+            || task_lower.contains("fastapi")
+            || task_lower.contains("pytorch")
+            || task_lower.contains("tensorflow")
+            || task_lower.contains("pandas")
+            || task_lower.contains("numpy")
+            || task_lower.contains("scikit")
+            || task_lower.contains("sklearn")
+            || task_lower.contains("ml ")
+            || task_lower.contains("machine learning")
+            || task_lower.contains("deep learning")
+            || task_lower.contains("neural")
+            || task_lower.contains("dcf")
+            || task_lower.contains("data science")
+            || task_lower.contains("jupyter")
+            || task_lower.contains("notebook")
+            || task_lower.contains("streamlit")
+            || task_lower.contains("gradio")
+            || task_lower.contains("huggingface")
+            || task_lower.contains("transformers")
+            || task_lower.contains("llm")
+            || task_lower.contains("langchain")
+            || task_lower.contains("pydantic")
+        {
+            Some("python")
+        } else if task_lower.contains("javascript")
+            || task_lower.contains("typescript")
+            || task_lower.contains("node")
+            || task_lower.contains("react")
+            || task_lower.contains("vue")
+            || task_lower.contains("angular")
+            || task_lower.contains("next.js")
+            || task_lower.contains("nextjs")
+        {
+            Some("javascript")
+        } else if task_lower.contains("app") || task_lower.contains("application") {
+            // Default to Python for generic "app" or "application" tasks
+            Some("python")
+        } else {
+            None
+        }
+    }
+
+    /// Suggest a meaningful project name from the task description
+    async fn suggest_project_name(&self, task: &str) -> String {
+        // 1. Try heuristic extraction first (fast, no LLM)
+        if let Some(name) = self.extract_name_heuristic(task) {
+            self.emit_log(format!("📁 Suggested project folder: {}", name));
+            return name;
+        }
+
+        // 2. Fallback to LLM for complex tasks
+        let prompt = format!(
+            r#"Extract a short project name from this task description.
+Rules:
+- Use snake_case (lowercase with underscores)
+- Maximum 30 characters
+- Must be a valid folder name (letters, numbers, underscores only)
+- Return ONLY the name, nothing else
+
+Task: "{}"
+
+Project name:"#,
+            task
+        );
+
+        match self
+            .call_llm_with_logging(&self.actuator_model.clone(), &prompt, None)
+            .await
+        {
+            Ok(response) => {
+                let suggested = response.trim().to_lowercase();
+                if let Some(validated) = self.validate_project_name(&suggested) {
+                    self.emit_log(format!("📁 Suggested project folder: {}", validated));
+                    return validated;
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to get project name from LLM: {}", e);
+            }
+        }
+
+        // 3. Final fallback
+        let fallback = "perspt_app".to_string();
+        self.emit_log(format!("📁 Using default folder: {}", fallback));
+        fallback
+    }
+
+    /// Extract project name from task using stop-word removal (no LLM)
+    fn extract_name_heuristic(&self, task: &str) -> Option<String> {
+        let task_lower = task.to_lowercase();
+
+        // Stop words to remove
+        let stop_words = [
+            // Verbs
+            "create",
+            "build",
+            "make",
+            "implement",
+            "develop",
+            "write",
+            "design",
+            "add",
+            "setup",
+            "set",
+            "up",
+            "generate",
+            "please",
+            "can",
+            "you",
+            // Articles
+            "a",
+            "an",
+            "the",
+            "this",
+            "that",
+            // Prepositions
+            "in",
+            "on",
+            "for",
+            "with",
+            "using",
+            "to",
+            "from",
+            // Languages (we don't want these in folder names)
+            "python",
+            "rust",
+            "javascript",
+            "typescript",
+            "node",
+            "nodejs",
+            "react",
+            "vue",
+            "angular",
+            "django",
+            "flask",
+            "fastapi",
+            // Generic terms
+            "simple",
+            "basic",
+            "new",
+            "my",
+            "our",
+            "your",
+        ];
+
+        // Split into words and filter
+        let words: Vec<&str> = task_lower
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .filter(|w| !stop_words.contains(w))
+            .filter(|w| w.len() > 1) // Skip single chars
+            .take(3) // Max 3 words
+            .collect();
+
+        if words.is_empty() {
+            return None;
+        }
+
+        // Join words with underscore
+        let name = words.join("_");
+
+        // Validate
+        self.validate_project_name(&name)
+    }
+
+    /// Validate and sanitize a project name
+    fn validate_project_name(&self, name: &str) -> Option<String> {
+        // Must start with letter, contain only letters/numbers/underscores
+        let cleaned: String = name
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_')
+            .take(30)
+            .collect();
+
+        if cleaned.is_empty() {
+            return None;
+        }
+
+        // Ensure it starts with a letter
+        let first = cleaned.chars().next()?;
+        if !first.is_alphabetic() {
+            return None;
+        }
+
+        Some(cleaned)
+    }
+
     ///
     /// The Architect analyzes the task and produces a structured Task DAG.
     /// This step retries until a valid JSON plan is produced or max attempts reached.
     async fn step_sheafify(&mut self, task: String) -> Result<()> {
         log::info!("Step 1: Sheafification - Planning task decomposition");
-        println!("   🏗️ Architect is analyzing the task...");
+        self.emit_log("🏗️ Architect is analyzing the task...".to_string());
 
         const MAX_ATTEMPTS: usize = 3;
         let mut last_error: Option<String> = None;
@@ -180,8 +694,7 @@ impl SRBNOrchestrator {
 
             // Call the Architect
             let response = self
-                .provider
-                .generate_response_simple(&self.get_architect_model(), &prompt)
+                .call_llm_with_logging(&self.get_architect_model(), &prompt, None)
                 .await
                 .context("Failed to get Architect response")?;
 
@@ -196,10 +709,10 @@ impl SRBNOrchestrator {
                         last_error = Some(format!("Validation error: {}", e));
 
                         if attempt >= MAX_ATTEMPTS {
-                            println!(
-                                "   ❌ Failed to get valid plan after {} attempts",
+                            self.emit_log(format!(
+                                "❌ Failed to get valid plan after {} attempts",
                                 MAX_ATTEMPTS
-                            );
+                            ));
                             // Fall back to single-task execution
                             return self.create_fallback_task(&task);
                         }
@@ -208,16 +721,22 @@ impl SRBNOrchestrator {
 
                     // Check complexity gating
                     if plan.len() > self.context.complexity_k && !self.auto_approve {
-                        println!(
-                            "   ⚠️ Plan has {} tasks (exceeds K={}). Approve? [y/n]",
+                        self.emit_log(format!(
+                            "⚠️ Plan has {} tasks (exceeds K={})",
                             plan.len(),
                             self.context.complexity_k
-                        );
+                        ));
                         // TODO: Implement interactive approval
                         // For now, auto-approve in headless mode
                     }
 
-                    println!("   ✅ Architect produced plan with {} task(s)", plan.len());
+                    self.emit_log(format!(
+                        "✅ Architect produced plan with {} task(s)",
+                        plan.len()
+                    ));
+
+                    // Emit plan generated event
+                    self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan.clone()));
 
                     // Create nodes from the plan
                     self.create_nodes_from_plan(&plan)?;
@@ -228,7 +747,9 @@ impl SRBNOrchestrator {
                     last_error = Some(format!("JSON parse error: {}", e));
 
                     if attempt >= MAX_ATTEMPTS {
-                        println!("   ⚠️ Could not parse structured plan, using single task");
+                        self.emit_log(
+                            "⚠️ Could not parse structured plan, using single task".to_string(),
+                        );
                         return self.create_fallback_task(&task);
                     }
                 }
@@ -250,6 +771,9 @@ impl SRBNOrchestrator {
             String::new()
         };
 
+        // Gather existing project context
+        let project_context = self.gather_project_context();
+
         let prompt = format!(
             r#"You are an Architect agent in a multi-agent coding system.
 
@@ -258,16 +782,38 @@ impl SRBNOrchestrator {
 
 ## Working Directory
 {working_dir}
+
+## Existing Project Structure
+{project_context}
 {error_feedback}
 ## Instructions
 Analyze this task and produce a structured execution plan as JSON.
 
+### MODULAR PROJECT STRUCTURE (CRITICAL)
+Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
 
-1. Break down the task into atomic subtasks
-2. Each subtask should produce one or more files
-3. Include unit tests where appropriate
-4. Specify dependencies between tasks
-5. Output ONLY valid JSON (no markdown, no explanation)
+1. **Entry Point First**: Create a main entry point file (e.g., `main.py`, `src/main.rs`, `index.js`)
+2. **Logical Modules**: Split functionality into separate files/modules with clear responsibilities
+3. **Proper Imports**: Ensure all cross-file imports will resolve correctly
+4. **Package Structure**: For Python, include `__init__.py` files in subdirectories
+5. **Test Isolation**: Put tests in a `tests/` directory or use `test_*.py` naming
+
+### TASK ORDERING
+1. Create foundational modules before dependent ones
+2. Specify dependencies accurately between tasks
+3. Entry point task should depend on all modules it imports
+
+### COMPLETENESS CHECKLIST
+- [ ] Every import in generated code must reference an existing or planned file
+- [ ] The project must be immediately runnable after all tasks complete
+- [ ] Include at least one test file for core functionality
+- [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
+
+## CRITICAL CONSTRAINTS
+- DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
+- The system handles project initialization separately via CLI tools (uv, npm, cargo)
+- Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
+- If you need to add dependencies, include them in the task goal description (e.g., "Add requests library for HTTP calls")
 
 ## Output Format
 Respond with ONLY a JSON object in this exact format:
@@ -291,10 +837,18 @@ Respond with ONLY a JSON object in this exact format:
       }}
     }},
     {{
+      "id": "main_entry",
+      "goal": "Create main.py entry point that imports and uses other modules",
+      "context_files": ["module_a.py", "module_b.py"],
+      "output_files": ["main.py"],
+      "dependencies": ["task_1", "task_2"],
+      "task_type": "code"
+    }},
+    {{
       "id": "test_1",
       "goal": "Unit tests for task_1",
       "context_files": ["new_file.py"],
-      "output_files": ["test_new_file.py"],
+      "output_files": ["tests/test_new_file.py"],
       "dependencies": ["task_1"],
       "task_type": "unit_test"
     }}
@@ -308,10 +862,76 @@ Valid criticality values: "Critical", "High", "Low"
 IMPORTANT: Output ONLY the JSON, no other text."#,
             task = task,
             working_dir = self.context.working_dir.display(),
+            project_context = project_context,
             error_feedback = error_feedback
         );
 
         Ok(prompt)
+    }
+
+    /// Gather existing project context for the Architect prompt
+    /// Uses ContextRetriever to read key configuration files
+    fn gather_project_context(&self) -> String {
+        let mut context_parts = Vec::new();
+        let working_dir = &self.context.working_dir;
+        let retriever = ContextRetriever::new(working_dir.clone())
+            .with_max_file_bytes(8 * 1024) // 8KB per file for config files
+            .with_max_context_bytes(32 * 1024); // 32KB total context
+
+        // Key config files to read (in priority order)
+        let config_files = [
+            "pyproject.toml",
+            "Cargo.toml",
+            "package.json",
+            "requirements.txt",
+        ];
+
+        // Read and include config file contents (up to max_file_bytes)
+        let mut found_configs = Vec::new();
+        for file in &config_files {
+            let path = working_dir.join(file);
+            if path.exists() {
+                if let Ok(content) = retriever.read_file_truncated(&path) {
+                    context_parts.push(format!("### {}\n```\n{}\n```", file, content));
+                    found_configs.push(*file);
+                }
+            }
+        }
+
+        // List directory structure
+        if let Ok(entries) = std::fs::read_dir(working_dir) {
+            let mut dirs = Vec::new();
+            let mut files = Vec::new();
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue; // Skip hidden files/dirs
+                }
+                if entry.path().is_dir() {
+                    dirs.push(name);
+                } else if !found_configs.contains(&name.as_str()) {
+                    files.push(name);
+                }
+            }
+
+            if !dirs.is_empty() {
+                context_parts.push(format!("### Directories\n{}", dirs.join(", ")));
+            }
+            if !files.is_empty() && files.len() <= 15 {
+                context_parts.push(format!("### Other Files\n{}", files.join(", ")));
+            } else if !files.is_empty() {
+                context_parts.push(format!(
+                    "### Other Files\n{} files (not listed)",
+                    files.len()
+                ));
+            }
+        }
+
+        if context_parts.is_empty() {
+            "Empty directory (greenfield project)".to_string()
+        } else {
+            context_parts.join("\n\n")
+        }
     }
 
     /// Parse JSON response into TaskPlan
@@ -397,9 +1017,24 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     }
 
     /// Create a fallback single-task execution when plan parsing fails
+    /// Create a fallback single-task execution when plan parsing fails
     fn create_fallback_task(&mut self, task: &str) -> Result<()> {
         log::warn!("Using fallback single-task execution");
-        println!("   📝 Using simplified single-task execution");
+        self.emit_log("📝 Using simplified single-task execution");
+
+        // Emit minimal plan
+        let mut plan = perspt_core::types::TaskPlan::new();
+        plan.tasks.push(perspt_core::types::PlannedTask {
+            id: "root".to_string(),
+            goal: task.to_string(),
+            context_files: vec![],
+            output_files: vec![],
+            dependencies: vec![],
+            task_type: perspt_core::types::TaskType::Code,
+            contract: Default::default(),
+            command_contract: None,
+        });
+        self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan));
 
         let root_node = SRBNNode::new("root".to_string(), task.to_string(), ModelTier::Actuator);
         self.add_node(root_node);
@@ -449,18 +1084,88 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         let actuator = &self.agents[1];
         let node = &self.graph[idx];
-        let message = actuator.process(node, &self.context).await?;
+        let node_id = node.node_id.clone();
 
-        // Extract code blocks from the LLM response and write to files
+        // Build prompt and call LLM with logging support
+        let prompt = actuator.build_prompt(node, &self.context);
+        let model = actuator.model().to_string();
+
+        let response = self
+            .call_llm_with_logging(&model, &prompt, Some(&node_id))
+            .await?;
+
+        let message = crate::types::AgentMessage::new(crate::types::ModelTier::Actuator, response);
         let content = &message.content;
 
-        // Parse code blocks in format: ```python\n...``` or ```\n...```
-        // Also look for file path patterns like "File: path/to/file.py"
-        if let Some(code_info) = self.extract_code_from_response(content) {
+        // Check for [COMMAND] blocks first (for TaskType::Command)
+        if let Some(command) = self.extract_command_from_response(content) {
+            log::info!("Extracted command: {}", command);
+            self.emit_log(format!("🔧 Command proposed: {}", command));
+
+            // Request approval before executing command
+            let approval_result = self
+                .await_approval(
+                    perspt_core::ActionType::Command {
+                        command: command.clone(),
+                    },
+                    format!("Execute shell command: {}", command),
+                    None,
+                )
+                .await;
+
+            if !matches!(
+                approval_result,
+                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+            ) {
+                self.emit_log("⏭️ Command skipped (not approved)");
+                return Ok(());
+            }
+
+            // Execute command via AgentTools
+            let mut args = HashMap::new();
+            args.insert("command".to_string(), command.clone());
+
+            let call = ToolCall {
+                name: "run_command".to_string(),
+                arguments: args,
+            };
+
+            let result = self.tools.execute(&call).await;
+            if result.success {
+                log::info!("✓ Command succeeded: {}", command);
+                self.emit_log(format!("✅ Command succeeded: {}", command));
+                self.emit_log(result.output);
+            } else {
+                log::warn!("Command failed: {:?}", result.error);
+                self.emit_log(format!("❌ Command failed: {:?}", result.error));
+            }
+        }
+        // Then check for file code blocks (for TaskType::Code)
+        else if let Some(code_info) = self.extract_code_from_response(content) {
             log::info!("Extracted code for file: {}", code_info.0);
+            self.emit_log(format!("📝 File proposed: {}", code_info.0));
 
             // Build full path
             let full_path = self.context.working_dir.join(&code_info.0);
+
+            // Request approval before writing file
+            let approval_result = self
+                .await_approval(
+                    perspt_core::ActionType::FileWrite {
+                        path: code_info.0.clone(),
+                    },
+                    format!("Write file: {}", code_info.0),
+                    Some(code_info.1.clone()),
+                )
+                .await;
+
+            if !matches!(
+                approval_result,
+                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+            ) {
+                self.emit_log("⏭️ File write skipped (not approved)");
+                return Ok(());
+            }
 
             // Create a tool call to write the file
             let mut args = HashMap::new();
@@ -475,7 +1180,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             let result = self.tools.execute(&call).await;
             if result.success {
                 log::info!("✓ Wrote file: {}", code_info.0);
-                println!("   📝 Wrote file: {}", code_info.0);
+                self.emit_log(format!("✅ Wrote file: {}", code_info.0));
 
                 // Track the written file for LSP verification
                 self.last_written_file = Some(full_path.clone());
@@ -493,17 +1198,40 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 }
             } else {
                 log::warn!("Failed to write file: {:?}", result.error);
+                self.emit_log(format!("❌ Failed to write file: {:?}", result.error));
             }
         } else {
             log::debug!(
-                "No code block found in response, response length: {}",
+                "No code block or command found in response, response length: {}",
                 content.len()
             );
-            println!("   ℹ No file changes detected in response");
+            self.emit_log("ℹ️ No file changes detected in response".to_string());
         }
 
         self.context.history.push(message);
         Ok(())
+    }
+
+    /// Extract command from LLM response
+    /// Looks for [COMMAND] pattern
+    fn extract_command_from_response(&self, content: &str) -> Option<String> {
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("[COMMAND]") {
+                return Some(trimmed.trim_start_matches("[COMMAND]").trim().to_string());
+            }
+            // Also support ```bash blocks with a command annotation
+            if trimmed.starts_with("$ ") || trimmed.starts_with("➜ ") {
+                return Some(
+                    trimmed
+                        .trim_start_matches("$ ")
+                        .trim_start_matches("➜ ")
+                        .trim()
+                        .to_string(),
+                );
+            }
+        }
+        None
     }
 
     /// Extract code from LLM response
@@ -558,7 +1286,13 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                             "rust" | "rs" => "main.rs".to_string(),
                             "javascript" | "js" => "main.js".to_string(),
                             "typescript" | "ts" => "main.ts".to_string(),
-                            _ => "output.txt".to_string(),
+                            _ => {
+                                if let Some(dir) = self.ledger.artifacts_dir() {
+                                    dir.join("output.txt").to_string_lossy().to_string()
+                                } else {
+                                    "output.txt".to_string()
+                                }
+                            }
                         });
                     return Some((filename, code));
                 }
@@ -575,7 +1309,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
     /// Step 4: Stability Verification
     ///
-    /// Computes Lyapunov Energy V(x) from LSP diagnostics and tests
+    /// Computes Lyapunov Energy V(x) from LSP diagnostics, contracts, and tests
     async fn step_verify(&mut self, idx: NodeIndex) -> Result<EnergyComponents> {
         log::info!("Step 4: Verification - Computing stability energy");
 
@@ -601,9 +1335,13 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                         diagnostics.len(),
                         energy.v_syn
                     );
-                    println!("   🔍 LSP found {} diagnostics:", diagnostics.len());
+                    self.emit_log(format!("🔍 LSP found {} diagnostics:", diagnostics.len()));
                     for d in &diagnostics {
-                        println!("      - [{:?}] {}", d.severity, d.message);
+                        self.emit_log(format!(
+                            "   - [{}] {}",
+                            severity_to_str(d.severity),
+                            d.message
+                        ));
                     }
 
                     // Store diagnostics for correction prompt
@@ -614,15 +1352,90 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             } else {
                 log::debug!("No LSP client available for Python");
             }
+
+            // V_str: Check forbidden patterns in written file
+            let node = &self.graph[idx];
+            if !node.contract.forbidden_patterns.is_empty() {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    for pattern in &node.contract.forbidden_patterns {
+                        if content.contains(pattern) {
+                            energy.v_str += 0.5;
+                            log::warn!("Forbidden pattern found: '{}'", pattern);
+                            self.emit_log(format!("⚠️ Forbidden pattern: '{}'", pattern));
+                        }
+                    }
+                }
+            }
+
+            // V_log: Run tests and calculate logic energy
+            // Skip tests if defer_tests is enabled (will run at sheaf validation)
+            let node = &self.graph[idx];
+            if self.context.defer_tests {
+                self.emit_log("⏭️ Tests deferred (--defer-tests enabled)".to_string());
+            } else if !node.contract.weighted_tests.is_empty() {
+                self.emit_log("🧪 Running tests...".to_string());
+                let runner = PythonTestRunner::new(self.context.working_dir.clone());
+
+                match runner.run_pytest(&[]).await {
+                    Ok(results) => {
+                        energy.v_log = runner.calculate_v_log(&results, &node.contract);
+
+                        if results.all_passed() {
+                            self.emit_log(format!(
+                                "✅ Tests passed: {}/{}",
+                                results.passed, results.total
+                            ));
+                        } else {
+                            self.emit_log(format!(
+                                "❌ Tests failed: {} passed, {} failed",
+                                results.passed, results.failed
+                            ));
+
+                            // Store test failures for correction prompt
+                            for failure in &results.failures {
+                                self.emit_log(format!(
+                                    "   - {} in {:?}: {}",
+                                    failure.name, failure.file, failure.message
+                                ));
+                            }
+
+                            // Store test output in context for correction prompt
+                            self.context.last_test_output = Some(results.output.clone());
+                        }
+
+                        log::info!(
+                            "Test results: {}/{} passed, V_log={:.2}",
+                            results.passed,
+                            results.total,
+                            energy.v_log
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to run tests: {}", e);
+                        self.emit_log(format!("⚠️ Test execution failed: {}", e));
+                        // Don't fail the verification, just log the error
+                    }
+                }
+            }
         }
 
         let node = &self.graph[idx];
+        // Record energy in persistent ledger
+        if let Err(e) =
+            self.ledger
+                .record_energy(&node.node_id, &energy, energy.total(&node.contract))
+        {
+            log::error!("Failed to record energy: {}", e);
+        }
+
         log::info!(
-            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, Total={:.2}",
+            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, V_boot={:.2}, V_sheaf={:.2}, Total={:.2}",
             node.node_id,
             energy.v_syn,
             energy.v_str,
             energy.v_log,
+            energy.v_boot,
+            energy.v_sheaf,
             energy.total(&node.contract)
         );
 
@@ -658,7 +1471,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 total,
                 epsilon
             );
-            println!("   ✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon);
+            self.emit_log(format!("✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon));
             return Ok(true);
         }
 
@@ -669,10 +1482,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 attempt_count,
                 total
             );
-            println!(
-                "   ⚠️ Escalating: failed to converge after {} attempts",
+            self.emit_log(format!(
+                "⚠️ Escalating: failed to converge after {} attempts",
                 attempt_count
-            );
+            ));
             return Ok(false);
         }
 
@@ -684,10 +1497,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             epsilon,
             attempt_count
         );
-        println!(
-            "   🔄 V(x)={:.2} > ε={:.2}, sending errors to LLM (attempt {})",
+        self.emit_log(format!(
+            "🔄 V(x)={:.2} > ε={:.2}, sending errors to LLM (attempt {})",
             total, epsilon, attempt_count
-        );
+        ));
 
         // Build correction prompt with diagnostics
         let correction_prompt = self.build_correction_prompt(&node_id, &goal, &energy)?;
@@ -696,10 +1509,8 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             "--- CORRECTION PROMPT ---\n{}\n-------------------------",
             correction_prompt
         );
-        println!(
-            "--- CORRECTION PROMPT ---\n{}\n-------------------------",
-            correction_prompt
-        );
+        // Don't emit the full correction prompt to TUI - it's too verbose
+        self.emit_log("📤 Sending correction prompt to LLM...".to_string());
 
         // Call LLM for corrected code
         let corrected = self.call_llm_for_correction(&correction_prompt).await?;
@@ -721,7 +1532,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             let result = self.tools.execute(&call).await;
             if result.success {
                 log::info!("✓ Applied correction to: {}", filename);
-                println!("   📝 Applied correction to: {}", filename);
+                self.emit_log(format!("📝 Applied correction to: {}", filename));
 
                 // Update tracking
                 self.last_written_file = Some(full_path.clone());
@@ -870,10 +1681,43 @@ File: [same filename]
             self.actuator_model
         );
         let response = self
-            .provider
-            .generate_response_simple(&self.actuator_model, prompt)
+            .call_llm_with_logging(&self.actuator_model.clone(), prompt, None)
             .await?;
         log::debug!("Received correction response with {} chars", response.len());
+
+        Ok(response)
+    }
+
+    /// Call LLM and immediately persist the request/response to database if logging is enabled
+    async fn call_llm_with_logging(
+        &self,
+        model: &str,
+        prompt: &str,
+        node_id: Option<&str>,
+    ) -> Result<String> {
+        let start = Instant::now();
+
+        let response = self
+            .provider
+            .generate_response_simple(model, prompt)
+            .await?;
+
+        // Immediately persist to database if logging is enabled
+        if self.context.log_llm {
+            let latency_ms = start.elapsed().as_millis() as i32;
+            if let Err(e) = self
+                .ledger
+                .record_llm_request(model, prompt, &response, node_id, latency_ms)
+            {
+                log::warn!("Failed to persist LLM request: {}", e);
+            } else {
+                log::debug!(
+                    "Persisted LLM request: model={}, latency={}ms",
+                    model,
+                    latency_ms
+                );
+            }
+        }
 
         Ok(response)
     }

@@ -25,14 +25,14 @@ high-performance, terminal-based interface to Large Language Models with **auton
    :class: tip
 
    - **SRBN Agent Mode** — Autonomous coding with Lyapunov stability guarantees
-   - **6-Crate Architecture** — Modular, extensible workspace design
+   - **7-Crate Architecture** -- Modular, extensible workspace design
    - **LSP Integration** — Real-time type checking with ``ty`` server
    - **Latest Models** — GPT-5.2, Claude Opus 4.5, Gemini 3
 
 Architecture
 ------------
 
-Perspt is built as a **6-crate Rust workspace**:
+Perspt is built as a **7-crate Rust workspace**:
 
 .. graphviz::
    :align: center
@@ -54,20 +54,20 @@ Perspt is built as a **6-crate Rust workspace**:
            style=dashed;
            core [label="perspt-core\nLLM Provider", fillcolor="#45B7D1"];
            agent [label="perspt-agent\nSRBN Engine", fillcolor="#FFEAA7"];
+           store [label="perspt-store\nSession DB", fillcolor="#B8D4E3"];
        }
        
        subgraph cluster_security {
            label="Security";
            style=dashed;
            policy [label="perspt-policy\nPolicy Engine", fillcolor="#DDA0DD"];
-           sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
        }
        
        cli -> tui;
        cli -> agent;
        agent -> core;
+       agent -> store;
        agent -> policy;
-       agent -> sandbox;
    }
 
 Key Features
@@ -247,4 +247,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 6-crate design.
+      Understand the 7-crate design.

@@ -130,6 +130,7 @@ impl GenAIProvider {
             prompt.len()
         );
 
+        let start_time = Instant::now();
         let mut last_error: Option<anyhow::Error> = None;
         let mut retry_count = 0;
 
@@ -157,7 +158,12 @@ impl GenAIProvider {
                     let content = chat_res
                         .first_text()
                         .context("No text content in response")?;
-                    log::debug!("Received response with {} characters", content.len());
+                    log::debug!(
+                        "Received response with {} characters in {}ms",
+                        content.len(),
+                        start_time.elapsed().as_millis()
+                    );
+
                     return Ok(content.to_string());
                 }
                 Err(e) => {

@@ -8,6 +8,7 @@ pub mod app_event;
 pub mod chat_app;
 pub mod dashboard;
 pub mod diff_viewer;
+pub mod logs_viewer;
 pub mod review_modal;
 pub mod simple_input;
 pub mod task_tree;
@@ -17,11 +18,12 @@ pub mod tui_runner;
 pub mod ui;
 
 // Re-exports for convenient access
-pub use agent_app::{run_agent_tui, AgentApp};
+pub use agent_app::{run_agent_tui_with_orchestrator, AgentApp};
 pub use app_event::{create_app_event_channel, AppEvent, AppEventReceiver, AppEventSender};
 pub use chat_app::ChatApp;
 pub use dashboard::Dashboard;
 pub use diff_viewer::DiffViewer;
+pub use logs_viewer::{run_logs_viewer, LogsViewer};
 pub use review_modal::ReviewModal;
 pub use task_tree::TaskTree;
 pub use telemetry::{

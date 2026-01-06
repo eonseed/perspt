@@ -6,7 +6,12 @@ Terminal UI components for Perspt built on the Ratatui framework.
 Overview
 --------
 
-``perspt-tui`` provides the visual interface for both chat and agent modes:
+``perspt-tui`` provides the visual interface for chat, agent, and logs modes:
+
+- **ChatApp** — Interactive chat TUI
+- **AgentApp** — Agent mode dashboard
+- **LogsViewer** — LLM logs analysis TUI
+- **Dashboard**, **DiffViewer**, **ReviewModal**, **TaskTree** — UI components
 
 .. graphviz::
    :align: center
@@ -189,6 +194,66 @@ Change approval/rejection modal.
        pub fn get_decision(&self) -> Option<ReviewDecision>
    }
 
+LogsViewer
+~~~~~~~~~~
+
+Interactive TUI for analyzing LLM request/response logs.
+
+.. code-block:: rust
+   :caption: LogsViewer structure
+
+   pub struct LogsViewer {
+       store: SessionStore,
+       sessions: Vec<SessionRecord>,
+       requests: Vec<LlmRequestRecord>,
+       active_panel: ActivePanel,
+       detail_tab: DetailTab,
+   }
+
+   pub enum ActivePanel {
+       Sessions,
+       Requests,
+       Detail,
+   }
+
+   pub enum DetailTab {
+       Prompt,
+       Response,
+       Stats,
+   }
+
+   impl LogsViewer {
+       pub fn new(store: SessionStore) -> Self
+       pub fn handle_key(&mut self, key: KeyCode)
+       pub fn render(&mut self, frame: &mut Frame)
+   }
+
+.. function:: run_logs_viewer(store: SessionStore) -> Result<()>
+
+   Entry point for the logs viewer TUI.
+
+Telemetry
+~~~~~~~~~
+
+Real-time telemetry events from the orchestrator.
+
+.. code-block:: rust
+
+   pub enum TelemetryEvent {
+       EnergyUpdate(EnergyComponents),
+       TokensUsed { input: usize, output: usize },
+       StepComplete { node_id: String },
+   }
+
+   pub struct EnergyComponents {
+       pub v_syn: f32,
+       pub v_str: f32,
+       pub v_log: f32,
+       pub total: f32,
+   }
+
+   pub fn create_telemetry_channel() -> (TelemetrySender, TelemetryReceiver)
+
 Key Bindings
 ------------
 
@@ -224,8 +289,11 @@ Key Bindings
 Source Code
 -----------
 
-:file:`crates/perspt-tui/src/agent_app.rs`: Main application (7KB)
+:file:`crates/perspt-tui/src/agent_app.rs`: Main application (17KB)
+:file:`crates/perspt-tui/src/chat_app.rs`: Chat TUI (30KB)
+:file:`crates/perspt-tui/src/logs_viewer.rs`: Logs viewer (35KB)
 :file:`crates/perspt-tui/src/dashboard.rs`: Status dashboard (8KB)
-:file:`crates/perspt-tui/src/diff_viewer.rs`: Diff display (6KB)
-:file:`crates/perspt-tui/src/review_modal.rs`: Review UI (6KB)
-:file:`crates/perspt-tui/src/task_tree.rs`: Task hierarchy (4KB)
+:file:`crates/perspt-tui/src/diff_viewer.rs`: Diff display (20KB)
+:file:`crates/perspt-tui/src/review_modal.rs`: Review UI (15KB)
+:file:`crates/perspt-tui/src/task_tree.rs`: Task hierarchy (15KB)
+:file:`crates/perspt-tui/src/telemetry.rs`: Telemetry events (4KB)

@@ -66,8 +66,8 @@ impl Dashboard {
     /// Add a log message
     pub fn log(&mut self, message: String) {
         self.logs.push(message);
-        // Keep only last 100 logs
-        if self.logs.len() > 100 {
+        // Keep only last 1000 logs
+        if self.logs.len() > 1000 {
             self.logs.remove(0);
         }
     }

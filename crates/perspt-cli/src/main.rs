@@ -96,6 +96,14 @@ enum Commands {
         /// Maximum steps/iterations (0 = unlimited)
         #[arg(long, default_value = "0")]
         max_steps: usize,
+
+        /// Defer tests until sheaf validation (faster iteration, tests run at end)
+        #[arg(long)]
+        defer_tests: bool,
+
+        /// Log all LLM requests/responses to database for debugging
+        #[arg(long)]
+        log_llm: bool,
     },
 
     /// Initialize project configuration
@@ -151,8 +159,26 @@ enum Commands {
 
     /// Resume a paused or crashed session
     Resume {
-        /// Session ID to resume
+        /// Session ID to resume (or --last for most recent)
         session_id: Option<String>,
+    },
+
+    /// View LLM request/response logs
+    Logs {
+        /// Session ID to view logs for
+        session_id: Option<String>,
+
+        /// Show logs from the most recent session
+        #[arg(long)]
+        last: bool,
+
+        /// Show usage statistics instead of individual requests
+        #[arg(long)]
+        stats: bool,
+
+        /// Launch interactive TUI logs viewer
+        #[arg(long)]
+        tui: bool,
     },
 
     /// Simple CLI chat mode (no TUI)
@@ -175,8 +201,11 @@ async fn main() -> Result<()> {
     // Suppress logs for TUI modes (Chat, Agent) to prevent bleeding into terminal
     let log_level = if cli.verbose {
         "debug"
-    } else if matches!(cli.command, None | Some(Commands::Chat { .. })) {
-        // Chat mode uses TUI - suppress all logs
+    } else if matches!(
+        cli.command,
+        None | Some(Commands::Chat { .. }) | Some(Commands::Agent { .. })
+    ) {
+        // Chat and Agent modes use TUI - suppress all logs
         "off"
     } else if matches!(cli.command, Some(Commands::SimpleChat { .. })) {
         // Simple chat only shows errors
@@ -204,6 +233,8 @@ async fn main() -> Result<()> {
             stability_threshold: _,
             max_cost: _,
             max_steps: _,
+            defer_tests,
+            log_llm,
         }) => {
             commands::agent::run(
                 task,
@@ -216,6 +247,8 @@ async fn main() -> Result<()> {
                 actuator_model,
                 verifier_model,
                 speculator_model,
+                defer_tests,
+                log_llm,
             )
             .await
         }
@@ -229,6 +262,12 @@ async fn main() -> Result<()> {
         Some(Commands::Status) => commands::status::run().await,
         Some(Commands::Abort { force }) => commands::abort::run(force).await,
         Some(Commands::Resume { session_id }) => commands::resume::run(session_id).await,
+        Some(Commands::Logs {
+            session_id,
+            last,
+            stats,
+            tui,
+        }) => commands::logs::run(session_id, last, stats, tui).await,
         Some(Commands::SimpleChat { model, log_file }) => {
             commands::simple_chat::run(commands::simple_chat::SimpleChatArgs { model, log_file })
                 .await
