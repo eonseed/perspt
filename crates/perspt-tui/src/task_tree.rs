@@ -122,15 +122,35 @@ impl TaskTree {
         self.rebuild_visible();
     }
 
-    /// Populate tree from TaskPlan
+    /// Populate tree from TaskPlan using dependency information for tree structure
     pub fn populate_from_plan(&mut self, plan: perspt_core::types::TaskPlan) {
         self.clear();
-        for task in plan.tasks {
-            // Determine depth/parent based on dependencies if needed,
-            // but for now we list them flat at root level
-            // as complexity K limits usually result in a sequence
-            self.add_task(task.id, task.goal, 0);
+
+        // Build a map of task ID to dependencies for depth calculation
+        let mut depth_map: HashMap<String, usize> = HashMap::new();
+
+        // First pass: insert all tasks with initial depth based on dependencies
+        for task in &plan.tasks {
+            // Calculate depth: max depth of dependencies + 1, or 0 if no deps
+            let depth = if task.dependencies.is_empty() {
+                0
+            } else {
+                task.dependencies
+                    .iter()
+                    .filter_map(|dep_id| depth_map.get(dep_id))
+                    .max()
+                    .map(|d| d + 1)
+                    .unwrap_or(0)
+            };
+            depth_map.insert(task.id.clone(), depth);
+
+            // Use first dependency as parent (for tree visualization)
+            // This creates a logical parent-child relationship
+            let parent_id = task.dependencies.first().cloned();
+
+            self.add_task_with_parent(task.id.clone(), task.goal.clone(), parent_id, depth);
         }
+
         // Selection reset
         if !self.visible_tasks.is_empty() {
             self.state.select(Some(0));

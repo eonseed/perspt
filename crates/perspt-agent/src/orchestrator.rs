@@ -3,7 +3,9 @@
 //! Manages the Task DAG and orchestrates agent execution following the 7-step control loop.
 
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
+use crate::context_retriever::ContextRetriever;
 use crate::lsp::LspClient;
+use crate::test_runner::PythonTestRunner;
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
@@ -11,6 +13,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Topo, Walker};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// Dependency edge type
 #[derive(Debug, Clone)]
@@ -256,11 +259,17 @@ impl SRBNOrchestrator {
 
         // Step 0: Project Initialization - Start session first
         let session_id = uuid::Uuid::new_v4().to_string();
+        self.context.session_id = session_id.clone();
         self.ledger.start_session(
             &session_id,
             &task,
             &self.context.working_dir.to_string_lossy(),
         )?;
+
+        // Log that LLM request logging is enabled (persistence happens immediately per-request)
+        if self.context.log_llm {
+            self.emit_log("📝 LLM request logging enabled".to_string());
+        }
 
         self.step_init_project(&task).await?;
 
@@ -306,6 +315,7 @@ impl SRBNOrchestrator {
         }
 
         log::info!("SRBN execution completed");
+
         self.emit_event(perspt_core::AgentEvent::Complete {
             success: true,
             message: format!("Completed {} nodes", total_nodes),
@@ -541,8 +551,7 @@ Project name:"#,
         );
 
         match self
-            .provider
-            .generate_response_simple(&self.actuator_model, &prompt)
+            .call_llm_with_logging(&self.actuator_model.clone(), &prompt, None)
             .await
         {
             Ok(response) => {
@@ -685,8 +694,7 @@ Project name:"#,
 
             // Call the Architect
             let response = self
-                .provider
-                .generate_response_simple(&self.get_architect_model(), &prompt)
+                .call_llm_with_logging(&self.get_architect_model(), &prompt, None)
                 .await
                 .context("Failed to get Architect response")?;
 
@@ -781,11 +789,25 @@ Project name:"#,
 ## Instructions
 Analyze this task and produce a structured execution plan as JSON.
 
-1. Break down the task into atomic subtasks
-2. Each subtask should produce one or more files
-3. Include unit tests where appropriate
-4. Specify dependencies between tasks
-5. Output ONLY valid JSON (no markdown, no explanation)
+### MODULAR PROJECT STRUCTURE (CRITICAL)
+Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
+
+1. **Entry Point First**: Create a main entry point file (e.g., `main.py`, `src/main.rs`, `index.js`)
+2. **Logical Modules**: Split functionality into separate files/modules with clear responsibilities
+3. **Proper Imports**: Ensure all cross-file imports will resolve correctly
+4. **Package Structure**: For Python, include `__init__.py` files in subdirectories
+5. **Test Isolation**: Put tests in a `tests/` directory or use `test_*.py` naming
+
+### TASK ORDERING
+1. Create foundational modules before dependent ones
+2. Specify dependencies accurately between tasks
+3. Entry point task should depend on all modules it imports
+
+### COMPLETENESS CHECKLIST
+- [ ] Every import in generated code must reference an existing or planned file
+- [ ] The project must be immediately runnable after all tasks complete
+- [ ] Include at least one test file for core functionality
+- [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
 ## CRITICAL CONSTRAINTS
 - DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
@@ -815,10 +837,18 @@ Respond with ONLY a JSON object in this exact format:
       }}
     }},
     {{
+      "id": "main_entry",
+      "goal": "Create main.py entry point that imports and uses other modules",
+      "context_files": ["module_a.py", "module_b.py"],
+      "output_files": ["main.py"],
+      "dependencies": ["task_1", "task_2"],
+      "task_type": "code"
+    }},
+    {{
       "id": "test_1",
       "goal": "Unit tests for task_1",
       "context_files": ["new_file.py"],
-      "output_files": ["test_new_file.py"],
+      "output_files": ["tests/test_new_file.py"],
       "dependencies": ["task_1"],
       "task_type": "unit_test"
     }}
@@ -840,28 +870,35 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     }
 
     /// Gather existing project context for the Architect prompt
+    /// Uses ContextRetriever to read key configuration files
     fn gather_project_context(&self) -> String {
-        let mut context_lines = Vec::new();
+        let mut context_parts = Vec::new();
         let working_dir = &self.context.working_dir;
+        let retriever = ContextRetriever::new(working_dir.clone())
+            .with_max_file_bytes(8 * 1024) // 8KB per file for config files
+            .with_max_context_bytes(32 * 1024); // 32KB total context
 
-        // Check for key project files
-        let key_files = [
+        // Key config files to read (in priority order)
+        let config_files = [
             "pyproject.toml",
             "Cargo.toml",
             "package.json",
             "requirements.txt",
-            "uv.lock",
-            "Cargo.lock",
-            "package-lock.json",
         ];
 
-        for file in &key_files {
-            if working_dir.join(file).exists() {
-                context_lines.push(format!("- {} (exists)", file));
+        // Read and include config file contents (up to max_file_bytes)
+        let mut found_configs = Vec::new();
+        for file in &config_files {
+            let path = working_dir.join(file);
+            if path.exists() {
+                if let Ok(content) = retriever.read_file_truncated(&path) {
+                    context_parts.push(format!("### {}\n```\n{}\n```", file, content));
+                    found_configs.push(*file);
+                }
             }
         }
 
-        // List top-level directories
+        // List directory structure
         if let Ok(entries) = std::fs::read_dir(working_dir) {
             let mut dirs = Vec::new();
             let mut files = Vec::new();
@@ -872,25 +909,28 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 }
                 if entry.path().is_dir() {
                     dirs.push(name);
-                } else if !key_files.contains(&name.as_str()) {
+                } else if !found_configs.contains(&name.as_str()) {
                     files.push(name);
                 }
             }
 
             if !dirs.is_empty() {
-                context_lines.push(format!("- Directories: {}", dirs.join(", ")));
+                context_parts.push(format!("### Directories\n{}", dirs.join(", ")));
             }
-            if !files.is_empty() && files.len() <= 10 {
-                context_lines.push(format!("- Files: {}", files.join(", ")));
+            if !files.is_empty() && files.len() <= 15 {
+                context_parts.push(format!("### Other Files\n{}", files.join(", ")));
             } else if !files.is_empty() {
-                context_lines.push(format!("- Files: {} files (truncated)", files.len()));
+                context_parts.push(format!(
+                    "### Other Files\n{} files (not listed)",
+                    files.len()
+                ));
             }
         }
 
-        if context_lines.is_empty() {
+        if context_parts.is_empty() {
             "Empty directory (greenfield project)".to_string()
         } else {
-            context_lines.join("\n")
+            context_parts.join("\n\n")
         }
     }
 
@@ -1044,8 +1084,17 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         let actuator = &self.agents[1];
         let node = &self.graph[idx];
-        let message = actuator.process(node, &self.context).await?;
+        let node_id = node.node_id.clone();
 
+        // Build prompt and call LLM with logging support
+        let prompt = actuator.build_prompt(node, &self.context);
+        let model = actuator.model().to_string();
+
+        let response = self
+            .call_llm_with_logging(&model, &prompt, Some(&node_id))
+            .await?;
+
+        let message = crate::types::AgentMessage::new(crate::types::ModelTier::Actuator, response);
         let content = &message.content;
 
         // Check for [COMMAND] blocks first (for TaskType::Command)
@@ -1317,6 +1366,57 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                     }
                 }
             }
+
+            // V_log: Run tests and calculate logic energy
+            // Skip tests if defer_tests is enabled (will run at sheaf validation)
+            let node = &self.graph[idx];
+            if self.context.defer_tests {
+                self.emit_log("⏭️ Tests deferred (--defer-tests enabled)".to_string());
+            } else if !node.contract.weighted_tests.is_empty() {
+                self.emit_log("🧪 Running tests...".to_string());
+                let runner = PythonTestRunner::new(self.context.working_dir.clone());
+
+                match runner.run_pytest(&[]).await {
+                    Ok(results) => {
+                        energy.v_log = runner.calculate_v_log(&results, &node.contract);
+
+                        if results.all_passed() {
+                            self.emit_log(format!(
+                                "✅ Tests passed: {}/{}",
+                                results.passed, results.total
+                            ));
+                        } else {
+                            self.emit_log(format!(
+                                "❌ Tests failed: {} passed, {} failed",
+                                results.passed, results.failed
+                            ));
+
+                            // Store test failures for correction prompt
+                            for failure in &results.failures {
+                                self.emit_log(format!(
+                                    "   - {} in {:?}: {}",
+                                    failure.name, failure.file, failure.message
+                                ));
+                            }
+
+                            // Store test output in context for correction prompt
+                            self.context.last_test_output = Some(results.output.clone());
+                        }
+
+                        log::info!(
+                            "Test results: {}/{} passed, V_log={:.2}",
+                            results.passed,
+                            results.total,
+                            energy.v_log
+                        );
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to run tests: {}", e);
+                        self.emit_log(format!("⚠️ Test execution failed: {}", e));
+                        // Don't fail the verification, just log the error
+                    }
+                }
+            }
         }
 
         let node = &self.graph[idx];
@@ -1581,10 +1681,43 @@ File: [same filename]
             self.actuator_model
         );
         let response = self
-            .provider
-            .generate_response_simple(&self.actuator_model, prompt)
+            .call_llm_with_logging(&self.actuator_model.clone(), prompt, None)
             .await?;
         log::debug!("Received correction response with {} chars", response.len());
+
+        Ok(response)
+    }
+
+    /// Call LLM and immediately persist the request/response to database if logging is enabled
+    async fn call_llm_with_logging(
+        &self,
+        model: &str,
+        prompt: &str,
+        node_id: Option<&str>,
+    ) -> Result<String> {
+        let start = Instant::now();
+
+        let response = self
+            .provider
+            .generate_response_simple(model, prompt)
+            .await?;
+
+        // Immediately persist to database if logging is enabled
+        if self.context.log_llm {
+            let latency_ms = start.elapsed().as_millis() as i32;
+            if let Err(e) = self
+                .ledger
+                .record_llm_request(model, prompt, &response, node_id, latency_ms)
+            {
+                log::warn!("Failed to persist LLM request: {}", e);
+            } else {
+                log::debug!(
+                    "Persisted LLM request: model={}, latency={}ms",
+                    model,
+                    latency_ms
+                );
+            }
+        }
 
         Ok(response)
     }

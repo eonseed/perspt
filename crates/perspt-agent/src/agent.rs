@@ -23,6 +23,12 @@ pub trait Agent: Send + Sync {
 
     /// Check if this agent can handle the given node
     fn can_handle(&self, node: &SRBNNode) -> bool;
+
+    /// Get the model name used by this agent (for logging)
+    fn model(&self) -> &str;
+
+    /// Build the prompt for this agent (for logging)
+    fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
 }
 
 /// Architect agent - handles planning and DAG construction
@@ -39,7 +45,7 @@ impl ArchitectAgent {
         }
     }
 
-    fn build_planning_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+    pub fn build_planning_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
         format!(
             r#"You are an Architect agent in a multi-agent coding system.
 
@@ -94,6 +100,14 @@ impl Agent for ArchitectAgent {
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Architect)
     }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+        self.build_planning_prompt(node, ctx)
+    }
 }
 
 /// Actuator agent - handles code generation
@@ -110,7 +124,7 @@ impl ActuatorAgent {
         }
     }
 
-    fn build_coding_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+    pub fn build_coding_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
         let contract = &node.contract;
 
         // Determine target file from output_targets or generate default
@@ -198,6 +212,14 @@ impl Agent for ActuatorAgent {
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Actuator)
     }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+        self.build_coding_prompt(node, ctx)
+    }
 }
 
 /// Verifier agent - handles stability verification and contract checking
@@ -214,7 +236,7 @@ impl VerifierAgent {
         }
     }
 
-    fn build_verification_prompt(&self, node: &SRBNNode, implementation: &str) -> String {
+    pub fn build_verification_prompt(&self, node: &SRBNNode, implementation: &str) -> String {
         let contract = &node.contract;
 
         format!(
@@ -286,6 +308,15 @@ impl Agent for VerifierAgent {
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Verifier)
     }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
+        // Verifier needs implementation context, use a placeholder
+        self.build_verification_prompt(node, "<implementation>")
+    }
 }
 
 /// Speculator agent - handles fast lookahead for exploration
@@ -305,17 +336,14 @@ impl SpeculatorAgent {
 
 #[async_trait]
 impl Agent for SpeculatorAgent {
-    async fn process(&self, node: &SRBNNode, _ctx: &AgentContext) -> Result<AgentMessage> {
+    async fn process(&self, node: &SRBNNode, ctx: &AgentContext) -> Result<AgentMessage> {
         log::info!(
             "[Speculator] Processing node: {} with model {}",
             node.node_id,
             self.model
         );
 
-        let prompt = format!(
-            "Quickly evaluate if this approach is viable: {}\nProvide a brief YES/NO with one sentence justification.",
-            node.goal
-        );
+        let prompt = self.build_prompt(node, ctx);
 
         let response = self
             .provider
@@ -331,6 +359,14 @@ impl Agent for SpeculatorAgent {
 
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Speculator)
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
+        format!("Briefly analyze potential issues for: {}", node.goal)
     }
 }
 

@@ -7,4 +7,4 @@ mod schema;
 mod store;
 
 pub use schema::init_schema;
-pub use store::{EnergyRecord, NodeStateRecord, SessionRecord, SessionStore};
+pub use store::{EnergyRecord, LlmRequestRecord, NodeStateRecord, SessionRecord, SessionStore};

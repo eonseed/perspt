@@ -24,11 +24,25 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Create sequences for auto-incrementing IDs (DuckDB doesn't auto-increment INTEGER PRIMARY KEY)
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_node_states_id START 1",
+        [],
+    )?;
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_energy_history_id START 1",
+        [],
+    )?;
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_llm_requests_id START 1",
+        [],
+    )?;
+
     // Node states table - per-node state tracking
     conn.execute(
         r#"
         CREATE TABLE IF NOT EXISTS node_states (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_node_states_id'),
             node_id VARCHAR NOT NULL,
             session_id VARCHAR NOT NULL,
             state VARCHAR NOT NULL,
@@ -46,7 +60,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     conn.execute(
         r#"
         CREATE TABLE IF NOT EXISTS energy_history (
-            id INTEGER PRIMARY KEY,
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_energy_history_id'),
             node_id VARCHAR NOT NULL,
             session_id VARCHAR NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +84,31 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_energy_history_session ON energy_history(session_id)",
+        [],
+    )?;
+
+    // LLM requests table - stores all LLM interactions for debugging and analysis
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS llm_requests (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_llm_requests_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR,
+            model VARCHAR NOT NULL,
+            prompt TEXT NOT NULL,
+            response TEXT NOT NULL,
+            tokens_in INTEGER DEFAULT 0,
+            tokens_out INTEGER DEFAULT 0,
+            latency_ms INTEGER DEFAULT 0,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_requests_session ON llm_requests(session_id)",
         [],
     )?;
 
