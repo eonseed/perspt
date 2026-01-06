@@ -530,11 +530,18 @@ pub struct AgentContext {
     pub session_id: String,
     /// Auto-approve mode
     pub auto_approve: bool,
+    /// Defer tests until sheaf validation (skip V_log during coding)
+    pub defer_tests: bool,
+    /// Log all LLM requests/responses to database
+    pub log_llm: bool,
     /// Last diagnostics from LSP (for correction prompts)
     #[serde(skip)]
     pub last_diagnostics: Vec<lsp_types::Diagnostic>,
     /// Token budget for cost control
     pub token_budget: TokenBudget,
+    /// Last test output for correction prompts
+    #[serde(skip)]
+    pub last_test_output: Option<String>,
 }
 
 impl Default for AgentContext {
@@ -546,8 +553,11 @@ impl Default for AgentContext {
             complexity_k: 5, // Default from PSP
             session_id: uuid::Uuid::new_v4().to_string(),
             auto_approve: false,
+            defer_tests: false,
+            log_llm: false,
             last_diagnostics: Vec::new(),
             token_budget: TokenBudget::default(),
+            last_test_output: None,
         }
     }
 }

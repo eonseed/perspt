@@ -3,7 +3,7 @@
 //! Persistent storage for session history, commits, and Merkle proofs.
 
 use anyhow::{Context, Result};
-pub use perspt_store::{NodeStateRecord, SessionRecord, SessionStore};
+pub use perspt_store::{LlmRequestRecord, NodeStateRecord, SessionRecord, SessionStore};
 use std::path::{Path, PathBuf};
 
 /// Merkle commit record (Legacy wrapper for compatibility)
@@ -195,6 +195,47 @@ impl MerkleLedger {
     /// Get the current merkle root (legacy facade)
     pub fn current_merkle_root(&self) -> [u8; 32] {
         [0u8; 32] // Placeholder
+    }
+
+    /// Record an LLM request/response for debugging and cost tracking
+    pub fn record_llm_request(
+        &self,
+        model: &str,
+        prompt: &str,
+        response: &str,
+        node_id: Option<&str>,
+        latency_ms: i32,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record LLM request")?;
+
+        let record = LlmRequestRecord {
+            session_id,
+            node_id: node_id.map(|s| s.to_string()),
+            model: model.to_string(),
+            prompt: prompt.to_string(),
+            response: response.to_string(),
+            tokens_in: 0, // TODO: Extract from provider response if available
+            tokens_out: 0,
+            latency_ms,
+        };
+
+        self.store.record_llm_request(&record)?;
+        log::debug!(
+            "Recorded LLM request: model={}, prompt_len={}, response_len={}",
+            model,
+            prompt.len(),
+            response.len()
+        );
+        Ok(())
+    }
+
+    /// Get access to the underlying store (for direct queries)
+    pub fn store(&self) -> &SessionStore {
+        &self.store
     }
 }
 

@@ -8,6 +8,7 @@ pub mod app_event;
 pub mod chat_app;
 pub mod dashboard;
 pub mod diff_viewer;
+pub mod logs_viewer;
 pub mod review_modal;
 pub mod simple_input;
 pub mod task_tree;
@@ -22,6 +23,7 @@ pub use app_event::{create_app_event_channel, AppEvent, AppEventReceiver, AppEve
 pub use chat_app::ChatApp;
 pub use dashboard::Dashboard;
 pub use diff_viewer::DiffViewer;
+pub use logs_viewer::{run_logs_viewer, LogsViewer};
 pub use review_modal::ReviewModal;
 pub use task_tree::TaskTree;
 pub use telemetry::{

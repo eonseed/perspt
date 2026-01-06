@@ -37,6 +37,8 @@ pub async fn run(
     actuator_model: Option<String>,
     verifier_model: Option<String>,
     speculator_model: Option<String>,
+    defer_tests: bool,
+    log_llm: bool,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
@@ -55,6 +57,8 @@ pub async fn run(
     log::info!("  Working directory: {:?}", working_dir);
     log::info!("  Auto-approve: {}", auto_approve);
     log::info!("  Complexity K: {}", complexity_k);
+    log::info!("  Defer tests: {}", defer_tests);
+    log::info!("  Log LLM: {}", log_llm);
     log::info!("  Mode: {:?}", exec_mode);
     log::info!(
         "  Architect model: {}",
@@ -86,8 +90,10 @@ pub async fn run(
         speculator,
     );
 
-    // Set complexity threshold
+    // Set complexity threshold, defer_tests, and log_llm
     orchestrator.context.complexity_k = complexity_k;
+    orchestrator.context.defer_tests = defer_tests;
+    orchestrator.context.log_llm = log_llm;
 
     println!("🚀 SRBN Agent starting...");
     println!("   Session: {}", orchestrator.session_id());

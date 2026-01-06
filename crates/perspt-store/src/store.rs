@@ -45,6 +45,19 @@ pub struct EnergyRecord {
     pub v_total: f32,
 }
 
+/// Record for LLM request/response logging
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmRequestRecord {
+    pub session_id: String,
+    pub node_id: Option<String>,
+    pub model: String,
+    pub prompt: String,
+    pub response: String,
+    pub tokens_in: i32,
+    pub tokens_out: i32,
+    pub latency_ms: i32,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -220,6 +233,164 @@ impl SessionStore {
                 v_boot: row.get::<_, f64>(5)? as f32,
                 v_sheaf: row.get::<_, f64>(6)? as f32,
                 v_total: row.get::<_, f64>(7)? as f32,
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// List recent sessions (newest first)
+    pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status
+             FROM sessions ORDER BY created_at DESC LIMIT ?",
+        )?;
+
+        let mut rows = stmt.query([limit.to_string()])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            // merkle_root is stored as BLOB, read it directly as Option<Vec<u8>>
+            let merkle_root: Option<Vec<u8>> = row.get(3).ok();
+
+            records.push(SessionRecord {
+                session_id: row.get(0)?,
+                task: row.get(1)?,
+                working_dir: row.get(2)?,
+                merkle_root,
+                detected_toolchain: row.get(4)?,
+                status: row.get(5)?,
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// Get all node states for a session
+    pub fn get_node_states(&self, session_id: &str) -> Result<Vec<NodeStateRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT node_id, session_id, state, v_total, merkle_hash, attempt_count
+             FROM node_states WHERE session_id = ? ORDER BY created_at",
+        )?;
+
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            records.push(NodeStateRecord {
+                node_id: row.get(0)?,
+                session_id: row.get(1)?,
+                state: row.get(2)?,
+                v_total: row.get::<_, f64>(3)? as f32,
+                merkle_hash: row
+                    .get::<_, Option<String>>(4)?
+                    .and_then(|s| hex::decode(s).ok()),
+                attempt_count: row.get(5)?,
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// Update session status
+    pub fn update_session_status(&self, session_id: &str, status: &str) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
+            [status, session_id],
+        )?;
+        Ok(())
+    }
+
+    /// Record an LLM request/response
+    pub fn record_llm_request(&self, record: &LlmRequestRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO llm_requests (session_id, node_id, model, prompt, response, tokens_in, tokens_out, latency_ms)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id.clone().unwrap_or_default(),
+                &record.model,
+                &record.prompt,
+                &record.response,
+                &record.tokens_in.to_string(),
+                &record.tokens_out.to_string(),
+                &record.latency_ms.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get LLM requests for a session
+    pub fn get_llm_requests(&self, session_id: &str) -> Result<Vec<LlmRequestRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, model, prompt, response, tokens_in, tokens_out, latency_ms
+             FROM llm_requests WHERE session_id = ? ORDER BY timestamp",
+        )?;
+
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            let node_id: Option<String> = row.get(1)?;
+            records.push(LlmRequestRecord {
+                session_id: row.get(0)?,
+                node_id: if node_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                    None
+                } else {
+                    node_id
+                },
+                model: row.get(2)?,
+                prompt: row.get(3)?,
+                response: row.get(4)?,
+                tokens_in: row.get(5)?,
+                tokens_out: row.get(6)?,
+                latency_ms: row.get(7)?,
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// Count all LLM requests in the database (for debugging)
+    pub fn count_all_llm_requests(&self) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM llm_requests")?;
+        let count: i64 = stmt.query_row([], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// Get all LLM requests (for debugging)
+    pub fn get_all_llm_requests(&self, limit: usize) -> Result<Vec<LlmRequestRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, model, prompt, response, tokens_in, tokens_out, latency_ms
+             FROM llm_requests ORDER BY timestamp DESC LIMIT ?",
+        )?;
+
+        let mut rows = stmt.query([limit as i64])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            let node_id: Option<String> = row.get(1)?;
+            records.push(LlmRequestRecord {
+                session_id: row.get(0)?,
+                node_id: if node_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                    None
+                } else {
+                    node_id
+                },
+                model: row.get(2)?,
+                prompt: row.get(3)?,
+                response: row.get(4)?,
+                tokens_in: row.get(5)?,
+                tokens_out: row.get(6)?,
+                latency_ms: row.get(7)?,
             });
         }
 
