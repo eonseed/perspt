@@ -131,6 +131,30 @@ Limits
 
    perspt agent --max-cost 5.0 --max-steps 20 "Large refactor"
 
+Logging and Debugging
+---------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Option
+     - Description
+   * - ``--log-llm``
+     - Log all LLM requests/responses to database
+   * - ``--defer-tests``
+     - Defer tests until sheaf validation (faster iteration)
+
+**Example**:
+
+.. code-block:: bash
+
+   # Debug with full LLM logging
+   perspt agent --log-llm "Debug task"
+
+   # View logs after run
+   perspt logs --tui
+
 Session Management
 ------------------
 

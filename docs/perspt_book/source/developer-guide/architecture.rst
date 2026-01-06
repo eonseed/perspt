@@ -1,7 +1,7 @@
 Architecture
 ============
 
-Perspt is built as a modern, modular Rust application using a **6-crate workspace architecture**. 
+Perspt is built as a modern, modular Rust application using a **7-crate workspace architecture**. 
 This design enables clean separation of concerns, independent testing, and easy extensibility.
 
 Workspace Overview
@@ -26,6 +26,7 @@ Workspace Overview
            agent [label="perspt-agent\n(SRBN Engine)", fillcolor="#FFEAA7"];
            policy [label="perspt-policy\n(Security)", fillcolor="#DDA0DD"];
            sandbox [label="perspt-sandbox\n(Isolation)", fillcolor="#F8B739"];
+           store [label="perspt-store\n(Persistence)", fillcolor="#87CEEB"];
        }
    }
 
@@ -56,14 +57,17 @@ Crate Dependency Graph
            style=invis;
            policy [label="perspt-policy\n━━━━━━━━━━━\nPolicyEngine\nSanitizer", fillcolor="#DDA0DD"];
            sandbox [label="perspt-sandbox\n━━━━━━━━━━━\nSandboxedCommand", fillcolor="#F8B739"];
+           store [label="perspt-store\n━━━━━━━━━━━\nSQLite DB\nMerkle Tree", fillcolor="#87CEEB"];
        }
        
        cli -> tui;
        cli -> agent;
        cli -> core;
+       cli -> store;
        agent -> policy;
        agent -> sandbox;
        agent -> core;
+       agent -> store;
    }
 
 SRBN Control Flow
@@ -140,6 +144,12 @@ The command-line interface providing 8 subcommands:
    * - ``resume``
      - Resume session
      - ``[SESSION_ID]``
+   * - ``logs``
+     - View LLM logs
+     - ``--tui``, ``--last``, ``--stats``
+   * - ``simple-chat``
+     - CLI chat mode
+     - ``--model``, ``--log-file``
 
 **Source**: :file:`crates/perspt-cli/src/`
 
@@ -259,6 +269,34 @@ perspt-sandbox
 Safe command execution with process isolation.
 
 **Source**: :file:`crates/perspt-sandbox/src/`
+
+perspt-store
+~~~~~~~~~~~~
+
+DuckDB-based persistence layer for session management and LLM logging:
+
+.. code-block:: rust
+   :caption: Session storage
+
+   pub struct SessionStore {
+       conn: Connection,
+   }
+
+   impl SessionStore {
+       pub fn new(db_path: &Path) -> Result<Self>
+       pub fn create_session(task: &str, workspace: &str) -> Result<String>
+       pub fn record_llm_request(...) -> Result<()>
+       pub fn get_llm_requests(session_id: &str) -> Result<Vec<LlmRequestRecord>>
+   }
+
+**Key Types**:
+
+- ``SessionRecord`` — Session metadata (id, task, status, timestamps)
+- ``LlmRequestRecord`` — LLM request/response with latency and tokens
+- ``EnergyRecord`` — Energy history for stability tracking
+- ``NodeStateRecord`` — SRBN node state snapshots
+
+**Source**: :file:`crates/perspt-store/src/`
 
 Design Principles
 -----------------

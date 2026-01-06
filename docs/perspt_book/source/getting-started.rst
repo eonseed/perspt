@@ -372,38 +372,34 @@ OpenAI Models
 .. code-block:: bash
 
    # Use GPT-4
-   perspt --model-name gpt-4
+   perspt chat --model gpt-4
 
    # Use GPT-4 Turbo
-   perspt --model-name gpt-4-turbo-preview
+   perspt chat --model gpt-4-turbo-preview
 
    # Use GPT-4o Mini (recommended for most use cases)
-   perspt --model-name gpt-4o-mini
+   perspt chat --model gpt-4o-mini
 
    # Use latest GPT-4.1
-   perspt --model-name gpt-4.1
+   perspt chat --model gpt-4.1
 
 Other Providers
 ~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   # Use Anthropic Claude
-   perspt --provider-type anthropic --model-name claude-3-sonnet-20240229
+   # Use Anthropic Claude (auto-detected from ANTHROPIC_API_KEY)
+   perspt chat --model claude-3-sonnet-20240229
 
-   # Use Google Gemini
-   perspt --provider-type google --model-name gemini-pro
+   # Use Google Gemini (auto-detected from GEMINI_API_KEY)
+   perspt chat --model gemini-pro
 
-   # Use Ollama (Local)
-   perspt --provider-type ollama --model-name llama3.2
+   # Use Ollama (Local - auto-detected)
+   perspt chat --model llama3.2
 
-List Available Models
-~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   # See all available models for your provider
-   perspt --list-models
+.. note::
+   The provider is auto-detected based on the model name and available API keys.
+   You don't need to specify ``--provider`` in most cases.
 
 Basic Configuration
 -------------------

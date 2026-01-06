@@ -121,46 +121,37 @@ impl PythonTestRunner {
         result.map(|s| s.success()).unwrap_or(false)
     }
 
-    /// Create a minimal pyproject.toml with pytest dependency
-    pub async fn create_pyproject(&self) -> Result<()> {
-        let pyproject_path = self.working_dir.join("pyproject.toml");
-
-        if pyproject_path.exists() {
-            log::debug!("pyproject.toml already exists");
-            return Ok(());
-        }
-
-        log::info!("Creating minimal pyproject.toml with pytest");
-
-        let content = r#"[project]
-name = "workspace"
-version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = []
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests", "."]
-python_files = ["test_*.py", "*_test.py"]
-python_functions = ["test_*"]
-"#;
-
-        tokio::fs::write(&pyproject_path, content)
-            .await
-            .context("Failed to write pyproject.toml")?;
-
-        Ok(())
-    }
-
     /// Initialize the Python environment with uv
+    /// NOTE: This assumes pyproject.toml already exists (created by orchestrator's step_init_project)
     pub async fn setup_environment(&self) -> Result<()> {
         log::info!("Setting up Python environment with uv");
 
-        // Create pyproject.toml if needed
-        if self.auto_setup && !self.has_pyproject() {
-            self.create_pyproject().await?;
+        // Check if pyproject.toml exists; if not, warn and try to proceed
+        if !self.has_pyproject() {
+            if self.auto_setup {
+                log::warn!(
+                    "No pyproject.toml found. Project should be initialized via 'uv init' first."
+                );
+                log::info!("Attempting to run 'uv init' as fallback...");
+                let init_output = Command::new("uv")
+                    .args(["init"])
+                    .current_dir(&self.working_dir)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+                    .await
+                    .context("Failed to run uv init")?;
+
+                if !init_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&init_output.stderr);
+                    log::warn!("uv init failed: {}", stderr);
+                    return self.install_pytest_directly().await;
+                }
+            } else {
+                anyhow::bail!(
+                    "No pyproject.toml found and auto_setup is disabled. Run 'uv init' first."
+                );
+            }
         }
 
         // Sync dependencies (this creates venv and installs deps)
@@ -210,7 +201,6 @@ python_functions = ["test_*"]
     /// If environment is not set up, will attempt to set it up first.
     pub async fn run_pytest(&self, test_args: &[&str]) -> Result<TestResults> {
         log::info!("Running pytest in {}", self.working_dir.display());
-        println!("   🧪 Running tests...");
 
         // Ensure environment is set up
         if !self.has_pytest().await {
@@ -245,13 +235,14 @@ python_functions = ["test_*"]
         let mut results = self.parse_pytest_output(&combined, duration_ms);
         results.run_succeeded = true; // We got output, run worked
 
-        // Print summary
+        // Log summary
         if results.all_passed() {
-            println!("   ✅ Tests passed: {}/{}", results.passed, results.total);
+            log::info!("✅ Tests passed: {}/{}", results.passed, results.total);
         } else {
-            println!(
-                "   ❌ Tests failed: {} passed, {} failed",
-                results.passed, results.failed
+            log::info!(
+                "❌ Tests failed: {} passed, {} failed",
+                results.passed,
+                results.failed
             );
         }
 

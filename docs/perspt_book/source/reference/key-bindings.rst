@@ -125,6 +125,42 @@ Type these in the chat input:
    * - ``/quit``
      - Exit application
 
+Logs Viewer (perspt logs --tui)
+-------------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Key
+     - Action
+   * - **q** / **Esc**
+     - Exit viewer
+   * - **Tab**
+     - Next panel (Sessions → Requests → Detail)
+   * - **Shift+Tab**
+     - Previous panel
+   * - **1**
+     - Show Prompt tab
+   * - **2**
+     - Show Response tab
+   * - **3**
+     - Show Stats tab
+   * - **↑** / **k**
+     - Move up / scroll up
+   * - **↓** / **j**
+     - Move down / scroll down
+   * - **Page Up** / **Page Down**
+     - Fast scroll (10 items or 20 lines)
+   * - **Home**
+     - Jump to start
+   * - **End**
+     - Jump to end
+   * - **Enter**
+     - Select item / expand
+   * - **?** / **F1**
+     - Show help modal
+
 Vim-style Navigation
 --------------------
 

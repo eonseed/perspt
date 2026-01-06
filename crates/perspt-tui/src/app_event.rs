@@ -18,8 +18,11 @@ pub enum AppEvent {
     /// Stream completed (EOT received)
     StreamComplete,
 
-    /// Agent state update (for Agent mode)
+    /// Agent state update (for Agent mode - legacy)
     AgentUpdate(AgentStateUpdate),
+
+    /// Core agent event from SRBNOrchestrator (new event system)
+    CoreEvent(perspt_core::AgentEvent),
 
     /// Periodic tick for animations (throbber, cursor blink)
     Tick,
@@ -35,9 +38,9 @@ pub enum AppEvent {
 #[derive(Debug, Clone)]
 pub enum AgentStateUpdate {
     /// Task status changed
-    TaskStatusChanged { task_id: String, status: TaskStatus },
+    Status { node_id: String, status: TaskStatus },
     /// Energy value updated
-    EnergyUpdated(f32),
+    Energy { node_id: String, energy: f32 },
     /// Log message
     Log(String),
     /// Node completed

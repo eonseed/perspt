@@ -23,6 +23,12 @@ pub trait Agent: Send + Sync {
 
     /// Check if this agent can handle the given node
     fn can_handle(&self, node: &SRBNNode) -> bool;
+
+    /// Get the model name used by this agent (for logging)
+    fn model(&self) -> &str;
+
+    /// Build the prompt for this agent (for logging)
+    fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
 }
 
 /// Architect agent - handles planning and DAG construction
@@ -39,7 +45,7 @@ impl ArchitectAgent {
         }
     }
 
-    fn build_planning_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+    pub fn build_planning_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
         format!(
             r#"You are an Architect agent in a multi-agent coding system.
 
@@ -94,6 +100,14 @@ impl Agent for ArchitectAgent {
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Architect)
     }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+        self.build_planning_prompt(node, ctx)
+    }
 }
 
 /// Actuator agent - handles code generation
@@ -110,44 +124,64 @@ impl ActuatorAgent {
         }
     }
 
-    fn build_coding_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+    pub fn build_coding_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
         let contract = &node.contract;
+
+        // Determine target file from output_targets or generate default
+        let target_file = node
+            .output_targets
+            .first()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "main.py".to_string());
 
         format!(
             r#"You are an Actuator agent responsible for implementing code.
 
 ## Task
-Goal: {}
+Goal: {goal}
 
 ## Behavioral Contract
-Interface Signature: {}
-Invariants: {:?}
-Forbidden Patterns: {:?}
+Interface Signature: {interface}
+Invariants: {invariants:?}
+Forbidden Patterns: {forbidden:?}
 
 ## Context
-Working Directory: {:?}
-Files to Read: {:?}
-Files to Modify: {:?}
+Working Directory: {working_dir:?}
+Files to Read: {context_files:?}
+Target Output File: {target_file}
 
 ## Instructions
 1. Implement the required functionality
 2. Follow the interface signature exactly
 3. Maintain all specified invariants
 4. Avoid all forbidden patterns
-5. Write clean, documented code
+5. Write clean, well-documented, production-quality code
+6. Include proper imports at the top of the file
+7. Add type annotations if missing
+8. Import any missing modules
 
 ## Output Format
-Provide the complete implementation with:
-- File path
-- Code content
-- Brief explanation of changes"#,
-            node.goal,
-            contract.interface_signature,
-            contract.invariants,
-            contract.forbidden_patterns,
-            ctx.working_dir,
-            node.context_files,
-            node.output_targets,
+You MUST output the code in this EXACT format:
+
+File: {target_file}
+```python
+# Your complete implementation here
+# Include ALL necessary imports
+# Include the COMPLETE file, not just snippets
+```
+
+IMPORTANT:
+- The "File:" line MUST appear before the code block
+- Provide the COMPLETE corrected file, not just snippets
+- Include all imports at the top
+- Do not skip any functions or classes"#,
+            goal = node.goal,
+            interface = contract.interface_signature,
+            invariants = contract.invariants,
+            forbidden = contract.forbidden_patterns,
+            working_dir = ctx.working_dir,
+            context_files = node.context_files,
+            target_file = target_file,
         )
     }
 }
@@ -178,6 +212,14 @@ impl Agent for ActuatorAgent {
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Actuator)
     }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+        self.build_coding_prompt(node, ctx)
+    }
 }
 
 /// Verifier agent - handles stability verification and contract checking
@@ -194,7 +236,7 @@ impl VerifierAgent {
         }
     }
 
-    fn build_verification_prompt(&self, node: &SRBNNode, implementation: &str) -> String {
+    pub fn build_verification_prompt(&self, node: &SRBNNode, implementation: &str) -> String {
         let contract = &node.contract;
 
         format!(
@@ -266,6 +308,15 @@ impl Agent for VerifierAgent {
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Verifier)
     }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
+        // Verifier needs implementation context, use a placeholder
+        self.build_verification_prompt(node, "<implementation>")
+    }
 }
 
 /// Speculator agent - handles fast lookahead for exploration
@@ -285,17 +336,14 @@ impl SpeculatorAgent {
 
 #[async_trait]
 impl Agent for SpeculatorAgent {
-    async fn process(&self, node: &SRBNNode, _ctx: &AgentContext) -> Result<AgentMessage> {
+    async fn process(&self, node: &SRBNNode, ctx: &AgentContext) -> Result<AgentMessage> {
         log::info!(
             "[Speculator] Processing node: {} with model {}",
             node.node_id,
             self.model
         );
 
-        let prompt = format!(
-            "Quickly evaluate if this approach is viable: {}\nProvide a brief YES/NO with one sentence justification.",
-            node.goal
-        );
+        let prompt = self.build_prompt(node, ctx);
 
         let response = self
             .provider
@@ -311,6 +359,14 @@ impl Agent for SpeculatorAgent {
 
     fn can_handle(&self, node: &SRBNNode) -> bool {
         matches!(node.tier, ModelTier::Speculator)
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
+        format!("Briefly analyze potential issues for: {}", node.goal)
     }
 }
 

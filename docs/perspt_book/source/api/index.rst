@@ -3,7 +3,7 @@
 API Reference
 =============
 
-Complete API documentation for Perspt's 6-crate workspace architecture.
+Complete API documentation for Perspt's 7-crate workspace architecture.
 
 .. graphviz::
    :align: center
@@ -19,6 +19,7 @@ Complete API documentation for Perspt's 6-crate workspace architecture.
        agent [label="perspt-agent", fillcolor="#FFEAA7", href="perspt-agent.html"];
        policy [label="perspt-policy", fillcolor="#DDA0DD", href="perspt-policy.html"];
        sandbox [label="perspt-sandbox", fillcolor="#F8B739", href="perspt-sandbox.html"];
+       store [label="perspt-store", fillcolor="#87CEEB", href="perspt-store.html"];
    }
 
 .. toctree::
@@ -31,6 +32,7 @@ Complete API documentation for Perspt's 6-crate workspace architecture.
    perspt-tui
    perspt-policy
    perspt-sandbox
+   perspt-store
 
 Crate Summary
 -------------
@@ -60,6 +62,9 @@ Crate Summary
    * - :doc:`perspt-sandbox`
      - Process isolation
      - ``SandboxedCommand``
+   * - :doc:`perspt-store`
+     - DuckDB session persistence
+     - ``SessionStore``, ``LlmRequestRecord``
 
 Architecture Quick Reference
 ----------------------------
@@ -102,6 +107,12 @@ Architecture Quick Reference
       :link-type: doc
 
       **Isolation**: Resource limits, process control
+
+   .. grid-item-card:: 💾 perspt-store
+      :link: perspt-store
+      :link-type: doc
+
+      **Persistence**: DuckDB sessions, LLM logging
 
 Common Patterns
 ---------------

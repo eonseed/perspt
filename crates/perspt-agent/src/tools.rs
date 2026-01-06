@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command as AsyncCommand;
 
 /// Tool result from agent execution
 #[derive(Debug, Clone)]
@@ -50,6 +52,8 @@ pub struct AgentTools {
     working_dir: PathBuf,
     /// Whether to require user approval for commands
     require_approval: bool,
+    /// Event sender for streaming output
+    event_sender: Option<perspt_core::events::channel::EventSender>,
 }
 
 impl AgentTools {
@@ -58,7 +62,13 @@ impl AgentTools {
         Self {
             working_dir,
             require_approval,
+            event_sender: None,
         }
+    }
+
+    /// Set event sender for streaming output
+    pub fn set_event_sender(&mut self, sender: perspt_core::events::channel::EventSender) {
+        self.event_sender = Some(sender);
     }
 
     /// Execute a tool call
@@ -70,6 +80,10 @@ impl AgentTools {
             "run_command" => self.run_command(call).await,
             "list_files" => self.list_files(call),
             "write_file" => self.write_file(call),
+            // Power Tools (OS-level)
+            "sed_replace" => self.sed_replace(call),
+            "awk_filter" => self.awk_filter(call),
+            "diff_files" => self.diff_files(call),
             _ => ToolResult::failure(&call.name, format!("Unknown tool: {}", call.name)),
         }
     }
@@ -159,40 +173,74 @@ impl AgentTools {
 
     /// Run a shell command (requires approval unless auto-approve is set)
     async fn run_command(&self, call: &ToolCall) -> ToolResult {
-        let cmd = match call.arguments.get("command") {
+        let cmd_str = match call.arguments.get("command") {
             Some(c) => c,
             None => {
                 return ToolResult::failure("run_command", "Missing 'command' argument".to_string())
             }
         };
 
-        // In a real implementation, this would check with the policy engine
-        // and potentially prompt the user for approval
         if self.require_approval {
-            log::info!("Command requires approval: {}", cmd);
-            // For now, we'll log but continue
+            log::info!("Command requires approval: {}", cmd_str);
         }
 
-        let output = Command::new("sh")
-            .args(["-c", cmd])
+        let mut child = match AsyncCommand::new("sh")
+            .args(["-c", cmd_str])
             .current_dir(&self.working_dir)
-            .output();
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(e) => return ToolResult::failure("run_command", format!("Failed to spawn: {}", e)),
+        };
 
-        match output {
-            Ok(out) => {
-                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+        let stdout = child.stdout.take().expect("Failed to open stdout");
+        let stderr = child.stderr.take().expect("Failed to open stderr");
+        let sender = self.event_sender.clone();
 
-                if out.status.success() {
-                    ToolResult::success("run_command", stdout)
-                } else {
-                    ToolResult::failure(
-                        "run_command",
-                        format!("Exit code: {:?}\n{}", out.status.code(), stderr),
-                    )
+        let stdout_handle = tokio::spawn(async move {
+            let mut reader = BufReader::new(stdout).lines();
+            let mut output = String::new();
+            while let Ok(Some(line)) = reader.next_line().await {
+                if let Some(ref s) = sender {
+                    let _ = s.send(perspt_core::AgentEvent::Log(line.clone()));
                 }
+                output.push_str(&line);
+                output.push('\n');
             }
-            Err(e) => ToolResult::failure("run_command", format!("Failed to execute: {}", e)),
+            output
+        });
+
+        let sender_err = self.event_sender.clone();
+        let stderr_handle = tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr).lines();
+            let mut output = String::new();
+            while let Ok(Some(line)) = reader.next_line().await {
+                if let Some(ref s) = sender_err {
+                    let _ = s.send(perspt_core::AgentEvent::Log(format!("ERR: {}", line)));
+                }
+                output.push_str(&line);
+                output.push('\n');
+            }
+            output
+        });
+
+        let status = match child.wait().await {
+            Ok(s) => s,
+            Err(e) => return ToolResult::failure("run_command", format!("Failed to wait: {}", e)),
+        };
+
+        let stdout_str = stdout_handle.await.unwrap_or_default();
+        let stderr_str = stderr_handle.await.unwrap_or_default();
+
+        if status.success() {
+            ToolResult::success("run_command", stdout_str)
+        } else {
+            ToolResult::failure(
+                "run_command",
+                format!("Exit code: {:?}\n{}", status.code(), stderr_str),
+            )
         }
     }
 
@@ -238,6 +286,133 @@ impl AgentTools {
             p.to_path_buf()
         } else {
             self.working_dir.join(p)
+        }
+    }
+
+    // =========================================================================
+    // Power Tools (OS-level operations)
+    // =========================================================================
+
+    /// Replace text in a file using sed-like pattern matching
+    fn sed_replace(&self, call: &ToolCall) -> ToolResult {
+        let path = match call.arguments.get("path") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("sed_replace", "Missing 'path' argument".to_string())
+            }
+        };
+
+        let pattern = match call.arguments.get("pattern") {
+            Some(p) => p,
+            None => {
+                return ToolResult::failure("sed_replace", "Missing 'pattern' argument".to_string())
+            }
+        };
+
+        let replacement = match call.arguments.get("replacement") {
+            Some(r) => r,
+            None => {
+                return ToolResult::failure(
+                    "sed_replace",
+                    "Missing 'replacement' argument".to_string(),
+                )
+            }
+        };
+
+        // Read file, perform replacement, write back
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let new_content = content.replace(pattern, replacement);
+                match fs::write(&path, &new_content) {
+                    Ok(_) => ToolResult::success(
+                        "sed_replace",
+                        format!(
+                            "Replaced '{}' with '{}' in {:?}",
+                            pattern, replacement, path
+                        ),
+                    ),
+                    Err(e) => ToolResult::failure("sed_replace", format!("Failed to write: {}", e)),
+                }
+            }
+            Err(e) => {
+                ToolResult::failure("sed_replace", format!("Failed to read {:?}: {}", path, e))
+            }
+        }
+    }
+
+    /// Filter file content using awk-like field selection
+    fn awk_filter(&self, call: &ToolCall) -> ToolResult {
+        let path = match call.arguments.get("path") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("awk_filter", "Missing 'path' argument".to_string())
+            }
+        };
+
+        let filter = match call.arguments.get("filter") {
+            Some(f) => f,
+            None => {
+                return ToolResult::failure("awk_filter", "Missing 'filter' argument".to_string())
+            }
+        };
+
+        // Use awk command for filtering
+        let output = Command::new("awk").arg(filter).arg(&path).output();
+
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    ToolResult::success(
+                        "awk_filter",
+                        String::from_utf8_lossy(&out.stdout).to_string(),
+                    )
+                } else {
+                    ToolResult::failure(
+                        "awk_filter",
+                        String::from_utf8_lossy(&out.stderr).to_string(),
+                    )
+                }
+            }
+            Err(e) => ToolResult::failure("awk_filter", format!("Failed to run awk: {}", e)),
+        }
+    }
+
+    /// Show differences between two files
+    fn diff_files(&self, call: &ToolCall) -> ToolResult {
+        let file1 = match call.arguments.get("file1") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("diff_files", "Missing 'file1' argument".to_string())
+            }
+        };
+
+        let file2 = match call.arguments.get("file2") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("diff_files", "Missing 'file2' argument".to_string())
+            }
+        };
+
+        // Use diff command
+        let output = Command::new("diff")
+            .args([
+                "--unified",
+                &file1.to_string_lossy(),
+                &file2.to_string_lossy(),
+            ])
+            .output();
+
+        match output {
+            Ok(out) => {
+                // diff exits with 0 if files are same, 1 if different, 2 if error
+                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                if stdout.is_empty() {
+                    ToolResult::success("diff_files", "Files are identical".to_string())
+                } else {
+                    ToolResult::success("diff_files", stdout)
+                }
+            }
+            Err(e) => ToolResult::failure("diff_files", format!("Failed to run diff: {}", e)),
         }
     }
 }
@@ -303,6 +478,60 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 description: "Directory path (default: working directory)".to_string(),
                 required: false,
             }],
+        },
+        // Power Tools
+        ToolDefinition {
+            name: "sed_replace".to_string(),
+            description: "Replace text in a file using sed-like pattern matching".to_string(),
+            parameters: vec![
+                ToolParameter {
+                    name: "path".to_string(),
+                    description: "Path to the file".to_string(),
+                    required: true,
+                },
+                ToolParameter {
+                    name: "pattern".to_string(),
+                    description: "Search pattern".to_string(),
+                    required: true,
+                },
+                ToolParameter {
+                    name: "replacement".to_string(),
+                    description: "Replacement text".to_string(),
+                    required: true,
+                },
+            ],
+        },
+        ToolDefinition {
+            name: "awk_filter".to_string(),
+            description: "Filter file content using awk-like field selection".to_string(),
+            parameters: vec![
+                ToolParameter {
+                    name: "path".to_string(),
+                    description: "Path to the file".to_string(),
+                    required: true,
+                },
+                ToolParameter {
+                    name: "filter".to_string(),
+                    description: "Awk filter expression (e.g., '$1 == \"error\"')".to_string(),
+                    required: true,
+                },
+            ],
+        },
+        ToolDefinition {
+            name: "diff_files".to_string(),
+            description: "Show differences between two files".to_string(),
+            parameters: vec![
+                ToolParameter {
+                    name: "file1".to_string(),
+                    description: "First file path".to_string(),
+                    required: true,
+                },
+                ToolParameter {
+                    name: "file2".to_string(),
+                    description: "Second file path".to_string(),
+                    required: true,
+                },
+            ],
         },
     ]
 }

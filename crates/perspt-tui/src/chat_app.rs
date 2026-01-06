@@ -275,6 +275,7 @@ impl ChatApp {
                 true
             }
             AppEvent::AgentUpdate(_) => true, // Not used in chat mode
+            AppEvent::CoreEvent(_) => true,   // Not used in chat mode
         }
     }
 

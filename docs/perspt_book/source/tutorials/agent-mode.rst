@@ -224,6 +224,32 @@ Change Tracking
    # Statistics
    perspt ledger --stats
 
+LLM Logging and Debugging
+-------------------------
+
+Enable LLM request logging for debugging:
+
+.. code-block:: bash
+
+   # Log all LLM requests to database
+   perspt agent --log-llm "Debug task"
+
+   # Defer tests until sheaf validation (faster iteration)
+   perspt agent --defer-tests "Rapid prototyping"
+
+View logged requests:
+
+.. code-block:: bash
+
+   # Interactive TUI viewer
+   perspt logs --tui
+
+   # Most recent session
+   perspt logs --last
+
+   # Usage statistics
+   perspt logs --stats
+
 Best Practices
 --------------
 
