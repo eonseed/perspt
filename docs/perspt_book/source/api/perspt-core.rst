@@ -8,9 +8,12 @@ Overview
 
 ``perspt-core`` contains the fundamental abstractions used by all other crates:
 
-- **GenAIProvider** - Thread-safe LLM provider with streaming support
-- **Config** - Simple configuration struct
-- **Memory** - Conversation memory management
+- **GenAIProvider** — Thread-safe LLM provider with streaming support
+- **Config** — Simple configuration struct
+- **Memory** — Conversation memory management
+- **Events** — Agent events and actions for TUI communication
+- **Plugin** — Language-specific plugins (Python, Rust, JS)
+- **Types** — Shared types for SRBN (TaskPlan, EnergyComponents, etc.)
 
 GenAIProvider
 -------------
@@ -157,6 +160,90 @@ Memory
 
 Conversation memory management for context handling.
 
+Events
+------
+
+Agent events for TUI communication:
+
+.. code-block:: rust
+
+   pub enum AgentEvent {
+       Log(String),
+       PlanGenerated(TaskPlan),
+       NodeStarted { node_id: String, description: String },
+       NodeCompleted { node_id: String },
+       Error(String),
+       ReviewRequired { action: AgentAction },
+       Complete,
+   }
+
+   pub enum AgentAction {
+       FileWrite { path: PathBuf, content: String },
+       ShellCommand { command: String },
+       Approve,
+       Reject,
+       ApproveWithEdit { new_content: String },
+   }
+
+   pub enum ActionType {
+       FileWrite,
+       ShellCommand,
+       ProjectInit,
+   }
+
+Plugin
+------
+
+Language-specific plugins for project initialization and LSP:
+
+.. code-block:: rust
+
+   pub trait LanguagePlugin: Send + Sync {
+       fn name(&self) -> &'static str;
+       fn init_project(&self, options: &InitOptions) -> Result<()>;
+       fn lsp_config(&self) -> Option<LspConfig>;
+   }
+
+   pub struct PythonPlugin;
+   pub struct RustPlugin;
+   pub struct JsPlugin;
+
+   pub struct PluginRegistry {
+       plugins: HashMap<String, Box<dyn LanguagePlugin>>,
+   }
+
+Types
+-----
+
+Shared types used throughout the SRBN system:
+
+.. code-block:: rust
+
+   pub struct TaskPlan {
+       pub nodes: Vec<SRBNNode>,
+   }
+
+   pub struct SRBNNode {
+       pub id: String,
+       pub description: String,
+       pub task_type: TaskType,
+       pub state: NodeState,
+   }
+
+   pub struct EnergyComponents {
+       pub v_syn: f32,
+       pub v_str: f32,
+       pub v_log: f32,
+       pub total: f32,
+   }
+
+   pub enum ModelTier {
+       Architect,
+       Actuator,
+       Verifier,
+       Speculator,
+   }
+
 Usage Example
 -------------
 
@@ -198,3 +285,6 @@ Source Code
 - ``crates/perspt-core/src/llm_provider.rs``
 - ``crates/perspt-core/src/config.rs``
 - ``crates/perspt-core/src/memory.rs``
+- ``crates/perspt-core/src/events.rs``
+- ``crates/perspt-core/src/plugin.rs``
+- ``crates/perspt-core/src/types.rs``
