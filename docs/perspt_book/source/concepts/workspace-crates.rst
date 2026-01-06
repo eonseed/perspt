@@ -221,7 +221,7 @@ Adding a New Crate
       members = [
           "crates/perspt-core",
           "crates/perspt-newcrate",  # Add here
-          ...
+          # ...
       ]
 
 4. Add dependencies to consuming crates
