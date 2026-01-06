@@ -12,8 +12,8 @@ import sys
 project = 'Perspt'
 copyright = '2025, Ronak Rathore, Vikrant Rathore'
 author = 'Ronak Rathore, Vikrant Rathore'
-release = '0.4.4'
-version = '0.4.4'
+release = '0.5.2'
+version = '0.5.2'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -278,7 +278,7 @@ texinfo_documents = [
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
-    # Note: Rust docs don't provide stable inventory, so we'll disable it for now
+    # Rust docs don't provide stable inventory, so we'll disable it for now
     # 'rust': ('https://doc.rust-lang.org/stable/', None),
 }
 
@@ -304,7 +304,7 @@ napoleon_attr_annotations = True
 
 # Graphviz configuration for diagram rendering
 graphviz_output_format = 'png'  # PNG for HTML
-graphviz_dot = '/opt/homebrew/bin/dot'
+graphviz_dot = 'dot'
 graphviz_dot_args = ['-Gdpi=150']  # Higher DPI for better PDF quality
 
 # MyST parser configuration
