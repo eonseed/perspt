@@ -45,7 +45,7 @@ Crate Summary
      - Description
      - Key Types
    * - :doc:`perspt-cli`
-     - CLI entry point with 8 subcommands
+     - CLI entry point with 10 subcommands
      - ``Commands``, ``Cli``
    * - :doc:`perspt-core`
      - LLM provider, config, memory
@@ -76,7 +76,7 @@ Architecture Quick Reference
       :link: perspt-cli
       :link-type: doc
 
-      **8 Subcommands**: chat, agent, init, config, ledger, status, abort, resume
+      **10 Subcommands**: chat, agent, init, config, ledger, status, abort, resume, logs, simple-chat
 
    .. grid-item-card:: 🔌 perspt-core
       :link: perspt-core

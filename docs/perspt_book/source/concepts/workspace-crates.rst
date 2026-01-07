@@ -17,7 +17,7 @@ Crate Overview
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
        edge [color="#666666"];
        
-       cli [label="perspt-cli\n━━━━━━━━━\nCLI Entry Point\n8 Subcommands", fillcolor="#4ECDC4"];
+       cli [label="perspt-cli\n━━━━━━━━━\nCLI Entry Point\n10 Subcommands", fillcolor="#4ECDC4"];
        core [label="perspt-core\n━━━━━━━━━\nGenAIProvider\nConfig, Memory", fillcolor="#45B7D1"];
        tui [label="perspt-tui\n━━━━━━━━━\nAgentApp\nDashboard", fillcolor="#96CEB4"];
        agent [label="perspt-agent\n━━━━━━━━━\nOrchestrator\nLSP, Tools", fillcolor="#FFEAA7"];
@@ -74,6 +74,10 @@ perspt-cli
      - Cancel current session
    * - ``resume``
      - Resume interrupted session
+   * - ``logs``
+     - View LLM request/response logs
+   * - ``simple-chat``
+     - Simple CLI chat (no TUI)
 
 perspt-core
 ~~~~~~~~~~~

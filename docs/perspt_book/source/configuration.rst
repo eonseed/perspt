@@ -59,8 +59,9 @@ If no API keys are detected, Perspt displays helpful setup instructions:
         • GEMINI_API_KEY=your-key
         # ... (shows all supported providers)
 
-     2. Use command line arguments:
-        perspt --provider openai --api-key sk-your-key
+     2. Just set an environment variable and run:
+        export OPENAI_API_KEY=sk-your-key
+        perspt
 
 Manual Configuration Methods
 ----------------------------
@@ -228,9 +229,8 @@ OpenAI
 
       .. code-block:: bash
 
-         perspt --provider-type openai \
-                --model-name gpt-4o-mini \
-                --api-key "sk-your-key-here"
+         export OPENAI_API_KEY="sk-your-key-here"
+         perspt chat --model gpt-4o-mini
 
 **Available Models:**
 - ``gpt-4.1`` - Latest and most advanced GPT model
@@ -272,9 +272,8 @@ Anthropic
 
       .. code-block:: bash
 
-         perspt --provider-type anthropic \
-                --model-name claude-3-sonnet-20240229 \
-                --api-key "your-key-here"
+         export ANTHROPIC_API_KEY="your-key-here"
+         perspt chat --model claude-3-sonnet-20240229
 
 **Available Models:**
 - ``claude-3-opus-20240229`` - Most capable Claude model
@@ -311,9 +310,8 @@ Google (Gemini)
 
       .. code-block:: bash
 
-         perspt --provider-type google \
-                --model-name gemini-pro \
-                --api-key "your-key-here"
+         export GEMINI_API_KEY="your-key-here"
+         perspt chat --model gemini-pro
 
 **Available Models:**
 - ``gemini-pro`` - Google's most capable model
@@ -337,20 +335,37 @@ Basic Options
 
    * - Option
      - Description
-   * - ``--config <PATH>``
+   * - ``-v, --verbose``
+     - Enable verbose logging
+   * - ``-c, --config <PATH>``
      - Path to configuration file
-   * - ``--provider-type <TYPE>``
-     - AI provider (openai, anthropic, google, groq, cohere, xai, deepseek, ollama)
-   * - ``--model-name <MODEL>``
-     - Specific model to use
-   * - ``--api-key <KEY>``
-     - API key for authentication
-   * - ``--list-models``
-     - List available models for provider
-   * - ``--help``
+   * - ``-h, --help``
      - Show help information
-   * - ``--version``
+   * - ``-V, --version``
      - Show version information
+
+**Subcommands:**
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 1
+
+   * - Command
+     - Description
+   * - ``chat``
+     - Start interactive TUI chat session (default)
+   * - ``agent``
+     - Run SRBN agent for autonomous coding
+   * - ``simple-chat``
+     - Simple CLI chat mode (no TUI)
+   * - ``init``
+     - Initialize project configuration
+   * - ``config``
+     - Manage configuration settings
+   * - ``ledger``
+     - Query and manage Merkle ledger
+   * - ``logs``
+     - View LLM request/response logs
 
 Advanced Options
 ~~~~~~~~~~~~~~~~
@@ -378,18 +393,15 @@ Examples
 .. code-block:: bash
 
    # Use specific OpenAI model
-   perspt --provider-type openai --model-name gpt-4
+   export OPENAI_API_KEY="sk-your-key"
+   perspt chat --model gpt-4
 
-   # Use Anthropic with custom timeout
-   perspt --provider-type anthropic \
-          --model-name claude-3-sonnet-20240229 \
-          --timeout 45
+   # Use Anthropic with specific model
+   export ANTHROPIC_API_KEY="your-key"
+   perspt chat --model claude-3-sonnet-20240229
 
    # Use custom configuration file
    perspt --config ~/.perspt/work-config.json
-
-   # List available models
-   perspt --provider-type openai --list-models
 
 UI Customization
 ----------------
@@ -598,7 +610,7 @@ Common validation errors:
 
 - **Invalid API key format**: Ensure your API key follows the correct format
 - **Missing required fields**: Some providers require specific configuration
-- **Invalid model names**: Use ``--list-models`` to see available options
+- **Invalid model names**: Check the model name matches your provider's offerings
 - **Network connectivity**: Check internet connection and proxy settings
 
 Configuration Templates

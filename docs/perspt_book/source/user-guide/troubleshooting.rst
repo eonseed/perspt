@@ -10,14 +10,15 @@ Start with these diagnostic commands to check system status:
 
 .. code-block:: bash
 
-   # Check provider connectivity and model availability
-   perspt --provider-type openai --list-models
+   # Check if API key is set
+   echo $OPENAI_API_KEY
    
-   # Validate specific model
-   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022 --list-models
+   # Start chat with verbose logging to see detailed output
+   perspt --verbose chat --model gpt-4o-mini
    
-   # Test with minimal configuration
-   perspt --api-key your-key --provider-type openai --model gpt-3.5-turbo
+   # Or simply test if it works
+   export OPENAI_API_KEY="your-key"
+   perspt
 
 **Environment Variable Check**
 
@@ -26,11 +27,11 @@ Start with these diagnostic commands to check system status:
    # Check if API keys are set
    echo $OPENAI_API_KEY
    echo $ANTHROPIC_API_KEY
-   echo $GOOGLE_API_KEY
+   echo $GEMINI_API_KEY
    
-   # Verify genai crate can access providers
+   # Enable debug logging
    export RUST_LOG=debug
-   perspt --provider-type openai --list-models
+   perspt --verbose
 
 Common Issues
 -------------
@@ -98,9 +99,10 @@ GenAI Crate Integration Issues
    .. code-block:: bash
 
       # Correct model names (case-sensitive)
-      perspt --provider-type openai --model gpt-4o-mini       # ✓ Correct
-      perspt --provider-type openai --model GPT-4O-Mini       # ✗ Wrong case
-      perspt --provider-type openai --model gpt4o-mini        # ✗ Missing hyphen
+      export OPENAI_API_KEY="your-key"
+      perspt chat --model gpt-4o-mini       # ✓ Correct
+      # perspt chat --model GPT-4O-Mini     # ✗ Wrong case
+      # perspt chat --model gpt4o-mini      # ✗ Missing hyphen
 
 3. **Check provider-specific model access**:
    - Some models require special access (e.g., GPT-4, Claude Opus)

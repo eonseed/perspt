@@ -45,7 +45,7 @@ Perspt is built as a **7-crate Rust workspace**:
        subgraph cluster_cli {
            label="User Interface";
            style=dashed;
-           cli [label="perspt-cli\n8 commands", fillcolor="#4ECDC4"];
+           cli [label="perspt-cli\n10 commands", fillcolor="#4ECDC4"];
            tui [label="perspt-tui\nTerminal UI", fillcolor="#96CEB4"];
        }
        
@@ -61,6 +61,7 @@ Perspt is built as a **7-crate Rust workspace**:
            label="Security";
            style=dashed;
            policy [label="perspt-policy\nPolicy Engine", fillcolor="#DDA0DD"];
+           sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
        }
        
        cli -> tui;
@@ -68,6 +69,7 @@ Perspt is built as a **7-crate Rust workspace**:
        agent -> core;
        agent -> store;
        agent -> policy;
+       agent -> sandbox;
    }
 
 Key Features
@@ -170,6 +172,12 @@ CLI Commands
    * - ``resume``
      - Resume session
      - ``perspt resume``
+   * - ``logs``
+     - View LLM logs
+     - ``perspt logs --tui``
+   * - ``simple-chat``
+     - Simple CLI mode
+     - ``perspt simple-chat``
 
 Supported Providers
 -------------------
