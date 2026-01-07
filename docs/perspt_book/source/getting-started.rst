@@ -243,8 +243,8 @@ Choose between TUI mode (rich interface) or Simple CLI mode (minimal interface):
    # Start with automatic detection (recommended)
    perspt
 
-   # Or specify provider manually
-   perspt --provider openai --model gpt-4o-mini
+   # Or specify model explicitly
+   perspt chat --model gpt-4o-mini
 
 You should see a welcome screen like this:
 

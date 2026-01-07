@@ -112,24 +112,31 @@ export OPENAI_API_KEY="sk-your-key"
 }
 ```
 
-**CLI Arguments:**
-```bash
-perspt --provider-type anthropic --model claude-opus-4.5
-perspt --list-models  # List available models
-```
+### ⌨️ Commands Overview
 
-### ⌨️ Command-Line Options
+Perspt uses subcommands. Running `perspt` with no command defaults to `chat`.
+
+| Command | Description |
+|---------|-------------|
+| `chat` | Start interactive TUI chat session (default) |
+| `agent` | Run SRBN agent for autonomous coding |
+| `init` | Initialize project configuration |
+| `config` | Manage configuration settings |
+| `ledger` | Query and manage Merkle ledger |
+| `status` | Show current agent status |
+| `abort` | Abort current agent session |
+| `resume` | Resume paused or crashed session |
+| `logs` | View LLM request/response logs |
+| `simple-chat` | Simple CLI chat mode (no TUI) |
+
+**Global Options (apply to all commands):**
 
 | Option | Description |
 |--------|-------------|
-| `-c, --config <FILE>` | Path to configuration file |
-| `-p, --provider-type <TYPE>` | Provider: openai, anthropic, gemini, groq, cohere, xai, deepseek, ollama |
-| `-k, --api-key <KEY>` | API key for the provider |
-| `-m, --model <MODEL>` | Model name (e.g., gpt-5.2, claude-opus-4.5) |
-| `--provider <PROFILE>` | Provider profile from config |
-| `-l, --list-models` | List available models |
-| `simple-chat` | Use simple CLI mode (no TUI) |
-| `--log-file <FILE>` | Log session to file (simple-chat only) |
+| `-v, --verbose` | Enable verbose logging |
+| `-c, --config <FILE>` | Configuration file path |
+| `-h, --help` | Print help information |
+| `-V, --version` | Print version |
 
 ## 🤖 Agent Mode - Autonomous Coding Assistant (v0.5.0)
 
@@ -176,13 +183,22 @@ V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log}
 perspt agent [OPTIONS] <TASK>
 
 Options:
-  -w, --workspace <DIR>      Working directory (default: current)
-  -y, --yes                  Auto-approve all actions
-  -k, --complexity <K>       Max tasks before approval (default: 5)
-  --architect-model <M>      Model for planning
-  --actuator-model <M>       Model for code generation
-  --max-tokens <N>           Token budget limit (default: 100000)
-  --max-cost <USD>           Maximum cost in dollars
+  -w, --workdir <DIR>              Working directory (default: current)
+  -y, --yes                        Auto-approve all actions
+      --auto-approve-safe          Auto-approve only safe (read-only) operations
+  -k, --complexity <K>             Max complexity K for sub-graph approval (default: 5)
+      --mode <MODE>                Execution mode: cautious, balanced, or yolo (default: balanced)
+      --model <MODEL>              Model to use for ALL agent tiers
+      --architect-model <M>        Model for Architect tier (deep reasoning/planning)
+      --actuator-model <M>         Model for Actuator tier (code generation)
+      --verifier-model <M>         Model for Verifier tier (stability checking)
+      --speculator-model <M>       Model for Speculator tier (fast lookahead)
+      --energy-weights <α,β,γ>     Lyapunov weights (default: 1.0,0.5,2.0)
+      --stability-threshold <ε>    Convergence threshold (default: 0.1)
+      --max-cost <USD>             Maximum cost in dollars (0 = unlimited)
+      --max-steps <N>              Maximum iterations (0 = unlimited)
+      --defer-tests                Defer tests until sheaf validation
+      --log-llm                    Log all LLM requests/responses to database
 ```
 
 ### Retry Policy (PSP-4)

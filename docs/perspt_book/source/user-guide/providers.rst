@@ -129,14 +129,17 @@ CLI Usage
 
 .. code-block:: bash
 
+   # Set environment variable and run
+   export OPENAI_API_KEY="sk-your-key-here"
+   
    # Use latest reasoning model
-   perspt --provider-type openai --model o1-mini
+   perspt chat --model o1-mini
    
-   # Use fastest model (default)
-   perspt --provider-type openai --model gpt-4o-mini
+   # Use fastest model (default when no model specified)
+   perspt chat --model gpt-4o-mini
    
-   # List all available OpenAI models
-   perspt --provider-type openai --list-models
+   # Start agent with OpenAI
+   perspt agent "Create a Python calculator"
 
 **Reasoning Model Features**
 
@@ -211,14 +214,14 @@ CLI Usage
 
 .. code-block:: bash
 
+   # Set environment variable and run
+   export ANTHROPIC_API_KEY="sk-ant-your-key-here"
+   
    # Use latest Claude model
-   perspt --provider-type anthropic --model claude-3-5-sonnet-20241022
+   perspt chat --model claude-3-5-sonnet-20241022
    
    # Use fastest Claude model  
-   perspt --provider-type anthropic --model claude-3-5-haiku-20241022
-   
-   # List available Anthropic models
-   perspt --provider-type anthropic --list-models
+   perspt chat --model claude-3-5-haiku-20241022
 
 **Environment Variables**
 
@@ -278,14 +281,14 @@ CLI Usage
 
 .. code-block:: bash
 
+   # Set environment variable and run
+   export GEMINI_API_KEY="your-key-here"
+   
    # Use latest Gemini model
-   perspt --provider-type google --model gemini-2.0-flash-exp
+   perspt chat --model gemini-2.0-flash-exp
    
    # Use model with largest context
-   perspt --provider-type google --model gemini-1.5-pro
-   
-   # List available Google models
-   perspt --provider-type google --list-models
+   perspt chat --model gemini-1.5-pro
 
 **Environment Variables**
 

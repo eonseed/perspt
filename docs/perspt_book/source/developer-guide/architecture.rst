@@ -42,7 +42,7 @@ Crate Dependency Graph
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11];
        edge [color="#666666"];
        
-       cli [label="perspt-cli\n━━━━━━━━━━━\n8 Subcommands", fillcolor="#4ECDC4"];
+       cli [label="perspt-cli\n━━━━━━━━━━━\n10 Subcommands", fillcolor="#4ECDC4"];
        
        subgraph cluster_middle {
            rank=same;
@@ -109,7 +109,7 @@ Crate Details
 perspt-cli
 ~~~~~~~~~~
 
-The command-line interface providing 8 subcommands:
+The command-line interface providing 10 subcommands:
 
 .. list-table:: CLI Subcommands
    :header-rows: 1

@@ -1,7 +1,7 @@
 perspt-cli API
 ==============
 
-The command-line interface entry point with 8 subcommands.
+The command-line interface entry point with 10 subcommands.
 
 Overview
 --------
@@ -16,6 +16,8 @@ Overview
 - **status** - Agent status
 - **abort** - Cancel session
 - **resume** - Resume session
+- **logs** - View LLM request/response logs
+- **simple-chat** - Simple CLI mode (no TUI)
 
 Global Options
 --------------
@@ -238,6 +240,8 @@ Command Routing
        Status,
        Abort { force: bool },
        Resume { session_id: Option<String> },
+       Logs { tui: bool, last: Option<usize>, stats: bool },
+       SimpleChat { model: Option<String>, log_file: Option<PathBuf> },
    }
 
    #[tokio::main]
@@ -265,3 +269,5 @@ Source Code
   - ``status.rs``
   - ``abort.rs``
   - ``resume.rs``
+  - ``logs.rs``
+  - ``simple_chat.rs``

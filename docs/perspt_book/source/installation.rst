@@ -464,13 +464,13 @@ After installation, verify that Perspt is working correctly:
 
    # Test basic functionality (requires API key)
    export OPENAI_API_KEY="your-key-here"
-   perspt --model-name gpt-4o-mini
+   perspt chat --model gpt-4o-mini
 
 You should see output similar to:
 
 .. code-block:: text
 
-   perspt 0.4.0
+   perspt 0.5.1
    Your Terminal's Window to the AI World
 
 Updating Perspt
