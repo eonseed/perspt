@@ -1,0 +1,20 @@
+[package]
+name = "perspt"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "../../README.md"
+documentation = "https://docs.rs/perspt"
+description = "Your Terminal's Window to the AI World - A high-performance CLI for LLMs with chat and autonomous agent modes"
+keywords = ["llm", "ai", "terminal", "chat", "agent"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+perspt-core = { workspace = true }
+perspt-agent = { workspace = true }
+perspt-store = { workspace = true }
+perspt-policy = { workspace = true }
+perspt-sandbox = { workspace = true }
