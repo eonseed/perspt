@@ -160,21 +160,38 @@ Target Output File: {target_file}
 7. Add type annotations if missing
 8. Import any missing modules
 
-## Output Format
-You MUST output the code in this EXACT format:
+6. Output Format:
+   - For NEW files: Use 'File: {target_file}' followed by the full code.
+   - For EXISTING files: Use 'Diff: {target_file}' followed by a Unified Diff.
 
+## Output Format Examples
+
+### Creating a New File
 File: {target_file}
 ```python
-# Your complete implementation here
-# Include ALL necessary imports
-# Include the COMPLETE file, not just snippets
+import os
+
+def main():
+    print("Hello")
+```
+
+### Modifying an Existing File
+Diff: {target_file}
+```diff
+--- {target_file}
++++ {target_file}
+@@ -10,2 +10,3 @@
+ def calculate(x):
+-    return x * 2
++    return x * 3
++    # Fixed calculation
 ```
 
 IMPORTANT:
-- The "File:" line MUST appear before the code block
-- Provide the COMPLETE corrected file, not just snippets
-- Include all imports at the top
-- Do not skip any functions or classes"#,
+- Use 'Diff:' for existing files to save tokens and apply changes safely.
+- Use 'File:' ONLY for new files or when rewriting the entire file is simpler.
+- For Diffs, include the standard header (---/+++) and @@ lines.
+- Do NOT output the full file contents if you are only changing a few lines."#,
             goal = node.goal,
             interface = contract.interface_signature,
             invariants = contract.invariants,

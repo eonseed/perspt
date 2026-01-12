@@ -3,6 +3,7 @@
 //! Tools available to agents for interacting with the workspace.
 //! Implements: read_file, search_code, apply_patch, run_command
 
+use diffy::{apply, Patch};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -80,6 +81,7 @@ impl AgentTools {
             "run_command" => self.run_command(call).await,
             "list_files" => self.list_files(call),
             "write_file" => self.write_file(call),
+            "apply_diff" => self.apply_diff(call),
             // Power Tools (OS-level)
             "sed_replace" => self.sed_replace(call),
             "awk_filter" => self.awk_filter(call),
@@ -168,6 +170,58 @@ impl AgentTools {
             Err(e) => {
                 ToolResult::failure("apply_patch", format!("Failed to write {:?}: {}", path, e))
             }
+        }
+    }
+
+    /// Apply a unified diff patch to a file
+    fn apply_diff(&self, call: &ToolCall) -> ToolResult {
+        let path = match call.arguments.get("path") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("apply_diff", "Missing 'path' argument".to_string())
+            }
+        };
+
+        let diff_content = match call.arguments.get("diff") {
+            Some(c) => c,
+            None => {
+                return ToolResult::failure("apply_diff", "Missing 'diff' argument".to_string())
+            }
+        };
+
+        // Read original file
+        let original = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                // If file doesn't exist, we can't patch it.
+                // (Unless it's a new file creation patch, but diffy usually assumes base text)
+                return ToolResult::failure(
+                    "apply_diff",
+                    format!("Failed to read base file {:?}: {}", path, e),
+                );
+            }
+        };
+
+        // Parse patch
+        let patch = match Patch::from_str(diff_content) {
+            Ok(p) => p,
+            Err(e) => {
+                return ToolResult::failure("apply_diff", format!("Failed to parse diff: {}", e));
+            }
+        };
+
+        // Apply patch
+        match apply(&original, &patch) {
+            Ok(patched) => match fs::write(&path, patched) {
+                Ok(_) => {
+                    ToolResult::success("apply_diff", format!("Successfully patched {:?}", path))
+                }
+                Err(e) => ToolResult::failure(
+                    "apply_diff",
+                    format!("Failed to write patched file: {}", e),
+                ),
+            },
+            Err(e) => ToolResult::failure("apply_diff", format!("Failed to apply patch: {}", e)),
         }
     }
 
@@ -462,6 +516,22 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             ],
         },
         ToolDefinition {
+            name: "apply_diff".to_string(),
+            description: "Apply a Unified Diff patch to a file".to_string(),
+            parameters: vec![
+                ToolParameter {
+                    name: "path".to_string(),
+                    description: "Path to the file to patch".to_string(),
+                    required: true,
+                },
+                ToolParameter {
+                    name: "diff".to_string(),
+                    description: "Unified Diff content".to_string(),
+                    required: true,
+                },
+            ],
+        },
+        ToolDefinition {
             name: "run_command".to_string(),
             description: "Execute a shell command in the working directory".to_string(),
             parameters: vec![ToolParameter {
@@ -587,5 +657,40 @@ mod tests {
 
         let result = tools.execute(&call).await;
         assert!(result.success);
+    }
+
+    #[tokio::test]
+    async fn test_apply_diff_tool() {
+        use std::collections::HashMap;
+        use std::io::Write;
+        let temp_dir = temp_dir();
+        let file_path = temp_dir.join("test_diff.txt");
+        let mut file = std::fs::File::create(&file_path).unwrap();
+        // Explicitly write bytes with unix newlines
+        file.write_all(b"Hello world\nThis is a test\n").unwrap();
+
+        let tools = AgentTools::new(temp_dir.clone(), true);
+
+        // Exact string with newlines
+        let diff = "--- test_diff.txt\n+++ test_diff.txt\n@@ -1,2 +1,2 @@\n-Hello world\n+Hello diffy\n This is a test\n";
+
+        let mut args = HashMap::new();
+        args.insert("path".to_string(), "test_diff.txt".to_string());
+        args.insert("diff".to_string(), diff.to_string());
+
+        let call = ToolCall {
+            name: "apply_diff".to_string(),
+            arguments: args,
+        };
+
+        let result = tools.apply_diff(&call);
+        assert!(
+            result.success,
+            "Diff application failed: {:?}",
+            result.error
+        );
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "Hello diffy\nThis is a test\n");
     }
 }
