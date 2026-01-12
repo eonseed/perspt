@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # LLM unified interface
-genai = "0.4.4"
+genai = "0.5.0"
 futures = "0.3"
 
 # Core async and traits
