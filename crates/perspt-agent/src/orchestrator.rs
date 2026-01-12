@@ -65,6 +65,8 @@ pub struct SRBNOrchestrator {
     action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
     /// Persistence ledger
     pub ledger: crate::ledger::MerkleLedger,
+    /// Last tool failure message (for energy calculation)
+    pub last_tool_failure: Option<String>,
 }
 
 impl SRBNOrchestrator {
@@ -129,6 +131,7 @@ impl SRBNOrchestrator {
             event_sender: None,
             action_receiver: None,
             ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
+            last_tool_failure: None,
         }
     }
 
@@ -1141,21 +1144,24 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             }
         }
         // Then check for file code blocks (for TaskType::Code)
-        else if let Some(code_info) = self.extract_code_from_response(content) {
-            log::info!("Extracted code for file: {}", code_info.0);
-            self.emit_log(format!("📝 File proposed: {}", code_info.0));
+        else if let Some((filename, code, is_diff)) = self.extract_code_from_response(content) {
+            log::info!("Extracted code for file: {} (diff={})", filename, is_diff);
+            self.emit_log(format!(
+                "📝 File proposed: {} (diff: {})",
+                filename, is_diff
+            ));
 
             // Build full path
-            let full_path = self.context.working_dir.join(&code_info.0);
+            let full_path = self.context.working_dir.join(&filename);
 
             // Request approval before writing file
             let approval_result = self
                 .await_approval(
                     perspt_core::ActionType::FileWrite {
-                        path: code_info.0.clone(),
+                        path: filename.clone(),
                     },
-                    format!("Write file: {}", code_info.0),
-                    Some(code_info.1.clone()),
+                    format!("Write file: {}", filename),
+                    Some(code.clone()),
                 )
                 .await;
 
@@ -1167,20 +1173,28 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 return Ok(());
             }
 
-            // Create a tool call to write the file
             let mut args = HashMap::new();
-            args.insert("path".to_string(), code_info.0.clone());
-            args.insert("content".to_string(), code_info.1.clone());
+            args.insert("path".to_string(), filename.clone());
 
-            let call = ToolCall {
-                name: "apply_patch".to_string(),
-                arguments: args,
+            let call = if is_diff {
+                args.insert("diff".to_string(), code.clone());
+                ToolCall {
+                    name: "apply_diff".to_string(),
+                    arguments: args,
+                }
+            } else {
+                args.insert("content".to_string(), code.clone());
+                ToolCall {
+                    name: "write_file".to_string(), // Previously alias for apply_patch (fs::write)
+                    arguments: args,
+                }
             };
 
             let result = self.tools.execute(&call).await;
             if result.success {
-                log::info!("✓ Wrote file: {}", code_info.0);
-                self.emit_log(format!("✅ Wrote file: {}", code_info.0));
+                log::info!("✓ Applied changes to: {}", filename);
+                self.emit_log(format!("✅ Applied changes to: {}", filename));
+                self.last_tool_failure = None; // Reset error
 
                 // Track the written file for LSP verification
                 self.last_written_file = Some(full_path.clone());
@@ -1189,16 +1203,36 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 // Notify LSP of file change (if LSP is running)
                 if let Some(client) = self.lsp_clients.get_mut("python") {
                     if self.file_version == 1 {
-                        let _ = client.did_open(&full_path, &code_info.1).await;
+                        let _ = client.did_open(&full_path, &code).await; // Note: For diff, we should ideally send full text but we don't have it easily here without reading back.
+                                                                          // Ideally we should reread file from disk for LSP sync if it was a diff
+                        if is_diff {
+                            if let Ok(new_content) = std::fs::read_to_string(&full_path) {
+                                let _ = client
+                                    .did_change(&full_path, &new_content, self.file_version)
+                                    .await;
+                            }
+                        } else {
+                            let _ = client.did_open(&full_path, &code).await;
+                        }
                     } else {
-                        let _ = client
-                            .did_change(&full_path, &code_info.1, self.file_version)
-                            .await;
+                        // For diff, read back file
+                        if is_diff {
+                            if let Ok(new_content) = std::fs::read_to_string(&full_path) {
+                                let _ = client
+                                    .did_change(&full_path, &new_content, self.file_version)
+                                    .await;
+                            }
+                        } else {
+                            let _ = client
+                                .did_change(&full_path, &code, self.file_version)
+                                .await;
+                        }
                     }
                 }
             } else {
-                log::warn!("Failed to write file: {:?}", result.error);
-                self.emit_log(format!("❌ Failed to write file: {:?}", result.error));
+                log::warn!("Failed to apply changes: {:?}", result.error);
+                self.emit_log(format!("❌ Failed: {:?}", result.error));
+                self.last_tool_failure = result.error.clone();
             }
         } else {
             log::debug!(
@@ -1236,7 +1270,9 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
     /// Extract code from LLM response
     /// Returns (filename, code_content) if found
-    fn extract_code_from_response(&self, content: &str) -> Option<(String, String)> {
+    /// Extract code from LLM response
+    /// Returns (filename, code_content, is_diff) if found
+    fn extract_code_from_response(&self, content: &str) -> Option<(String, String, bool)> {
         // Look for patterns like:
         // File: hello_world.py
         // ```python
@@ -1266,6 +1302,21 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 }
             }
 
+            // Look for Diff patterns
+            if line.starts_with("Diff:") || line.starts_with("**Diff:") || line.starts_with("diff:")
+            {
+                let path = line
+                    .trim_start_matches("Diff:")
+                    .trim_start_matches("**Diff:")
+                    .trim_start_matches("diff:")
+                    .trim_start_matches("**")
+                    .trim_end_matches("**")
+                    .trim();
+                if !path.is_empty() {
+                    file_path = Some(path.to_string());
+                }
+            }
+
             // Parse code blocks
             if line.starts_with("```") && !in_code_block {
                 in_code_block = true;
@@ -1284,17 +1335,16 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                         .unwrap_or_else(|| match code_lang.as_str() {
                             "python" | "py" => "main.py".to_string(),
                             "rust" | "rs" => "main.rs".to_string(),
-                            "javascript" | "js" => "main.js".to_string(),
-                            "typescript" | "ts" => "main.ts".to_string(),
-                            _ => {
-                                if let Some(dir) = self.ledger.artifacts_dir() {
-                                    dir.join("output.txt").to_string_lossy().to_string()
-                                } else {
-                                    "output.txt".to_string()
-                                }
-                            }
+                            _ => "output.txt".to_string(),
                         });
-                    return Some((filename, code));
+                    // Check if it's a diff
+                    let is_diff = code_lang == "diff"
+                        || code.starts_with("---")
+                        || file_path
+                            .as_ref()
+                            .map(|_| content.contains("Diff:"))
+                            .unwrap_or(false);
+                    return Some((filename, code, is_diff));
                 }
                 continue;
             }
@@ -1317,6 +1367,27 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         // Calculate energy components
         let mut energy = EnergyComponents::default();
+
+        // V_syn: From Tool Failures (Critical)
+        if let Some(ref err) = self.last_tool_failure {
+            energy.v_syn = 10.0; // High energy for tool failure
+            log::warn!("Tool failure detected, V_syn set to 10.0: {}", err);
+            self.emit_log(format!("⚠️ Tool failure prevents verification: {}", err));
+            // We can return early or allow other checks. Usually tool failure means broken state.
+
+            // Store diagnostics mock for correction prompt
+            self.context.last_diagnostics = vec![lsp_types::Diagnostic {
+                range: lsp_types::Range::default(),
+                severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+                code: None,
+                code_description: None,
+                source: Some("tool".to_string()),
+                message: format!("Failed to apply changes: {}", err),
+                related_information: None,
+                tags: None,
+                data: None,
+            }];
+        }
 
         // V_syn: From LSP diagnostics
         if let Some(ref path) = self.last_written_file {
@@ -1516,23 +1587,32 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         let corrected = self.call_llm_for_correction(&correction_prompt).await?;
 
         // Extract and apply diff
-        if let Some((filename, new_code)) = self.extract_code_from_response(&corrected) {
+        if let Some((filename, new_code, is_diff)) = self.extract_code_from_response(&corrected) {
             let full_path = self.context.working_dir.join(&filename);
 
             // Write corrected file
             let mut args = HashMap::new();
             args.insert("path".to_string(), filename.clone());
-            args.insert("content".to_string(), new_code.clone());
 
-            let call = ToolCall {
-                name: "apply_patch".to_string(),
-                arguments: args,
+            let call = if is_diff {
+                args.insert("diff".to_string(), new_code.clone());
+                ToolCall {
+                    name: "apply_diff".to_string(),
+                    arguments: args,
+                }
+            } else {
+                args.insert("content".to_string(), new_code.clone());
+                ToolCall {
+                    name: "write_file".to_string(),
+                    arguments: args,
+                }
             };
 
             let result = self.tools.execute(&call).await;
             if result.success {
                 log::info!("✓ Applied correction to: {}", filename);
                 self.emit_log(format!("📝 Applied correction to: {}", filename));
+                self.last_tool_failure = None;
 
                 // Update tracking
                 self.last_written_file = Some(full_path.clone());
@@ -1540,10 +1620,14 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
                 // Notify LSP of file change
                 if let Some(client) = self.lsp_clients.get_mut("python") {
-                    let _ = client
-                        .did_change(&full_path, &new_code, self.file_version)
-                        .await;
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        let _ = client
+                            .did_change(&full_path, &content, self.file_version)
+                            .await;
+                    }
                 }
+            } else {
+                self.last_tool_failure = result.error;
             }
         }
 
