@@ -385,6 +385,12 @@ impl SRBNOrchestrator {
         let plugin_name = self.detect_language_from_task(task);
 
         if let Some(name) = plugin_name {
+            // Check if this task actually requires a full project workspace/scaffold
+            if !self.check_workspace_requirement(task).await {
+                self.emit_log("ℹ️ Simple task detected, skipping project scaffolding.");
+                return Ok(());
+            }
+
             if let Some(plugin) = registry.get(name) {
                 self.emit_log(format!("🌱 Initializing new {} project", name));
 
@@ -477,6 +483,59 @@ impl SRBNOrchestrator {
         }
 
         Ok(())
+    }
+
+    /// Check if the task requires a full project workspace/scaffold
+    /// Uses heuristics and LLM decision making to avoid unnecessary initialization
+    async fn check_workspace_requirement(&self, task: &str) -> bool {
+        let task_lower = task.to_lowercase();
+
+        // 1. Simple heuristics: keywords that strongly suggest a single file
+        let single_file_keywords = [
+            "script",
+            "single file",
+            "snippet",
+            "just a file",
+            "one file",
+            "standalone",
+        ];
+        if single_file_keywords.iter().any(|&k| task_lower.contains(k)) {
+            return false;
+        }
+
+        // 2. Short tasks are often single files
+        if task.len() < 50 && !task_lower.contains("project") && !task_lower.contains("app") {
+            return false;
+        }
+
+        // 3. Fallback to LLM for a binary decision
+        let prompt = format!(
+            r#"Analyze this task and decide if it requires a full project workspace/scaffold (e.g., uv init, cargo init, npm init) or if it can be done as a simple standalone file.
+- Full workspace is needed for multi-file projects, web servers, complex apps with dependencies.
+- Simple standalone file is better for scripts, utility functions, or single-logic snippets.
+
+Task: "{}"
+
+Respond with ONLY 'WORKSPACE' or 'STANDALONE'."#,
+            task
+        );
+
+        match self
+            .call_llm_with_logging(&self.architect_model.clone(), &prompt, None)
+            .await
+        {
+            Ok(response) => {
+                let decision = response.trim().to_uppercase();
+                decision.contains("WORKSPACE")
+            }
+            Err(e) => {
+                log::warn!(
+                    "Failed to get workspace decision from LLM: {}, defaulting to WORKSPACE",
+                    e
+                );
+                true // Default to safety
+            }
+        }
     }
 
     /// Detect language from task description using heuristics
@@ -1910,5 +1969,25 @@ mod tests {
         orch.add_dependency("node1", "node2", "depends_on").unwrap();
 
         assert_eq!(orch.node_count(), 2);
+    }
+    #[tokio::test]
+    async fn test_check_workspace_requirement() {
+        let orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+
+        // Positive heuristics
+        assert!(
+            !orch
+                .check_workspace_requirement("write a python script")
+                .await
+        );
+        assert!(!orch.check_workspace_requirement("simple script").await);
+        assert!(!orch.check_workspace_requirement("standalone file").await);
+
+        // Negative heuristics (length or project keywords)
+        // Note: For long strings without keywords, it would fall back to LLM which would fail in test
+        // but the current implementation logs warning and returns true.
+        // We'll test things that are definitely short and don't match or long but definitely project.
+
+        assert!(!orch.check_workspace_requirement("calc sum").await); // Short, no project keywords -> STANDALONE
     }
 }
