@@ -703,14 +703,14 @@ IMPORTANT: Provide ONLY ONE file. Include doctests in docstrings."#,
                 if failed > 0 {
                     self.emit_log(format!("🧪 Doctest: {} passed, {} failed", passed, failed));
                     // Weight failures at gamma=2.0 per SRBN spec
-                    return 2.0 * (failed as f32);
+                    2.0 * (failed as f32)
                 } else if passed > 0 {
                     self.emit_log(format!("🧪 Doctest: {} passed", passed));
-                    return 0.0;
+                    0.0
                 } else {
                     // No doctests found - that's okay for Solo Mode, v_log = 0
                     log::debug!("No doctests found in file");
-                    return 0.0;
+                    0.0
                 }
             }
             Err(e) => {
