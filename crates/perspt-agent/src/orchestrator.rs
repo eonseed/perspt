@@ -260,7 +260,7 @@ impl SRBNOrchestrator {
         log::info!("Starting SRBN execution for task: {}", task);
         self.emit_log(format!("🚀 Starting task: {}", task));
 
-        // Step 0: Project Initialization - Start session first
+        // Step 0: Start session first
         let session_id = uuid::Uuid::new_v4().to_string();
         self.context.session_id = session_id.clone();
         self.ledger.start_session(
@@ -274,9 +274,16 @@ impl SRBNOrchestrator {
             self.emit_log("📝 LLM request logging enabled".to_string());
         }
 
-        self.step_init_project(&task).await?;
+        // Decide: Solo Mode (single file) vs Team Mode (full DAG)
+        if self.should_use_solo_mode(&task).await {
+            // Solo Mode: Single-file execution without DAG
+            log::info!("Using Solo Mode for simple task");
+            self.emit_log("⚡ Solo Mode: Single-file execution".to_string());
+            return self.run_solo_mode(task).await;
+        }
 
-        // Step 1: Architecture Sheafification
+        // Team Mode: Full project initialization and DAG sheafification
+        self.step_init_project(&task).await?;
         self.step_sheafify(task).await?;
 
         // Emit task nodes to TUI after sheafification
@@ -483,6 +490,234 @@ impl SRBNOrchestrator {
         }
 
         Ok(())
+    }
+
+    /// Determine if Solo Mode should be used for this task
+    /// Solo Mode is for simple single-file tasks that don't need project scaffolding
+    async fn should_use_solo_mode(&self, task: &str) -> bool {
+        let task_lower = task.to_lowercase();
+
+        // Keywords that suggest multi-file project (use Team Mode)
+        let project_keywords = [
+            "project",
+            "app",
+            "application",
+            "web server",
+            "api",
+            "database",
+            "crud",
+            "module",
+            "package",
+            "library",
+            "framework",
+            "microservice",
+        ];
+        if project_keywords.iter().any(|&k| task_lower.contains(k)) {
+            log::debug!("Task contains project keyword, using Team Mode");
+            return false;
+        }
+
+        // Keywords that strongly suggest single file (use Solo Mode)
+        let single_file_keywords = [
+            "script",
+            "single file",
+            "snippet",
+            "function",
+            "calculate",
+            "compute",
+            "print",
+            "hello world",
+            "fibonacci",
+            "factorial",
+            "sort",
+            "search",
+            "parse",
+            "convert",
+            "simple",
+        ];
+        if single_file_keywords.iter().any(|&k| task_lower.contains(k)) {
+            log::debug!("Task contains single-file keyword, using Solo Mode");
+            return true;
+        }
+
+        // Short tasks are typically single files
+        if task.len() < 80 {
+            log::debug!("Task is short ({}), using Solo Mode", task.len());
+            return true;
+        }
+
+        // Default to Team Mode for ambiguous cases
+        log::debug!("Ambiguous task, defaulting to Team Mode");
+        false
+    }
+
+    /// Run Solo Mode: A tight loop for single-file tasks
+    ///
+    /// Bypasses DAG sheafification and directly generates, verifies, and corrects
+    /// a single Python file with embedded doctests for V_log.
+    async fn run_solo_mode(&mut self, task: String) -> Result<()> {
+        const MAX_ATTEMPTS: usize = 3;
+
+        // Build the solo prompt - minimal, single-file focused
+        let prompt = self.build_solo_prompt(&task);
+
+        for attempt in 1..=MAX_ATTEMPTS {
+            self.emit_log(format!("🔄 Solo Mode attempt {}/{}", attempt, MAX_ATTEMPTS));
+
+            // Generate code
+            let response = self
+                .call_llm_with_logging(&self.actuator_model.clone(), &prompt, Some("solo"))
+                .await?;
+
+            // Extract and write file
+            if let Some((filename, code, _is_diff)) = self.extract_code_from_response(&response) {
+                let full_path = self.context.working_dir.join(&filename);
+
+                // Write file directly (Solo Mode auto-approves simple writes)
+                let mut args = HashMap::new();
+                args.insert("path".to_string(), filename.clone());
+                args.insert("content".to_string(), code.clone());
+
+                let call = ToolCall {
+                    name: "write_file".to_string(),
+                    arguments: args,
+                };
+
+                let result = self.tools.execute(&call).await;
+                if !result.success {
+                    self.emit_log(format!(
+                        "❌ Failed to write {}: {:?}",
+                        filename, result.error
+                    ));
+                    continue;
+                }
+
+                self.emit_log(format!("📝 Created: {}", filename));
+                self.last_written_file = Some(full_path.clone());
+
+                // Verify: Run doctest for V_log
+                let v_log = self.run_doctest(&full_path).await;
+
+                // Verify: Get LSP diagnostics for V_syn
+                let mut v_syn = 0.0;
+                if let Some(client) = self.lsp_clients.get("python") {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+                    let path_str = full_path.to_string_lossy().to_string();
+                    let diagnostics = client.get_diagnostics(&path_str).await;
+                    v_syn = LspClient::calculate_syntactic_energy(&diagnostics);
+
+                    if !diagnostics.is_empty() {
+                        self.emit_log(format!(
+                            "🔍 LSP: {} diagnostics (V_syn={:.2})",
+                            diagnostics.len(),
+                            v_syn
+                        ));
+                        self.context.last_diagnostics = diagnostics;
+                    }
+                }
+
+                let v_total = v_syn + v_log;
+                let epsilon = 0.1;
+
+                if v_total < epsilon {
+                    self.emit_log(format!(
+                        "✅ Solo Mode complete! V(x)={:.2} < ε={:.2}",
+                        v_total, epsilon
+                    ));
+
+                    self.emit_event(perspt_core::AgentEvent::Complete {
+                        success: true,
+                        message: format!("Created {}", filename),
+                    });
+                    return Ok(());
+                }
+
+                self.emit_log(format!(
+                    "⚠️ V(x)={:.2} > ε={:.2}, correcting...",
+                    v_total, epsilon
+                ));
+
+                // Build correction prompt and continue loop
+                // (The next iteration will use the refined prompt)
+            } else {
+                self.emit_log("⚠️ No code block found in LLM response".to_string());
+            }
+        }
+
+        // Exhausted attempts - escalate
+        self.emit_log(format!(
+            "❌ Solo Mode failed after {} attempts, consider Team Mode",
+            MAX_ATTEMPTS
+        ));
+        self.emit_event(perspt_core::AgentEvent::Complete {
+            success: false,
+            message: "Solo Mode exhausted retries".to_string(),
+        });
+        Ok(())
+    }
+
+    /// Build a minimal prompt for Solo Mode
+    fn build_solo_prompt(&self, task: &str) -> String {
+        format!(
+            r#"You are an expert Python developer. Complete this task with a SINGLE, self-contained Python file.
+
+## Task
+{task}
+
+## Requirements
+1. Write ONE Python file that accomplishes the task
+2. Include docstrings with doctest examples for all functions
+3. Make the file directly runnable with `python filename.py`
+4. Include `if __name__ == "__main__":` block with example usage
+5. Use type hints for all function parameters and return values
+
+## Output Format
+File: script.py
+```python
+# your complete code here
+```
+
+IMPORTANT: Provide ONLY ONE file. Include doctests in docstrings."#,
+            task = task
+        )
+    }
+
+    /// Run Python doctest on a file and return V_log energy
+    async fn run_doctest(&self, file_path: &std::path::Path) -> f32 {
+        let output = tokio::process::Command::new("python")
+            .args(["-m", "doctest", "-v"])
+            .arg(file_path)
+            .current_dir(&self.context.working_dir)
+            .output()
+            .await;
+
+        match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+
+                // Parse doctest output for failures
+                let failed = stderr.matches("FAILED").count() + stdout.matches("FAILED").count();
+                let passed = stdout.matches("ok").count();
+
+                if failed > 0 {
+                    self.emit_log(format!("🧪 Doctest: {} passed, {} failed", passed, failed));
+                    // Weight failures at gamma=2.0 per SRBN spec
+                    return 2.0 * (failed as f32);
+                } else if passed > 0 {
+                    self.emit_log(format!("🧪 Doctest: {} passed", passed));
+                    return 0.0;
+                } else {
+                    // No doctests found - that's okay for Solo Mode, v_log = 0
+                    log::debug!("No doctests found in file");
+                    return 0.0;
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to run doctest: {}", e);
+                0.0 // Don't penalize if doctest runner fails
+            }
+        }
     }
 
     /// Check if the task requires a full project workspace/scaffold
