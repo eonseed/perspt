@@ -278,6 +278,9 @@ impl GenAIProvider {
                 Ok(ChatStreamEvent::ToolCallChunk(_)) => {
                     log::debug!("Tool call chunk received (ignored)");
                 }
+                Ok(ChatStreamEvent::ThoughtSignatureChunk(_)) => {
+                    log::debug!("Thought signature chunk received (ignored)");
+                }
                 Err(e) => {
                     log::error!(
                         "!!! STREAM ERROR after {chunk_count} chunks at {elapsed:?}: {e} !!!"
