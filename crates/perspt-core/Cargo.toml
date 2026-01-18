@@ -1,6 +1,6 @@
 [package]
 name = "perspt-core"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # LLM unified interface
-genai = "0.4.4"
+genai = "0.5.1"
 futures = "0.3"
 
 # Core async and traits
