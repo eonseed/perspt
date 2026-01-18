@@ -611,6 +611,12 @@ impl EnergyComponents {
             + self.v_boot
             + self.v_sheaf
     }
+
+    /// Calculate total energy for Solo Mode (implicit weights = 1.0)
+    /// Used when no BehavioralContract is available
+    pub fn total_simple(&self) -> f32 {
+        self.v_syn + self.v_str + self.v_log + self.v_boot + self.v_sheaf
+    }
 }
 
 // =============================================================================
