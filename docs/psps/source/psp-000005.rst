@@ -1,0 +1,919 @@
+PSP: 000005
+Title: SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification
+Author: Vikrant Rathore (@vikrantrathore)
+Status: Draft
+Type: Enhancement
+Created: 2026-03-23
+Discussion-To: https://github.com/eonseed/perspt/pull/95
+Replaces: 000004
+
+========
+Abstract
+========
+
+This PSP replaces :psp:`000004` as the implementation specification for Perspt's SRBN-based coding workflow. It defines the missing runtime semantics needed for Perspt to create complete multi-file projects, verify repository state with language-native tools, and deliver a review-and-approval experience comparable to contemporary coding CLIs while preserving SRBN stability guarantees.
+
+==========
+Motivation
+==========
+
+PSP 000004 established the conceptual direction for Perspt's SRBN-based coding workflow, but it left critical runtime semantics underspecified for implementation. The current implementation remains structurally biased toward single-file generation, Python-centric verification, and partial UI/TUI wiring. As a result, users asking for complete projects or refactors often receive a single file, incomplete verification, or an approval experience that does not provide the confidence expected from a coding agent.
+
+Currently, users cannot reliably request a complete multi-file application and expect Perspt to plan, generate, verify, and review it as a coherent project. The runtime frequently collapses into single-file execution, verification is not consistently language-aware, and the review loop does not surface structured diffs, project-wide validation, or trustworthy execution boundaries. This affects users attempting long-horizon software engineering tasks, especially in Rust and polyglot repositories, where file-level checks are insufficient and repository-level correctness is required.
+
+This PSP addresses that gap by replacing PSP 000004 with an implementation contract for the next SRBN phase: project-first planning, graph-derived context supply, multi-artifact node execution, independent verifier semantics, repo-native verification, stronger safety controls, and a coding UX designed around inspectable diffs and stable convergence.
+
+================
+Proposed Changes
+================
+
+.. rubric:: Functional Specification
+
+Perspt SHALL treat project-scale coding as the default SRBN workflow and SHALL stop degrading multi-file tasks into single-file execution unless the user explicitly requests a single file.
+
+**Behavioral Changes:**
+
+* Agent runs SHALL default to project mode for any task that implies a repository, application, package, library, service, refactor, or testable feature set.
+* Solo Mode SHALL only activate for explicit single-file intents such as ``single file``, ``snippet``, or ``standalone script`` or through an explicit CLI flag.
+* The Architect SHALL produce a structured task graph whose nodes can create or modify multiple files when needed.
+* The Actuator SHALL emit a pure JSON artifact bundle containing one or more file operations instead of a single ``File:`` or ``Diff:`` block.
+* The Orchestrator SHALL apply all artifact operations for a node as a unit, then verify repository state before committing the node.
+* Verification SHALL be repository-native and selected through the language plugin registry. For Rust workspaces this includes Rust LSP plus ``cargo check`` and ``cargo test`` by default. Successful compilation and test execution SHALL be required in the default interactive mode, while warnings MAY remain unless a stricter verifier preset is selected. Optional stricter checks such as ``cargo clippy`` MAY be enabled explicitly.
+* Language plugins SHALL drive runtime verification and execution behavior, not only project initialization.
+* The Verifier SHALL become a first-class stage in the loop. It SHALL compute energy from deterministic tool and contract signals rather than relying on the Actuator to self-assess.
+* Approval SHALL be performed against a structured diff view that can show all affected files within a node.
+* Stable nodes SHALL be committed to the ledger with per-node state, energy, and artifact metadata, enabling trustworthy status and resume behavior.
+* Node execution SHALL use bounded, graph-derived context assembled from parent intent, dependency summaries, target file state, and verifier summaries rather than ad hoc repository-wide prompt stuffing.
+* The SRBN runtime SHALL remain provider-neutral and support tiered model selection across Gemini, GPT, and Claude class models without changing the execution semantics.
+* Once the user approves the session policy, Perspt SHALL be able to operate autonomously within the current project or working folder. Any action that reads from, writes to, or executes against locations outside that folder SHALL require explicit user approval at the time of the action.
+
+**Execution Flow:**
+
+1. Detect repository language(s) and initialize the relevant plugin, verifier commands, and LSP clients.
+2. Plan the task as a project graph instead of a single file unless single-file intent is explicit.
+3. Execute nodes in topological order.
+4. For each node, generate a multi-artifact bundle containing file creations, file edits, and optionally approved commands.
+5. Apply the bundle transactionally inside the workspace.
+6. Run verifier stages to compute node energy from syntax, structure, logic, execution, and sheaf consistency signals.
+7. If energy remains above threshold, generate a correction prompt grounded in verifier outputs and retry within policy limits.
+8. If stable, show reviewable diffs, accept or reject the node, then commit the stable node to the ledger.
+9. After child nodes converge, run sheaf validation for cross-node consistency before finalizing parent completion.
+
+.. graphviz::
+   :caption: PSP 5 Node State Machine
+   :align: center
+
+   digraph psp5_state_machine {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.18,0.1"];
+     edge [fontname="Arial", fontsize=9, color="#6D4C41", fontcolor="#6D4C41"];
+
+     queued [label="Queued", fillcolor="#ECEFF1", color="#607D8B"];
+     planning [label="Planning\ncontract + targets", fillcolor="#EDE7F6", color="#5E35B1"];
+     generating [label="Generating\nartifact bundle", fillcolor="#E1F5FE", color="#039BE5"];
+     validating [label="Validating\nparse + policy", fillcolor="#FFF3E0", color="#FB8C00"];
+     reviewing [label="Reviewing\ndiff + approval", fillcolor="#E8F5E9", color="#43A047"];
+     verifying [label="Verifying\nLSP + build + tests", fillcolor="#FCE4EC", color="#D81B60"];
+     stable [label="Stable", fillcolor="#C8E6C9", color="#2E7D32"];
+     committed [label="Committed\nledger updated", fillcolor="#DCEDC8", color="#558B2F"];
+     rejected [label="Rejected", fillcolor="#FFEBEE", color="#E53935"];
+     retrying [label="Retrying\ngrounded correction", fillcolor="#FFF8E1", color="#F9A825"];
+     escalated [label="Escalated\nmanual intervention", fillcolor="#FBE9E7", color="#D84315"];
+
+     queued -> planning;
+     planning -> generating;
+     generating -> validating;
+     validating -> rejected [label="invalid bundle"];
+     validating -> reviewing [label="valid bundle"];
+     reviewing -> rejected [label="user reject"];
+     reviewing -> verifying [label="user approve"];
+     verifying -> stable [label="energy < epsilon"];
+     verifying -> retrying [label="energy >= epsilon"];
+     retrying -> generating [label="retry budget available", style=dashed];
+     retrying -> escalated [label="budget exhausted"];
+     stable -> committed;
+     rejected -> generating [label="revise node", style=dashed];
+   }
+
+.. graphviz::
+   :caption: PSP 5 Runtime Architecture
+   :align: center
+
+   digraph psp5_runtime {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+     edge [fontname="Arial", fontsize=9, color="#546E7A", fontcolor="#546E7A"];
+
+     user [label="User\nTask Request", fillcolor="#E3F2FD", color="#1E88E5"];
+     cli [label="CLI / TUI\nReview Surface", fillcolor="#E8F5E9", color="#43A047"];
+     orch [label="SRBN Orchestrator", fillcolor="#FFF3E0", color="#FB8C00"];
+     plan [label="Architect\nTask Graph", fillcolor="#F3E5F5", color="#8E24AA"];
+     act [label="Actuator\nArtifact Bundle", fillcolor="#E1F5FE", color="#039BE5"];
+     verify [label="Verifier\nEnergy Computation", fillcolor="#FCE4EC", color="#D81B60"];
+     plugins [label="Plugin Registry\nLanguage + Toolchain", fillcolor="#F1F8E9", color="#7CB342"];
+     repo [label="Workspace / Repo", fillcolor="#ECEFF1", color="#607D8B"];
+     ledger [label="Merkle Ledger\nSession State", fillcolor="#E8F5E9", color="#2E7D32"];
+
+     user -> cli [label="invoke task"];
+     cli -> orch [label="start / approve / reject"];
+     orch -> plan [label="sheafify"];
+     plan -> orch [label="task DAG"];
+     orch -> act [label="execute node"];
+     act -> repo [label="apply artifacts"];
+     orch -> plugins [label="select active plugin(s)"];
+     plugins -> verify [label="LSP + build + test commands"];
+     repo -> verify [label="current project state"];
+     verify -> orch [label="V_syn, V_str, V_log, V_boot, V_sheaf"];
+     orch -> cli [label="diffs + status + requests"];
+     orch -> ledger [label="commit stable node"];
+     ledger -> cli [label="status / resume context"];
+   }
+
+**Error Conditions:**
+
+* If plan parsing fails, Perspt SHALL use a deterministic project fallback graph rather than collapsing directly to a single unstructured root node.
+* If a node emits malformed artifact data, the Orchestrator SHALL reject the bundle, increase energy, and request correction.
+* If project verification tools are unavailable, the session SHALL surface a sensor degradation warning and SHALL not claim verified stability.
+* If a command violates policy or sandbox constraints, the node SHALL be rejected before execution.
+* If retries or budget limits are exceeded, the node SHALL escalate with stored state and actionable diagnostics.
+* If multiple language plugins are active in the same workspace, the verifier SHALL select the relevant plugin set for the current node rather than collapsing to a single global language assumption.
+
+.. rubric:: UI/UX Design
+
+This PSP introduces a coding workflow optimized for confidence, inspectability, and incremental control rather than opaque autonomous execution.
+
+**User Goals:**
+
+* Request a full project or refactor and receive a coherent multi-file result.
+* Review exactly what changed before approving execution.
+* Understand whether a node is blocked by syntax, tests, structure, sheaf mismatch, or policy restrictions.
+* Resume interrupted sessions with trustworthy project state.
+
+**Interaction Flow:**
+
+* The default ``perspt agent`` experience SHALL begin with repository inspection and planning rather than immediate code emission.
+* Before applying a node, the user SHALL be able to review a grouped diff spanning all files touched by that node.
+* The review experience SHALL support approve, reject, edit externally, and request correction actions.
+* The dashboard SHALL show current node, total nodes, completed nodes, energy value, verifier stage, and latest failure class.
+* The task tree SHALL show verifying, failed, escalated, and completed states, not only pending and running.
+* The logs view SHALL correlate LLM calls, verifier outputs, and tool executions to the current node.
+* Headless mode SHALL print concise, structured progress with the current node, verification summary, and next action.
+
+**Project Development Workflow:**
+
+The intended end-user development workflow for a project SHALL be:
+
+1. The user runs ``perspt agent "<project task>"`` in an existing repository or an empty project directory.
+2. Perspt detects active language plugin(s), inspects the repository, and produces a task graph.
+3. The user reviews the top-level plan, including project files, subgraphs, and expected verifier stages.
+4. Perspt executes the first node and generates a multi-file artifact bundle.
+5. The user reviews a grouped diff for the node before approval.
+6. Perspt applies the bundle, runs language-native verification, and reports energy with component breakdown.
+7. If unstable, Perspt iterates with correction prompts grounded in verifier output.
+8. If stable, Perspt commits the node and advances to the next node.
+9. The user may pause, resume, reject, or edit externally at any approval boundary.
+10. Once all nodes converge and pass sheaf validation, the session completes with a resumable ledger state and a final summary.
+
+This workflow applies equally to greenfield projects, feature additions, and refactors, with the key difference being the initial repository inspection and plugin selection.
+
+.. graphviz::
+   :caption: User Development Workflow for a Project
+   :align: center
+
+   digraph psp5_user_flow {
+     rankdir=TB;
+     bgcolor="transparent";
+     node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.18,0.1"];
+     edge [fontname="Arial", fontsize=9, color="#5C6BC0", fontcolor="#5C6BC0"];
+
+     start [label="Start\nperspt agent <task>", fillcolor="#E3F2FD", color="#1E88E5"];
+     inspect [label="Inspect Repo\nSelect Plugin(s)", fillcolor="#E8F5E9", color="#43A047"];
+     plan [label="Show Task Graph\nFiles, Contracts, Tests", fillcolor="#F3E5F5", color="#8E24AA"];
+     gen [label="Generate Node\nArtifact Bundle", fillcolor="#FFF3E0", color="#FB8C00"];
+     review [label="Review Multi-File Diff\nApprove / Reject / Edit", fillcolor="#E1F5FE", color="#039BE5"];
+     verify [label="Verify Repo State\nLSP + Build + Tests", fillcolor="#FCE4EC", color="#D81B60"];
+     stable [label="Stable?", shape=diamond, fillcolor="#FFF9C4", color="#F9A825"];
+     commit [label="Commit Node\nLedger + Progress", fillcolor="#E8F5E9", color="#2E7D32"];
+     next [label="Next Node", fillcolor="#ECEFF1", color="#607D8B"];
+     done [label="Complete Project\nSummary + Resume State", fillcolor="#C8E6C9", color="#2E7D32"];
+     retry [label="Correction Loop\nGrounded Feedback", fillcolor="#FFEBEE", color="#E53935"];
+
+     start -> inspect;
+     inspect -> plan;
+     plan -> gen;
+     gen -> review;
+     review -> verify [label="approve"];
+     review -> gen [label="reject / edit request", style=dashed];
+     verify -> stable;
+     stable -> commit [label="yes"];
+     stable -> retry [label="no"];
+     retry -> gen [style=dashed];
+     commit -> next;
+     next -> gen [label="remaining nodes"];
+     next -> done [label="all nodes complete"];
+   }
+
+**Visual Design:**
+
+* Diff review SHALL display multi-file unified diffs by default, with side-by-side mode optional.
+* Approval prompts SHALL include stability metrics, affected files, and verification summaries.
+* Energy feedback SHALL distinguish syntax, structure, logic, execution, and sheaf components so the user can understand why convergence failed.
+* Status surfaces SHALL avoid color-only signaling and include text labels for stability and failure classes.
+
+**Accessibility Considerations:**
+
+* All review actions SHALL remain keyboard-only and discoverable through on-screen hints.
+* Diff approval SHALL not rely solely on color; additions, removals, and warnings SHALL be labeled textually.
+* Energy and status indicators SHALL include plain-language labels in addition to graphs or sparklines.
+* Headless output SHALL remain useful for screen readers and remote terminals.
+
+.. rubric:: Technical Specification
+
+**Architecture:**
+
+This PSP refines PSP 000004 into a discrete execution contract for project-scale coding work.
+
+The following invariants govern the runtime semantics described below:
+
+* Structural truth SHALL come from machine-verifiable artifacts such as signatures, schemas, symbol inventories, generated interface files, and content hashes.
+* Node scope SHALL be bounded by ownership closure rather than by prompt convenience alone.
+* Ledger commit SHALL remain the only hard stability barrier; provisional or speculative work SHALL NOT be treated as committed state.
+* Non-convergence SHALL trigger local topology repair, degraded-validation stop, or explicit user escalation rather than unstructured retry loops alone.
+
+**1. Project-First Runtime Selection**
+
+* Replace heuristic Solo Mode activation with explicit single-file detection.
+* Introduce a project-default execution path for Feature and Enhancement tasks.
+* Add a deterministic fallback planner that produces a minimal project graph when structured planning fails.
+
+**2. Multi-Artifact Node Protocol**
+
+* Replace single-file response parsing with a structured pure JSON artifact format.
+* A node response MAY support multiple file operations, but only when those operations remain inside one ownership-bounded change unit.
+* The Orchestrator SHALL parse all artifact operations before mutating the workspace.
+* Artifact application SHALL fail atomically if any operation is invalid.
+
+**Ownership-Bounded Node Rules**
+
+* A node MAY modify multiple files only when those files belong to a single ownership closure.
+* A node SHALL NOT span multiple ownership closures unless it is an explicit integration node.
+* The planner SHALL reject or decompose a node whose artifact bundle crosses ownership domains without an explicit integration boundary.
+* The planner SHALL enforce bounded fanout for each node, including limits on touched files, changed external interfaces, and ownership domains.
+* Multi-file bundles SHALL remain attributable to one verifier scope so that failures can be localized to the responsible node set.
+
+**Node Classes**
+
+The runtime SHALL distinguish three node classes:
+
+* **Interface nodes:** define exported signatures, schemas, ownership manifests, verifier scope, and interface seals used by dependent nodes.
+* **Implementation nodes:** operate only on node-owned files plus adjacent sealed interfaces.
+* **Integration nodes:** reconcile cross-owner or cross-plugin boundaries after child convergence and SHALL be the primary mechanism for cross-domain coordination.
+
+This distinction preserves practical multi-file work while preventing a single node from collapsing into an unbounded mini-monolith.
+
+Required artifact schema:
+
+.. code-block:: json
+
+   {
+     "artifacts": [
+       {
+         "path": "src/main.rs",
+         "operation": "write",
+         "content": "..."
+       },
+       {
+         "path": "src/lib.rs",
+         "operation": "diff",
+         "patch": "--- ..."
+       }
+     ],
+     "commands": []
+   }
+
+.. graphviz::
+   :caption: Multi-Artifact Node Lifecycle
+   :align: center
+
+   digraph artifact_lifecycle {
+       rankdir=LR;
+       bgcolor="transparent";
+       node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10];
+       edge [fontname="Arial", fontsize=9, color="#607D8B", fontcolor="#607D8B"];
+
+       node_goal [label="Node Goal + Contract", fillcolor="#EDE7F6", color="#5E35B1"];
+      bundle [label="Ownership-Bounded\nArtifact Bundle", fillcolor="#E1F5FE", color="#039BE5"];
+       parse [label="Parse + Validate\nall operations", fillcolor="#FFF3E0", color="#FB8C00"];
+       apply [label="Transactional Apply\nworkspace-bounded", fillcolor="#E8F5E9", color="#43A047"];
+       verify [label="Repo Verification\nplugin-selected", fillcolor="#FCE4EC", color="#D81B60"];
+       decision [label="Energy < epsilon?", shape=diamond, fillcolor="#FFF9C4", color="#F9A825"];
+       commit [label="Commit Stable Node", fillcolor="#C8E6C9", color="#2E7D32"];
+       reject [label="Reject Bundle\nRetry / Escalate", fillcolor="#FFEBEE", color="#E53935"];
+
+       node_goal -> bundle;
+       bundle -> parse;
+       parse -> apply [label="valid"];
+       parse -> reject [label="invalid"];
+       apply -> verify;
+       verify -> decision;
+       decision -> commit [label="yes"];
+       decision -> reject [label="no"];
+       reject -> bundle [style=dashed, label="correction"];
+   }
+
+  **3. Graph-Derived Context Supply and Restriction Maps**
+
+  The task graph SHALL define not only execution order but also the authoritative context boundary for each node. This is required for SRBN to remain stable on long-running, large-project work.
+
+  Each node SHALL execute against a stratified context package composed from the graph, the ledger, and the active plugin capabilities.
+
+  **Structural Context (Authoritative)**
+
+  Structural context SHALL provide the machine-verifiable artifacts required for compile-critical and type-critical work. It includes:
+
+  * exact exported signatures, trait or protocol definitions, API schemas, and generated interface files
+  * ownership manifests and node-to-file bindings
+  * dependency commit hashes, structural digests, and interface seals
+  * symbol inventories, migration shapes, or equivalent plugin-defined structural representations
+
+  **Semantic Context (Advisory)**
+
+  Semantic context MAY provide:
+
+  * parent intent summary and parent contract rationale
+  * dependency summaries and verifier summaries
+  * design notes, policy explanations, and resume-oriented context
+
+  **Local State**
+
+  Local state SHALL include:
+
+  * current contents of files owned by the node
+  * adjacent sealed interfaces relied upon by the node
+  * active repository invariants and policy constraints
+
+  The runtime SHALL treat this package as the node's restriction map from parent scope to child scope. A node SHALL not receive the full repository by default, and a node SHALL NOT rely on semantic summaries alone for structural correctness.
+
+  **Context Supply Rules**
+
+  * Context selection SHALL be bounded by explicit byte and file-count budgets.
+  * When budgets are exceeded, the runtime SHALL prefer structural digests over raw external source bodies and SHALL prefer raw contents for node-owned files.
+  * Semantic summaries MAY replace explanatory or resume-oriented context, but SHALL NOT replace compile-critical or type-critical structure.
+  * Context supplied to a node SHALL be reproducible from persisted state. Resume semantics SHALL reconstruct the same context package from the ledger and repository state.
+  * A node SHALL record the hashes of the summaries, contracts, and dependency commits that were used to derive its prompt context.
+  * If required structural context cannot be reconstructed, trusted, or matched to the current repository state, the node SHALL not proceed silently. The runtime SHALL rehydrate structural artifacts, downgrade verification confidence explicitly, or escalate.
+
+  **Long-Horizon Project Requirements**
+
+  * The runtime SHALL support project execution where total project size exceeds the per-node prompt budget by relying on graph partitioning, committed structural digests, and bounded local state.
+  * Parent nodes SHALL consume child outputs through sealed interfaces, structural digests, and verifier results rather than re-reading all child source files.
+  * Cross-language nodes SHALL receive plugin-selected context relevant to the files and interfaces they own.
+  * The ledger SHALL act as the durable context substrate for long-running sessions, preventing state drift caused by mutable conversational history.
+
+  **4. Repo-Native Verifier**
+
+* Add a verifier pipeline selected by the active language plugin.
+* Replace the current init-oriented plugin usage with a capability-based runtime plugin contract that governs repository detection, ownership matching, LSP startup, verifier commands, structural validators, and execution defaults.
+* Each plugin SHALL define:
+
+  * detection rules and file ownership matching rules
+  * interface extraction strategy and structural digest generation
+  * LSP configuration and fallback ordering
+  * syntax/type command
+  * optional build or compile command
+  * test command
+  * optional lint command
+  * optional structural checks
+  * optional execution or build checks
+  * required host tools and availability probes
+  * degraded-sensor behavior when required tools are unavailable
+  * file patterns or scopes that identify node ownership inside mixed-language repositories
+  * approval and policy requirements for plugin-recommended commands or scripts
+
+**Plugin Contract Evolution**
+
+The language plugin interface SHALL evolve beyond the current ``init_command``, ``test_command``, and ``run_command`` model. The runtime SHALL support capabilities equivalent to:
+
+* project detection for existing repositories
+* new-project initialization for greenfield tasks
+* ownership matching and node scoping
+* structural interface extraction and digesting
+* LSP selection and fallback behavior
+* syntax/type verification command selection
+* build verification command selection
+* test verification command selection
+* execution command selection when runtime checks are appropriate
+* structural verification hooks for language-specific API checks
+* host-tool availability checks and degraded-validation handling
+* ownership or matching rules for files and nodes in multi-language workspaces
+
+The plugin registry SHALL support more than one active plugin in a workspace. A polyglot repository SHALL be allowed to use multiple plugins simultaneously, with the Orchestrator selecting the relevant verifier stack per node.
+
+If a plugin's preferred verifier tool is unavailable on the host OS, the runtime SHALL enter a degraded-validation state, select a lower-confidence fallback if the plugin defines one, or escalate. It SHALL NOT claim verified stability solely because a sensor failed to start.
+
+* For Rust, the default verifier stack SHALL be:
+
+  * ``rust-analyzer`` diagnostics
+  * ``cargo check``
+  * ``cargo test``
+  * optional ``cargo clippy -- -D warnings`` in stricter modes
+
+* For Python, the default verifier stack SHALL be:
+
+  * ``ty`` or ``pyright`` diagnostics
+  * ``pytest``
+  * optional execution checks when a runnable entry point exists
+
+* For JavaScript or TypeScript, the default verifier stack SHALL be:
+
+  * TypeScript or JavaScript LSP diagnostics
+  * the plugin-defined test command
+  * optional build command when the repository defines one
+
+**Multi-Language Repository Semantics**
+
+* The registry SHALL expose all matching plugins for a repository, not only the first detected plugin.
+* Each task node SHALL be associated with a primary plugin based on its context files, output targets, or repository path.
+* Cross-language nodes MAY invoke more than one verifier stack when the change spans language boundaries.
+* Integration nodes SHOULD be the default mechanism for cross-plugin boundaries so that verification and escalation remain attributable.
+* Repository-wide status SHALL report active plugins and degraded sensors per plugin.
+
+**Tool Surfaces and OS Utility Governance**
+
+The runtime SHALL distinguish among four tool classes:
+
+* built-in content tools for file reads, writes, diffs, and searches
+* repository utilities such as checked-in scripts or make targets
+* language toolchain commands such as ``cargo``, ``uv``, ``pytest``, ``npm``, or equivalent plugin-defined tooling
+* temporary scripts generated for narrowly scoped automation when built-in tools or repository utilities are insufficient
+
+The runtime SHOULD prefer structured built-in content tools for ordinary file manipulation.
+
+The runtime MAY invoke OS utilities, repository-local scripts, language-native toolchain commands, or temporary generated scripts when the active plugin or node contract requires them. Such invocations SHALL be governed by the following rules:
+
+* mutating commands, networked commands, shell composition, and temporary scripts SHALL pass through canonicalization, sanitization, workspace/path policy, and sandbox selection
+* mutating or risky commands SHALL require explicit user approval before execution
+* free-form shell pipelines SHALL NOT be the primary artifact-editing model
+* command provenance SHALL be recorded in ledger-backed state alongside the node that requested the action
+* once the user approves the session policy, commands operating strictly within the current project or working folder MAY run autonomously when permitted by that policy and by the active plugin capability profile
+* commands that read from, write to, or execute against paths outside the current project or working folder SHALL always require explicit user approval for that action
+
+This preserves practical access to host capabilities without turning unrestricted shell execution into the default editing semantics.
+
+**Model and Provider Compatibility**
+
+This PSP SHALL support operation with high-capability models from multiple providers, including Gemini 3.1 Pro class models, GPT 5.4 class models, and Claude Opus 4.6 class models, without requiring provider-specific workflow semantics.
+
+The runtime SHALL define model behavior in terms of capability classes rather than vendor identity:
+
+* Architect tier: strong planning, decomposition, and structured-output reliability.
+* Actuator tier: strong code generation and patch generation reliability.
+* Verifier tier: strong instruction following, summarization, and deterministic evaluation formatting.
+* Speculator tier: lower-cost fast lookahead or branch exploration.
+
+**Compatibility Requirements**
+
+* The runtime SHALL accept explicit per-tier model configuration independent of provider.
+* The PSP SHALL not depend on hidden chain-of-thought, provider-specific reasoning tokens, or proprietary tool-call protocols in order to remain functional.
+* Structured outputs SHALL be defined by Perspt-owned response contracts and parsers, not by assuming one provider's native JSON mode is always available.
+* Planner, actuator, and verifier outputs SHALL tolerate common provider variation such as markdown fences, explanatory preambles, and minor formatting noise when extracting structured content.
+* Streaming behavior SHALL not be required for correctness. Non-streaming responses SHALL remain valid for all stages.
+* The system SHALL support retry, backoff, and model fallback policies when a configured model returns malformed structured output or transient provider errors.
+* The execution protocol SHALL remain text-first and portable across providers even when one provider offers stronger native tool or JSON features than another.
+
+**Provider-Neutral Output Contracts**
+
+* Planning output SHALL be parseable from plain text responses containing a JSON object, fenced JSON, or a normalized extracted body.
+* Artifact bundle output SHALL use a Perspt-defined pure JSON schema. Markdown with embedded blocks MAY be tolerated only as a normalization fallback for backward compatibility and SHALL NOT be the normative format.
+* Verification summaries SHALL use a stable Perspt schema for status, violations, evidence, and suggested corrections.
+* The runtime SHALL normalize provider responses before parsing so that equivalent Gemini, GPT, and Claude outputs enter the same execution path.
+
+**Model Selection and Fallback Rules**
+
+* Users SHALL be able to set one model for all tiers or specify different models per tier.
+* The runtime MAY use the same model for Architect, Actuator, Verifier, and Speculator tiers when the chosen model is sufficiently capable.
+* The runtime SHOULD allow lower-cost models for the Speculator tier and higher-reliability models for the Architect or Verifier tiers.
+* If a model repeatedly fails the structured-output contract for a stage, the runtime SHALL escalate, retry with stricter normalization, or fall back to a configured alternate model for that tier.
+* A provider outage or rate limit SHALL not corrupt the ledger or cause the system to claim stable convergence.
+
+**Sheaf Validators for Large Projects**
+
+The verifier SHALL include explicit sheaf validators for project-scale and polyglot repositories. These validators define how cross-node consistency is checked after child nodes converge and before parent nodes are committed.
+
+Required validator classes are:
+
+* Export and import consistency: exported symbols, trait implementations, type definitions, and module imports SHALL match the interfaces promised by dependency nodes.
+* Dependency graph consistency: repository dependency edges SHALL remain acyclic where required, and node-local changes SHALL not introduce invalid module or package references.
+* Schema and contract compatibility: JSON schemas, API request and response types, configuration formats, migration shapes, and serialization contracts SHALL remain compatible across producer and consumer nodes.
+* Build graph consistency: plugin-selected build targets SHALL remain satisfiable for the affected subgraph, not only for the single edited file.
+* Test ownership consistency: failing tests SHALL be attributed to the owning node or interface boundary so the correction loop can requeue the correct node set.
+* Cross-language boundary consistency: FFI layers, generated clients, protocol bindings, and API contracts crossing plugin boundaries SHALL be validated with the relevant plugin stack.
+* Policy and invariant consistency: repository-wide invariants and forbidden patterns inherited from parent scopes SHALL still hold after child convergence.
+
+**Validator Execution Rules**
+
+* Sheaf validation SHALL run after child nodes converge and before the parent node is considered stable.
+* Validators SHALL operate on committed summaries and current repository state, not only on prompt text.
+* A sheaf validation failure SHALL identify the violated boundary, the affected node or node set, and the evidence used by the validator.
+* Failures SHALL increase ``V_sheaf`` and requeue only the affected node set where possible instead of restarting the whole project graph.
+* When a validator cannot produce trustworthy evidence because sensors are degraded, the runtime SHALL surface a degraded-validation state and escalate rather than claim stability.
+
+**Sheaf Validation Outputs**
+
+Each sheaf validation pass SHALL emit:
+
+* validated boundary or boundaries
+* validator class and plugin source
+* pass or fail status
+* evidence summary and affected files or interfaces
+* resulting ``V_sheaf`` contribution
+* recommended requeue targets when validation fails
+
+**5. Discrete Adaptive Speculation Pipeline**
+
+To hide verifier latency without weakening the stability barrier, the runtime SHALL implement discrete speculation through provisional branches rather than through implicit asynchronous optimism.
+
+* **Provisional Branches:** Speculative child work SHALL be stored separately from committed ledger state.
+* **Interface Seal Prerequisite:** Downstream speculation SHALL be allowed only when the parent node's public interface is sealed and hashed.
+* **Sandboxed Verification:** Background verifier stages SHALL execute against provisional branches, cloned workspaces, or plugin-defined sandbox boundaries.
+* **Blocked Dependents:** Children that depend on unstable parent implementation details SHALL remain blocked until the relevant interface is sealed.
+* **Flush-on-Failure:** If parent verification fails, the runtime SHALL flush or prune dependent speculative branches and replay only the surviving branch state.
+* **No False Commit:** Provisional work SHALL NOT be merged into the global ledger until the parent node meets the stability threshold.
+
+The current concept of a lower-cost Speculator tier MAY assist with branch exploration, but it does not by itself satisfy this pipeline contract unless the provisional branch and flush semantics are implemented.
+
+**6. SRBN Energy Model Implementation**
+
+The runtime SHALL implement the practical energy model:
+
+.. math::
+
+   V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log} + V_{boot} + V_{sheaf}
+
+With the following concrete meanings:
+
+* :math:`V_{syn}`: LSP and compiler diagnostics
+* :math:`V_{str}`: contract violations including interface mismatches, missing symbols, forbidden patterns, and invariant failures
+* :math:`V_{log}`: targeted test failures weighted by criticality
+* :math:`V_{boot}`: command or runtime execution failures when part of the contract
+* :math:`V_{sheaf}`: cross-node consistency failures after child convergence
+
+The Verifier SHALL own energy computation. The Actuator SHALL not be considered the source of truth for correctness.
+
+**7. Escalation and Local Graph Rewrite**
+
+Retry exhaustion SHALL be treated only as a trigger, not as the escalation semantics themselves.
+
+The runtime SHALL classify non-convergence into one or more of the following categories:
+
+* implementation error
+* contract mismatch
+* insufficient model capability
+* degraded sensors or tool unavailability
+* topology mismatch
+
+When escalation is required, the runtime SHALL choose one or more ordered repair actions:
+
+* correction retry with grounded verifier evidence
+* contract repair or interface-node refinement
+* capability-tier promotion
+* sensor recovery or degraded-validation stop
+* node split by ownership closure
+* insertion of an interface node
+* local subgraph re-planning
+* explicit user escalation with stored evidence
+
+Escalation outputs SHALL identify the violated boundary, the affected node set, the evidence used to classify the failure, and the recommended rewrite or stop action.
+
+**8. Safety, Policy, and Persistence**
+
+* All command proposals SHALL pass through canonicalization, sanitization, policy review, and sandbox selection before execution.
+* Path resolution SHALL be workspace-bounded by default.
+* Stable node completion SHALL record node state, artifact metadata, energy values, retry counts, and Merkle hash material in the ledger.
+* Provisional branch execution SHALL record branch lineage, interface seals, and flush decisions separately from committed node state.
+* Status and resume commands SHALL derive their view from ledger-backed state, not assumptions about in-memory progress.
+
+**TUI and Headless Workflow Requirements:**
+
+The implementation SHALL support both interactive TUI sessions and headless CLI runs with equivalent semantic stages.
+
+* In TUI mode, the user SHALL see:
+
+  * repository detection and active plugin list
+  * task graph and current node
+  * grouped diff review for node changes
+  * verifier output with energy breakdown
+  * explicit approval actions and retry/escalation state
+
+* In headless mode, Perspt SHALL print concise stage-oriented output such as:
+
+  * ``PLAN``: detected plugins, top-level nodes, expected files
+  * ``NODE``: current node ID and goal
+  * ``DIFF``: files changed in the proposed bundle
+  * ``VERIFY``: summarized results from LSP, build, and tests
+  * ``ENERGY``: component breakdown and threshold comparison
+  * ``COMMIT``: node committed and ledger updated
+  * ``CONTEXT``: summaries, contracts, and dependency hashes used for the current node
+
+The user experience SHALL remain consistent across both surfaces, with the TUI offering richer inspection rather than different semantics.
+
+**Configuration:**
+
+This PSP permits implementation of the following configuration capabilities:
+
+* explicit single-file mode
+* explicit single-file CLI flag
+* verifier strictness presets
+* per-language verifier command overrides
+* per-language LSP overrides and fallback ordering
+* workspace path policy mode
+* optional auto-approval of read-only commands only
+* per-tier model selection and optional per-tier fallback model
+* structured-output normalization strictness
+
+**Performance:**
+
+* Multi-file artifact parsing SHALL be linear in the number of operations.
+* Verification SHALL prefer incremental LSP updates, structural digest reuse, and targeted repo commands rather than full ad hoc scans where possible.
+* Context assembly SHALL prefer structural digests for external dependencies, raw contents for node-owned files, and bounded semantic summaries for rationale and resume.
+* Output normalization and parsing SHALL be linear in response size and independent of provider-specific SDK features.
+* Strict modes MAY reduce speculative concurrency and trade latency for stronger verifier confidence.
+
+**Implementation Phases:**
+
+* **Phase 1:** Project-first execution model, deterministic planner fallback, and capability-based plugin contracts
+* **Phase 2:** Ownership manifests, node classes, and bounded multi-artifact validation
+* **Phase 3:** Stratified restriction maps, structural digests, and context provenance
+* **Phase 4:** Provider-neutral output contracts, repo-native verifier attribution, and degraded-sensor handling
+* **Phase 5:** Escalation semantics, local graph rewrite, and sheaf validator targeting
+* **Phase 6:** Provisional branch ledger, interface-sealed speculation, and branch flush behavior
+* **Phase 7:** Review UX parity and provenance-rich status surfaces
+* **Phase 8:** Ledger-backed node commits, sheaf validation, and resume correctness
+
+**Acceptance Criteria:**
+
+* A request for a new application with modules and tests results in a multi-file plan and a multi-file applied project by default.
+* Rust repositories use Rust-native verification rather than Python-only checks.
+* In default interactive Rust mode, successful compilation and test execution are required, while warnings MAY remain unless a stricter verifier preset is selected.
+* Language plugins are used for runtime verification, not only initialization and tooling sync.
+* Polyglot repositories can activate more than one plugin, and node verification selects the relevant plugin stack.
+* A single node can create or modify multiple files in one iteration only when those files remain inside one ownership closure or explicit integration boundary.
+* Each node executes with a reproducible, bounded context package derived from task-graph restrictions, structural digests, and committed state.
+* Resume reconstructs node context from ledger-backed structural artifacts, summaries, and repository state rather than relying on mutable conversational history.
+* A node is rejected or decomposed when it crosses ownership domains without being an integration node.
+* A Rust node cannot proceed when only prose exists for a required public trait, schema, or equivalent structural dependency.
+* Plugin-selected verification is chosen per node from declared capabilities and available host tools.
+* Missing build, LSP, or test tools produce degraded validation or escalation rather than false stable status.
+* Speculative child branches are flushed when parent verification fails.
+* A non-convergent node results in local graph rewrite, degraded-validation stop, or explicit user escalation rather than retry exhaustion alone.
+* The user can review all node changes in a diff surface before approving.
+* Status and resume reflect actual persisted node state.
+* Policy and sandbox enforcement are applied to every command execution path.
+* Shell utilities, repository scripts, and temporary scripts require approval and policy checks before mutating repository state.
+* Once the user approves the session policy, Perspt can operate autonomously within the current project or working folder.
+* Any operation outside the current project or working folder requires explicit user approval at the time of that operation.
+* The same PSP 5 execution flow works with a Gemini 3.1 Pro class model, a GPT 5.4 class model, or a Claude Opus 4.6 class model when configured for the relevant tiers.
+* Planner and artifact parsing remain correct when the model returns fenced JSON or plain text with minor wrapper text.
+* A malformed structured response triggers normalization or retry behavior rather than silent plan corruption.
+
+=========
+Rationale
+=========
+
+The primary goal of this PSP is to turn SRBN from an architectural promise into an operational coding workflow. PSP 000004 defined the conceptual topology, but its implementation scope remained too broad and too aspirational to guarantee correct execution semantics. This continuation proposal narrows the problem into concrete runtime contracts that can be implemented, tested, and reviewed incrementally.
+
+**Design Decision Rationale:**
+
+* Multi-file project creation must be a first-class runtime behavior because software engineering tasks rarely map to a single file.
+* Multi-file execution must be bounded by ownership closure and interface locality so that verifier attribution remains practical.
+* Verification must be repository-native because file-local checks cannot provide trustworthy stability for real codebases.
+* The plugin layer must own runtime language behavior because initialization-only plugins do not provide enough structure for SRBN verification.
+* Structured artifact bundles are preferred over free-form code blocks because they allow explicit parsing, transactional apply, and better review UX.
+* Structural context must be separated from semantic summaries so that compile-critical correctness does not depend on lossy natural-language descriptions.
+* Real repositories require governed access to OS utilities and language-native tools, but such access must remain policy-checked and approval-gated.
+* A separate verifier stage is required to align with SRBN's barrier model and to avoid treating the generator as its own correctness oracle.
+* Ledger-backed state is required if status, resume, and SRBN commit semantics are to be reliable.
+
+**Alternatives Considered:**
+
+* Alternative 1: Keep PSP 000004 broad and fix issues opportunistically in code. This was not chosen because the current gaps are architectural and need a clearer implementation contract.
+* Alternative 2: Replace SRBN with a simpler Codex-style imperative loop. This was not chosen because it would abandon the stability, contract, and ledger goals that distinguish Perspt.
+* Alternative 3: Keep single-file node semantics and rely on more planning granularity. This was not chosen because many real tasks require coordinated edits across multiple files within one logical unit of work.
+* Alternative 4: Pass large repository slices directly into each node prompt. This was not chosen because it would recreate the mutable-context failure mode that SRBN is meant to avoid.
+* Alternative 5: Enforce one-file-per-node as a universal rule. This was not chosen because it is too rigid for atomic multi-file changes and does not by itself guarantee verifier locality.
+* Alternative 6: Make shell utilities and temporary scripts the default editing model. This was not chosen because it weakens policy control, provenance, and structured review for ordinary artifact generation.
+* Alternative 7: Require manual approval for every in-project command even after session policy approval. This was not chosen because it would prevent practical autonomous project development inside a trusted working folder.
+
+**UI/UX Design Rationale:**
+
+* Codex-like and Gemini-like user confidence comes from transparency: diffs, verification output, and explicit approvals. Perspt should adopt those strengths while retaining SRBN's formal stability model.
+* Grouping file changes by node preserves the SRBN mental model while still making review understandable for users.
+* Keyboard-first review and labeled status output fit Perspt's terminal-first design philosophy.
+
+=======================
+Backwards Compatibility
+=======================
+
+**User Impact:**
+
+* Existing ``perspt agent`` invocations will continue to work, but many requests that currently degrade to single-file execution will instead run as project-oriented SRBN sessions.
+* Users will gain more structured review surfaces and more accurate status information.
+* Some previously auto-executed commands may now require explicit approval or policy compliance.
+
+**Configuration Impact:**
+
+* Existing CLI flags remain valid.
+* Explicit single-file mode and verifier strictness SHALL be exposed as additive CLI capabilities.
+* No immediate migration of user configuration files is required.
+
+**Migration Strategy:**
+
+* The project-first behavior SHOULD become the default once multi-artifact execution is implemented.
+* Solo Mode SHOULD be retained behind explicit intent detection or an explicit CLI flag.
+* Existing sessions are not guaranteed to become resumable under the new semantics until Phase 8 persistence work is complete.
+
+========================
+Reference Implementation
+========================
+
+**Implementation Notes:**
+
+The expected implementation work primarily affects:
+
+* ``crates/perspt-agent/src/orchestrator.rs``
+* ``crates/perspt-agent/src/agent.rs``
+* ``crates/perspt-agent/src/context_retriever.rs``
+* ``crates/perspt-agent/src/tools.rs``
+* ``crates/perspt-core/src/llm_provider.rs``
+* ``crates/perspt-agent/src/lsp.rs``
+* ``crates/perspt-agent/src/test_runner.rs``
+* ``crates/perspt-core/src/plugin.rs``
+* ``crates/perspt-core/src/events.rs``
+* ``crates/perspt-core/src/types.rs``
+* ``crates/perspt-tui/src/agent_app.rs``
+* ``crates/perspt-tui/src/diff_viewer.rs``
+* ``crates/perspt-tui/src/review_modal.rs``
+* ``crates/perspt-agent/src/ledger.rs``
+* ``crates/perspt-store/src/store.rs``
+
+**Branch:**
+
+* Initial drafting branch: ``psp5``
+
+**Testing Strategy:**
+
+* parser tests for multi-artifact bundles
+* orchestration tests for multi-file node execution
+* plugin-driven verifier tests for Rust and Python repositories
+* TUI event tests for diff and approval flows
+* resume and ledger persistence tests for node-level session recovery
+* cross-provider contract tests covering Gemini, GPT, and Claude style responses for plan parsing, artifact extraction, and verifier summaries
+
+**Example Headless CLI Transcript:**
+
+.. code-block:: text
+
+  $ perspt agent "build a Rust CLI todo app with tests and JSON storage"
+  PLAN    plugins=rust  nodes=5  repo_mode=project
+  PLAN    node[1]=scaffold crate + cli entrypoints
+  PLAN    node[2]=domain model + JSON store
+  PLAN    node[3]=command handlers + tests
+  PLAN    node[4]=integration cleanup + docs
+  PLAN    node[5]=final sheaf validation
+
+  NODE    id=1 goal="scaffold crate + cli entrypoints"
+  DIFF    create Cargo.toml, src/main.rs, src/lib.rs, tests/cli_smoke.rs
+  VERIFY  rust-analyzer=0 diagnostics  cargo check=pass  cargo test=pass
+  ENERGY  syn=0 str=0 log=0 boot=0 sheaf=0 total=0.00 threshold=0.10
+  COMMIT  node=1 merkle=7e31f1e8 ledger=updated
+
+  NODE    id=2 goal="domain model + JSON store"
+  DIFF    modify src/lib.rs, create src/store.rs, create src/model.rs
+  VERIFY  rust-analyzer=1 diagnostic  cargo check=fail  cargo test=not-run
+  ENERGY  syn=0.35 str=0.20 log=0 boot=0 sheaf=0 total=0.55 threshold=0.10
+  RETRY   reason="missing Serialize derive for TodoRecord"
+
+  NODE    id=2 retry=1
+  DIFF    modify src/model.rs, src/store.rs
+  VERIFY  rust-analyzer=0 diagnostics  cargo check=pass  cargo test=pass
+  ENERGY  syn=0 str=0 log=0 boot=0 sheaf=0 total=0.00 threshold=0.10
+  COMMIT  node=2 merkle=44d0ad2b ledger=updated
+
+  SUMMARY completed=5/5 status=stable active_plugins=rust
+
+**Example TUI Review Transcript:**
+
+.. code-block:: text
+
+  Perspt Agent
+  Workspace: ./todo-cli      Plugins: rust      Session: 01HV7...
+
+  Task Graph
+  > [2/5] domain model + JSON store
+    [3/5] command handlers + tests
+    [4/5] integration cleanup + docs
+
+  Proposed Node Bundle
+  Files: src/model.rs, src/store.rs, src/lib.rs
+  Commands: cargo check, cargo test
+
+  Diff Summary
+  + struct TodoRecord { id, title, done }
+  + impl JsonStore::load / save
+  ~ pub mod store; pub mod model;
+
+  Verification
+  rust-analyzer: 0 diagnostics
+  cargo check: pass
+  cargo test: 12 passed
+  Energy: syn=0 str=0 log=0 boot=0 sheaf=0 total=0.00
+
+  Actions: [a]pprove  [r]eject  [e]dit externally  [v]iew full diff  [q]uit
+  > a
+
+  Commit Result
+  Node 2 committed. Ledger hash: 44d0ad2b. Next node unlocked: command handlers + tests.
+
+**File-by-File Implementation Appendix:**
+
+**Phase 1: Project-first execution model and deterministic planner fallback**
+
+* ``crates/perspt-agent/src/orchestrator.rs``: replace Solo Mode heuristics with explicit single-file intent detection, add deterministic fallback graph generation, and route default execution through project planning.
+* ``crates/perspt-agent/src/agent.rs``: revise planner and actuator prompts to describe node contracts, expected outputs, and multi-file scope.
+* ``crates/perspt-core/src/events.rs``: add plan-ready, node-selected, and fallback-planner events needed by CLI and TUI status surfaces.
+* ``crates/perspt-cli/src/commands/agent.rs``: print structured plan output and expose project-mode defaults in headless sessions.
+* ``crates/perspt-agent/src/context_retriever.rs``: add graph-aware context assembly primitives, ownership manifests, and structural digest retrieval instead of raw file-list expansion.
+* ``crates/perspt-core/src/llm_provider.rs`` and ``crates/perspt-cli/src/commands/agent.rs``: support explicit per-tier model selection and fallback configuration independent of provider.
+
+**Phase 2: Ownership manifests, node classes, and bounded multi-artifact validation**
+
+* ``crates/perspt-agent/src/agent.rs``: replace single-target output instructions with structured bundle instructions covering multiple file operations.
+* ``crates/perspt-agent/src/orchestrator.rs``: classify node types, validate ownership closure before mutation, and apply bounded bundles atomically.
+* ``crates/perspt-agent/src/tools.rs``: enforce workspace-bounded path resolution and transactional file operation helpers.
+* ``crates/perspt-core/src/types.rs``: define artifact bundle, ownership-manifest, interface-seal, and node-class types shared across orchestration, storage, and UI.
+
+**Phase 3: Stratified restriction maps, structural digests, and context provenance**
+
+* ``crates/perspt-agent/src/context_retriever.rs``: build reproducible node context packages from structural artifacts, semantic summaries, target files, and verifier state.
+* ``crates/perspt-agent/src/orchestrator.rs``: persist and replay context package hashes, enforce context budgets, and block execution when required structural artifacts are missing.
+* ``crates/perspt-core/src/types.rs``: define context-package, structural-digest, summary-digest, and restriction-map types.
+* ``crates/perspt-agent/src/ledger.rs`` and ``crates/perspt-store/src/store.rs``: persist structural hashes, semantic summary hashes, and context provenance needed for resume.
+
+**Phase 4: Provider-neutral output contracts and normalization**
+
+* ``crates/perspt-core/src/llm_provider.rs``: normalize response envelopes across providers and expose retry and fallback hooks.
+* ``crates/perspt-agent/src/orchestrator.rs``: parse planner and artifact outputs through provider-neutral normalization before validation.
+* ``crates/perspt-agent/src/agent.rs``: define output contracts in provider-neutral language and avoid provider-specific assumptions.
+* ``crates/perspt-cli/src/commands/agent.rs``: allow per-tier fallback models and model capability selection from the CLI.
+* ``crates/perspt-core/src/plugin.rs``: extend the plugin trait to own runtime verification, LSP selection, build and test commands, file ownership rules, and degraded-sensor behavior.
+* ``crates/perspt-agent/src/lsp.rs``: support multi-plugin LSP lifecycle management and per-node diagnostic collection.
+* ``crates/perspt-agent/src/test_runner.rs``: generalize beyond Python so plugins can provide test and build execution semantics.
+* ``crates/perspt-agent/src/orchestrator.rs``: compute verifier stages from active plugin capabilities rather than fixed Python-only logic.
+* ``crates/perspt-agent/src/tools.rs`` and ``crates/perspt-policy/src/sanitize.rs``: formalize command governance, OS-tool execution, and temporary-script approval semantics.
+
+**Phase 5: Escalation semantics, local graph rewrite, and sheaf validator targeting**
+
+* ``crates/perspt-agent/src/orchestrator.rs``: classify non-convergence, perform local graph rewrite, and target requeues to the affected node set.
+* ``crates/perspt-core/src/types.rs``: define escalation categories, rewrite actions, and degraded-validation states.
+* ``crates/perspt-agent/src/ledger.rs`` and ``crates/perspt-store/src/store.rs``: persist escalation evidence, rewrite lineage, and validator targeting metadata.
+
+**Phase 6: Provisional branch ledger and interface-sealed speculation**
+
+* ``crates/perspt-agent/src/orchestrator.rs``: implement provisional branch execution, branch flush rules, and replay behavior gated by interface seals.
+* ``crates/perspt-agent/src/ledger.rs`` and ``crates/perspt-store/src/store.rs``: persist provisional branch lineage, interface seals, and flush decisions separately from committed state.
+* ``crates/perspt-core/src/types.rs``: define provisional-branch and interface-seal records.
+
+**Phase 7: Review UX parity with structured diffs, node status, and energy output**
+
+* ``crates/perspt-tui/src/agent_app.rs``: wire runtime events into the dashboard, review modal, and node progression state.
+* ``crates/perspt-tui/src/diff_viewer.rs``: render grouped multi-file node bundles with summary and detailed diff views.
+* ``crates/perspt-tui/src/review_modal.rs``: support approve, reject, edit externally, and correction-request actions.
+* ``crates/perspt-tui/src/task_tree.rs``: expose queued, verifying, failed, escalated, provisional, and committed states.
+* ``crates/perspt-cli/src/commands/status.rs`` and ``crates/perspt-cli/src/commands/logs.rs``: mirror node states, verifier output, energy breakdown, branch provenance, and context provenance in headless mode.
+
+**Phase 8: Ledger-backed node commits, sheaf validation, and resume correctness**
+
+* ``crates/perspt-agent/src/ledger.rs``: persist stable node metadata, Merkle material, retries, provisional lineage, and sheaf validation inputs.
+* ``crates/perspt-store/src/store.rs`` and ``crates/perspt-store/src/schema.rs``: store node-level artifact bundles, verification results, branch state, and resume state.
+* ``crates/perspt-agent/src/orchestrator.rs``: replace placeholder commit and sheaf-validation steps with persisted node commits and parent/child convergence checks.
+* ``crates/perspt-cli/src/commands/resume.rs``: reconstruct sessions from stored node state instead of in-memory assumptions.
+
+**Documentation Updates Required:**
+
+* README agent-mode description
+* Perspt book SRBN architecture page
+* PSP index updates
+
+============
+Open Issues
+============
+
+* The default capability profile recommended for Gemini, GPT, and Claude class models by tier is deferred to a future PSP focused on model-tier policy and defaults.
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.
