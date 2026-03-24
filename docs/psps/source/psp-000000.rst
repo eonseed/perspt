@@ -104,6 +104,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - Feature
      - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
      - Vikrant Rathore
+     - Withdrawn
+   * - :psp:`000005`
+     - Enhancement
+     - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
+     - Vikrant Rathore
      - Draft
 
 ====================
@@ -158,15 +163,27 @@ Feature PSPs introduce new functionality to Perspt.
      - Feature
      - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
      - Vikrant Rathore
-     - Draft
+     - Withdrawn
 
 Enhancement PSPs
 ================
 
 Enhancement PSPs improve existing Perspt functionality.
 
-.. note::
-   No enhancement PSPs have been created yet.
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000005`
+     - Enhancement
+     - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
+     - Vikrant Rathore
+     - Draft
 
 UI/UX PSPs
 ===========
@@ -217,9 +234,9 @@ Draft PSPs (under development)
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
      - Vikrant Rathore
      - Draft
-   * - :psp:`000004`
-     - Feature
-     - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
+   * - :psp:`000005`
+     - Enhancement
+     - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
      - Draft
 
@@ -228,7 +245,7 @@ Discussion PSPs (under review)
 
 
 .. note::
-   No other PSPs are currently under discussion.
+  No other PSPs are currently under discussion.
 
 Accepted PSPs (approved for implementation)
 ============================================
@@ -264,8 +281,20 @@ Rejected PSPs (not approved)
 Withdrawn PSPs (removed by authors)
 ====================================
 
-.. note::
-   No PSPs have been withdrawn yet.
+.. list-table::
+   :header-rows: 1
+   :widths: 5 10 45 30 10
+
+   * - Number
+     - Type
+     - Title
+     - Author(s)
+     - Status
+   * - :psp:`000004`
+     - Feature
+     - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
+     - Vikrant Rathore
+     - Withdrawn
 
 =============
 PSP Types Key
