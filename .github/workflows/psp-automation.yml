@@ -97,8 +97,44 @@ jobs:
       id: extract
       if: steps.check.outputs.is_psp == 'true'
       run: |
-        # Find the PSP file (including XXXXXX placeholder per PSP-000001.rst process)
-        psp_file=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/source/psp-.*\.rst$' | head -1)
+        # Find the PSP file (prioritizing new files or drafts over index files)
+        all_files=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/source/psp-.*\.rst$' || true)
+        
+        psp_file=""
+        # 1. Try to find a newly added file first
+        added_file=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/source/psp-.*\.rst$' | head -1 || true)
+        if [ -n "$added_file" ]; then
+          psp_file="$added_file"
+        else
+          # 2. Try to find a file with XXXXXX placeholder
+          for f in $all_files; do
+            if [ -f "$f" ] && head -20 "$f" | grep -q "PSP: XXXXXX"; then
+              psp_file="$f"
+              break
+            fi
+          done
+          
+          if [ -z "$psp_file" ]; then
+            # 3. Try to find a file with Draft status
+            for f in $all_files; do
+              if [ -f "$f" ] && head -20 "$f" | grep -q "Status: Draft"; then
+                psp_file="$f"
+                break
+              fi
+            done
+          fi
+          
+          if [ -z "$psp_file" ]; then
+            # 4. Try to find a file that is not the index or process PSP
+            filtered=$(echo "$all_files" | grep -v "psp-000000.rst" | grep -v "psp-000001.rst" | head -1 || true)
+            if [ -n "$filtered" ]; then
+              psp_file="$filtered"
+            else
+              # 5. Fallback to just the first file
+              psp_file=$(echo "$all_files" | head -1)
+            fi
+          fi
+        fi
         
         if [ -n "$psp_file" ]; then
           echo "📄 Processing PSP file: $psp_file"
