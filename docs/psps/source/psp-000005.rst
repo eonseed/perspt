@@ -4,7 +4,7 @@ Author: Vikrant Rathore (@vikrantrathore)
 Status: Draft
 Type: Enhancement
 Created: 2026-03-23
-Discussion-To: TBD
+Discussion-To: https://github.com/eonseed/perspt/pull/95
 Replaces: 000004
 
 ========
