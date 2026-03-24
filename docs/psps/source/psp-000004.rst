@@ -1,16 +1,17 @@
 PSP: 000004
 Title: Multi-Agent Coding Workflow and CLI Expansion
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Discussion
+Status: Withdrawn
 Type: Feature
 Created: 2025-12-18
 Discussion-To: https://github.com/eonseed/perspt/issues/60
+Replaced-By: 000005
 
 ========
 Abstract
 ========
 
-This PSP proposes a significant expansion of Perspt's capabilities from a chat-focused TUI/CLI into a high-performance agentic coding tool. Inspired by the **"Stability is All You Need"** paper and OpenAI's Rust-based Codex CLI, this proposal introduces a robust multi-agent orchestration system based on the **Stabilized Recursive Barrier Network (SRBN)**. This implementation provides a deterministic "Chain of Control" where specialized agent nodes collaborate via a structured **TaskGraph**, governed by active **Constraint Barriers** and **Sheaf-Theoretic Consistency**. This ensures that Perspt remains stable and reliable even during complex, long-horizon software engineering tasks.
+This PSP is withdrawn and superseded by :psp:`000005`, which replaces it as the implementation specification for Perspt's SRBN-based coding workflow. PSP 000004 remains as historical design context only.
 
 ==========
 Motivation
@@ -301,7 +302,7 @@ The multi-agent workflow follows a deterministic state machine aligned with the 
            fontcolor="#00897B"
        ];
        VERIFYING -> SHEAF_CHK [
-           label="V(x) < ε",
+           label="V(x) < epsilon",
            color="#00897B",
            fontcolor="#00897B"
        ];
@@ -318,7 +319,7 @@ The multi-agent workflow follows a deterministic state machine aligned with the 
        
        // --- RIGHT SIDE: Error Recovery ---
        VERIFYING -> RETRY [
-           label="V(x) > ε",
+           label="V(x) > epsilon",
            color="#FB8C00",
            fontcolor="#FB8C00"
        ];
