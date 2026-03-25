@@ -386,17 +386,27 @@ impl DiffViewer {
         if let Some(ref summary) = self.bundle_summary {
             lines.push(Line::from(vec![
                 Span::styled("  Node: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(&summary.node_id, Style::default().fg(Color::Rgb(129, 212, 250)).add_modifier(Modifier::BOLD)),
-                Span::styled(format!("  [{}]", summary.node_class), Style::default().fg(Color::Rgb(179, 157, 219))),
-            ]));
-            lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {} created, {} modified — {} writes, {} diffs",
-                        summary.files_created, summary.files_modified,
-                        summary.writes_count, summary.diffs_count),
-                    Style::default().fg(Color::Rgb(158, 158, 158)),
+                    &summary.node_id,
+                    Style::default()
+                        .fg(Color::Rgb(129, 212, 250))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  [{}]", summary.node_class),
+                    Style::default().fg(Color::Rgb(179, 157, 219)),
                 ),
             ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  {} created, {} modified — {} writes, {} diffs",
+                    summary.files_created,
+                    summary.files_modified,
+                    summary.writes_count,
+                    summary.diffs_count
+                ),
+                Style::default().fg(Color::Rgb(158, 158, 158)),
+            )]));
             lines.push(Line::from(""));
         }
 
@@ -409,8 +419,14 @@ impl DiffViewer {
                     _ => Color::White,
                 };
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  {} ", op), Style::default().fg(op_color).add_modifier(Modifier::BOLD)),
-                    Span::styled(&hunk.file_path, Style::default().fg(Color::Rgb(129, 212, 250))),
+                    Span::styled(
+                        format!("  {} ", op),
+                        Style::default().fg(op_color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        &hunk.file_path,
+                        Style::default().fg(Color::Rgb(129, 212, 250)),
+                    ),
                 ]));
             }
 

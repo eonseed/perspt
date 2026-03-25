@@ -823,7 +823,9 @@ impl SessionStore {
                 node_id: row.get(2)?,
                 parent_node_id: row.get(3)?,
                 state: row.get(4)?,
-                parent_seal_hash: row.get::<_, Option<String>>(5)?.and_then(|h| hex::decode(h).ok()),
+                parent_seal_hash: row
+                    .get::<_, Option<String>>(5)?
+                    .and_then(|h| hex::decode(h).ok()),
                 sandbox_dir: row.get::<_, Option<String>>(6)?,
             });
         }
@@ -852,7 +854,9 @@ impl SessionStore {
                 node_id: row.get(2)?,
                 parent_node_id: row.get(3)?,
                 state: row.get(4)?,
-                parent_seal_hash: row.get::<_, Option<String>>(5)?.and_then(|h| hex::decode(h).ok()),
+                parent_seal_hash: row
+                    .get::<_, Option<String>>(5)?
+                    .and_then(|h| hex::decode(h).ok()),
                 sandbox_dir: row.get::<_, Option<String>>(6)?,
             });
         }
@@ -897,9 +901,8 @@ impl SessionStore {
     /// Get child branch IDs for a parent branch
     pub fn get_child_branches(&self, parent_branch_id: &str) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT child_branch_id FROM branch_lineage WHERE parent_branch_id = ?",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT child_branch_id FROM branch_lineage WHERE parent_branch_id = ?")?;
         let mut rows = stmt.query([parent_branch_id])?;
         let mut ids = Vec::new();
         while let Some(row) = rows.next()? {
@@ -933,7 +936,11 @@ impl SessionStore {
     }
 
     /// Get all interface seals for a node
-    pub fn get_interface_seals(&self, session_id: &str, node_id: &str) -> Result<Vec<InterfaceSealRow>> {
+    pub fn get_interface_seals(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<InterfaceSealRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT seal_id, session_id, node_id, sealed_path, artifact_kind, seal_hash, version
@@ -948,7 +955,11 @@ impl SessionStore {
                 node_id: row.get(2)?,
                 sealed_path: row.get(3)?,
                 artifact_kind: row.get(4)?,
-                seal_hash: row.get::<_, String>(5).ok().and_then(|h| hex::decode(h).ok()).unwrap_or_default(),
+                seal_hash: row
+                    .get::<_, String>(5)
+                    .ok()
+                    .and_then(|h| hex::decode(h).ok())
+                    .unwrap_or_default(),
                 version: row.get::<_, i32>(6)?,
             });
         }

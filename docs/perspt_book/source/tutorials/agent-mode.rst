@@ -79,18 +79,36 @@ The agent will:
 Step 3: Review Changes
 ~~~~~~~~~~~~~~~~~~~~~~
 
-When prompted, review the generated code:
+When prompted, review the generated code. The review modal shows a grouped
+diff view with per-node bundle summary, verification gates, and energy
+breakdown:
 
 .. code-block:: text
 
    ╭─────────────────────────────────────────────────────╮
-   │  Review Changes                                     │
+   │  Review Node 2 — Actuator                           │
    ╞═════════════════════════════════════════════════════╡
-   │  + calculator.py   (new file, 45 lines)            │
-   │  + test_calculator.py (new file, 62 lines)         │
+   │  Bundle: 2 created, 0 modified (3 writes, 2 diffs) │
+   │  + calculator.py   [create] (45 lines)             │
+   │  + test_calculator.py [create] (62 lines)          │
    │                                                     │
-   │  [y] Approve  [n] Reject  [d] View Diff            │
+   │  Verification: ✓syn ✓build ✓test ✓lint             │
+   │  Tests: 8 passed, 0 failed                         │
+   │  Energy: V(x) = 0.05  [boot 0.0 sheaf 0.0]        │
+   │                                                     │
+   │  [y] Approve  [n] Reject  [c] Correct              │
+   │  [e] Edit externally  [d] View Diff                │
    ╰─────────────────────────────────────────────────────╯
+
+Review actions:
+
+- **Approve** (``y``) — accept the node and commit to ledger
+- **Reject** (``n``) — discard and re-generate from scratch
+- **Correct** (``c``) — send targeted feedback for the agent to fix specific issues
+- **Edit externally** (``e``) — open files in your editor, then return to the
+  same approval boundary
+- **View Diff** (``d``) — toggle the full unified diff view with per-file
+  operation labels
 
 Step 4: Check Results
 ~~~~~~~~~~~~~~~~~~~~~
@@ -201,14 +219,21 @@ Managing Sessions
 
 .. code-block:: bash
 
-   # Check status
+   # Check status — shows lifecycle counts, energy breakdown, escalations
    perspt status
 
    # Abort current
    perspt abort
 
-   # Resume interrupted
+   # Resume interrupted — displays trust context (energy, retries, escalations)
    perspt resume
+
+The ``status`` command shows per-node lifecycle counts (queued, running,
+verifying, retrying, completed, failed, escalated), the latest energy component
+breakdown, total retry count, and recent escalation reports.
+
+The ``resume`` command displays trust context before resuming: escalation count,
+last energy state with component values, and total retries across all nodes.
 
 Change Tracking
 ---------------

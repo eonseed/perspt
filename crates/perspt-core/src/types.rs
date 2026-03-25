@@ -3083,11 +3083,7 @@ mod psp5_tests {
 
     #[test]
     fn test_blocked_dependency() {
-        let dep = BlockedDependency::new(
-            "child_node",
-            "parent_node",
-            vec!["src/api.rs".into()],
-        );
+        let dep = BlockedDependency::new("child_node", "parent_node", vec!["src/api.rs".into()]);
         assert_eq!(dep.child_node_id, "child_node");
         assert_eq!(dep.parent_node_id, "parent_node");
         assert_eq!(dep.required_seal_paths.len(), 1);

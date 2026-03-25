@@ -56,9 +56,18 @@ pub async fn run() -> Result<()> {
             .filter(|n| n.state == "RUNNING" || n.state == "Coding" || n.state == "Verifying")
             .count();
         let failed = node_states.iter().filter(|n| n.state == "FAILED").count();
-        let queued = node_states.iter().filter(|n| n.state == "Queued" || n.state == "QUEUED").count();
-        let retrying = node_states.iter().filter(|n| n.state == "Retrying" || n.state == "RETRYING").count();
-        let escalated = node_states.iter().filter(|n| n.state == "Escalated" || n.state == "ESCALATED").count();
+        let queued = node_states
+            .iter()
+            .filter(|n| n.state == "Queued" || n.state == "QUEUED")
+            .count();
+        let retrying = node_states
+            .iter()
+            .filter(|n| n.state == "Retrying" || n.state == "RETRYING")
+            .count();
+        let escalated = node_states
+            .iter()
+            .filter(|n| n.state == "Escalated" || n.state == "ESCALATED")
+            .count();
 
         println!();
         println!("📊 Node Lifecycle:");
@@ -84,11 +93,18 @@ pub async fn run() -> Result<()> {
         if let Some(latest) = node_states.last() {
             println!("   ⚡ Energy:    V(x) = {:.3}", latest.v_total);
             // Try to get energy component detail
-            if let Ok(energy_history) = store.get_energy_history(&session.session_id, &latest.node_id) {
+            if let Ok(energy_history) =
+                store.get_energy_history(&session.session_id, &latest.node_id)
+            {
                 if let Some(last_energy) = energy_history.last() {
-                    println!("   Components:  syn={:.2} str={:.2} log={:.2} boot={:.2} sheaf={:.2}",
-                        last_energy.v_syn, last_energy.v_str, last_energy.v_log,
-                        last_energy.v_boot, last_energy.v_sheaf);
+                    println!(
+                        "   Components:  syn={:.2} str={:.2} log={:.2} boot={:.2} sheaf={:.2}",
+                        last_energy.v_syn,
+                        last_energy.v_str,
+                        last_energy.v_log,
+                        last_energy.v_boot,
+                        last_energy.v_sheaf
+                    );
                 }
             }
             // Retry info
@@ -155,7 +171,10 @@ pub async fn run() -> Result<()> {
         println!();
         println!("🗑️  Recent Flush Decisions:");
         for flush in flushes.iter().take(3) {
-            println!("   Parent: {}  Reason: {}", flush.parent_node_id, flush.reason);
+            println!(
+                "   Parent: {}  Reason: {}",
+                flush.parent_node_id, flush.reason
+            );
         }
     }
 

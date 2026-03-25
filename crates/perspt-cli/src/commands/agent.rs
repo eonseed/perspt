@@ -196,12 +196,20 @@ pub async fn run(
                 if let Ok(store) = perspt_store::SessionStore::new() {
                     // VERIFY summary
                     if let Ok(nodes) = store.get_node_states(&sid) {
-                        let completed = nodes.iter().filter(|n| n.state == "COMPLETED" || n.state == "STABLE").count();
+                        let completed = nodes
+                            .iter()
+                            .filter(|n| n.state == "COMPLETED" || n.state == "STABLE")
+                            .count();
                         let failed = nodes.iter().filter(|n| n.state == "FAILED").count();
                         let retries: i32 = nodes.iter().map(|n| n.attempt_count.max(0)).sum();
                         println!();
-                        println!("[VERIFY] {}/{} nodes completed, {} failed, {} retries",
-                            completed, nodes.len(), failed, retries);
+                        println!(
+                            "[VERIFY] {}/{} nodes completed, {} failed, {} retries",
+                            completed,
+                            nodes.len(),
+                            failed,
+                            retries
+                        );
 
                         // ENERGY summary from latest node
                         if let Some(latest) = nodes.last() {
@@ -224,8 +232,12 @@ pub async fn run(
                         if !branches.is_empty() {
                             let merged = branches.iter().filter(|b| b.state == "merged").count();
                             let flushed = branches.iter().filter(|b| b.state == "flushed").count();
-                            println!("[BRANCH] {} total, {} merged, {} flushed",
-                                branches.len(), merged, flushed);
+                            println!(
+                                "[BRANCH] {} total, {} merged, {} flushed",
+                                branches.len(),
+                                merged,
+                                flushed
+                            );
                         }
                     }
                     println!("[COMMIT] Session {} complete", &sid[..sid.len().min(16)]);
