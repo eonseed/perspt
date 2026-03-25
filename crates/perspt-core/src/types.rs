@@ -317,6 +317,14 @@ impl StabilityMonitor {
         let prev = &self.energy_history[self.energy_history.len() - 2];
         last < prev
     }
+
+    /// Reset monitor state for a subgraph replan, preserving history but
+    /// clearing attempt count and stability flag so the node can be retried.
+    pub fn reset_for_replan(&mut self) {
+        self.attempt_count = 0;
+        self.stable = false;
+        self.retry_policy = RetryPolicy::default();
+    }
 }
 
 /// SRBN Node - the fundamental unit of control

@@ -11,7 +11,7 @@ use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNod
 use anyhow::{Context, Result};
 use perspt_core::types::{EscalationCategory, EscalationReport, RewriteAction, RewriteRecord};
 use petgraph::graph::{DiGraph, NodeIndex};
-use petgraph::visit::{Topo, Walker};
+use petgraph::visit::{EdgeRef, Topo, Walker};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -2656,31 +2656,36 @@ File: [same filename]
                     node_id,
                     proposed_children
                 );
+                if proposed_children.is_empty() {
+                    self.emit_log(format!(
+                        "✂️ NodeSplit for {} requested with no children — escalating",
+                        node_id
+                    ));
+                    return false;
+                }
                 self.emit_log(format!(
-                    "✂️ Splitting {} into {} sub-nodes (not yet automated — escalating)",
+                    "✂️ Splitting {} into {} sub-nodes",
                     node_id,
                     proposed_children.len()
                 ));
-                // Node split requires graph mutation that is not yet safe to
-                // automate; escalate so the user (or Phase 6) can handle it.
-                false
+                self.split_node(idx, proposed_children)
             }
             RewriteAction::InterfaceInsertion { boundary } => {
                 log::info!("Interface insertion for {}: {}", node_id, boundary);
                 self.emit_log(format!(
-                    "📐 Interface insertion at {} (not yet automated — escalating)",
+                    "📐 Inserting interface adapter at boundary: {}",
                     boundary
                 ));
-                false
+                self.insert_interface_node(idx, boundary)
             }
             RewriteAction::SubgraphReplan { affected_nodes } => {
                 log::info!("Subgraph replan for {}: {:?}", node_id, affected_nodes);
                 self.emit_log(format!(
-                    "🗺️ Subgraph replan for {} ({} nodes, not yet automated — escalating)",
+                    "🗺️ Replanning subgraph around {} ({} affected nodes)",
                     node_id,
                     affected_nodes.len()
                 ));
-                false
+                self.replan_subgraph(idx, affected_nodes)
             }
         }
     }
@@ -2722,6 +2727,182 @@ File: [same filename]
             .neighbors_directed(idx, petgraph::Direction::Outgoing)
             .map(|dep_idx| self.graph[dep_idx].node_id.clone())
             .collect()
+    }
+
+    /// Split a node into multiple child nodes, inheriting its contracts and
+    /// edges. The original node is removed and replaced with the children.
+    ///
+    /// Each proposed child string is treated as a sub-goal description.
+    /// Returns `true` if the split was applied successfully.
+    fn split_node(&mut self, idx: NodeIndex, proposed_children: &[String]) -> bool {
+        let parent = self.graph[idx].clone();
+        let parent_id = parent.node_id.clone();
+
+        // Collect existing incoming and outgoing edges before mutation.
+        let incoming: Vec<(NodeIndex, Dependency)> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Incoming)
+            .map(|src| {
+                let edge = self.graph.edges_connecting(src, idx).next().unwrap();
+                (src, edge.weight().clone())
+            })
+            .collect();
+        let outgoing: Vec<(NodeIndex, Dependency)> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Outgoing)
+            .map(|dst| {
+                let edge = self.graph.edges_connecting(idx, dst).next().unwrap();
+                (dst, edge.weight().clone())
+            })
+            .collect();
+
+        // Create child nodes.
+        let mut child_indices = Vec::with_capacity(proposed_children.len());
+        for (i, sub_goal) in proposed_children.iter().enumerate() {
+            let child_id = format!("{}__split_{}", parent_id, i);
+            let mut child = SRBNNode::new(child_id.clone(), sub_goal.clone(), parent.tier);
+            child.parent_id = Some(parent_id.clone());
+            child.contract = parent.contract.clone();
+            child.node_class = parent.node_class;
+            child.owner_plugin = parent.owner_plugin.clone();
+            // Distribute output targets round-robin across children so each
+            // child handles a subset of the original scope.
+            child.output_targets = parent
+                .output_targets
+                .iter()
+                .skip(i)
+                .step_by(proposed_children.len())
+                .cloned()
+                .collect();
+            child.context_files = parent.context_files.clone();
+            let c_idx = self.graph.add_node(child);
+            self.node_indices.insert(child_id, c_idx);
+            child_indices.push(c_idx);
+        }
+
+        // Wire incoming edges → first child, outgoing edges from last child.
+        if let Some(&first) = child_indices.first() {
+            for (src, dep) in &incoming {
+                self.graph.add_edge(*src, first, dep.clone());
+            }
+        }
+        if let Some(&last) = child_indices.last() {
+            for (dst, dep) in &outgoing {
+                self.graph.add_edge(last, *dst, dep.clone());
+            }
+        }
+
+        // Chain children sequentially.
+        for pair in child_indices.windows(2) {
+            self.graph.add_edge(
+                pair[0],
+                pair[1],
+                Dependency {
+                    kind: "split_sequence".to_string(),
+                },
+            );
+        }
+
+        // Remove original node.
+        self.node_indices.remove(&parent_id);
+        self.graph.remove_node(idx);
+
+        log::info!(
+            "Split node {} into {} children",
+            parent_id,
+            proposed_children.len()
+        );
+        true
+    }
+
+    /// Insert an interface/adapter node on the edge between the given node
+    /// and its dependents.  The boundary string describes the interface
+    /// contract for the newly created adapter node.
+    /// Returns `true` if the insertion succeeded.
+    fn insert_interface_node(&mut self, idx: NodeIndex, boundary: &str) -> bool {
+        let source_id = self.graph[idx].node_id.clone();
+        let adapter_id = format!("{}__iface", source_id);
+        let source_node = &self.graph[idx];
+
+        let mut adapter = SRBNNode::new(
+            adapter_id.clone(),
+            format!("Interface adapter: {}", boundary),
+            source_node.tier,
+        );
+        adapter.parent_id = Some(source_id.clone());
+        adapter.node_class = perspt_core::types::NodeClass::Interface;
+        adapter.owner_plugin = source_node.owner_plugin.clone();
+
+        let adapter_idx = self.graph.add_node(adapter);
+        self.node_indices.insert(adapter_id.clone(), adapter_idx);
+
+        // Collect outgoing edges from the source node.
+        let outgoing: Vec<(NodeIndex, Dependency)> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Outgoing)
+            .map(|dst| {
+                let edge = self.graph.edges_connecting(idx, dst).next().unwrap();
+                (dst, edge.weight().clone())
+            })
+            .collect();
+
+        // Remove old outgoing edges and re-route through adapter.
+        // We remove edges by finding edge indices.
+        let edge_ids: Vec<_> = self
+            .graph
+            .edges_directed(idx, petgraph::Direction::Outgoing)
+            .map(|e| e.id())
+            .collect();
+        for eid in edge_ids {
+            self.graph.remove_edge(eid);
+        }
+
+        // source → adapter
+        self.graph.add_edge(
+            idx,
+            adapter_idx,
+            Dependency {
+                kind: "interface_boundary".to_string(),
+            },
+        );
+
+        // adapter → original dependents
+        for (dst, dep) in outgoing {
+            self.graph.add_edge(adapter_idx, dst, dep);
+        }
+
+        log::info!("Inserted interface node {} after {}", adapter_id, source_id);
+        true
+    }
+
+    /// Reset the specified affected nodes back to `TaskQueued` so they get
+    /// re-executed.  The triggering node itself is also reset.  Returns `true`
+    /// if at least one node was replanned.
+    fn replan_subgraph(&mut self, trigger_idx: NodeIndex, affected_nodes: &[String]) -> bool {
+        let mut replanned = 0;
+
+        // Reset the trigger node itself.
+        self.graph[trigger_idx].state = NodeState::Retry;
+        self.graph[trigger_idx].monitor.reset_for_replan();
+        replanned += 1;
+
+        // Reset each referenced affected node.
+        for nid in affected_nodes {
+            if let Some(&nidx) = self.node_indices.get(nid.as_str()) {
+                self.graph[nidx].state = NodeState::TaskQueued;
+                self.graph[nidx].monitor.reset_for_replan();
+                replanned += 1;
+            } else {
+                log::warn!("Subgraph replan: unknown node {}", nid);
+            }
+        }
+
+        log::info!(
+            "Replanned {} nodes starting from {}",
+            replanned,
+            self.graph[trigger_idx].node_id
+        );
+        replanned > 0
     }
 
     /// Get the current session ID
