@@ -5,7 +5,7 @@
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
 use crate::context_retriever::ContextRetriever;
 use crate::lsp::LspClient;
-use crate::test_runner::PythonTestRunner;
+use crate::test_runner::{self, PythonTestRunner, TestRunnerTrait};
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
@@ -1881,8 +1881,15 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         // V_syn: From LSP diagnostics
         if let Some(ref path) = self.last_written_file {
-            // Try to get diagnostics from LSP
-            if let Some(client) = self.lsp_clients.get("python") {
+            // PSP-5 Phase 4: look up LSP client by the node's owner_plugin
+            let node_plugin = self.graph[idx].owner_plugin.clone();
+            let lsp_key = if node_plugin.is_empty() || node_plugin == "unknown" {
+                "python".to_string() // legacy fallback
+            } else {
+                node_plugin
+            };
+
+            if let Some(client) = self.lsp_clients.get(&lsp_key) {
                 // Small delay to let LSP analyze the file
                 tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
 
@@ -1911,7 +1918,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                     log::info!("LSP reports no errors (diagnostics vector is empty)");
                 }
             } else {
-                log::debug!("No LSP client available for Python");
+                log::debug!("No LSP client available for plugin '{}'", lsp_key);
             }
 
             // V_str: Check forbidden patterns in written file
@@ -1934,12 +1941,27 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             if self.context.defer_tests {
                 self.emit_log("⏭️ Tests deferred (--defer-tests enabled)".to_string());
             } else if !node.contract.weighted_tests.is_empty() {
-                self.emit_log("🧪 Running tests...".to_string());
-                let runner = PythonTestRunner::new(self.context.working_dir.clone());
+                // PSP-5 Phase 4: select runner by the node's owner plugin
+                let plugin_name = &node.owner_plugin;
+                let registry = perspt_core::plugin::PluginRegistry::new();
+                let runner: Box<dyn TestRunnerTrait> = if let Some(plugin) =
+                    registry.get(plugin_name)
+                {
+                    let profile = plugin.verifier_profile();
+                    self.emit_log(format!("🧪 Running tests via {} plugin...", plugin.name()));
+                    test_runner::test_runner_for_profile(profile, self.context.working_dir.clone())
+                } else {
+                    self.emit_log("🧪 Running tests (fallback Python runner)...".to_string());
+                    Box::new(PythonTestRunner::new(self.context.working_dir.clone()))
+                };
 
-                match runner.run_pytest(&[]).await {
+                match runner.run_tests().await {
                     Ok(results) => {
-                        energy.v_log = runner.calculate_v_log(&results, &node.contract);
+                        // V_log calculation still uses PythonTestRunner's method for
+                        // weighted-test matching. This is language-agnostic since it
+                        // only inspects failure names vs. contract weighted_tests.
+                        let py_runner = PythonTestRunner::new(self.context.working_dir.clone());
+                        energy.v_log = py_runner.calculate_v_log(&results, &node.contract);
 
                         if results.all_passed() {
                             self.emit_log(format!(
@@ -2635,8 +2657,9 @@ File: [same filename]
 
     /// PSP-5: Run plugin-driven verification for a node
     ///
-    /// Uses the active language plugin's commands for syntax check, build, test,
-    /// and lint instead of hardcoded Python verification.
+    /// Uses the active language plugin's verifier profile to select commands
+    /// for syntax check, build, test, and lint stages. Delegates execution
+    /// to `TestRunnerTrait` implementations from `test_runner`.
     pub async fn run_plugin_verification(
         &mut self,
         plugin_name: &str,
@@ -2652,109 +2675,70 @@ File: [same filename]
             }
         };
 
-        // Check if tools are available
-        if !plugin.host_tool_available() {
+        let profile = plugin.verifier_profile();
+
+        // If fully degraded, report immediately
+        if profile.fully_degraded() {
             return perspt_core::types::VerificationResult::degraded(format!(
-                "{} toolchain not available on host",
+                "{} toolchain not available on host (all stages degraded)",
                 plugin.name()
             ));
         }
 
-        let mut result = perspt_core::types::VerificationResult::default();
         let working_dir = self.context.working_dir.clone();
+        let runner = test_runner::test_runner_for_profile(profile, working_dir);
 
-        // Run syntax check
-        if let Some(cmd) = plugin.syntax_check_command() {
-            let output = tokio::process::Command::new("sh")
-                .args(["-c", &cmd])
-                .current_dir(&working_dir)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .output()
-                .await;
+        let mut result = perspt_core::types::VerificationResult::default();
 
-            match output {
-                Ok(out) => {
-                    result.syntax_ok = out.status.success();
-                    if !result.syntax_ok {
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        result.diagnostics_count = stderr.lines().count();
-                        result.raw_output = Some(stderr.to_string());
-                        self.emit_log(format!(
-                            "⚠️ Syntax check failed ({} diagnostics)",
-                            result.diagnostics_count
-                        ));
-                    } else {
-                        result.syntax_ok = true;
-                        self.emit_log("✅ Syntax check passed".to_string());
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Syntax check command failed to run: {}", e);
-                    result.syntax_ok = false;
+        // Syntax check
+        match runner.run_syntax_check().await {
+            Ok(r) => {
+                result.syntax_ok = r.passed > 0 && r.failed == 0;
+                if !result.syntax_ok && r.run_succeeded {
+                    result.diagnostics_count = r.output.lines().count();
+                    result.raw_output = Some(r.output);
+                    self.emit_log(format!(
+                        "⚠️ Syntax check failed ({} diagnostics)",
+                        result.diagnostics_count
+                    ));
+                } else if result.syntax_ok {
+                    self.emit_log("✅ Syntax check passed".to_string());
                 }
             }
-        } else {
-            result.syntax_ok = true; // No syntax check available, assume ok
+            Err(e) => {
+                log::warn!("Syntax check failed to run: {}", e);
+                result.syntax_ok = false;
+            }
         }
 
-        // Run build check
-        if let Some(cmd) = plugin.build_command() {
-            let output = tokio::process::Command::new("sh")
-                .args(["-c", &cmd])
-                .current_dir(&working_dir)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .output()
-                .await;
-
-            match output {
-                Ok(out) => {
-                    result.build_ok = out.status.success();
-                    if !result.build_ok {
-                        self.emit_log("⚠️ Build failed".to_string());
-                    } else {
-                        self.emit_log("✅ Build passed".to_string());
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Build command failed to run: {}", e);
-                    result.build_ok = false;
+        // Build check
+        match runner.run_build_check().await {
+            Ok(r) => {
+                result.build_ok = r.passed > 0 && r.failed == 0;
+                if result.build_ok {
+                    self.emit_log("✅ Build passed".to_string());
+                } else if r.run_succeeded {
+                    self.emit_log("⚠️ Build failed".to_string());
                 }
             }
-        } else {
-            result.build_ok = true; // No build step, assume ok
+            Err(e) => {
+                log::warn!("Build check failed to run: {}", e);
+                result.build_ok = false;
+            }
         }
 
-        // Run tests
-        let test_cmd = plugin.test_command();
-        let output = tokio::process::Command::new("sh")
-            .args(["-c", &test_cmd])
-            .current_dir(&working_dir)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .await;
-
-        match output {
-            Ok(out) => {
-                result.tests_ok = out.status.success();
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                // Simple heuristic to count tests
-                let passed = stdout.matches("passed").count() + stdout.matches("ok").count();
-                let failed = stdout.matches("failed").count() + stdout.matches("FAILED").count();
-                result.tests_passed = passed;
-                result.tests_failed = failed;
+        // Tests
+        match runner.run_tests().await {
+            Ok(r) => {
+                result.tests_ok = r.all_passed();
+                result.tests_passed = r.passed;
+                result.tests_failed = r.failed;
 
                 if result.tests_ok {
-                    self.emit_log(format!("✅ Tests passed ({})", plugin.name()));
+                    self.emit_log(format!("✅ Tests passed ({})", plugin_name));
                 } else {
-                    self.emit_log(format!("❌ Tests failed ({})", plugin.name()));
-                    result.raw_output = Some(format!(
-                        "{}\n{}",
-                        stdout,
-                        String::from_utf8_lossy(&out.stderr)
-                    ));
+                    self.emit_log(format!("❌ Tests failed ({})", plugin_name));
+                    result.raw_output = Some(r.output);
                 }
             }
             Err(e) => {
@@ -2763,30 +2747,20 @@ File: [same filename]
             }
         }
 
-        // Run lint (only in Strict mode)
+        // Lint (only in Strict mode)
         if self.context.verifier_strictness == perspt_core::types::VerifierStrictness::Strict {
-            if let Some(cmd) = plugin.lint_command() {
-                let output = tokio::process::Command::new("sh")
-                    .args(["-c", &cmd])
-                    .current_dir(&working_dir)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .output()
-                    .await;
-
-                match output {
-                    Ok(out) => {
-                        result.lint_ok = out.status.success();
-                        if result.lint_ok {
-                            self.emit_log("✅ Lint passed".to_string());
-                        } else {
-                            self.emit_log("⚠️ Lint issues found".to_string());
-                        }
+            match runner.run_lint().await {
+                Ok(r) => {
+                    result.lint_ok = r.passed > 0 && r.failed == 0;
+                    if result.lint_ok {
+                        self.emit_log("✅ Lint passed".to_string());
+                    } else if r.run_succeeded {
+                        self.emit_log("⚠️ Lint issues found".to_string());
                     }
-                    Err(e) => {
-                        log::warn!("Lint command failed to run: {}", e);
-                        result.lint_ok = false;
-                    }
+                }
+                Err(e) => {
+                    log::warn!("Lint command failed to run: {}", e);
+                    result.lint_ok = false;
                 }
             }
         } else {
@@ -2796,7 +2770,7 @@ File: [same filename]
         // Build summary
         result.summary = format!(
             "{}: syntax={}, build={}, tests={}, lint={}",
-            plugin.name(),
+            plugin_name,
             if result.syntax_ok { "✅" } else { "❌" },
             if result.build_ok { "✅" } else { "❌" },
             if result.tests_ok { "✅" } else { "❌" },
