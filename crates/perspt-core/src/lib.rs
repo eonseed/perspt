@@ -4,6 +4,7 @@ pub mod config;
 pub mod events;
 pub mod llm_provider;
 pub mod memory;
+pub mod normalize;
 pub mod plugin;
 pub mod types;
 
