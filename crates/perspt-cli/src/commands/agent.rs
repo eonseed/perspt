@@ -39,6 +39,7 @@ pub async fn run(
     speculator_model: Option<String>,
     defer_tests: bool,
     log_llm: bool,
+    single_file: bool,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
@@ -94,6 +95,11 @@ pub async fn run(
     orchestrator.context.complexity_k = complexity_k;
     orchestrator.context.defer_tests = defer_tests;
     orchestrator.context.log_llm = log_llm;
+
+    // PSP-5: Set explicit single-file mode if --single-file flag was provided
+    if single_file {
+        orchestrator.context.execution_mode = perspt_core::types::ExecutionMode::Solo;
+    }
 
     println!("🚀 SRBN Agent starting...");
     println!("   Session: {}", orchestrator.session_id());

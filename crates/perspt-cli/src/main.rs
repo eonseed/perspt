@@ -104,6 +104,10 @@ enum Commands {
         /// Log all LLM requests/responses to database for debugging
         #[arg(long)]
         log_llm: bool,
+
+        /// Force single-file execution (Solo Mode) instead of project-first planning
+        #[arg(long)]
+        single_file: bool,
     },
 
     /// Initialize project configuration
@@ -235,6 +239,7 @@ async fn main() -> Result<()> {
             max_steps: _,
             defer_tests,
             log_llm,
+            single_file,
         }) => {
             commands::agent::run(
                 task,
@@ -249,6 +254,7 @@ async fn main() -> Result<()> {
                 speculator_model,
                 defer_tests,
                 log_llm,
+                single_file,
             )
             .await
         }
