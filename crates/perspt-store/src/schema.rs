@@ -171,6 +171,94 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // =========================================================================
+    // PSP-5 Phase 5: Escalation evidence and rewrite lineage
+    // =========================================================================
+
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_escalation_reports_id START 1",
+        [],
+    )?;
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_rewrite_records_id START 1",
+        [],
+    )?;
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_sheaf_validations_id START 1",
+        [],
+    )?;
+
+    // Escalation reports — one row per classified non-convergence event
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS escalation_reports (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_escalation_reports_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            category VARCHAR NOT NULL,
+            action VARCHAR NOT NULL,
+            energy_snapshot TEXT,
+            stage_outcomes TEXT,
+            evidence TEXT,
+            affected_node_ids TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_escalation_reports_session ON escalation_reports(session_id)",
+        [],
+    )?;
+
+    // Rewrite records — one row per local graph rewrite applied
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS rewrite_records (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_rewrite_records_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            action VARCHAR NOT NULL,
+            category VARCHAR NOT NULL,
+            requeued_nodes TEXT,
+            inserted_nodes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rewrite_records_session ON rewrite_records(session_id)",
+        [],
+    )?;
+
+    // Sheaf validation results — one row per validator pass per node
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS sheaf_validations (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_sheaf_validations_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            validator_class VARCHAR NOT NULL,
+            plugin_source VARCHAR,
+            passed BOOLEAN NOT NULL,
+            evidence_summary TEXT,
+            affected_files TEXT,
+            v_sheaf_contribution REAL DEFAULT 0.0,
+            requeue_targets TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sheaf_validations_session ON sheaf_validations(session_id)",
+        [],
+    )?;
+
     log::info!("DuckDB schema initialized successfully");
     Ok(())
 }

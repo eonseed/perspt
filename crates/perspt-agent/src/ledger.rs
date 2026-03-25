@@ -354,6 +354,115 @@ impl MerkleLedger {
 
         self.store.get_context_provenance(&session_id, node_id)
     }
+
+    // =========================================================================
+    // PSP-5 Phase 5: Escalation and Rewrite Persistence
+    // =========================================================================
+
+    /// Record an escalation report for a non-convergent node
+    pub fn record_escalation_report(
+        &self,
+        report: &perspt_core::types::EscalationReport,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record escalation report")?;
+
+        let record = perspt_store::EscalationReportRecord {
+            session_id,
+            node_id: report.node_id.clone(),
+            category: report.category.to_string(),
+            action: serde_json::to_string(&report.action).unwrap_or_default(),
+            energy_snapshot: serde_json::to_string(&report.energy_snapshot).unwrap_or_default(),
+            stage_outcomes: serde_json::to_string(&report.stage_outcomes).unwrap_or_default(),
+            evidence: report.evidence.clone(),
+            affected_node_ids: serde_json::to_string(&report.affected_node_ids).unwrap_or_default(),
+        };
+
+        self.store.record_escalation_report(&record)?;
+        log::debug!(
+            "Recorded escalation report for node '{}': {} → {}",
+            report.node_id,
+            report.category,
+            report.action
+        );
+        Ok(())
+    }
+
+    /// Record a local graph rewrite
+    pub fn record_rewrite(&self, record: &perspt_core::types::RewriteRecord) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record rewrite")?;
+
+        let row = perspt_store::RewriteRecordRow {
+            session_id,
+            node_id: record.node_id.clone(),
+            action: serde_json::to_string(&record.action).unwrap_or_default(),
+            category: record.category.to_string(),
+            requeued_nodes: serde_json::to_string(&record.requeued_nodes).unwrap_or_default(),
+            inserted_nodes: serde_json::to_string(&record.inserted_nodes).unwrap_or_default(),
+        };
+
+        self.store.record_rewrite(&row)?;
+        log::debug!(
+            "Recorded rewrite for node '{}': {} ({} requeued, {} inserted)",
+            record.node_id,
+            record.action,
+            record.requeued_nodes.len(),
+            record.inserted_nodes.len()
+        );
+        Ok(())
+    }
+
+    /// Record a sheaf validation result
+    pub fn record_sheaf_validation(
+        &self,
+        node_id: &str,
+        result: &perspt_core::types::SheafValidationResult,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record sheaf validation")?;
+
+        let row = perspt_store::SheafValidationRow {
+            session_id,
+            node_id: node_id.to_string(),
+            validator_class: result.validator_class.to_string(),
+            plugin_source: result.plugin_source.clone(),
+            passed: result.passed,
+            evidence_summary: result.evidence_summary.clone(),
+            affected_files: serde_json::to_string(&result.affected_files).unwrap_or_default(),
+            v_sheaf_contribution: result.v_sheaf_contribution,
+            requeue_targets: serde_json::to_string(&result.requeue_targets).unwrap_or_default(),
+        };
+
+        self.store.record_sheaf_validation(&row)?;
+        log::debug!(
+            "Recorded sheaf validation for node '{}': {} → {}",
+            node_id,
+            result.validator_class,
+            if result.passed { "pass" } else { "fail" }
+        );
+        Ok(())
+    }
+
+    /// Get escalation reports for the current session
+    pub fn get_escalation_reports(&self) -> Result<Vec<perspt_store::EscalationReportRecord>> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to query escalation reports")?;
+
+        self.store.get_escalation_reports(&session_id)
+    }
 }
 
 /// Ledger statistics (Legacy)

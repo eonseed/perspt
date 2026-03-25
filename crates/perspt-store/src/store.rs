@@ -86,6 +86,56 @@ pub struct ContextProvenanceRecord {
     pub total_bytes: i32,
 }
 
+/// PSP-5 Phase 5: Record for escalation report persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EscalationReportRecord {
+    pub session_id: String,
+    pub node_id: String,
+    /// Serialized EscalationCategory
+    pub category: String,
+    /// JSON-serialized RewriteAction
+    pub action: String,
+    /// JSON-serialized EnergyComponents
+    pub energy_snapshot: String,
+    /// JSON-serialized Vec<StageOutcome>
+    pub stage_outcomes: String,
+    /// Human-readable evidence
+    pub evidence: String,
+    /// JSON-serialized Vec<String>
+    pub affected_node_ids: String,
+}
+
+/// PSP-5 Phase 5: Record for local graph rewrite persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewriteRecordRow {
+    pub session_id: String,
+    pub node_id: String,
+    /// JSON-serialized RewriteAction
+    pub action: String,
+    /// Serialized EscalationCategory
+    pub category: String,
+    /// JSON-serialized Vec<String>
+    pub requeued_nodes: String,
+    /// JSON-serialized Vec<String>
+    pub inserted_nodes: String,
+}
+
+/// PSP-5 Phase 5: Record for sheaf validation result persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SheafValidationRow {
+    pub session_id: String,
+    pub node_id: String,
+    pub validator_class: String,
+    pub plugin_source: Option<String>,
+    pub passed: bool,
+    pub evidence_summary: String,
+    /// JSON-serialized Vec<String>
+    pub affected_files: String,
+    pub v_sheaf_contribution: f32,
+    /// JSON-serialized Vec<String>
+    pub requeue_targets: String,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -531,5 +581,146 @@ impl SessionStore {
         } else {
             Ok(None)
         }
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 5: Escalation, Rewrite, and Sheaf Validation Persistence
+    // =========================================================================
+
+    /// Record an escalation report
+    pub fn record_escalation_report(&self, record: &EscalationReportRecord) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO escalation_reports (session_id, node_id, category, action, energy_snapshot, stage_outcomes, evidence, affected_node_ids)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.category,
+                &record.action,
+                &record.energy_snapshot,
+                &record.stage_outcomes,
+                &record.evidence,
+                &record.affected_node_ids,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get escalation reports for a session
+    pub fn get_escalation_reports(&self, session_id: &str) -> Result<Vec<EscalationReportRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, category, action, energy_snapshot, stage_outcomes, evidence, affected_node_ids
+             FROM escalation_reports WHERE session_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(EscalationReportRecord {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                category: row.get(2)?,
+                action: row.get(3)?,
+                energy_snapshot: row.get(4)?,
+                stage_outcomes: row.get(5)?,
+                evidence: row.get(6)?,
+                affected_node_ids: row.get(7)?,
+            });
+        }
+        Ok(records)
+    }
+
+    /// Record a local graph rewrite
+    pub fn record_rewrite(&self, record: &RewriteRecordRow) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO rewrite_records (session_id, node_id, action, category, requeued_nodes, inserted_nodes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.action,
+                &record.category,
+                &record.requeued_nodes,
+                &record.inserted_nodes,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get rewrite records for a session
+    pub fn get_rewrite_records(&self, session_id: &str) -> Result<Vec<RewriteRecordRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, action, category, requeued_nodes, inserted_nodes
+             FROM rewrite_records WHERE session_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(RewriteRecordRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                action: row.get(2)?,
+                category: row.get(3)?,
+                requeued_nodes: row.get(4)?,
+                inserted_nodes: row.get(5)?,
+            });
+        }
+        Ok(records)
+    }
+
+    /// Record a sheaf validation result
+    pub fn record_sheaf_validation(&self, record: &SheafValidationRow) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO sheaf_validations (session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.validator_class,
+                &record.plugin_source.clone().unwrap_or_default(),
+                &record.passed.to_string(),
+                &record.evidence_summary,
+                &record.affected_files,
+                &record.v_sheaf_contribution.to_string(),
+                &record.requeue_targets,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get sheaf validation results for a session and node
+    pub fn get_sheaf_validations(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<SheafValidationRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets
+             FROM sheaf_validations WHERE session_id = ? AND node_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id, node_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(SheafValidationRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                validator_class: row.get(2)?,
+                plugin_source: row.get::<_, Option<String>>(3)?,
+                passed: row.get::<_, String>(4)?.parse().unwrap_or(false),
+                evidence_summary: row.get(5)?,
+                affected_files: row.get(6)?,
+                v_sheaf_contribution: row.get::<_, f64>(7)? as f32,
+                requeue_targets: row.get(8)?,
+            });
+        }
+        Ok(records)
     }
 }
