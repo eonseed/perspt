@@ -463,6 +463,169 @@ impl MerkleLedger {
 
         self.store.get_escalation_reports(&session_id)
     }
+
+    // =========================================================================
+    // PSP-5 Phase 6: Provisional Branch, Interface Seal, Branch Flush Facades
+    // =========================================================================
+
+    /// Get the current session ID (helper for Phase 6 methods)
+    fn session_id(&self) -> Result<String> {
+        self.current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session")
+    }
+
+    /// Record a new provisional branch for speculative child work
+    pub fn record_provisional_branch(
+        &self,
+        branch: &perspt_core::types::ProvisionalBranch,
+    ) -> Result<()> {
+        let row = perspt_store::ProvisionalBranchRow {
+            branch_id: branch.branch_id.clone(),
+            session_id: branch.session_id.clone(),
+            node_id: branch.node_id.clone(),
+            parent_node_id: branch.parent_node_id.clone(),
+            state: branch.state.to_string(),
+            parent_seal_hash: branch.parent_seal_hash.map(|h| h.to_vec()),
+            sandbox_dir: branch.sandbox_dir.clone(),
+        };
+
+        self.store.record_provisional_branch(&row)?;
+        log::debug!(
+            "Recorded provisional branch '{}' for node '{}' (parent: '{}')",
+            branch.branch_id,
+            branch.node_id,
+            branch.parent_node_id
+        );
+        Ok(())
+    }
+
+    /// Update a provisional branch state
+    pub fn update_branch_state(&self, branch_id: &str, new_state: &str) -> Result<()> {
+        self.store.update_branch_state(branch_id, new_state)?;
+        log::debug!("Updated branch '{}' state to '{}'", branch_id, new_state);
+        Ok(())
+    }
+
+    /// Get all provisional branches for the current session
+    pub fn get_provisional_branches(&self) -> Result<Vec<perspt_store::ProvisionalBranchRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_provisional_branches(&session_id)
+    }
+
+    /// Get live (active/sealed) branches depending on a parent node
+    pub fn get_live_branches_for_parent(
+        &self,
+        parent_node_id: &str,
+    ) -> Result<Vec<perspt_store::ProvisionalBranchRow>> {
+        let session_id = self.session_id()?;
+        self.store
+            .get_live_branches_for_parent(&session_id, parent_node_id)
+    }
+
+    /// Flush all live branches for a parent node and return flushed branch IDs
+    pub fn flush_branches_for_parent(&self, parent_node_id: &str) -> Result<Vec<String>> {
+        let session_id = self.session_id()?;
+        self.store
+            .flush_branches_for_parent(&session_id, parent_node_id)
+    }
+
+    /// Record a branch lineage edge (parent branch → child branch)
+    pub fn record_branch_lineage(
+        &self,
+        lineage: &perspt_core::types::BranchLineage,
+    ) -> Result<()> {
+        let row = perspt_store::BranchLineageRow {
+            lineage_id: lineage.lineage_id.clone(),
+            parent_branch_id: lineage.parent_branch_id.clone(),
+            child_branch_id: lineage.child_branch_id.clone(),
+            depends_on_seal: lineage.depends_on_seal,
+        };
+
+        self.store.record_branch_lineage(&row)?;
+        log::debug!(
+            "Recorded branch lineage: {} → {}",
+            lineage.parent_branch_id,
+            lineage.child_branch_id
+        );
+        Ok(())
+    }
+
+    /// Get child branch IDs for a parent branch
+    pub fn get_child_branches(&self, parent_branch_id: &str) -> Result<Vec<String>> {
+        self.store.get_child_branches(parent_branch_id)
+    }
+
+    /// Record an interface seal for a node
+    pub fn record_interface_seal(
+        &self,
+        seal: &perspt_core::types::InterfaceSealRecord,
+    ) -> Result<()> {
+        let row = perspt_store::InterfaceSealRow {
+            seal_id: seal.seal_id.clone(),
+            session_id: seal.session_id.clone(),
+            node_id: seal.node_id.clone(),
+            sealed_path: seal.sealed_path.clone(),
+            artifact_kind: seal.artifact_kind.to_string(),
+            seal_hash: seal.seal_hash.to_vec(),
+            version: seal.version as i32,
+        };
+
+        self.store.record_interface_seal(&row)?;
+        log::debug!(
+            "Recorded interface seal '{}' for node '{}' at '{}'",
+            seal.seal_id,
+            seal.node_id,
+            seal.sealed_path
+        );
+        Ok(())
+    }
+
+    /// Get all interface seals for a node in the current session
+    pub fn get_interface_seals(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<perspt_store::InterfaceSealRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_interface_seals(&session_id, node_id)
+    }
+
+    /// Check whether a node has any interface seals
+    pub fn has_interface_seals(&self, node_id: &str) -> Result<bool> {
+        let session_id = self.session_id()?;
+        self.store.has_interface_seals(&session_id, node_id)
+    }
+
+    /// Record a branch flush decision
+    pub fn record_branch_flush(
+        &self,
+        flush: &perspt_core::types::BranchFlushRecord,
+    ) -> Result<()> {
+        let row = perspt_store::BranchFlushRow {
+            flush_id: flush.flush_id.clone(),
+            session_id: flush.session_id.clone(),
+            parent_node_id: flush.parent_node_id.clone(),
+            flushed_branch_ids: serde_json::to_string(&flush.flushed_branch_ids)
+                .unwrap_or_default(),
+            requeue_node_ids: serde_json::to_string(&flush.requeue_node_ids).unwrap_or_default(),
+            reason: flush.reason.clone(),
+        };
+
+        self.store.record_branch_flush(&row)?;
+        log::debug!(
+            "Recorded branch flush for parent '{}': {} branches flushed",
+            flush.parent_node_id,
+            flush.flushed_branch_ids.len()
+        );
+        Ok(())
+    }
+
+    /// Get all branch flush records for the current session
+    pub fn get_branch_flushes(&self) -> Result<Vec<perspt_store::BranchFlushRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_branch_flushes(&session_id)
+    }
 }
 
 /// Ledger statistics (Legacy)
