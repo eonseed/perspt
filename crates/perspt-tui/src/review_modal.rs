@@ -486,7 +486,10 @@ mod tests {
 
         assert_eq!(modal.handle_key('y'), Some(ReviewDecision::Approve));
         assert_eq!(modal.handle_key('n'), Some(ReviewDecision::Reject));
-        assert_eq!(modal.handle_key('c'), Some(ReviewDecision::RequestCorrection));
+        assert_eq!(
+            modal.handle_key('c'),
+            Some(ReviewDecision::RequestCorrection)
+        );
         assert_eq!(modal.handle_key('e'), Some(ReviewDecision::Edit));
         assert_eq!(modal.handle_key('d'), Some(ReviewDecision::ViewDiff));
         assert_eq!(modal.handle_key('s'), Some(ReviewDecision::Skip));
@@ -509,8 +512,14 @@ mod tests {
     fn test_correction_action_is_available() {
         let modal = ReviewModal::new();
         // The correction action should be in the default actions list
-        let has_correction = modal.actions.iter().any(|(d, _, _)| *d == ReviewDecision::RequestCorrection);
-        assert!(has_correction, "RequestCorrection should be in default actions");
+        let has_correction = modal
+            .actions
+            .iter()
+            .any(|(d, _, _)| *d == ReviewDecision::RequestCorrection);
+        assert!(
+            has_correction,
+            "RequestCorrection should be in default actions"
+        );
     }
 
     #[test]

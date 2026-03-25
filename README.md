@@ -123,9 +123,9 @@ Perspt uses subcommands. Running `perspt` with no command defaults to `chat`.
 | `init` | Initialize project configuration |
 | `config` | Manage configuration settings |
 | `ledger` | Query and manage Merkle ledger |
-| `status` | Show current agent status |
+| `status` | Show lifecycle counts, energy breakdown, and escalation reports |
 | `abort` | Abort current agent session |
-| `resume` | Resume paused or crashed session |
+| `resume` | Resume session with trust context (energy, retries, escalations) |
 | `logs` | View LLM request/response logs |
 | `simple-chat` | Simple CLI chat mode (no TUI) |
 
@@ -208,6 +208,37 @@ Options:
 | Compilation errors | 3 | Escalate to user |
 | Tool failures | 5 | Escalate to user |
 | Review rejections | 3 | Escalate to user |
+
+### Review Experience
+
+The agent presents a **grouped diff review** for each node with full verification context:
+
+- **Bundle summary** showing created/modified files, write and diff counts, and node class
+- **Verification gates** — syntax, build, test, and lint status at a glance (e.g. `✓syn ✓build ✗test ✓lint`)
+- **Energy breakdown** with per-component values (`V_boot`, `V_sheaf`) and convergence status
+- **Degradation warnings** when a node converged with non-zero energy
+
+**Review actions:**
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `y` | Approve | Accept the node and commit to ledger |
+| `n` | Reject | Discard and re-generate |
+| `c` | Correct | Send targeted feedback for the agent to fix |
+| `e` | Edit externally | Open files in your editor, return to approval |
+| `d` | View Diff | Toggle full unified diff view |
+
+### Headless Output
+
+When running with `--yes` (auto-approve), the agent prints structured progress:
+
+```text
+[VERIFY] syntax=ok build=ok tests=8/8 lint=ok degraded=false
+[ENERGY] V(x)=0.05 boot=0.00 sheaf=0.00
+[ESCALATE] 0 escalations
+[BRANCH] 1 active
+[COMMIT] session abc123 committed
+```
 
 ## 🖥️ Simple CLI Mode
 

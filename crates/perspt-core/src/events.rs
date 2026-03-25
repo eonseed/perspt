@@ -162,10 +162,7 @@ pub enum AgentEvent {
     },
 
     /// PSP-5 Phase 6: Provisional branch merged into committed state
-    BranchMerged {
-        branch_id: String,
-        node_id: String,
-    },
+    BranchMerged { branch_id: String, node_id: String },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)

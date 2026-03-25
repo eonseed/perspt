@@ -49,17 +49,17 @@ impl TaskStatus {
 
     pub fn color(&self) -> Color {
         match self {
-            TaskStatus::Queued => Color::Rgb(158, 158, 158),    // Lighter gray
-            TaskStatus::Planning => Color::Rgb(179, 157, 219),  // Light purple
-            TaskStatus::Pending => Color::Rgb(120, 144, 156),   // Gray
-            TaskStatus::Coding => Color::Rgb(255, 213, 79),     // Yellow
-            TaskStatus::Running => Color::Rgb(255, 183, 77),    // Amber
+            TaskStatus::Queued => Color::Rgb(158, 158, 158), // Lighter gray
+            TaskStatus::Planning => Color::Rgb(179, 157, 219), // Light purple
+            TaskStatus::Pending => Color::Rgb(120, 144, 156), // Gray
+            TaskStatus::Coding => Color::Rgb(255, 213, 79),  // Yellow
+            TaskStatus::Running => Color::Rgb(255, 183, 77), // Amber
             TaskStatus::Verifying => Color::Rgb(129, 212, 250), // Light blue
-            TaskStatus::Retrying => Color::Rgb(255, 152, 0),    // Orange
-            TaskStatus::SheafCheck => Color::Rgb(77, 208, 225),  // Cyan
+            TaskStatus::Retrying => Color::Rgb(255, 152, 0), // Orange
+            TaskStatus::SheafCheck => Color::Rgb(77, 208, 225), // Cyan
             TaskStatus::Committing => Color::Rgb(165, 214, 167), // Light green
             TaskStatus::Completed => Color::Rgb(102, 187, 106), // Green
-            TaskStatus::Failed => Color::Rgb(239, 83, 80),      // Red
+            TaskStatus::Failed => Color::Rgb(239, 83, 80),   // Red
             TaskStatus::Escalated => Color::Rgb(186, 104, 200), // Purple
         }
     }
@@ -535,7 +535,11 @@ mod tests {
         ];
         for (node_status, expected) in mappings {
             let result: TaskStatus = node_status.into();
-            assert_eq!(result, expected, "NodeStatus::{:?} should map to TaskStatus::{:?}", node_status, expected);
+            assert_eq!(
+                result, expected,
+                "NodeStatus::{:?} should map to TaskStatus::{:?}",
+                node_status, expected
+            );
         }
     }
 
@@ -558,10 +562,18 @@ mod tests {
     #[test]
     fn test_status_icons_and_colors_unique() {
         let statuses = vec![
-            TaskStatus::Queued, TaskStatus::Planning, TaskStatus::Pending,
-            TaskStatus::Coding, TaskStatus::Running, TaskStatus::Verifying,
-            TaskStatus::Retrying, TaskStatus::SheafCheck, TaskStatus::Committing,
-            TaskStatus::Completed, TaskStatus::Failed, TaskStatus::Escalated,
+            TaskStatus::Queued,
+            TaskStatus::Planning,
+            TaskStatus::Pending,
+            TaskStatus::Coding,
+            TaskStatus::Running,
+            TaskStatus::Verifying,
+            TaskStatus::Retrying,
+            TaskStatus::SheafCheck,
+            TaskStatus::Committing,
+            TaskStatus::Completed,
+            TaskStatus::Failed,
+            TaskStatus::Escalated,
         ];
         // Every status should have a non-empty icon
         for s in &statuses {

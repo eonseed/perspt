@@ -532,10 +532,7 @@ impl MerkleLedger {
     }
 
     /// Record a branch lineage edge (parent branch → child branch)
-    pub fn record_branch_lineage(
-        &self,
-        lineage: &perspt_core::types::BranchLineage,
-    ) -> Result<()> {
+    pub fn record_branch_lineage(&self, lineage: &perspt_core::types::BranchLineage) -> Result<()> {
         let row = perspt_store::BranchLineageRow {
             lineage_id: lineage.lineage_id.clone(),
             parent_branch_id: lineage.parent_branch_id.clone(),
@@ -598,10 +595,7 @@ impl MerkleLedger {
     }
 
     /// Record a branch flush decision
-    pub fn record_branch_flush(
-        &self,
-        flush: &perspt_core::types::BranchFlushRecord,
-    ) -> Result<()> {
+    pub fn record_branch_flush(&self, flush: &perspt_core::types::BranchFlushRecord) -> Result<()> {
         let row = perspt_store::BranchFlushRow {
             flush_id: flush.flush_id.clone(),
             session_id: flush.session_id.clone(),

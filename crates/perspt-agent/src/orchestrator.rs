@@ -2146,32 +2146,36 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         {
             let node = &self.graph[idx];
             let total = energy.total(&node.contract);
-            let (stage_outcomes, degraded, degraded_reasons, summary, lint_ok, tests_passed, tests_failed) =
-                if let Some(ref vr) = self.last_verification_result {
-                    (
-                        vr.stage_outcomes.clone(),
-                        vr.degraded,
-                        vr.degraded_stage_reasons(),
-                        vr.summary.clone(),
-                        vr.lint_ok,
-                        vr.tests_passed,
-                        vr.tests_failed,
-                    )
-                } else {
-                    let diag_count = self.context.last_diagnostics.len();
-                    (
-                        Vec::new(),
-                        false,
-                        Vec::new(),
-                        format!(
-                            "V(x)={:.2} | {} diagnostics",
-                            total, diag_count
-                        ),
-                        true,
-                        0,
-                        0,
-                    )
-                };
+            let (
+                stage_outcomes,
+                degraded,
+                degraded_reasons,
+                summary,
+                lint_ok,
+                tests_passed,
+                tests_failed,
+            ) = if let Some(ref vr) = self.last_verification_result {
+                (
+                    vr.stage_outcomes.clone(),
+                    vr.degraded,
+                    vr.degraded_stage_reasons(),
+                    vr.summary.clone(),
+                    vr.lint_ok,
+                    vr.tests_passed,
+                    vr.tests_failed,
+                )
+            } else {
+                let diag_count = self.context.last_diagnostics.len();
+                (
+                    Vec::new(),
+                    false,
+                    Vec::new(),
+                    format!("V(x)={:.2} | {} diagnostics", total, diag_count),
+                    true,
+                    0,
+                    0,
+                )
+            };
 
             self.emit_event(perspt_core::AgentEvent::VerificationComplete {
                 node_id: node.node_id.clone(),
@@ -4032,8 +4036,7 @@ File: [same filename]
         for pidx in &parents {
             let parent_id = self.graph[*pidx].node_id.clone();
             // Determine if this parent is an Interface node (seal dependency)
-            let depends_on_seal =
-                self.graph[*pidx].node_class == NodeClass::Interface;
+            let depends_on_seal = self.graph[*pidx].node_class == NodeClass::Interface;
             let lineage = perspt_core::types::BranchLineage {
                 lineage_id: format!("lin_{}_{}", branch_id, parent_id),
                 parent_branch_id: parent_id,
@@ -4049,11 +4052,7 @@ File: [same filename]
         self.graph[idx].provisional_branch_id = Some(branch_id.clone());
 
         // PSP-5 Phase 6: Create sandbox workspace for this branch
-        match crate::tools::create_sandbox(
-            &self.context.working_dir,
-            &session_id,
-            &branch_id,
-        ) {
+        match crate::tools::create_sandbox(&self.context.working_dir, &session_id, &branch_id) {
             Ok(sandbox_path) => {
                 log::debug!("Sandbox created at {}", sandbox_path.display());
             }
@@ -4237,7 +4236,10 @@ File: [same filename]
             self.emit_event(perspt_core::AgentEvent::InterfaceSealed {
                 node_id: node_id.clone(),
                 sealed_paths: sealed_paths.clone(),
-                seal_hash: seal_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>(),
+                seal_hash: seal_hash
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>(),
             });
             log::info!(
                 "Sealed {} interface artifact(s) for node {}",

@@ -228,11 +228,13 @@ impl AgentApp {
                 self.task_tree.update_status(&node_id, status.into());
                 // Update verifier stage indicator
                 let status_label: crate::task_tree::TaskStatus = status.into();
-                if matches!(status_label, crate::task_tree::TaskStatus::Verifying
-                    | crate::task_tree::TaskStatus::SheafCheck
-                    | crate::task_tree::TaskStatus::Coding
-                    | crate::task_tree::TaskStatus::Committing)
-                {
+                if matches!(
+                    status_label,
+                    crate::task_tree::TaskStatus::Verifying
+                        | crate::task_tree::TaskStatus::SheafCheck
+                        | crate::task_tree::TaskStatus::Coding
+                        | crate::task_tree::TaskStatus::Committing
+                ) {
                     self.dashboard.verifier_stage = Some(format!("{:?}", status_label));
                 }
                 self.dashboard
@@ -296,15 +298,42 @@ impl AgentApp {
 
                 // PSP-5 Phase 7: Build stability metrics with verification context
                 use crate::review_modal::StabilityMetrics;
-                let stability = if self.review_state.energy.is_some() || self.review_state.syntax_ok.is_some() {
+                let stability = if self.review_state.energy.is_some()
+                    || self.review_state.syntax_ok.is_some()
+                {
                     let energy = self.review_state.energy.unwrap_or(0.0);
                     Some(StabilityMetrics {
                         energy: crate::telemetry::EnergyComponents {
-                            v_syn: self.review_state.energy_components.as_ref().map(|e| e.v_syn).unwrap_or(0.0),
-                            v_str: self.review_state.energy_components.as_ref().map(|e| e.v_str).unwrap_or(0.0),
-                            v_log: self.review_state.energy_components.as_ref().map(|e| e.v_log).unwrap_or(0.0),
-                            v_boot: self.review_state.energy_components.as_ref().map(|e| e.v_boot).unwrap_or(0.0),
-                            v_sheaf: self.review_state.energy_components.as_ref().map(|e| e.v_sheaf).unwrap_or(0.0),
+                            v_syn: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_syn)
+                                .unwrap_or(0.0),
+                            v_str: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_str)
+                                .unwrap_or(0.0),
+                            v_log: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_log)
+                                .unwrap_or(0.0),
+                            v_boot: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_boot)
+                                .unwrap_or(0.0),
+                            v_sheaf: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_sheaf)
+                                .unwrap_or(0.0),
                             total: energy,
                         },
                         is_stable: energy < 0.1,
@@ -413,7 +442,10 @@ impl AgentApp {
                 flushed_branch_ids,
                 reason,
             } => {
-                self.dashboard.active_branches = self.dashboard.active_branches.saturating_sub(flushed_branch_ids.len());
+                self.dashboard.active_branches = self
+                    .dashboard
+                    .active_branches
+                    .saturating_sub(flushed_branch_ids.len());
                 self.dashboard.log(format!(
                     "🗑️  Flushed: {} branch(es) from {} — {}",
                     flushed_branch_ids.len(),
@@ -430,10 +462,7 @@ impl AgentApp {
                     child_node_id, parent_node_id
                 ));
             }
-            AgentEvent::BranchMerged {
-                branch_id,
-                node_id,
-            } => {
+            AgentEvent::BranchMerged { branch_id, node_id } => {
                 self.dashboard.active_branches = self.dashboard.active_branches.saturating_sub(1);
                 self.dashboard.log(format!(
                     "✅ Merged: branch {} for {}",
@@ -482,7 +511,8 @@ impl AgentApp {
                 } else {
                     "Complete".to_string()
                 });
-                self.dashboard.log(format!("🔍 Verified: {} — {}", node_id, summary));
+                self.dashboard
+                    .log(format!("🔍 Verified: {} — {}", node_id, summary));
             }
             AgentEvent::BundleApplied {
                 node_id,
@@ -536,14 +566,12 @@ impl AgentApp {
                 self.active_tab = ActiveTab::Diff;
             }
             ReviewDecision::RequestCorrection => {
-                self.dashboard
-                    .log("🔄 Correction requested".to_string());
+                self.dashboard.log("🔄 Correction requested".to_string());
                 if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
-                    let _ =
-                        sender.send(perspt_core::AgentAction::RequestCorrection {
-                            request_id: rid,
-                            feedback: "User requested correction via TUI review".to_string(),
-                        });
+                    let _ = sender.send(perspt_core::AgentAction::RequestCorrection {
+                        request_id: rid,
+                        feedback: "User requested correction via TUI review".to_string(),
+                    });
                 }
             }
             ReviewDecision::Skip => {

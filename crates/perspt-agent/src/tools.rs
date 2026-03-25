@@ -747,10 +747,7 @@ pub fn create_sandbox(
 
     fs::create_dir_all(&sandbox_root)?;
 
-    log::debug!(
-        "Created sandbox workspace at {}",
-        sandbox_root.display()
-    );
+    log::debug!("Created sandbox workspace at {}", sandbox_root.display());
 
     Ok(sandbox_root)
 }
@@ -765,10 +762,7 @@ pub fn cleanup_sandbox(sandbox_dir: &Path) -> std::io::Result<()> {
 }
 
 /// Clean up all sandbox workspaces for a session.
-pub fn cleanup_session_sandboxes(
-    working_dir: &Path,
-    session_id: &str,
-) -> std::io::Result<()> {
+pub fn cleanup_session_sandboxes(working_dir: &Path, session_id: &str) -> std::io::Result<()> {
     let session_sandbox = working_dir
         .join(".perspt")
         .join("sandboxes")
@@ -776,10 +770,7 @@ pub fn cleanup_session_sandboxes(
 
     if session_sandbox.exists() {
         fs::remove_dir_all(&session_sandbox)?;
-        log::debug!(
-            "Cleaned up all sandboxes for session {}",
-            session_id
-        );
+        log::debug!("Cleaned up all sandboxes for session {}", session_id);
     }
     Ok(())
 }

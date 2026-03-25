@@ -225,20 +225,12 @@ impl Dashboard {
             };
             let comp = Paragraph::new(format!("{}{}", comp_text, suffix))
                 .style(Style::default().fg(Color::Rgb(158, 158, 158)))
-                .block(
-                    Block::default()
-                        .title("Components")
-                        .borders(Borders::ALL),
-                );
+                .block(Block::default().title("Components").borders(Borders::ALL));
             frame.render_widget(comp, panel_chunks[2]);
         } else {
             let comp = Paragraph::new("No component data yet")
                 .style(Style::default().fg(Color::DarkGray))
-                .block(
-                    Block::default()
-                        .title("Components")
-                        .borders(Borders::ALL),
-                );
+                .block(Block::default().title("Components").borders(Borders::ALL));
             frame.render_widget(comp, panel_chunks[2]);
         }
 
