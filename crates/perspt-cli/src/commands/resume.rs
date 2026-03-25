@@ -102,6 +102,21 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
         node_states.len()
     );
 
+    // PSP-5 Phase 6: Show provisional branch state
+    let branches = store.get_provisional_branches(&actual_id)?;
+    if !branches.is_empty() {
+        let active = branches.iter().filter(|b| b.state == "active").count();
+        let flushed = branches.iter().filter(|b| b.state == "flushed").count();
+        if active > 0 || flushed > 0 {
+            println!(
+                "🌿 Provisional: {} active, {} flushed (of {} total)",
+                active,
+                flushed,
+                branches.len()
+            );
+        }
+    }
+
     // Check if session is already completed
     if session.status == "COMPLETED" {
         println!();
