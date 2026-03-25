@@ -5,6 +5,12 @@
 use anyhow::Result;
 use duckdb::Connection;
 
+/// Add a column to a table, ignoring errors if it already exists (backward-compatible migration).
+fn add_column_if_not_exists(conn: &Connection, table: &str, column: &str, col_type: &str) {
+    let sql = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, col_type);
+    let _ = conn.execute(&sql, []);
+}
+
 /// Initialize the DuckDB schema for SRBN persistence
 pub fn init_schema(conn: &Connection) -> Result<()> {
     // Sessions table - top-level session tracking
@@ -373,6 +379,79 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
     )?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_branch_flushes_session ON branch_flushes(session_id)",
+        [],
+    )?;
+
+    // =========================================================================
+    // PSP-5 Phase 8: Ledger-backed node commits and resume correctness
+    // =========================================================================
+
+    // Extend node_states with Phase 8 columns for richer node snapshots.
+    // Uses ADD COLUMN to migrate existing databases; errors are silently
+    // ignored when the column already exists.
+    add_column_if_not_exists(conn, "node_states", "node_class", "VARCHAR");
+    add_column_if_not_exists(conn, "node_states", "owner_plugin", "VARCHAR");
+    add_column_if_not_exists(conn, "node_states", "goal", "TEXT");
+    add_column_if_not_exists(conn, "node_states", "parent_id", "VARCHAR");
+    add_column_if_not_exists(conn, "node_states", "children", "TEXT");
+    add_column_if_not_exists(conn, "node_states", "last_error_type", "VARCHAR");
+    add_column_if_not_exists(conn, "node_states", "committed_at", "VARCHAR");
+
+    // Task graph edges for deterministic DAG reconstruction on resume
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_task_graph_edges_id START 1",
+        [],
+    )?;
+
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS task_graph_edges (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_task_graph_edges_id'),
+            session_id VARCHAR NOT NULL,
+            parent_node_id VARCHAR NOT NULL,
+            child_node_id VARCHAR NOT NULL,
+            edge_type VARCHAR NOT NULL DEFAULT 'dependency',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_graph_edges_session ON task_graph_edges(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_graph_edges_parent ON task_graph_edges(parent_node_id)",
+        [],
+    )?;
+
+    // Review outcomes for explicit approval/rejection tracking
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_review_outcomes_id START 1",
+        [],
+    )?;
+
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS review_outcomes (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_review_outcomes_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            outcome VARCHAR NOT NULL,
+            reviewer_note TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_outcomes_session ON review_outcomes(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_review_outcomes_node ON review_outcomes(node_id)",
         [],
     )?;
 

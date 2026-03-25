@@ -10,6 +10,6 @@ pub use schema::init_schema;
 pub use store::{
     BranchFlushRow, BranchLineageRow, ContextProvenanceRecord, EnergyRecord,
     EscalationReportRecord, InterfaceSealRow, LlmRequestRecord, NodeStateRecord,
-    ProvisionalBranchRow, RewriteRecordRow, SessionRecord, SessionStore, SheafValidationRow,
-    StructuralDigestRecord,
+    ProvisionalBranchRow, ReviewOutcomeRow, RewriteRecordRow, SessionRecord, SessionStore,
+    SheafValidationRow, StructuralDigestRecord, TaskGraphEdgeRow,
 };

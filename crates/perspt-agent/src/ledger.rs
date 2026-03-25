@@ -149,6 +149,14 @@ impl MerkleLedger {
             v_total: energy,
             merkle_hash: Some(merkle_root.to_vec()),
             attempt_count: 1, // Placeholder
+            // Phase 8 fields — populated properly in Commit 3
+            node_class: None,
+            owner_plugin: None,
+            goal: None,
+            parent_id: None,
+            children: None,
+            last_error_type: None,
+            committed_at: None,
         };
 
         self.store.record_node_state(&record)?;
