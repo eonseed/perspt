@@ -486,7 +486,7 @@ impl SessionStore {
     pub fn get_node_states(&self, session_id: &str) -> Result<Vec<NodeStateRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, state, v_total, merkle_hash, attempt_count, \
+            "SELECT node_id, session_id, state, v_total, CAST(merkle_hash AS VARCHAR), attempt_count, \
                     node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at \
              FROM node_states WHERE session_id = ? ORDER BY created_at",
         )?;
@@ -1131,7 +1131,7 @@ impl SessionStore {
                  SELECT *, ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC) AS rn \
                  FROM node_states WHERE session_id = ? \
              ) \
-             SELECT node_id, session_id, state, v_total, merkle_hash, attempt_count, \
+             SELECT node_id, session_id, state, v_total, CAST(merkle_hash AS VARCHAR), attempt_count, \
                     node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at \
              FROM ranked WHERE rn = 1 ORDER BY created_at",
         )?;
@@ -1335,8 +1335,8 @@ impl SessionStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT session_id, node_id, result_json, \
-                    syntax_ok, build_ok, tests_ok, lint_ok, \
-                    diagnostics_count, tests_passed, tests_failed, degraded, degraded_reason \
+                    CAST(syntax_ok AS VARCHAR), CAST(build_ok AS VARCHAR), CAST(tests_ok AS VARCHAR), CAST(lint_ok AS VARCHAR), \
+                    diagnostics_count, tests_passed, tests_failed, CAST(degraded AS VARCHAR), degraded_reason \
              FROM verification_results \
              WHERE session_id = ? AND node_id = ? \
              ORDER BY created_at DESC LIMIT 1",
@@ -1374,8 +1374,8 @@ impl SessionStore {
                  FROM verification_results WHERE session_id = ? \
              ) \
              SELECT session_id, node_id, result_json, \
-                    syntax_ok, build_ok, tests_ok, lint_ok, \
-                    diagnostics_count, tests_passed, tests_failed, degraded, degraded_reason \
+                    CAST(syntax_ok AS VARCHAR), CAST(build_ok AS VARCHAR), CAST(tests_ok AS VARCHAR), CAST(lint_ok AS VARCHAR), \
+                    diagnostics_count, tests_passed, tests_failed, CAST(degraded AS VARCHAR), degraded_reason \
              FROM ranked WHERE rn = 1 ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -1448,5 +1448,282 @@ impl SessionStore {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create an in-memory store for testing
+    fn test_store() -> SessionStore {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("perspt_test_{}.db", uuid::Uuid::new_v4()));
+        SessionStore::open(&db_path).expect("Failed to create test store")
+    }
+
+    fn seed_session(store: &SessionStore, session_id: &str) {
+        let record = SessionRecord {
+            session_id: session_id.to_string(),
+            task: "test task".to_string(),
+            working_dir: "/tmp/test".to_string(),
+            merkle_root: None,
+            detected_toolchain: None,
+            status: "RUNNING".to_string(),
+        };
+        store.create_session(&record).unwrap();
+    }
+
+    #[test]
+    fn test_node_state_phase8_roundtrip() {
+        let store = test_store();
+        let sid = "test-sess-1";
+        seed_session(&store, sid);
+
+        let record = NodeStateRecord {
+            node_id: "node-1".to_string(),
+            session_id: sid.to_string(),
+            state: "Completed".to_string(),
+            v_total: 0.42,
+            merkle_hash: Some(vec![0xab; 32]),
+            attempt_count: 3,
+            node_class: Some("Interface".to_string()),
+            owner_plugin: Some("rust".to_string()),
+            goal: Some("Implement API".to_string()),
+            parent_id: Some("root".to_string()),
+            children: Some(r#"["child-a","child-b"]"#.to_string()),
+            last_error_type: Some("CompilationError".to_string()),
+            committed_at: Some("2025-01-01T00:00:00Z".to_string()),
+        };
+
+        store.record_node_state(&record).unwrap();
+
+        let states = store.get_latest_node_states(sid).unwrap();
+        assert_eq!(states.len(), 1);
+        let r = &states[0];
+        assert_eq!(r.node_id, "node-1");
+        assert_eq!(r.state, "Completed");
+        assert_eq!(r.attempt_count, 3);
+        assert_eq!(r.node_class.as_deref(), Some("Interface"));
+        assert_eq!(r.owner_plugin.as_deref(), Some("rust"));
+        assert_eq!(r.goal.as_deref(), Some("Implement API"));
+        assert_eq!(r.parent_id.as_deref(), Some("root"));
+        assert!(r.children.is_some());
+        assert_eq!(r.last_error_type.as_deref(), Some("CompilationError"));
+        assert_eq!(r.committed_at.as_deref(), Some("2025-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn test_task_graph_edge_roundtrip() {
+        let store = test_store();
+        let sid = "test-graph-1";
+        seed_session(&store, sid);
+
+        let edge = TaskGraphEdgeRow {
+            session_id: sid.to_string(),
+            parent_node_id: "parent-1".to_string(),
+            child_node_id: "child-1".to_string(),
+            edge_type: "depends_on".to_string(),
+        };
+        store.record_task_graph_edge(&edge).unwrap();
+
+        let edges = store.get_task_graph_edges(sid).unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].parent_node_id, "parent-1");
+        assert_eq!(edges[0].child_node_id, "child-1");
+        assert_eq!(edges[0].edge_type, "depends_on");
+    }
+
+    #[test]
+    fn test_verification_result_roundtrip() {
+        let store = test_store();
+        let sid = "test-vr-1";
+        seed_session(&store, sid);
+
+        let row = VerificationResultRow {
+            session_id: sid.to_string(),
+            node_id: "node-v".to_string(),
+            result_json: r#"{"syntax_ok":true}"#.to_string(),
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: false,
+            lint_ok: true,
+            diagnostics_count: 2,
+            tests_passed: 5,
+            tests_failed: 1,
+            degraded: false,
+            degraded_reason: None,
+        };
+        store.record_verification_result(&row).unwrap();
+
+        let got = store.get_verification_result(sid, "node-v").unwrap();
+        assert!(got.is_some());
+        let got = got.unwrap();
+        assert!(got.syntax_ok);
+        assert!(got.build_ok);
+        assert!(!got.tests_ok);
+        assert_eq!(got.tests_passed, 5);
+        assert_eq!(got.tests_failed, 1);
+        assert!(!got.degraded);
+    }
+
+    #[test]
+    fn test_verification_result_degraded() {
+        let store = test_store();
+        let sid = "test-vr-deg";
+        seed_session(&store, sid);
+
+        let row = VerificationResultRow {
+            session_id: sid.to_string(),
+            node_id: "node-d".to_string(),
+            result_json: "{}".to_string(),
+            syntax_ok: true,
+            build_ok: false,
+            tests_ok: false,
+            lint_ok: false,
+            diagnostics_count: 0,
+            tests_passed: 0,
+            tests_failed: 0,
+            degraded: true,
+            degraded_reason: Some("LSP unavailable".to_string()),
+        };
+        store.record_verification_result(&row).unwrap();
+
+        let got = store
+            .get_verification_result(sid, "node-d")
+            .unwrap()
+            .unwrap();
+        assert!(got.degraded);
+        assert_eq!(got.degraded_reason.as_deref(), Some("LSP unavailable"));
+    }
+
+    #[test]
+    fn test_artifact_bundle_roundtrip() {
+        let store = test_store();
+        let sid = "test-ab-1";
+        seed_session(&store, sid);
+
+        let row = ArtifactBundleRow {
+            session_id: sid.to_string(),
+            node_id: "node-a".to_string(),
+            bundle_json: r#"{"artifacts":[],"commands":[]}"#.to_string(),
+            artifact_count: 3,
+            command_count: 1,
+            touched_files: r#"["src/main.rs","src/lib.rs","tests/test.rs"]"#.to_string(),
+        };
+        store.record_artifact_bundle(&row).unwrap();
+
+        let got = store.get_artifact_bundle(sid, "node-a").unwrap();
+        assert!(got.is_some());
+        let got = got.unwrap();
+        assert_eq!(got.artifact_count, 3);
+        assert_eq!(got.command_count, 1);
+        assert!(got.touched_files.contains("main.rs"));
+    }
+
+    #[test]
+    fn test_latest_node_states_dedup() {
+        let store = test_store();
+        let sid = "test-dedup";
+        seed_session(&store, sid);
+
+        // Insert two states for the same node
+        let r1 = NodeStateRecord {
+            node_id: "node-x".to_string(),
+            session_id: sid.to_string(),
+            state: "Coding".to_string(),
+            v_total: 0.5,
+            merkle_hash: None,
+            attempt_count: 1,
+            node_class: None,
+            owner_plugin: None,
+            goal: None,
+            parent_id: None,
+            children: None,
+            last_error_type: None,
+            committed_at: None,
+        };
+        store.record_node_state(&r1).unwrap();
+
+        let r2 = NodeStateRecord {
+            node_id: "node-x".to_string(),
+            session_id: sid.to_string(),
+            state: "Completed".to_string(),
+            v_total: 0.3,
+            merkle_hash: None,
+            attempt_count: 2,
+            node_class: Some("Implementation".to_string()),
+            owner_plugin: None,
+            goal: Some("Updated goal".to_string()),
+            parent_id: None,
+            children: None,
+            last_error_type: None,
+            committed_at: Some("2025-01-02T00:00:00Z".to_string()),
+        };
+        store.record_node_state(&r2).unwrap();
+
+        // get_latest should return only the last entry
+        let latest = store.get_latest_node_states(sid).unwrap();
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest[0].state, "Completed");
+        assert_eq!(latest[0].attempt_count, 2);
+        assert_eq!(latest[0].goal.as_deref(), Some("Updated goal"));
+    }
+
+    #[test]
+    fn test_backward_compat_empty_phase8_fields() {
+        let store = test_store();
+        let sid = "test-compat";
+        seed_session(&store, sid);
+
+        // Insert a node with all Phase 8 fields as None (pre-Phase-8 session)
+        let r = NodeStateRecord {
+            node_id: "old-node".to_string(),
+            session_id: sid.to_string(),
+            state: "COMPLETED".to_string(),
+            v_total: 1.0,
+            merkle_hash: None,
+            attempt_count: 1,
+            node_class: None,
+            owner_plugin: None,
+            goal: None,
+            parent_id: None,
+            children: None,
+            last_error_type: None,
+            committed_at: None,
+        };
+        store.record_node_state(&r).unwrap();
+
+        let latest = store.get_latest_node_states(sid).unwrap();
+        assert_eq!(latest.len(), 1);
+        assert!(latest[0].node_class.is_none());
+        assert!(latest[0].goal.is_none());
+        assert!(latest[0].committed_at.is_none());
+
+        // Verification and artifact lookups should return None
+        let vr = store.get_verification_result(sid, "old-node").unwrap();
+        assert!(vr.is_none());
+        let ab = store.get_artifact_bundle(sid, "old-node").unwrap();
+        assert!(ab.is_none());
+    }
+
+    #[test]
+    fn test_review_outcome_roundtrip() {
+        let store = test_store();
+        let sid = "test-review";
+        seed_session(&store, sid);
+
+        let row = ReviewOutcomeRow {
+            session_id: sid.to_string(),
+            node_id: "node-r".to_string(),
+            outcome: "approved".to_string(),
+            reviewer_note: Some("LGTM".to_string()),
+        };
+        store.record_review_outcome(&row).unwrap();
+
+        let outcomes = store.get_review_outcomes(sid, "node-r").unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].outcome, "approved");
+        assert_eq!(outcomes[0].reviewer_note.as_deref(), Some("LGTM"));
     }
 }
