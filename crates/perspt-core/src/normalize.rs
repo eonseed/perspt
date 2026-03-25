@@ -448,4 +448,51 @@ mod tests {
             ProviderFamily::Unknown
         );
     }
+
+    #[test]
+    fn test_extract_json_with_nested_code_fence() {
+        // LLMs often wrap JSON in markdown code fences with extra prose
+        let raw = r#"
+Here is the plan I've created for you:
+
+```json
+{
+  "steps": [
+    {"id": "s1", "action": "create_file", "path": "src/lib.rs"},
+    {"id": "s2", "action": "run_tests", "path": "."}
+  ],
+  "description": "Create and verify a new library"
+}
+```
+
+Let me know if you'd like any changes.
+"#;
+        let output = extract_json(raw).unwrap();
+        assert_eq!(output.method, ExtractionMethod::FencedJson);
+        assert!(output.json_body.contains("create_file"));
+        assert!(output.json_body.contains("run_tests"));
+    }
+
+    #[test]
+    fn test_extract_and_deserialize_realistic_plan() {
+        #[derive(Debug, serde::Deserialize, PartialEq)]
+        struct Step {
+            id: String,
+            action: String,
+        }
+        #[derive(Debug, serde::Deserialize)]
+        struct Plan {
+            steps: Vec<Step>,
+        }
+
+        let raw = r#"Sure! ```json
+{"steps": [{"id": "1", "action": "lint"}, {"id": "2", "action": "test"}]}
+```"#;
+
+        let (plan, method): (Plan, _) = extract_and_deserialize(raw).unwrap();
+        assert_eq!(method, ExtractionMethod::FencedJson);
+        assert_eq!(plan.steps.len(), 2);
+        assert_eq!(plan.steps[0].action, "lint");
+        assert_eq!(plan.steps[1].action, "test");
+    }
 }
