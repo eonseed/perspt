@@ -251,6 +251,63 @@ impl AgentApp {
                     trigger_node, action, nodes_affected
                 ));
             }
+            // PSP-5 Phase 6: Provisional branch lifecycle events
+            AgentEvent::BranchCreated {
+                branch_id,
+                node_id,
+                parent_node_id,
+            } => {
+                self.dashboard.log(format!(
+                    "🌿 Branch: {} for {} (parent: {})",
+                    &branch_id[..branch_id.len().min(16)],
+                    node_id,
+                    parent_node_id
+                ));
+            }
+            AgentEvent::InterfaceSealed {
+                node_id,
+                sealed_paths,
+                seal_hash,
+            } => {
+                self.dashboard.log(format!(
+                    "🔒 Sealed: {} ({} artifact{}) [{}]",
+                    node_id,
+                    sealed_paths.len(),
+                    if sealed_paths.len() == 1 { "" } else { "s" },
+                    &seal_hash[..seal_hash.len().min(12)]
+                ));
+            }
+            AgentEvent::BranchFlushed {
+                parent_node_id,
+                flushed_branch_ids,
+                reason,
+            } => {
+                self.dashboard.log(format!(
+                    "🗑️  Flushed: {} branch(es) from {} — {}",
+                    flushed_branch_ids.len(),
+                    parent_node_id,
+                    reason
+                ));
+            }
+            AgentEvent::DependentUnblocked {
+                child_node_id,
+                parent_node_id,
+            } => {
+                self.dashboard.log(format!(
+                    "🔓 Unblocked: {} (parent {} sealed)",
+                    child_node_id, parent_node_id
+                ));
+            }
+            AgentEvent::BranchMerged {
+                branch_id,
+                node_id,
+            } => {
+                self.dashboard.log(format!(
+                    "✅ Merged: branch {} for {}",
+                    &branch_id[..branch_id.len().min(16)],
+                    node_id
+                ));
+            }
             _ => {}
         }
     }

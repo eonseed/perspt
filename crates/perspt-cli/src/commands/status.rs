@@ -87,6 +87,40 @@ pub async fn run() -> Result<()> {
         println!("   Tokens:      {}", total_tokens);
     }
 
+    // PSP-5 Phase 6: Show provisional branch status
+    let branches = store.get_provisional_branches(&session.session_id)?;
+    if !branches.is_empty() {
+        let active = branches.iter().filter(|b| b.state == "active").count();
+        let sealed = branches.iter().filter(|b| b.state == "sealed").count();
+        let merged = branches.iter().filter(|b| b.state == "merged").count();
+        let flushed = branches.iter().filter(|b| b.state == "flushed").count();
+        println!();
+        println!("🌿 Provisional Branches:");
+        println!("   Total:       {}", branches.len());
+        if active > 0 {
+            println!("   🔄 Active:   {}", active);
+        }
+        if sealed > 0 {
+            println!("   🔒 Sealed:   {}", sealed);
+        }
+        if merged > 0 {
+            println!("   ✅ Merged:   {}", merged);
+        }
+        if flushed > 0 {
+            println!("   ❌ Flushed:  {}", flushed);
+        }
+    }
+
+    // PSP-5 Phase 6: Show recent flush decisions
+    let flushes = store.get_branch_flushes(&session.session_id)?;
+    if !flushes.is_empty() {
+        println!();
+        println!("🗑️  Recent Flush Decisions:");
+        for flush in flushes.iter().take(3) {
+            println!("   Parent: {}  Reason: {}", flush.parent_node_id, flush.reason);
+        }
+    }
+
     println!();
     println!("{}", "─".repeat(70));
     println!("Commands:");
