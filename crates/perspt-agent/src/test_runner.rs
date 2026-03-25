@@ -474,23 +474,17 @@ impl RustTestRunner {
             if line.starts_with("test result:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 for i in 0..parts.len() {
-                    if parts[i] == "passed;" || parts[i] == "passed" {
-                        if i > 0 {
-                            if let Ok(n) = parts[i - 1].parse::<usize>() {
-                                results.passed = n;
-                            }
+                    if (parts[i] == "passed;" || parts[i] == "passed") && i > 0 {
+                        if let Ok(n) = parts[i - 1].parse::<usize>() {
+                            results.passed = n;
                         }
-                    } else if parts[i] == "failed;" || parts[i] == "failed" {
-                        if i > 0 {
-                            if let Ok(n) = parts[i - 1].parse::<usize>() {
-                                results.failed = n;
-                            }
+                    } else if (parts[i] == "failed;" || parts[i] == "failed") && i > 0 {
+                        if let Ok(n) = parts[i - 1].parse::<usize>() {
+                            results.failed = n;
                         }
-                    } else if parts[i] == "ignored;" || parts[i] == "ignored" {
-                        if i > 0 {
-                            if let Ok(n) = parts[i - 1].parse::<usize>() {
-                                results.skipped = n;
-                            }
+                    } else if (parts[i] == "ignored;" || parts[i] == "ignored") && i > 0 {
+                        if let Ok(n) = parts[i - 1].parse::<usize>() {
+                            results.skipped = n;
                         }
                     }
                 }
@@ -573,10 +567,7 @@ impl TestRunnerTrait for RustTestRunner {
 }
 
 /// PSP-5: Factory function to create a test runner for a given plugin
-pub fn test_runner_for_plugin(
-    plugin_name: &str,
-    working_dir: PathBuf,
-) -> Box<dyn TestRunnerTrait> {
+pub fn test_runner_for_plugin(plugin_name: &str, working_dir: PathBuf) -> Box<dyn TestRunnerTrait> {
     match plugin_name {
         "rust" => Box::new(RustTestRunner::new(working_dir)),
         "python" => Box::new(PythonTestRunner::new(working_dir)),

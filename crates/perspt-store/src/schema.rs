@@ -112,6 +112,65 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // PSP-5 Phase 3: Sequences for context provenance tables
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_structural_digests_id START 1",
+        [],
+    )?;
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_context_provenance_id START 1",
+        [],
+    )?;
+
+    // PSP-5 Phase 3: Structural digests - hashes of compile-critical artifacts
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS structural_digests (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_structural_digests_id'),
+            digest_id VARCHAR NOT NULL,
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            source_path VARCHAR NOT NULL,
+            artifact_kind VARCHAR NOT NULL,
+            hash BLOB NOT NULL,
+            version INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_structural_digests_session ON structural_digests(session_id)",
+        [],
+    )?;
+
+    // PSP-5 Phase 3: Context provenance - audit trail of what context was used per node
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS context_provenance (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_context_provenance_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            context_package_id VARCHAR NOT NULL,
+            structural_hashes TEXT,
+            summary_hashes TEXT,
+            dependency_hashes TEXT,
+            included_file_count INTEGER DEFAULT 0,
+            total_bytes INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_context_provenance_session ON context_provenance(session_id)",
+        [],
+    )?;
+
     log::info!("DuckDB schema initialized successfully");
     Ok(())
 }

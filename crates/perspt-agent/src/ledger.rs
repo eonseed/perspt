@@ -237,6 +237,123 @@ impl MerkleLedger {
     pub fn store(&self) -> &SessionStore {
         &self.store
     }
+
+    // =========================================================================
+    // PSP-5 Phase 3: Structural Digests & Context Provenance
+    // =========================================================================
+
+    /// Record a structural digest for a node
+    pub fn record_structural_digest(
+        &self,
+        node_id: &str,
+        source_path: &str,
+        artifact_kind: &str,
+        hash: &[u8],
+        version: i32,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record structural digest")?;
+
+        let record = perspt_store::StructuralDigestRecord {
+            digest_id: format!("sd-{}-{}", node_id, uuid::Uuid::new_v4()),
+            session_id,
+            node_id: node_id.to_string(),
+            source_path: source_path.to_string(),
+            artifact_kind: artifact_kind.to_string(),
+            hash: hash.to_vec(),
+            version,
+        };
+
+        self.store.record_structural_digest(&record)?;
+        log::debug!(
+            "Recorded structural digest for {} at {}",
+            node_id,
+            source_path
+        );
+        Ok(())
+    }
+
+    /// Get structural digests for a specific node in the current session
+    pub fn get_structural_digests(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<perspt_store::StructuralDigestRecord>> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to query structural digests")?;
+
+        self.store.get_structural_digests(&session_id, node_id)
+    }
+
+    /// Record context provenance for a node
+    pub fn record_context_provenance(
+        &self,
+        provenance: &perspt_core::types::ContextProvenance,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record context provenance")?;
+
+        let to_hex_32 =
+            |bytes: &[u8; 32]| -> String { bytes.iter().map(|b| format!("{:02x}", b)).collect() };
+        let to_hex_vec =
+            |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{:02x}", b)).collect() };
+        let structural_hashes: Vec<String> = provenance
+            .structural_digest_hashes
+            .iter()
+            .map(|(id, hash)| format!("{}:{}", id, to_hex_32(hash)))
+            .collect();
+        let summary_hashes: Vec<String> = provenance
+            .summary_digest_hashes
+            .iter()
+            .map(|(id, hash)| format!("{}:{}", id, to_hex_32(hash)))
+            .collect();
+        let dep_hashes: Vec<String> = provenance
+            .dependency_commit_hashes
+            .iter()
+            .map(|(id, hash)| format!("{}:{}", id, to_hex_vec(hash)))
+            .collect();
+
+        let record = perspt_store::ContextProvenanceRecord {
+            session_id,
+            node_id: provenance.node_id.clone(),
+            context_package_id: provenance.context_package_id.clone(),
+            structural_hashes: serde_json::to_string(&structural_hashes).unwrap_or_default(),
+            summary_hashes: serde_json::to_string(&summary_hashes).unwrap_or_default(),
+            dependency_hashes: serde_json::to_string(&dep_hashes).unwrap_or_default(),
+            included_file_count: provenance.included_file_count as i32,
+            total_bytes: provenance.total_bytes as i32,
+        };
+
+        self.store.record_context_provenance(&record)?;
+        log::debug!(
+            "Recorded context provenance for node '{}' (package '{}')",
+            provenance.node_id,
+            provenance.context_package_id
+        );
+        Ok(())
+    }
+
+    /// Get context provenance for a specific node in the current session
+    pub fn get_context_provenance(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<perspt_store::ContextProvenanceRecord>> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to query context provenance")?;
+
+        self.store.get_context_provenance(&session_id, node_id)
+    }
 }
 
 /// Ledger statistics (Legacy)

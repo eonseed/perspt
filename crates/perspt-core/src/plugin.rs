@@ -135,6 +135,17 @@ pub trait LanguagePlugin: Send + Sync {
         self.extensions()
     }
 
+    /// PSP-5 Phase 2: Check if a file path belongs to this plugin's ownership domain
+    ///
+    /// Uses `file_ownership_patterns()` for suffix/extension matching.
+    fn owns_file(&self, path: &str) -> bool {
+        let path_lower = path.to_lowercase();
+        self.file_ownership_patterns().iter().any(|pattern| {
+            let pattern = pattern.trim_start_matches('*');
+            path_lower.ends_with(pattern)
+        })
+    }
+
     /// Check if the host has the required build tools available
     ///
     /// Returns true if the plugin's primary toolchain is installed and callable.
@@ -547,5 +558,30 @@ impl PluginRegistry {
 impl Default for PluginRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plugin_owns_file() {
+        let rust = RustPlugin;
+        assert!(rust.owns_file("src/main.rs"));
+        assert!(rust.owns_file("crates/core/src/lib.rs"));
+        assert!(!rust.owns_file("main.py"));
+        assert!(!rust.owns_file("index.js"));
+
+        let python = PythonPlugin;
+        assert!(python.owns_file("main.py"));
+        assert!(python.owns_file("tests/test_main.py"));
+        assert!(!python.owns_file("src/main.rs"));
+
+        let js = JsPlugin;
+        assert!(js.owns_file("index.js"));
+        assert!(js.owns_file("src/app.ts"));
+        assert!(!js.owns_file("main.py"));
+        assert!(!js.owns_file("src/main.rs"));
     }
 }

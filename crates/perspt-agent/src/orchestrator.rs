@@ -67,6 +67,8 @@ pub struct SRBNOrchestrator {
     pub ledger: crate::ledger::MerkleLedger,
     /// Last tool failure message (for energy calculation)
     pub last_tool_failure: Option<String>,
+    /// PSP-5 Phase 3: Last assembled context provenance (for commit recording)
+    last_context_provenance: Option<perspt_core::types::ContextProvenance>,
 }
 
 impl SRBNOrchestrator {
@@ -132,6 +134,7 @@ impl SRBNOrchestrator {
             action_receiver: None,
             ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
             last_tool_failure: None,
+            last_context_provenance: None,
         }
     }
 
@@ -338,7 +341,7 @@ impl SRBNOrchestrator {
                 self.emit_event(perspt_core::AgentEvent::NodeSelected {
                     node_id: node.node_id.clone(),
                     goal: node.goal.clone(),
-                    node_class: "implementation".to_string(),
+                    node_class: node.node_class.to_string(),
                 });
                 self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                     node_id: node.node_id.clone(),
@@ -1478,9 +1481,54 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             }
         }
 
+        // PSP-5 Phase 2: Build ownership manifest from plan output_files
+        self.build_ownership_manifest_from_plan(plan);
+
         Ok(())
     }
 
+    /// PSP-5 Phase 2: Build ownership manifest from a TaskPlan
+    ///
+    /// Assigns each task's output_files to the owning node, detecting the
+    /// language plugin from file extension via the plugin registry.
+    fn build_ownership_manifest_from_plan(&mut self, plan: &TaskPlan) {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+
+        for task in &plan.tasks {
+            // Detect the plugin for this task's output files
+            let plugin_name = task
+                .output_files
+                .first()
+                .and_then(|f| {
+                    registry
+                        .all()
+                        .iter()
+                        .find(|p| p.owns_file(f))
+                        .map(|p| p.name().to_string())
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+
+            // Set owner_plugin on the node if we can find it
+            if let Some(idx) = self.node_indices.get(&task.id) {
+                self.graph[*idx].owner_plugin = plugin_name.clone();
+            }
+
+            // Register each output file in the manifest
+            for file in &task.output_files {
+                self.context.ownership_manifest.assign(
+                    file.clone(),
+                    task.id.clone(),
+                    plugin_name.clone(),
+                    task.node_class,
+                );
+            }
+        }
+
+        log::info!(
+            "Built ownership manifest: {} entries",
+            self.context.ownership_manifest.len()
+        );
+    }
 
     /// Get the Architect model name
     fn get_architect_model(&self) -> String {
@@ -1522,12 +1570,34 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     async fn step_speculate(&mut self, idx: NodeIndex) -> Result<()> {
         log::info!("Step 3: Speculation - Generating implementation");
 
+        // PSP-5 Phase 3: Build context package for this node
+        let retriever = ContextRetriever::new(self.context.working_dir.clone())
+            .with_max_file_bytes(8 * 1024)
+            .with_max_context_bytes(100 * 1024); // 100KB default budget
+
+        let node = &self.graph[idx];
+        let restriction_map =
+            retriever.build_restriction_map(node, &self.context.ownership_manifest);
+        let context_package = retriever.assemble_context_package(node, &restriction_map);
+        let formatted_context = retriever.format_context_package(&context_package);
+
+        // Record provenance for later commit
+        self.last_context_provenance = Some(context_package.provenance());
+
         let actuator = &self.agents[1];
         let node = &self.graph[idx];
         let node_id = node.node_id.clone();
 
-        // Build prompt and call LLM with logging support
-        let prompt = actuator.build_prompt(node, &self.context);
+        // Build prompt enriched with context package
+        let base_prompt = actuator.build_prompt(node, &self.context);
+        let prompt = if formatted_context.is_empty() {
+            base_prompt
+        } else {
+            format!(
+                "{}\n\n## Node Context (PSP-5 Restriction Map)\n\n{}",
+                base_prompt, formatted_context
+            )
+        };
         let model = actuator.model().to_string();
 
         let response = self
@@ -2266,8 +2336,13 @@ File: [same filename]
 
         self.graph[idx].state = NodeState::Committing;
 
-        // In a real implementation, write to DuckDB Merkle Ledger
-        // For now, just mark as completed
+        // PSP-5 Phase 3: Record context provenance if available
+        if let Some(provenance) = self.last_context_provenance.take() {
+            if let Err(e) = self.ledger.record_context_provenance(&provenance) {
+                log::warn!("Failed to record context provenance: {}", e);
+            }
+        }
+
         self.graph[idx].state = NodeState::Completed;
 
         log::info!("Node {} committed", self.graph[idx].node_id);
@@ -2353,26 +2428,17 @@ File: [same filename]
     }
 
     /// Try to parse a JSON artifact bundle from content
-    fn try_parse_json_bundle(
-        &self,
-        content: &str,
-    ) -> Option<perspt_core::types::ArtifactBundle> {
+    fn try_parse_json_bundle(&self, content: &str) -> Option<perspt_core::types::ArtifactBundle> {
         // Try to find JSON in markdown code blocks
         let json_str = if let Some(start) = content.find("```json") {
             let start = start + 7;
-            if let Some(end_offset) = content[start..].find("```") {
-                Some(content[start..start + end_offset].trim())
-            } else {
-                None
-            }
+            content[start..]
+                .find("```")
+                .map(|end_offset| content[start..start + end_offset].trim())
         } else if content.trim().starts_with('{') {
             Some(content.trim())
         } else if let Some(start) = content.find('{') {
-            if let Some(end) = content.rfind('}') {
-                Some(&content[start..=end])
-            } else {
-                None
-            }
+            content.rfind('}').map(|end| &content[start..=end])
         } else {
             None
         };
@@ -2392,15 +2458,37 @@ File: [same filename]
     /// PSP-5: Apply an artifact bundle transactionally
     ///
     /// All file operations are validated first, then applied.
+    /// PSP-5 Phase 2: Validates ownership boundaries before applying.
     /// If any operation fails, the method returns an error describing which operation
     /// failed, and previous successful operations are logged for manual review.
     pub async fn apply_bundle_transactionally(
         &mut self,
         bundle: &perspt_core::types::ArtifactBundle,
         node_id: &str,
+        node_class: perspt_core::types::NodeClass,
     ) -> Result<()> {
-        // Validate first
+        // Validate structural integrity first
         bundle.validate().map_err(|e| anyhow::anyhow!(e))?;
+
+        // PSP-5 Phase 2: Validate ownership boundaries
+        self.context
+            .ownership_manifest
+            .validate_bundle(bundle, node_id, node_class)
+            .map_err(|e| anyhow::anyhow!("Ownership validation failed: {}", e))?;
+
+        // PSP-5 Phase 2: Determine owner_plugin for new path assignment
+        let owner_plugin = self
+            .node_indices
+            .get(node_id)
+            .and_then(|idx| {
+                let plugin = &self.graph[*idx].owner_plugin;
+                if plugin.is_empty() {
+                    None
+                } else {
+                    Some(plugin.clone())
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
 
         let mut files_created: Vec<String> = Vec::new();
         let mut files_modified: Vec<String> = Vec::new();
@@ -2450,7 +2538,9 @@ File: [same filename]
                     };
                     if should_notify {
                         if let Ok(content) = std::fs::read_to_string(&full_path) {
-                            let _ = client.did_change(&full_path, &content, self.file_version).await;
+                            let _ = client
+                                .did_change(&full_path, &content, self.file_version)
+                                .await;
                         }
                     }
                 }
@@ -2468,6 +2558,14 @@ File: [same filename]
                 ));
             }
         }
+
+        // PSP-5 Phase 2: Auto-assign unregistered paths to this node
+        self.context.ownership_manifest.assign_new_paths(
+            bundle,
+            node_id,
+            &owner_plugin,
+            node_class,
+        );
 
         // Emit BundleApplied event
         self.emit_event(perspt_core::AgentEvent::BundleApplied {
@@ -2503,7 +2601,10 @@ File: [same filename]
 
         // Determine file names based on language
         let (main_file, test_file) = match lang {
-            "rust" => ("src/main.rs".to_string(), "tests/integration_test.rs".to_string()),
+            "rust" => (
+                "src/main.rs".to_string(),
+                "tests/integration_test.rs".to_string(),
+            ),
             "javascript" => ("index.js".to_string(), "test/index.test.js".to_string()),
             _ => ("main.py".to_string(), format!("tests/test_main.{}", ext)),
         };
@@ -2732,7 +2833,6 @@ File: [same filename]
         result
     }
 }
-
 
 /// Convert diagnostic severity to string
 fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static str {
