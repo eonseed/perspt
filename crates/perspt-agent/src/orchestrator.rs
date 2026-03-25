@@ -176,6 +176,229 @@ impl SRBNOrchestrator {
         self.action_receiver = Some(action_receiver);
     }
 
+    // =========================================================================
+    // PSP-5 Phase 8: Session Rehydration for Resume
+    // =========================================================================
+
+    /// Rehydrate the orchestrator from a persisted session, rebuilding the
+    /// DAG from stored node snapshots and graph edges.
+    ///
+    /// Terminal nodes (Completed, Failed, Aborted) will be skipped during
+    /// the subsequent `run_resumed()` execution. Non-terminal nodes are
+    /// placed back in their persisted state so the executor can continue
+    /// from the last durable boundary.
+    ///
+    /// Returns `Ok(snapshot)` with the loaded session snapshot on success,
+    /// or an error when the session cannot be reconstructed.
+    pub fn rehydrate_session(
+        &mut self,
+        session_id: &str,
+    ) -> Result<crate::ledger::SessionSnapshot> {
+        // Attach the ledger to this session so facades read the right data
+        self.context.session_id = session_id.to_string();
+        self.ledger.current_session = Some(crate::ledger::SessionRecordLegacy {
+            session_id: session_id.to_string(),
+            task: String::new(),
+            started_at: epoch_seconds(),
+            ended_at: None,
+            status: "RESUMING".to_string(),
+            total_nodes: 0,
+            completed_nodes: 0,
+        });
+
+        let snapshot = self.ledger.load_session_snapshot()?;
+
+        if snapshot.node_details.is_empty() {
+            anyhow::bail!(
+                "Session {} has no persisted nodes — cannot resume",
+                session_id
+            );
+        }
+
+        // Rebuild graph: first add all nodes
+        let mut node_map: HashMap<String, NodeIndex> = HashMap::new();
+
+        for detail in &snapshot.node_details {
+            let rec = &detail.record;
+
+            let state = parse_node_state(&rec.state);
+            let node_class = rec
+                .node_class
+                .as_deref()
+                .map(parse_node_class)
+                .unwrap_or_default();
+
+            let mut node = SRBNNode::new(
+                rec.node_id.clone(),
+                rec.goal.clone().unwrap_or_default(),
+                ModelTier::Actuator,
+            );
+            node.state = state;
+            node.node_class = node_class;
+            node.owner_plugin = rec.owner_plugin.clone().unwrap_or_default();
+            node.parent_id = rec.parent_id.clone();
+            node.children = rec
+                .children
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+                .unwrap_or_default();
+            node.monitor.attempt_count = rec.attempt_count as usize;
+
+            // Restore latest energy if available
+            if let Some(last_energy) = detail.energy_history.last() {
+                node.monitor.energy_history.push(last_energy.v_total);
+            }
+
+            // Restore interface seal hash from persisted seals
+            if let Some(seal) = detail.interface_seals.last() {
+                if seal.seal_hash.len() == 32 {
+                    let mut hash = [0u8; 32];
+                    hash.copy_from_slice(&seal.seal_hash);
+                    node.interface_seal_hash = Some(hash);
+                }
+            }
+
+            let idx = self.add_node(node);
+            node_map.insert(rec.node_id.clone(), idx);
+        }
+
+        // Rebuild edges from persisted graph topology
+        for edge in &snapshot.graph_edges {
+            if let (Some(&from_idx), Some(&to_idx)) = (
+                node_map.get(&edge.parent_node_id),
+                node_map.get(&edge.child_node_id),
+            ) {
+                self.graph.add_edge(
+                    from_idx,
+                    to_idx,
+                    Dependency {
+                        kind: edge.edge_type.clone(),
+                    },
+                );
+            }
+        }
+
+        // Restore blocked dependencies from non-completed parents of Interface class
+        for (&ref child_id, &child_idx) in &node_map {
+            let parents: Vec<NodeIndex> = self
+                .graph
+                .neighbors_directed(child_idx, petgraph::Direction::Incoming)
+                .collect();
+
+            for parent_idx in parents {
+                let parent = &self.graph[parent_idx];
+                if parent.node_class == NodeClass::Interface
+                    && parent.interface_seal_hash.is_none()
+                    && !parent.state.is_terminal()
+                {
+                    self.blocked_dependencies
+                        .push(perspt_core::types::BlockedDependency {
+                            child_node_id: child_id.clone(),
+                            parent_node_id: parent.node_id.clone(),
+                            required_seal_paths: Vec::new(),
+                            blocked_at: epoch_seconds(),
+                        });
+                }
+            }
+        }
+
+        let terminal = snapshot
+            .node_details
+            .iter()
+            .filter(|d| {
+                let s = parse_node_state(&d.record.state);
+                s.is_terminal()
+            })
+            .count();
+        let resumable = snapshot.node_details.len() - terminal;
+
+        log::info!(
+            "Rehydrated session {}: {} nodes ({} terminal, {} resumable), {} edges",
+            session_id,
+            snapshot.node_details.len(),
+            terminal,
+            resumable,
+            snapshot.graph_edges.len()
+        );
+
+        // Update legacy session tracker
+        if let Some(ref mut sess) = self.ledger.current_session {
+            sess.total_nodes = snapshot.node_details.len();
+            sess.completed_nodes = terminal;
+            sess.status = "RUNNING".to_string();
+        }
+
+        Ok(snapshot)
+    }
+
+    /// Resume execution from a rehydrated session.
+    ///
+    /// Walks the DAG in topological order, skipping terminal nodes and
+    /// executing any node whose state is not completed/failed/aborted.
+    pub async fn run_resumed(&mut self) -> Result<()> {
+        let topo = Topo::new(&self.graph);
+        let indices: Vec<_> = topo.iter(&self.graph).collect();
+        let total_nodes = indices.len();
+        let mut executed = 0;
+
+        for (i, idx) in indices.iter().enumerate() {
+            let node = &self.graph[*idx];
+
+            // Skip terminal nodes
+            if node.state.is_terminal() {
+                log::debug!("Skipping terminal node {} ({:?})", node.node_id, node.state);
+                continue;
+            }
+
+            // Check seal prerequisites
+            if self.check_seal_prerequisites(*idx) {
+                log::warn!(
+                    "Node {} blocked on seal prerequisite — skipping",
+                    self.graph[*idx].node_id
+                );
+                continue;
+            }
+
+            let node = &self.graph[*idx];
+            self.emit_log(format!(
+                "📝 [resume {}/{}] {}",
+                i + 1,
+                total_nodes,
+                node.goal
+            ));
+            self.emit_event(perspt_core::AgentEvent::NodeSelected {
+                node_id: node.node_id.clone(),
+                goal: node.goal.clone(),
+                node_class: node.node_class.to_string(),
+            });
+            self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                node_id: node.node_id.clone(),
+                status: perspt_core::NodeStatus::Running,
+            });
+
+            self.execute_node(*idx).await?;
+
+            if let Some(node) = self.graph.node_weight(*idx) {
+                self.emit_event(perspt_core::AgentEvent::NodeCompleted {
+                    node_id: node.node_id.clone(),
+                    goal: node.goal.clone(),
+                });
+            }
+            executed += 1;
+        }
+
+        log::info!(
+            "Resumed execution completed: {} of {} nodes executed",
+            executed,
+            total_nodes
+        );
+        self.emit_event(perspt_core::AgentEvent::Complete {
+            success: true,
+            message: format!("Resumed: executed {} of {} nodes", executed, total_nodes),
+        });
+        Ok(())
+    }
+
     /// Emit an event to the TUI (if connected)
     fn emit_event(&self, event: perspt_core::AgentEvent) {
         if let Some(ref sender) = self.event_sender {
@@ -1500,6 +1723,19 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                         },
                     );
                     log::debug!("  Wired dependency: {} -> {}", dep_id, task.id);
+
+                    // PSP-5 Phase 8: Persist graph edge for resume reconstruction
+                    if let Err(e) =
+                        self.ledger
+                            .record_task_graph_edge(dep_id, &task.id, "depends_on")
+                    {
+                        log::warn!(
+                            "Failed to persist graph edge {} -> {}: {}",
+                            dep_id,
+                            task.id,
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -2840,6 +3076,58 @@ File: [same filename]
                 log::warn!("Failed to record context provenance: {}", e);
             }
         }
+
+        // PSP-5 Phase 8: Persist verification result before marking completion
+        if let Some(ref vr) = self.last_verification_result {
+            self.ledger
+                .record_verification_result(&self.graph[idx].node_id, vr)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Commit blocked: failed to persist verification result for {}: {}",
+                        self.graph[idx].node_id,
+                        e
+                    )
+                })?;
+        }
+
+        // PSP-5 Phase 8: Persist full node snapshot via the rich commit API.
+        // This captures graph-structural metadata, retry/error context, and
+        // merkle material. Partial-write failure blocks completion.
+        let node = &self.graph[idx];
+        let children_json = if node.children.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&node.children).unwrap_or_default())
+        };
+
+        let payload = crate::ledger::NodeCommitPayload {
+            node_id: node.node_id.clone(),
+            state: "Completed".to_string(),
+            v_total: node.monitor.current_energy(),
+            merkle_hash: node.interface_seal_hash.map(|h| h.to_vec()),
+            attempt_count: node.monitor.attempt_count as i32,
+            node_class: Some(node.node_class.to_string()),
+            owner_plugin: if node.owner_plugin.is_empty() {
+                None
+            } else {
+                Some(node.owner_plugin.clone())
+            },
+            goal: Some(node.goal.clone()),
+            parent_id: node.parent_id.clone(),
+            children: children_json,
+            last_error_type: self
+                .last_tool_failure
+                .as_ref()
+                .map(|f| f.chars().take(200).collect()),
+        };
+
+        self.ledger.commit_node_snapshot(&payload).map_err(|e| {
+            anyhow::anyhow!(
+                "Commit blocked: failed to persist node snapshot for {}: {}",
+                self.graph[idx].node_id,
+                e
+            )
+        })?;
 
         // PSP-5 Phase 6: Emit interface seals for Interface-class nodes
         self.emit_interface_seals(idx);
@@ -4389,6 +4677,34 @@ fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static 
         Some(lsp_types::DiagnosticSeverity::HINT) => "HINT",
         Some(_) => "OTHER",
         None => "UNKNOWN",
+    }
+}
+
+/// Parse a persisted state string back into a NodeState enum
+fn parse_node_state(s: &str) -> NodeState {
+    match s {
+        "TaskQueued" => NodeState::TaskQueued,
+        "Planning" => NodeState::Planning,
+        "Coding" => NodeState::Coding,
+        "Verifying" => NodeState::Verifying,
+        "Retry" => NodeState::Retry,
+        "SheafCheck" => NodeState::SheafCheck,
+        "Committing" => NodeState::Committing,
+        "Escalated" => NodeState::Escalated,
+        "Completed" | "COMPLETED" | "STABLE" => NodeState::Completed,
+        "Failed" | "FAILED" => NodeState::Failed,
+        "Aborted" | "ABORTED" => NodeState::Aborted,
+        _ => NodeState::TaskQueued, // Default for unknown states
+    }
+}
+
+/// Parse a persisted node class string back into a NodeClass enum
+fn parse_node_class(s: &str) -> NodeClass {
+    match s {
+        "Interface" => NodeClass::Interface,
+        "Implementation" => NodeClass::Implementation,
+        "Integration" => NodeClass::Integration,
+        _ => NodeClass::default(),
     }
 }
 
