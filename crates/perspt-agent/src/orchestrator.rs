@@ -393,6 +393,14 @@ impl SRBNOrchestrator {
 
         log::info!("SRBN execution completed");
 
+        // PSP-5 Phase 6: Clean up all session sandboxes
+        if let Err(e) = crate::tools::cleanup_session_sandboxes(
+            &self.context.working_dir,
+            &self.context.session_id,
+        ) {
+            log::warn!("Failed to clean up session sandboxes: {}", e);
+        }
+
         self.emit_event(perspt_core::AgentEvent::Complete {
             success: true,
             message: format!("Completed {} nodes", total_nodes),
@@ -3926,6 +3934,20 @@ File: [same filename]
 
         // Store branch ID on the node for tracking
         self.graph[idx].provisional_branch_id = Some(branch_id.clone());
+
+        // PSP-5 Phase 6: Create sandbox workspace for this branch
+        match crate::tools::create_sandbox(
+            &self.context.working_dir,
+            &session_id,
+            &branch_id,
+        ) {
+            Ok(sandbox_path) => {
+                log::debug!("Sandbox created at {}", sandbox_path.display());
+            }
+            Err(e) => {
+                log::warn!("Failed to create sandbox for branch {}: {}", branch_id, e);
+            }
+        }
 
         self.emit_event(perspt_core::AgentEvent::BranchCreated {
             branch_id: branch_id.clone(),

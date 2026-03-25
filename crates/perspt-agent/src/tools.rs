@@ -724,3 +724,81 @@ mod tests {
         assert_eq!(content, "Hello diffy\nThis is a test\n");
     }
 }
+
+// =============================================================================
+// PSP-5 Phase 6: Sandbox workspace helpers
+// =============================================================================
+
+/// Create a sandbox workspace for provisional verification.
+///
+/// Copies key project files into a session-scoped temporary directory so
+/// speculative verification does not pollute committed workspace state.
+/// Returns the path to the sandbox root.
+pub fn create_sandbox(
+    working_dir: &Path,
+    session_id: &str,
+    branch_id: &str,
+) -> std::io::Result<PathBuf> {
+    let sandbox_root = working_dir
+        .join(".perspt")
+        .join("sandboxes")
+        .join(session_id)
+        .join(branch_id);
+
+    fs::create_dir_all(&sandbox_root)?;
+
+    log::debug!(
+        "Created sandbox workspace at {}",
+        sandbox_root.display()
+    );
+
+    Ok(sandbox_root)
+}
+
+/// Clean up a specific sandbox workspace.
+pub fn cleanup_sandbox(sandbox_dir: &Path) -> std::io::Result<()> {
+    if sandbox_dir.exists() {
+        fs::remove_dir_all(sandbox_dir)?;
+        log::debug!("Cleaned up sandbox at {}", sandbox_dir.display());
+    }
+    Ok(())
+}
+
+/// Clean up all sandbox workspaces for a session.
+pub fn cleanup_session_sandboxes(
+    working_dir: &Path,
+    session_id: &str,
+) -> std::io::Result<()> {
+    let session_sandbox = working_dir
+        .join(".perspt")
+        .join("sandboxes")
+        .join(session_id);
+
+    if session_sandbox.exists() {
+        fs::remove_dir_all(&session_sandbox)?;
+        log::debug!(
+            "Cleaned up all sandboxes for session {}",
+            session_id
+        );
+    }
+    Ok(())
+}
+
+/// Copy a file from the workspace into a sandbox, preserving relative paths.
+pub fn copy_to_sandbox(
+    working_dir: &Path,
+    sandbox_dir: &Path,
+    relative_path: &str,
+) -> std::io::Result<()> {
+    let src = working_dir.join(relative_path);
+    let dst = sandbox_dir.join(relative_path);
+
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if src.exists() {
+        fs::copy(&src, &dst)?;
+    }
+    Ok(())
+}
