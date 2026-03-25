@@ -64,8 +64,23 @@ pub enum AgentEvent {
         syntax_ok: bool,
         build_ok: bool,
         tests_ok: bool,
+        lint_ok: bool,
         diagnostics_count: usize,
+        tests_passed: usize,
+        tests_failed: usize,
         energy: f32,
+        /// PSP-5 Phase 7: Full energy component breakdown
+        energy_components: crate::types::EnergyComponents,
+        /// PSP-5 Phase 7: Per-stage verification outcomes with sensor status
+        stage_outcomes: Vec<crate::types::StageOutcome>,
+        /// PSP-5 Phase 7: Whether verification ran in degraded mode
+        degraded: bool,
+        /// PSP-5 Phase 7: Human-readable reasons for each degraded stage
+        degraded_reasons: Vec<String>,
+        /// PSP-5 Phase 7: Summary suitable for display
+        summary: String,
+        /// PSP-5 Phase 7: Node class for display context
+        node_class: String,
     },
 
     /// PSP-5: Artifact bundle applied to workspace
@@ -73,6 +88,12 @@ pub enum AgentEvent {
         node_id: String,
         files_created: Vec<String>,
         files_modified: Vec<String>,
+        /// PSP-5 Phase 7: Number of write (new file) operations
+        writes_count: usize,
+        /// PSP-5 Phase 7: Number of diff (patch) operations
+        diffs_count: usize,
+        /// PSP-5 Phase 7: Node class for display context
+        node_class: String,
     },
 
     /// PSP-5 Phase 4: A sensor fell back to an alternative tool
@@ -150,14 +171,43 @@ pub enum AgentEvent {
 /// Node status for TUI display (mirrors NodeState but simplified)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeStatus {
+    /// Queued, waiting for dependencies
+    Queued,
+    /// Planning phase (Architect)
+    Planning,
     Pending,
+    /// Active coding / implementation phase
+    Coding,
     Running,
     Verifying,
     /// PSP-5: Node is retrying after a failed verification
     Retrying,
+    /// PSP-5 Phase 7: Sheaf consistency check underway
+    SheafCheck,
+    /// PSP-5 Phase 7: Committing stable state to ledger
+    Committing,
     Completed,
     Failed,
     Escalated,
+}
+
+impl From<crate::types::NodeState> for NodeStatus {
+    fn from(state: crate::types::NodeState) -> Self {
+        use crate::types::NodeState;
+        match state {
+            NodeState::TaskQueued => NodeStatus::Queued,
+            NodeState::Planning => NodeStatus::Planning,
+            NodeState::Coding => NodeStatus::Coding,
+            NodeState::Verifying => NodeStatus::Verifying,
+            NodeState::Retry => NodeStatus::Retrying,
+            NodeState::SheafCheck => NodeStatus::SheafCheck,
+            NodeState::Committing => NodeStatus::Committing,
+            NodeState::Escalated => NodeStatus::Escalated,
+            NodeState::Completed => NodeStatus::Completed,
+            NodeState::Failed => NodeStatus::Failed,
+            NodeState::Aborted => NodeStatus::Failed,
+        }
+    }
 }
 
 /// Type of action requiring approval
@@ -204,6 +254,11 @@ pub enum AgentAction {
     Resume,
     /// Abort the entire session
     Abort,
+    /// PSP-5 Phase 7: Request correction with structured user feedback
+    RequestCorrection {
+        request_id: String,
+        feedback: String,
+    },
 }
 
 /// Channel types for agent communication

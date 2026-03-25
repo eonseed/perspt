@@ -1568,6 +1568,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         // Step 2: Recursive Sub-graph Execution (already in topo order)
         self.graph[idx].state = NodeState::Coding;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[idx].node_id.clone(),
+            status: perspt_core::NodeStatus::Coding,
+        });
 
         // Step 3: Speculative Generation
         self.step_speculate(idx).await?;
@@ -1624,6 +1628,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
             if !applied {
                 self.graph[idx].state = NodeState::Escalated;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Escalated,
+                });
                 log::warn!(
                     "Node {} escalated to user: {} → {}",
                     self.graph[idx].node_id,
@@ -1962,6 +1970,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         log::info!("Step 4: Verification - Computing stability energy");
 
         self.graph[idx].state = NodeState::Verifying;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[idx].node_id.clone(),
+            status: perspt_core::NodeStatus::Verifying,
+        });
 
         // Calculate energy components
         let mut energy = EnergyComponents::default();
@@ -2130,6 +2142,56 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             energy.total(&node.contract)
         );
 
+        // PSP-5 Phase 7: Emit enriched VerificationComplete event
+        {
+            let node = &self.graph[idx];
+            let total = energy.total(&node.contract);
+            let (stage_outcomes, degraded, degraded_reasons, summary, lint_ok, tests_passed, tests_failed) =
+                if let Some(ref vr) = self.last_verification_result {
+                    (
+                        vr.stage_outcomes.clone(),
+                        vr.degraded,
+                        vr.degraded_stage_reasons(),
+                        vr.summary.clone(),
+                        vr.lint_ok,
+                        vr.tests_passed,
+                        vr.tests_failed,
+                    )
+                } else {
+                    let diag_count = self.context.last_diagnostics.len();
+                    (
+                        Vec::new(),
+                        false,
+                        Vec::new(),
+                        format!(
+                            "V(x)={:.2} | {} diagnostics",
+                            total, diag_count
+                        ),
+                        true,
+                        0,
+                        0,
+                    )
+                };
+
+            self.emit_event(perspt_core::AgentEvent::VerificationComplete {
+                node_id: node.node_id.clone(),
+                syntax_ok: energy.v_syn == 0.0,
+                build_ok: energy.v_syn < 5.0,
+                tests_ok: energy.v_log == 0.0,
+                lint_ok,
+                diagnostics_count: self.context.last_diagnostics.len(),
+                tests_passed,
+                tests_failed,
+                energy: total,
+                energy_components: energy.clone(),
+                stage_outcomes,
+                degraded,
+                degraded_reasons,
+                summary,
+                node_class: node.node_class.to_string(),
+            });
+        }
+
         Ok(energy)
     }
 
@@ -2216,6 +2278,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         // === CORRECTION LOOP ===
         self.graph[idx].state = NodeState::Retry;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[idx].node_id.clone(),
+            status: perspt_core::NodeStatus::Retrying,
+        });
         log::info!(
             "V(x)={:.2} > ε={:.2}, regenerating with feedback (attempt {})",
             total,
@@ -2466,6 +2532,10 @@ File: [same filename]
         log::info!("Step 6: Sheaf Validation - Cross-node consistency check");
 
         self.graph[idx].state = NodeState::SheafCheck;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[idx].node_id.clone(),
+            status: perspt_core::NodeStatus::SheafCheck,
+        });
 
         // Determine which validators to run for this node.
         let validators = self.select_validators(idx);
@@ -2539,6 +2609,10 @@ File: [same filename]
                 for nid in &requeue_targets {
                     if let Some(&nidx) = self.node_indices.get(nid.as_str()) {
                         self.graph[nidx].state = NodeState::TaskQueued;
+                        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                            node_id: self.graph[nidx].node_id.clone(),
+                            status: perspt_core::NodeStatus::Queued,
+                        });
                     }
                 }
             }
@@ -2751,6 +2825,10 @@ File: [same filename]
         log::info!("Step 7: Committing stable state to ledger");
 
         self.graph[idx].state = NodeState::Committing;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[idx].node_id.clone(),
+            status: perspt_core::NodeStatus::Committing,
+        });
 
         // PSP-5 Phase 3: Record context provenance if available
         if let Some(provenance) = self.last_context_provenance.take() {
@@ -2763,6 +2841,10 @@ File: [same filename]
         self.emit_interface_seals(idx);
 
         self.graph[idx].state = NodeState::Completed;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[idx].node_id.clone(),
+            status: perspt_core::NodeStatus::Completed,
+        });
 
         // PSP-5 Phase 6: Unblock dependents that were waiting on this node's seal
         self.unblock_dependents(idx);
@@ -2912,6 +2994,10 @@ File: [same filename]
             RewriteAction::DegradedValidationStop { reason } => {
                 self.emit_log(format!("⛔ Degraded-validation stop: {}", reason));
                 self.graph[idx].state = NodeState::Escalated;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Escalated,
+                });
                 // This is a deliberate stop, not a silent false-stable — mark
                 // it as escalated so the user can decide how to proceed.
                 false
@@ -2933,6 +3019,10 @@ File: [same filename]
                 ));
                 // Reset the node state so the caller's loop can re-execute
                 self.graph[idx].state = NodeState::Retry;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Retrying,
+                });
                 true
             }
             RewriteAction::ContractRepair { fields } => {
@@ -2944,6 +3034,10 @@ File: [same filename]
                 ));
                 // Mark for retry — the next iteration will use the adjusted contract
                 self.graph[idx].state = NodeState::Retry;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Retrying,
+                });
                 true
             }
             RewriteAction::CapabilityPromotion { from_tier, to_tier } => {
@@ -2959,6 +3053,10 @@ File: [same filename]
                 ));
                 self.graph[idx].tier = *to_tier;
                 self.graph[idx].state = NodeState::Retry;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Retrying,
+                });
                 true
             }
             RewriteAction::SensorRecovery { degraded_stages } => {
@@ -2971,6 +3069,10 @@ File: [same filename]
                 // For now, just mark for retry — actual recovery would
                 // re-probe the plugin verifier profile.
                 self.graph[idx].state = NodeState::Retry;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Retrying,
+                });
                 true
             }
             RewriteAction::NodeSplit { proposed_children } => {
@@ -3235,6 +3337,10 @@ File: [same filename]
 
         // Reset the trigger node itself.
         self.graph[trigger_idx].state = NodeState::Retry;
+        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+            node_id: self.graph[trigger_idx].node_id.clone(),
+            status: perspt_core::NodeStatus::Retrying,
+        });
         self.graph[trigger_idx].monitor.reset_for_replan();
         replanned += 1;
 
@@ -3242,6 +3348,10 @@ File: [same filename]
         for nid in affected_nodes {
             if let Some(&nidx) = self.node_indices.get(nid.as_str()) {
                 self.graph[nidx].state = NodeState::TaskQueued;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[nidx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Queued,
+                });
                 self.graph[nidx].monitor.reset_for_replan();
                 replanned += 1;
             } else {
@@ -3541,6 +3651,9 @@ File: [same filename]
             node_id: node_id.to_string(),
             files_created,
             files_modified,
+            writes_count: bundle.writes_count(),
+            diffs_count: bundle.diffs_count(),
+            node_class: node_class.to_string(),
         });
 
         self.last_tool_failure = None;
