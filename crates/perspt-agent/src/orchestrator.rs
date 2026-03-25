@@ -2454,6 +2454,15 @@ File: [same filename]
         // Accumulate V_sheaf and check for failures.
         let total_v_sheaf: f32 = results.iter().map(|r| r.v_sheaf_contribution).sum();
         let failures: Vec<&SheafValidationResult> = results.iter().filter(|r| !r.passed).collect();
+        let failure_count = failures.len();
+
+        // Emit sheaf validation event.
+        self.emit_event(perspt_core::AgentEvent::SheafValidationComplete {
+            node_id: self.graph[idx].node_id.clone(),
+            validators_run: results.len(),
+            failures: failure_count,
+            v_sheaf: total_v_sheaf,
+        });
 
         if !failures.is_empty() {
             let node_id = self.graph[idx].node_id.clone();
@@ -2930,7 +2939,16 @@ File: [same filename]
                     node_id,
                     proposed_children.len()
                 ));
-                self.split_node(idx, proposed_children)
+                let count = proposed_children.len();
+                let applied = self.split_node(idx, proposed_children);
+                if applied {
+                    self.emit_event(perspt_core::AgentEvent::GraphRewriteApplied {
+                        trigger_node: node_id.clone(),
+                        action: "node_split".to_string(),
+                        nodes_affected: count,
+                    });
+                }
+                applied
             }
             RewriteAction::InterfaceInsertion { boundary } => {
                 log::info!("Interface insertion for {}: {}", node_id, boundary);
@@ -2938,16 +2956,33 @@ File: [same filename]
                     "📐 Inserting interface adapter at boundary: {}",
                     boundary
                 ));
-                self.insert_interface_node(idx, boundary)
+                let applied = self.insert_interface_node(idx, boundary);
+                if applied {
+                    self.emit_event(perspt_core::AgentEvent::GraphRewriteApplied {
+                        trigger_node: node_id.clone(),
+                        action: "interface_insertion".to_string(),
+                        nodes_affected: 1,
+                    });
+                }
+                applied
             }
             RewriteAction::SubgraphReplan { affected_nodes } => {
                 log::info!("Subgraph replan for {}: {:?}", node_id, affected_nodes);
+                let count = affected_nodes.len();
                 self.emit_log(format!(
                     "🗺️ Replanning subgraph around {} ({} affected nodes)",
                     node_id,
                     affected_nodes.len()
                 ));
-                self.replan_subgraph(idx, affected_nodes)
+                let applied = self.replan_subgraph(idx, affected_nodes);
+                if applied {
+                    self.emit_event(perspt_core::AgentEvent::GraphRewriteApplied {
+                        trigger_node: node_id.clone(),
+                        action: "subgraph_replan".to_string(),
+                        nodes_affected: count + 1, // trigger + affected
+                    });
+                }
+                applied
             }
         }
     }

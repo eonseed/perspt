@@ -97,6 +97,21 @@ pub enum AgentEvent {
         category: String,
         action: String,
     },
+
+    /// PSP-5 Phase 5: Sheaf validation completed for a node
+    SheafValidationComplete {
+        node_id: String,
+        validators_run: usize,
+        failures: usize,
+        v_sheaf: f32,
+    },
+
+    /// PSP-5 Phase 5: Graph rewrite applied (split, interface insertion, replan)
+    GraphRewriteApplied {
+        trigger_node: String,
+        action: String,
+        nodes_affected: usize,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
