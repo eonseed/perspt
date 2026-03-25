@@ -90,6 +90,13 @@ pub enum AgentEvent {
         degraded_stages: Vec<String>,
         stability_blocked: bool,
     },
+
+    /// PSP-5 Phase 5: Non-convergence classified with a repair action
+    EscalationClassified {
+        node_id: String,
+        category: String,
+        action: String,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
