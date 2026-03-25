@@ -861,17 +861,18 @@ The expected implementation work primarily affects:
 * ``crates/perspt-core/src/types.rs``: define context-package, structural-digest, summary-digest, and restriction-map types.
 * ``crates/perspt-agent/src/ledger.rs`` and ``crates/perspt-store/src/store.rs``: persist structural hashes, semantic summary hashes, and context provenance needed for resume.
 
-**Phase 4: Provider-neutral output contracts and normalization**
+**Phase 4: Provider-neutral output contracts and normalization** *(implemented)*
 
-* ``crates/perspt-core/src/llm_provider.rs``: normalize response envelopes across providers and expose retry and fallback hooks.
-* ``crates/perspt-agent/src/orchestrator.rs``: parse planner and artifact outputs through provider-neutral normalization before validation.
-* ``crates/perspt-agent/src/agent.rs``: define output contracts in provider-neutral language and avoid provider-specific assumptions.
-* ``crates/perspt-cli/src/commands/agent.rs``: allow per-tier fallback models and model capability selection from the CLI.
-* ``crates/perspt-core/src/plugin.rs``: extend the plugin trait to own runtime verification, LSP selection, build and test commands, file ownership rules, and degraded-sensor behavior.
-* ``crates/perspt-agent/src/lsp.rs``: support multi-plugin LSP lifecycle management and per-node diagnostic collection.
-* ``crates/perspt-agent/src/test_runner.rs``: generalize beyond Python so plugins can provide test and build execution semantics.
-* ``crates/perspt-agent/src/orchestrator.rs``: compute verifier stages from active plugin capabilities rather than fixed Python-only logic.
-* ``crates/perspt-agent/src/tools.rs`` and ``crates/perspt-policy/src/sanitize.rs``: formalize command governance, OS-tool execution, and temporary-script approval semantics.
+* ``crates/perspt-core/src/normalize.rs`` *(new)*: provider-neutral JSON extraction from LLM responses with fenced-block, direct-JSON, and embedded-JSON strategies.  Provider-family classification (``ProviderFamily``) and ``NormalizedOutput`` / ``ExtractionMethod`` types.
+* ``crates/perspt-agent/src/orchestrator.rs``: planner and artifact parsing route through ``extract_json`` / ``extract_and_deserialize`` before legacy ``File:``/``Diff:`` fallback.  Per-node plugin selection via ``owner_plugin``, ``lsp_key_for_file`` for plugin-routed diagnostics, and degraded-validation blocking in ``step_converge``.
+* ``crates/perspt-core/src/plugin.rs``: ``VerifierStage``, ``VerifierCapability`` (with ``effective_command`` primary/fallback), ``LspCapability``, ``LspConfig``, and ``VerifierProfile``.  ``RustPlugin``, ``PythonPlugin``, ``JsPlugin`` implement granular verifier and LSP declarations.  ``PluginRegistry::detect_all`` probes host binaries at startup.
+* ``crates/perspt-agent/src/test_runner.rs``: ``TestRunnerTrait`` with ``run_lint`` / ``run_stage``, ``PluginVerifierRunner`` (generic command executor gated by policy sanitisation and workspace-bound checks), and ``test_runner_for_profile`` factory.
+* ``crates/perspt-agent/src/lsp.rs``: ``LspClient::from_config(LspConfig)`` constructor, ``start_with_config``, and ``language_id`` field for multi-plugin LSP lifecycle.
+* ``crates/perspt-core/src/types.rs``: ``SensorStatus`` (Available / Fallback / Unavailable), ``StageOutcome``, and ``VerificationResult::has_degraded_stages`` / ``degraded_stage_reasons`` for runtime degradation tracking.
+* ``crates/perspt-core/src/events.rs``: ``SensorFallback`` and ``DegradedVerification`` event variants.
+* ``crates/perspt-agent/src/tools.rs`` and ``crates/perspt-policy/src/sanitize.rs``: ``validate_workspace_bound`` for path-escape detection; ``run_command`` and ``exec_command`` enforce sanitisation before execution.
+* ``crates/perspt-cli/src/commands/agent.rs``: startup detects active plugins via ``PluginRegistry::detect_all``, reports verifier stages and LSP status, and uses detected plugins for ``start_lsp_for_plugins``.
+* Test coverage: 123 tests across the workspace covering normalization, plugin capabilities, verifier runners, degraded-state propagation, policy rejection, and orchestrator routing.
 
 **Phase 5: Escalation semantics, local graph rewrite, and sheaf validator targeting**
 
