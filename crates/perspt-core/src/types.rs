@@ -2575,4 +2575,146 @@ mod psp5_tests {
         assert!(reasons.iter().any(|r| r.contains("lint")));
         assert!(reasons.iter().any(|r| r.contains("test")));
     }
+
+    // =========================================================================
+    // Phase 5: Escalation, graph rewrite, and sheaf validator types
+    // =========================================================================
+
+    #[test]
+    fn test_escalation_category_display() {
+        assert_eq!(
+            EscalationCategory::ImplementationError.to_string(),
+            "implementation_error"
+        );
+        assert_eq!(
+            EscalationCategory::ContractMismatch.to_string(),
+            "contract_mismatch"
+        );
+        assert_eq!(
+            EscalationCategory::DegradedSensors.to_string(),
+            "degraded_sensors"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_action_grounded_retry() {
+        let action = RewriteAction::GroundedRetry {
+            evidence_summary: "build failed twice".into(),
+        };
+        match action {
+            RewriteAction::GroundedRetry { evidence_summary } => {
+                assert!(evidence_summary.contains("build failed"));
+            }
+            _ => panic!("Expected GroundedRetry"),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_action_node_split() {
+        let action = RewriteAction::NodeSplit {
+            proposed_children: vec!["child_a".into(), "child_b".into()],
+        };
+        match action {
+            RewriteAction::NodeSplit { proposed_children } => {
+                assert_eq!(proposed_children.len(), 2);
+            }
+            _ => panic!("Expected NodeSplit"),
+        }
+    }
+
+    #[test]
+    fn test_sheaf_validator_class_display() {
+        assert_eq!(
+            SheafValidatorClass::DependencyGraphConsistency.to_string(),
+            "dependency_graph"
+        );
+        assert_eq!(
+            SheafValidatorClass::CrossLanguageBoundary.to_string(),
+            "cross_language"
+        );
+    }
+
+    #[test]
+    fn test_sheaf_validation_result_passed() {
+        let result = SheafValidationResult::passed(
+            SheafValidatorClass::DependencyGraphConsistency,
+            vec!["node_1".into()],
+        );
+        assert!(result.passed);
+        assert_eq!(result.v_sheaf_contribution, 0.0);
+        assert!(result.evidence_summary.is_empty());
+        assert!(result.requeue_targets.is_empty());
+    }
+
+    #[test]
+    fn test_sheaf_validation_result_failed() {
+        let result = SheafValidationResult::failed(
+            SheafValidatorClass::ExportImportConsistency,
+            "ownership mismatch on 2 files",
+            vec!["src/a.rs".into(), "src/b.rs".into()],
+            vec!["node_2".into()],
+            0.3,
+        );
+        assert!(!result.passed);
+        assert_eq!(result.v_sheaf_contribution, 0.3);
+        assert!(result.evidence_summary.contains("ownership mismatch"));
+        assert_eq!(result.affected_files.len(), 2);
+        assert_eq!(result.requeue_targets, vec!["node_2"]);
+    }
+
+    #[test]
+    fn test_escalation_report_roundtrip() {
+        let report = EscalationReport {
+            node_id: "test_node".into(),
+            session_id: "sess_1".into(),
+            category: EscalationCategory::TopologyMismatch,
+            action: RewriteAction::InterfaceInsertion {
+                boundary: "module_boundary".into(),
+            },
+            energy_snapshot: EnergyComponents::default(),
+            stage_outcomes: Vec::new(),
+            evidence: "violation at boundary".into(),
+            affected_node_ids: vec!["dep_1".into()],
+            timestamp: 12345,
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let deser: EscalationReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.node_id, "test_node");
+        assert_eq!(deser.category, EscalationCategory::TopologyMismatch);
+        assert_eq!(deser.affected_node_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_stability_monitor_reset_for_replan() {
+        let mut monitor = StabilityMonitor::new();
+        monitor.record_energy(0.8);
+        monitor.record_energy(0.5);
+        monitor.record_failure(ErrorType::Compilation);
+        assert_eq!(monitor.attempt_count, 2);
+
+        monitor.reset_for_replan();
+        assert_eq!(monitor.attempt_count, 0);
+        assert!(!monitor.stable);
+        // History is preserved
+        assert_eq!(monitor.energy_history.len(), 2);
+    }
+
+    #[test]
+    fn test_rewrite_record_serialization() {
+        let record = RewriteRecord {
+            node_id: "n1".into(),
+            session_id: "s1".into(),
+            action: RewriteAction::SubgraphReplan {
+                affected_nodes: vec!["n2".into(), "n3".into()],
+            },
+            category: EscalationCategory::InsufficientModelCapability,
+            requeued_nodes: vec!["n2".into(), "n3".into()],
+            inserted_nodes: Vec::new(),
+            timestamp: 99999,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let deser: RewriteRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.requeued_nodes.len(), 2);
+        assert!(deser.inserted_nodes.is_empty());
+    }
 }

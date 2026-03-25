@@ -3032,6 +3032,9 @@ File: [same filename]
     /// Each proposed child string is treated as a sub-goal description.
     /// Returns `true` if the split was applied successfully.
     fn split_node(&mut self, idx: NodeIndex, proposed_children: &[String]) -> bool {
+        if proposed_children.is_empty() {
+            return false;
+        }
         let parent = self.graph[idx].clone();
         let parent_id = parent.node_id.clone();
 
@@ -3907,5 +3910,142 @@ mod tests {
         // Unknown extension falls back to first available client
         let key = orch.lsp_key_for_file("data.csv");
         assert!(key.is_some()); // Falls back to first available
+    }
+
+    // =========================================================================
+    // Phase 5: Graph rewrite & sheaf validator tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_split_node_creates_children() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut node = SRBNNode::new("parent".into(), "Do everything".into(), ModelTier::Actuator);
+        node.output_targets = vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")];
+        orch.add_node(node);
+
+        let idx = orch.node_indices["parent"];
+        let applied = orch.split_node(idx, &["handle a.rs".into(), "handle b.rs".into()]);
+        assert!(applied);
+        // Parent should be gone
+        assert!(!orch.node_indices.contains_key("parent"));
+        // Two children should exist
+        assert!(orch.node_indices.contains_key("parent__split_0"));
+        assert!(orch.node_indices.contains_key("parent__split_1"));
+    }
+
+    #[tokio::test]
+    async fn test_split_node_empty_children_is_noop() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let node = SRBNNode::new("n".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(node);
+        let idx = orch.node_indices["n"];
+        let applied = orch.split_node(idx, &[]);
+        // Should not apply — return false but not panic
+        assert!(!applied);
+    }
+
+    #[tokio::test]
+    async fn test_insert_interface_node() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let n1 = SRBNNode::new("a".into(), "source".into(), ModelTier::Actuator);
+        let n2 = SRBNNode::new("b".into(), "dest".into(), ModelTier::Actuator);
+        orch.add_node(n1);
+        orch.add_node(n2);
+        orch.add_dependency("a", "b", "data_flow").unwrap();
+
+        let idx_a = orch.node_indices["a"];
+        let applied = orch.insert_interface_node(idx_a, "API boundary");
+        assert!(applied);
+        assert!(orch.node_indices.contains_key("a__iface"));
+        // Should now have 3 nodes
+        assert_eq!(orch.node_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_replan_subgraph_resets_nodes() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut n1 = SRBNNode::new("trigger".into(), "g1".into(), ModelTier::Actuator);
+        n1.state = NodeState::Coding;
+        let mut n2 = SRBNNode::new("dep".into(), "g2".into(), ModelTier::Actuator);
+        n2.state = NodeState::Completed;
+        orch.add_node(n1);
+        orch.add_node(n2);
+
+        let trigger_idx = orch.node_indices["trigger"];
+        let applied = orch.replan_subgraph(trigger_idx, &["dep".into()]);
+        assert!(applied);
+
+        let dep_idx = orch.node_indices["dep"];
+        assert_eq!(orch.graph[dep_idx].state, NodeState::TaskQueued);
+        assert_eq!(orch.graph[trigger_idx].state, NodeState::Retry);
+    }
+
+    #[tokio::test]
+    async fn test_select_validators_always_includes_dependency_graph() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let node = SRBNNode::new("n".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(node);
+        let idx = orch.node_indices["n"];
+
+        let validators = orch.select_validators(idx);
+        assert!(validators.contains(&SheafValidatorClass::DependencyGraphConsistency));
+    }
+
+    #[tokio::test]
+    async fn test_select_validators_interface_node() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut node = SRBNNode::new("iface".into(), "g".into(), ModelTier::Actuator);
+        node.node_class = perspt_core::types::NodeClass::Interface;
+        orch.add_node(node);
+        let idx = orch.node_indices["iface"];
+
+        let validators = orch.select_validators(idx);
+        assert!(validators.contains(&SheafValidatorClass::ExportImportConsistency));
+    }
+
+    #[tokio::test]
+    async fn test_run_sheaf_validator_dependency_graph_no_cycles() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let n1 = SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator);
+        let n2 = SRBNNode::new("b".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(n1);
+        orch.add_node(n2);
+        orch.add_dependency("a", "b", "dep").unwrap();
+
+        let idx = orch.node_indices["a"];
+        let result = orch.run_sheaf_validator(idx, SheafValidatorClass::DependencyGraphConsistency);
+        assert!(result.passed);
+        assert_eq!(result.v_sheaf_contribution, 0.0);
+    }
+
+    #[tokio::test]
+    async fn test_classify_non_convergence_default() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let node = SRBNNode::new("n".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(node);
+        let idx = orch.node_indices["n"];
+
+        // With no verification results or policy failures, should default to ImplementationError
+        let category = orch.classify_non_convergence(idx);
+        assert_eq!(category, EscalationCategory::ImplementationError);
+    }
+
+    #[tokio::test]
+    async fn test_affected_dependents() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let n1 = SRBNNode::new("root".into(), "g".into(), ModelTier::Actuator);
+        let n2 = SRBNNode::new("child1".into(), "g".into(), ModelTier::Actuator);
+        let n3 = SRBNNode::new("child2".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(n1);
+        orch.add_node(n2);
+        orch.add_node(n3);
+        orch.add_dependency("root", "child1", "dep").unwrap();
+        orch.add_dependency("root", "child2", "dep").unwrap();
+
+        let idx = orch.node_indices["root"];
+        let deps = orch.affected_dependents(idx);
+        assert_eq!(deps.len(), 2);
+        assert!(deps.contains(&"child1".to_string()));
+        assert!(deps.contains(&"child2".to_string()));
     }
 }
