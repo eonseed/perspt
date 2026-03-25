@@ -1070,4 +1070,52 @@ test result: ok. 3 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out
         let runner = test_runner_for_profile(custom, PathBuf::from("."));
         assert_eq!(runner.name(), "go");
     }
+
+    #[tokio::test]
+    async fn test_exec_command_rejects_dangerous_pattern() {
+        let profile = make_test_profile(
+            "danger",
+            vec![VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("rm -rf /".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("/tmp"), profile);
+        let result = runner.run_syntax_check().await;
+        // The command should be rejected by policy sanitisation
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_exec_command_rejects_workspace_escape() {
+        let profile = make_test_profile(
+            "escape",
+            vec![VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("cat /etc/passwd".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("/home/user/project"), profile);
+        let result = runner.run_syntax_check().await;
+        // The command references a path outside the workspace
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fallback_command_selected_when_primary_unavailable() {
+        let cap = VerifierCapability {
+            stage: VerifierStage::Test,
+            command: Some("uv run pytest".to_string()),
+            available: false,
+            fallback_command: Some("python -m pytest".to_string()),
+            fallback_available: true,
+        };
+        assert_eq!(cap.effective_command(), Some("python -m pytest"));
+    }
 }

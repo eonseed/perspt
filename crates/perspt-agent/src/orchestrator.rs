@@ -3076,4 +3076,27 @@ mod tests {
 
         assert!(!orch.check_workspace_requirement("calc sum").await); // Short, no project keywords -> STANDALONE
     }
+
+    #[tokio::test]
+    async fn test_lsp_key_for_file_resolves_by_plugin() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        // Insert a dummy LSP client key so the lookup has something to match
+        orch.lsp_clients.insert(
+            "rust".to_string(),
+            crate::lsp::LspClient::new("rust-analyzer"),
+        );
+        orch.lsp_clients
+            .insert("python".to_string(), crate::lsp::LspClient::new("pylsp"));
+
+        // Rust plugin owns .rs files
+        assert_eq!(
+            orch.lsp_key_for_file("src/main.rs"),
+            Some("rust".to_string())
+        );
+        // Python plugin owns .py files
+        assert_eq!(orch.lsp_key_for_file("app.py"), Some("python".to_string()));
+        // Unknown extension falls back to first available client
+        let key = orch.lsp_key_for_file("data.csv");
+        assert!(key.is_some()); // Falls back to first available
+    }
 }

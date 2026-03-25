@@ -2247,6 +2247,48 @@ mod psp5_tests {
         };
         assert!(result.has_degraded_stages());
         let reasons = result.degraded_stage_reasons();
-        assert!(reasons[0].contains("unavailable"));
+        assert!(reasons[0].contains("clippy not installed"));
+    }
+
+    #[test]
+    fn test_verification_result_mixed_stages() {
+        // A realistic result: syntax passed on primary, lint fell back, tests unavailable
+        let result = VerificationResult {
+            syntax_ok: true,
+            tests_ok: false,
+            lint_ok: false,
+            stage_outcomes: vec![
+                StageOutcome {
+                    stage: "syntax_check".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Available,
+                    output: Some("OK".into()),
+                },
+                StageOutcome {
+                    stage: "lint".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Fallback {
+                        actual: "cargo check".into(),
+                        reason: "clippy not found".into(),
+                    },
+                    output: Some("warnings only".into()),
+                },
+                StageOutcome {
+                    stage: "test".into(),
+                    passed: false,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: "no test runner".into(),
+                    },
+                    output: None,
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(result.has_degraded_stages());
+        let reasons = result.degraded_stage_reasons();
+        // Both lint (fallback) and test (unavailable) should be degraded
+        assert_eq!(reasons.len(), 2);
+        assert!(reasons.iter().any(|r| r.contains("lint")));
+        assert!(reasons.iter().any(|r| r.contains("test")));
     }
 }
