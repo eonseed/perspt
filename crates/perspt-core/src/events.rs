@@ -112,6 +112,39 @@ pub enum AgentEvent {
         action: String,
         nodes_affected: usize,
     },
+
+    /// PSP-5 Phase 6: Provisional branch created for speculative child work
+    BranchCreated {
+        branch_id: String,
+        node_id: String,
+        parent_node_id: String,
+    },
+
+    /// PSP-5 Phase 6: Interface sealed for a node (dependents may proceed)
+    InterfaceSealed {
+        node_id: String,
+        sealed_paths: Vec<String>,
+        seal_hash: String,
+    },
+
+    /// PSP-5 Phase 6: Provisional branches flushed due to parent failure
+    BranchFlushed {
+        parent_node_id: String,
+        flushed_branch_ids: Vec<String>,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 6: Blocked dependent unblocked after parent seal
+    DependentUnblocked {
+        child_node_id: String,
+        parent_node_id: String,
+    },
+
+    /// PSP-5 Phase 6: Provisional branch merged into committed state
+    BranchMerged {
+        branch_id: String,
+        node_id: String,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
