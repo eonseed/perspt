@@ -56,21 +56,59 @@ pub async fn run() -> Result<()> {
             .filter(|n| n.state == "RUNNING" || n.state == "Coding" || n.state == "Verifying")
             .count();
         let failed = node_states.iter().filter(|n| n.state == "FAILED").count();
+        let queued = node_states.iter().filter(|n| n.state == "Queued" || n.state == "QUEUED").count();
+        let retrying = node_states.iter().filter(|n| n.state == "Retrying" || n.state == "RETRYING").count();
+        let escalated = node_states.iter().filter(|n| n.state == "Escalated" || n.state == "ESCALATED").count();
 
         println!();
-        println!("📊 Node Progress:");
+        println!("📊 Node Lifecycle:");
         println!("   Total:       {}", node_states.len());
         println!("   ✅ Completed: {}", completed);
+        if queued > 0 {
+            println!("   ◇  Queued:    {}", queued);
+        }
         if running > 0 {
             println!("   🔄 Running:   {}", running);
+        }
+        if retrying > 0 {
+            println!("   ↻  Retrying:  {}", retrying);
         }
         if failed > 0 {
             println!("   ❌ Failed:    {}", failed);
         }
+        if escalated > 0 {
+            println!("   ⚠️  Escalated: {}", escalated);
+        }
 
-        // Get latest energy
+        // PSP-5 Phase 7: Energy component breakdown from latest node
         if let Some(latest) = node_states.last() {
             println!("   ⚡ Energy:    V(x) = {:.3}", latest.v_total);
+            // Try to get energy component detail
+            if let Ok(energy_history) = store.get_energy_history(&session.session_id, &latest.node_id) {
+                if let Some(last_energy) = energy_history.last() {
+                    println!("   Components:  syn={:.2} str={:.2} log={:.2} boot={:.2} sheaf={:.2}",
+                        last_energy.v_syn, last_energy.v_str, last_energy.v_log,
+                        last_energy.v_boot, last_energy.v_sheaf);
+                }
+            }
+            // Retry info
+            let total_retries: i32 = node_states.iter().map(|n| n.attempt_count.max(0)).sum();
+            if total_retries > 0 {
+                println!("   ↻ Retries:   {} total across all nodes", total_retries);
+            }
+        }
+    }
+
+    // PSP-5 Phase 7: Escalation reports
+    let escalations = store.get_escalation_reports(&session.session_id)?;
+    if !escalations.is_empty() {
+        println!();
+        println!("⚠️  Escalations ({}):", escalations.len());
+        for esc in escalations.iter().take(3) {
+            println!("   {} → {} ({})", esc.node_id, esc.category, esc.action);
+        }
+        if escalations.len() > 3 {
+            println!("   ... and {} more", escalations.len() - 3);
         }
     }
 

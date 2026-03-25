@@ -190,6 +190,46 @@ pub async fn run(
                 println!();
                 println!("✅ Task completed successfully!");
                 println!("   Nodes processed: {}", orchestrator.node_count());
+
+                // PSP-5 Phase 7: Structured headless summary
+                let sid = orchestrator.session_id().to_string();
+                if let Ok(store) = perspt_store::SessionStore::new() {
+                    // VERIFY summary
+                    if let Ok(nodes) = store.get_node_states(&sid) {
+                        let completed = nodes.iter().filter(|n| n.state == "COMPLETED" || n.state == "STABLE").count();
+                        let failed = nodes.iter().filter(|n| n.state == "FAILED").count();
+                        let retries: i32 = nodes.iter().map(|n| n.attempt_count.max(0)).sum();
+                        println!();
+                        println!("[VERIFY] {}/{} nodes completed, {} failed, {} retries",
+                            completed, nodes.len(), failed, retries);
+
+                        // ENERGY summary from latest node
+                        if let Some(latest) = nodes.last() {
+                            if let Ok(history) = store.get_energy_history(&sid, &latest.node_id) {
+                                if let Some(e) = history.last() {
+                                    println!("[ENERGY] V(x)={:.3} syn={:.2} str={:.2} log={:.2} boot={:.2} sheaf={:.2}",
+                                        e.v_total, e.v_syn, e.v_str, e.v_log, e.v_boot, e.v_sheaf);
+                                }
+                            }
+                        }
+                    }
+                    // Escalation summary
+                    if let Ok(escalations) = store.get_escalation_reports(&sid) {
+                        if !escalations.is_empty() {
+                            println!("[ESCALATE] {} escalation(s) recorded", escalations.len());
+                        }
+                    }
+                    // Branch summary
+                    if let Ok(branches) = store.get_provisional_branches(&sid) {
+                        if !branches.is_empty() {
+                            let merged = branches.iter().filter(|b| b.state == "merged").count();
+                            let flushed = branches.iter().filter(|b| b.state == "flushed").count();
+                            println!("[BRANCH] {} total, {} merged, {} flushed",
+                                branches.len(), merged, flushed);
+                        }
+                    }
+                    println!("[COMMIT] Session {} complete", &sid[..sid.len().min(16)]);
+                }
             }
             Err(e) => {
                 println!();
