@@ -18,6 +18,7 @@ pub enum TaskStatus {
     Pending,
     Running,
     Verifying,
+    Retrying,
     Completed,
     Failed,
     Escalated,
@@ -29,6 +30,7 @@ impl TaskStatus {
             TaskStatus::Pending => "○",
             TaskStatus::Running => "◐",
             TaskStatus::Verifying => "◑",
+            TaskStatus::Retrying => "↻",
             TaskStatus::Completed => "●",
             TaskStatus::Failed => "✗",
             TaskStatus::Escalated => "⚠",
@@ -40,6 +42,7 @@ impl TaskStatus {
             TaskStatus::Pending => Color::Rgb(120, 144, 156), // Gray
             TaskStatus::Running => Color::Rgb(255, 183, 77),  // Amber
             TaskStatus::Verifying => Color::Rgb(129, 212, 250), // Light blue
+            TaskStatus::Retrying => Color::Rgb(255, 152, 0),  // Orange
             TaskStatus::Completed => Color::Rgb(102, 187, 106), // Green
             TaskStatus::Failed => Color::Rgb(239, 83, 80),    // Red
             TaskStatus::Escalated => Color::Rgb(186, 104, 200), // Purple
@@ -53,6 +56,7 @@ impl From<perspt_core::NodeStatus> for TaskStatus {
             perspt_core::NodeStatus::Pending => TaskStatus::Pending,
             perspt_core::NodeStatus::Running => TaskStatus::Running,
             perspt_core::NodeStatus::Verifying => TaskStatus::Verifying,
+            perspt_core::NodeStatus::Retrying => TaskStatus::Retrying,
             perspt_core::NodeStatus::Completed => TaskStatus::Completed,
             perspt_core::NodeStatus::Failed => TaskStatus::Failed,
             perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,

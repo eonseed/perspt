@@ -274,17 +274,45 @@ impl SRBNOrchestrator {
             self.emit_log("📝 LLM request logging enabled".to_string());
         }
 
-        // Decide: Solo Mode (single file) vs Team Mode (full DAG)
-        if self.should_use_solo_mode(&task).await {
+        // PSP-5: Detect execution mode (Project is default, Solo only on explicit keywords)
+        let execution_mode = self.detect_execution_mode(&task);
+        self.context.execution_mode = execution_mode;
+        self.emit_log(format!("🎯 Execution mode: {}", execution_mode));
+
+        if execution_mode == perspt_core::types::ExecutionMode::Solo {
             // Solo Mode: Single-file execution without DAG
-            log::info!("Using Solo Mode for simple task");
+            log::info!("Using Solo Mode for explicit single-file task");
             self.emit_log("⚡ Solo Mode: Single-file execution".to_string());
             return self.run_solo_mode(task).await;
+        }
+
+        // PSP-5: Detect active plugins before project init
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let active_plugins: Vec<String> = registry
+            .detect_all(&self.context.working_dir)
+            .iter()
+            .map(|p| p.name().to_string())
+            .collect();
+        self.context.active_plugins = active_plugins.clone();
+
+        if !active_plugins.is_empty() {
+            self.emit_log(format!(
+                "🔌 Detected plugins: {}",
+                active_plugins.join(", ")
+            ));
         }
 
         // Team Mode: Full project initialization and DAG sheafification
         self.step_init_project(&task).await?;
         self.step_sheafify(task).await?;
+
+        // PSP-5: Emit PlanReady event after sheafification
+        let node_count = self.graph.node_count();
+        self.emit_event(perspt_core::AgentEvent::PlanReady {
+            nodes: node_count,
+            plugins: self.context.active_plugins.clone(),
+            execution_mode: execution_mode.to_string(),
+        });
 
         // Emit task nodes to TUI after sheafification
         for node_id in self.node_indices.keys() {
@@ -304,9 +332,14 @@ impl SRBNOrchestrator {
         let total_nodes = indices.len();
 
         for (i, idx) in indices.iter().enumerate() {
-            // Emit running status
+            // PSP-5: Emit NodeSelected event before execution
             if let Some(node) = self.graph.node_weight(*idx) {
                 self.emit_log(format!("📝 [{}/{}] {}", i + 1, total_nodes, node.goal));
+                self.emit_event(perspt_core::AgentEvent::NodeSelected {
+                    node_id: node.node_id.clone(),
+                    goal: node.goal.clone(),
+                    node_class: "implementation".to_string(),
+                });
                 self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                     node_id: node.node_id.clone(),
                     status: perspt_core::NodeStatus::Running,
@@ -494,61 +527,37 @@ impl SRBNOrchestrator {
 
     /// Determine if Solo Mode should be used for this task
     /// Solo Mode is for simple single-file tasks that don't need project scaffolding
-    async fn should_use_solo_mode(&self, task: &str) -> bool {
+    /// PSP-5: Detect execution mode from task description
+    ///
+    /// Project mode is the DEFAULT. Solo mode only activates on explicit
+    /// single-file intent keywords or via the `--single-file` CLI flag.
+    fn detect_execution_mode(&self, task: &str) -> perspt_core::types::ExecutionMode {
+        // If execution mode was set explicitly (e.g., CLI flag), honor it
+        if self.context.execution_mode != perspt_core::types::ExecutionMode::Project {
+            return self.context.execution_mode;
+        }
+
         let task_lower = task.to_lowercase();
 
-        // Keywords that suggest multi-file project (use Team Mode)
-        let project_keywords = [
-            "project",
-            "app",
-            "application",
-            "web server",
-            "api",
-            "database",
-            "crud",
-            "module",
-            "package",
-            "library",
-            "framework",
-            "microservice",
-        ];
-        if project_keywords.iter().any(|&k| task_lower.contains(k)) {
-            log::debug!("Task contains project keyword, using Team Mode");
-            return false;
-        }
-
-        // Keywords that strongly suggest single file (use Solo Mode)
-        let single_file_keywords = [
-            "script",
+        // Only these explicit keywords trigger Solo mode
+        let solo_keywords = [
             "single file",
+            "single-file",
             "snippet",
-            "function",
-            "calculate",
-            "compute",
-            "print",
-            "hello world",
-            "fibonacci",
-            "factorial",
-            "sort",
-            "search",
-            "parse",
-            "convert",
-            "simple",
+            "standalone script",
+            "standalone file",
+            "one file only",
+            "just a file",
         ];
-        if single_file_keywords.iter().any(|&k| task_lower.contains(k)) {
-            log::debug!("Task contains single-file keyword, using Solo Mode");
-            return true;
+
+        if solo_keywords.iter().any(|&k| task_lower.contains(k)) {
+            log::debug!("Task contains explicit solo keyword, using Solo Mode");
+            return perspt_core::types::ExecutionMode::Solo;
         }
 
-        // Short tasks are typically single files
-        if task.len() < 80 {
-            log::debug!("Task is short ({}), using Solo Mode", task.len());
-            return true;
-        }
-
-        // Default to Team Mode for ambiguous cases
-        log::debug!("Ambiguous task, defaulting to Team Mode");
-        false
+        // Default: Project mode for everything else
+        log::debug!("Defaulting to Project Mode (PSP-5)");
+        perspt_core::types::ExecutionMode::Project
     }
 
     /// Run Solo Mode: A tight loop for single-file tasks
@@ -1170,7 +1179,7 @@ Project name:"#,
                                 MAX_ATTEMPTS
                             ));
                             // Fall back to single-task execution
-                            return self.create_fallback_task(&task);
+                            return self.create_deterministic_fallback_graph(&task);
                         }
                         continue;
                     }
@@ -1206,14 +1215,14 @@ Project name:"#,
                         self.emit_log(
                             "⚠️ Could not parse structured plan, using single task".to_string(),
                         );
-                        return self.create_fallback_task(&task);
+                        return self.create_deterministic_fallback_graph(&task);
                     }
                 }
             }
         }
 
         // Should not reach here
-        self.create_fallback_task(&task)
+        self.create_deterministic_fallback_graph(&task)
     }
 
     /// Build the Architect prompt requesting structured JSON output
@@ -1472,31 +1481,6 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         Ok(())
     }
 
-    /// Create a fallback single-task execution when plan parsing fails
-    /// Create a fallback single-task execution when plan parsing fails
-    fn create_fallback_task(&mut self, task: &str) -> Result<()> {
-        log::warn!("Using fallback single-task execution");
-        self.emit_log("📝 Using simplified single-task execution");
-
-        // Emit minimal plan
-        let mut plan = perspt_core::types::TaskPlan::new();
-        plan.tasks.push(perspt_core::types::PlannedTask {
-            id: "root".to_string(),
-            goal: task.to_string(),
-            context_files: vec![],
-            output_files: vec![],
-            dependencies: vec![],
-            task_type: perspt_core::types::TaskType::Code,
-            contract: Default::default(),
-            command_contract: None,
-        });
-        self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan));
-
-        let root_node = SRBNNode::new("root".to_string(), task.to_string(), ModelTier::Actuator);
-        self.add_node(root_node);
-
-        Ok(())
-    }
 
     /// Get the Architect model name
     fn get_architect_model(&self) -> String {
@@ -2318,7 +2302,437 @@ File: [same filename]
 
         Ok(())
     }
+
+    // =========================================================================
+    // PSP-000005: Multi-Artifact Bundle Parsing & Application
+    // =========================================================================
+
+    /// PSP-5: Parse an artifact bundle from LLM response
+    ///
+    /// Tries structured JSON bundle first, falls back to legacy `File:`/`Diff:` extraction.
+    /// Returns None if no artifacts could be extracted.
+    pub fn parse_artifact_bundle(
+        &self,
+        content: &str,
+    ) -> Option<perspt_core::types::ArtifactBundle> {
+        // Try structured JSON bundle first
+        if let Some(bundle) = self.try_parse_json_bundle(content) {
+            if let Ok(()) = bundle.validate() {
+                log::info!(
+                    "Parsed structured artifact bundle: {} artifacts",
+                    bundle.len()
+                );
+                return Some(bundle);
+            } else {
+                log::warn!("JSON bundle found but failed validation, falling back to legacy");
+            }
+        }
+
+        // Fall back to legacy File:/Diff: extraction
+        if let Some((filename, code, is_diff)) = self.extract_code_from_response(content) {
+            let op = if is_diff {
+                perspt_core::types::ArtifactOperation::Diff {
+                    path: filename,
+                    patch: code,
+                }
+            } else {
+                perspt_core::types::ArtifactOperation::Write {
+                    path: filename,
+                    content: code,
+                }
+            };
+            let bundle = perspt_core::types::ArtifactBundle {
+                artifacts: vec![op],
+                commands: vec![],
+            };
+            log::info!("Constructed single-artifact bundle from legacy extraction");
+            return Some(bundle);
+        }
+
+        None
+    }
+
+    /// Try to parse a JSON artifact bundle from content
+    fn try_parse_json_bundle(
+        &self,
+        content: &str,
+    ) -> Option<perspt_core::types::ArtifactBundle> {
+        // Try to find JSON in markdown code blocks
+        let json_str = if let Some(start) = content.find("```json") {
+            let start = start + 7;
+            if let Some(end_offset) = content[start..].find("```") {
+                Some(content[start..start + end_offset].trim())
+            } else {
+                None
+            }
+        } else if content.trim().starts_with('{') {
+            Some(content.trim())
+        } else if let Some(start) = content.find('{') {
+            if let Some(end) = content.rfind('}') {
+                Some(&content[start..=end])
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let json_str = json_str?;
+
+        // Try to parse as ArtifactBundle
+        match serde_json::from_str::<perspt_core::types::ArtifactBundle>(json_str) {
+            Ok(bundle) => Some(bundle),
+            Err(e) => {
+                log::debug!("JSON is not an ArtifactBundle: {}", e);
+                None
+            }
+        }
+    }
+
+    /// PSP-5: Apply an artifact bundle transactionally
+    ///
+    /// All file operations are validated first, then applied.
+    /// If any operation fails, the method returns an error describing which operation
+    /// failed, and previous successful operations are logged for manual review.
+    pub async fn apply_bundle_transactionally(
+        &mut self,
+        bundle: &perspt_core::types::ArtifactBundle,
+        node_id: &str,
+    ) -> Result<()> {
+        // Validate first
+        bundle.validate().map_err(|e| anyhow::anyhow!(e))?;
+
+        let mut files_created: Vec<String> = Vec::new();
+        let mut files_modified: Vec<String> = Vec::new();
+
+        for op in &bundle.artifacts {
+            let mut args = HashMap::new();
+            args.insert("path".to_string(), op.path().to_string());
+
+            let call = match op {
+                perspt_core::types::ArtifactOperation::Write { content, .. } => {
+                    args.insert("content".to_string(), content.clone());
+                    ToolCall {
+                        name: "write_file".to_string(),
+                        arguments: args,
+                    }
+                }
+                perspt_core::types::ArtifactOperation::Diff { patch, .. } => {
+                    args.insert("diff".to_string(), patch.clone());
+                    ToolCall {
+                        name: "apply_diff".to_string(),
+                        arguments: args,
+                    }
+                }
+            };
+
+            let result = self.tools.execute(&call).await;
+            if result.success {
+                let full_path = self.context.working_dir.join(op.path());
+
+                if op.is_write() {
+                    files_created.push(op.path().to_string());
+                } else {
+                    files_modified.push(op.path().to_string());
+                }
+
+                // Track for LSP notification
+                self.last_written_file = Some(full_path.clone());
+                self.file_version += 1;
+
+                // Notify LSP of file change
+                for (lang, client) in self.lsp_clients.iter_mut() {
+                    // Only notify if the file extension matches the LSP language
+                    let should_notify = match lang.as_str() {
+                        "python" => op.path().ends_with(".py"),
+                        "rust" => op.path().ends_with(".rs"),
+                        _ => true,
+                    };
+                    if should_notify {
+                        if let Ok(content) = std::fs::read_to_string(&full_path) {
+                            let _ = client.did_change(&full_path, &content, self.file_version).await;
+                        }
+                    }
+                }
+
+                log::info!("✓ Applied: {}", op.path());
+                self.emit_log(format!("✅ Applied: {}", op.path()));
+            } else {
+                log::warn!("Failed to apply {}: {:?}", op.path(), result.error);
+                self.emit_log(format!("❌ Failed: {} - {:?}", op.path(), result.error));
+                self.last_tool_failure = result.error.clone();
+                return Err(anyhow::anyhow!(
+                    "Bundle application failed at {}: {:?}",
+                    op.path(),
+                    result.error
+                ));
+            }
+        }
+
+        // Emit BundleApplied event
+        self.emit_event(perspt_core::AgentEvent::BundleApplied {
+            node_id: node_id.to_string(),
+            files_created,
+            files_modified,
+        });
+
+        self.last_tool_failure = None;
+        Ok(())
+    }
+
+    /// PSP-5: Create a deterministic fallback execution graph
+    ///
+    /// When the Architect fails to produce a valid JSON plan after MAX_ATTEMPTS,
+    /// this creates a minimal 3-node graph: scaffold → implement → test.
+    fn create_deterministic_fallback_graph(&mut self, task: &str) -> Result<()> {
+        log::warn!("Using deterministic fallback graph (PSP-5)");
+        self.emit_log("📦 Using deterministic fallback plan");
+
+        // Emit FallbackPlanner event
+        self.emit_event(perspt_core::AgentEvent::FallbackPlanner {
+            reason: "Architect failed to produce valid JSON plan".to_string(),
+        });
+
+        // Detect language for file extensions
+        let lang = self.detect_language_from_task(task).unwrap_or("python");
+        let ext = match lang {
+            "rust" => "rs",
+            "javascript" => "js",
+            _ => "py",
+        };
+
+        // Determine file names based on language
+        let (main_file, test_file) = match lang {
+            "rust" => ("src/main.rs".to_string(), "tests/integration_test.rs".to_string()),
+            "javascript" => ("index.js".to_string(), "test/index.test.js".to_string()),
+            _ => ("main.py".to_string(), format!("tests/test_main.{}", ext)),
+        };
+
+        // Node 1: Scaffold/structure
+        let scaffold_task = perspt_core::types::PlannedTask {
+            id: "scaffold".to_string(),
+            goal: format!("Set up project structure for: {}", task),
+            context_files: vec![],
+            output_files: vec![main_file.clone()],
+            dependencies: vec![],
+            task_type: perspt_core::types::TaskType::Code,
+            contract: Default::default(),
+            command_contract: None,
+            node_class: perspt_core::types::NodeClass::Interface,
+        };
+
+        // Node 2: Core implementation
+        let impl_task = perspt_core::types::PlannedTask {
+            id: "implement".to_string(),
+            goal: format!("Implement core logic for: {}", task),
+            context_files: vec![main_file.clone()],
+            output_files: vec![main_file],
+            dependencies: vec!["scaffold".to_string()],
+            task_type: perspt_core::types::TaskType::Code,
+            contract: Default::default(),
+            command_contract: None,
+            node_class: perspt_core::types::NodeClass::Implementation,
+        };
+
+        // Node 3: Tests
+        let test_task = perspt_core::types::PlannedTask {
+            id: "test".to_string(),
+            goal: format!("Write tests for: {}", task),
+            context_files: vec![],
+            output_files: vec![test_file],
+            dependencies: vec!["implement".to_string()],
+            task_type: perspt_core::types::TaskType::UnitTest,
+            contract: Default::default(),
+            command_contract: None,
+            node_class: perspt_core::types::NodeClass::Integration,
+        };
+
+        // Build plan and emit
+        let mut plan = perspt_core::types::TaskPlan::new();
+        plan.tasks.push(scaffold_task);
+        plan.tasks.push(impl_task);
+        plan.tasks.push(test_task);
+
+        self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan.clone()));
+        self.create_nodes_from_plan(&plan)?;
+
+        Ok(())
+    }
+
+    /// PSP-5: Run plugin-driven verification for a node
+    ///
+    /// Uses the active language plugin's commands for syntax check, build, test,
+    /// and lint instead of hardcoded Python verification.
+    pub async fn run_plugin_verification(
+        &mut self,
+        plugin_name: &str,
+    ) -> perspt_core::types::VerificationResult {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let plugin = match registry.get(plugin_name) {
+            Some(p) => p,
+            None => {
+                return perspt_core::types::VerificationResult::degraded(format!(
+                    "Plugin '{}' not found",
+                    plugin_name
+                ));
+            }
+        };
+
+        // Check if tools are available
+        if !plugin.host_tool_available() {
+            return perspt_core::types::VerificationResult::degraded(format!(
+                "{} toolchain not available on host",
+                plugin.name()
+            ));
+        }
+
+        let mut result = perspt_core::types::VerificationResult::default();
+        let working_dir = self.context.working_dir.clone();
+
+        // Run syntax check
+        if let Some(cmd) = plugin.syntax_check_command() {
+            let output = tokio::process::Command::new("sh")
+                .args(["-c", &cmd])
+                .current_dir(&working_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+
+            match output {
+                Ok(out) => {
+                    result.syntax_ok = out.status.success();
+                    if !result.syntax_ok {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        result.diagnostics_count = stderr.lines().count();
+                        result.raw_output = Some(stderr.to_string());
+                        self.emit_log(format!(
+                            "⚠️ Syntax check failed ({} diagnostics)",
+                            result.diagnostics_count
+                        ));
+                    } else {
+                        result.syntax_ok = true;
+                        self.emit_log("✅ Syntax check passed".to_string());
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Syntax check command failed to run: {}", e);
+                    result.syntax_ok = false;
+                }
+            }
+        } else {
+            result.syntax_ok = true; // No syntax check available, assume ok
+        }
+
+        // Run build check
+        if let Some(cmd) = plugin.build_command() {
+            let output = tokio::process::Command::new("sh")
+                .args(["-c", &cmd])
+                .current_dir(&working_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+
+            match output {
+                Ok(out) => {
+                    result.build_ok = out.status.success();
+                    if !result.build_ok {
+                        self.emit_log("⚠️ Build failed".to_string());
+                    } else {
+                        self.emit_log("✅ Build passed".to_string());
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Build command failed to run: {}", e);
+                    result.build_ok = false;
+                }
+            }
+        } else {
+            result.build_ok = true; // No build step, assume ok
+        }
+
+        // Run tests
+        let test_cmd = plugin.test_command();
+        let output = tokio::process::Command::new("sh")
+            .args(["-c", &test_cmd])
+            .current_dir(&working_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .await;
+
+        match output {
+            Ok(out) => {
+                result.tests_ok = out.status.success();
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                // Simple heuristic to count tests
+                let passed = stdout.matches("passed").count() + stdout.matches("ok").count();
+                let failed = stdout.matches("failed").count() + stdout.matches("FAILED").count();
+                result.tests_passed = passed;
+                result.tests_failed = failed;
+
+                if result.tests_ok {
+                    self.emit_log(format!("✅ Tests passed ({})", plugin.name()));
+                } else {
+                    self.emit_log(format!("❌ Tests failed ({})", plugin.name()));
+                    result.raw_output = Some(format!(
+                        "{}\n{}",
+                        stdout,
+                        String::from_utf8_lossy(&out.stderr)
+                    ));
+                }
+            }
+            Err(e) => {
+                log::warn!("Test command failed to run: {}", e);
+                result.tests_ok = false;
+            }
+        }
+
+        // Run lint (only in Strict mode)
+        if self.context.verifier_strictness == perspt_core::types::VerifierStrictness::Strict {
+            if let Some(cmd) = plugin.lint_command() {
+                let output = tokio::process::Command::new("sh")
+                    .args(["-c", &cmd])
+                    .current_dir(&working_dir)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(out) => {
+                        result.lint_ok = out.status.success();
+                        if result.lint_ok {
+                            self.emit_log("✅ Lint passed".to_string());
+                        } else {
+                            self.emit_log("⚠️ Lint issues found".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Lint command failed to run: {}", e);
+                        result.lint_ok = false;
+                    }
+                }
+            }
+        } else {
+            result.lint_ok = true; // Skip lint in non-strict mode
+        }
+
+        // Build summary
+        result.summary = format!(
+            "{}: syntax={}, build={}, tests={}, lint={}",
+            plugin.name(),
+            if result.syntax_ok { "✅" } else { "❌" },
+            if result.build_ok { "✅" } else { "❌" },
+            if result.tests_ok { "✅" } else { "❌" },
+            if result.lint_ok { "✅" } else { "⏭️" },
+        );
+
+        result
+    }
 }
+
 
 /// Convert diagnostic severity to string
 fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static str {

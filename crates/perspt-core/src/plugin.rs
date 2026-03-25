@@ -2,6 +2,8 @@
 //!
 //! Provides a trait-based plugin system for polyglot support.
 //! Each language (Rust, Python, JS, etc.) implements this trait.
+//!
+//! PSP-000005 expands plugins from init-only to full runtime verification contracts.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -45,6 +47,9 @@ pub enum ProjectAction {
 }
 
 /// A plugin for a specific programming language
+///
+/// PSP-5 expands this trait beyond init/test/run to a full capability-based
+/// runtime contract that governs detection, verification, LSP, and ownership.
 pub trait LanguagePlugin: Send + Sync {
     /// Name of the language
     fn name(&self) -> &str;
@@ -97,6 +102,51 @@ pub trait LanguagePlugin: Send + Sync {
 
     /// Get the command to run the project (for verification)
     fn run_command(&self) -> String;
+
+    // =========================================================================
+    // PSP-5: Capability-Based Runtime Contract
+    // =========================================================================
+
+    /// Get the syntax/type check command (e.g., `cargo check`, `uv run ty check .`)
+    ///
+    /// Returns None if the plugin has no syntax check command (uses LSP only).
+    fn syntax_check_command(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the build command (e.g., `cargo build`, `npm run build`)
+    ///
+    /// Returns None if the language doesn't have a separate build step.
+    fn build_command(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the lint command (e.g., `cargo clippy -- -D warnings`)
+    ///
+    /// Used only in VerifierStrictness::Strict mode.
+    fn lint_command(&self) -> Option<String> {
+        None
+    }
+
+    /// File glob patterns this plugin owns (e.g., `["*.rs", "Cargo.toml"]`)
+    ///
+    /// Used for node ownership matching in multi-language repos.
+    fn file_ownership_patterns(&self) -> &[&str] {
+        self.extensions()
+    }
+
+    /// Check if the host has the required build tools available
+    ///
+    /// Returns true if the plugin's primary toolchain is installed and callable.
+    /// When false, the runtime enters degraded-validation mode.
+    fn host_tool_available(&self) -> bool {
+        true
+    }
+
+    /// Get fallback LSP config when primary is unavailable
+    fn lsp_fallback(&self) -> Option<LspConfig> {
+        None
+    }
 }
 
 /// Rust language plugin
@@ -161,6 +211,34 @@ impl LanguagePlugin for RustPlugin {
 
     fn run_command(&self) -> String {
         "cargo run".to_string()
+    }
+
+    // PSP-5 capability methods
+
+    fn syntax_check_command(&self) -> Option<String> {
+        Some("cargo check".to_string())
+    }
+
+    fn build_command(&self) -> Option<String> {
+        Some("cargo build".to_string())
+    }
+
+    fn lint_command(&self) -> Option<String> {
+        Some("cargo clippy -- -D warnings".to_string())
+    }
+
+    fn file_ownership_patterns(&self) -> &[&str] {
+        &["rs"]
+    }
+
+    fn host_tool_available(&self) -> bool {
+        std::process::Command::new("cargo")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 }
 
@@ -265,6 +343,38 @@ impl LanguagePlugin for PythonPlugin {
     fn run_command(&self) -> String {
         "uv run python -m main".to_string()
     }
+
+    // PSP-5 capability methods
+
+    fn syntax_check_command(&self) -> Option<String> {
+        Some("uv run ty check .".to_string())
+    }
+
+    fn lint_command(&self) -> Option<String> {
+        Some("uv run ruff check .".to_string())
+    }
+
+    fn file_ownership_patterns(&self) -> &[&str] {
+        &["py"]
+    }
+
+    fn host_tool_available(&self) -> bool {
+        std::process::Command::new("uv")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    fn lsp_fallback(&self) -> Option<LspConfig> {
+        Some(LspConfig {
+            server_binary: "pyright-langserver".to_string(),
+            args: vec!["--stdio".to_string()],
+            language_id: "python".to_string(),
+        })
+    }
 }
 
 /// JavaScript/TypeScript language plugin
@@ -353,6 +463,34 @@ impl LanguagePlugin for JsPlugin {
     fn run_command(&self) -> String {
         "npm start".to_string()
     }
+
+    // PSP-5 capability methods
+
+    fn syntax_check_command(&self) -> Option<String> {
+        Some("npx tsc --noEmit".to_string())
+    }
+
+    fn build_command(&self) -> Option<String> {
+        Some("npm run build".to_string())
+    }
+
+    fn lint_command(&self) -> Option<String> {
+        Some("npx eslint .".to_string())
+    }
+
+    fn file_ownership_patterns(&self) -> &[&str] {
+        &["js", "ts", "jsx", "tsx"]
+    }
+
+    fn host_tool_available(&self) -> bool {
+        std::process::Command::new("node")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 /// Plugin registry for dynamic language detection
@@ -372,12 +510,24 @@ impl PluginRegistry {
         }
     }
 
-    /// Detect which plugin should handle the given path
+    /// Detect which plugin should handle the given path (first match)
     pub fn detect(&self, path: &Path) -> Option<&dyn LanguagePlugin> {
         self.plugins
             .iter()
             .find(|p| p.detect(path))
             .map(|p| p.as_ref())
+    }
+
+    /// PSP-5: Detect ALL plugins that match the given path (polyglot support)
+    ///
+    /// Returns all matching plugins instead of just the first, enabling
+    /// multi-language verification in polyglot repositories.
+    pub fn detect_all(&self, path: &Path) -> Vec<&dyn LanguagePlugin> {
+        self.plugins
+            .iter()
+            .filter(|p| p.detect(path))
+            .map(|p| p.as_ref())
+            .collect()
     }
 
     /// Get a plugin by name
