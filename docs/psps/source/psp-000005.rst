@@ -876,9 +876,14 @@ The expected implementation work primarily affects:
 
 **Phase 5: Escalation semantics, local graph rewrite, and sheaf validator targeting**
 
-* ``crates/perspt-agent/src/orchestrator.rs``: classify non-convergence, perform local graph rewrite, and target requeues to the affected node set.
-* ``crates/perspt-core/src/types.rs``: define escalation categories, rewrite actions, and degraded-validation states.
-* ``crates/perspt-agent/src/ledger.rs`` and ``crates/perspt-store/src/store.rs``: persist escalation evidence, rewrite lineage, and validator targeting metadata.
+* ``crates/perspt-core/src/types.rs``: ``EscalationCategory`` (5 variants), ``RewriteAction`` (9 variants with structured payloads), ``SheafValidatorClass`` (7 validator types), ``SheafValidationResult`` (passed/failed constructors with V_sheaf contribution), ``EscalationReport``, ``RewriteRecord``, ``TargetedRequeue``, and ``StabilityMonitor::reset_for_replan`` for subgraph replans.
+* ``crates/perspt-store/src/schema.rs``: ``escalation_reports``, ``rewrite_records``, and ``sheaf_validations`` tables with session-scoped indexes.
+* ``crates/perspt-store/src/store.rs``: ``EscalationReportRecord``, ``RewriteRecordRow``, ``SheafValidationRow`` record types; six CRUD methods for persistence round-trips.
+* ``crates/perspt-agent/src/ledger.rs``: ``record_escalation_report``, ``record_rewrite``, ``record_sheaf_validation``, and ``get_escalation_reports`` facade methods.
+* ``crates/perspt-agent/src/orchestrator.rs``: ``classify_non_convergence`` categorises failures (DegradedSensors → ContractMismatch → TopologyMismatch → InsufficientModelCapability → ImplementationError); ``choose_repair_action`` selects least-drastic fix; ``apply_repair_action`` handles local repairs (GroundedRetry, ContractRepair, CapabilityPromotion, SensorRecovery) and bounded graph rewrites (``split_node``, ``insert_interface_node``, ``replan_subgraph``); ``select_validators`` targets validators by node class, plugin ownership, and verification state; ``run_sheaf_validator`` dispatches seven validator classes with V_sheaf scoring and requeue targeting.
+* ``crates/perspt-core/src/events.rs``: ``EscalationClassified``, ``SheafValidationComplete``, and ``GraphRewriteApplied`` event variants.
+* ``crates/perspt-tui/src/agent_app.rs``: TUI dashboard handling for all three Phase 5 events.
+* Test coverage: 140 tests across the workspace covering Phase 5 type construction, serialization, graph rewrite correctness, validator targeting, and classification defaults.
 
 **Phase 6: Provisional branch ledger and interface-sealed speculation**
 
