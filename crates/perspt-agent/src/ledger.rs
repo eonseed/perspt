@@ -57,7 +57,7 @@ pub struct MerkleLedger {
     /// Session store from perspt-store
     store: SessionStore,
     /// Current session metadata (legacy cache)
-    current_session: Option<SessionRecordLegacy>,
+    pub(crate) current_session: Option<SessionRecordLegacy>,
     /// Session artifact directory
     session_dir: Option<PathBuf>,
 }
