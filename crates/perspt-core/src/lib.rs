@@ -18,11 +18,13 @@ pub use plugin::{
 
 // Re-export commonly used types
 pub use types::{
-    AgentContext, AgentMessage, ArtifactKind, BehavioralContract, CommandContract, ContextBudget,
-    ContextPackage, ContextProvenance, Criticality, EnergyComponents, ErrorType,
-    EscalationCategory, EscalationReport, ModelTier, NodeState, OwnershipManifest, PlannedContract,
-    PlannedTask, PlannedTest, RestrictionMap, RetryPolicy, RewriteAction, RewriteRecord, SRBNNode,
-    SensorStatus, SheafValidationResult, SheafValidatorClass, StabilityMonitor, StageOutcome,
-    StructuralDigest, SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget,
-    VerificationResult, WeightedTest,
+    AgentContext, AgentMessage, ArtifactKind, BehavioralContract, BlockedDependency,
+    BranchFlushRecord, BranchLineage, CommandContract, ContextBudget, ContextPackage,
+    ContextProvenance, Criticality, EnergyComponents, ErrorType, EscalationCategory,
+    EscalationReport, InterfaceSealRecord, ModelTier, NodeState, OwnershipManifest, PlannedContract,
+    PlannedTask, PlannedTest, ProvisionalBranch, ProvisionalBranchState, RestrictionMap,
+    RetryPolicy, RewriteAction, RewriteRecord, SRBNNode, SensorStatus, SheafValidationResult,
+    SheafValidatorClass, StabilityMonitor, StageOutcome, StructuralDigest, SummaryDigest,
+    SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget, VerificationResult,
+    WeightedTest,
 };
