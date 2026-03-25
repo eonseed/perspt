@@ -237,6 +237,71 @@ All changes are recorded in a Merkle tree for:
    # Statistics
    perspt ledger --stats
 
+Provisional Branches
+--------------------
+
+When SRBN speculates on child nodes before the parent is fully committed, it uses
+**provisional branches** to isolate speculative work from the committed ledger state.
+
+.. admonition:: Key Invariant
+   :class: important
+
+   Provisional work is **never** merged into the global ledger until the parent node
+   meets the stability threshold. If the parent fails, all dependent branches are flushed.
+
+Branch Lifecycle
+~~~~~~~~~~~~~~~~
+
+Each provisional branch tracks state through four stages:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - State
+     - Description
+   * - **Active**
+     - Branch is open, speculative work is in progress
+   * - **Sealed**
+     - Parent interface is sealed; children may proceed
+   * - **Merged**
+     - Parent committed; branch work is merged into the global ledger
+   * - **Flushed**
+     - Parent failed; branch work is discarded and may be replayed later
+
+Interface Seal Prerequisites
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Downstream speculation requires that the parent node's public interface be sealed and
+hashed. This prevents children from coding against unstable signatures:
+
+1. Parent node reaches **Commit** phase
+2. If the node is an **Interface** class, its structural digest is sealed
+3. ``InterfaceSealed`` event is emitted with sealed paths and hash
+4. Blocked dependents are released and may begin speculation
+5. Sealed digests are injected into child restriction maps for compilation
+
+Flush Cascade
+~~~~~~~~~~~~~
+
+When a parent node's verification fails:
+
+1. The parent's provisional branch is flushed
+2. ``collect_descendants`` walks the DAG to find all transitive children
+3. Each descendant branch is flushed recursively
+4. ``BranchFlushed`` event is emitted with the reason and affected branch IDs
+5. Surviving branch state may be replayed after the parent is repaired
+
+Sandboxed Verification
+~~~~~~~~~~~~~~~~~~~~~~
+
+Provisional branches execute verification against isolated sandbox workspaces:
+
+- ``create_sandbox()`` creates a temporary directory for the branch
+- ``copy_to_sandbox()`` copies workspace files into the sandbox
+- ``cleanup_sandbox()`` removes a single sandbox after branch completion
+- ``cleanup_session_sandboxes()`` removes all session sandboxes at shutdown
+
 See Also
 --------
 

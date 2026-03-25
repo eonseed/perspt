@@ -367,6 +367,115 @@ PSP-4 compliant retry limits:
      - 3
      - Escalate to user
 
+Provisional Branches
+--------------------
+
+Phase 6 adds provisional branch tracking to isolate speculative child work from
+committed ledger state.
+
+Branch Types
+~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   /// Lifecycle state of a provisional branch
+   pub enum ProvisionalBranchState {
+       Active,   // Speculation in progress
+       Sealed,   // Interface locked, children may proceed
+       Merged,   // Parent committed, work accepted
+       Flushed,  // Parent failed, work discarded
+   }
+
+   /// A provisional branch for speculative node execution
+   pub struct ProvisionalBranch {
+       pub branch_id: String,
+       pub session_id: String,
+       pub parent_node_id: String,
+       pub node_id: String,
+       pub state: ProvisionalBranchState,
+       pub created_at: u64,
+       pub sealed_at: Option<u64>,
+       pub merged_at: Option<u64>,
+       pub flushed_at: Option<u64>,
+   }
+
+   /// Record of a sealed interface digest
+   pub struct InterfaceSealRecord {
+       pub seal_id: String,
+       pub session_id: String,
+       pub node_id: String,
+       pub sealed_paths: Vec<String>,
+       pub seal_hash: [u8; 32],
+       pub created_at: u64,
+   }
+
+Orchestrator Helpers
+~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   impl SRBNOrchestrator {
+       /// Create a provisional branch before speculating on a node
+       fn maybe_create_provisional_branch(&mut self, node_id: &str)
+
+       /// Merge branch work into the global ledger after parent commits
+       fn merge_provisional_branch(&mut self, node_id: &str)
+
+       /// Flush a branch when parent verification fails
+       fn flush_provisional_branch(&mut self, node_id: &str, reason: &str)
+
+       /// Cascade flushes to all descendant branches in the DAG
+       fn flush_descendant_branches(&mut self, parent_id: &str, reason: &str)
+
+       /// Emit interface seals after Interface-class node commits
+       fn emit_interface_seals(&mut self, node_id: &str)
+
+       /// Check if all parent interface seals are available
+       fn check_seal_prerequisites(&self, node_id: &str) -> bool
+
+       /// Inject sealed interface digests into a node's restriction map
+       fn inject_sealed_interfaces(&self, node_id: &str)
+
+       /// Release blocked children when a seal becomes available
+       fn unblock_dependents(&mut self, parent_id: &str)
+   }
+
+Sandbox Utilities
+~~~~~~~~~~~~~~~~~
+
+.. code-block:: rust
+
+   /// Create an isolated sandbox directory for provisional verification
+   pub fn create_sandbox(session_id: &str, branch_id: &str) -> Result<PathBuf>
+
+   /// Remove a single sandbox after branch completion
+   pub fn cleanup_sandbox(sandbox_path: &Path) -> Result<()>
+
+   /// Remove all sandboxes for a session at shutdown
+   pub fn cleanup_session_sandboxes(session_id: &str) -> Result<()>
+
+   /// Copy workspace files into a sandbox for isolated verification
+   pub fn copy_to_sandbox(source: &Path, sandbox: &Path) -> Result<()>
+
+Branch Events
+~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+
+   * - Event
+     - Description
+   * - ``BranchCreated``
+     - A provisional branch was opened for a node
+   * - ``InterfaceSealed``
+     - An Interface-class node's public API was sealed
+   * - ``BranchFlushed``
+     - One or more branches were discarded after parent failure
+   * - ``DependentUnblocked``
+     - A blocked child was released after its parent was sealed
+   * - ``BranchMerged``
+     - A provisional branch was merged into the global ledger
+
 Source Code
 -----------
 
