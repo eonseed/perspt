@@ -4489,4 +4489,154 @@ mod tests {
         assert!(deps.contains(&"child1".to_string()));
         assert!(deps.contains(&"child2".to_string()));
     }
+
+    // =========================================================================
+    // PSP-5 Phase 6: Provisional Branch Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_maybe_create_provisional_branch_root_node() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_phase6"), false);
+        orch.context.session_id = "test_session".into();
+        let node = SRBNNode::new("root".into(), "root goal".into(), ModelTier::Actuator);
+        orch.add_node(node);
+
+        let idx = orch.node_indices["root"];
+        // Root node has no parents — should not create a branch
+        let branch = orch.maybe_create_provisional_branch(idx);
+        assert!(branch.is_none());
+        assert!(orch.graph[idx].provisional_branch_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_maybe_create_provisional_branch_child_node() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_phase6"), false);
+        orch.context.session_id = "test_session".into();
+        let parent = SRBNNode::new("parent".into(), "parent goal".into(), ModelTier::Actuator);
+        let child = SRBNNode::new("child".into(), "child goal".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+        orch.add_dependency("parent", "child", "dep").unwrap();
+
+        let idx = orch.node_indices["child"];
+        let branch = orch.maybe_create_provisional_branch(idx);
+        assert!(branch.is_some());
+        assert!(orch.graph[idx].provisional_branch_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_collect_descendants() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let n1 = SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator);
+        let n2 = SRBNNode::new("b".into(), "g".into(), ModelTier::Actuator);
+        let n3 = SRBNNode::new("c".into(), "g".into(), ModelTier::Actuator);
+        let n4 = SRBNNode::new("d".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(n1);
+        orch.add_node(n2);
+        orch.add_node(n3);
+        orch.add_node(n4);
+        orch.add_dependency("a", "b", "dep").unwrap();
+        orch.add_dependency("b", "c", "dep").unwrap();
+        orch.add_dependency("a", "d", "dep").unwrap();
+
+        let idx_a = orch.node_indices["a"];
+        let descendants = orch.collect_descendants(idx_a);
+        assert_eq!(descendants.len(), 3); // b, c, d
+    }
+
+    #[tokio::test]
+    async fn test_check_seal_prerequisites_no_interface_parent() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let parent = SRBNNode::new("parent".into(), "g".into(), ModelTier::Actuator);
+        let child = SRBNNode::new("child".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+        orch.add_dependency("parent", "child", "dep").unwrap();
+
+        let idx = orch.node_indices["child"];
+        // Parent is Implementation (default), not Interface — should not block
+        assert!(!orch.check_seal_prerequisites(idx));
+        assert!(orch.blocked_dependencies.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_check_seal_prerequisites_unsealed_interface() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut parent = SRBNNode::new("iface".into(), "g".into(), ModelTier::Actuator);
+        parent.node_class = perspt_core::types::NodeClass::Interface;
+        let child = SRBNNode::new("impl".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+        orch.add_dependency("iface", "impl", "dep").unwrap();
+
+        let idx = orch.node_indices["impl"];
+        // Interface parent not sealed and not completed — should block
+        assert!(orch.check_seal_prerequisites(idx));
+        assert_eq!(orch.blocked_dependencies.len(), 1);
+        assert_eq!(orch.blocked_dependencies[0].parent_node_id, "iface");
+    }
+
+    #[tokio::test]
+    async fn test_check_seal_prerequisites_sealed_interface() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut parent = SRBNNode::new("iface".into(), "g".into(), ModelTier::Actuator);
+        parent.node_class = perspt_core::types::NodeClass::Interface;
+        parent.interface_seal_hash = Some([1u8; 32]); // Already sealed
+        let child = SRBNNode::new("impl".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+        orch.add_dependency("iface", "impl", "dep").unwrap();
+
+        let idx = orch.node_indices["impl"];
+        // Interface parent is sealed — should not block
+        assert!(!orch.check_seal_prerequisites(idx));
+        assert!(orch.blocked_dependencies.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_unblock_dependents() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let parent = SRBNNode::new("parent".into(), "g".into(), ModelTier::Actuator);
+        let child = SRBNNode::new("child".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+
+        // Manually add a blocked dependency
+        orch.blocked_dependencies
+            .push(perspt_core::types::BlockedDependency::new(
+                "child",
+                "parent",
+                vec!["src/api.rs".into()],
+            ));
+        assert_eq!(orch.blocked_dependencies.len(), 1);
+
+        let idx = orch.node_indices["parent"];
+        orch.unblock_dependents(idx);
+        assert!(orch.blocked_dependencies.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_flush_descendant_branches() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_phase6_flush"), false);
+        orch.context.session_id = "test_session".into();
+
+        let parent = SRBNNode::new("parent".into(), "g".into(), ModelTier::Actuator);
+        let mut child1 = SRBNNode::new("child1".into(), "g".into(), ModelTier::Actuator);
+        child1.provisional_branch_id = Some("branch_c1".into());
+        let mut child2 = SRBNNode::new("child2".into(), "g".into(), ModelTier::Actuator);
+        child2.provisional_branch_id = Some("branch_c2".into());
+        let grandchild = SRBNNode::new("grandchild".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child1);
+        orch.add_node(child2);
+        orch.add_node(grandchild);
+        orch.add_dependency("parent", "child1", "dep").unwrap();
+        orch.add_dependency("parent", "child2", "dep").unwrap();
+        orch.add_dependency("child1", "grandchild", "dep").unwrap();
+
+        let idx = orch.node_indices["parent"];
+        // This will try to flush branches but ledger may not find them —
+        // the important thing is it doesn't panic and traverses correctly
+        orch.flush_descendant_branches(idx);
+    }
 }

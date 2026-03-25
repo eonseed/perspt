@@ -802,3 +802,53 @@ pub fn copy_to_sandbox(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_create_sandbox() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "branch1").unwrap();
+        assert!(sandbox.exists());
+        assert!(sandbox.ends_with("sess1/branch1"));
+    }
+
+    #[test]
+    fn test_cleanup_sandbox() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "branch1").unwrap();
+        assert!(sandbox.exists());
+        cleanup_sandbox(&sandbox).unwrap();
+        assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn test_cleanup_session_sandboxes() {
+        let dir = tempdir().unwrap();
+        create_sandbox(dir.path(), "sess1", "b1").unwrap();
+        create_sandbox(dir.path(), "sess1", "b2").unwrap();
+        let session_dir = dir.path().join(".perspt").join("sandboxes").join("sess1");
+        assert!(session_dir.exists());
+        cleanup_session_sandboxes(dir.path(), "sess1").unwrap();
+        assert!(!session_dir.exists());
+    }
+
+    #[test]
+    fn test_copy_to_sandbox() {
+        let dir = tempdir().unwrap();
+        // Create a source file
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+        let sandbox = create_sandbox(dir.path(), "sess1", "b1").unwrap();
+        copy_to_sandbox(dir.path(), &sandbox, "src/main.rs").unwrap();
+
+        let copied = sandbox.join("src/main.rs");
+        assert!(copied.exists());
+        assert_eq!(fs::read_to_string(copied).unwrap(), "fn main() {}");
+    }
+}

@@ -2988,4 +2988,116 @@ mod psp5_tests {
         assert_eq!(deser.requeued_nodes.len(), 2);
         assert!(deser.inserted_nodes.is_empty());
     }
+
+    // =========================================================================
+    // PSP-5 Phase 6: Provisional Branch and Seal Tests
+    // =========================================================================
+
+    #[test]
+    fn test_provisional_branch_state_display() {
+        assert_eq!(ProvisionalBranchState::Active.to_string(), "active");
+        assert_eq!(ProvisionalBranchState::Sealed.to_string(), "sealed");
+        assert_eq!(ProvisionalBranchState::Merged.to_string(), "merged");
+        assert_eq!(ProvisionalBranchState::Flushed.to_string(), "flushed");
+    }
+
+    #[test]
+    fn test_provisional_branch_lifecycle() {
+        let branch = ProvisionalBranch::new("b1", "s1", "node_child", "node_parent");
+        assert_eq!(branch.state, ProvisionalBranchState::Active);
+        assert!(branch.is_live());
+        assert!(!branch.is_flushed());
+        assert!(branch.parent_seal_hash.is_none());
+        assert!(branch.sandbox_dir.is_none());
+        assert!(branch.created_at > 0);
+    }
+
+    #[test]
+    fn test_provisional_branch_flushed_not_live() {
+        let mut branch = ProvisionalBranch::new("b1", "s1", "n1", "p1");
+        branch.state = ProvisionalBranchState::Flushed;
+        assert!(!branch.is_live());
+        assert!(branch.is_flushed());
+    }
+
+    #[test]
+    fn test_provisional_branch_sealed_is_live() {
+        let mut branch = ProvisionalBranch::new("b1", "s1", "n1", "p1");
+        branch.state = ProvisionalBranchState::Sealed;
+        assert!(branch.is_live());
+        assert!(!branch.is_flushed());
+    }
+
+    #[test]
+    fn test_provisional_branch_serialization() {
+        let branch = ProvisionalBranch::new("b1", "s1", "n1", "p1");
+        let json = serde_json::to_string(&branch).unwrap();
+        let deser: ProvisionalBranch = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.branch_id, "b1");
+        assert_eq!(deser.state, ProvisionalBranchState::Active);
+    }
+
+    #[test]
+    fn test_branch_lineage_serialization() {
+        let lineage = BranchLineage {
+            lineage_id: "lin_1".into(),
+            parent_branch_id: "parent_b".into(),
+            child_branch_id: "child_b".into(),
+            depends_on_seal: true,
+        };
+        let json = serde_json::to_string(&lineage).unwrap();
+        let deser: BranchLineage = serde_json::from_str(&json).unwrap();
+        assert!(deser.depends_on_seal);
+        assert_eq!(deser.parent_branch_id, "parent_b");
+    }
+
+    #[test]
+    fn test_interface_seal_from_digest() {
+        let digest = StructuralDigest::from_content(
+            "node_iface",
+            "src/api.rs",
+            ArtifactKind::InterfaceSeal,
+            b"pub fn hello() -> String",
+        );
+        let seal = InterfaceSealRecord::from_digest("sess1", "node_iface", &digest);
+        assert_eq!(seal.node_id, "node_iface");
+        assert_eq!(seal.sealed_path, "src/api.rs");
+        assert!(seal.matches_hash(&digest.hash));
+        assert!(!seal.matches_hash(&[0u8; 32]));
+    }
+
+    #[test]
+    fn test_branch_flush_record() {
+        let flush = BranchFlushRecord::new(
+            "s1",
+            "parent_node",
+            vec!["b1".into(), "b2".into()],
+            vec!["child1".into(), "child2".into()],
+            "Parent failed verification",
+        );
+        assert!(flush.flush_id.starts_with("flush_"));
+        assert_eq!(flush.flushed_branch_ids.len(), 2);
+        assert_eq!(flush.requeue_node_ids.len(), 2);
+        assert!(flush.created_at > 0);
+    }
+
+    #[test]
+    fn test_blocked_dependency() {
+        let dep = BlockedDependency::new(
+            "child_node",
+            "parent_node",
+            vec!["src/api.rs".into()],
+        );
+        assert_eq!(dep.child_node_id, "child_node");
+        assert_eq!(dep.parent_node_id, "parent_node");
+        assert_eq!(dep.required_seal_paths.len(), 1);
+        assert!(dep.blocked_at > 0);
+    }
+
+    #[test]
+    fn test_srbn_node_phase6_fields() {
+        let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        assert!(node.provisional_branch_id.is_none());
+        assert!(node.interface_seal_hash.is_none());
+    }
 }
