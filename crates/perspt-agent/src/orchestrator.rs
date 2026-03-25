@@ -9,7 +9,10 @@ use crate::test_runner::{self, PythonTestRunner, TestRunnerTrait};
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
-use perspt_core::types::{EscalationCategory, EscalationReport, RewriteAction, RewriteRecord};
+use perspt_core::types::{
+    EscalationCategory, EscalationReport, RewriteAction, RewriteRecord, SheafValidationResult,
+    SheafValidatorClass,
+};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{EdgeRef, Topo, Walker};
 use std::collections::HashMap;
@@ -2418,15 +2421,274 @@ File: [same filename]
 
         self.graph[idx].state = NodeState::SheafCheck;
 
-        // Check for cyclic dependencies
-        if petgraph::algo::is_cyclic_directed(&self.graph) {
-            anyhow::bail!("Cyclic dependency detected in task graph");
+        // Determine which validators to run for this node.
+        let validators = self.select_validators(idx);
+        if validators.is_empty() {
+            log::info!("No targeted validators selected — skipping sheaf check");
+            return Ok(());
         }
 
-        // In a real implementation, verify interface consistency
-        // using LSP textDocument/definition
+        log::info!(
+            "Running {} sheaf validators for node {}",
+            validators.len(),
+            self.graph[idx].node_id
+        );
 
+        let mut results = Vec::new();
+        for class in &validators {
+            let result = self.run_sheaf_validator(idx, *class);
+            results.push(result);
+        }
+
+        // Persist all validation results.
+        let persist_node_id = self.graph[idx].node_id.clone();
+        for result in &results {
+            if let Err(e) = self
+                .ledger
+                .record_sheaf_validation(&persist_node_id, result)
+            {
+                log::warn!("Failed to persist sheaf validation: {}", e);
+            }
+        }
+
+        // Accumulate V_sheaf and check for failures.
+        let total_v_sheaf: f32 = results.iter().map(|r| r.v_sheaf_contribution).sum();
+        let failures: Vec<&SheafValidationResult> = results.iter().filter(|r| !r.passed).collect();
+
+        if !failures.is_empty() {
+            let node_id = self.graph[idx].node_id.clone();
+            let evidence = failures
+                .iter()
+                .map(|f| format!("{}: {}", f.validator_class, f.evidence_summary))
+                .collect::<Vec<_>>()
+                .join("; ");
+
+            self.emit_log(format!(
+                "⚠️ Sheaf validation failed for {} (V_sheaf={:.3}): {}",
+                node_id, total_v_sheaf, evidence
+            ));
+
+            // Collect unique requeue targets from all failures.
+            let requeue_targets: Vec<String> = failures
+                .iter()
+                .flat_map(|f| f.requeue_targets.iter().cloned())
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+
+            if !requeue_targets.is_empty() {
+                self.emit_log(format!(
+                    "🔄 Requeuing {} nodes due to sheaf failures",
+                    requeue_targets.len()
+                ));
+                for nid in &requeue_targets {
+                    if let Some(&nidx) = self.node_indices.get(nid.as_str()) {
+                        self.graph[nidx].state = NodeState::TaskQueued;
+                    }
+                }
+            }
+
+            anyhow::bail!("Sheaf validation failed for node {}: {}", node_id, evidence);
+        }
+
+        log::info!("Sheaf validation passed (V_sheaf={:.3})", total_v_sheaf);
         Ok(())
+    }
+
+    /// Select which validator classes are relevant for the given node
+    /// based on its properties and graph position.
+    fn select_validators(&self, idx: NodeIndex) -> Vec<SheafValidatorClass> {
+        let mut validators = Vec::new();
+
+        // Always run dependency graph consistency — it's cheap and universal.
+        validators.push(SheafValidatorClass::DependencyGraphConsistency);
+
+        let node = &self.graph[idx];
+
+        // Interface nodes need export/import consistency checks.
+        if node.node_class == perspt_core::types::NodeClass::Interface {
+            validators.push(SheafValidatorClass::ExportImportConsistency);
+        }
+
+        // Integration nodes cross ownership boundaries.
+        if node.node_class == perspt_core::types::NodeClass::Integration {
+            validators.push(SheafValidatorClass::ExportImportConsistency);
+            validators.push(SheafValidatorClass::SchemaContractCompatibility);
+        }
+
+        // Nodes that touch multiple plugins get cross-language validation.
+        let node_owner = &node.owner_plugin;
+        let has_cross_plugin_deps = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Outgoing)
+            .any(|dep_idx| self.graph[dep_idx].owner_plugin != *node_owner);
+        if has_cross_plugin_deps {
+            validators.push(SheafValidatorClass::CrossLanguageBoundary);
+        }
+
+        // If verification result is available and has build failures, check
+        // build graph consistency.
+        if let Some(ref vr) = self.last_verification_result {
+            if !vr.build_ok {
+                validators.push(SheafValidatorClass::BuildGraphConsistency);
+            }
+            if !vr.tests_ok {
+                validators.push(SheafValidatorClass::TestOwnershipConsistency);
+            }
+        }
+
+        validators
+    }
+
+    /// Run a single sheaf validator class against the current node context.
+    fn run_sheaf_validator(
+        &self,
+        idx: NodeIndex,
+        class: SheafValidatorClass,
+    ) -> SheafValidationResult {
+        let node = &self.graph[idx];
+        let node_id = &node.node_id;
+
+        match class {
+            SheafValidatorClass::DependencyGraphConsistency => {
+                // Check for cycles in the task graph.
+                if petgraph::algo::is_cyclic_directed(&self.graph) {
+                    SheafValidationResult::failed(
+                        class,
+                        "Cyclic dependency detected in task graph",
+                        vec![node_id.clone()],
+                        self.affected_dependents(idx),
+                        0.5,
+                    )
+                } else {
+                    SheafValidationResult::passed(class, vec![node_id.clone()])
+                }
+            }
+            SheafValidatorClass::ExportImportConsistency => {
+                // Check that outgoing neighbors' context files include this node's outputs.
+                let manifest = &self.context.ownership_manifest;
+                let mut mismatched = Vec::new();
+
+                for target in &node.output_targets {
+                    let target_str = target.to_string_lossy();
+                    if let Some(entry) = manifest.owner_of(&target_str) {
+                        if entry.owner_node_id != *node_id {
+                            mismatched.push(target_str.to_string());
+                        }
+                    }
+                }
+
+                if mismatched.is_empty() {
+                    SheafValidationResult::passed(class, vec![node_id.clone()])
+                } else {
+                    SheafValidationResult::failed(
+                        class,
+                        format!(
+                            "Ownership mismatch on {} file(s): {}",
+                            mismatched.len(),
+                            mismatched.join(", ")
+                        ),
+                        mismatched,
+                        vec![node_id.clone()],
+                        0.3,
+                    )
+                }
+            }
+            SheafValidatorClass::SchemaContractCompatibility => {
+                // Check that the node's behavioral contract is not empty.
+                let contract = &node.contract;
+                if contract.invariants.is_empty() && contract.interface_signature.is_empty() {
+                    SheafValidationResult::failed(
+                        class,
+                        "Integration node has empty contract",
+                        node.output_targets
+                            .iter()
+                            .map(|t| t.to_string_lossy().to_string())
+                            .collect(),
+                        vec![node_id.clone()],
+                        0.2,
+                    )
+                } else {
+                    SheafValidationResult::passed(class, vec![node_id.clone()])
+                }
+            }
+            SheafValidatorClass::BuildGraphConsistency => {
+                // When build fails, check if this node's files are referenced
+                // by others that might have broken.
+                let dependents = self.affected_dependents(idx);
+                if dependents.is_empty() {
+                    SheafValidationResult::passed(class, vec![node_id.clone()])
+                } else {
+                    SheafValidationResult::failed(
+                        class,
+                        format!(
+                            "Build failed with {} dependent nodes potentially affected",
+                            dependents.len()
+                        ),
+                        node.output_targets
+                            .iter()
+                            .map(|t| t.to_string_lossy().to_string())
+                            .collect(),
+                        dependents,
+                        0.4,
+                    )
+                }
+            }
+            SheafValidatorClass::TestOwnershipConsistency => {
+                // When tests fail, attribute failures to the owning node.
+                let owned_files = self.context.ownership_manifest.files_owned_by(node_id);
+                if owned_files.is_empty() {
+                    SheafValidationResult::passed(class, vec![node_id.clone()])
+                } else {
+                    // If tests are failing and this node owns files, it's a
+                    // candidate for re-examination.
+                    SheafValidationResult::failed(
+                        class,
+                        format!(
+                            "Test failures may be attributed to {} owned file(s)",
+                            owned_files.len()
+                        ),
+                        owned_files.iter().map(|s| s.to_string()).collect(),
+                        vec![node_id.clone()],
+                        0.3,
+                    )
+                }
+            }
+            SheafValidatorClass::CrossLanguageBoundary => {
+                // Check that cross-plugin dependencies have matching plugins.
+                let mut boundary_issues = Vec::new();
+                let node_plugin = &node.owner_plugin;
+
+                for dep_idx in self
+                    .graph
+                    .neighbors_directed(idx, petgraph::Direction::Outgoing)
+                {
+                    let dep = &self.graph[dep_idx];
+                    if dep.owner_plugin != *node_plugin && !dep.owner_plugin.is_empty() {
+                        // Cross-plugin edge — check both are active.
+                        if !self.context.active_plugins.contains(&dep.owner_plugin) {
+                            boundary_issues.push(format!("plugin {} not active", dep.owner_plugin));
+                        }
+                    }
+                }
+
+                if boundary_issues.is_empty() {
+                    SheafValidationResult::passed(class, vec![node_id.clone()])
+                } else {
+                    SheafValidationResult::failed(
+                        class,
+                        boundary_issues.join("; "),
+                        vec![node_id.clone()],
+                        self.affected_dependents(idx),
+                        0.4,
+                    )
+                }
+            }
+            SheafValidatorClass::PolicyInvariantConsistency => {
+                // Placeholder: policy checks would consult perspt-policy crate.
+                SheafValidationResult::passed(class, vec![node_id.clone()])
+            }
+        }
     }
 
     /// Step 7: Merkle Ledger Commit
