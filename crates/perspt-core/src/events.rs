@@ -37,6 +37,46 @@ pub enum AgentEvent {
 
     /// Error occurred
     Error(String),
+
+    // =========================================================================
+    // PSP-5: Lifecycle Events
+    // =========================================================================
+
+    /// PSP-5: Plan ready after sheafification with detected plugins and execution mode
+    PlanReady {
+        nodes: usize,
+        plugins: Vec<String>,
+        execution_mode: String,
+    },
+
+    /// PSP-5: Node selected for execution
+    NodeSelected {
+        node_id: String,
+        goal: String,
+        node_class: String,
+    },
+
+    /// PSP-5: Deterministic fallback planner activated
+    FallbackPlanner {
+        reason: String,
+    },
+
+    /// PSP-5: Verification completed for a node
+    VerificationComplete {
+        node_id: String,
+        syntax_ok: bool,
+        build_ok: bool,
+        tests_ok: bool,
+        diagnostics_count: usize,
+        energy: f32,
+    },
+
+    /// PSP-5: Artifact bundle applied to workspace
+    BundleApplied {
+        node_id: String,
+        files_created: Vec<String>,
+        files_modified: Vec<String>,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
@@ -45,6 +85,8 @@ pub enum NodeStatus {
     Pending,
     Running,
     Verifying,
+    /// PSP-5: Node is retrying after a failed verification
+    Retrying,
     Completed,
     Failed,
     Escalated,
@@ -63,6 +105,13 @@ pub enum ActionType {
     ProjectInit {
         command: String,
         suggested_name: String,
+    },
+    /// PSP-5: Multi-file artifact bundle write
+    BundleWrite {
+        /// Node that produced the bundle
+        node_id: String,
+        /// Files being written or modified
+        files: Vec<String>,
     },
 }
 

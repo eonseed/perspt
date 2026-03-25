@@ -378,8 +378,213 @@ impl PythonTestRunner {
     }
 }
 
-// Re-export PythonTestRunner as TestRunner for now
-// In future phases, we'll add a generic TestRunner trait
+// =============================================================================
+// PSP-5: Generic Test Runner Trait
+// =============================================================================
+
+/// PSP-5: Language-agnostic test runner trait
+///
+/// Allows the orchestrator to run verification steps through any language's
+/// toolchain without hardcoding Python paths.
+#[async_trait::async_trait]
+pub trait TestRunnerTrait: Send + Sync {
+    /// Run syntax/type check (e.g., `cargo check`, `uv run ty check .`)
+    async fn run_syntax_check(&self) -> Result<TestResults>;
+
+    /// Run the test suite (e.g., `cargo test`, `uv run pytest`)
+    async fn run_tests(&self) -> Result<TestResults>;
+
+    /// Run build check (e.g., `cargo build`)
+    async fn run_build_check(&self) -> Result<TestResults>;
+
+    /// Name of the runner (for logging)
+    fn name(&self) -> &str;
+}
+
+#[async_trait::async_trait]
+impl TestRunnerTrait for PythonTestRunner {
+    async fn run_syntax_check(&self) -> Result<TestResults> {
+        // Use ty (via uv) for type checking
+        let output = Command::new("uv")
+            .args(["run", "ty", "check", "."])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run ty check")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: format!("{}\n{}", stdout, stderr),
+            ..Default::default()
+        })
+    }
+
+    async fn run_tests(&self) -> Result<TestResults> {
+        self.run_pytest(&[]).await
+    }
+
+    async fn run_build_check(&self) -> Result<TestResults> {
+        // Python doesn't have a separate build step
+        Ok(TestResults {
+            passed: 1,
+            total: 1,
+            run_succeeded: true,
+            output: "No build step for Python".to_string(),
+            ..Default::default()
+        })
+    }
+
+    fn name(&self) -> &str {
+        "python"
+    }
+}
+
+/// PSP-5: Rust test runner using cargo
+pub struct RustTestRunner {
+    /// Working directory (workspace root)
+    working_dir: PathBuf,
+}
+
+impl RustTestRunner {
+    /// Create a new Rust test runner
+    pub fn new(working_dir: PathBuf) -> Self {
+        Self { working_dir }
+    }
+
+    /// Parse `cargo test` output for pass/fail counts
+    fn parse_cargo_test_output(&self, output: &str) -> TestResults {
+        let mut results = TestResults {
+            output: output.to_string(),
+            run_succeeded: true,
+            ..Default::default()
+        };
+
+        for line in output.lines() {
+            let line = line.trim();
+
+            // Parse "test result: ok. X passed; Y failed; Z ignored"
+            if line.starts_with("test result:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                for i in 0..parts.len() {
+                    if parts[i] == "passed;" || parts[i] == "passed" {
+                        if i > 0 {
+                            if let Ok(n) = parts[i - 1].parse::<usize>() {
+                                results.passed = n;
+                            }
+                        }
+                    } else if parts[i] == "failed;" || parts[i] == "failed" {
+                        if i > 0 {
+                            if let Ok(n) = parts[i - 1].parse::<usize>() {
+                                results.failed = n;
+                            }
+                        }
+                    } else if parts[i] == "ignored;" || parts[i] == "ignored" {
+                        if i > 0 {
+                            if let Ok(n) = parts[i - 1].parse::<usize>() {
+                                results.skipped = n;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        results.total = results.passed + results.failed + results.skipped;
+        results
+    }
+}
+
+#[async_trait::async_trait]
+impl TestRunnerTrait for RustTestRunner {
+    async fn run_syntax_check(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["check"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo check")?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: stderr,
+            ..Default::default()
+        })
+    }
+
+    async fn run_tests(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["test"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo test")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let combined = format!("{}\n{}", stdout, stderr);
+
+        let mut results = self.parse_cargo_test_output(&combined);
+        results.run_succeeded = true;
+        Ok(results)
+    }
+
+    async fn run_build_check(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["build"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo build")?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: stderr,
+            ..Default::default()
+        })
+    }
+
+    fn name(&self) -> &str {
+        "rust"
+    }
+}
+
+/// PSP-5: Factory function to create a test runner for a given plugin
+pub fn test_runner_for_plugin(
+    plugin_name: &str,
+    working_dir: PathBuf,
+) -> Box<dyn TestRunnerTrait> {
+    match plugin_name {
+        "rust" => Box::new(RustTestRunner::new(working_dir)),
+        "python" => Box::new(PythonTestRunner::new(working_dir)),
+        _ => Box::new(PythonTestRunner::new(working_dir)), // Default fallback
+    }
+}
+
+// Re-export PythonTestRunner as TestRunner for backward compatibility
 pub type TestRunner = PythonTestRunner;
 
 #[cfg(test)]
@@ -436,5 +641,39 @@ mod tests {
         let v_log = runner.calculate_v_log(&results, &contract);
         // gamma (2.0) * Critical weight (10.0) = 20.0
         assert!((v_log - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_cargo_test_output() {
+        let runner = RustTestRunner::new(PathBuf::from("."));
+
+        let output = r#"
+running 5 tests
+test tests::test_add ... ok
+test tests::test_sub ... ok
+test tests::test_mul ... FAILED
+test tests::test_div ... ok
+test tests::test_rem ... ignored
+
+test result: ok. 3 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out
+"#;
+        let results = runner.parse_cargo_test_output(output);
+        assert_eq!(results.passed, 3);
+        assert_eq!(results.failed, 1);
+        assert_eq!(results.skipped, 1);
+        assert_eq!(results.total, 5);
+    }
+
+    #[test]
+    fn test_runner_for_plugin_factory() {
+        let rust_runner = test_runner_for_plugin("rust", PathBuf::from("."));
+        assert_eq!(rust_runner.name(), "rust");
+
+        let python_runner = test_runner_for_plugin("python", PathBuf::from("."));
+        assert_eq!(python_runner.name(), "python");
+
+        // Unknown falls back to Python
+        let fallback = test_runner_for_plugin("go", PathBuf::from("."));
+        assert_eq!(fallback.name(), "python");
     }
 }

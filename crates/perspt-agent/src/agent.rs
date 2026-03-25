@@ -134,6 +134,66 @@ impl ActuatorAgent {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "main.py".to_string());
 
+        // PSP-5: Determine output format based on execution mode and plugin
+        let is_project_mode = ctx.execution_mode == perspt_core::types::ExecutionMode::Project;
+        let has_multiple_outputs = node.output_targets.len() > 1;
+
+        let output_format_section = if is_project_mode || has_multiple_outputs {
+            format!(
+                r#"## Output Format (Multi-Artifact Bundle)
+When producing multi-file output, use this JSON format wrapped in a ```json code block:
+
+```json
+{{
+  "artifacts": [
+    {{ "path": "{target_file}", "operation": "write", "content": "..." }},
+    {{ "path": "tests/test_main.py", "operation": "write", "content": "..." }}
+  ],
+  "commands": []
+}}
+```
+
+Each artifact entry must have:
+- `path`: Relative path within the workspace
+- `operation`: Either `"write"` (full file) or `"diff"` (unified diff patch)
+- `content` (for write) or `patch` (for diff): The file content or patch
+
+RULES:
+- Paths MUST be relative (no leading `/`)
+- Use `"write"` for new files or full rewrites
+- Use `"diff"` with proper unified diff format for small changes to existing files
+- Include ALL files needed for the task in a single bundle"#,
+                target_file = target_file
+            )
+        } else {
+            format!(
+                r#"## Output Format
+Use one of these formats:
+
+### Creating a New File
+File: {target_file}
+```python
+# your code here
+```
+
+### Modifying an Existing File
+Diff: {target_file}
+```diff
+--- {target_file}
++++ {target_file}
+@@ -10,2 +10,3 @@
+ def calculate(x):
+-    return x * 2
++    return x * 3
+```
+
+IMPORTANT:
+- Use 'Diff:' for existing files to save tokens
+- Use 'File:' ONLY for new files or full rewrites"#,
+                target_file = target_file
+            )
+        };
+
         format!(
             r#"You are an Actuator agent responsible for implementing code.
 
@@ -160,38 +220,7 @@ Target Output File: {target_file}
 7. Add type annotations if missing
 8. Import any missing modules
 
-6. Output Format:
-   - For NEW files: Use 'File: {target_file}' followed by the full code.
-   - For EXISTING files: Use 'Diff: {target_file}' followed by a Unified Diff.
-
-## Output Format Examples
-
-### Creating a New File
-File: {target_file}
-```python
-import os
-
-def main():
-    print("Hello")
-```
-
-### Modifying an Existing File
-Diff: {target_file}
-```diff
---- {target_file}
-+++ {target_file}
-@@ -10,2 +10,3 @@
- def calculate(x):
--    return x * 2
-+    return x * 3
-+    # Fixed calculation
-```
-
-IMPORTANT:
-- Use 'Diff:' for existing files to save tokens and apply changes safely.
-- Use 'File:' ONLY for new files or when rewriting the entire file is simpler.
-- For Diffs, include the standard header (---/+++) and @@ lines.
-- Do NOT output the full file contents if you are only changing a few lines."#,
+{output_format}"#,
             goal = node.goal,
             interface = contract.interface_signature,
             invariants = contract.invariants,
@@ -199,6 +228,7 @@ IMPORTANT:
             working_dir = ctx.working_dir,
             context_files = node.context_files,
             target_file = target_file,
+            output_format = output_format_section,
         )
     }
 }

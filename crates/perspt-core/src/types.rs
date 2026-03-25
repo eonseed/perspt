@@ -1,7 +1,7 @@
 //! SRBN Types
 //!
 //! Core types for the Stabilized Recursive Barrier Network.
-//! Based on PSP-000004 specification.
+//! Based on PSP-000004 and PSP-000005 specifications.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -542,6 +542,15 @@ pub struct AgentContext {
     /// Last test output for correction prompts
     #[serde(skip)]
     pub last_test_output: Option<String>,
+    /// PSP-5: Execution mode (Project vs Solo)
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
+    /// PSP-5: Verifier strictness preset
+    #[serde(default)]
+    pub verifier_strictness: VerifierStrictness,
+    /// PSP-5: Active language plugins detected for this workspace
+    #[serde(default)]
+    pub active_plugins: Vec<String>,
 }
 
 impl Default for AgentContext {
@@ -558,6 +567,9 @@ impl Default for AgentContext {
             last_diagnostics: Vec::new(),
             token_budget: TokenBudget::default(),
             last_test_output: None,
+            execution_mode: ExecutionMode::default(),
+            verifier_strictness: VerifierStrictness::default(),
+            active_plugins: Vec::new(),
         }
     }
 }
@@ -732,6 +744,9 @@ pub struct PlannedTask {
     /// Command contract (only for TaskType::Command)
     #[serde(default)]
     pub command_contract: Option<CommandContract>,
+    /// PSP-5: Node class (Interface / Implementation / Integration)
+    #[serde(default)]
+    pub node_class: NodeClass,
 }
 
 impl PlannedTask {
@@ -746,6 +761,7 @@ impl PlannedTask {
             task_type: TaskType::Code,
             contract: PlannedContract::default(),
             command_contract: None,
+            node_class: NodeClass::default(),
         }
     }
 
@@ -866,5 +882,394 @@ impl CommandContract {
         }
 
         energy
+    }
+}
+
+// =============================================================================
+// PSP-000005 Types — Project-First Execution Model
+// =============================================================================
+
+/// PSP-5: Execution mode for the runtime
+///
+/// Project mode is the default. Solo mode only activates on explicit single-file
+/// intent keywords or via `--single-file` CLI flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Default: treat task as a multi-file project
+    #[default]
+    Project,
+    /// Explicit single-file execution
+    Solo,
+}
+
+impl std::fmt::Display for ExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionMode::Project => write!(f, "project"),
+            ExecutionMode::Solo => write!(f, "solo"),
+        }
+    }
+}
+
+/// PSP-5: Node class distinguishing interface, implementation, and integration nodes
+///
+/// - **Interface** nodes define exported signatures, schemas, and verifier scope.
+/// - **Implementation** nodes operate on node-owned files plus sealed interfaces.
+/// - **Integration** nodes reconcile cross-owner or cross-plugin boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeClass {
+    /// Defines exported signatures, schemas, ownership manifests
+    Interface,
+    /// Operates on node-owned files plus adjacent sealed interfaces
+    #[default]
+    Implementation,
+    /// Reconciles cross-owner or cross-plugin boundaries
+    Integration,
+}
+
+impl std::fmt::Display for NodeClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeClass::Interface => write!(f, "interface"),
+            NodeClass::Implementation => write!(f, "implementation"),
+            NodeClass::Integration => write!(f, "integration"),
+        }
+    }
+}
+
+/// PSP-5: Verifier strictness presets
+///
+/// Controls which verification stages are required for stability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VerifierStrictness {
+    /// Default: compilation + tests required, warnings allowed
+    #[default]
+    Default,
+    /// Strict: compilation + tests + linting (e.g. clippy -D warnings)
+    Strict,
+    /// Minimal: syntax/parse check only, no tests required
+    Minimal,
+}
+
+/// PSP-5: A single artifact operation within an artifact bundle
+///
+/// Each operation represents one file mutation: either a full write or a diff patch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum ArtifactOperation {
+    /// Write the full file contents
+    Write {
+        /// Relative path within the workspace
+        path: String,
+        /// Full file content
+        content: String,
+    },
+    /// Apply a unified diff patch
+    Diff {
+        /// Relative path within the workspace
+        path: String,
+        /// Unified diff content
+        patch: String,
+    },
+}
+
+impl ArtifactOperation {
+    /// Get the file path this operation targets
+    pub fn path(&self) -> &str {
+        match self {
+            ArtifactOperation::Write { path, .. } => path,
+            ArtifactOperation::Diff { path, .. } => path,
+        }
+    }
+
+    /// Check if this is a write (new file) operation
+    pub fn is_write(&self) -> bool {
+        matches!(self, ArtifactOperation::Write { .. })
+    }
+
+    /// Check if this is a diff (patch) operation
+    pub fn is_diff(&self) -> bool {
+        matches!(self, ArtifactOperation::Diff { .. })
+    }
+}
+
+/// PSP-5: Multi-artifact bundle from the Actuator
+///
+/// A node response containing one or more file operations applied as a unit.
+/// The orchestrator SHALL parse all operations before mutating the workspace
+/// and SHALL fail atomically if any operation is invalid.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactBundle {
+    /// File operations to apply
+    pub artifacts: Vec<ArtifactOperation>,
+    /// Optional commands to run after file operations
+    #[serde(default)]
+    pub commands: Vec<String>,
+}
+
+impl ArtifactBundle {
+    /// Create an empty bundle
+    pub fn new() -> Self {
+        Self {
+            artifacts: Vec::new(),
+            commands: Vec::new(),
+        }
+    }
+
+    /// Number of file operations
+    pub fn len(&self) -> usize {
+        self.artifacts.len()
+    }
+
+    /// Check if bundle is empty
+    pub fn is_empty(&self) -> bool {
+        self.artifacts.is_empty()
+    }
+
+    /// Get all unique file paths affected by this bundle
+    pub fn affected_paths(&self) -> Vec<&str> {
+        let mut paths: Vec<&str> = self.artifacts.iter().map(|a| a.path()).collect();
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    /// Count of file writes (new files)
+    pub fn writes_count(&self) -> usize {
+        self.artifacts.iter().filter(|a| a.is_write()).count()
+    }
+
+    /// Count of file diffs (patches)
+    pub fn diffs_count(&self) -> usize {
+        self.artifacts.iter().filter(|a| a.is_diff()).count()
+    }
+
+    /// Validate the bundle: checks for empty paths and duplicate targets
+    pub fn validate(&self) -> Result<(), String> {
+        if self.artifacts.is_empty() {
+            return Err("Artifact bundle is empty".to_string());
+        }
+
+        for (i, op) in self.artifacts.iter().enumerate() {
+            if op.path().is_empty() {
+                return Err(format!("Artifact {} has empty path", i));
+            }
+            // Reject absolute paths
+            if op.path().starts_with('/') || op.path().starts_with('\\') {
+                return Err(format!(
+                    "Artifact {} has absolute path '{}', must be relative",
+                    i,
+                    op.path()
+                ));
+            }
+            // Reject path traversal
+            if op.path().contains("..") {
+                return Err(format!(
+                    "Artifact {} has path traversal in '{}'",
+                    i,
+                    op.path()
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for ArtifactBundle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// PSP-5: Structured verification result from a plugin-driven verifier
+///
+/// Holds the outcome of running syntax checks, build, tests, and lint
+/// through the active language plugin's toolchain.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerificationResult {
+    /// Whether the syntax/type check passed
+    pub syntax_ok: bool,
+    /// Whether the build succeeded
+    pub build_ok: bool,
+    /// Whether tests passed
+    pub tests_ok: bool,
+    /// Whether lint passed (only in Strict mode)
+    pub lint_ok: bool,
+    /// Number of diagnostics from LSP / compiler
+    pub diagnostics_count: usize,
+    /// Number of tests passed
+    pub tests_passed: usize,
+    /// Number of tests failed
+    pub tests_failed: usize,
+    /// Summary output from verification tools
+    pub summary: String,
+    /// Raw tool output (for correction prompts)
+    pub raw_output: Option<String>,
+    /// Whether verification ran in degraded mode (missing tools)
+    pub degraded: bool,
+    /// Reason for degraded mode
+    pub degraded_reason: Option<String>,
+}
+
+impl VerificationResult {
+    /// Check if all verification stages passed
+    pub fn all_passed(&self) -> bool {
+        self.syntax_ok && self.build_ok && self.tests_ok && !self.degraded
+    }
+
+    /// Create a degraded result when tools are unavailable
+    pub fn degraded(reason: impl Into<String>) -> Self {
+        Self {
+            degraded: true,
+            degraded_reason: Some(reason.into()),
+            summary: "Verification ran in degraded mode".to_string(),
+            ..Default::default()
+        }
+    }
+}
+
+#[cfg(test)]
+mod psp5_tests {
+    use super::*;
+
+    #[test]
+    fn test_execution_mode_default_is_project() {
+        assert_eq!(ExecutionMode::default(), ExecutionMode::Project);
+    }
+
+    #[test]
+    fn test_node_class_default_is_implementation() {
+        assert_eq!(NodeClass::default(), NodeClass::Implementation);
+    }
+
+    #[test]
+    fn test_artifact_bundle_roundtrip() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "fn main() {}".to_string(),
+                },
+                ArtifactOperation::Diff {
+                    path: "src/lib.rs".to_string(),
+                    patch: "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new".to_string(),
+                },
+            ],
+            commands: vec!["cargo build".to_string()],
+        };
+
+        let json = serde_json::to_string(&bundle).unwrap();
+        let deser: ArtifactBundle = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deser.len(), 2);
+        assert_eq!(deser.writes_count(), 1);
+        assert_eq!(deser.diffs_count(), 1);
+        assert_eq!(deser.commands.len(), 1);
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_empty() {
+        let bundle = ArtifactBundle::new();
+        assert!(bundle.validate().is_err());
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_absolute_path() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "/etc/passwd".to_string(),
+                content: "bad".to_string(),
+            }],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_err());
+        assert!(bundle.validate().unwrap_err().contains("absolute path"));
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_path_traversal() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "../../etc/passwd".to_string(),
+                content: "bad".to_string(),
+            }],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_err());
+        assert!(bundle.validate().unwrap_err().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_ok() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "fn main() {}".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_ok());
+    }
+
+    #[test]
+    fn test_artifact_operation_accessors() {
+        let write = ArtifactOperation::Write {
+            path: "foo.rs".to_string(),
+            content: "bar".to_string(),
+        };
+        assert_eq!(write.path(), "foo.rs");
+        assert!(write.is_write());
+        assert!(!write.is_diff());
+
+        let diff = ArtifactOperation::Diff {
+            path: "baz.rs".to_string(),
+            patch: "patch".to_string(),
+        };
+        assert_eq!(diff.path(), "baz.rs");
+        assert!(!diff.is_write());
+        assert!(diff.is_diff());
+    }
+
+    #[test]
+    fn test_affected_paths_deduplication() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "v1".to_string(),
+                },
+                ArtifactOperation::Diff {
+                    path: "src/main.rs".to_string(),
+                    patch: "patch".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+        assert_eq!(bundle.affected_paths().len(), 1);
+    }
+
+    #[test]
+    fn test_verification_result_all_passed() {
+        let mut result = VerificationResult::default();
+        assert!(!result.all_passed()); // all false by default
+
+        result.syntax_ok = true;
+        result.build_ok = true;
+        result.tests_ok = true;
+        assert!(result.all_passed());
+    }
+
+    #[test]
+    fn test_verification_result_degraded() {
+        let result = VerificationResult::degraded("no cargo");
+        assert!(result.degraded);
+        assert!(!result.all_passed());
+        assert_eq!(result.degraded_reason.unwrap(), "no cargo");
     }
 }
