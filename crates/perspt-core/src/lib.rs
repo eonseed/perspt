@@ -21,6 +21,6 @@ pub use types::{
     AgentContext, AgentMessage, ArtifactKind, BehavioralContract, CommandContract, ContextBudget,
     ContextPackage, ContextProvenance, Criticality, EnergyComponents, ErrorType, ModelTier,
     NodeState, OwnershipManifest, PlannedContract, PlannedTask, PlannedTest, RestrictionMap,
-    RetryPolicy, SRBNNode, StabilityMonitor, StructuralDigest, SummaryDigest, SummaryKind,
-    TaskPlan, TaskType, TokenBudget, WeightedTest,
+    RetryPolicy, SRBNNode, SensorStatus, StabilityMonitor, StageOutcome, StructuralDigest,
+    SummaryDigest, SummaryKind, TaskPlan, TaskType, TokenBudget, VerificationResult, WeightedTest,
 };

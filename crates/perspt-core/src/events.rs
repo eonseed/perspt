@@ -74,6 +74,22 @@ pub enum AgentEvent {
         files_created: Vec<String>,
         files_modified: Vec<String>,
     },
+
+    /// PSP-5 Phase 4: A sensor fell back to an alternative tool
+    SensorFallback {
+        node_id: String,
+        stage: String,
+        primary: String,
+        actual: String,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 4: Verification completed with degraded stages
+    DegradedVerification {
+        node_id: String,
+        degraded_stages: Vec<String>,
+        stability_blocked: bool,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
