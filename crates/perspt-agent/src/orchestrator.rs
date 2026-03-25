@@ -10,8 +10,8 @@ use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
 use perspt_core::types::{
-    EscalationCategory, EscalationReport, RewriteAction, RewriteRecord, SheafValidationResult,
-    SheafValidatorClass,
+    EscalationCategory, EscalationReport, NodeClass, ProvisionalBranch, ProvisionalBranchState,
+    RewriteAction, RewriteRecord, SheafValidationResult, SheafValidatorClass,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{EdgeRef, Topo, Walker};
@@ -75,6 +75,8 @@ pub struct SRBNOrchestrator {
     last_context_provenance: Option<perspt_core::types::ContextProvenance>,
     /// PSP-5 Phase 4: Last plugin-driven verification result (for convergence checks)
     last_verification_result: Option<perspt_core::types::VerificationResult>,
+    /// PSP-5 Phase 6: Blocked dependencies awaiting parent interface seals
+    blocked_dependencies: Vec<perspt_core::types::BlockedDependency>,
 }
 
 /// Get current timestamp as epoch seconds.
@@ -151,6 +153,7 @@ impl SRBNOrchestrator {
             last_tool_failure: None,
             last_context_provenance: None,
             last_verification_result: None,
+            blocked_dependencies: Vec::new(),
         }
     }
 
@@ -351,6 +354,18 @@ impl SRBNOrchestrator {
         let total_nodes = indices.len();
 
         for (i, idx) in indices.iter().enumerate() {
+            // PSP-5 Phase 6: Check if node is blocked on a parent interface seal.
+            // In the current sequential topo-order execution this should not fire
+            // (parents commit before children), but it establishes the gating
+            // contract for when speculative parallelism is introduced later.
+            if self.check_seal_prerequisites(*idx) {
+                log::warn!(
+                    "Node {} blocked on seal prerequisite — skipping in this iteration",
+                    self.graph[*idx].node_id
+                );
+                continue;
+            }
+
             // PSP-5: Emit NodeSelected event before execution
             if let Some(node) = self.graph.node_weight(*idx) {
                 self.emit_log(format!("📝 [{}/{}] {}", i + 1, total_nodes, node.goal));
@@ -1540,6 +1555,9 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         let node = &self.graph[idx];
         log::info!("Executing node: {} ({})", node.node_id, node.goal);
 
+        // PSP-5 Phase 6: Create provisional branch if node has graph parents
+        let branch_id = self.maybe_create_provisional_branch(idx);
+
         // Step 2: Recursive Sub-graph Execution (already in topo order)
         self.graph[idx].state = NodeState::Coding;
 
@@ -1586,6 +1604,11 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 action: report.action.to_string(),
             });
 
+            // PSP-5 Phase 6: Mark provisional branch as flushed on escalation
+            if let Some(ref bid) = branch_id {
+                self.flush_provisional_branch(bid, &self.graph[idx].node_id.clone());
+            }
+
             // Apply the chosen repair action or escalate to user
             let applied = self.apply_repair_action(idx, &action).await;
 
@@ -1608,6 +1631,11 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         // Step 7: Merkle Ledger Commit
         self.step_commit(idx).await?;
 
+        // PSP-5 Phase 6: Merge provisional branch after successful commit
+        if let Some(ref bid) = branch_id {
+            self.merge_provisional_branch(bid, idx);
+        }
+
         Ok(())
     }
 
@@ -1621,8 +1649,16 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             .with_max_context_bytes(100 * 1024); // 100KB default budget
 
         let node = &self.graph[idx];
-        let restriction_map =
+        let mut restriction_map =
             retriever.build_restriction_map(node, &self.context.ownership_manifest);
+
+        // PSP-5 Phase 6: Inject sealed interface digests from parent nodes.
+        // For each parent Interface node that has a recorded seal, add the
+        // seal's structural digest to the restriction map so the context
+        // package uses immutable sealed data instead of mutable parent files.
+        self.inject_sealed_interfaces(idx, &mut restriction_map);
+
+        let node = &self.graph[idx];
         let context_package = retriever.assemble_context_package(node, &restriction_map);
         let formatted_context = retriever.format_context_package(&context_package);
 
@@ -2713,7 +2749,13 @@ File: [same filename]
             }
         }
 
+        // PSP-5 Phase 6: Emit interface seals for Interface-class nodes
+        self.emit_interface_seals(idx);
+
         self.graph[idx].state = NodeState::Completed;
+
+        // PSP-5 Phase 6: Unblock dependents that were waiting on this node's seal
+        self.unblock_dependents(idx);
 
         log::info!("Node {} committed", self.graph[idx].node_id);
         Ok(())
@@ -3821,6 +3863,299 @@ File: [same filename]
         );
 
         result
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 6: Provisional Branch Lifecycle
+    // =========================================================================
+
+    /// Create a provisional branch if the node has graph parents (i.e., it
+    /// depends on another node's output). Returns the branch ID if created.
+    fn maybe_create_provisional_branch(&mut self, idx: NodeIndex) -> Option<String> {
+        // Find incoming edges (parents this node depends on)
+        let parents: Vec<NodeIndex> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Incoming)
+            .collect();
+
+        if parents.is_empty() {
+            return None; // Root node — no provisional branch needed
+        }
+
+        let node = &self.graph[idx];
+        let node_id = node.node_id.clone();
+        let session_id = self.context.session_id.clone();
+
+        // Use the first parent as the primary dependency.
+        // For multi-parent nodes the branch tracks the first parent;
+        // lineage records capture all parent→child edges.
+        let parent_idx = parents[0];
+        let parent_node_id = self.graph[parent_idx].node_id.clone();
+
+        let branch_id = format!("branch_{}_{}", node_id, uuid::Uuid::new_v4());
+        let branch = ProvisionalBranch::new(
+            branch_id.clone(),
+            session_id.clone(),
+            node_id.clone(),
+            parent_node_id.clone(),
+        );
+
+        // Persist via ledger
+        if let Err(e) = self.ledger.record_provisional_branch(&branch) {
+            log::warn!("Failed to record provisional branch: {}", e);
+        }
+
+        // Record lineage edges for every parent
+        for pidx in &parents {
+            let parent_id = self.graph[*pidx].node_id.clone();
+            // Determine if this parent is an Interface node (seal dependency)
+            let depends_on_seal =
+                self.graph[*pidx].node_class == NodeClass::Interface;
+            let lineage = perspt_core::types::BranchLineage {
+                lineage_id: format!("lin_{}_{}", branch_id, parent_id),
+                parent_branch_id: parent_id,
+                child_branch_id: branch_id.clone(),
+                depends_on_seal,
+            };
+            if let Err(e) = self.ledger.record_branch_lineage(&lineage) {
+                log::warn!("Failed to record branch lineage: {}", e);
+            }
+        }
+
+        // Store branch ID on the node for tracking
+        self.graph[idx].provisional_branch_id = Some(branch_id.clone());
+
+        self.emit_event(perspt_core::AgentEvent::BranchCreated {
+            branch_id: branch_id.clone(),
+            node_id,
+            parent_node_id,
+        });
+        log::info!("Created provisional branch {} for node", branch_id);
+
+        Some(branch_id)
+    }
+
+    /// Merge a provisional branch after successful commit.
+    fn merge_provisional_branch(&mut self, branch_id: &str, idx: NodeIndex) {
+        let node_id = self.graph[idx].node_id.clone();
+        if let Err(e) = self
+            .ledger
+            .update_branch_state(branch_id, &ProvisionalBranchState::Merged.to_string())
+        {
+            log::warn!("Failed to merge branch {}: {}", branch_id, e);
+        }
+        self.emit_event(perspt_core::AgentEvent::BranchMerged {
+            branch_id: branch_id.to_string(),
+            node_id,
+        });
+        log::info!("Merged provisional branch {}", branch_id);
+    }
+
+    /// Flush a provisional branch on escalation / non-convergence.
+    fn flush_provisional_branch(&mut self, branch_id: &str, node_id: &str) {
+        if let Err(e) = self
+            .ledger
+            .update_branch_state(branch_id, &ProvisionalBranchState::Flushed.to_string())
+        {
+            log::warn!("Failed to flush branch {}: {}", branch_id, e);
+        }
+        log::info!(
+            "Flushed provisional branch {} for node {}",
+            branch_id,
+            node_id
+        );
+    }
+
+    /// Emit interface seals from an Interface-class node's output artifacts.
+    ///
+    /// Called during step_commit for nodes whose `node_class` is `Interface`.
+    /// Computes structural digests of owned output files and persists seal
+    /// records so dependent nodes can assemble context from sealed interfaces.
+    fn emit_interface_seals(&mut self, idx: NodeIndex) {
+        let node = &self.graph[idx];
+        if node.node_class != NodeClass::Interface {
+            return;
+        }
+
+        let node_id = node.node_id.clone();
+        let session_id = self.context.session_id.clone();
+        let output_targets: Vec<_> = node.output_targets.clone();
+        let mut sealed_paths = Vec::new();
+        let mut seal_hash = [0u8; 32];
+
+        let retriever = ContextRetriever::new(self.context.working_dir.clone());
+
+        for target in &output_targets {
+            let path_str = target.to_string_lossy().to_string();
+            match retriever.compute_structural_digest(
+                &path_str,
+                perspt_core::types::ArtifactKind::InterfaceSeal,
+                &node_id,
+            ) {
+                Ok(digest) => {
+                    let seal = perspt_core::types::InterfaceSealRecord::from_digest(
+                        &session_id,
+                        &node_id,
+                        &digest,
+                    );
+                    seal_hash = seal.seal_hash;
+                    sealed_paths.push(path_str);
+
+                    if let Err(e) = self.ledger.record_interface_seal(&seal) {
+                        log::warn!("Failed to record interface seal: {}", e);
+                    }
+                }
+                Err(e) => {
+                    log::debug!("Skipping seal for {}: {}", path_str, e);
+                }
+            }
+        }
+
+        if !sealed_paths.is_empty() {
+            // Store seal hash on the node
+            self.graph[idx].interface_seal_hash = Some(seal_hash);
+
+            self.emit_event(perspt_core::AgentEvent::InterfaceSealed {
+                node_id: node_id.clone(),
+                sealed_paths: sealed_paths.clone(),
+                seal_hash: seal_hash.iter().map(|b| format!("{:02x}", b)).collect::<String>(),
+            });
+            log::info!(
+                "Sealed {} interface artifact(s) for node {}",
+                sealed_paths.len(),
+                node_id
+            );
+        }
+    }
+
+    /// Unblock child nodes that were waiting on this node's interface seal.
+    fn unblock_dependents(&mut self, idx: NodeIndex) {
+        let node_id = self.graph[idx].node_id.clone();
+
+        // Drain blocked dependencies that match this parent
+        let (unblocked, remaining): (Vec<_>, Vec<_>) = self
+            .blocked_dependencies
+            .drain(..)
+            .partition(|dep| dep.parent_node_id == node_id);
+
+        self.blocked_dependencies = remaining;
+
+        for dep in unblocked {
+            self.emit_event(perspt_core::AgentEvent::DependentUnblocked {
+                child_node_id: dep.child_node_id.clone(),
+                parent_node_id: node_id.clone(),
+            });
+            log::info!(
+                "Unblocked dependent {} (parent {} sealed)",
+                dep.child_node_id,
+                node_id
+            );
+        }
+    }
+
+    /// Check whether a node should be blocked because a parent Interface node
+    /// has not yet produced a seal.  Returns `true` if the node is blocked.
+    fn check_seal_prerequisites(&mut self, idx: NodeIndex) -> bool {
+        let parents: Vec<NodeIndex> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Incoming)
+            .collect();
+
+        for pidx in parents {
+            let parent = &self.graph[pidx];
+            if parent.node_class == NodeClass::Interface
+                && parent.interface_seal_hash.is_none()
+                && parent.state != NodeState::Completed
+            {
+                // Parent Interface node hasn't sealed yet — block this child
+                let child_node_id = self.graph[idx].node_id.clone();
+                let parent_node_id = parent.node_id.clone();
+                let sealed_paths: Vec<String> = parent
+                    .output_targets
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+
+                let dep = perspt_core::types::BlockedDependency::new(
+                    &child_node_id,
+                    &parent_node_id,
+                    sealed_paths,
+                );
+                self.blocked_dependencies.push(dep);
+
+                log::info!(
+                    "Node {} blocked: waiting on interface seal from {}",
+                    child_node_id,
+                    parent_node_id
+                );
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Inject sealed interface digests from parent nodes into a restriction map.
+    ///
+    /// For each parent that has a recorded interface seal in the ledger, replace
+    /// the mutable file reference in the sealed_interfaces list with a
+    /// structural digest derived from the persisted seal.  This ensures the
+    /// child context is assembled from immutable sealed data.
+    fn inject_sealed_interfaces(
+        &self,
+        idx: NodeIndex,
+        restriction_map: &mut perspt_core::types::RestrictionMap,
+    ) {
+        let parents: Vec<NodeIndex> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Incoming)
+            .collect();
+
+        for pidx in parents {
+            let parent = &self.graph[pidx];
+            if parent.interface_seal_hash.is_none() {
+                continue;
+            }
+
+            let parent_node_id = &parent.node_id;
+
+            // Query persisted seal records for this parent
+            let seals = match self.ledger.get_interface_seals(parent_node_id) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    log::debug!("Could not query seals for {}: {}", parent_node_id, e);
+                    continue;
+                }
+            };
+
+            for seal in seals {
+                // Remove the path from sealed_interfaces (it will be replaced by digest)
+                restriction_map
+                    .sealed_interfaces
+                    .retain(|p| *p != seal.sealed_path);
+
+                // Convert Vec<u8> seal_hash to [u8; 32]
+                let mut hash = [0u8; 32];
+                let len = seal.seal_hash.len().min(32);
+                hash[..len].copy_from_slice(&seal.seal_hash[..len]);
+
+                // Add a structural digest instead
+                let digest = perspt_core::types::StructuralDigest {
+                    digest_id: format!("seal_{}_{}", seal.node_id, seal.sealed_path),
+                    source_node_id: seal.node_id.clone(),
+                    source_path: seal.sealed_path.clone(),
+                    artifact_kind: perspt_core::types::ArtifactKind::InterfaceSeal,
+                    hash,
+                    version: seal.version as u32,
+                };
+                restriction_map.structural_digests.push(digest);
+
+                log::debug!(
+                    "Injected sealed digest for {} from parent {}",
+                    seal.sealed_path,
+                    parent_node_id,
+                );
+            }
+        }
     }
 }
 
