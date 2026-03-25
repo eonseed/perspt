@@ -117,6 +117,27 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
         }
     }
 
+    // PSP-5 Phase 7: Show trust context before resuming
+    let escalations = store.get_escalation_reports(&actual_id)?;
+    if !escalations.is_empty() {
+        println!("⚠️  Escalations: {} recorded", escalations.len());
+    }
+    // Show last energy state
+    if let Some(latest) = node_states.last() {
+        if let Ok(energy_history) = store.get_energy_history(&actual_id, &latest.node_id) {
+            if let Some(last_energy) = energy_history.last() {
+                println!(
+                    "⚡ Last energy: V(x)={:.3} (syn={:.2} str={:.2} log={:.2})",
+                    last_energy.v_total, last_energy.v_syn, last_energy.v_str, last_energy.v_log
+                );
+            }
+        }
+    }
+    let total_retries: i32 = node_states.iter().map(|n| n.attempt_count.max(0)).sum();
+    if total_retries > 0 {
+        println!("↻  Total retries: {}", total_retries);
+    }
+
     // Check if session is already completed
     if session.status == "COMPLETED" {
         println!();
