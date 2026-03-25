@@ -213,6 +213,44 @@ impl AgentApp {
                 self.dashboard
                     .log(format!("{} Session Complete: {}", emoji, message));
             }
+            AgentEvent::EscalationClassified {
+                node_id,
+                category,
+                action,
+            } => {
+                self.dashboard.log(format!(
+                    "⚠️ Escalation: {} → {} (action: {})",
+                    node_id, category, action
+                ));
+            }
+            AgentEvent::SheafValidationComplete {
+                node_id,
+                validators_run,
+                failures,
+                v_sheaf,
+            } => {
+                if failures > 0 {
+                    self.dashboard.log(format!(
+                        "🔍 Sheaf: {} — {}/{} failed (V_sheaf={:.3})",
+                        node_id, failures, validators_run, v_sheaf
+                    ));
+                } else {
+                    self.dashboard.log(format!(
+                        "✓ Sheaf: {} — {}/{} passed",
+                        node_id, validators_run, validators_run
+                    ));
+                }
+            }
+            AgentEvent::GraphRewriteApplied {
+                trigger_node,
+                action,
+                nodes_affected,
+            } => {
+                self.dashboard.log(format!(
+                    "🔧 Rewrite: {} via {} ({} nodes)",
+                    trigger_node, action, nodes_affected
+                ));
+            }
             _ => {}
         }
     }
