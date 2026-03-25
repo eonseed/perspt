@@ -6,6 +6,27 @@ use anyhow::{Context, Result};
 pub use perspt_store::{LlmRequestRecord, NodeStateRecord, SessionRecord, SessionStore};
 use std::path::{Path, PathBuf};
 
+/// Full commit payload collected by the orchestrator at commit time.
+///
+/// Bundles graph-structural fields, retry/error metadata, and merkle
+/// material so that `commit_node_snapshot()` can persist a complete
+/// node record in a single call.
+#[derive(Debug, Clone)]
+pub struct NodeCommitPayload {
+    pub node_id: String,
+    pub state: String,
+    pub v_total: f32,
+    pub merkle_hash: Option<Vec<u8>>,
+    pub attempt_count: i32,
+    pub node_class: Option<String>,
+    pub owner_plugin: Option<String>,
+    pub goal: Option<String>,
+    pub parent_id: Option<String>,
+    /// JSON-serialized `Vec<String>` of child node IDs
+    pub children: Option<String>,
+    pub last_error_type: Option<String>,
+}
+
 /// Merkle commit record (Legacy wrapper for compatibility)
 #[derive(Debug, Clone)]
 pub struct MerkleCommit {
@@ -149,7 +170,7 @@ impl MerkleLedger {
             v_total: energy,
             merkle_hash: Some(merkle_root.to_vec()),
             attempt_count: 1, // Placeholder
-            // Phase 8 fields — populated properly in Commit 3
+            // Phase 8 fields — populated properly via commit_node_snapshot
             node_class: None,
             owner_plugin: None,
             goal: None,
@@ -165,6 +186,61 @@ impl MerkleLedger {
         log::info!("Committed node {} to store", node_id);
 
         // Update session progress
+        if let Some(ref mut session) = self.current_session {
+            session.completed_nodes += 1;
+        }
+
+        Ok(commit_id)
+    }
+
+    /// Commit a full node snapshot with all Phase 8 metadata.
+    ///
+    /// This is the preferred commit API for the orchestrator. It records the
+    /// complete node state, graph-structural fields, retry/error metadata,
+    /// and merkle material in a single durable write. Returns the commit ID.
+    pub fn commit_node_snapshot(&mut self, payload: &NodeCommitPayload) -> Result<String> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to commit")?;
+
+        let commit_id = generate_commit_id();
+
+        let record = NodeStateRecord {
+            node_id: payload.node_id.clone(),
+            session_id: session_id.clone(),
+            state: payload.state.clone(),
+            v_total: payload.v_total,
+            merkle_hash: payload.merkle_hash.clone(),
+            attempt_count: payload.attempt_count,
+            node_class: payload.node_class.clone(),
+            owner_plugin: payload.owner_plugin.clone(),
+            goal: payload.goal.clone(),
+            parent_id: payload.parent_id.clone(),
+            children: payload.children.clone(),
+            last_error_type: payload.last_error_type.clone(),
+            committed_at: Some(chrono_iso_now()),
+        };
+
+        self.store.record_node_state(&record)?;
+
+        // Update merkle root if hash is present
+        if let Some(ref hash) = payload.merkle_hash {
+            if hash.len() == 32 {
+                let mut root = [0u8; 32];
+                root.copy_from_slice(hash);
+                self.store.update_merkle_root(&session_id, &root)?;
+            }
+        }
+
+        log::info!(
+            "Committed node snapshot '{}' (state={}, attempts={})",
+            payload.node_id,
+            payload.state,
+            payload.attempt_count
+        );
+
         if let Some(ref mut session) = self.current_session {
             session.completed_nodes += 1;
         }
@@ -565,6 +641,149 @@ impl MerkleLedger {
     }
 
     // =========================================================================
+    // PSP-5 Phase 8: Task Graph & Session Rehydration
+    // =========================================================================
+
+    /// Record a task-graph edge (parent→child dependency)
+    pub fn record_task_graph_edge(
+        &self,
+        parent_node_id: &str,
+        child_node_id: &str,
+        edge_type: &str,
+    ) -> Result<()> {
+        let session_id = self.session_id()?;
+        let row = perspt_store::TaskGraphEdgeRow {
+            session_id,
+            parent_node_id: parent_node_id.to_string(),
+            child_node_id: child_node_id.to_string(),
+            edge_type: edge_type.to_string(),
+        };
+        self.store.record_task_graph_edge(&row)?;
+        log::debug!(
+            "Recorded task graph edge: {} → {} ({})",
+            parent_node_id,
+            child_node_id,
+            edge_type
+        );
+        Ok(())
+    }
+
+    /// Get all task graph edges for the current session
+    pub fn get_task_graph_edges(&self) -> Result<Vec<perspt_store::TaskGraphEdgeRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_task_graph_edges(&session_id)
+    }
+
+    /// Get sheaf validations for a specific node
+    pub fn get_sheaf_validations(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<perspt_store::SheafValidationRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_sheaf_validations(&session_id, node_id)
+    }
+
+    /// Load a complete session snapshot for rehydration/resume.
+    ///
+    /// Aggregates the latest node states, graph topology, energy history,
+    /// verification results, artifact bundles, sheaf validations,
+    /// provisional branches, interface seals, context provenance, and
+    /// escalation reports into a single `SessionSnapshot`.
+    pub fn load_session_snapshot(&self) -> Result<SessionSnapshot> {
+        let session_id = self.session_id()?;
+
+        let node_states = self
+            .store
+            .get_latest_node_states(&session_id)
+            .unwrap_or_default();
+
+        let graph_edges = self
+            .store
+            .get_task_graph_edges(&session_id)
+            .unwrap_or_default();
+
+        let branches = self
+            .store
+            .get_provisional_branches(&session_id)
+            .unwrap_or_default();
+
+        let escalation_reports = self
+            .store
+            .get_escalation_reports(&session_id)
+            .unwrap_or_default();
+
+        let flushes = self
+            .store
+            .get_branch_flushes(&session_id)
+            .unwrap_or_default();
+
+        // Collect per-node evidence
+        let mut node_details: Vec<NodeSnapshotDetail> = Vec::with_capacity(node_states.len());
+        for ns in &node_states {
+            let nid = &ns.node_id;
+
+            let energy_history = self
+                .store
+                .get_energy_history(&session_id, nid)
+                .unwrap_or_default();
+
+            let verification = self
+                .store
+                .get_verification_result(&session_id, nid)
+                .ok()
+                .flatten();
+
+            let artifact_bundle = self
+                .store
+                .get_artifact_bundle(&session_id, nid)
+                .ok()
+                .flatten();
+
+            let sheaf_validations = self
+                .store
+                .get_sheaf_validations(&session_id, nid)
+                .unwrap_or_default();
+
+            let interface_seals = self
+                .store
+                .get_interface_seals(&session_id, nid)
+                .unwrap_or_default();
+
+            let context_provenance = self
+                .store
+                .get_context_provenance(&session_id, nid)
+                .ok()
+                .flatten();
+
+            node_details.push(NodeSnapshotDetail {
+                record: ns.clone(),
+                energy_history,
+                verification,
+                artifact_bundle,
+                sheaf_validations,
+                interface_seals,
+                context_provenance,
+            });
+        }
+
+        log::info!(
+            "Loaded session snapshot: {} nodes, {} edges, {} branches",
+            node_details.len(),
+            graph_edges.len(),
+            branches.len()
+        );
+
+        Ok(SessionSnapshot {
+            session_id,
+            node_details,
+            graph_edges,
+            branches,
+            escalation_reports,
+            flushes,
+        })
+    }
+
+    // =========================================================================
     // PSP-5 Phase 6: Provisional Branch, Interface Seal, Branch Flush Facades
     // =========================================================================
 
@@ -902,6 +1121,33 @@ pub struct LedgerStats {
     pub db_size_bytes: u64,
 }
 
+/// PSP-5 Phase 8: Per-node evidence bundle for session rehydration.
+#[derive(Debug, Clone)]
+pub struct NodeSnapshotDetail {
+    pub record: NodeStateRecord,
+    pub energy_history: Vec<perspt_store::EnergyRecord>,
+    pub verification: Option<perspt_store::VerificationResultRow>,
+    pub artifact_bundle: Option<perspt_store::ArtifactBundleRow>,
+    pub sheaf_validations: Vec<perspt_store::SheafValidationRow>,
+    pub interface_seals: Vec<perspt_store::InterfaceSealRow>,
+    pub context_provenance: Option<perspt_store::ContextProvenanceRecord>,
+}
+
+/// PSP-5 Phase 8: Complete session snapshot for resume/rehydration.
+///
+/// Aggregates all persisted state needed to reconstruct the orchestrator
+/// DAG, restore node states, and resume execution from the last durable
+/// boundary.
+#[derive(Debug, Clone)]
+pub struct SessionSnapshot {
+    pub session_id: String,
+    pub node_details: Vec<NodeSnapshotDetail>,
+    pub graph_edges: Vec<perspt_store::TaskGraphEdgeRow>,
+    pub branches: Vec<perspt_store::ProvisionalBranchRow>,
+    pub escalation_reports: Vec<perspt_store::EscalationReportRecord>,
+    pub flushes: Vec<perspt_store::BranchFlushRow>,
+}
+
 /// Generate a unique commit ID
 fn generate_commit_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -919,4 +1165,38 @@ fn chrono_timestamp() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64
+}
+
+/// ISO-8601 timestamp for committed_at fields
+fn chrono_iso_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // Simple UTC timestamp — YYYY-MM-DDTHH:MM:SSZ
+    let days = secs / 86400;
+    let time = secs % 86400;
+    let h = time / 3600;
+    let m = (time % 3600) / 60;
+    let s = time % 60;
+    // Days since 1970-01-01 to y/m/d (civil calendar)
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, m, s)
+}
+
+/// Convert days since Unix epoch to (year, month, day)
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    // Algorithm from Howard Hinnant's date library
+    let z = days + 719468;
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m, d)
 }
