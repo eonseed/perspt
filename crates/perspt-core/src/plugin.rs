@@ -19,6 +19,150 @@ pub struct LspConfig {
     pub language_id: String,
 }
 
+// =============================================================================
+// PSP-5 Phase 4: Verifier Capability Declarations
+// =============================================================================
+
+/// Verification stage in the plugin-driven pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VerifierStage {
+    /// Syntax / type check (e.g. `cargo check`, `uv run ty check .`)
+    SyntaxCheck,
+    /// Build step (e.g. `cargo build`, `npm run build`)
+    Build,
+    /// Test execution (e.g. `cargo test`, `uv run pytest`)
+    Test,
+    /// Lint pass (e.g. `cargo clippy`, `uv run ruff check .`)
+    Lint,
+}
+
+impl std::fmt::Display for VerifierStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerifierStage::SyntaxCheck => write!(f, "syntax_check"),
+            VerifierStage::Build => write!(f, "build"),
+            VerifierStage::Test => write!(f, "test"),
+            VerifierStage::Lint => write!(f, "lint"),
+        }
+    }
+}
+
+/// A single verifier sensor: one stage of the verification pipeline.
+///
+/// Each capability independently declares its command, host-tool availability,
+/// and optional fallback. This replaces the coarse single `host_tool_available()`
+/// check with per-sensor probing.
+#[derive(Debug, Clone)]
+pub struct VerifierCapability {
+    /// Which stage this capability covers.
+    pub stage: VerifierStage,
+    /// Primary command to execute (None if this stage is not supported).
+    pub command: Option<String>,
+    /// Whether the primary command's host tool is available on this machine.
+    pub available: bool,
+    /// Fallback command when the primary tool is unavailable.
+    pub fallback_command: Option<String>,
+    /// Whether the fallback tool is available.
+    pub fallback_available: bool,
+}
+
+impl VerifierCapability {
+    /// True if either the primary or fallback tool is available.
+    pub fn any_available(&self) -> bool {
+        self.available || self.fallback_available
+    }
+
+    /// The best available command, preferring primary over fallback.
+    pub fn effective_command(&self) -> Option<&str> {
+        if self.available {
+            self.command.as_deref()
+        } else if self.fallback_available {
+            self.fallback_command.as_deref()
+        } else {
+            None
+        }
+    }
+}
+
+/// LSP availability and fallback for a plugin.
+#[derive(Debug, Clone)]
+pub struct LspCapability {
+    /// Primary LSP configuration.
+    pub primary: LspConfig,
+    /// Whether the primary LSP binary is available on the host.
+    pub primary_available: bool,
+    /// Fallback LSP configuration (if any).
+    pub fallback: Option<LspConfig>,
+    /// Whether the fallback binary is available.
+    pub fallback_available: bool,
+}
+
+impl LspCapability {
+    /// Return the best available LSP config, preferring primary.
+    pub fn effective_config(&self) -> Option<&LspConfig> {
+        if self.primary_available {
+            Some(&self.primary)
+        } else if self.fallback_available {
+            self.fallback.as_ref()
+        } else {
+            None
+        }
+    }
+}
+
+/// Complete verifier profile for a plugin.
+///
+/// Bundles all per-sensor capabilities and LSP availability into one
+/// inspectable structure. Built by `LanguagePlugin::verifier_profile()`.
+#[derive(Debug, Clone)]
+pub struct VerifierProfile {
+    /// Name of the plugin that produced this profile.
+    pub plugin_name: String,
+    /// Per-stage verifier capabilities.
+    pub capabilities: Vec<VerifierCapability>,
+    /// LSP availability and fallback.
+    pub lsp: LspCapability,
+}
+
+impl VerifierProfile {
+    /// Get the capability for a given stage, if declared.
+    pub fn get(&self, stage: VerifierStage) -> Option<&VerifierCapability> {
+        self.capabilities.iter().find(|c| c.stage == stage)
+    }
+
+    /// Stages that have at least one available tool (primary or fallback).
+    pub fn available_stages(&self) -> Vec<VerifierStage> {
+        self.capabilities
+            .iter()
+            .filter(|c| c.any_available())
+            .map(|c| c.stage)
+            .collect()
+    }
+
+    /// True when every declared stage has zero available tools.
+    pub fn fully_degraded(&self) -> bool {
+        self.capabilities.iter().all(|c| !c.any_available())
+    }
+}
+
+// =============================================================================
+// Utility: host binary probe
+// =============================================================================
+
+/// Check whether a given binary name is available on the host PATH.
+///
+/// Runs `<binary> --version` silently; returns `true` if the process exits
+/// successfully. Used by plugins for per-sensor host-tool probing.
+pub fn host_binary_available(binary: &str) -> bool {
+    std::process::Command::new(binary)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Options for project initialization
 #[derive(Debug, Clone, Default)]
 pub struct InitOptions {
@@ -158,6 +302,82 @@ pub trait LanguagePlugin: Send + Sync {
     fn lsp_fallback(&self) -> Option<LspConfig> {
         None
     }
+
+    // =========================================================================
+    // PSP-5 Phase 4: Verifier Profile Assembly
+    // =========================================================================
+
+    /// Build a complete verifier profile by probing each capability.
+    ///
+    /// The default implementation auto-assembles from the existing
+    /// `syntax_check_command()`, `build_command()`, `test_command()`,
+    /// `lint_command()`, and `host_tool_available()` methods.
+    ///
+    /// Plugins override this method to provide per-sensor probing
+    /// with distinct fallback commands and independent availability checks.
+    fn verifier_profile(&self) -> VerifierProfile {
+        let tool_available = self.host_tool_available();
+
+        let mut capabilities = Vec::new();
+
+        if let Some(cmd) = self.syntax_check_command() {
+            capabilities.push(VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some(cmd),
+                available: tool_available,
+                fallback_command: None,
+                fallback_available: false,
+            });
+        }
+
+        if let Some(cmd) = self.build_command() {
+            capabilities.push(VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some(cmd),
+                available: tool_available,
+                fallback_command: None,
+                fallback_available: false,
+            });
+        }
+
+        // Test always has a command (test_command is required)
+        capabilities.push(VerifierCapability {
+            stage: VerifierStage::Test,
+            command: Some(self.test_command()),
+            available: tool_available,
+            fallback_command: None,
+            fallback_available: false,
+        });
+
+        if let Some(cmd) = self.lint_command() {
+            capabilities.push(VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some(cmd),
+                available: tool_available,
+                fallback_command: None,
+                fallback_available: false,
+            });
+        }
+
+        let primary_config = self.get_lsp_config();
+        let primary_available = host_binary_available(&primary_config.server_binary);
+        let fallback = self.lsp_fallback();
+        let fallback_available = fallback
+            .as_ref()
+            .map(|f| host_binary_available(&f.server_binary))
+            .unwrap_or(false);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary: primary_config,
+                primary_available,
+                fallback,
+                fallback_available,
+            },
+        }
+    }
 }
 
 /// Rust language plugin
@@ -243,13 +463,57 @@ impl LanguagePlugin for RustPlugin {
     }
 
     fn host_tool_available(&self) -> bool {
-        std::process::Command::new("cargo")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        host_binary_available("cargo")
+    }
+
+    fn verifier_profile(&self) -> VerifierProfile {
+        let cargo = host_binary_available("cargo");
+        let clippy = cargo; // clippy is a cargo subcommand, same binary
+
+        let capabilities = vec![
+            VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("cargo check".to_string()),
+                available: cargo,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("cargo build".to_string()),
+                available: cargo,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Test,
+                command: Some("cargo test".to_string()),
+                available: cargo,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some("cargo clippy -- -D warnings".to_string()),
+                available: clippy,
+                fallback_command: None,
+                fallback_available: false,
+            },
+        ];
+
+        let primary = self.get_lsp_config();
+        let primary_available = host_binary_available(&primary.server_binary);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary,
+                primary_available,
+                fallback: None,
+                fallback_available: false,
+            },
+        }
     }
 }
 
@@ -370,13 +634,7 @@ impl LanguagePlugin for PythonPlugin {
     }
 
     fn host_tool_available(&self) -> bool {
-        std::process::Command::new("uv")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        host_binary_available("uv")
     }
 
     fn lsp_fallback(&self) -> Option<LspConfig> {
@@ -385,6 +643,57 @@ impl LanguagePlugin for PythonPlugin {
             args: vec!["--stdio".to_string()],
             language_id: "python".to_string(),
         })
+    }
+
+    fn verifier_profile(&self) -> VerifierProfile {
+        let uv = host_binary_available("uv");
+        let pyright = host_binary_available("pyright");
+
+        let capabilities = vec![
+            VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("uv run ty check .".to_string()),
+                available: uv,
+                // pyright as CLI fallback for syntax checking
+                fallback_command: Some("pyright .".to_string()),
+                fallback_available: pyright,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Test,
+                command: Some("uv run pytest".to_string()),
+                available: uv,
+                // bare pytest fallback
+                fallback_command: Some("python -m pytest".to_string()),
+                fallback_available: host_binary_available("python3")
+                    || host_binary_available("python"),
+            },
+            VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some("uv run ruff check .".to_string()),
+                available: uv,
+                fallback_command: Some("ruff check .".to_string()),
+                fallback_available: host_binary_available("ruff"),
+            },
+        ];
+
+        let primary = self.get_lsp_config();
+        let primary_available = host_binary_available("uvx");
+        let fallback = self.lsp_fallback();
+        let fallback_available = fallback
+            .as_ref()
+            .map(|f| host_binary_available(&f.server_binary))
+            .unwrap_or(false);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary,
+                primary_available,
+                fallback,
+                fallback_available,
+            },
+        }
     }
 }
 
@@ -494,13 +803,57 @@ impl LanguagePlugin for JsPlugin {
     }
 
     fn host_tool_available(&self) -> bool {
-        std::process::Command::new("node")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        host_binary_available("node")
+    }
+
+    fn verifier_profile(&self) -> VerifierProfile {
+        let node = host_binary_available("node");
+        let npx = host_binary_available("npx");
+
+        let capabilities = vec![
+            VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("npx tsc --noEmit".to_string()),
+                available: npx,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("npm run build".to_string()),
+                available: node,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Test,
+                command: Some("npm test".to_string()),
+                available: node,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some("npx eslint .".to_string()),
+                available: npx,
+                fallback_command: None,
+                fallback_available: false,
+            },
+        ];
+
+        let primary = self.get_lsp_config();
+        let primary_available = host_binary_available(&primary.server_binary);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary,
+                primary_available,
+                fallback: None,
+                fallback_available: false,
+            },
+        }
     }
 }
 
@@ -583,5 +936,219 @@ mod tests {
         assert!(js.owns_file("src/app.ts"));
         assert!(!js.owns_file("main.py"));
         assert!(!js.owns_file("src/main.rs"));
+    }
+
+    // =========================================================================
+    // Verifier Capability & Profile Tests
+    // =========================================================================
+
+    #[test]
+    fn test_verifier_capability_effective_command() {
+        // Primary available → primary wins
+        let cap = VerifierCapability {
+            stage: VerifierStage::SyntaxCheck,
+            command: Some("cargo check".to_string()),
+            available: true,
+            fallback_command: Some("rustc --edition 2021".to_string()),
+            fallback_available: true,
+        };
+        assert_eq!(cap.effective_command(), Some("cargo check"));
+        assert!(cap.any_available());
+
+        // Primary unavailable, fallback available → fallback wins
+        let cap2 = VerifierCapability {
+            stage: VerifierStage::Lint,
+            command: Some("uv run ruff check .".to_string()),
+            available: false,
+            fallback_command: Some("ruff check .".to_string()),
+            fallback_available: true,
+        };
+        assert_eq!(cap2.effective_command(), Some("ruff check ."));
+        assert!(cap2.any_available());
+
+        // Both unavailable → None
+        let cap3 = VerifierCapability {
+            stage: VerifierStage::Build,
+            command: Some("cargo build".to_string()),
+            available: false,
+            fallback_command: None,
+            fallback_available: false,
+        };
+        assert_eq!(cap3.effective_command(), None);
+        assert!(!cap3.any_available());
+    }
+
+    #[test]
+    fn test_verifier_profile_get_and_available_stages() {
+        let profile = VerifierProfile {
+            plugin_name: "test".to_string(),
+            capabilities: vec![
+                VerifierCapability {
+                    stage: VerifierStage::SyntaxCheck,
+                    command: Some("check".to_string()),
+                    available: true,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+                VerifierCapability {
+                    stage: VerifierStage::Build,
+                    command: Some("build".to_string()),
+                    available: false,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+                VerifierCapability {
+                    stage: VerifierStage::Test,
+                    command: Some("test".to_string()),
+                    available: true,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+            ],
+            lsp: LspCapability {
+                primary: LspConfig {
+                    server_binary: "test-ls".to_string(),
+                    args: vec![],
+                    language_id: "test".to_string(),
+                },
+                primary_available: false,
+                fallback: None,
+                fallback_available: false,
+            },
+        };
+
+        assert!(profile.get(VerifierStage::SyntaxCheck).is_some());
+        assert!(profile.get(VerifierStage::Lint).is_none());
+
+        let available = profile.available_stages();
+        assert_eq!(available.len(), 2);
+        assert!(available.contains(&VerifierStage::SyntaxCheck));
+        assert!(available.contains(&VerifierStage::Test));
+        assert!(!available.contains(&VerifierStage::Build));
+        assert!(!profile.fully_degraded());
+    }
+
+    #[test]
+    fn test_verifier_profile_fully_degraded() {
+        let profile = VerifierProfile {
+            plugin_name: "empty".to_string(),
+            capabilities: vec![VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("build".to_string()),
+                available: false,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+            lsp: LspCapability {
+                primary: LspConfig {
+                    server_binary: "none".to_string(),
+                    args: vec![],
+                    language_id: "none".to_string(),
+                },
+                primary_available: false,
+                fallback: None,
+                fallback_available: false,
+            },
+        };
+        assert!(profile.fully_degraded());
+        assert!(profile.available_stages().is_empty());
+    }
+
+    #[test]
+    fn test_lsp_capability_effective_config() {
+        let lsp = LspCapability {
+            primary: LspConfig {
+                server_binary: "rust-analyzer".to_string(),
+                args: vec![],
+                language_id: "rust".to_string(),
+            },
+            primary_available: true,
+            fallback: None,
+            fallback_available: false,
+        };
+        assert_eq!(
+            lsp.effective_config().unwrap().server_binary,
+            "rust-analyzer"
+        );
+
+        // Primary unavailable, fallback available
+        let lsp2 = LspCapability {
+            primary: LspConfig {
+                server_binary: "uvx".to_string(),
+                args: vec![],
+                language_id: "python".to_string(),
+            },
+            primary_available: false,
+            fallback: Some(LspConfig {
+                server_binary: "pyright-langserver".to_string(),
+                args: vec!["--stdio".to_string()],
+                language_id: "python".to_string(),
+            }),
+            fallback_available: true,
+        };
+        assert_eq!(
+            lsp2.effective_config().unwrap().server_binary,
+            "pyright-langserver"
+        );
+
+        // Both unavailable
+        let lsp3 = LspCapability {
+            primary: LspConfig {
+                server_binary: "nope".to_string(),
+                args: vec![],
+                language_id: "none".to_string(),
+            },
+            primary_available: false,
+            fallback: None,
+            fallback_available: false,
+        };
+        assert!(lsp3.effective_config().is_none());
+    }
+
+    #[test]
+    fn test_rust_plugin_verifier_profile_shape() {
+        let rust = RustPlugin;
+        let profile = rust.verifier_profile();
+        assert_eq!(profile.plugin_name, "rust");
+        // Rust should declare all 4 stages
+        assert_eq!(profile.capabilities.len(), 4);
+        let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
+        assert!(stages.contains(&VerifierStage::SyntaxCheck));
+        assert!(stages.contains(&VerifierStage::Build));
+        assert!(stages.contains(&VerifierStage::Test));
+        assert!(stages.contains(&VerifierStage::Lint));
+    }
+
+    #[test]
+    fn test_python_plugin_verifier_profile_shape() {
+        let py = PythonPlugin;
+        let profile = py.verifier_profile();
+        assert_eq!(profile.plugin_name, "python");
+        // Python: syntax_check, test, lint (no build)
+        assert_eq!(profile.capabilities.len(), 3);
+        let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
+        assert!(stages.contains(&VerifierStage::SyntaxCheck));
+        assert!(stages.contains(&VerifierStage::Test));
+        assert!(stages.contains(&VerifierStage::Lint));
+        assert!(!stages.contains(&VerifierStage::Build));
+        // Python has an LSP fallback declared
+        assert!(profile.lsp.fallback.is_some());
+    }
+
+    #[test]
+    fn test_js_plugin_verifier_profile_shape() {
+        let js = JsPlugin;
+        let profile = js.verifier_profile();
+        assert_eq!(profile.plugin_name, "javascript");
+        // JS: all 4 stages
+        assert_eq!(profile.capabilities.len(), 4);
+    }
+
+    #[test]
+    fn test_verifier_stage_display() {
+        assert_eq!(format!("{}", VerifierStage::SyntaxCheck), "syntax_check");
+        assert_eq!(format!("{}", VerifierStage::Build), "build");
+        assert_eq!(format!("{}", VerifierStage::Test), "test");
+        assert_eq!(format!("{}", VerifierStage::Lint), "lint");
     }
 }
