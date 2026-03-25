@@ -885,11 +885,18 @@ The expected implementation work primarily affects:
 * ``crates/perspt-tui/src/agent_app.rs``: TUI dashboard handling for all three Phase 5 events.
 * Test coverage: 140 tests across the workspace covering Phase 5 type construction, serialization, graph rewrite correctness, validator targeting, and classification defaults.
 
-**Phase 6: Provisional branch ledger and interface-sealed speculation**
+**Phase 6: Provisional branch ledger and interface-sealed speculation** *(implemented)*
 
-* ``crates/perspt-agent/src/orchestrator.rs``: implement provisional branch execution, branch flush rules, and replay behavior gated by interface seals.
-* ``crates/perspt-agent/src/ledger.rs`` and ``crates/perspt-store/src/store.rs``: persist provisional branch lineage, interface seals, and flush decisions separately from committed state.
-* ``crates/perspt-core/src/types.rs``: define provisional-branch and interface-seal records.
+* ``crates/perspt-core/src/types.rs``: ``ProvisionalBranchState`` (Active/Sealed/Merged/Flushed), ``ProvisionalBranch``, ``BranchLineage``, ``InterfaceSealRecord``, ``BranchFlushRecord``, ``BlockedDependency``; ``SRBNNode`` extended with ``provisional_branch_id`` and ``interface_seal_hash`` fields.
+* ``crates/perspt-core/src/events.rs``: ``BranchCreated``, ``InterfaceSealed``, ``BranchFlushed``, ``DependentUnblocked``, and ``BranchMerged`` event variants.
+* ``crates/perspt-store/src/schema.rs``: ``provisional_branches``, ``branch_lineage``, ``interface_seals``, and ``branch_flushes`` tables with sequences and session-scoped indexes.
+* ``crates/perspt-store/src/store.rs``: ``ProvisionalBranchRow``, ``BranchLineageRow``, ``InterfaceSealRow``, ``BranchFlushRow`` record types; fifteen CRUD methods for persistence round-trips.
+* ``crates/perspt-agent/src/ledger.rs``: ``record_provisional_branch``, ``update_branch_state``, ``get_provisional_branches``, ``get_live_branches_for_parent``, ``flush_branches_for_parent``, ``record_branch_lineage``, ``get_child_branches``, ``record_interface_seal``, ``get_interface_seals``, ``has_interface_seals``, ``record_branch_flush``, and ``get_branch_flushes`` facade methods.
+* ``crates/perspt-agent/src/orchestrator.rs``: ``maybe_create_provisional_branch`` creates session-scoped branches before speculation; ``merge_provisional_branch`` and ``flush_provisional_branch`` handle commit and failure paths; ``flush_descendant_branches`` and ``collect_descendants`` cascade flushes through the DAG; ``emit_interface_seals`` produces sealed digests after Interface-class node commits; ``check_seal_prerequisites`` gates execution on sealed parent interfaces; ``inject_sealed_interfaces`` adds sealed digests to restriction maps; ``unblock_dependents`` releases children when seals become available.
+* ``crates/perspt-agent/src/tools.rs``: ``create_sandbox``, ``cleanup_sandbox``, ``cleanup_session_sandboxes``, and ``copy_to_sandbox`` helpers for provisional verification in isolated workspaces.
+* ``crates/perspt-cli/src/commands/status.rs`` and ``crates/perspt-cli/src/commands/resume.rs``: provisional branch counts, flush decision display, and branch state in resume output.
+* ``crates/perspt-tui/src/agent_app.rs``: TUI dashboard handling for all five Phase 6 events.
+* Test coverage: unit tests covering branch lifecycle, seal prerequisites, descendant collection, flush cascades, unblock logic, and sandbox utilities.
 
 **Phase 7: Review UX parity with structured diffs, node status, and energy output**
 
