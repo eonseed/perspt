@@ -1403,50 +1403,33 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     }
 
     /// Parse JSON response into TaskPlan
+    ///
+    /// PSP-5 Phase 4: Uses the provider-neutral normalization layer to extract
+    /// JSON from LLM responses regardless of fencing, wrapper text, or provider
+    /// formatting quirks. Falls back to raw content parsing if normalization
+    /// finds no JSON.
     fn parse_task_plan(&self, content: &str) -> Result<TaskPlan> {
-        // Try to extract JSON from markdown code block if present
-        let json_str = if let Some(start) = content.find("```json") {
-            let start = start + 7;
-            if let Some(end_offset) = content[start..].find("```") {
-                content[start..start + end_offset].trim()
-            } else {
-                content[start..].trim()
+        // PSP-5 Phase 4: Use normalized extraction
+        match perspt_core::normalize::extract_and_deserialize::<TaskPlan>(content) {
+            Ok((plan, method)) => {
+                log::info!("Parsed TaskPlan via normalization ({})", method);
+                return Ok(plan);
             }
-        } else if let Some(start) = content.find("```") {
-            // Try generic code block
-            let start = start + 3;
-            // Skip language identifier if present
-            let start = content[start..]
-                .find('\n')
-                .map(|n| start + n + 1)
-                .unwrap_or(start);
-            if let Some(end_offset) = content[start..].find("```") {
-                content[start..start + end_offset].trim()
-            } else {
-                content[start..].trim()
+            Err(e) => {
+                log::warn!(
+                    "Normalization could not extract TaskPlan: {}. Attempting raw parse.",
+                    e
+                );
             }
-        } else if content.trim().starts_with('{') {
-            // Direct JSON
-            content.trim()
-        } else {
-            // Try to find JSON object anywhere in the content
-            if let Some(start) = content.find('{') {
-                if let Some(end) = content.rfind('}') {
-                    &content[start..=end]
-                } else {
-                    content.trim()
-                }
-            } else {
-                content.trim()
-            }
-        };
+        }
 
+        // Legacy fallback: try direct deserialization of trimmed content
+        let trimmed = content.trim();
         log::debug!(
-            "Attempting to parse JSON: {}...",
-            &json_str[..json_str.len().min(200)]
+            "Attempting legacy JSON parse: {}...",
+            &trimmed[..trimmed.len().min(200)]
         );
-
-        serde_json::from_str(json_str).context("Failed to parse TaskPlan JSON")
+        serde_json::from_str(trimmed).context("Failed to parse TaskPlan JSON")
     }
 
     /// Create SRBN nodes from a parsed TaskPlan
@@ -2428,28 +2411,18 @@ File: [same filename]
     }
 
     /// Try to parse a JSON artifact bundle from content
+    ///
+    /// PSP-5 Phase 4: Uses the provider-neutral normalization layer.
     fn try_parse_json_bundle(&self, content: &str) -> Option<perspt_core::types::ArtifactBundle> {
-        // Try to find JSON in markdown code blocks
-        let json_str = if let Some(start) = content.find("```json") {
-            let start = start + 7;
-            content[start..]
-                .find("```")
-                .map(|end_offset| content[start..start + end_offset].trim())
-        } else if content.trim().starts_with('{') {
-            Some(content.trim())
-        } else if let Some(start) = content.find('{') {
-            content.rfind('}').map(|end| &content[start..=end])
-        } else {
-            None
-        };
-
-        let json_str = json_str?;
-
-        // Try to parse as ArtifactBundle
-        match serde_json::from_str::<perspt_core::types::ArtifactBundle>(json_str) {
-            Ok(bundle) => Some(bundle),
+        match perspt_core::normalize::extract_and_deserialize::<perspt_core::types::ArtifactBundle>(
+            content,
+        ) {
+            Ok((bundle, method)) => {
+                log::info!("Parsed ArtifactBundle via normalization ({})", method);
+                Some(bundle)
+            }
             Err(e) => {
-                log::debug!("JSON is not an ArtifactBundle: {}", e);
+                log::debug!("Normalization could not extract ArtifactBundle: {}", e);
                 None
             }
         }
