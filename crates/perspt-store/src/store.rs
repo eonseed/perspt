@@ -791,7 +791,7 @@ impl SessionStore {
                 &record.node_id,
                 &record.parent_node_id,
                 &record.state,
-                &record.parent_seal_hash.as_ref().map(|h| hex::encode(h)).unwrap_or_default(),
+                &record.parent_seal_hash.as_ref().map(hex::encode).unwrap_or_default(),
                 &record.sandbox_dir.clone().unwrap_or_default(),
             ],
         )?;
