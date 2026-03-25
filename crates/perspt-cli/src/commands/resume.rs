@@ -163,14 +163,72 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
     println!("🚀 Resuming orchestration...");
     println!();
 
-    // Create orchestrator with the same settings
+    // PSP-5 Phase 8: Rehydrate from persisted session state instead of
+    // creating a fresh orchestrator that would re-plan from scratch.
     let mut orchestrator = perspt_agent::SRBNOrchestrator::new(
         working_dir.clone(),
         false, // Don't auto-approve on resume
     );
 
-    // Run the task (orchestrator will skip completed nodes based on ledger)
-    match orchestrator.run(session.task.clone()).await {
+    // Attempt ledger-backed rehydration; fall back to fresh run if the
+    // session has no persisted node data (pre-Phase-8 session or empty DAG).
+    let rehydrated = match orchestrator.rehydrate_session(&actual_id) {
+        Ok(snapshot) => {
+            let total = snapshot.node_details.len();
+            let terminal = snapshot
+                .node_details
+                .iter()
+                .filter(|d| {
+                    matches!(
+                        d.record.state.as_str(),
+                        "Completed"
+                            | "COMPLETED"
+                            | "STABLE"
+                            | "Failed"
+                            | "FAILED"
+                            | "Aborted"
+                            | "ABORTED"
+                    )
+                })
+                .count();
+            println!(
+                "📦 Rehydrated {} nodes ({} terminal, {} to resume)",
+                total,
+                terminal,
+                total - terminal
+            );
+
+            // Show degraded conditions
+            let missing_goals = snapshot
+                .node_details
+                .iter()
+                .filter(|d| d.record.goal.is_none())
+                .count();
+            if missing_goals > 0 {
+                println!(
+                    "⚠️  Degraded: {} nodes missing goal metadata (older session)",
+                    missing_goals
+                );
+            }
+
+            true
+        }
+        Err(e) => {
+            println!(
+                "⚠️  Cannot rehydrate session ({}), falling back to fresh run",
+                e
+            );
+            false
+        }
+    };
+
+    let result = if rehydrated {
+        orchestrator.run_resumed().await
+    } else {
+        orchestrator.run(session.task.clone()).await
+    };
+
+    match result {
         Ok(()) => {
             store.update_session_status(&actual_id, "COMPLETED")?;
             println!("✅ Session completed successfully!");

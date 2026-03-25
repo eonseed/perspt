@@ -238,6 +238,30 @@ impl TaskTree {
         }
     }
 
+    /// PSP-5 Phase 8: Add a node or update its status if already present.
+    ///
+    /// Used during resume to pre-populate the tree from persisted state
+    /// without requiring a full TaskPlan.
+    pub fn add_or_update_node(&mut self, id: &str, goal: &str, status: TaskStatus) {
+        if let Some(task) = self.nodes.get_mut(id) {
+            task.status = status;
+        } else {
+            let node = TaskNode {
+                id: id.to_string(),
+                goal: goal.to_string(),
+                status,
+                depth: 0,
+                parent_id: None,
+                has_children: false,
+                energy: None,
+                retry_count: 0,
+            };
+            self.roots.push(id.to_string());
+            self.nodes.insert(id.to_string(), node);
+            self.rebuild_visible();
+        }
+    }
+
     /// Update task energy
     pub fn update_energy(&mut self, id: &str, energy: f32) {
         if let Some(task) = self.nodes.get_mut(id) {
