@@ -98,6 +98,50 @@ pub async fn run(
     println!("🚀 SRBN Agent starting...");
     println!("   Session: {}", orchestrator.session_id());
     println!("   Task: {}", task);
+
+    // PSP-5 Phase 4: Detect active plugins in the workspace
+    let registry = perspt_core::plugin::PluginRegistry::new();
+    let detected = registry.detect_all(&working_dir);
+    let active_names: Vec<&str> = detected.iter().map(|p| p.name()).collect();
+
+    if active_names.is_empty() {
+        println!("   Plugins: none detected (will use defaults)");
+    } else {
+        println!("   Plugins: {}", active_names.join(", "));
+        for plugin in &detected {
+            let profile = plugin.verifier_profile();
+            let available: Vec<String> = profile
+                .available_stages()
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let lsp_status = if profile.lsp.primary_available {
+                format!("{} (primary)", profile.lsp.primary.server_binary)
+            } else if profile.lsp.fallback_available {
+                format!(
+                    "{} (fallback)",
+                    profile
+                        .lsp
+                        .fallback
+                        .as_ref()
+                        .map(|f| f.server_binary.as_str())
+                        .unwrap_or("?")
+                )
+            } else {
+                "none available".to_string()
+            };
+            println!(
+                "     {} — stages: [{}], lsp: {}",
+                plugin.name(),
+                available.join(", "),
+                lsp_status
+            );
+        }
+    }
+
+    // Store active plugins in context
+    orchestrator.context.active_plugins = active_names.iter().map(|s| s.to_string()).collect();
+
     println!();
 
     // Check if we should run in TUI mode or headless mode
@@ -110,11 +154,9 @@ pub async fn run(
         println!();
 
         // Start LSP for detected plugins
-        println!("   🔍 Starting language servers...");
-        if let Err(e) = orchestrator
-            .start_lsp_for_plugins(&["python", "rust", "javascript"])
-            .await
-        {
+        let plugin_refs: Vec<&str> = active_names.to_vec();
+        println!("   \u{1f50d} Starting language servers...");
+        if let Err(e) = orchestrator.start_lsp_for_plugins(&plugin_refs).await {
             log::warn!("Failed to start LSP: {}", e);
             println!("   ⚠️  Continuing without LSP");
         } else {
@@ -132,11 +174,9 @@ pub async fn run(
         println!();
 
         // Start LSP for detected plugins
-        println!("   🔍 Starting language servers...");
-        if let Err(e) = orchestrator
-            .start_lsp_for_plugins(&["python", "rust", "javascript"])
-            .await
-        {
+        let plugin_refs: Vec<&str> = active_names.to_vec();
+        println!("   \u{1f50d} Starting language servers...");
+        if let Err(e) = orchestrator.start_lsp_for_plugins(&plugin_refs).await {
             log::warn!("Failed to start LSP: {}", e);
             println!("   ⚠️  Continuing without LSP");
         } else {
