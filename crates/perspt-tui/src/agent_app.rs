@@ -226,6 +226,15 @@ impl AgentApp {
             }
             AgentEvent::TaskStatusChanged { node_id, status } => {
                 self.task_tree.update_status(&node_id, status.into());
+                // Update verifier stage indicator
+                let status_label: crate::task_tree::TaskStatus = status.into();
+                if matches!(status_label, crate::task_tree::TaskStatus::Verifying
+                    | crate::task_tree::TaskStatus::SheafCheck
+                    | crate::task_tree::TaskStatus::Coding
+                    | crate::task_tree::TaskStatus::Committing)
+                {
+                    self.dashboard.verifier_stage = Some(format!("{:?}", status_label));
+                }
                 self.dashboard
                     .log(format!("🔄 Task {} -> {:?}", node_id, status));
             }
@@ -294,6 +303,8 @@ impl AgentApp {
                             v_syn: self.review_state.energy_components.as_ref().map(|e| e.v_syn).unwrap_or(0.0),
                             v_str: self.review_state.energy_components.as_ref().map(|e| e.v_str).unwrap_or(0.0),
                             v_log: self.review_state.energy_components.as_ref().map(|e| e.v_log).unwrap_or(0.0),
+                            v_boot: self.review_state.energy_components.as_ref().map(|e| e.v_boot).unwrap_or(0.0),
+                            v_sheaf: self.review_state.energy_components.as_ref().map(|e| e.v_sheaf).unwrap_or(0.0),
                             total: energy,
                         },
                         is_stable: energy < 0.1,
@@ -336,6 +347,7 @@ impl AgentApp {
                 category,
                 action,
             } => {
+                self.dashboard.escalation_count += 1;
                 self.dashboard.log(format!(
                     "⚠️ Escalation: {} → {} (action: {})",
                     node_id, category, action
@@ -375,6 +387,7 @@ impl AgentApp {
                 node_id,
                 parent_node_id,
             } => {
+                self.dashboard.active_branches += 1;
                 self.dashboard.log(format!(
                     "🌿 Branch: {} for {} (parent: {})",
                     &branch_id[..branch_id.len().min(16)],
@@ -400,6 +413,7 @@ impl AgentApp {
                 flushed_branch_ids,
                 reason,
             } => {
+                self.dashboard.active_branches = self.dashboard.active_branches.saturating_sub(flushed_branch_ids.len());
                 self.dashboard.log(format!(
                     "🗑️  Flushed: {} branch(es) from {} — {}",
                     flushed_branch_ids.len(),
@@ -420,6 +434,7 @@ impl AgentApp {
                 branch_id,
                 node_id,
             } => {
+                self.dashboard.active_branches = self.dashboard.active_branches.saturating_sub(1);
                 self.dashboard.log(format!(
                     "✅ Merged: branch {} for {}",
                     &branch_id[..branch_id.len().min(16)],
@@ -454,13 +469,19 @@ impl AgentApp {
                 self.review_state.tests_passed = Some(tests_passed);
                 self.review_state.tests_failed = Some(tests_failed);
                 self.review_state.energy = Some(energy);
-                self.review_state.energy_components = Some(energy_components);
+                self.review_state.energy_components = Some(energy_components.clone());
                 self.review_state.stage_outcomes = stage_outcomes;
                 self.review_state.degraded = degraded;
                 self.review_state.degraded_reasons = degraded_reasons;
                 self.review_state.summary = Some(summary.clone());
 
                 self.dashboard.update_energy(energy);
+                self.dashboard.energy_components = Some(energy_components);
+                self.dashboard.verifier_stage = Some(if degraded {
+                    "Degraded".to_string()
+                } else {
+                    "Complete".to_string()
+                });
                 self.dashboard.log(format!("🔍 Verified: {} — {}", node_id, summary));
             }
             AgentEvent::BundleApplied {

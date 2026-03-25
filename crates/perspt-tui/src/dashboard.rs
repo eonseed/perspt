@@ -27,6 +27,14 @@ pub struct Dashboard {
     pub status: String,
     /// Log messages
     pub logs: Vec<String>,
+    /// PSP-5 Phase 7: Energy component breakdown
+    pub energy_components: Option<perspt_core::EnergyComponents>,
+    /// PSP-5 Phase 7: Current verifier stage label
+    pub verifier_stage: Option<String>,
+    /// PSP-5 Phase 7: Recent escalation count
+    pub escalation_count: usize,
+    /// PSP-5 Phase 7: Active branch count
+    pub active_branches: usize,
 }
 
 impl Default for Dashboard {
@@ -40,6 +48,10 @@ impl Default for Dashboard {
             stable: false,
             status: "Ready".to_string(),
             logs: Vec::new(),
+            energy_components: None,
+            verifier_stage: None,
+            escalation_count: 0,
+            active_branches: 0,
         }
     }
 }
@@ -158,13 +170,17 @@ impl Dashboard {
             .constraints([
                 Constraint::Length(5), // Current node
                 Constraint::Length(3), // Energy value
-                Constraint::Min(5),    // Energy sparkline
+                Constraint::Length(3), // Energy components
+                Constraint::Min(3),    // Energy sparkline
             ])
             .split(area);
 
-        // Current node
-        let node_text = self.current_node.as_deref().unwrap_or("None");
-        let node = Paragraph::new(format!("📋 {}", node_text))
+        // Current node with verifier stage
+        let mut node_text = format!("📋 {}", self.current_node.as_deref().unwrap_or("None"));
+        if let Some(ref stage) = self.verifier_stage {
+            node_text.push_str(&format!("  [{}]", stage));
+        }
+        let node = Paragraph::new(node_text)
             .block(Block::default().title("Current Task").borders(Borders::ALL));
         frame.render_widget(node, panel_chunks[0]);
 
@@ -189,6 +205,43 @@ impl Dashboard {
             );
         frame.render_widget(energy, panel_chunks[1]);
 
+        // Energy component breakdown
+        if let Some(ref ec) = self.energy_components {
+            let comp_text = format!(
+                "syn={:.2} str={:.2} log={:.2} boot={:.2} sheaf={:.2}",
+                ec.v_syn, ec.v_str, ec.v_log, ec.v_boot, ec.v_sheaf
+            );
+            let mut activity_parts = Vec::new();
+            if self.escalation_count > 0 {
+                activity_parts.push(format!("{}⚠esc", self.escalation_count));
+            }
+            if self.active_branches > 0 {
+                activity_parts.push(format!("{}🌿br", self.active_branches));
+            }
+            let suffix = if activity_parts.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", activity_parts.join("  "))
+            };
+            let comp = Paragraph::new(format!("{}{}", comp_text, suffix))
+                .style(Style::default().fg(Color::Rgb(158, 158, 158)))
+                .block(
+                    Block::default()
+                        .title("Components")
+                        .borders(Borders::ALL),
+                );
+            frame.render_widget(comp, panel_chunks[2]);
+        } else {
+            let comp = Paragraph::new("No component data yet")
+                .style(Style::default().fg(Color::DarkGray))
+                .block(
+                    Block::default()
+                        .title("Components")
+                        .borders(Borders::ALL),
+                );
+            frame.render_widget(comp, panel_chunks[2]);
+        }
+
         // Energy sparkline
         let sparkline = Sparkline::default()
             .block(
@@ -198,7 +251,7 @@ impl Dashboard {
             )
             .data(&self.energy_history)
             .style(Style::default().fg(Color::Magenta));
-        frame.render_widget(sparkline, panel_chunks[2]);
+        frame.render_widget(sparkline, panel_chunks[3]);
     }
 
     fn render_log_panel(&self, frame: &mut Frame, area: Rect) {

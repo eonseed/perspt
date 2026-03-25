@@ -101,6 +101,8 @@ pub struct TaskNode {
     pub has_children: bool,
     /// Lyapunov energy (if available)
     pub energy: Option<f32>,
+    /// Retry count (incremented on Retrying status)
+    pub retry_count: usize,
 }
 
 /// Task tree viewer state with expand/collapse support
@@ -136,6 +138,7 @@ impl TaskTree {
             parent_id: None,
             has_children: false,
             energy: None,
+            retry_count: 0,
         };
 
         if depth == 0 {
@@ -205,6 +208,7 @@ impl TaskTree {
             parent_id,
             has_children: false,
             energy: None,
+            retry_count: 0,
         };
 
         if is_root {
@@ -227,6 +231,9 @@ impl TaskTree {
     /// Update task status
     pub fn update_status(&mut self, id: &str, status: TaskStatus) {
         if let Some(task) = self.nodes.get_mut(id) {
+            if status == TaskStatus::Retrying {
+                task.retry_count += 1;
+            }
             task.status = status;
         }
     }
@@ -406,6 +413,14 @@ impl TaskTree {
                 if let Some(energy) = task.energy {
                     let energy_style = self.theme.energy_style(energy);
                     spans.push(Span::styled(format!("[{:.2}] ", energy), energy_style));
+                }
+
+                // Add retry count if > 0
+                if task.retry_count > 0 {
+                    spans.push(Span::styled(
+                        format!("↻{} ", task.retry_count),
+                        Style::default().fg(Color::Rgb(255, 152, 0)),
+                    ));
                 }
 
                 spans.push(Span::styled(
