@@ -626,6 +626,178 @@ impl MerkleLedger {
         let session_id = self.session_id()?;
         self.store.get_branch_flushes(&session_id)
     }
+
+    // =========================================================================
+    // PSP-5 Phase 7: Shared Review & Provenance Aggregation Helpers
+    // =========================================================================
+
+    /// Build a review-ready summary for a single node.
+    ///
+    /// Aggregates energy history, escalation reports, sheaf validations,
+    /// context provenance, interface seals, and branch state from the store
+    /// into a single struct consumable by both TUI and CLI surfaces.
+    pub fn node_review_summary(&self, node_id: &str) -> Result<NodeReviewSummary> {
+        let session_id = self.session_id()?;
+
+        let energy_history = self
+            .store
+            .get_energy_history(&session_id, node_id)
+            .unwrap_or_default();
+
+        let latest_energy = energy_history.last().cloned();
+
+        let escalation_reports = self
+            .store
+            .get_escalation_reports(&session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|r| r.node_id == node_id)
+            .collect::<Vec<_>>();
+
+        let sheaf_validations = self
+            .store
+            .get_sheaf_validations(&session_id, node_id)
+            .unwrap_or_default();
+
+        let interface_seals = self
+            .store
+            .get_interface_seals(&session_id, node_id)
+            .unwrap_or_default();
+
+        let context_provenance = self
+            .store
+            .get_context_provenance(&session_id, node_id)
+            .ok()
+            .flatten()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        let branches: Vec<_> = self
+            .store
+            .get_provisional_branches(&session_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|b| b.node_id == node_id)
+            .collect();
+
+        let attempt_count = energy_history.len().max(1) as u32;
+
+        Ok(NodeReviewSummary {
+            node_id: node_id.to_string(),
+            latest_energy,
+            energy_history,
+            attempt_count,
+            escalation_reports,
+            sheaf_validations,
+            interface_seals,
+            context_provenance,
+            branches,
+        })
+    }
+
+    /// Build a session-level summary aggregating lifecycle counts, energy
+    /// stats, escalation activity, and branch provenance.
+    pub fn session_summary(&self) -> Result<SessionReviewSummary> {
+        let session_id = self.session_id()?;
+
+        let node_states = self.store.get_node_states(&session_id).unwrap_or_default();
+        let total_nodes = node_states.len();
+        let completed = node_states
+            .iter()
+            .filter(|n| n.state == "COMPLETED" || n.state == "STABLE")
+            .count();
+        let failed = node_states.iter().filter(|n| n.state == "FAILED").count();
+        let escalated = node_states
+            .iter()
+            .filter(|n| n.state == "Escalated")
+            .count();
+
+        // Collect latest energy per node
+        let mut total_energy: f32 = 0.0;
+        let mut node_energies: Vec<(String, perspt_store::EnergyRecord)> = Vec::new();
+        for ns in &node_states {
+            if let Ok(history) = self.store.get_energy_history(&session_id, &ns.node_id) {
+                if let Some(latest) = history.last() {
+                    total_energy += latest.v_total;
+                    node_energies.push((ns.node_id.clone(), latest.clone()));
+                }
+            }
+        }
+
+        let escalation_reports = self
+            .store
+            .get_escalation_reports(&session_id)
+            .unwrap_or_default();
+
+        let branches = self
+            .store
+            .get_provisional_branches(&session_id)
+            .unwrap_or_default();
+
+        let active_branches = branches.iter().filter(|b| b.state == "active").count();
+        let sealed_branches = branches.iter().filter(|b| b.state == "sealed").count();
+        let merged_branches = branches.iter().filter(|b| b.state == "merged").count();
+        let flushed_branches = branches.iter().filter(|b| b.state == "flushed").count();
+
+        let flushes = self
+            .store
+            .get_branch_flushes(&session_id)
+            .unwrap_or_default();
+
+        Ok(SessionReviewSummary {
+            session_id,
+            total_nodes,
+            completed,
+            failed,
+            escalated,
+            total_energy,
+            node_energies,
+            escalation_reports,
+            branches_total: branches.len(),
+            active_branches,
+            sealed_branches,
+            merged_branches,
+            flushed_branches,
+            flush_decisions: flushes,
+        })
+    }
+}
+
+/// PSP-5 Phase 7: Aggregated review summary for a single node.
+///
+/// Consumed by both TUI review modal and CLI status/resume commands.
+#[derive(Debug, Clone)]
+pub struct NodeReviewSummary {
+    pub node_id: String,
+    pub latest_energy: Option<perspt_store::EnergyRecord>,
+    pub energy_history: Vec<perspt_store::EnergyRecord>,
+    pub attempt_count: u32,
+    pub escalation_reports: Vec<perspt_store::EscalationReportRecord>,
+    pub sheaf_validations: Vec<perspt_store::SheafValidationRow>,
+    pub interface_seals: Vec<perspt_store::InterfaceSealRow>,
+    pub context_provenance: Vec<perspt_store::ContextProvenanceRecord>,
+    pub branches: Vec<perspt_store::ProvisionalBranchRow>,
+}
+
+/// PSP-5 Phase 7: Aggregated session-level review summary.
+///
+/// Consumed by both TUI dashboard and CLI status/resume commands.
+#[derive(Debug, Clone)]
+pub struct SessionReviewSummary {
+    pub session_id: String,
+    pub total_nodes: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub escalated: usize,
+    pub total_energy: f32,
+    pub node_energies: Vec<(String, perspt_store::EnergyRecord)>,
+    pub escalation_reports: Vec<perspt_store::EscalationReportRecord>,
+    pub branches_total: usize,
+    pub active_branches: usize,
+    pub sealed_branches: usize,
+    pub merged_branches: usize,
+    pub flushed_branches: usize,
+    pub flush_decisions: Vec<perspt_store::BranchFlushRow>,
 }
 
 /// Ledger statistics (Legacy)
