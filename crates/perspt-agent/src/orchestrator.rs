@@ -69,6 +69,8 @@ pub struct SRBNOrchestrator {
     pub last_tool_failure: Option<String>,
     /// PSP-5 Phase 3: Last assembled context provenance (for commit recording)
     last_context_provenance: Option<perspt_core::types::ContextProvenance>,
+    /// PSP-5 Phase 4: Last plugin-driven verification result (for convergence checks)
+    last_verification_result: Option<perspt_core::types::VerificationResult>,
 }
 
 impl SRBNOrchestrator {
@@ -135,6 +137,7 @@ impl SRBNOrchestrator {
             ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
             last_tool_failure: None,
             last_context_provenance: None,
+            last_verification_result: None,
         }
     }
 
@@ -2049,14 +2052,48 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         let should_escalate = node.monitor.should_escalate();
 
         if stable {
-            log::info!(
-                "Node {} is stable (V(x)={:.2} < ε={:.2})",
-                node_id,
-                total,
-                epsilon
-            );
-            self.emit_log(format!("✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon));
-            return Ok(true);
+            // PSP-5 Phase 4: Block false stability when verification was degraded
+            if let Some(ref vr) = self.last_verification_result {
+                if vr.has_degraded_stages() {
+                    let reasons = vr.degraded_stage_reasons();
+                    log::warn!(
+                        "Node {} energy is below ε but verification was degraded: {:?}",
+                        node_id,
+                        reasons
+                    );
+                    self.emit_log(format!(
+                        "⚠️ V(x)={:.2} < ε but stability unconfirmed — degraded sensors: {}",
+                        total,
+                        reasons.join(", ")
+                    ));
+                    self.emit_event(perspt_core::AgentEvent::DegradedVerification {
+                        node_id: node_id.clone(),
+                        degraded_stages: reasons,
+                        stability_blocked: true,
+                    });
+                    // Do NOT return Ok(true) — fall through to correction loop
+                    // so the orchestrator retries with awareness that some sensors
+                    // were unavailable.
+                } else {
+                    log::info!(
+                        "Node {} is stable (V(x)={:.2} < ε={:.2})",
+                        node_id,
+                        total,
+                        epsilon
+                    );
+                    self.emit_log(format!("✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon));
+                    return Ok(true);
+                }
+            } else {
+                log::info!(
+                    "Node {} is stable (V(x)={:.2} < ε={:.2})",
+                    node_id,
+                    total,
+                    epsilon
+                );
+                self.emit_log(format!("✅ Stable! V(x)={:.2} < ε={:.2}", total, epsilon));
+                return Ok(true);
+            }
         }
 
         if should_escalate {
@@ -2733,10 +2770,17 @@ File: [same filename]
     /// Uses the active language plugin's verifier profile to select commands
     /// for syntax check, build, test, and lint stages. Delegates execution
     /// to `TestRunnerTrait` implementations from `test_runner`.
+    ///
+    /// Each stage records a `StageOutcome` with `SensorStatus`, enabling
+    /// callers to detect fallback / unavailable sensors and block false
+    /// stability claims.
     pub async fn run_plugin_verification(
         &mut self,
         plugin_name: &str,
     ) -> perspt_core::types::VerificationResult {
+        use perspt_core::plugin::VerifierStage;
+        use perspt_core::types::{SensorStatus, StageOutcome};
+
         let registry = perspt_core::plugin::PluginRegistry::new();
         let plugin = match registry.get(plugin_name) {
             Some(p) => p,
@@ -2758,6 +2802,40 @@ File: [same filename]
             ));
         }
 
+        // Derive per-stage sensor status from the profile before moving it.
+        let sensor_status_for = |stage: VerifierStage,
+                                 profile: &perspt_core::plugin::VerifierProfile|
+         -> SensorStatus {
+            match profile.get(stage) {
+                Some(cap) if cap.available => SensorStatus::Available,
+                Some(cap) if cap.fallback_available => SensorStatus::Fallback {
+                    actual: cap
+                        .fallback_command
+                        .clone()
+                        .unwrap_or_else(|| "fallback".into()),
+                    reason: format!(
+                        "primary '{}' not found",
+                        cap.command.as_deref().unwrap_or("?")
+                    ),
+                },
+                Some(cap) => SensorStatus::Unavailable {
+                    reason: format!(
+                        "no tool for {} (tried '{}')",
+                        stage,
+                        cap.command.as_deref().unwrap_or("?")
+                    ),
+                },
+                None => SensorStatus::Unavailable {
+                    reason: format!("{} stage not declared by plugin", stage),
+                },
+            }
+        };
+
+        let syn_sensor = sensor_status_for(VerifierStage::SyntaxCheck, &profile);
+        let build_sensor = sensor_status_for(VerifierStage::Build, &profile);
+        let test_sensor = sensor_status_for(VerifierStage::Test, &profile);
+        let lint_sensor = sensor_status_for(VerifierStage::Lint, &profile);
+
         let working_dir = self.context.working_dir.clone();
         let runner = test_runner::test_runner_for_profile(profile, working_dir);
 
@@ -2769,7 +2847,7 @@ File: [same filename]
                 result.syntax_ok = r.passed > 0 && r.failed == 0;
                 if !result.syntax_ok && r.run_succeeded {
                     result.diagnostics_count = r.output.lines().count();
-                    result.raw_output = Some(r.output);
+                    result.raw_output = Some(r.output.clone());
                     self.emit_log(format!(
                         "⚠️ Syntax check failed ({} diagnostics)",
                         result.diagnostics_count
@@ -2777,10 +2855,24 @@ File: [same filename]
                 } else if result.syntax_ok {
                     self.emit_log("✅ Syntax check passed".to_string());
                 }
+                result.stage_outcomes.push(StageOutcome {
+                    stage: VerifierStage::SyntaxCheck.to_string(),
+                    passed: result.syntax_ok,
+                    sensor_status: syn_sensor,
+                    output: Some(r.output),
+                });
             }
             Err(e) => {
                 log::warn!("Syntax check failed to run: {}", e);
                 result.syntax_ok = false;
+                result.stage_outcomes.push(StageOutcome {
+                    stage: VerifierStage::SyntaxCheck.to_string(),
+                    passed: false,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: format!("execution error: {}", e),
+                    },
+                    output: None,
+                });
             }
         }
 
@@ -2793,10 +2885,24 @@ File: [same filename]
                 } else if r.run_succeeded {
                     self.emit_log("⚠️ Build failed".to_string());
                 }
+                result.stage_outcomes.push(StageOutcome {
+                    stage: VerifierStage::Build.to_string(),
+                    passed: result.build_ok,
+                    sensor_status: build_sensor,
+                    output: Some(r.output),
+                });
             }
             Err(e) => {
                 log::warn!("Build check failed to run: {}", e);
                 result.build_ok = false;
+                result.stage_outcomes.push(StageOutcome {
+                    stage: VerifierStage::Build.to_string(),
+                    passed: false,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: format!("execution error: {}", e),
+                    },
+                    output: None,
+                });
             }
         }
 
@@ -2811,12 +2917,26 @@ File: [same filename]
                     self.emit_log(format!("✅ Tests passed ({})", plugin_name));
                 } else {
                     self.emit_log(format!("❌ Tests failed ({})", plugin_name));
-                    result.raw_output = Some(r.output);
+                    result.raw_output = Some(r.output.clone());
                 }
+                result.stage_outcomes.push(StageOutcome {
+                    stage: VerifierStage::Test.to_string(),
+                    passed: result.tests_ok,
+                    sensor_status: test_sensor,
+                    output: Some(r.output),
+                });
             }
             Err(e) => {
                 log::warn!("Test command failed to run: {}", e);
                 result.tests_ok = false;
+                result.stage_outcomes.push(StageOutcome {
+                    stage: VerifierStage::Test.to_string(),
+                    passed: false,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: format!("execution error: {}", e),
+                    },
+                    output: None,
+                });
             }
         }
 
@@ -2830,24 +2950,62 @@ File: [same filename]
                     } else if r.run_succeeded {
                         self.emit_log("⚠️ Lint issues found".to_string());
                     }
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::Lint.to_string(),
+                        passed: result.lint_ok,
+                        sensor_status: lint_sensor,
+                        output: Some(r.output),
+                    });
                 }
                 Err(e) => {
                     log::warn!("Lint command failed to run: {}", e);
                     result.lint_ok = false;
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::Lint.to_string(),
+                        passed: false,
+                        sensor_status: SensorStatus::Unavailable {
+                            reason: format!("execution error: {}", e),
+                        },
+                        output: None,
+                    });
                 }
             }
         } else {
             result.lint_ok = true; // Skip lint in non-strict mode
         }
 
+        // Mark overall degraded if any stage used fallback or unavailable sensor
+        if result.has_degraded_stages() {
+            result.degraded = true;
+            let reasons = result.degraded_stage_reasons();
+            result.degraded_reason = Some(reasons.join("; "));
+
+            // Emit per-stage SensorFallback events
+            for outcome in &result.stage_outcomes {
+                if let SensorStatus::Fallback { actual, reason } = &outcome.sensor_status {
+                    self.emit_event(perspt_core::AgentEvent::SensorFallback {
+                        node_id: plugin_name.to_string(),
+                        stage: outcome.stage.clone(),
+                        primary: reason.clone(),
+                        actual: actual.clone(),
+                        reason: reason.clone(),
+                    });
+                }
+            }
+        }
+
+        // Store result for convergence-time degraded check
+        self.last_verification_result = Some(result.clone());
+
         // Build summary
         result.summary = format!(
-            "{}: syntax={}, build={}, tests={}, lint={}",
+            "{}: syntax={}, build={}, tests={}, lint={}{}",
             plugin_name,
             if result.syntax_ok { "✅" } else { "❌" },
             if result.build_ok { "✅" } else { "❌" },
             if result.tests_ok { "✅" } else { "❌" },
             if result.lint_ok { "✅" } else { "⏭️" },
+            if result.degraded { " (degraded)" } else { "" },
         );
 
         result

@@ -1288,6 +1288,9 @@ pub struct VerificationResult {
     pub degraded: bool,
     /// Reason for degraded mode
     pub degraded_reason: Option<String>,
+    /// Per-stage outcomes with sensor status
+    #[serde(default)]
+    pub stage_outcomes: Vec<StageOutcome>,
 }
 
 impl VerificationResult {
@@ -1305,6 +1308,78 @@ impl VerificationResult {
             ..Default::default()
         }
     }
+
+    /// Check whether any stage ran with a fallback or unavailable sensor.
+    ///
+    /// When true the caller should NOT treat a passing result as a genuine
+    /// stability proof — the energy surface was only partially observable.
+    pub fn has_degraded_stages(&self) -> bool {
+        self.stage_outcomes
+            .iter()
+            .any(|s| !matches!(s.sensor_status, SensorStatus::Available))
+    }
+
+    /// Collect human-readable descriptions of all degraded stages.
+    pub fn degraded_stage_reasons(&self) -> Vec<String> {
+        self.stage_outcomes
+            .iter()
+            .filter_map(|s| match &s.sensor_status {
+                SensorStatus::Available => None,
+                SensorStatus::Fallback { actual, reason } => Some(format!(
+                    "{}: used fallback '{}' ({})",
+                    s.stage, actual, reason
+                )),
+                SensorStatus::Unavailable { reason } => {
+                    Some(format!("{}: unavailable ({})", s.stage, reason))
+                }
+            })
+            .collect()
+    }
+}
+
+/// Sensor availability status for a single verification stage.
+///
+/// Tells downstream consumers whether the preferred tool was available,
+/// a fallback was used, or the stage had no usable sensor at all.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SensorStatus {
+    /// The preferred tool ran successfully.
+    Available,
+    /// A fallback tool was used instead of the primary.
+    Fallback {
+        /// Name of the tool that actually ran.
+        actual: String,
+        /// Why the primary was not available.
+        reason: String,
+    },
+    /// No tool was available for this stage.
+    Unavailable {
+        /// What went wrong.
+        reason: String,
+    },
+}
+
+impl std::fmt::Display for SensorStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SensorStatus::Available => write!(f, "available"),
+            SensorStatus::Fallback { actual, .. } => write!(f, "fallback({})", actual),
+            SensorStatus::Unavailable { reason } => write!(f, "unavailable({})", reason),
+        }
+    }
+}
+
+/// Outcome of a single verification stage (syntax, build, test, lint).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageOutcome {
+    /// Which verification stage this covers.
+    pub stage: String,
+    /// Whether the stage passed.
+    pub passed: bool,
+    /// Sensor status for this stage.
+    pub sensor_status: SensorStatus,
+    /// Optional output captured from the tool.
+    pub output: Option<String>,
 }
 
 // =============================================================================
@@ -2076,5 +2151,102 @@ mod psp5_tests {
     fn test_artifact_kind_display() {
         assert_eq!(format!("{}", ArtifactKind::Signature), "signature");
         assert_eq!(format!("{}", ArtifactKind::InterfaceSeal), "interface_seal");
+    }
+
+    #[test]
+    fn test_sensor_status_display() {
+        assert_eq!(format!("{}", SensorStatus::Available), "available");
+        assert_eq!(
+            format!(
+                "{}",
+                SensorStatus::Fallback {
+                    actual: "ruff".into(),
+                    reason: "primary not found".into()
+                }
+            ),
+            "fallback(ruff)"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                SensorStatus::Unavailable {
+                    reason: "not installed".into()
+                }
+            ),
+            "unavailable(not installed)"
+        );
+    }
+
+    #[test]
+    fn test_verification_result_no_degraded_stages() {
+        let result = VerificationResult {
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: true,
+            lint_ok: true,
+            stage_outcomes: vec![StageOutcome {
+                stage: "syntax_check".into(),
+                passed: true,
+                sensor_status: SensorStatus::Available,
+                output: None,
+            }],
+            ..Default::default()
+        };
+        assert!(result.all_passed());
+        assert!(!result.has_degraded_stages());
+        assert!(result.degraded_stage_reasons().is_empty());
+    }
+
+    #[test]
+    fn test_verification_result_with_fallback_blocks_stability() {
+        let result = VerificationResult {
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: true,
+            lint_ok: true,
+            stage_outcomes: vec![
+                StageOutcome {
+                    stage: "syntax_check".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Available,
+                    output: None,
+                },
+                StageOutcome {
+                    stage: "test".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Fallback {
+                        actual: "python -m pytest".into(),
+                        reason: "uv not found".into(),
+                    },
+                    output: None,
+                },
+            ],
+            ..Default::default()
+        };
+        // All tools passed but a fallback was used — should flag degraded
+        assert!(result.has_degraded_stages());
+        let reasons = result.degraded_stage_reasons();
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("test"));
+        assert!(reasons[0].contains("fallback"));
+    }
+
+    #[test]
+    fn test_verification_result_unavailable_stage() {
+        let result = VerificationResult {
+            syntax_ok: false,
+            stage_outcomes: vec![StageOutcome {
+                stage: "lint".into(),
+                passed: false,
+                sensor_status: SensorStatus::Unavailable {
+                    reason: "clippy not installed".into(),
+                },
+                output: None,
+            }],
+            ..Default::default()
+        };
+        assert!(result.has_degraded_stages());
+        let reasons = result.degraded_stage_reasons();
+        assert!(reasons[0].contains("unavailable"));
     }
 }
