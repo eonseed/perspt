@@ -473,6 +473,98 @@ impl MerkleLedger {
     }
 
     // =========================================================================
+    // PSP-5 Phase 8: Verification Result and Artifact Bundle Facades
+    // =========================================================================
+
+    /// Record a verification result snapshot for a node
+    pub fn record_verification_result(
+        &self,
+        node_id: &str,
+        result: &perspt_core::types::VerificationResult,
+    ) -> Result<()> {
+        let session_id = self.session_id()?;
+
+        let result_json = serde_json::to_string(result).unwrap_or_default();
+        let row = perspt_store::VerificationResultRow {
+            session_id,
+            node_id: node_id.to_string(),
+            result_json,
+            syntax_ok: result.syntax_ok,
+            build_ok: result.build_ok,
+            tests_ok: result.tests_ok,
+            lint_ok: result.lint_ok,
+            diagnostics_count: result.diagnostics_count as i32,
+            tests_passed: result.tests_passed as i32,
+            tests_failed: result.tests_failed as i32,
+            degraded: result.degraded,
+            degraded_reason: result.degraded_reason.clone(),
+        };
+
+        self.store.record_verification_result(&row)?;
+        log::debug!(
+            "Recorded verification result for node '{}': syn={} build={} test={} degraded={}",
+            node_id,
+            result.syntax_ok,
+            result.build_ok,
+            result.tests_ok,
+            result.degraded
+        );
+        Ok(())
+    }
+
+    /// Get the latest verification result for a node
+    pub fn get_verification_result(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<perspt_store::VerificationResultRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_verification_result(&session_id, node_id)
+    }
+
+    /// Record an artifact bundle snapshot for a node
+    pub fn record_artifact_bundle(
+        &self,
+        node_id: &str,
+        bundle: &perspt_core::types::ArtifactBundle,
+    ) -> Result<()> {
+        let session_id = self.session_id()?;
+
+        let bundle_json = serde_json::to_string(bundle).unwrap_or_default();
+        let touched_files: Vec<String> = bundle
+            .artifacts
+            .iter()
+            .map(|a| a.path().to_string())
+            .collect();
+
+        let row = perspt_store::ArtifactBundleRow {
+            session_id,
+            node_id: node_id.to_string(),
+            bundle_json,
+            artifact_count: bundle.artifacts.len() as i32,
+            command_count: bundle.commands.len() as i32,
+            touched_files: serde_json::to_string(&touched_files).unwrap_or_default(),
+        };
+
+        self.store.record_artifact_bundle(&row)?;
+        log::debug!(
+            "Recorded artifact bundle for node '{}': {} artifacts, {} commands",
+            node_id,
+            bundle.artifacts.len(),
+            bundle.commands.len()
+        );
+        Ok(())
+    }
+
+    /// Get the latest artifact bundle for a node
+    pub fn get_artifact_bundle(
+        &self,
+        node_id: &str,
+    ) -> Result<Option<perspt_store::ArtifactBundleRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_artifact_bundle(&session_id, node_id)
+    }
+
+    // =========================================================================
     // PSP-5 Phase 6: Provisional Branch, Interface Seal, Branch Flush Facades
     // =========================================================================
 
