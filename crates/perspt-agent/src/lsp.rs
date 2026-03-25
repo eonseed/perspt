@@ -16,6 +16,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 
+use perspt_core::plugin::LspConfig;
+
 /// Type alias for pending LSP requests map
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>;
 /// Type alias for diagnostics map
@@ -46,6 +48,8 @@ pub struct LspClient {
     diagnostics: Arc<Mutex<HashMap<String, Vec<Diagnostic>>>>,
     /// Server name (e.g., "rust-analyzer", "pyright")
     server_name: String,
+    /// Language ID for textDocument/didOpen (e.g., "rust", "python")
+    language_id: String,
     /// Keep track of the process to kill it on drop
     process: Option<Child>,
     /// Whether the server is initialized
@@ -61,6 +65,24 @@ impl LspClient {
             pending_requests: Arc::new(Mutex::new(HashMap::new())),
             diagnostics: Arc::new(Mutex::new(HashMap::new())),
             server_name: server_name.to_string(),
+            language_id: String::new(),
+            process: None,
+            initialized: false,
+        }
+    }
+
+    /// Create a new LSP client from a plugin's LspConfig.
+    ///
+    /// Stores the language_id so `did_open` can tag documents correctly
+    /// without guessing from file extensions.
+    pub fn from_config(config: &LspConfig) -> Self {
+        Self {
+            stdin: None,
+            request_id: AtomicU64::new(1),
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
+            diagnostics: Arc::new(Mutex::new(HashMap::new())),
+            server_name: config.server_binary.clone(),
+            language_id: config.language_id.clone(),
             process: None,
             initialized: false,
         }
@@ -84,10 +106,34 @@ impl LspClient {
         let (cmd, args) = Self::get_server_command(&self.server_name)
             .context(format!("Unknown language server: {}", self.server_name))?;
 
+        let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        self.start_process(cmd, &args_owned, workspace_root).await
+    }
+
+    /// Start using a plugin's LspConfig.
+    ///
+    /// Preferred over `start()` when a `LanguagePlugin` is available, because
+    /// it uses the config's binary and args directly — no lookup table needed.
+    pub async fn start_with_config(
+        &mut self,
+        config: &LspConfig,
+        workspace_root: &Path,
+    ) -> Result<()> {
+        self.start_process(&config.server_binary, &config.args, workspace_root)
+            .await
+    }
+
+    /// Internal: spawn the LSP child process, wire up stdio, run initialize.
+    async fn start_process(
+        &mut self,
+        cmd: &str,
+        args: &[String],
+        workspace_root: &Path,
+    ) -> Result<()> {
         log::info!("Starting LSP server: {} {:?}", cmd, args);
 
         let mut child = Command::new(cmd)
-            .args(&args)
+            .args(args)
             .current_dir(workspace_root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -514,13 +560,19 @@ impl LspClient {
         }
 
         let uri = format!("file://{}", path.display());
-        let language_id = match path.extension().and_then(|e| e.to_str()) {
-            Some("py") => "python",
-            Some("rs") => "rust",
-            Some("js") => "javascript",
-            Some("ts") => "typescript",
-            Some("go") => "go",
-            _ => "python", // Default to python for now instead of plaintext
+
+        // Prefer the language_id from plugin config; fall back to extension guess
+        let language_id = if !self.language_id.is_empty() {
+            self.language_id.as_str()
+        } else {
+            match path.extension().and_then(|e| e.to_str()) {
+                Some("py") => "python",
+                Some("rs") => "rust",
+                Some("js") => "javascript",
+                Some("ts") => "typescript",
+                Some("go") => "go",
+                _ => "plaintext",
+            }
         };
 
         self.send_notification(
