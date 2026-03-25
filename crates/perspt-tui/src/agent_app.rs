@@ -140,6 +140,41 @@ impl AgentApp {
         self.action_sender = Some(sender);
     }
 
+    /// PSP-5 Phase 8: Prepopulate task tree from persisted node states.
+    ///
+    /// Called before resuming so the TUI shows completed nodes immediately
+    /// instead of waiting for orchestrator events (which skip terminal nodes).
+    pub fn prepopulate_from_store(&mut self, session_id: &str) {
+        let Ok(store) = perspt_store::SessionStore::new() else {
+            return;
+        };
+
+        let nodes = store.get_latest_node_states(session_id).unwrap_or_default();
+
+        for ns in &nodes {
+            let status = match ns.state.as_str() {
+                "Completed" | "COMPLETED" | "STABLE" => TaskStatus::Completed,
+                "Failed" | "FAILED" => TaskStatus::Failed,
+                "Escalated" | "ESCALATED" => TaskStatus::Escalated,
+                "Coding" => TaskStatus::Coding,
+                "Verifying" => TaskStatus::Verifying,
+                "Committing" => TaskStatus::Committing,
+                _ => TaskStatus::Pending,
+            };
+
+            // Add the node to the task tree if not already present
+            let goal = ns.goal.clone().unwrap_or_else(|| ns.node_id.clone());
+            self.task_tree
+                .add_or_update_node(&ns.node_id, &goal, status);
+        }
+
+        self.dashboard.log(format!(
+            "📦 Restored {} nodes from session {}",
+            nodes.len(),
+            &session_id[..8.min(session_id.len())]
+        ));
+    }
+
     /// Run the app main loop
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
         while !self.should_quit {
