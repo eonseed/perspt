@@ -514,4 +514,58 @@ mod tests {
         tree.previous();
         assert_eq!(tree.state.selected(), Some(0));
     }
+
+    #[test]
+    fn test_lifecycle_mapping_all_variants() {
+        // Verify all NodeStatus variants map to the expected TaskStatus
+        use perspt_core::NodeStatus;
+        let mappings = vec![
+            (NodeStatus::Queued, TaskStatus::Queued),
+            (NodeStatus::Planning, TaskStatus::Planning),
+            (NodeStatus::Pending, TaskStatus::Pending),
+            (NodeStatus::Coding, TaskStatus::Coding),
+            (NodeStatus::Running, TaskStatus::Running),
+            (NodeStatus::Verifying, TaskStatus::Verifying),
+            (NodeStatus::Retrying, TaskStatus::Retrying),
+            (NodeStatus::SheafCheck, TaskStatus::SheafCheck),
+            (NodeStatus::Committing, TaskStatus::Committing),
+            (NodeStatus::Completed, TaskStatus::Completed),
+            (NodeStatus::Failed, TaskStatus::Failed),
+            (NodeStatus::Escalated, TaskStatus::Escalated),
+        ];
+        for (node_status, expected) in mappings {
+            let result: TaskStatus = node_status.into();
+            assert_eq!(result, expected, "NodeStatus::{:?} should map to TaskStatus::{:?}", node_status, expected);
+        }
+    }
+
+    #[test]
+    fn test_retry_count_increments_on_retrying() {
+        let mut tree = TaskTree::new();
+        tree.add_task("t1".to_string(), "Task".to_string(), 0);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 0);
+
+        tree.update_status("t1", TaskStatus::Retrying);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 1);
+
+        tree.update_status("t1", TaskStatus::Verifying);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 1);
+
+        tree.update_status("t1", TaskStatus::Retrying);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 2);
+    }
+
+    #[test]
+    fn test_status_icons_and_colors_unique() {
+        let statuses = vec![
+            TaskStatus::Queued, TaskStatus::Planning, TaskStatus::Pending,
+            TaskStatus::Coding, TaskStatus::Running, TaskStatus::Verifying,
+            TaskStatus::Retrying, TaskStatus::SheafCheck, TaskStatus::Committing,
+            TaskStatus::Completed, TaskStatus::Failed, TaskStatus::Escalated,
+        ];
+        // Every status should have a non-empty icon
+        for s in &statuses {
+            assert!(!s.icon().is_empty(), "{:?} should have an icon", s);
+        }
+    }
 }

@@ -486,8 +486,10 @@ mod tests {
 
         assert_eq!(modal.handle_key('y'), Some(ReviewDecision::Approve));
         assert_eq!(modal.handle_key('n'), Some(ReviewDecision::Reject));
+        assert_eq!(modal.handle_key('c'), Some(ReviewDecision::RequestCorrection));
         assert_eq!(modal.handle_key('e'), Some(ReviewDecision::Edit));
         assert_eq!(modal.handle_key('d'), Some(ReviewDecision::ViewDiff));
+        assert_eq!(modal.handle_key('s'), Some(ReviewDecision::Skip));
         assert_eq!(modal.handle_key('x'), None);
     }
 
@@ -501,5 +503,57 @@ mod tests {
         assert_eq!(modal.selected, 1);
         modal.select_left();
         assert_eq!(modal.selected, 0);
+    }
+
+    #[test]
+    fn test_correction_action_is_available() {
+        let modal = ReviewModal::new();
+        // The correction action should be in the default actions list
+        let has_correction = modal.actions.iter().any(|(d, _, _)| *d == ReviewDecision::RequestCorrection);
+        assert!(has_correction, "RequestCorrection should be in default actions");
+    }
+
+    #[test]
+    fn test_all_decisions_have_unique_hotkeys() {
+        let decisions = vec![
+            ReviewDecision::Approve,
+            ReviewDecision::Reject,
+            ReviewDecision::RequestCorrection,
+            ReviewDecision::Edit,
+            ReviewDecision::ViewDiff,
+            ReviewDecision::Skip,
+        ];
+        let hotkeys: Vec<char> = decisions.iter().map(|d| d.hotkey()).collect();
+        let unique: std::collections::HashSet<char> = hotkeys.iter().cloned().collect();
+        assert_eq!(hotkeys.len(), unique.len(), "All hotkeys should be unique");
+    }
+
+    #[test]
+    fn test_show_with_stability_includes_verification() {
+        let mut modal = ReviewModal::new();
+        let stability = StabilityMetrics {
+            syntax_ok: Some(true),
+            build_ok: Some(true),
+            tests_ok: Some(false),
+            lint_ok: Some(true),
+            tests_passed: Some(5),
+            tests_failed: Some(2),
+            degraded: true,
+            degraded_reasons: vec!["test runner unavailable".to_string()],
+            node_class: Some("Implementation".to_string()),
+            ..Default::default()
+        };
+        modal.show_with_stability(
+            "Test".to_string(),
+            "Desc".to_string(),
+            vec!["file.rs".to_string()],
+            stability,
+        );
+        assert!(modal.visible);
+        assert!(modal.stability.is_some());
+        let s = modal.stability.as_ref().unwrap();
+        assert_eq!(s.syntax_ok, Some(true));
+        assert_eq!(s.tests_failed, Some(2));
+        assert!(s.degraded);
     }
 }

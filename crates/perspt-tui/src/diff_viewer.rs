@@ -643,4 +643,62 @@ mod tests {
         let result = parse_hunk_header("@@ -1,5 +1,7 @@");
         assert_eq!(result, Some((1, 5, 1, 7)));
     }
+
+    #[test]
+    fn test_bundle_summary_default() {
+        let viewer = DiffViewer::new();
+        assert!(viewer.bundle_summary.is_none());
+    }
+
+    #[test]
+    fn test_bundle_summary_set_and_clear() {
+        let mut viewer = DiffViewer::new();
+        viewer.bundle_summary = Some(BundleSummary {
+            node_id: "node-1".to_string(),
+            node_class: "Implementation".to_string(),
+            files_created: 2,
+            files_modified: 3,
+            writes_count: 5,
+            diffs_count: 3,
+        });
+        assert!(viewer.bundle_summary.is_some());
+        viewer.clear();
+        assert!(viewer.bundle_summary.is_none());
+    }
+
+    #[test]
+    fn test_hunk_operation_label() {
+        let mut viewer = DiffViewer::new();
+        viewer.compute_diff("src/new.rs", "", "fn main() {}\n");
+        assert_eq!(viewer.hunks.len(), 1);
+        // Set operation manually as agent_app would
+        viewer.hunks[0].operation = Some("created".to_string());
+        assert_eq!(viewer.hunks[0].operation.as_deref(), Some("created"));
+    }
+
+    #[test]
+    fn test_parse_diff_multi_file() {
+        let mut viewer = DiffViewer::new();
+        let diff_text = "\
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+@@ -1,3 +1,4 @@
+ line1
++new line
+ line2
+ line3
+diff --git a/src/b.rs b/src/b.rs
+--- a/src/b.rs
++++ b/src/b.rs
+@@ -1,2 +1,2 @@
+-old
++new
+ same
+";
+        viewer.parse_diff(diff_text);
+        assert_eq!(viewer.hunks.len(), 2);
+        assert_eq!(viewer.hunks[0].file_path, "src/a.rs");
+        assert_eq!(viewer.hunks[1].file_path, "src/b.rs");
+    }
 }
