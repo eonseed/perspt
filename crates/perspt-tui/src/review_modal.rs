@@ -24,6 +24,8 @@ pub enum ReviewDecision {
     Edit,
     /// View detailed diff [d]
     ViewDiff,
+    /// Request correction with feedback [c]
+    RequestCorrection,
     /// Skip this review
     Skip,
 }
@@ -35,6 +37,7 @@ impl ReviewDecision {
             ReviewDecision::Reject => 'n',
             ReviewDecision::Edit => 'e',
             ReviewDecision::ViewDiff => 'd',
+            ReviewDecision::RequestCorrection => 'c',
             ReviewDecision::Skip => 's',
         }
     }
@@ -53,6 +56,16 @@ pub struct StabilityMetrics {
     pub attempts: usize,
     /// Maximum allowed attempts
     pub max_attempts: usize,
+    /// PSP-5 Phase 7: Verification gate results
+    pub syntax_ok: Option<bool>,
+    pub build_ok: Option<bool>,
+    pub tests_ok: Option<bool>,
+    pub lint_ok: Option<bool>,
+    pub tests_passed: Option<usize>,
+    pub tests_failed: Option<usize>,
+    pub degraded: bool,
+    pub degraded_reasons: Vec<String>,
+    pub node_class: Option<String>,
 }
 
 /// Enhanced review modal with stability metrics
@@ -88,6 +101,7 @@ impl Default for ReviewModal {
             actions: vec![
                 (ReviewDecision::Approve, "y", "✓ Approve"),
                 (ReviewDecision::Reject, "n", "✗ Reject"),
+                (ReviewDecision::RequestCorrection, "c", "🔄 Correct"),
                 (ReviewDecision::Edit, "e", "📝 Edit"),
                 (ReviewDecision::ViewDiff, "d", "👁 Diff"),
             ],
@@ -133,6 +147,7 @@ impl ReviewModal {
         match key.to_ascii_lowercase() {
             'y' => Some(ReviewDecision::Approve),
             'n' => Some(ReviewDecision::Reject),
+            'c' => Some(ReviewDecision::RequestCorrection),
             'e' => Some(ReviewDecision::Edit),
             'd' => Some(ReviewDecision::ViewDiff),
             's' => Some(ReviewDecision::Skip),
@@ -241,6 +256,8 @@ impl ReviewModal {
             Span::raw(" approve  "),
             Span::styled("[n]", Style::default().fg(Color::Red)),
             Span::raw(" reject  "),
+            Span::styled("[c]", Style::default().fg(Color::Rgb(255, 152, 0))),
+            Span::raw(" correct  "),
             Span::styled("[e]", Style::default().fg(Color::Yellow)),
             Span::raw(" edit  "),
             Span::styled("[d]", Style::default().fg(Color::Cyan)),
@@ -260,16 +277,62 @@ impl ReviewModal {
     ) {
         let energy = &stability.energy;
 
-        // Split into columns for energy components
+        // Split into rows: verification gates + energy components
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Min(3)])
+            .split(area);
+
+        // Row 1: Verification gate badges and node class
+        let mut gate_spans: Vec<Span> = Vec::new();
+        if let Some(ref nc) = stability.node_class {
+            gate_spans.push(Span::styled(
+                format!("[{}] ", nc),
+                Style::default().fg(Color::Rgb(179, 157, 219)),
+            ));
+        }
+        let gates = [
+            ("syn", stability.syntax_ok),
+            ("build", stability.build_ok),
+            ("test", stability.tests_ok),
+            ("lint", stability.lint_ok),
+        ];
+        for (name, result) in &gates {
+            let (icon, color) = match result {
+                Some(true) => ("✓", Color::Rgb(102, 187, 106)),
+                Some(false) => ("✗", Color::Rgb(239, 83, 80)),
+                None => ("?", Color::DarkGray),
+            };
+            gate_spans.push(Span::styled(
+                format!("{}{} ", icon, name),
+                Style::default().fg(color),
+            ));
+        }
+        if let (Some(p), Some(f)) = (stability.tests_passed, stability.tests_failed) {
+            gate_spans.push(Span::styled(
+                format!(" ({}/{} tests) ", p, p + f),
+                Style::default().fg(Color::White),
+            ));
+        }
+        if stability.degraded {
+            gate_spans.push(Span::styled(
+                format!("⚠ degraded: {}", stability.degraded_reasons.join(", ")),
+                Style::default().fg(Color::Rgb(255, 183, 77)),
+            ));
+        }
+        let gates_line = Paragraph::new(Line::from(gate_spans));
+        frame.render_widget(gates_line, rows[0]);
+
+        // Row 2: Energy component gauges
         let cols = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(25), // Total energy
-                Constraint::Percentage(25), // V_syn
-                Constraint::Percentage(25), // V_str
-                Constraint::Percentage(25), // V_log
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
             ])
-            .split(area);
+            .split(rows[1]);
 
         // Total energy with status
         let (status_text, status_color) = if stability.is_stable {
@@ -365,6 +428,7 @@ impl ReviewModal {
                     match decision {
                         ReviewDecision::Approve => Color::Rgb(102, 187, 106),
                         ReviewDecision::Reject => Color::Rgb(239, 83, 80),
+                        ReviewDecision::RequestCorrection => Color::Rgb(255, 152, 0),
                         ReviewDecision::Edit => Color::Rgb(255, 183, 77),
                         ReviewDecision::ViewDiff => Color::Rgb(129, 212, 250),
                         ReviewDecision::Skip => Color::DarkGray,

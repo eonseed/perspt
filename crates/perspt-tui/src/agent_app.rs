@@ -247,7 +247,7 @@ impl AgentApp {
                 self.pending_request_id = Some(request_id);
                 // Populate review state node context
                 self.review_state.description = Some(description.clone());
-                self.review_state.diff = diff;
+                self.review_state.diff = diff.clone();
                 if self.review_state.node_id.is_none() {
                     self.review_state.node_id = Some(node_id.clone());
                 }
@@ -263,8 +263,68 @@ impl AgentApp {
                         .cloned()
                         .collect(),
                 };
-                self.review_modal
-                    .show(format!("Approval: {}", node_id), description, files);
+
+                // PSP-5 Phase 7: Populate diff viewer bundle summary
+                self.diff_viewer.bundle_summary = Some(crate::diff_viewer::BundleSummary {
+                    node_id: node_id.clone(),
+                    node_class: self.review_state.node_class.clone().unwrap_or_default(),
+                    files_created: self.review_state.files_created.len(),
+                    files_modified: self.review_state.files_modified.len(),
+                    writes_count: self.review_state.writes_count,
+                    diffs_count: self.review_state.diffs_count,
+                });
+                if let Some(ref diff_text) = diff {
+                    self.diff_viewer.parse_diff(diff_text);
+                    // Tag hunks with operation labels from review state
+                    for hunk in &mut self.diff_viewer.hunks {
+                        if self.review_state.files_created.contains(&hunk.file_path) {
+                            hunk.operation = Some("created".to_string());
+                        } else if self.review_state.files_modified.contains(&hunk.file_path) {
+                            hunk.operation = Some("modified".to_string());
+                        }
+                    }
+                }
+
+                // PSP-5 Phase 7: Build stability metrics with verification context
+                use crate::review_modal::StabilityMetrics;
+                let stability = if self.review_state.energy.is_some() || self.review_state.syntax_ok.is_some() {
+                    let energy = self.review_state.energy.unwrap_or(0.0);
+                    Some(StabilityMetrics {
+                        energy: crate::telemetry::EnergyComponents {
+                            v_syn: self.review_state.energy_components.as_ref().map(|e| e.v_syn).unwrap_or(0.0),
+                            v_str: self.review_state.energy_components.as_ref().map(|e| e.v_str).unwrap_or(0.0),
+                            v_log: self.review_state.energy_components.as_ref().map(|e| e.v_log).unwrap_or(0.0),
+                            total: energy,
+                        },
+                        is_stable: energy < 0.1,
+                        threshold: 0.1,
+                        attempts: 0,
+                        max_attempts: 0,
+                        syntax_ok: self.review_state.syntax_ok,
+                        build_ok: self.review_state.build_ok,
+                        tests_ok: self.review_state.tests_ok,
+                        lint_ok: self.review_state.lint_ok,
+                        tests_passed: self.review_state.tests_passed,
+                        tests_failed: self.review_state.tests_failed,
+                        degraded: self.review_state.degraded,
+                        degraded_reasons: self.review_state.degraded_reasons.clone(),
+                        node_class: self.review_state.node_class.clone(),
+                    })
+                } else {
+                    None
+                };
+
+                if let Some(stability) = stability {
+                    self.review_modal.show_with_stability(
+                        format!("Approval: {}", node_id),
+                        description,
+                        files,
+                        stability,
+                    );
+                } else {
+                    self.review_modal
+                        .show(format!("Approval: {}", node_id), description, files);
+                }
             }
             AgentEvent::Complete { success, message } => {
                 let emoji = if success { "🎉" } else { "❌" };
@@ -453,6 +513,17 @@ impl AgentApp {
             }
             ReviewDecision::ViewDiff => {
                 self.active_tab = ActiveTab::Diff;
+            }
+            ReviewDecision::RequestCorrection => {
+                self.dashboard
+                    .log("🔄 Correction requested".to_string());
+                if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
+                    let _ =
+                        sender.send(perspt_core::AgentAction::RequestCorrection {
+                            request_id: rid,
+                            feedback: "User requested correction via TUI review".to_string(),
+                        });
+                }
             }
             ReviewDecision::Skip => {
                 self.dashboard.log("⏭ Skipped review".to_string());
