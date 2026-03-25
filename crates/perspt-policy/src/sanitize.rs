@@ -128,6 +128,51 @@ pub fn is_safe_for_auto_exec(command: &str) -> bool {
     }
 }
 
+/// Validate that a command is workspace-bound.
+///
+/// Checks parsed command parts for absolute paths that escape the given
+/// workspace root.  Returns `Ok(())` when all path-like arguments resolve
+/// inside the workspace, or an error describing the violation.
+pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path) -> Result<()> {
+    let parts = shell_words::split(command)?;
+
+    for part in &parts {
+        // Skip flags and non-path arguments
+        if part.starts_with('-') || !part.contains('/') {
+            continue;
+        }
+
+        let candidate = std::path::Path::new(part);
+        if candidate.is_absolute() {
+            // Absolute path — must be inside workspace
+            if !candidate.starts_with(workspace_root) {
+                anyhow::bail!(
+                    "command references path outside workspace: {} (workspace: {})",
+                    part,
+                    workspace_root.display()
+                );
+            }
+        } else if part.contains("..") {
+            // Relative with '..' — resolve and check
+            let resolved = workspace_root.join(candidate);
+            if let Ok(canonical) = resolved.canonicalize() {
+                if !canonical.starts_with(workspace_root) {
+                    anyhow::bail!(
+                        "command escapes workspace via '..': {} resolves to {} (workspace: {})",
+                        part,
+                        canonical.display(),
+                        workspace_root.display()
+                    );
+                }
+            }
+            // If canonicalize fails (path doesn't exist yet), allow it —
+            // the command may create the path.
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +206,34 @@ mod tests {
     fn test_canonicalize() {
         let normalized = canonicalize("ls   -la    /tmp").unwrap();
         assert_eq!(normalized, "ls -la /tmp");
+    }
+
+    #[test]
+    fn test_workspace_bound_relative_safe() {
+        let ws = std::path::PathBuf::from("/home/user/project");
+        assert!(validate_workspace_bound("cargo build", &ws).is_ok());
+    }
+
+    #[test]
+    fn test_workspace_bound_absolute_inside() {
+        let ws = std::path::PathBuf::from("/home/user/project");
+        assert!(validate_workspace_bound("cat /home/user/project/src/main.rs", &ws).is_ok());
+    }
+
+    #[test]
+    fn test_workspace_bound_absolute_outside_rejected() {
+        let ws = std::path::PathBuf::from("/home/user/project");
+        let result = validate_workspace_bound("cat /etc/passwd", &ws);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("outside workspace"));
+    }
+
+    #[test]
+    fn test_workspace_bound_flags_ignored() {
+        let ws = std::path::PathBuf::from("/home/user/project");
+        assert!(validate_workspace_bound("cargo build --release", &ws).is_ok());
     }
 }
