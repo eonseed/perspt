@@ -1604,10 +1604,12 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 action: report.action.to_string(),
             });
 
-            // PSP-5 Phase 6: Mark provisional branch as flushed on escalation
+            // PSP-5 Phase 6: Flush this branch and all descendant branches
+            let node_id_for_flush = self.graph[idx].node_id.clone();
             if let Some(ref bid) = branch_id {
-                self.flush_provisional_branch(bid, &self.graph[idx].node_id.clone());
+                self.flush_provisional_branch(bid, &node_id_for_flush);
             }
+            self.flush_descendant_branches(idx);
 
             // Apply the chosen repair action or escalate to user
             let applied = self.apply_repair_action(idx, &action).await;
@@ -3964,6 +3966,88 @@ File: [same filename]
             branch_id,
             node_id
         );
+    }
+
+    /// Flush all descendant provisional branches when a parent node fails.
+    ///
+    /// Walks the DAG outward from `idx`, finds all child nodes that have
+    /// active provisional branches, flushes them, and persists a
+    /// BranchFlushRecord documenting the cascade.
+    fn flush_descendant_branches(&mut self, idx: NodeIndex) {
+        let parent_node_id = self.graph[idx].node_id.clone();
+        let session_id = self.context.session_id.clone();
+
+        // Collect all transitive dependents
+        let descendant_indices = self.collect_descendants(idx);
+
+        let mut flushed_branch_ids = Vec::new();
+        let mut requeue_node_ids = Vec::new();
+
+        for desc_idx in &descendant_indices {
+            let desc_node = &self.graph[*desc_idx];
+            if let Some(ref bid) = desc_node.provisional_branch_id {
+                // Flush the branch
+                let bid_clone = bid.clone();
+                let nid_clone = desc_node.node_id.clone();
+                self.flush_provisional_branch(&bid_clone, &nid_clone);
+                flushed_branch_ids.push(bid_clone);
+                requeue_node_ids.push(nid_clone);
+            }
+        }
+
+        if flushed_branch_ids.is_empty() {
+            return;
+        }
+
+        // Persist the flush decision
+        let flush_record = perspt_core::types::BranchFlushRecord::new(
+            &session_id,
+            &parent_node_id,
+            flushed_branch_ids.clone(),
+            requeue_node_ids.clone(),
+            format!(
+                "Parent node {} failed verification/convergence",
+                parent_node_id
+            ),
+        );
+        if let Err(e) = self.ledger.record_branch_flush(&flush_record) {
+            log::warn!("Failed to record branch flush: {}", e);
+        }
+
+        self.emit_event(perspt_core::AgentEvent::BranchFlushed {
+            parent_node_id: parent_node_id.clone(),
+            flushed_branch_ids,
+            reason: format!("Parent {} failed", parent_node_id),
+        });
+
+        log::info!(
+            "Flushed {} descendant branches for parent {}; {} nodes eligible for requeue",
+            flush_record.flushed_branch_ids.len(),
+            parent_node_id,
+            requeue_node_ids.len(),
+        );
+    }
+
+    /// Collect all transitive dependent node indices reachable from `idx`
+    /// via outgoing edges (children, grandchildren, etc.).
+    fn collect_descendants(&self, idx: NodeIndex) -> Vec<NodeIndex> {
+        let mut descendants = Vec::new();
+        let mut stack = vec![idx];
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(idx);
+
+        while let Some(current) = stack.pop() {
+            for child in self
+                .graph
+                .neighbors_directed(current, petgraph::Direction::Outgoing)
+            {
+                if visited.insert(child) {
+                    descendants.push(child);
+                    stack.push(child);
+                }
+            }
+        }
+        descendants
     }
 
     /// Emit interface seals from an Interface-class node's output artifacts.
