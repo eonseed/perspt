@@ -9,6 +9,7 @@ use crate::test_runner::{self, PythonTestRunner, TestRunnerTrait};
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
+use perspt_core::types::{EscalationCategory, EscalationReport, RewriteAction, RewriteRecord};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Topo, Walker};
 use std::collections::HashMap;
@@ -71,6 +72,15 @@ pub struct SRBNOrchestrator {
     last_context_provenance: Option<perspt_core::types::ContextProvenance>,
     /// PSP-5 Phase 4: Last plugin-driven verification result (for convergence checks)
     last_verification_result: Option<perspt_core::types::VerificationResult>,
+}
+
+/// Get current timestamp as epoch seconds.
+fn epoch_seconds() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
 }
 
 impl SRBNOrchestrator {
@@ -1538,9 +1548,54 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
 
         // Step 5: Convergence & Self-Correction
         if !self.step_converge(idx, energy).await? {
-            // Failed to converge - escalate
-            self.graph[idx].state = NodeState::Escalated;
-            log::warn!("Node {} escalated to user", self.graph[idx].node_id);
+            // PSP-5 Phase 5: Classify non-convergence and choose repair action
+            let category = self.classify_non_convergence(idx);
+            let action = self.choose_repair_action(idx, &category);
+
+            // Persist the escalation report
+            let node = &self.graph[idx];
+            let report = EscalationReport {
+                node_id: node.node_id.clone(),
+                session_id: self.context.session_id.clone(),
+                category,
+                action: action.clone(),
+                energy_snapshot: EnergyComponents {
+                    v_syn: node.monitor.current_energy(),
+                    ..Default::default()
+                },
+                stage_outcomes: self
+                    .last_verification_result
+                    .as_ref()
+                    .map(|vr| vr.stage_outcomes.clone())
+                    .unwrap_or_default(),
+                evidence: self.build_escalation_evidence(idx),
+                affected_node_ids: self.affected_dependents(idx),
+                timestamp: epoch_seconds(),
+            };
+
+            if let Err(e) = self.ledger.record_escalation_report(&report) {
+                log::warn!("Failed to persist escalation report: {}", e);
+            }
+
+            self.emit_event(perspt_core::AgentEvent::EscalationClassified {
+                node_id: report.node_id.clone(),
+                category: report.category.to_string(),
+                action: report.action.to_string(),
+            });
+
+            // Apply the chosen repair action or escalate to user
+            let applied = self.apply_repair_action(idx, &action).await;
+
+            if !applied {
+                self.graph[idx].state = NodeState::Escalated;
+                log::warn!(
+                    "Node {} escalated to user: {} → {}",
+                    self.graph[idx].node_id,
+                    category,
+                    action
+                );
+            }
+
             return Ok(());
         }
 
@@ -2391,6 +2446,282 @@ File: [same filename]
 
         log::info!("Node {} committed", self.graph[idx].node_id);
         Ok(())
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 5: Non-Convergence Classification and Repair
+    // =========================================================================
+
+    /// Classify why a node failed to converge.
+    ///
+    /// Uses the last verification result, retry policy, tool failure state,
+    /// and graph topology to determine the failure category.
+    fn classify_non_convergence(&self, idx: NodeIndex) -> EscalationCategory {
+        let node = &self.graph[idx];
+
+        // 1. Degraded sensors take priority — we cannot trust any other signal
+        if let Some(ref vr) = self.last_verification_result {
+            if vr.has_degraded_stages() {
+                return EscalationCategory::DegradedSensors;
+            }
+        }
+
+        // 2. Contract / structural mismatch
+        if node.monitor.retry_policy.review_rejections > 0 {
+            return EscalationCategory::ContractMismatch;
+        }
+
+        // 3. Topology mismatch — node touches files outside its ownership
+        if !node.owner_plugin.is_empty() {
+            let manifest = &self.context.ownership_manifest;
+            for target in &node.output_targets {
+                if let Some(entry) = manifest.owner_of(&target.to_string_lossy()) {
+                    if entry.owner_node_id != node.node_id {
+                        return EscalationCategory::TopologyMismatch;
+                    }
+                }
+            }
+        }
+
+        // 4. Compilation errors that persist across retries suggest model inadequacy
+        if node.monitor.retry_policy.compilation_failures
+            >= node.monitor.retry_policy.max_compilation_retries
+        {
+            // If energy never decreased, the model may not be capable enough
+            if !node.monitor.is_converging() && node.monitor.attempt_count >= 3 {
+                return EscalationCategory::InsufficientModelCapability;
+            }
+        }
+
+        // 5. Default: implementation error (most common case)
+        EscalationCategory::ImplementationError
+    }
+
+    /// Choose a repair action based on the classified failure category.
+    ///
+    /// Picks the least-destructive action that is safe given current evidence.
+    fn choose_repair_action(&self, idx: NodeIndex, category: &EscalationCategory) -> RewriteAction {
+        let node = &self.graph[idx];
+
+        match category {
+            EscalationCategory::DegradedSensors => {
+                let degraded = self
+                    .last_verification_result
+                    .as_ref()
+                    .map(|vr| vr.degraded_stage_reasons())
+                    .unwrap_or_default();
+                RewriteAction::DegradedValidationStop {
+                    reason: format!(
+                        "Cannot verify stability — degraded sensors: {}",
+                        degraded.join(", ")
+                    ),
+                }
+            }
+            EscalationCategory::ContractMismatch => RewriteAction::ContractRepair {
+                fields: vec!["interface_signature".to_string(), "invariants".to_string()],
+            },
+            EscalationCategory::InsufficientModelCapability => {
+                RewriteAction::CapabilityPromotion {
+                    from_tier: node.tier,
+                    to_tier: ModelTier::Architect, // promote to strongest tier
+                }
+            }
+            EscalationCategory::TopologyMismatch => {
+                // Check if a split would help
+                if node.output_targets.len() > 1 {
+                    RewriteAction::NodeSplit {
+                        proposed_children: node
+                            .output_targets
+                            .iter()
+                            .enumerate()
+                            .map(|(i, _)| format!("{}_split_{}", node.node_id, i))
+                            .collect(),
+                    }
+                } else {
+                    RewriteAction::InterfaceInsertion {
+                        boundary: format!(
+                            "ownership boundary for {}",
+                            node.output_targets
+                                .first()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_default()
+                        ),
+                    }
+                }
+            }
+            EscalationCategory::ImplementationError => {
+                // If we still have retry budget for a different error type, ground the retry
+                if node.monitor.remaining_attempts() > 0 {
+                    let evidence = self.build_escalation_evidence(idx);
+                    RewriteAction::GroundedRetry {
+                        evidence_summary: evidence,
+                    }
+                } else {
+                    RewriteAction::UserEscalation {
+                        evidence: self.build_escalation_evidence(idx),
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply a chosen repair action.  Returns `true` if the action was
+    /// handled locally; `false` if the orchestrator should escalate to user.
+    async fn apply_repair_action(&mut self, idx: NodeIndex, action: &RewriteAction) -> bool {
+        let node_id = self.graph[idx].node_id.clone();
+
+        // Persist the rewrite record before applying
+        let category = self.classify_non_convergence(idx);
+        let rewrite = RewriteRecord {
+            node_id: node_id.clone(),
+            session_id: self.context.session_id.clone(),
+            action: action.clone(),
+            category,
+            requeued_nodes: Vec::new(),
+            inserted_nodes: Vec::new(),
+            timestamp: epoch_seconds(),
+        };
+        if let Err(e) = self.ledger.record_rewrite(&rewrite) {
+            log::warn!("Failed to persist rewrite record: {}", e);
+        }
+
+        match action {
+            RewriteAction::DegradedValidationStop { reason } => {
+                self.emit_log(format!("⛔ Degraded-validation stop: {}", reason));
+                self.graph[idx].state = NodeState::Escalated;
+                // This is a deliberate stop, not a silent false-stable — mark
+                // it as escalated so the user can decide how to proceed.
+                false
+            }
+            RewriteAction::UserEscalation { evidence } => {
+                self.emit_log(format!("⚠️ User escalation required: {}", evidence));
+                false
+            }
+            RewriteAction::GroundedRetry { evidence_summary } => {
+                log::info!(
+                    "Applying grounded retry for node {}: {}",
+                    node_id,
+                    evidence_summary
+                );
+                self.emit_log(format!(
+                    "🔄 Grounded retry for {}: {}",
+                    node_id,
+                    &evidence_summary[..evidence_summary.len().min(120)]
+                ));
+                // Reset the node state so the caller's loop can re-execute
+                self.graph[idx].state = NodeState::Retry;
+                true
+            }
+            RewriteAction::ContractRepair { fields } => {
+                log::info!("Contract repair for node {}: fields {:?}", node_id, fields);
+                self.emit_log(format!(
+                    "🔧 Contract repair for {}: {}",
+                    node_id,
+                    fields.join(", ")
+                ));
+                // Mark for retry — the next iteration will use the adjusted contract
+                self.graph[idx].state = NodeState::Retry;
+                true
+            }
+            RewriteAction::CapabilityPromotion { from_tier, to_tier } => {
+                log::info!(
+                    "Promoting node {} from {:?} to {:?}",
+                    node_id,
+                    from_tier,
+                    to_tier
+                );
+                self.emit_log(format!(
+                    "⬆️ Promoting {} from {:?} to {:?}",
+                    node_id, from_tier, to_tier
+                ));
+                self.graph[idx].tier = *to_tier;
+                self.graph[idx].state = NodeState::Retry;
+                true
+            }
+            RewriteAction::SensorRecovery { degraded_stages } => {
+                log::info!(
+                    "Sensor recovery for node {}: {:?}",
+                    node_id,
+                    degraded_stages
+                );
+                self.emit_log(format!("🔧 Attempting sensor recovery for {}", node_id));
+                // For now, just mark for retry — actual recovery would
+                // re-probe the plugin verifier profile.
+                self.graph[idx].state = NodeState::Retry;
+                true
+            }
+            RewriteAction::NodeSplit { proposed_children } => {
+                log::info!(
+                    "Node split requested for {}: {:?}",
+                    node_id,
+                    proposed_children
+                );
+                self.emit_log(format!(
+                    "✂️ Splitting {} into {} sub-nodes (not yet automated — escalating)",
+                    node_id,
+                    proposed_children.len()
+                ));
+                // Node split requires graph mutation that is not yet safe to
+                // automate; escalate so the user (or Phase 6) can handle it.
+                false
+            }
+            RewriteAction::InterfaceInsertion { boundary } => {
+                log::info!("Interface insertion for {}: {}", node_id, boundary);
+                self.emit_log(format!(
+                    "📐 Interface insertion at {} (not yet automated — escalating)",
+                    boundary
+                ));
+                false
+            }
+            RewriteAction::SubgraphReplan { affected_nodes } => {
+                log::info!("Subgraph replan for {}: {:?}", node_id, affected_nodes);
+                self.emit_log(format!(
+                    "🗺️ Subgraph replan for {} ({} nodes, not yet automated — escalating)",
+                    node_id,
+                    affected_nodes.len()
+                ));
+                false
+            }
+        }
+    }
+
+    /// Build a human-readable evidence string for an escalation.
+    fn build_escalation_evidence(&self, idx: NodeIndex) -> String {
+        let node = &self.graph[idx];
+        let mut parts = Vec::new();
+
+        parts.push(format!("node: {}", node.node_id));
+        parts.push(format!("goal: {}", node.goal));
+        parts.push(format!("energy: {:.2}", node.monitor.current_energy()));
+        parts.push(format!("attempts: {}", node.monitor.attempt_count));
+        parts.push(node.monitor.retry_policy.summary());
+
+        if let Some(ref vr) = self.last_verification_result {
+            parts.push(format!(
+                "verification: syn={}, build={}, tests={}, diag={}",
+                vr.syntax_ok, vr.build_ok, vr.tests_ok, vr.diagnostics_count
+            ));
+            if vr.has_degraded_stages() {
+                parts.push(format!(
+                    "degraded: {}",
+                    vr.degraded_stage_reasons().join("; ")
+                ));
+            }
+        }
+
+        if let Some(ref failure) = self.last_tool_failure {
+            parts.push(format!("last tool failure: {}", failure));
+        }
+
+        parts.join(" | ")
+    }
+
+    /// Collect node IDs that directly depend on the given node.
+    fn affected_dependents(&self, idx: NodeIndex) -> Vec<String> {
+        self.graph
+            .neighbors_directed(idx, petgraph::Direction::Outgoing)
+            .map(|dep_idx| self.graph[dep_idx].node_id.clone())
+            .collect()
     }
 
     /// Get the current session ID
