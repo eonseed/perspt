@@ -2141,7 +2141,7 @@ impl InterfaceSealRecord {
             session_id: sid,
             node_id: nid,
             sealed_path: digest.source_path.clone(),
-            artifact_kind: digest.artifact_kind.clone(),
+            artifact_kind: digest.artifact_kind,
             seal_hash: digest.hash,
             version: digest.version,
             created_at: epoch_secs(),
