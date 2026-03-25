@@ -8,7 +8,8 @@ mod store;
 
 pub use schema::init_schema;
 pub use store::{
-    ContextProvenanceRecord, EnergyRecord, EscalationReportRecord, LlmRequestRecord,
-    NodeStateRecord, RewriteRecordRow, SessionRecord, SessionStore, SheafValidationRow,
+    BranchFlushRow, BranchLineageRow, ContextProvenanceRecord, EnergyRecord,
+    EscalationReportRecord, InterfaceSealRow, LlmRequestRecord, NodeStateRecord,
+    ProvisionalBranchRow, RewriteRecordRow, SessionRecord, SessionStore, SheafValidationRow,
     StructuralDigestRecord,
 };
