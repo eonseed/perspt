@@ -109,13 +109,16 @@ pub async fn run(
         println!("(Use --yes flag to run headlessly)");
         println!();
 
-        // Start Python LSP (ty) for type checking
-        println!("   🔍 Starting ty language server for Python...");
-        if let Err(e) = orchestrator.start_python_lsp().await {
-            log::warn!("Failed to start ty: {}", e);
-            println!("   ⚠️ Continuing without LSP (ty not available)");
+        // Start LSP for detected plugins
+        println!("   🔍 Starting language servers...");
+        if let Err(e) = orchestrator
+            .start_lsp_for_plugins(&["python", "rust", "javascript"])
+            .await
+        {
+            log::warn!("Failed to start LSP: {}", e);
+            println!("   ⚠️  Continuing without LSP");
         } else {
-            println!("   ✅ ty language server ready");
+            println!("   ✅ Language servers ready");
         }
 
         // Run with TUI integration
@@ -128,13 +131,16 @@ pub async fn run(
         );
         println!();
 
-        // Start Python LSP (ty) for type checking
-        println!("   🔍 Starting ty language server for Python...");
-        if let Err(e) = orchestrator.start_python_lsp().await {
-            log::warn!("Failed to start ty: {}", e);
-            println!("   ⚠️ Continuing without LSP (ty not available)");
+        // Start LSP for detected plugins
+        println!("   🔍 Starting language servers...");
+        if let Err(e) = orchestrator
+            .start_lsp_for_plugins(&["python", "rust", "javascript"])
+            .await
+        {
+            log::warn!("Failed to start LSP: {}", e);
+            println!("   ⚠️  Continuing without LSP");
         } else {
-            println!("   ✅ ty language server ready");
+            println!("   ✅ Language servers ready");
         }
         println!();
 

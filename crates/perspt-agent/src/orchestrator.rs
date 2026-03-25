@@ -672,7 +672,8 @@ impl SRBNOrchestrator {
         let mut energy = EnergyComponents::default();
 
         // V_syn: LSP Diagnostics
-        if let Some(client) = self.lsp_clients.get("python") {
+        let lsp_key = self.lsp_key_for_file(&path.to_string_lossy());
+        if let Some(client) = lsp_key.as_deref().and_then(|k| self.lsp_clients.get(k)) {
             tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
             let path_str = path.to_string_lossy().to_string();
 
@@ -1691,10 +1692,10 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 self.file_version += 1;
 
                 // Notify LSP of file change (if LSP is running)
-                if let Some(client) = self.lsp_clients.get_mut("python") {
+                let lsp_key = self.lsp_key_for_file(&full_path.to_string_lossy());
+                if let Some(client) = lsp_key.and_then(|k| self.lsp_clients.get_mut(&k)) {
                     if self.file_version == 1 {
-                        let _ = client.did_open(&full_path, &code).await; // Note: For diff, we should ideally send full text but we don't have it easily here without reading back.
-                                                                          // Ideally we should reread file from disk for LSP sync if it was a diff
+                        let _ = client.did_open(&full_path, &code).await;
                         if is_diff {
                             if let Ok(new_content) = std::fs::read_to_string(&full_path) {
                                 let _ = client
@@ -2131,7 +2132,8 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 self.file_version += 1;
 
                 // Notify LSP of file change
-                if let Some(client) = self.lsp_clients.get_mut("python") {
+                let lsp_key = self.lsp_key_for_file(&full_path.to_string_lossy());
+                if let Some(client) = lsp_key.and_then(|k| self.lsp_clients.get_mut(&k)) {
                     if let Ok(content) = std::fs::read_to_string(&full_path) {
                         let _ = client
                             .did_change(&full_path, &content, self.file_version)
@@ -2365,22 +2367,93 @@ File: [same filename]
     }
 
     /// Start Python LSP (ty) for type checking
+    ///
+    /// Legacy entry point — delegates to `start_lsp_for_plugins` with just Python.
     pub async fn start_python_lsp(&mut self) -> Result<()> {
-        log::info!("Starting ty language server for Python");
+        self.start_lsp_for_plugins(&["python"]).await
+    }
 
-        let mut client = LspClient::new("ty");
-        match client.start(&self.context.working_dir).await {
-            Ok(()) => {
-                log::info!("ty language server started successfully");
-                self.lsp_clients.insert("python".to_string(), client);
+    /// Start LSP clients for the given plugin names.
+    ///
+    /// For each name, looks up the plugin's `LspConfig` (with fallback)
+    /// and starts a client keyed by the plugin name.
+    pub async fn start_lsp_for_plugins(&mut self, plugin_names: &[&str]) -> Result<()> {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+
+        for &name in plugin_names {
+            if self.lsp_clients.contains_key(name) {
+                log::debug!("LSP client already running for {}", name);
+                continue;
             }
-            Err(e) => {
-                log::warn!("Failed to start ty: {} (continuing without LSP)", e);
-                // Continue without LSP - it's optional
+
+            let plugin = match registry.get(name) {
+                Some(p) => p,
+                None => {
+                    log::warn!("No plugin found for '{}', skipping LSP startup", name);
+                    continue;
+                }
+            };
+
+            let profile = plugin.verifier_profile();
+            let lsp_config = match profile.lsp.effective_config() {
+                Some(cfg) => cfg.clone(),
+                None => {
+                    log::warn!(
+                        "No available LSP for {} (primary and fallback unavailable)",
+                        name
+                    );
+                    continue;
+                }
+            };
+
+            log::info!(
+                "Starting LSP for {}: {} {:?}",
+                name,
+                lsp_config.server_binary,
+                lsp_config.args
+            );
+
+            let mut client = LspClient::from_config(&lsp_config);
+            match client
+                .start_with_config(&lsp_config, &self.context.working_dir)
+                .await
+            {
+                Ok(()) => {
+                    log::info!("{} LSP started successfully", name);
+                    self.lsp_clients.insert(name.to_string(), client);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Failed to start {} LSP: {} (continuing without it)",
+                        name,
+                        e
+                    );
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Resolve the LSP client key for a given file path.
+    ///
+    /// Checks which registered plugin owns the file and returns its name,
+    /// falling back to the first available LSP client.
+    fn lsp_key_for_file(&self, path: &str) -> Option<String> {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+
+        // First, try to find a plugin that owns this file
+        for plugin in registry.all() {
+            if plugin.owns_file(path) {
+                let name = plugin.name().to_string();
+                if self.lsp_clients.contains_key(&name) {
+                    return Some(name);
+                }
+            }
+        }
+
+        // Fallback: return the first available client
+        self.lsp_clients.keys().next().cloned()
     }
 
     // =========================================================================
@@ -2524,12 +2597,12 @@ File: [same filename]
                 self.file_version += 1;
 
                 // Notify LSP of file change
+                let registry = perspt_core::plugin::PluginRegistry::new();
                 for (lang, client) in self.lsp_clients.iter_mut() {
-                    // Only notify if the file extension matches the LSP language
-                    let should_notify = match lang.as_str() {
-                        "python" => op.path().ends_with(".py"),
-                        "rust" => op.path().ends_with(".rs"),
-                        _ => true,
+                    // Only notify if the plugin owns this file
+                    let should_notify = match registry.get(lang) {
+                        Some(plugin) => plugin.owns_file(op.path()),
+                        None => true,
                     };
                     if should_notify {
                         if let Ok(content) = std::fs::read_to_string(&full_path) {
