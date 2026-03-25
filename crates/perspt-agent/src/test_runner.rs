@@ -676,7 +676,31 @@ impl PluginVerifierRunner {
     ///
     /// The command is split on whitespace for arg parsing. This is
     /// intentionally simple; complex pipelines should use `sh -c`.
+    ///
+    /// PSP-5 Phase 4: Commands pass through policy sanitization and
+    /// workspace-bound validation before execution.
     async fn exec_command(&self, command: &str, stage: VerifierStage) -> Result<TestResults> {
+        // Sanitize command through policy
+        let sr = perspt_policy::sanitize_command(command)?;
+        if sr.rejected {
+            anyhow::bail!(
+                "{} command rejected by policy: {}",
+                stage,
+                sr.rejection_reason.unwrap_or_default()
+            );
+        }
+        for warning in &sr.warnings {
+            log::warn!(
+                "[{}] policy warning for {} stage: {}",
+                self.profile.plugin_name,
+                stage,
+                warning
+            );
+        }
+
+        // Validate workspace bounds
+        perspt_policy::validate_workspace_bound(command, &self.working_dir)?;
+
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.is_empty() {
             anyhow::bail!("empty command for stage {}", stage);

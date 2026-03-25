@@ -234,6 +234,36 @@ impl AgentTools {
             }
         };
 
+        // PSP-5 Phase 4: Sanitize command through policy before execution
+        match perspt_policy::sanitize_command(cmd_str) {
+            Ok(sr) if sr.rejected => {
+                return ToolResult::failure(
+                    "run_command",
+                    format!(
+                        "Command rejected by policy: {}",
+                        sr.rejection_reason
+                            .unwrap_or_else(|| "unknown reason".to_string())
+                    ),
+                );
+            }
+            Ok(sr) => {
+                for warning in &sr.warnings {
+                    log::warn!("Command policy warning: {}", warning);
+                }
+            }
+            Err(e) => {
+                return ToolResult::failure(
+                    "run_command",
+                    format!("Command sanitization failed: {}", e),
+                );
+            }
+        }
+
+        // Validate workspace bounds
+        if let Err(e) = perspt_policy::validate_workspace_bound(cmd_str, &self.working_dir) {
+            return ToolResult::failure("run_command", format!("Command rejected: {}", e));
+        }
+
         if self.require_approval {
             log::info!("Command requires approval: {}", cmd_str);
         }
