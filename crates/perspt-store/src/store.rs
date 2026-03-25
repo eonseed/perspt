@@ -30,6 +30,15 @@ pub struct NodeStateRecord {
     pub v_total: f32,
     pub merkle_hash: Option<Vec<u8>>,
     pub attempt_count: i32,
+    // PSP-5 Phase 8: Richer node snapshot for resume reconstruction
+    pub node_class: Option<String>,
+    pub owner_plugin: Option<String>,
+    pub goal: Option<String>,
+    pub parent_id: Option<String>,
+    /// JSON-serialized Vec<String>
+    pub children: Option<String>,
+    pub last_error_type: Option<String>,
+    pub committed_at: Option<String>,
 }
 
 /// Record for energy history
@@ -186,6 +195,29 @@ pub struct BranchFlushRow {
     pub reason: String,
 }
 
+// =============================================================================
+// PSP-5 Phase 8: Task Graph and Review Outcome Records
+// =============================================================================
+
+/// PSP-5 Phase 8: Record for task graph edges (DAG reconstruction on resume)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskGraphEdgeRow {
+    pub session_id: String,
+    pub parent_node_id: String,
+    pub child_node_id: String,
+    pub edge_type: String,
+}
+
+/// PSP-5 Phase 8: Record for review outcome persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewOutcomeRow {
+    pub session_id: String,
+    pub node_id: String,
+    /// One of: "approved", "rejected", "edit_requested", "correction_requested"
+    pub outcome: String,
+    pub reviewer_note: Option<String>,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -253,18 +285,41 @@ impl SessionStore {
 
     /// Record node state
     pub fn record_node_state(&self, record: &NodeStateRecord) -> Result<()> {
+        let v_total = record.v_total.to_string();
+        let merkle_hash = record
+            .merkle_hash
+            .as_ref()
+            .map(hex::encode)
+            .unwrap_or_default();
+        let attempt_count = record.attempt_count.to_string();
+        let node_class = record.node_class.clone().unwrap_or_default();
+        let owner_plugin = record.owner_plugin.clone().unwrap_or_default();
+        let goal = record.goal.clone().unwrap_or_default();
+        let parent_id = record.parent_id.clone().unwrap_or_default();
+        let children = record.children.clone().unwrap_or_default();
+        let last_error_type = record.last_error_type.clone().unwrap_or_default();
+        let committed_at = record.committed_at.clone().unwrap_or_default();
+
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO node_states (node_id, session_id, state, v_total, merkle_hash, attempt_count)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO node_states (node_id, session_id, state, v_total, merkle_hash, attempt_count,
+                                     node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             [
                 &record.node_id,
                 &record.session_id,
                 &record.state,
-                &record.v_total.to_string(),
-                &record.merkle_hash.as_ref().map(hex::encode).unwrap_or_default(),
-                &record.attempt_count.to_string(),
+                &v_total,
+                &merkle_hash,
+                &attempt_count,
+                &node_class,
+                &owner_plugin,
+                &goal,
+                &parent_id,
+                &children,
+                &last_error_type,
+                &committed_at,
             ],
         )?;
         Ok(())
@@ -399,7 +454,8 @@ impl SessionStore {
     pub fn get_node_states(&self, session_id: &str) -> Result<Vec<NodeStateRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, state, v_total, merkle_hash, attempt_count
+            "SELECT node_id, session_id, state, v_total, merkle_hash, attempt_count, \
+                    node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at \
              FROM node_states WHERE session_id = ? ORDER BY created_at",
         )?;
 
@@ -416,6 +472,13 @@ impl SessionStore {
                     .get::<_, Option<String>>(4)?
                     .and_then(|s| hex::decode(s).ok()),
                 attempt_count: row.get(5)?,
+                node_class: row.get::<_, Option<String>>(6)?.filter(|s| !s.is_empty()),
+                owner_plugin: row.get::<_, Option<String>>(7)?.filter(|s| !s.is_empty()),
+                goal: row.get::<_, Option<String>>(8)?.filter(|s| !s.is_empty()),
+                parent_id: row.get::<_, Option<String>>(9)?.filter(|s| !s.is_empty()),
+                children: row.get::<_, Option<String>>(10)?.filter(|s| !s.is_empty()),
+                last_error_type: row.get::<_, Option<String>>(11)?.filter(|s| !s.is_empty()),
+                committed_at: row.get::<_, Option<String>>(12)?.filter(|s| !s.is_empty()),
             });
         }
 
@@ -1020,5 +1083,173 @@ impl SessionStore {
             });
         }
         Ok(records)
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 8: Node Snapshot, Task Graph, and Review Outcome Persistence
+    // =========================================================================
+
+    /// Get the latest node state snapshot per node for a session (for resume reconstruction).
+    ///
+    /// Returns at most one record per node_id, picking the most recently created row.
+    pub fn get_latest_node_states(&self, session_id: &str) -> Result<Vec<NodeStateRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "WITH ranked AS ( \
+                 SELECT *, ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC) AS rn \
+                 FROM node_states WHERE session_id = ? \
+             ) \
+             SELECT node_id, session_id, state, v_total, merkle_hash, attempt_count, \
+                    node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at \
+             FROM ranked WHERE rn = 1 ORDER BY created_at",
+        )?;
+
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            records.push(NodeStateRecord {
+                node_id: row.get(0)?,
+                session_id: row.get(1)?,
+                state: row.get(2)?,
+                v_total: row.get::<_, f64>(3)? as f32,
+                merkle_hash: row
+                    .get::<_, Option<String>>(4)?
+                    .and_then(|s| hex::decode(s).ok()),
+                attempt_count: row.get(5)?,
+                node_class: row.get::<_, Option<String>>(6)?.filter(|s| !s.is_empty()),
+                owner_plugin: row.get::<_, Option<String>>(7)?.filter(|s| !s.is_empty()),
+                goal: row.get::<_, Option<String>>(8)?.filter(|s| !s.is_empty()),
+                parent_id: row.get::<_, Option<String>>(9)?.filter(|s| !s.is_empty()),
+                children: row.get::<_, Option<String>>(10)?.filter(|s| !s.is_empty()),
+                last_error_type: row.get::<_, Option<String>>(11)?.filter(|s| !s.is_empty()),
+                committed_at: row.get::<_, Option<String>>(12)?.filter(|s| !s.is_empty()),
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// Record a task graph edge (parent→child dependency)
+    pub fn record_task_graph_edge(&self, record: &TaskGraphEdgeRow) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO task_graph_edges (session_id, parent_node_id, child_node_id, edge_type)
+            VALUES (?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.parent_node_id,
+                &record.child_node_id,
+                &record.edge_type,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get all task graph edges for a session
+    pub fn get_task_graph_edges(&self, session_id: &str) -> Result<Vec<TaskGraphEdgeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, parent_node_id, child_node_id, edge_type \
+             FROM task_graph_edges WHERE session_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(TaskGraphEdgeRow {
+                session_id: row.get(0)?,
+                parent_node_id: row.get(1)?,
+                child_node_id: row.get(2)?,
+                edge_type: row.get(3)?,
+            });
+        }
+        Ok(records)
+    }
+
+    /// Get child node IDs for a parent in a session's task graph
+    pub fn get_children_of_node(
+        &self,
+        session_id: &str,
+        parent_node_id: &str,
+    ) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT child_node_id FROM task_graph_edges \
+             WHERE session_id = ? AND parent_node_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id, parent_node_id])?;
+        let mut ids = Vec::new();
+        while let Some(row) = rows.next()? {
+            ids.push(row.get(0)?);
+        }
+        Ok(ids)
+    }
+
+    /// Record a review outcome (approval, rejection, edit request)
+    pub fn record_review_outcome(&self, record: &ReviewOutcomeRow) -> Result<()> {
+        let reviewer_note = record.reviewer_note.clone().unwrap_or_default();
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO review_outcomes (session_id, node_id, outcome, reviewer_note)
+            VALUES (?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.outcome,
+                &reviewer_note,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get all review outcomes for a node
+    pub fn get_review_outcomes(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<ReviewOutcomeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, outcome, reviewer_note \
+             FROM review_outcomes WHERE session_id = ? AND node_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id, node_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(ReviewOutcomeRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                outcome: row.get(2)?,
+                reviewer_note: row.get::<_, Option<String>>(3)?.filter(|s| !s.is_empty()),
+            });
+        }
+        Ok(records)
+    }
+
+    /// Get the most recent review outcome for a node
+    pub fn get_latest_review_outcome(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Option<ReviewOutcomeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, outcome, reviewer_note \
+             FROM review_outcomes WHERE session_id = ? AND node_id = ? \
+             ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([session_id, node_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ReviewOutcomeRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                outcome: row.get(2)?,
+                reviewer_note: row.get::<_, Option<String>>(3)?.filter(|s| !s.is_empty()),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
