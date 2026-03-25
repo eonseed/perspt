@@ -17,7 +17,9 @@ pub use plugin::{
 
 // Re-export commonly used types
 pub use types::{
-    AgentContext, AgentMessage, BehavioralContract, CommandContract, Criticality, EnergyComponents,
-    ErrorType, ModelTier, NodeState, PlannedContract, PlannedTask, PlannedTest, RetryPolicy,
-    SRBNNode, StabilityMonitor, TaskPlan, TaskType, TokenBudget, WeightedTest,
+    AgentContext, AgentMessage, ArtifactKind, BehavioralContract, CommandContract, ContextBudget,
+    ContextPackage, ContextProvenance, Criticality, EnergyComponents, ErrorType, ModelTier,
+    NodeState, OwnershipManifest, PlannedContract, PlannedTask, PlannedTest, RestrictionMap,
+    RetryPolicy, SRBNNode, StabilityMonitor, StructuralDigest, SummaryDigest, SummaryKind,
+    TaskPlan, TaskType, TokenBudget, WeightedTest,
 };

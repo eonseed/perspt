@@ -222,6 +222,178 @@ impl ContextRetriever {
         context
     }
 
+    // =========================================================================
+    // PSP-5 Phase 3: Context Provenance & Structural Digests
+    // =========================================================================
+
+    /// PSP-5 Phase 3: Build a restriction map for a node
+    ///
+    /// The restriction map defines the context boundary: what files, digests,
+    /// and summaries a node is allowed to see. Built from the ownership manifest,
+    /// task graph, and parent scope.
+    pub fn build_restriction_map(
+        &self,
+        node: &perspt_core::types::SRBNNode,
+        manifest: &perspt_core::types::OwnershipManifest,
+    ) -> perspt_core::types::RestrictionMap {
+        let mut map = perspt_core::types::RestrictionMap::for_node(node.node_id.clone());
+
+        // Add files owned by this node
+        let owned = manifest.files_owned_by(&node.node_id);
+        map.owned_files = owned.iter().map(|s| s.to_string()).collect();
+
+        // Add output targets (node's primary files)
+        for target in &node.output_targets {
+            let path_str = target.to_string_lossy().to_string();
+            if !map.owned_files.contains(&path_str) {
+                map.owned_files.push(path_str);
+            }
+        }
+
+        // Add context files as sealed interfaces (read-only dependencies)
+        for ctx_file in &node.context_files {
+            map.sealed_interfaces
+                .push(ctx_file.to_string_lossy().to_string());
+        }
+
+        // Apply budget from retriever limits
+        map.budget = perspt_core::types::ContextBudget {
+            byte_limit: self.max_context_bytes,
+            file_count_limit: 20,
+        };
+
+        map
+    }
+
+    /// PSP-5 Phase 3: Assemble a reproducible context package for a node
+    ///
+    /// Builds a complete, bounded context package from the restriction map.
+    /// Prioritizes: owned files (full content) > sealed interfaces (digest or content) > summaries.
+    pub fn assemble_context_package(
+        &self,
+        node: &perspt_core::types::SRBNNode,
+        restriction_map: &perspt_core::types::RestrictionMap,
+    ) -> perspt_core::types::ContextPackage {
+        let mut package = perspt_core::types::ContextPackage::new(node.node_id.clone());
+        package.restriction_map = restriction_map.clone();
+
+        // 1. Include owned files in full (highest priority — node needs these)
+        for file_path in &restriction_map.owned_files {
+            let full_path = self.working_dir.join(file_path);
+            if full_path.exists() {
+                if let Ok(content) = self.read_file_truncated(&full_path) {
+                    if !package.add_file(file_path, content) {
+                        log::warn!(
+                            "Budget exceeded adding owned file '{}' for node '{}'",
+                            file_path,
+                            node.node_id
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 2. Include sealed interfaces (prefer digest if budget is tight)
+        for iface_path in &restriction_map.sealed_interfaces {
+            let full_path = self.working_dir.join(iface_path);
+            if full_path.exists() {
+                // Try to include full content if budget allows
+                if let Ok(content) = self.read_file_truncated(&full_path) {
+                    if !package.add_file(iface_path, content) {
+                        // Budget exceeded — compute digest instead
+                        if let Ok(raw) = std::fs::read(&full_path) {
+                            let digest = perspt_core::types::StructuralDigest::from_content(
+                                &node.node_id,
+                                iface_path,
+                                perspt_core::types::ArtifactKind::InterfaceSeal,
+                                &raw,
+                            );
+                            package.add_structural_digest(digest);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Include any pre-existing structural digests from the restriction map
+        for digest in &restriction_map.structural_digests {
+            package.add_structural_digest(digest.clone());
+        }
+
+        // 4. Include summary digests
+        for summary in &restriction_map.summary_digests {
+            package.add_summary_digest(summary.clone());
+        }
+
+        package
+    }
+
+    /// PSP-5 Phase 3: Compute a structural digest for a file
+    pub fn compute_structural_digest(
+        &self,
+        path: &str,
+        artifact_kind: perspt_core::types::ArtifactKind,
+        source_node_id: &str,
+    ) -> Result<perspt_core::types::StructuralDigest> {
+        let full_path = self.working_dir.join(path);
+        let content = std::fs::read(&full_path)?;
+        Ok(perspt_core::types::StructuralDigest::from_content(
+            source_node_id,
+            path,
+            artifact_kind,
+            &content,
+        ))
+    }
+
+    /// PSP-5 Phase 3: Format a context package as text for LLM prompts
+    pub fn format_context_package(&self, package: &perspt_core::types::ContextPackage) -> String {
+        let mut context = String::new();
+
+        // Owned/included files
+        if !package.included_files.is_empty() {
+            context.push_str("## Context Files\n\n");
+            for (path, content) in &package.included_files {
+                context.push_str(&format!("### {}\n```\n{}\n```\n\n", path, content));
+            }
+        }
+
+        // Structural digests (compact representation)
+        if !package.structural_digests.is_empty() {
+            context.push_str("## Structural Dependencies (digests)\n\n");
+            for digest in &package.structural_digests {
+                context.push_str(&format!(
+                    "- {} ({}) from node '{}' [hash: {:02x}{:02x}..]\n",
+                    digest.source_path,
+                    digest.artifact_kind,
+                    digest.source_node_id,
+                    digest.hash[0],
+                    digest.hash[1],
+                ));
+            }
+            context.push('\n');
+        }
+
+        // Summary digests
+        if !package.summary_digests.is_empty() {
+            context.push_str("## Advisory Summaries\n\n");
+            for summary in &package.summary_digests {
+                context.push_str(&format!(
+                    "### {} (from {})\n{}\n\n",
+                    summary.digest_id, summary.source_node_id, summary.summary_text
+                ));
+            }
+        }
+
+        if package.budget_exceeded {
+            context.push_str(
+                "\n> Note: Context budget was exceeded. Some files replaced with structural digests.\n",
+            );
+        }
+
+        context
+    }
+
     /// Check if a file extension indicates a binary file
     fn is_binary_extension(path: &Path) -> bool {
         match path.extension().and_then(|e| e.to_str()) {
@@ -298,5 +470,138 @@ mod tests {
         let result = retriever.read_file_truncated(&file_path).unwrap();
         assert!(result.contains("truncated"));
         assert!(result.len() < 2000); // Should be truncated + message
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 3: Restriction Maps & Context Packages
+    // =========================================================================
+
+    #[test]
+    fn test_build_restriction_map() {
+        let dir = tempdir().unwrap();
+        let retriever = ContextRetriever::new(dir.path().to_path_buf());
+
+        let mut node = perspt_core::types::SRBNNode::new(
+            "node_1".to_string(),
+            "test goal".to_string(),
+            perspt_core::types::ModelTier::Actuator,
+        );
+        node.output_targets = vec![std::path::PathBuf::from("src/main.rs")];
+        node.context_files = vec![std::path::PathBuf::from("src/lib.rs")];
+
+        let mut manifest = perspt_core::types::OwnershipManifest::new();
+        manifest.assign(
+            "src/main.rs",
+            "node_1",
+            "rust",
+            perspt_core::types::NodeClass::Implementation,
+        );
+        manifest.assign(
+            "src/utils.rs",
+            "node_1",
+            "rust",
+            perspt_core::types::NodeClass::Implementation,
+        );
+
+        let map = retriever.build_restriction_map(&node, &manifest);
+
+        assert_eq!(map.node_id, "node_1");
+        // Owned files: src/main.rs (from output_targets) + src/utils.rs (from manifest)
+        assert!(map.owned_files.contains(&"src/main.rs".to_string()));
+        assert!(map.owned_files.contains(&"src/utils.rs".to_string()));
+        // Sealed interfaces: src/lib.rs (from context_files)
+        assert_eq!(map.sealed_interfaces, vec!["src/lib.rs".to_string()]);
+    }
+
+    #[test]
+    fn test_assemble_context_package_with_files() {
+        let dir = tempdir().unwrap();
+        // Create a file that the node owns
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+        let retriever = ContextRetriever::new(dir.path().to_path_buf());
+
+        let node = perspt_core::types::SRBNNode::new(
+            "node_1".to_string(),
+            "test goal".to_string(),
+            perspt_core::types::ModelTier::Actuator,
+        );
+
+        let mut map = perspt_core::types::RestrictionMap::for_node("node_1".to_string());
+        map.owned_files.push("src/main.rs".to_string());
+        map.budget.byte_limit = 10 * 1024; // 10KB
+
+        let package = retriever.assemble_context_package(&node, &map);
+
+        assert_eq!(package.node_id, "node_1");
+        assert!(package.included_files.contains_key("src/main.rs"));
+        assert!(!package.budget_exceeded);
+        assert!(package.total_bytes > 0);
+    }
+
+    #[test]
+    fn test_assemble_context_package_budget_exceeded() {
+        let dir = tempdir().unwrap();
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        // Create a file larger than the budget
+        fs::write(src_dir.join("big.rs"), "x".repeat(500)).unwrap();
+
+        let retriever = ContextRetriever::new(dir.path().to_path_buf());
+
+        let node = perspt_core::types::SRBNNode::new(
+            "node_1".to_string(),
+            "test goal".to_string(),
+            perspt_core::types::ModelTier::Actuator,
+        );
+
+        let mut map = perspt_core::types::RestrictionMap::for_node("node_1".to_string());
+        map.owned_files.push("src/big.rs".to_string());
+        map.budget.byte_limit = 100; // Very small budget
+
+        let package = retriever.assemble_context_package(&node, &map);
+        assert!(package.budget_exceeded);
+    }
+
+    #[test]
+    fn test_format_context_package_empty() {
+        let retriever = ContextRetriever::new(PathBuf::from("."));
+        let package = perspt_core::types::ContextPackage::new("node_1".to_string());
+
+        let formatted = retriever.format_context_package(&package);
+        assert!(formatted.is_empty());
+    }
+
+    #[test]
+    fn test_format_context_package_with_files() {
+        let retriever = ContextRetriever::new(PathBuf::from("."));
+        let mut package = perspt_core::types::ContextPackage::new("node_1".to_string());
+        package.add_file("src/main.rs", "fn main() {}".to_string());
+
+        let formatted = retriever.format_context_package(&package);
+        assert!(formatted.contains("## Context Files"));
+        assert!(formatted.contains("src/main.rs"));
+        assert!(formatted.contains("fn main() {}"));
+    }
+
+    #[test]
+    fn test_compute_structural_digest() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.rs"), "fn test() {}").unwrap();
+
+        let retriever = ContextRetriever::new(dir.path().to_path_buf());
+        let digest = retriever
+            .compute_structural_digest(
+                "test.rs",
+                perspt_core::types::ArtifactKind::Signature,
+                "node_1",
+            )
+            .unwrap();
+
+        assert_eq!(digest.source_node_id, "node_1");
+        assert_eq!(digest.source_path, "test.rs");
+        assert_ne!(digest.hash, [0u8; 32]);
     }
 }

@@ -41,7 +41,6 @@ pub enum AgentEvent {
     // =========================================================================
     // PSP-5: Lifecycle Events
     // =========================================================================
-
     /// PSP-5: Plan ready after sheafification with detected plugins and execution mode
     PlanReady {
         nodes: usize,
@@ -57,9 +56,7 @@ pub enum AgentEvent {
     },
 
     /// PSP-5: Deterministic fallback planner activated
-    FallbackPlanner {
-        reason: String,
-    },
+    FallbackPlanner { reason: String },
 
     /// PSP-5: Verification completed for a node
     VerificationComplete {

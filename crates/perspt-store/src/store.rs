@@ -58,6 +58,34 @@ pub struct LlmRequestRecord {
     pub latency_ms: i32,
 }
 
+/// PSP-5 Phase 3: Record for structural digest persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuralDigestRecord {
+    pub digest_id: String,
+    pub session_id: String,
+    pub node_id: String,
+    pub source_path: String,
+    pub artifact_kind: String,
+    pub hash: Vec<u8>,
+    pub version: i32,
+}
+
+/// PSP-5 Phase 3: Record for context provenance persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextProvenanceRecord {
+    pub session_id: String,
+    pub node_id: String,
+    pub context_package_id: String,
+    /// JSON-serialized structural digest hashes
+    pub structural_hashes: String,
+    /// JSON-serialized summary hashes
+    pub summary_hashes: String,
+    /// JSON-serialized dependency commit hashes
+    pub dependency_hashes: String,
+    pub included_file_count: i32,
+    pub total_bytes: i32,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -395,5 +423,113 @@ impl SessionStore {
         }
 
         Ok(records)
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 3: Structural Digest & Context Provenance Persistence
+    // =========================================================================
+
+    /// Record a structural digest
+    pub fn record_structural_digest(&self, record: &StructuralDigestRecord) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO structural_digests (digest_id, session_id, node_id, source_path, artifact_kind, hash, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.digest_id,
+                &record.session_id,
+                &record.node_id,
+                &record.source_path,
+                &record.artifact_kind,
+                &hex::encode(&record.hash),
+                &record.version.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get structural digests for a session and node
+    pub fn get_structural_digests(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<StructuralDigestRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT digest_id, session_id, node_id, source_path, artifact_kind, hash, version
+             FROM structural_digests WHERE session_id = ? AND node_id = ? ORDER BY created_at",
+        )?;
+
+        let mut rows = stmt.query([session_id, node_id])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            records.push(StructuralDigestRecord {
+                digest_id: row.get(0)?,
+                session_id: row.get(1)?,
+                node_id: row.get(2)?,
+                source_path: row.get(3)?,
+                artifact_kind: row.get(4)?,
+                hash: row
+                    .get::<_, String>(5)
+                    .ok()
+                    .and_then(|s| hex::decode(s).ok())
+                    .unwrap_or_default(),
+                version: row.get(5)?,
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// Record context provenance for a node
+    pub fn record_context_provenance(&self, record: &ContextProvenanceRecord) -> Result<()> {
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO context_provenance (session_id, node_id, context_package_id, structural_hashes, summary_hashes, dependency_hashes, included_file_count, total_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.context_package_id,
+                &record.structural_hashes,
+                &record.summary_hashes,
+                &record.dependency_hashes,
+                &record.included_file_count.to_string(),
+                &record.total_bytes.to_string(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get context provenance for a session and node
+    pub fn get_context_provenance(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Option<ContextProvenanceRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, context_package_id, structural_hashes, summary_hashes, dependency_hashes, included_file_count, total_bytes
+             FROM context_provenance WHERE session_id = ? AND node_id = ? ORDER BY created_at DESC LIMIT 1",
+        )?;
+
+        let mut rows = stmt.query([session_id, node_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ContextProvenanceRecord {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                context_package_id: row.get(2)?,
+                structural_hashes: row.get(3)?,
+                summary_hashes: row.get(4)?,
+                dependency_hashes: row.get(5)?,
+                included_file_count: row.get(6)?,
+                total_bytes: row.get(7)?,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
