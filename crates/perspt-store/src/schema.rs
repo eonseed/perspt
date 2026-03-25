@@ -455,6 +455,74 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Verification result snapshots for resume and status display
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_verification_results_id START 1",
+        [],
+    )?;
+
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS verification_results (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_verification_results_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            result_json TEXT NOT NULL,
+            syntax_ok BOOLEAN NOT NULL DEFAULT false,
+            build_ok BOOLEAN NOT NULL DEFAULT false,
+            tests_ok BOOLEAN NOT NULL DEFAULT false,
+            lint_ok BOOLEAN NOT NULL DEFAULT false,
+            diagnostics_count INTEGER DEFAULT 0,
+            tests_passed INTEGER DEFAULT 0,
+            tests_failed INTEGER DEFAULT 0,
+            degraded BOOLEAN NOT NULL DEFAULT false,
+            degraded_reason VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verification_results_session ON verification_results(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_verification_results_node ON verification_results(node_id)",
+        [],
+    )?;
+
+    // Artifact bundle snapshots for resume and diff review
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_artifact_bundles_id START 1",
+        [],
+    )?;
+
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS artifact_bundles (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_artifact_bundles_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            bundle_json TEXT NOT NULL,
+            artifact_count INTEGER DEFAULT 0,
+            command_count INTEGER DEFAULT 0,
+            touched_files TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_bundles_session ON artifact_bundles(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_artifact_bundles_node ON artifact_bundles(node_id)",
+        [],
+    )?;
+
     log::info!("DuckDB schema initialized successfully");
     Ok(())
 }

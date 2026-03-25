@@ -218,6 +218,38 @@ pub struct ReviewOutcomeRow {
     pub reviewer_note: Option<String>,
 }
 
+/// PSP-5 Phase 8: Record for verification result snapshot persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerificationResultRow {
+    pub session_id: String,
+    pub node_id: String,
+    /// JSON-serialized VerificationResult (full data for resume reconstruction)
+    pub result_json: String,
+    // Query-friendly summary fields
+    pub syntax_ok: bool,
+    pub build_ok: bool,
+    pub tests_ok: bool,
+    pub lint_ok: bool,
+    pub diagnostics_count: i32,
+    pub tests_passed: i32,
+    pub tests_failed: i32,
+    pub degraded: bool,
+    pub degraded_reason: Option<String>,
+}
+
+/// PSP-5 Phase 8: Record for artifact bundle snapshot persistence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactBundleRow {
+    pub session_id: String,
+    pub node_id: String,
+    /// JSON-serialized ArtifactBundle (full data for resume reconstruction)
+    pub bundle_json: String,
+    pub artifact_count: i32,
+    pub command_count: i32,
+    /// JSON-serialized Vec<String> of touched file paths
+    pub touched_files: String,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -1247,6 +1279,171 @@ impl SessionStore {
                 node_id: row.get(1)?,
                 outcome: row.get(2)?,
                 reviewer_note: row.get::<_, Option<String>>(3)?.filter(|s| !s.is_empty()),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 8: Verification Result and Artifact Bundle Persistence
+    // =========================================================================
+
+    /// Record a verification result snapshot for a node
+    pub fn record_verification_result(&self, record: &VerificationResultRow) -> Result<()> {
+        let syntax_ok = record.syntax_ok.to_string();
+        let build_ok = record.build_ok.to_string();
+        let tests_ok = record.tests_ok.to_string();
+        let lint_ok = record.lint_ok.to_string();
+        let diagnostics_count = record.diagnostics_count.to_string();
+        let tests_passed = record.tests_passed.to_string();
+        let tests_failed = record.tests_failed.to_string();
+        let degraded = record.degraded.to_string();
+        let degraded_reason = record.degraded_reason.clone().unwrap_or_default();
+
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO verification_results (session_id, node_id, result_json,
+                syntax_ok, build_ok, tests_ok, lint_ok,
+                diagnostics_count, tests_passed, tests_failed, degraded, degraded_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.result_json,
+                &syntax_ok,
+                &build_ok,
+                &tests_ok,
+                &lint_ok,
+                &diagnostics_count,
+                &tests_passed,
+                &tests_failed,
+                &degraded,
+                &degraded_reason,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get the latest verification result for a node
+    pub fn get_verification_result(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Option<VerificationResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, result_json, \
+                    syntax_ok, build_ok, tests_ok, lint_ok, \
+                    diagnostics_count, tests_passed, tests_failed, degraded, degraded_reason \
+             FROM verification_results \
+             WHERE session_id = ? AND node_id = ? \
+             ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([session_id, node_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(VerificationResultRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                result_json: row.get(2)?,
+                syntax_ok: row.get::<_, String>(3)?.parse().unwrap_or(false),
+                build_ok: row.get::<_, String>(4)?.parse().unwrap_or(false),
+                tests_ok: row.get::<_, String>(5)?.parse().unwrap_or(false),
+                lint_ok: row.get::<_, String>(6)?.parse().unwrap_or(false),
+                diagnostics_count: row.get(7)?,
+                tests_passed: row.get(8)?,
+                tests_failed: row.get(9)?,
+                degraded: row.get::<_, String>(10)?.parse().unwrap_or(false),
+                degraded_reason: row.get::<_, Option<String>>(11)?.filter(|s| !s.is_empty()),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get all verification results for a session (for status display)
+    pub fn get_all_verification_results(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<VerificationResultRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "WITH ranked AS ( \
+                 SELECT *, ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY created_at DESC) AS rn \
+                 FROM verification_results WHERE session_id = ? \
+             ) \
+             SELECT session_id, node_id, result_json, \
+                    syntax_ok, build_ok, tests_ok, lint_ok, \
+                    diagnostics_count, tests_passed, tests_failed, degraded, degraded_reason \
+             FROM ranked WHERE rn = 1 ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(VerificationResultRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                result_json: row.get(2)?,
+                syntax_ok: row.get::<_, String>(3)?.parse().unwrap_or(false),
+                build_ok: row.get::<_, String>(4)?.parse().unwrap_or(false),
+                tests_ok: row.get::<_, String>(5)?.parse().unwrap_or(false),
+                lint_ok: row.get::<_, String>(6)?.parse().unwrap_or(false),
+                diagnostics_count: row.get(7)?,
+                tests_passed: row.get(8)?,
+                tests_failed: row.get(9)?,
+                degraded: row.get::<_, String>(10)?.parse().unwrap_or(false),
+                degraded_reason: row.get::<_, Option<String>>(11)?.filter(|s| !s.is_empty()),
+            });
+        }
+        Ok(records)
+    }
+
+    /// Record an artifact bundle snapshot for a node
+    pub fn record_artifact_bundle(&self, record: &ArtifactBundleRow) -> Result<()> {
+        let artifact_count = record.artifact_count.to_string();
+        let command_count = record.command_count.to_string();
+
+        self.conn.lock().unwrap().execute(
+            r#"
+            INSERT INTO artifact_bundles (session_id, node_id, bundle_json,
+                artifact_count, command_count, touched_files)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+            [
+                &record.session_id,
+                &record.node_id,
+                &record.bundle_json,
+                &artifact_count,
+                &command_count,
+                &record.touched_files,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get the latest artifact bundle for a node
+    pub fn get_artifact_bundle(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Option<ArtifactBundleRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, bundle_json, artifact_count, command_count, touched_files \
+             FROM artifact_bundles \
+             WHERE session_id = ? AND node_id = ? \
+             ORDER BY created_at DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([session_id, node_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(ArtifactBundleRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                bundle_json: row.get(2)?,
+                artifact_count: row.get(3)?,
+                command_count: row.get(4)?,
+                touched_files: row.get(5)?,
             }))
         } else {
             Ok(None)
