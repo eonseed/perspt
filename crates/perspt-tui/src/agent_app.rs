@@ -46,6 +46,48 @@ impl ActiveTab {
     }
 }
 
+/// PSP-5 Phase 7: Aggregated review state for the active approval boundary.
+///
+/// Populated incrementally as VerificationComplete, BundleApplied, and
+/// ApprovalRequest events arrive. Consumed by the review modal and diff viewer.
+#[derive(Debug, Clone, Default)]
+pub struct NodeReviewState {
+    /// Node currently under review
+    pub node_id: Option<String>,
+    /// Node class (Interface, Implementation, Integration)
+    pub node_class: Option<String>,
+    /// Files created by the bundle
+    pub files_created: Vec<String>,
+    /// Files modified by the bundle
+    pub files_modified: Vec<String>,
+    /// Write operation count
+    pub writes_count: usize,
+    /// Diff operation count
+    pub diffs_count: usize,
+    /// Latest verification result fields
+    pub syntax_ok: Option<bool>,
+    pub build_ok: Option<bool>,
+    pub tests_ok: Option<bool>,
+    pub lint_ok: Option<bool>,
+    pub diagnostics_count: Option<usize>,
+    pub tests_passed: Option<usize>,
+    pub tests_failed: Option<usize>,
+    pub energy: Option<f32>,
+    /// Full energy component breakdown
+    pub energy_components: Option<perspt_core::EnergyComponents>,
+    /// Per-stage outcomes with sensor status
+    pub stage_outcomes: Vec<perspt_core::StageOutcome>,
+    /// Whether verification ran degraded
+    pub degraded: bool,
+    pub degraded_reasons: Vec<String>,
+    /// Verification summary line
+    pub summary: Option<String>,
+    /// Diff text for the viewer
+    pub diff: Option<String>,
+    /// Approval request description
+    pub description: Option<String>,
+}
+
 /// Agent app state
 pub struct AgentApp {
     /// Dashboard component
@@ -62,6 +104,8 @@ pub struct AgentApp {
     pub active_tab: ActiveTab,
     /// Pending approval request ID
     pub pending_request_id: Option<String>,
+    /// PSP-5 Phase 7: Aggregated review state for the active approval
+    pub review_state: NodeReviewState,
     /// Should quit
     pub should_quit: bool,
     /// Is paused
@@ -78,6 +122,7 @@ impl Default for AgentApp {
             review_modal: ReviewModal::new(),
             action_sender: None,
             pending_request_id: None,
+            review_state: NodeReviewState::default(),
             should_quit: false,
             paused: false,
         }
@@ -197,13 +242,26 @@ impl AgentApp {
                 node_id,
                 action_type,
                 description,
-                diff: _,
+                diff,
             } => {
                 self.pending_request_id = Some(request_id);
-                // Map ActionType to a set of files or something similar for the modal
-                let files = match action_type {
-                    perspt_core::ActionType::FileWrite { path } => vec![path],
-                    _ => vec![],
+                // Populate review state node context
+                self.review_state.description = Some(description.clone());
+                self.review_state.diff = diff;
+                if self.review_state.node_id.is_none() {
+                    self.review_state.node_id = Some(node_id.clone());
+                }
+                // Collect affected files from action type
+                let files = match &action_type {
+                    perspt_core::ActionType::FileWrite { path } => vec![path.clone()],
+                    perspt_core::ActionType::BundleWrite { files, .. } => files.clone(),
+                    _ => self
+                        .review_state
+                        .files_created
+                        .iter()
+                        .chain(self.review_state.files_modified.iter())
+                        .cloned()
+                        .collect(),
                 };
                 self.review_modal
                     .show(format!("Approval: {}", node_id), description, files);
@@ -308,12 +366,71 @@ impl AgentApp {
                     node_id
                 ));
             }
+            // PSP-5 Phase 7: Populate review state from verification and bundle events
+            AgentEvent::VerificationComplete {
+                node_id,
+                syntax_ok,
+                build_ok,
+                tests_ok,
+                lint_ok,
+                diagnostics_count,
+                tests_passed,
+                tests_failed,
+                energy,
+                energy_components,
+                stage_outcomes,
+                degraded,
+                degraded_reasons,
+                summary,
+                node_class,
+            } => {
+                self.review_state.node_id = Some(node_id.clone());
+                self.review_state.node_class = Some(node_class);
+                self.review_state.syntax_ok = Some(syntax_ok);
+                self.review_state.build_ok = Some(build_ok);
+                self.review_state.tests_ok = Some(tests_ok);
+                self.review_state.lint_ok = Some(lint_ok);
+                self.review_state.diagnostics_count = Some(diagnostics_count);
+                self.review_state.tests_passed = Some(tests_passed);
+                self.review_state.tests_failed = Some(tests_failed);
+                self.review_state.energy = Some(energy);
+                self.review_state.energy_components = Some(energy_components);
+                self.review_state.stage_outcomes = stage_outcomes;
+                self.review_state.degraded = degraded;
+                self.review_state.degraded_reasons = degraded_reasons;
+                self.review_state.summary = Some(summary.clone());
+
+                self.dashboard.update_energy(energy);
+                self.dashboard.log(format!("🔍 Verified: {} — {}", node_id, summary));
+            }
+            AgentEvent::BundleApplied {
+                node_id,
+                files_created,
+                files_modified,
+                writes_count,
+                diffs_count,
+                node_class,
+            } => {
+                self.review_state.node_id = Some(node_id.clone());
+                self.review_state.node_class = Some(node_class);
+                self.review_state.files_created = files_created.clone();
+                self.review_state.files_modified = files_modified.clone();
+                self.review_state.writes_count = writes_count;
+                self.review_state.diffs_count = diffs_count;
+
+                self.dashboard.log(format!(
+                    "📦 Bundle: {} ({} writes, {} diffs)",
+                    node_id, writes_count, diffs_count
+                ));
+            }
             _ => {}
         }
     }
 
     fn handle_review_decision(&mut self, decision: ReviewDecision) {
         let request_id = self.pending_request_id.take();
+        // PSP-5 Phase 7: Reset review state after decision
+        self.review_state = NodeReviewState::default();
 
         match decision {
             ReviewDecision::Approve => {
