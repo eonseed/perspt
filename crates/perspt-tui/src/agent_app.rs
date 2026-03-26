@@ -505,6 +505,35 @@ impl AgentApp {
                     node_id
                 ));
             }
+            AgentEvent::ContextDegraded {
+                node_id,
+                budget_exceeded,
+                missing_owned_files,
+                included_file_count,
+                total_bytes: _,
+                reason,
+            } => {
+                let detail = if budget_exceeded {
+                    format!("{} files included (budget exceeded)", included_file_count)
+                } else {
+                    format!("{} owned file(s) missing", missing_owned_files.len())
+                };
+                self.dashboard.log(format!(
+                    "⚠️ Context degraded: {} — {} ({})",
+                    node_id, reason, detail
+                ));
+            }
+            AgentEvent::ProvenanceDrift {
+                node_id,
+                missing_files,
+                reason: _,
+            } => {
+                self.dashboard.log(format!(
+                    "⚠️ Provenance drift: {} — {} file(s) missing since last run",
+                    node_id,
+                    missing_files.len()
+                ));
+            }
             // PSP-5 Phase 7: Populate review state from verification and bundle events
             AgentEvent::VerificationComplete {
                 node_id,

@@ -73,6 +73,8 @@ pub struct SRBNOrchestrator {
     pub last_tool_failure: Option<String>,
     /// PSP-5 Phase 3: Last assembled context provenance (for commit recording)
     last_context_provenance: Option<perspt_core::types::ContextProvenance>,
+    /// PSP-5 Phase 3: Last formatted context from restriction map (for correction prompts)
+    last_formatted_context: String,
     /// PSP-5 Phase 4: Last plugin-driven verification result (for convergence checks)
     last_verification_result: Option<perspt_core::types::VerificationResult>,
     /// PSP-5 Phase 6: Blocked dependencies awaiting parent interface seals
@@ -152,6 +154,7 @@ impl SRBNOrchestrator {
             ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
             last_tool_failure: None,
             last_context_provenance: None,
+            last_formatted_context: String::new(),
             last_verification_result: None,
             blocked_dependencies: Vec::new(),
         }
@@ -279,7 +282,7 @@ impl SRBNOrchestrator {
         }
 
         // Restore blocked dependencies from non-completed parents of Interface class
-        for (&ref child_id, &child_idx) in &node_map {
+        for (child_id, &child_idx) in &node_map {
             let parents: Vec<NodeIndex> = self
                 .graph
                 .neighbors_directed(child_idx, petgraph::Direction::Incoming)
@@ -326,6 +329,39 @@ impl SRBNOrchestrator {
             sess.total_nodes = snapshot.node_details.len();
             sess.completed_nodes = terminal;
             sess.status = "RUNNING".to_string();
+        }
+
+        // PSP-5 Phase 3: Validate context provenance for non-terminal nodes.
+        // Check that files referenced in persisted provenance still exist on
+        // disk so the resumed run has a chance to rebuild equivalent context.
+        for detail in &snapshot.node_details {
+            let state = parse_node_state(&detail.record.state);
+            if state.is_terminal() {
+                continue;
+            }
+
+            if let Some(ref prov) = detail.context_provenance {
+                let retriever = ContextRetriever::new(self.context.working_dir.clone());
+                let drift = retriever.validate_provenance_record(prov);
+                if !drift.is_empty() {
+                    log::warn!(
+                        "Provenance drift for node '{}': {} file(s) missing: {}",
+                        detail.record.node_id,
+                        drift.len(),
+                        drift.join(", ")
+                    );
+                    self.emit_log(format!(
+                        "⚠️ Provenance drift: node '{}' has {} missing file(s)",
+                        detail.record.node_id,
+                        drift.len()
+                    ));
+                    self.emit_event(perspt_core::AgentEvent::ProvenanceDrift {
+                        node_id: detail.record.node_id.clone(),
+                        missing_files: drift,
+                        reason: "Files referenced in persisted context no longer exist".to_string(),
+                    });
+                }
+            }
         }
 
         Ok(snapshot)
@@ -1916,8 +1952,48 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         let context_package = retriever.assemble_context_package(node, &restriction_map);
         let formatted_context = retriever.format_context_package(&context_package);
 
+        // PSP-5 Phase 3: Enforce context budget — emit degradation event when
+        // budget is exceeded or required owned files are missing.
+        let node = &self.graph[idx];
+        let missing_owned: Vec<String> = restriction_map
+            .owned_files
+            .iter()
+            .filter(|f| !context_package.included_files.contains_key(*f))
+            .cloned()
+            .collect();
+
+        if context_package.budget_exceeded || !missing_owned.is_empty() {
+            let reason = if context_package.budget_exceeded && !missing_owned.is_empty() {
+                format!(
+                    "Budget exceeded and {} owned file(s) missing",
+                    missing_owned.len()
+                )
+            } else if context_package.budget_exceeded {
+                "Context budget exceeded; some files replaced with structural digests".to_string()
+            } else {
+                format!(
+                    "{} owned file(s) could not be read: {}",
+                    missing_owned.len(),
+                    missing_owned.join(", ")
+                )
+            };
+
+            log::warn!("Context degraded for node '{}': {}", node.node_id, reason);
+            self.emit_log(format!("⚠️ Context degraded: {}", reason));
+            self.emit_event(perspt_core::AgentEvent::ContextDegraded {
+                node_id: node.node_id.clone(),
+                budget_exceeded: context_package.budget_exceeded,
+                missing_owned_files: missing_owned,
+                included_file_count: context_package.included_files.len(),
+                total_bytes: context_package.total_bytes,
+                reason,
+            });
+        }
+
         // Record provenance for later commit
         self.last_context_provenance = Some(context_package.provenance());
+        // Store formatted context for reuse in correction prompts
+        self.last_formatted_context = formatted_context.clone();
 
         let actuator = &self.agents[1];
         let node = &self.graph[idx];
@@ -2597,7 +2673,11 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
         Box::pin(self.step_converge(idx, new_energy)).await
     }
 
-    /// Build a correction prompt with diagnostic details
+    /// Build a correction prompt with diagnostic details.
+    ///
+    /// PSP-5 Phase 3: Language-agnostic, uses the node's actual output targets
+    /// and includes formatted restriction-map context so the LLM has structural
+    /// awareness during correction.
     fn build_correction_prompt(
         &self,
         _node_id: &str,
@@ -2606,7 +2686,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
     ) -> Result<String> {
         let diagnostics = &self.context.last_diagnostics;
 
-        // Read current code
+        // Read current code from the last written file
         let current_code = if let Some(ref path) = self.last_written_file {
             std::fs::read_to_string(path).unwrap_or_default()
         } else {
@@ -2622,12 +2702,33 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                     .to_string_lossy()
                     .to_string()
             })
-            .unwrap_or_else(|| "main.py".to_string());
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Detect language from file extension for code fences and instructions
+        let lang = self
+            .last_written_file
+            .as_ref()
+            .and_then(|p| p.extension())
+            .and_then(|e| e.to_str())
+            .map(|ext| match ext {
+                "py" => "python",
+                "rs" => "rust",
+                "ts" | "tsx" => "typescript",
+                "js" | "jsx" => "javascript",
+                "go" => "go",
+                "java" => "java",
+                "rb" => "ruby",
+                "c" | "h" => "c",
+                "cpp" | "cc" | "cxx" | "hpp" => "cpp",
+                "cs" => "csharp",
+                other => other,
+            })
+            .unwrap_or("text");
 
         let mut prompt = format!(
             r#"## Code Correction Required
 
-The code you generated has {} error(s) detected by the Python type checker.
+The code you generated has {} error(s) detected by the language toolchain.
 Your task is to fix ALL errors and return the complete corrected file.
 
 ### Original Goal
@@ -2635,7 +2736,7 @@ Your task is to fix ALL errors and return the complete corrected file.
 
 ### Current Code (with errors)
 File: {}
-```python
+```{}
 {}
 ```
 
@@ -2644,6 +2745,7 @@ File: {}
             diagnostics.len(),
             goal,
             file_path,
+            lang,
             current_code,
             energy.v_syn
         );
@@ -2668,24 +2770,35 @@ File: {}
             ));
         }
 
-        prompt.push_str(
+        // PSP-5 Phase 3: Include restriction-map context so the LLM can
+        // reference structural dependencies and sealed interfaces during
+        // correction instead of operating blind.
+        if !self.last_formatted_context.is_empty() {
+            prompt.push_str(&format!(
+                "\n### Restriction Map Context\n\n{}\n",
+                self.last_formatted_context
+            ));
+        }
+
+        prompt.push_str(&format!(
             r#"
 ### Fix Requirements
 1. Fix ALL errors listed above - do not leave any unfixed
 2. Maintain the original functionality and goal
-3. Add proper type annotations if missing
-4. Import any missing modules
+3. Follow {} language conventions and idioms
+4. Import any missing modules or dependencies
 5. Return the COMPLETE corrected file, not just snippets
 
 ### Output Format
 Provide the complete corrected file:
 
 File: [same filename]
-```python
+```{}
 [complete corrected code]
 ```
 "#,
-        );
+            lang, lang
+        ));
 
         Ok(prompt)
     }
