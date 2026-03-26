@@ -437,6 +437,39 @@ impl ContextRetriever {
             None => false,
         }
     }
+
+    /// PSP-5 Phase 3: Validate a persisted provenance record against the current workspace.
+    ///
+    /// Parses structural digest references from the provenance record and checks
+    /// whether the referenced source files still exist on disk. Returns a list
+    /// of missing file paths — empty means no drift detected.
+    pub fn validate_provenance_record(
+        &self,
+        record: &perspt_store::ContextProvenanceRecord,
+    ) -> Vec<String> {
+        let mut missing = Vec::new();
+
+        // Parse structural_hashes JSON: entries have format "digest_id:hex_hash"
+        // where digest_id is "source_node_id:source_path:artifact_kind".
+        if let Ok(entries) = serde_json::from_str::<Vec<String>>(&record.structural_hashes) {
+            for entry in &entries {
+                // Entry format: "source_node_id:source_path:artifact_kind:hex_hash"
+                // Split and extract source_path (second segment)
+                let parts: Vec<&str> = entry.splitn(4, ':').collect();
+                if parts.len() >= 3 {
+                    // parts[0] = source_node_id, parts[1] = source_path,
+                    // parts[2..] = artifact_kind:hex_hash
+                    let source_path = parts[1];
+                    let full_path = self.working_dir.join(source_path);
+                    if !full_path.exists() {
+                        missing.push(source_path.to_string());
+                    }
+                }
+            }
+        }
+
+        missing
+    }
 }
 
 #[cfg(test)]

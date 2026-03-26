@@ -163,6 +163,23 @@ pub enum AgentEvent {
 
     /// PSP-5 Phase 6: Provisional branch merged into committed state
     BranchMerged { branch_id: String, node_id: String },
+
+    /// PSP-5 Phase 3: Context assembly degraded (budget exceeded or missing artifacts)
+    ContextDegraded {
+        node_id: String,
+        budget_exceeded: bool,
+        missing_owned_files: Vec<String>,
+        included_file_count: usize,
+        total_bytes: usize,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 3: Context provenance drift detected on resume
+    ProvenanceDrift {
+        node_id: String,
+        missing_files: Vec<String>,
+        reason: String,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
