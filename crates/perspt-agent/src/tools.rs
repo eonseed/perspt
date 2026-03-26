@@ -794,6 +794,47 @@ pub fn copy_to_sandbox(
     Ok(())
 }
 
+/// Copy a file from a sandbox back to the live workspace, preserving relative paths.
+pub fn copy_from_sandbox(
+    sandbox_dir: &Path,
+    working_dir: &Path,
+    relative_path: &str,
+) -> std::io::Result<()> {
+    let src = sandbox_dir.join(relative_path);
+    let dst = working_dir.join(relative_path);
+
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if src.exists() {
+        fs::copy(&src, &dst)?;
+    }
+    Ok(())
+}
+
+/// List all files in a sandbox directory as workspace-relative paths.
+pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
+    let mut files = Vec::new();
+    if !sandbox_dir.exists() {
+        return Ok(files);
+    }
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, base, out)?;
+            } else if let Ok(rel) = path.strip_prefix(base) {
+                out.push(rel.to_string_lossy().to_string());
+            }
+        }
+        Ok(())
+    }
+    walk(sandbox_dir, sandbox_dir, &mut files)?;
+    Ok(files)
+}
+
 #[cfg(test)]
 mod sandbox_tests {
     use super::*;

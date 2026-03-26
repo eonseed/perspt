@@ -2132,8 +2132,9 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 filename, is_diff
             ));
 
-            // Build full path
-            let full_path = self.context.working_dir.join(&filename);
+            // Build full path — route to sandbox if the node has a provisional branch
+            let effective_dir = self.effective_working_dir(idx);
+            let full_path = effective_dir.join(&filename);
 
             // Request approval before writing file
             let approval_result = self
@@ -2437,25 +2438,26 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
                 self.emit_log("⏭️ Tests deferred (--defer-tests enabled)".to_string());
             } else if !node.contract.weighted_tests.is_empty() {
                 // PSP-5 Phase 4: select runner by the node's owner plugin
+                // PSP-5 Phase 6: use sandbox directory for speculative nodes
                 let plugin_name = &node.owner_plugin;
+                let verify_dir = self.effective_working_dir(idx);
                 let registry = perspt_core::plugin::PluginRegistry::new();
-                let runner: Box<dyn TestRunnerTrait> = if let Some(plugin) =
-                    registry.get(plugin_name)
-                {
-                    let profile = plugin.verifier_profile();
-                    self.emit_log(format!("🧪 Running tests via {} plugin...", plugin.name()));
-                    test_runner::test_runner_for_profile(profile, self.context.working_dir.clone())
-                } else {
-                    self.emit_log("🧪 Running tests (fallback Python runner)...".to_string());
-                    Box::new(PythonTestRunner::new(self.context.working_dir.clone()))
-                };
+                let runner: Box<dyn TestRunnerTrait> =
+                    if let Some(plugin) = registry.get(plugin_name) {
+                        let profile = plugin.verifier_profile();
+                        self.emit_log(format!("🧪 Running tests via {} plugin...", plugin.name()));
+                        test_runner::test_runner_for_profile(profile, verify_dir.clone())
+                    } else {
+                        self.emit_log("🧪 Running tests (fallback Python runner)...".to_string());
+                        Box::new(PythonTestRunner::new(verify_dir.clone()))
+                    };
 
                 match runner.run_tests().await {
                     Ok(results) => {
                         // V_log calculation still uses PythonTestRunner's method for
                         // weighted-test matching. This is language-agnostic since it
                         // only inspects failure names vs. contract weighted_tests.
-                        let py_runner = PythonTestRunner::new(self.context.working_dir.clone());
+                        let py_runner = PythonTestRunner::new(verify_dir);
                         energy.v_log = py_runner.calculate_v_log(&results, &node.contract);
 
                         if results.all_passed() {
@@ -3245,6 +3247,33 @@ File: [same filename]
             node_id: self.graph[idx].node_id.clone(),
             status: perspt_core::NodeStatus::Committing,
         });
+
+        // PSP-5 Phase 6: Copy sandbox artifacts back to live workspace before
+        // persisting any state, so the commit reflects the final files.
+        if let Some(sandbox_dir) = self.sandbox_dir_for_node(idx) {
+            match crate::tools::list_sandbox_files(&sandbox_dir) {
+                Ok(files) => {
+                    for rel in &files {
+                        if let Err(e) = crate::tools::copy_from_sandbox(
+                            &sandbox_dir,
+                            &self.context.working_dir,
+                            rel,
+                        ) {
+                            log::warn!("Failed to export sandbox file {}: {}", rel, e);
+                        }
+                    }
+                    if !files.is_empty() {
+                        self.emit_log(format!(
+                            "📦 Exported {} file(s) from sandbox to workspace",
+                            files.len()
+                        ));
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to list sandbox files: {}", e);
+                }
+            }
+        }
 
         // PSP-5 Phase 3: Record context provenance if available
         if let Some(provenance) = self.last_context_provenance.take() {
@@ -4550,6 +4579,31 @@ File: [same filename]
     // PSP-5 Phase 6: Provisional Branch Lifecycle
     // =========================================================================
 
+    /// Resolve the sandbox directory for a node that has a provisional branch.
+    /// Returns `None` for root nodes or nodes without branches.
+    fn sandbox_dir_for_node(&self, idx: NodeIndex) -> Option<std::path::PathBuf> {
+        let branch_id = self.graph[idx].provisional_branch_id.as_ref()?;
+        let sandbox_path = self
+            .context
+            .working_dir
+            .join(".perspt")
+            .join("sandboxes")
+            .join(&self.context.session_id)
+            .join(branch_id);
+        if sandbox_path.exists() {
+            Some(sandbox_path)
+        } else {
+            None
+        }
+    }
+
+    /// Return the effective working directory for a node: sandbox if the node
+    /// has an active provisional branch, otherwise the live workspace.
+    fn effective_working_dir(&self, idx: NodeIndex) -> std::path::PathBuf {
+        self.sandbox_dir_for_node(idx)
+            .unwrap_or_else(|| self.context.working_dir.clone())
+    }
+
     /// Create a provisional branch if the node has graph parents (i.e., it
     /// depends on another node's output). Returns the branch ID if created.
     fn maybe_create_provisional_branch(&mut self, idx: NodeIndex) -> Option<String> {
@@ -4605,10 +4659,43 @@ File: [same filename]
         // Store branch ID on the node for tracking
         self.graph[idx].provisional_branch_id = Some(branch_id.clone());
 
-        // PSP-5 Phase 6: Create sandbox workspace for this branch
+        // PSP-5 Phase 6: Create sandbox workspace for this branch and seed it
+        // with any existing files the node will read or modify.
         match crate::tools::create_sandbox(&self.context.working_dir, &session_id, &branch_id) {
             Ok(sandbox_path) => {
                 log::debug!("Sandbox created at {}", sandbox_path.display());
+                // Copy node's owned output targets into the sandbox so
+                // verification and builds can find them.
+                let node = &self.graph[idx];
+                for target in &node.output_targets {
+                    if let Some(rel) = target.to_str() {
+                        if let Err(e) = crate::tools::copy_to_sandbox(
+                            &self.context.working_dir,
+                            &sandbox_path,
+                            rel,
+                        ) {
+                            log::debug!("Could not seed sandbox with {}: {}", rel, e);
+                        }
+                    }
+                }
+                // Also copy parent output targets that this node depends on
+                for pidx in &parents {
+                    for target in &self.graph[*pidx].output_targets {
+                        if let Some(rel) = target.to_str() {
+                            if let Err(e) = crate::tools::copy_to_sandbox(
+                                &self.context.working_dir,
+                                &sandbox_path,
+                                rel,
+                            ) {
+                                log::debug!(
+                                    "Could not seed sandbox with parent file {}: {}",
+                                    rel,
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
             }
             Err(e) => {
                 log::warn!("Failed to create sandbox for branch {}: {}", branch_id, e);
@@ -4634,6 +4721,23 @@ File: [same filename]
         {
             log::warn!("Failed to merge branch {}: {}", branch_id, e);
         }
+
+        // Clean up sandbox directory — artifacts were already exported in step_commit
+        let sandbox_path = self
+            .context
+            .working_dir
+            .join(".perspt")
+            .join("sandboxes")
+            .join(&self.context.session_id)
+            .join(branch_id);
+        if let Err(e) = crate::tools::cleanup_sandbox(&sandbox_path) {
+            log::warn!(
+                "Failed to cleanup sandbox for merged branch {}: {}",
+                branch_id,
+                e
+            );
+        }
+
         self.emit_event(perspt_core::AgentEvent::BranchMerged {
             branch_id: branch_id.to_string(),
             node_id,
@@ -4649,6 +4753,23 @@ File: [same filename]
         {
             log::warn!("Failed to flush branch {}: {}", branch_id, e);
         }
+
+        // Clean up sandbox directory — speculative work is discarded
+        let sandbox_path = self
+            .context
+            .working_dir
+            .join(".perspt")
+            .join("sandboxes")
+            .join(&self.context.session_id)
+            .join(branch_id);
+        if let Err(e) = crate::tools::cleanup_sandbox(&sandbox_path) {
+            log::warn!(
+                "Failed to cleanup sandbox for flushed branch {}: {}",
+                branch_id,
+                e
+            );
+        }
+
         log::info!(
             "Flushed provisional branch {} for node {}",
             branch_id,
@@ -5063,7 +5184,7 @@ mod tests {
 
         let idx = orch.node_indices["parent"];
         let applied = orch.split_node(idx, &["handle a.rs".into(), "handle b.rs".into()]);
-        assert!(applied);
+        assert!(!applied.is_empty());
         // Parent should be gone
         assert!(!orch.node_indices.contains_key("parent"));
         // Two children should exist
@@ -5078,8 +5199,8 @@ mod tests {
         orch.add_node(node);
         let idx = orch.node_indices["n"];
         let applied = orch.split_node(idx, &[]);
-        // Should not apply — return false but not panic
-        assert!(!applied);
+        // Should not apply — return empty vec but not panic
+        assert!(applied.is_empty());
     }
 
     #[tokio::test]
@@ -5093,7 +5214,7 @@ mod tests {
 
         let idx_a = orch.node_indices["a"];
         let applied = orch.insert_interface_node(idx_a, "API boundary");
-        assert!(applied);
+        assert!(applied.is_some());
         assert!(orch.node_indices.contains_key("a__iface"));
         // Should now have 3 nodes
         assert_eq!(orch.node_count(), 3);
