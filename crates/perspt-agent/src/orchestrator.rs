@@ -3443,20 +3443,25 @@ File: [same filename]
     async fn apply_repair_action(&mut self, idx: NodeIndex, action: &RewriteAction) -> bool {
         let node_id = self.graph[idx].node_id.clone();
 
-        // Persist the rewrite record before applying
-        let category = self.classify_non_convergence(idx);
-        let rewrite = RewriteRecord {
-            node_id: node_id.clone(),
-            session_id: self.context.session_id.clone(),
-            action: action.clone(),
-            category,
-            requeued_nodes: Vec::new(),
-            inserted_nodes: Vec::new(),
-            timestamp: epoch_seconds(),
-        };
-        if let Err(e) = self.ledger.record_rewrite(&rewrite) {
-            log::warn!("Failed to persist rewrite record: {}", e);
+        // PSP-5 Phase 5: Churn guardrail — limit repeated rewrites on the
+        // same node lineage. Count prior rewrites for this node (and its
+        // parent lineage) and refuse further rewrites beyond the limit.
+        const MAX_REWRITES_PER_LINEAGE: usize = 3;
+        let lineage_rewrites = self.count_lineage_rewrites(&node_id);
+        if lineage_rewrites >= MAX_REWRITES_PER_LINEAGE {
+            log::warn!(
+                "Rewrite churn limit reached for node {} ({} prior rewrites) — refusing rewrite",
+                node_id,
+                lineage_rewrites
+            );
+            self.emit_log(format!(
+                "⛔ Rewrite churn limit ({}) reached for {} — escalating",
+                MAX_REWRITES_PER_LINEAGE, node_id
+            ));
+            return false;
         }
+
+        let category = self.classify_non_convergence(idx);
 
         match action {
             RewriteAction::DegradedValidationStop { reason } => {
@@ -3466,12 +3471,12 @@ File: [same filename]
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Escalated,
                 });
-                // This is a deliberate stop, not a silent false-stable — mark
-                // it as escalated so the user can decide how to proceed.
+                self.persist_rewrite_record(&node_id, action, &category, &[]);
                 false
             }
             RewriteAction::UserEscalation { evidence } => {
                 self.emit_log(format!("⚠️ User escalation required: {}", evidence));
+                self.persist_rewrite_record(&node_id, action, &category, &[]);
                 false
             }
             RewriteAction::GroundedRetry { evidence_summary } => {
@@ -3485,12 +3490,12 @@ File: [same filename]
                     node_id,
                     &evidence_summary[..evidence_summary.len().min(120)]
                 ));
-                // Reset the node state so the caller's loop can re-execute
                 self.graph[idx].state = NodeState::Retry;
                 self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Retrying,
                 });
+                self.persist_rewrite_record(&node_id, action, &category, &[]);
                 true
             }
             RewriteAction::ContractRepair { fields } => {
@@ -3500,12 +3505,12 @@ File: [same filename]
                     node_id,
                     fields.join(", ")
                 ));
-                // Mark for retry — the next iteration will use the adjusted contract
                 self.graph[idx].state = NodeState::Retry;
                 self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Retrying,
                 });
+                self.persist_rewrite_record(&node_id, action, &category, &[]);
                 true
             }
             RewriteAction::CapabilityPromotion { from_tier, to_tier } => {
@@ -3525,6 +3530,7 @@ File: [same filename]
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Retrying,
                 });
+                self.persist_rewrite_record(&node_id, action, &category, &[]);
                 true
             }
             RewriteAction::SensorRecovery { degraded_stages } => {
@@ -3534,13 +3540,12 @@ File: [same filename]
                     degraded_stages
                 );
                 self.emit_log(format!("🔧 Attempting sensor recovery for {}", node_id));
-                // For now, just mark for retry — actual recovery would
-                // re-probe the plugin verifier profile.
                 self.graph[idx].state = NodeState::Retry;
                 self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Retrying,
                 });
+                self.persist_rewrite_record(&node_id, action, &category, &[]);
                 true
             }
             RewriteAction::NodeSplit { proposed_children } => {
@@ -3562,15 +3567,18 @@ File: [same filename]
                     proposed_children.len()
                 ));
                 let count = proposed_children.len();
-                let applied = self.split_node(idx, proposed_children);
-                if applied {
+                let inserted = self.split_node(idx, proposed_children);
+                if !inserted.is_empty() {
+                    self.persist_rewrite_record(&node_id, action, &category, &inserted);
                     self.emit_event(perspt_core::AgentEvent::GraphRewriteApplied {
                         trigger_node: node_id.clone(),
                         action: "node_split".to_string(),
                         nodes_affected: count,
                     });
+                    true
+                } else {
+                    false
                 }
-                applied
             }
             RewriteAction::InterfaceInsertion { boundary } => {
                 log::info!("Interface insertion for {}: {}", node_id, boundary);
@@ -3578,15 +3586,23 @@ File: [same filename]
                     "📐 Inserting interface adapter at boundary: {}",
                     boundary
                 ));
-                let applied = self.insert_interface_node(idx, boundary);
-                if applied {
+                let inserted = self.insert_interface_node(idx, boundary);
+                if let Some(ref adapter_id) = inserted {
+                    self.persist_rewrite_record(
+                        &node_id,
+                        action,
+                        &category,
+                        std::slice::from_ref(adapter_id),
+                    );
                     self.emit_event(perspt_core::AgentEvent::GraphRewriteApplied {
                         trigger_node: node_id.clone(),
                         action: "interface_insertion".to_string(),
                         nodes_affected: 1,
                     });
+                    true
+                } else {
+                    false
                 }
-                applied
             }
             RewriteAction::SubgraphReplan { affected_nodes } => {
                 log::info!("Subgraph replan for {}: {:?}", node_id, affected_nodes);
@@ -3598,13 +3614,62 @@ File: [same filename]
                 ));
                 let applied = self.replan_subgraph(idx, affected_nodes);
                 if applied {
+                    self.persist_rewrite_record(&node_id, action, &category, &[]);
                     self.emit_event(perspt_core::AgentEvent::GraphRewriteApplied {
                         trigger_node: node_id.clone(),
                         action: "subgraph_replan".to_string(),
-                        nodes_affected: count + 1, // trigger + affected
+                        nodes_affected: count + 1,
                     });
                 }
                 applied
+            }
+        }
+    }
+
+    /// Persist a rewrite record with the actual inserted node IDs.
+    fn persist_rewrite_record(
+        &self,
+        node_id: &str,
+        action: &RewriteAction,
+        category: &perspt_core::types::EscalationCategory,
+        inserted_nodes: &[String],
+    ) {
+        let rewrite = RewriteRecord {
+            node_id: node_id.to_string(),
+            session_id: self.context.session_id.clone(),
+            action: action.clone(),
+            category: *category,
+            requeued_nodes: Vec::new(),
+            inserted_nodes: inserted_nodes.to_vec(),
+            timestamp: epoch_seconds(),
+        };
+        if let Err(e) = self.ledger.record_rewrite(&rewrite) {
+            log::warn!("Failed to persist rewrite record: {}", e);
+        }
+    }
+
+    /// Count how many rewrites have been applied to this node or its lineage
+    /// (nodes sharing the same base ID prefix before `__split_` or `__iface`).
+    fn count_lineage_rewrites(&self, node_id: &str) -> usize {
+        // Extract the root lineage ID (strip __split_N and __iface suffixes)
+        let base = node_id
+            .split("__split_")
+            .next()
+            .unwrap_or(node_id)
+            .split("__iface")
+            .next()
+            .unwrap_or(node_id);
+
+        // Count rewrite records for this lineage from the ledger
+        match self.ledger.get_rewrite_count_for_lineage(base) {
+            Ok(count) => count,
+            Err(e) => {
+                log::warn!(
+                    "Failed to query rewrite count for lineage '{}': {}",
+                    base,
+                    e
+                );
+                0
             }
         }
     }
@@ -3652,10 +3717,10 @@ File: [same filename]
     /// edges. The original node is removed and replaced with the children.
     ///
     /// Each proposed child string is treated as a sub-goal description.
-    /// Returns `true` if the split was applied successfully.
-    fn split_node(&mut self, idx: NodeIndex, proposed_children: &[String]) -> bool {
+    /// Returns the list of inserted child node IDs (empty on failure).
+    fn split_node(&mut self, idx: NodeIndex, proposed_children: &[String]) -> Vec<String> {
         if proposed_children.is_empty() {
-            return false;
+            return Vec::new();
         }
         let parent = self.graph[idx].clone();
         let parent_id = parent.node_id.clone();
@@ -3680,6 +3745,7 @@ File: [same filename]
 
         // Create child nodes.
         let mut child_indices = Vec::with_capacity(proposed_children.len());
+        let mut child_ids = Vec::with_capacity(proposed_children.len());
         for (i, sub_goal) in proposed_children.iter().enumerate() {
             let child_id = format!("{}__split_{}", parent_id, i);
             let mut child = SRBNNode::new(child_id.clone(), sub_goal.clone(), parent.tier);
@@ -3698,23 +3764,35 @@ File: [same filename]
                 .collect();
             child.context_files = parent.context_files.clone();
             let c_idx = self.graph.add_node(child);
-            self.node_indices.insert(child_id, c_idx);
+            self.node_indices.insert(child_id.clone(), c_idx);
             child_indices.push(c_idx);
+            child_ids.push(child_id);
         }
 
         // Wire incoming edges → first child, outgoing edges from last child.
         if let Some(&first) = child_indices.first() {
             for (src, dep) in &incoming {
                 self.graph.add_edge(*src, first, dep.clone());
+                // Persist new edge
+                let src_id = self.graph[*src].node_id.clone();
+                let dst_id = self.graph[first].node_id.clone();
+                let _ = self
+                    .ledger
+                    .record_task_graph_edge(&src_id, &dst_id, &dep.kind);
             }
         }
         if let Some(&last) = child_indices.last() {
             for (dst, dep) in &outgoing {
                 self.graph.add_edge(last, *dst, dep.clone());
+                let src_id = self.graph[last].node_id.clone();
+                let dst_id = self.graph[*dst].node_id.clone();
+                let _ = self
+                    .ledger
+                    .record_task_graph_edge(&src_id, &dst_id, &dep.kind);
             }
         }
 
-        // Chain children sequentially.
+        // Chain children sequentially and persist edges.
         for pair in child_indices.windows(2) {
             self.graph.add_edge(
                 pair[0],
@@ -3723,6 +3801,11 @@ File: [same filename]
                     kind: "split_sequence".to_string(),
                 },
             );
+            let src_id = self.graph[pair[0]].node_id.clone();
+            let dst_id = self.graph[pair[1]].node_id.clone();
+            let _ = self
+                .ledger
+                .record_task_graph_edge(&src_id, &dst_id, "split_sequence");
         }
 
         // Remove original node.
@@ -3730,18 +3813,19 @@ File: [same filename]
         self.graph.remove_node(idx);
 
         log::info!(
-            "Split node {} into {} children",
+            "Split node {} into {} children: {:?}",
             parent_id,
-            proposed_children.len()
+            proposed_children.len(),
+            child_ids
         );
-        true
+        child_ids
     }
 
     /// Insert an interface/adapter node on the edge between the given node
     /// and its dependents.  The boundary string describes the interface
     /// contract for the newly created adapter node.
-    /// Returns `true` if the insertion succeeded.
-    fn insert_interface_node(&mut self, idx: NodeIndex, boundary: &str) -> bool {
+    /// Returns the adapter node ID on success, or None on failure.
+    fn insert_interface_node(&mut self, idx: NodeIndex, boundary: &str) -> Option<String> {
         let source_id = self.graph[idx].node_id.clone();
         let adapter_id = format!("{}__iface", source_id);
         let source_node = &self.graph[idx];
@@ -3769,7 +3853,6 @@ File: [same filename]
             .collect();
 
         // Remove old outgoing edges and re-route through adapter.
-        // We remove edges by finding edge indices.
         let edge_ids: Vec<_> = self
             .graph
             .edges_directed(idx, petgraph::Direction::Outgoing)
@@ -3787,14 +3870,21 @@ File: [same filename]
                 kind: "interface_boundary".to_string(),
             },
         );
+        let _ = self
+            .ledger
+            .record_task_graph_edge(&source_id, &adapter_id, "interface_boundary");
 
         // adapter → original dependents
         for (dst, dep) in outgoing {
-            self.graph.add_edge(adapter_idx, dst, dep);
+            self.graph.add_edge(adapter_idx, dst, dep.clone());
+            let dst_id = self.graph[dst].node_id.clone();
+            let _ = self
+                .ledger
+                .record_task_graph_edge(&adapter_id, &dst_id, &dep.kind);
         }
 
         log::info!("Inserted interface node {} after {}", adapter_id, source_id);
-        true
+        Some(adapter_id)
     }
 
     /// Reset the specified affected nodes back to `TaskQueued` so they get
