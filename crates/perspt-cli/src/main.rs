@@ -28,6 +28,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Start an interactive chat session (default)
     Chat {
@@ -108,6 +109,10 @@ enum Commands {
         /// Force single-file execution (Solo Mode) instead of project-first planning
         #[arg(long)]
         single_file: bool,
+
+        /// Verifier strictness: default, strict, or minimal
+        #[arg(long, default_value = "default")]
+        verifier_strictness: String,
     },
 
     /// Initialize project configuration
@@ -240,6 +245,7 @@ async fn main() -> Result<()> {
             defer_tests,
             log_llm,
             single_file,
+            verifier_strictness,
         }) => {
             commands::agent::run(
                 task,
@@ -255,6 +261,7 @@ async fn main() -> Result<()> {
                 defer_tests,
                 log_llm,
                 single_file,
+                verifier_strictness,
             )
             .await
         }

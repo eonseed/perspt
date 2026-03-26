@@ -534,6 +534,25 @@ impl AgentApp {
                     missing_files.len()
                 ));
             }
+            AgentEvent::ToolReadiness {
+                plugins,
+                strictness,
+            } => {
+                self.dashboard
+                    .log(format!("🔧 Verifier strictness: {}", strictness));
+                for pr in &plugins {
+                    if pr.degraded_stages.is_empty() {
+                        self.dashboard
+                            .log(format!("🔌 {} — all stages available", pr.plugin_name));
+                    } else {
+                        self.dashboard.log(format!(
+                            "🔌 {} — degraded: {}",
+                            pr.plugin_name,
+                            pr.degraded_stages.join(", ")
+                        ));
+                    }
+                }
+            }
             // PSP-5 Phase 7: Populate review state from verification and bundle events
             AgentEvent::VerificationComplete {
                 node_id,

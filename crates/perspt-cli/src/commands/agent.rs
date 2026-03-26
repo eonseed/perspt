@@ -40,6 +40,7 @@ pub async fn run(
     defer_tests: bool,
     log_llm: bool,
     single_file: bool,
+    verifier_strictness: String,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
@@ -100,6 +101,13 @@ pub async fn run(
     if single_file {
         orchestrator.context.execution_mode = perspt_core::types::ExecutionMode::Solo;
     }
+
+    // PSP-5: Set verifier strictness from CLI flag
+    orchestrator.context.verifier_strictness = match verifier_strictness.to_lowercase().as_str() {
+        "strict" => perspt_core::types::VerifierStrictness::Strict,
+        "minimal" => perspt_core::types::VerifierStrictness::Minimal,
+        _ => perspt_core::types::VerifierStrictness::Default,
+    };
 
     println!("🚀 SRBN Agent starting...");
     println!("   Session: {}", orchestrator.session_id());

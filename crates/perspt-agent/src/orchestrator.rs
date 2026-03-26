@@ -583,6 +583,69 @@ impl SRBNOrchestrator {
             ));
         }
 
+        // PSP-5 Phase 4: Probe verifier readiness at session start and emit
+        // ToolReadiness event so TUI/headless surfaces know which stages are
+        // available, degraded, or missing before any nodes execute.
+        {
+            let mut plugin_readiness = Vec::new();
+            for plugin_name in &active_plugins {
+                if let Some(plugin) = registry.get(plugin_name) {
+                    let profile = plugin.verifier_profile();
+                    let available: Vec<String> = profile
+                        .capabilities
+                        .iter()
+                        .filter(|c| c.available)
+                        .map(|c| c.stage.to_string())
+                        .collect();
+                    let degraded: Vec<String> = profile
+                        .capabilities
+                        .iter()
+                        .filter(|c| !c.available && c.fallback_available)
+                        .map(|c| format!("{} (fallback)", c.stage))
+                        .chain(
+                            profile
+                                .capabilities
+                                .iter()
+                                .filter(|c| !c.any_available())
+                                .map(|c| format!("{} (unavailable)", c.stage)),
+                        )
+                        .collect();
+                    let lsp_status = if profile.lsp.primary_available {
+                        format!("{} (primary)", profile.lsp.primary.server_binary)
+                    } else if profile.lsp.fallback_available {
+                        profile
+                            .lsp
+                            .fallback
+                            .as_ref()
+                            .map(|f| format!("{} (fallback)", f.server_binary))
+                            .unwrap_or_else(|| "fallback".to_string())
+                    } else {
+                        "unavailable".to_string()
+                    };
+
+                    if !degraded.is_empty() {
+                        self.emit_log(format!(
+                            "⚠️ Plugin '{}' degraded: {}",
+                            plugin_name,
+                            degraded.join(", ")
+                        ));
+                    }
+
+                    plugin_readiness.push(perspt_core::events::PluginReadiness {
+                        plugin_name: plugin_name.clone(),
+                        available_stages: available,
+                        degraded_stages: degraded,
+                        lsp_status,
+                    });
+                }
+            }
+
+            self.emit_event(perspt_core::AgentEvent::ToolReadiness {
+                plugins: plugin_readiness,
+                strictness: format!("{:?}", self.context.verifier_strictness),
+            });
+        }
+
         // Team Mode: Full project initialization and DAG sheafification
         self.step_init_project(&task).await?;
         self.step_sheafify(task).await?;
