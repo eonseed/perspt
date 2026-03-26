@@ -211,11 +211,39 @@ impl SRBNOrchestrator {
 
         let snapshot = self.ledger.load_session_snapshot()?;
 
+        // PSP-5 Phase 8: Corruption / backward-compatibility checks
         if snapshot.node_details.is_empty() {
             anyhow::bail!(
                 "Session {} has no persisted nodes — cannot resume",
                 session_id
             );
+        }
+
+        // Detect orphaned edges (references to nodes not in snapshot)
+        let node_ids: std::collections::HashSet<&str> = snapshot
+            .node_details
+            .iter()
+            .map(|d| d.record.node_id.as_str())
+            .collect();
+        let orphaned_edges = snapshot
+            .graph_edges
+            .iter()
+            .filter(|e| {
+                !node_ids.contains(e.parent_node_id.as_str())
+                    || !node_ids.contains(e.child_node_id.as_str())
+            })
+            .count();
+        if orphaned_edges > 0 {
+            log::warn!(
+                "Session {} has {} orphaned edge(s) referencing unknown nodes — \
+                 edges will be dropped during resume",
+                session_id,
+                orphaned_edges
+            );
+            self.emit_log(format!(
+                "⚠️ Resume: dropping {} orphaned graph edge(s)",
+                orphaned_edges
+            ));
         }
 
         // Rebuild graph: first add all nodes
@@ -371,11 +399,28 @@ impl SRBNOrchestrator {
     ///
     /// Walks the DAG in topological order, skipping terminal nodes and
     /// executing any node whose state is not completed/failed/aborted.
+    /// Emits a differential resume summary so users can see what will
+    /// be replayed vs. skipped.
     pub async fn run_resumed(&mut self) -> Result<()> {
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
         let mut executed = 0;
+
+        // PSP-5 Phase 8: Emit differential resume summary
+        let terminal_count = indices
+            .iter()
+            .filter(|i| self.graph[**i].state.is_terminal())
+            .count();
+        let blocked_count = indices
+            .iter()
+            .filter(|i| !self.graph[**i].state.is_terminal() && self.check_seal_prerequisites(**i))
+            .count();
+        let resumable_count = total_nodes - terminal_count - blocked_count;
+        self.emit_log(format!(
+            "📊 Differential resume: {} total, {} skipped (terminal), {} blocked (seal), {} to execute",
+            total_nodes, terminal_count, blocked_count, resumable_count
+        ));
 
         for (i, idx) in indices.iter().enumerate() {
             let node = &self.graph[*idx];
@@ -5516,5 +5561,69 @@ mod tests {
         // This will try to flush branches but ledger may not find them —
         // the important thing is it doesn't panic and traverses correctly
         orch.flush_descendant_branches(idx);
+    }
+
+    // =========================================================================
+    // PSP-5 Completion Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_effective_working_dir_no_branch() {
+        let orch = SRBNOrchestrator::new(PathBuf::from("/test/workspace"), false);
+        // No nodes, but we can test the helper directly by adding one
+        let mut orch = orch;
+        let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        orch.add_node(node);
+        let idx = orch.node_indices["n1"];
+        // No provisional branch → returns live workspace
+        assert_eq!(
+            orch.effective_working_dir(idx),
+            PathBuf::from("/test/workspace")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sandbox_dir_for_node_none_without_branch() {
+        let orch = SRBNOrchestrator::new(PathBuf::from("/test/workspace"), false);
+        let mut orch = orch;
+        let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        orch.add_node(node);
+        let idx = orch.node_indices["n1"];
+        assert!(orch.sandbox_dir_for_node(idx).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_churn_guardrail() {
+        let orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_churn"), false);
+        let mut orch = orch;
+        let node = SRBNNode::new("node_a".into(), "goal".into(), ModelTier::Actuator);
+        orch.add_node(node);
+        // count_lineage_rewrites should return 0 for a fresh node
+        let count = orch.count_lineage_rewrites("node_a");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_run_resumed_skips_terminal_nodes() {
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_resume"), false);
+
+        let mut n1 = SRBNNode::new("done".into(), "completed".into(), ModelTier::Actuator);
+        n1.state = NodeState::Completed;
+        let mut n2 = SRBNNode::new("failed".into(), "failed".into(), ModelTier::Actuator);
+        n2.state = NodeState::Failed;
+        orch.add_node(n1);
+        orch.add_node(n2);
+
+        // Both nodes are terminal, so run_resumed should do nothing and succeed
+        let result = orch.run_resumed().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_persist_review_decision_no_panic() {
+        let orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_review"), false);
+        // Should not panic even without a real ledger session —
+        // it gracefully logs errors
+        orch.persist_review_decision("node_x", "approved", None);
     }
 }

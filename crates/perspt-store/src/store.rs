@@ -1761,6 +1761,9 @@ mod tests {
             node_id: "node-r".to_string(),
             outcome: "approved".to_string(),
             reviewer_note: Some("LGTM".to_string()),
+            energy_at_review: None,
+            degraded: None,
+            escalation_category: None,
         };
         store.record_review_outcome(&row).unwrap();
 
@@ -1768,5 +1771,56 @@ mod tests {
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].outcome, "approved");
         assert_eq!(outcomes[0].reviewer_note.as_deref(), Some("LGTM"));
+    }
+
+    #[test]
+    fn test_review_outcome_with_audit_fields() {
+        let store = test_store();
+        let sid = "test-review-audit";
+        seed_session(&store, sid);
+
+        let row = ReviewOutcomeRow {
+            session_id: sid.to_string(),
+            node_id: "node-a".to_string(),
+            outcome: "rejected".to_string(),
+            reviewer_note: Some("Needs rework".to_string()),
+            energy_at_review: Some(0.42),
+            degraded: Some(true),
+            escalation_category: Some("complexity".to_string()),
+        };
+        store.record_review_outcome(&row).unwrap();
+
+        let outcomes = store.get_review_outcomes(sid, "node-a").unwrap();
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].outcome, "rejected");
+        assert_eq!(outcomes[0].energy_at_review, Some(0.42));
+        assert_eq!(outcomes[0].degraded, Some(true));
+        assert_eq!(
+            outcomes[0].escalation_category.as_deref(),
+            Some("complexity")
+        );
+    }
+
+    #[test]
+    fn test_get_all_review_outcomes() {
+        let store = test_store();
+        let sid = "test-review-all";
+        seed_session(&store, sid);
+
+        for (node, outcome) in &[("n1", "approved"), ("n2", "rejected"), ("n1", "approved")] {
+            let row = ReviewOutcomeRow {
+                session_id: sid.to_string(),
+                node_id: node.to_string(),
+                outcome: outcome.to_string(),
+                reviewer_note: None,
+                energy_at_review: None,
+                degraded: None,
+                escalation_category: None,
+            };
+            store.record_review_outcome(&row).unwrap();
+        }
+
+        let all = store.get_all_review_outcomes(sid).unwrap();
+        assert_eq!(all.len(), 3);
     }
 }
