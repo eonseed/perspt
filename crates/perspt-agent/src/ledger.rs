@@ -503,6 +503,26 @@ impl MerkleLedger {
         Ok(())
     }
 
+    /// PSP-5 Phase 5: Count rewrite records matching a lineage prefix.
+    ///
+    /// A lineage is identified by the base node ID (before any `__split_` or
+    /// `__iface` suffixes). This count is used as a churn guardrail to prevent
+    /// infinite rewrite loops.
+    pub fn get_rewrite_count_for_lineage(&self, lineage_base: &str) -> Result<usize> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to query rewrite count")?;
+
+        let records = self.store.get_rewrite_records(&session_id)?;
+        let count = records
+            .iter()
+            .filter(|r| r.node_id.starts_with(lineage_base))
+            .count();
+        Ok(count)
+    }
+
     /// Record a sheaf validation result
     pub fn record_sheaf_validation(
         &self,
