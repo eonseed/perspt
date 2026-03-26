@@ -41,6 +41,9 @@ pub async fn run(
     log_llm: bool,
     single_file: bool,
     verifier_strictness: String,
+    architect_fallback_model: Option<String>,
+    actuator_fallback_model: Option<String>,
+    output_plan: Option<PathBuf>,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
@@ -90,6 +93,8 @@ pub async fn run(
         actuator,
         verifier,
         speculator,
+        architect_fallback_model,
+        actuator_fallback_model,
     );
 
     // Set complexity threshold, defer_tests, and log_llm
@@ -204,6 +209,27 @@ pub async fn run(
                 println!();
                 println!("✅ Task completed successfully!");
                 println!("   Nodes processed: {}", orchestrator.node_count());
+
+                // PSP-5: Export structured plan as JSON if --output-plan was given
+                if let Some(ref plan_path) = output_plan {
+                    let nodes: Vec<_> = orchestrator
+                        .graph
+                        .node_indices()
+                        .map(|idx| &orchestrator.graph[idx])
+                        .collect();
+                    match serde_json::to_string_pretty(&nodes) {
+                        Ok(json) => {
+                            if let Err(e) = std::fs::write(plan_path, &json) {
+                                eprintln!("⚠️  Failed to write plan to {}: {}", plan_path.display(), e);
+                            } else {
+                                println!("   Plan exported to {}", plan_path.display());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Failed to serialize plan: {}", e);
+                        }
+                    }
+                }
 
                 // PSP-5 Phase 7: Structured headless summary
                 let sid = orchestrator.session_id().to_string();
