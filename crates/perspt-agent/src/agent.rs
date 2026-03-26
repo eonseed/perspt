@@ -7,6 +7,7 @@ use crate::types::{AgentContext, AgentMessage, ModelTier, SRBNNode};
 use anyhow::Result;
 use async_trait::async_trait;
 use perspt_core::llm_provider::GenAIProvider;
+use std::path::Path;
 use std::sync::Arc;
 
 /// The Agent trait defines the interface for SRBN agents.
@@ -46,30 +47,122 @@ impl ArchitectAgent {
     }
 
     pub fn build_planning_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
+        // Delegate to the canonical task decomposition prompt with node-level context
+        Self::build_task_decomposition_prompt(
+            &node.goal,
+            &ctx.working_dir,
+            &format!("Context Files: {:?}\nOutput Targets: {:?}", node.context_files, node.output_targets),
+            None,
+        )
+    }
+
+    /// PSP-5 Fix F: Canonical task decomposition prompt with the full JSON schema contract.
+    /// Used by both the ArchitectAgent (node-level) and the Orchestrator (initial planning).
+    pub fn build_task_decomposition_prompt(
+        task: &str,
+        working_dir: &Path,
+        project_context: &str,
+        last_error: Option<&str>,
+    ) -> String {
+        let error_feedback = if let Some(e) = last_error {
+            format!(
+                "\n## Previous Attempt Failed\nError: {}\nPlease fix the JSON format and try again.\n",
+                e
+            )
+        } else {
+            String::new()
+        };
+
         format!(
             r#"You are an Architect agent in a multi-agent coding system.
 
 ## Task
-Goal: {}
+{task}
 
-## Context
-Working Directory: {:?}
-Context Files: {:?}
-Output Targets: {:?}
+## Working Directory
+{working_dir}
 
-## Requirements
-1. Break down this task into subtasks if needed
-2. Define behavioral contracts for each subtask
-3. Identify dependencies between subtasks
-4. Specify required interfaces and invariants
+## Existing Project Structure
+{project_context}
+{error_feedback}
+## Instructions
+Analyze this task and produce a structured execution plan as JSON.
+
+### MODULAR PROJECT STRUCTURE (CRITICAL)
+Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
+
+1. **Entry Point First**: Create a main entry point file (e.g., `main.py`, `src/main.rs`, `index.js`)
+2. **Logical Modules**: Split functionality into separate files/modules with clear responsibilities
+3. **Proper Imports**: Ensure all cross-file imports will resolve correctly
+4. **Package Structure**: For Python, include `__init__.py` files in subdirectories
+5. **Test Isolation**: Put tests in a `tests/` directory or use `test_*.py` naming
+
+### TASK ORDERING
+1. Create foundational modules before dependent ones
+2. Specify dependencies accurately between tasks
+3. Entry point task should depend on all modules it imports
+
+### COMPLETENESS CHECKLIST
+- [ ] Every import in generated code must reference an existing or planned file
+- [ ] The project must be immediately runnable after all tasks complete
+- [ ] Include at least one test file for core functionality
+- [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
+
+## CRITICAL CONSTRAINTS
+- DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
+- The system handles project initialization separately via CLI tools (uv, npm, cargo)
+- Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
+- If you need to add dependencies, include them in the task goal description (e.g., "Add requests library for HTTP calls")
 
 ## Output Format
-Provide a structured plan with:
-- Subtask list with goals
-- File dependencies
-- Interface signatures
-- Test criteria"#,
-            node.goal, ctx.working_dir, node.context_files, node.output_targets,
+Respond with ONLY a JSON object in this exact format:
+```json
+{{
+  "tasks": [
+    {{
+      "id": "task_1",
+      "goal": "Description of what this task accomplishes",
+      "context_files": ["existing_file.py"],
+      "output_files": ["new_file.py"],
+      "dependencies": [],
+      "task_type": "code",
+      "contract": {{
+        "interface_signature": "def function_name(arg: Type) -> ReturnType",
+        "invariants": ["Must handle edge cases"],
+        "forbidden_patterns": ["no bare except"],
+        "tests": [
+          {{"name": "test_function_name", "criticality": "Critical"}}
+        ]
+      }}
+    }},
+    {{
+      "id": "main_entry",
+      "goal": "Create main.py entry point that imports and uses other modules",
+      "context_files": ["module_a.py", "module_b.py"],
+      "output_files": ["main.py"],
+      "dependencies": ["task_1", "task_2"],
+      "task_type": "code"
+    }},
+    {{
+      "id": "test_1",
+      "goal": "Unit tests for task_1",
+      "context_files": ["new_file.py"],
+      "output_files": ["tests/test_new_file.py"],
+      "dependencies": ["task_1"],
+      "task_type": "unit_test"
+    }}
+  ]
+}}
+```
+
+Valid task_type values: "code", "unit_test", "integration_test", "refactor", "documentation"
+Valid criticality values: "Critical", "High", "Low"
+
+IMPORTANT: Output ONLY the JSON, no other text."#,
+            task = task,
+            working_dir = working_dir.display(),
+            project_context = project_context,
+            error_feedback = error_feedback
         )
     }
 }

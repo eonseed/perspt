@@ -21,17 +21,24 @@ pub enum ModelTier {
 }
 
 impl ModelTier {
-    /// Get the recommended model for this tier
-    /// Default: gemini-flash-lite-latest for all tiers (can be overridden via CLI)
+    /// Get the recommended default model for this tier.
+    ///
+    /// Architect and Verifier tiers prefer higher-capability models for
+    /// reasoning and evaluation. Actuator uses a balanced model. Speculator
+    /// uses a lower-cost model. All defaults can be overridden per-tier via CLI.
     pub fn default_model(&self) -> &'static str {
-        // Use gemini-flash-lite-latest as the default for all tiers
-        // This can be overridden per-tier via CLI: --architect-model, --actuator-model, etc.
-        Self::default_model_name()
+        match self {
+            ModelTier::Architect => "gemini-2.5-flash-preview-05-20",
+            ModelTier::Verifier => "gemini-2.5-flash-preview-05-20",
+            ModelTier::Actuator => "gemini-2.0-flash",
+            ModelTier::Speculator => "gemini-2.0-flash-lite",
+        }
     }
 
-    /// Get the default model name (static, for use when no instance is available)
+    /// Get the default model name (static, for use when no instance is available).
+    /// Returns the Actuator default as the general-purpose fallback.
     pub fn default_model_name() -> &'static str {
-        "gemini-flash-lite-latest"
+        "gemini-2.0-flash"
     }
 }
 

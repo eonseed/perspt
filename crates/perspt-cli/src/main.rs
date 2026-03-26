@@ -113,6 +113,18 @@ enum Commands {
         /// Verifier strictness: default, strict, or minimal
         #[arg(long, default_value = "default")]
         verifier_strictness: String,
+
+        /// Fallback model for Architect tier (used when primary fails structured-output)
+        #[arg(long)]
+        architect_fallback_model: Option<String>,
+
+        /// Fallback model for Actuator tier (used when primary fails structured-output)
+        #[arg(long)]
+        actuator_fallback_model: Option<String>,
+
+        /// Export the task graph as JSON to a file after planning (before execution)
+        #[arg(long)]
+        output_plan: Option<PathBuf>,
     },
 
     /// Initialize project configuration
@@ -246,6 +258,9 @@ async fn main() -> Result<()> {
             log_llm,
             single_file,
             verifier_strictness,
+            architect_fallback_model,
+            actuator_fallback_model,
+            output_plan,
         }) => {
             commands::agent::run(
                 task,
@@ -262,6 +277,9 @@ async fn main() -> Result<()> {
                 log_llm,
                 single_file,
                 verifier_strictness,
+                architect_fallback_model,
+                actuator_fallback_model,
+                output_plan,
             )
             .await
         }

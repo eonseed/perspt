@@ -187,6 +187,31 @@ pub enum AgentEvent {
         reason: String,
     },
 
+    /// PSP-5 Phase 3: Context blocked — required structural context is untrustworthy.
+    /// The node SHALL NOT proceed silently (PSP-5 §3 requirement).
+    ContextBlocked {
+        node_id: String,
+        missing_owned_files: Vec<String>,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 3: Structural dependency pre-check failed — a required
+    /// dependency only has prose summaries, no machine-verifiable digests.
+    StructuralDependencyMissing {
+        node_id: String,
+        dependency_node_id: String,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 1/4: Model fallback triggered for a tier after structured-output failure
+    ModelFallback {
+        node_id: String,
+        tier: String,
+        primary_model: String,
+        fallback_model: String,
+        reason: String,
+    },
+
     /// PSP-5 Phase 3: Context provenance drift detected on resume
     ProvenanceDrift {
         node_id: String,

@@ -63,6 +63,10 @@ pub struct SRBNOrchestrator {
     architect_model: String,
     /// Actuator model name for corrections
     actuator_model: String,
+    /// PSP-5: Fallback model for Architect tier (used when primary fails structured-output contract)
+    architect_fallback_model: Option<String>,
+    /// PSP-5: Fallback model for Actuator tier
+    actuator_fallback_model: Option<String>,
     /// Event sender for TUI updates (optional)
     event_sender: Option<perspt_core::events::channel::EventSender>,
     /// Action receiver for TUI commands (optional)
@@ -93,10 +97,11 @@ fn epoch_seconds() -> i64 {
 impl SRBNOrchestrator {
     /// Create a new orchestrator with default models
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
-        Self::new_with_models(working_dir, auto_approve, None, None, None, None)
+        Self::new_with_models(working_dir, auto_approve, None, None, None, None, None, None)
     }
 
     /// Create a new orchestrator with custom model configuration
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_models(
         working_dir: PathBuf,
         auto_approve: bool,
@@ -104,6 +109,8 @@ impl SRBNOrchestrator {
         actuator_model: Option<String>,
         verifier_model: Option<String>,
         speculator_model: Option<String>,
+        architect_fallback_model: Option<String>,
+        actuator_fallback_model: Option<String>,
     ) -> Self {
         let context = AgentContext {
             working_dir: working_dir.clone(),
@@ -149,6 +156,8 @@ impl SRBNOrchestrator {
             provider,
             architect_model: stored_architect_model,
             actuator_model: stored_actuator_model,
+            architect_fallback_model,
+            actuator_fallback_model,
             event_sender: None,
             action_receiver: None,
             ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
@@ -1623,9 +1632,22 @@ Project name:"#,
             // Build the structured prompt
             let prompt = self.build_architect_prompt(&task, last_error.as_deref())?;
 
-            // Call the Architect
+            // Call the Architect with tier-aware fallback for structured-output failures
             let response = self
-                .call_llm_with_logging(&self.get_architect_model(), &prompt, None)
+                .call_llm_with_tier_fallback(
+                    &self.get_architect_model(),
+                    &prompt,
+                    None,
+                    ModelTier::Architect,
+                    |resp| {
+                        // Validate that the response contains parseable JSON plan
+                        if resp.contains("tasks") && (resp.contains('{') && resp.contains('}')) {
+                            Ok(())
+                        } else {
+                            Err("Response does not contain a JSON task plan".to_string())
+                        }
+                    },
+                )
                 .await
                 .context("Failed to get Architect response")?;
 
@@ -1692,112 +1714,17 @@ Project name:"#,
     }
 
     /// Build the Architect prompt requesting structured JSON output
+    ///
+    /// PSP-5 Fix F: Delegates to `ArchitectAgent::build_task_decomposition_prompt`
+    /// so the JSON schema contract lives in one place.
     fn build_architect_prompt(&self, task: &str, last_error: Option<&str>) -> Result<String> {
-        let error_feedback = if let Some(e) = last_error {
-            format!(
-                "\n## Previous Attempt Failed\nError: {}\nPlease fix the JSON format and try again.\n",
-                e
-            )
-        } else {
-            String::new()
-        };
-
-        // Gather existing project context
         let project_context = self.gather_project_context();
-
-        let prompt = format!(
-            r#"You are an Architect agent in a multi-agent coding system.
-
-## Task
-{task}
-
-## Working Directory
-{working_dir}
-
-## Existing Project Structure
-{project_context}
-{error_feedback}
-## Instructions
-Analyze this task and produce a structured execution plan as JSON.
-
-### MODULAR PROJECT STRUCTURE (CRITICAL)
-Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
-
-1. **Entry Point First**: Create a main entry point file (e.g., `main.py`, `src/main.rs`, `index.js`)
-2. **Logical Modules**: Split functionality into separate files/modules with clear responsibilities
-3. **Proper Imports**: Ensure all cross-file imports will resolve correctly
-4. **Package Structure**: For Python, include `__init__.py` files in subdirectories
-5. **Test Isolation**: Put tests in a `tests/` directory or use `test_*.py` naming
-
-### TASK ORDERING
-1. Create foundational modules before dependent ones
-2. Specify dependencies accurately between tasks
-3. Entry point task should depend on all modules it imports
-
-### COMPLETENESS CHECKLIST
-- [ ] Every import in generated code must reference an existing or planned file
-- [ ] The project must be immediately runnable after all tasks complete
-- [ ] Include at least one test file for core functionality
-- [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
-
-## CRITICAL CONSTRAINTS
-- DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
-- The system handles project initialization separately via CLI tools (uv, npm, cargo)
-- Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
-- If you need to add dependencies, include them in the task goal description (e.g., "Add requests library for HTTP calls")
-
-## Output Format
-Respond with ONLY a JSON object in this exact format:
-```json
-{{
-  "tasks": [
-    {{
-      "id": "task_1",
-      "goal": "Description of what this task accomplishes",
-      "context_files": ["existing_file.py"],
-      "output_files": ["new_file.py"],
-      "dependencies": [],
-      "task_type": "code",
-      "contract": {{
-        "interface_signature": "def function_name(arg: Type) -> ReturnType",
-        "invariants": ["Must handle edge cases"],
-        "forbidden_patterns": ["no bare except"],
-        "tests": [
-          {{"name": "test_function_name", "criticality": "Critical"}}
-        ]
-      }}
-    }},
-    {{
-      "id": "main_entry",
-      "goal": "Create main.py entry point that imports and uses other modules",
-      "context_files": ["module_a.py", "module_b.py"],
-      "output_files": ["main.py"],
-      "dependencies": ["task_1", "task_2"],
-      "task_type": "code"
-    }},
-    {{
-      "id": "test_1",
-      "goal": "Unit tests for task_1",
-      "context_files": ["new_file.py"],
-      "output_files": ["tests/test_new_file.py"],
-      "dependencies": ["task_1"],
-      "task_type": "unit_test"
-    }}
-  ]
-}}
-```
-
-Valid task_type values: "code", "unit_test", "integration_test", "refactor", "documentation"
-Valid criticality values: "Critical", "High", "Low"
-
-IMPORTANT: Output ONLY the JSON, no other text."#,
-            task = task,
-            working_dir = self.context.working_dir.display(),
-            project_context = project_context,
-            error_feedback = error_feedback
-        );
-
-        Ok(prompt)
+        Ok(crate::agent::ArchitectAgent::build_task_decomposition_prompt(
+            task,
+            &self.context.working_dir,
+            &project_context,
+            last_error,
+        ))
     }
 
     /// Gather existing project context for the Architect prompt
@@ -2147,11 +2074,63 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             self.emit_event(perspt_core::AgentEvent::ContextDegraded {
                 node_id: node.node_id.clone(),
                 budget_exceeded: context_package.budget_exceeded,
-                missing_owned_files: missing_owned,
+                missing_owned_files: missing_owned.clone(),
                 included_file_count: context_package.included_files.len(),
                 total_bytes: context_package.total_bytes,
-                reason,
+                reason: reason.clone(),
             });
+
+            // PSP-5 Phase 3: Block execution when required owned files are missing.
+            // Budget-exceeded-but-all-owned-files-present is a warning, not a block.
+            if !missing_owned.is_empty() {
+                self.emit_event(perspt_core::AgentEvent::ContextBlocked {
+                    node_id: node.node_id.clone(),
+                    missing_owned_files: missing_owned,
+                    reason: reason.clone(),
+                });
+                self.graph[idx].state = NodeState::Escalated;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Escalated,
+                });
+                return Err(anyhow::anyhow!(
+                    "Context blocked for node '{}': {}. Node escalated.",
+                    self.graph[idx].node_id,
+                    reason
+                ));
+            }
+        }
+
+        // PSP-5 Phase 3: Pre-execution structural dependency check.
+        // A node SHALL NOT proceed when only prose exists for a required dependency.
+        {
+            let node = &self.graph[idx];
+            let prose_only_deps = self.check_structural_dependencies(node, &restriction_map);
+            if !prose_only_deps.is_empty() {
+                for (dep_node_id, dep_reason) in &prose_only_deps {
+                    self.emit_event(perspt_core::AgentEvent::StructuralDependencyMissing {
+                        node_id: node.node_id.clone(),
+                        dependency_node_id: dep_node_id.clone(),
+                        reason: dep_reason.clone(),
+                    });
+                }
+                let dep_names: Vec<&str> = prose_only_deps.iter().map(|(id, _)| id.as_str()).collect();
+                let block_reason = format!(
+                    "Required structural dependencies lack machine-verifiable digests (only prose summaries): [{}]",
+                    dep_names.join(", ")
+                );
+                self.emit_log(format!("🚫 {}", block_reason));
+                self.graph[idx].state = NodeState::Escalated;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Escalated,
+                });
+                return Err(anyhow::anyhow!(
+                    "Structural dependency check failed for node '{}': {}",
+                    self.graph[idx].node_id,
+                    block_reason
+                ));
+            }
         }
 
         // Record provenance for later commit
@@ -3048,6 +3027,86 @@ File: [same filename]
         }
 
         Ok(response)
+    }
+
+    /// PSP-5 Phase 1/4: Call LLM with tier-aware fallback.
+    ///
+    /// If the primary model returns a response that fails structured-output
+    /// contract validation (`validator` returns `Err`), and a fallback model
+    /// is configured for the given tier, retry with the fallback. Emits a
+    /// `ModelFallback` event on switch. Returns the raw response string.
+    async fn call_llm_with_tier_fallback<F>(
+        &self,
+        primary_model: &str,
+        prompt: &str,
+        node_id: Option<&str>,
+        tier: ModelTier,
+        validator: F,
+    ) -> Result<String>
+    where
+        F: Fn(&str) -> std::result::Result<(), String>,
+    {
+        // Try primary model
+        let response = self
+            .call_llm_with_logging(primary_model, prompt, node_id)
+            .await?;
+
+        // Validate structured output
+        if validator(&response).is_ok() {
+            return Ok(response);
+        }
+
+        let validation_err = validator(&response).unwrap_err();
+        log::warn!(
+            "Primary model '{}' failed structured-output contract for {:?}: {}",
+            primary_model,
+            tier,
+            validation_err
+        );
+
+        // Look up fallback model for this tier
+        let fallback = match tier {
+            ModelTier::Architect => self.architect_fallback_model.as_deref(),
+            ModelTier::Actuator => self.actuator_fallback_model.as_deref(),
+            // Verifier and Speculator share the actuator fallback if any
+            _ => self.actuator_fallback_model.as_deref(),
+        };
+
+        let fallback_model = match fallback {
+            Some(m) => m,
+            None => {
+                // No fallback configured — return the original response and let
+                // downstream parsing handle the error
+                log::warn!(
+                    "No fallback model configured for {:?} tier; returning primary response",
+                    tier
+                );
+                return Ok(response);
+            }
+        };
+
+        log::info!(
+            "Falling back to model '{}' for {:?} tier",
+            fallback_model,
+            tier
+        );
+        self.emit_event_ref(perspt_core::AgentEvent::ModelFallback {
+            node_id: node_id.unwrap_or("").to_string(),
+            tier: format!("{:?}", tier),
+            primary_model: primary_model.to_string(),
+            fallback_model: fallback_model.to_string(),
+            reason: validation_err,
+        });
+
+        self.call_llm_with_logging(fallback_model, prompt, node_id)
+            .await
+    }
+
+    /// Emit an event from a &self context (non-mutable).
+    fn emit_event_ref(&self, event: perspt_core::AgentEvent) {
+        if let Some(sender) = &self.event_sender {
+            let _ = sender.send(event);
+        }
     }
 
     /// Step 6: Sheaf Validation
@@ -5095,6 +5154,67 @@ File: [same filename]
         false
     }
 
+    /// PSP-5 Phase 3: Check that required structural dependencies have
+    /// machine-verifiable digests, not just prose summaries.
+    ///
+    /// Returns a list of (dependency_node_id, reason) for dependencies that
+    /// only have semantic/advisory summaries with no structural evidence.
+    fn check_structural_dependencies(
+        &self,
+        node: &SRBNNode,
+        restriction_map: &perspt_core::types::RestrictionMap,
+    ) -> Vec<(String, String)> {
+        use perspt_core::types::{ArtifactKind, NodeClass};
+
+        let mut prose_only = Vec::new();
+
+        // Only enforce for Implementation nodes that depend on Interface nodes
+        if node.node_class != NodeClass::Implementation {
+            return prose_only;
+        }
+
+        // Collect parent Interface node IDs from the DAG
+        let idx = match self.node_indices.get(&node.node_id) {
+            Some(i) => *i,
+            None => return prose_only,
+        };
+
+        let parents: Vec<NodeIndex> = self
+            .graph
+            .neighbors_directed(idx, petgraph::Direction::Incoming)
+            .collect();
+
+        for pidx in parents {
+            let parent = &self.graph[pidx];
+            if parent.node_class != NodeClass::Interface {
+                continue;
+            }
+
+            // Check if we have at least one structural digest from this parent
+            let has_structural = restriction_map.structural_digests.iter().any(|d| {
+                d.source_node_id == parent.node_id
+                    && matches!(
+                        d.artifact_kind,
+                        ArtifactKind::Signature
+                            | ArtifactKind::Schema
+                            | ArtifactKind::InterfaceSeal
+                    )
+            });
+
+            if !has_structural {
+                prose_only.push((
+                    parent.node_id.clone(),
+                    format!(
+                        "Interface node '{}' has no Signature/Schema/InterfaceSeal digest in the restriction map",
+                        parent.node_id
+                    ),
+                ));
+            }
+        }
+
+        prose_only
+    }
+
     /// Inject sealed interface digests from parent nodes into a restriction map.
     ///
     /// For each parent that has a recorded interface seal in the ledger, replace
@@ -5625,5 +5745,101 @@ mod tests {
         // Should not panic even without a real ledger session —
         // it gracefully logs errors
         orch.persist_review_decision("node_x", "approved", None);
+    }
+
+    // =========================================================================
+    // PSP-5 Gap Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_check_structural_dependencies_blocks_prose_only() {
+        use perspt_core::types::{NodeClass, RestrictionMap};
+
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_struct_dep"), false);
+
+        // Parent: Interface node (no structural digests)
+        let mut parent =
+            SRBNNode::new("iface_1".into(), "Define API".into(), ModelTier::Architect);
+        parent.node_class = NodeClass::Interface;
+
+        // Child: Implementation node depending on the interface
+        let mut child =
+            SRBNNode::new("impl_1".into(), "Implement API".into(), ModelTier::Actuator);
+        child.node_class = NodeClass::Implementation;
+
+        let parent_idx = orch.add_node(parent);
+        let child_idx = orch.add_node(child.clone());
+        orch.graph
+            .add_edge(parent_idx, child_idx, Dependency { kind: "dep".into() });
+
+        // Empty restriction map — no structural digests at all
+        let rmap = RestrictionMap::for_node("impl_1");
+        let gaps = orch.check_structural_dependencies(&child, &rmap);
+
+        assert_eq!(gaps.len(), 1);
+        assert_eq!(gaps[0].0, "iface_1");
+        assert!(gaps[0].1.contains("no Signature/Schema/InterfaceSeal"));
+    }
+
+    #[tokio::test]
+    async fn test_check_structural_dependencies_passes_with_digest() {
+        use perspt_core::types::{ArtifactKind, NodeClass, RestrictionMap, StructuralDigest};
+
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_struct_ok"), false);
+
+        let mut parent =
+            SRBNNode::new("iface_2".into(), "Define API".into(), ModelTier::Architect);
+        parent.node_class = NodeClass::Interface;
+
+        let mut child =
+            SRBNNode::new("impl_2".into(), "Implement API".into(), ModelTier::Actuator);
+        child.node_class = NodeClass::Implementation;
+
+        let parent_idx = orch.add_node(parent);
+        let child_idx = orch.add_node(child.clone());
+        orch.graph
+            .add_edge(parent_idx, child_idx, Dependency { kind: "dep".into() });
+
+        // Restriction map with a Signature digest from the Interface node
+        let mut rmap = RestrictionMap::for_node("impl_2");
+        rmap.structural_digests.push(StructuralDigest::from_content(
+            "iface_2",
+            "api.rs",
+            ArtifactKind::Signature,
+            b"fn do_thing(x: i32) -> bool;",
+        ));
+
+        let gaps = orch.check_structural_dependencies(&child, &rmap);
+        assert!(gaps.is_empty(), "Expected no gaps when digest present");
+    }
+
+    #[tokio::test]
+    async fn test_check_structural_dependencies_skips_non_implementation() {
+        use perspt_core::types::{NodeClass, RestrictionMap};
+
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_struct_skip"), false);
+
+        // An Integration node should NOT be checked
+        let mut node =
+            SRBNNode::new("integ_1".into(), "Wire modules".into(), ModelTier::Actuator);
+        node.node_class = NodeClass::Integration;
+        orch.add_node(node.clone());
+
+        let rmap = RestrictionMap::for_node("integ_1");
+        let gaps = orch.check_structural_dependencies(&node, &rmap);
+        assert!(gaps.is_empty(), "Integration nodes should skip the check");
+    }
+
+    #[tokio::test]
+    async fn test_tier_default_models_are_differentiated() {
+        // PSP-5 Fix D: each tier should map to a different default model
+        let arch = ModelTier::Architect.default_model();
+        let act = ModelTier::Actuator.default_model();
+        let spec = ModelTier::Speculator.default_model();
+
+        // Architect and Actuator should NOT be the same tier default
+        assert_ne!(arch, act, "Architect and Actuator defaults should differ");
+        // Speculator should be the lightest
+        assert_ne!(spec, arch, "Speculator should differ from Architect");
     }
 }
