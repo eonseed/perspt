@@ -5,6 +5,19 @@
 
 use serde::{Deserialize, Serialize};
 
+/// PSP-5 Phase 4: Per-plugin readiness summary for session-start reporting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginReadiness {
+    /// Plugin name (e.g. "rust", "python")
+    pub plugin_name: String,
+    /// Verifier stages that have at least one available tool
+    pub available_stages: Vec<String>,
+    /// Verifier stages where only a fallback or no tool is available
+    pub degraded_stages: Vec<String>,
+    /// LSP status description
+    pub lsp_status: String,
+}
+
 /// Events emitted by the Orchestrator for TUI consumption
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
@@ -179,6 +192,14 @@ pub enum AgentEvent {
         node_id: String,
         missing_files: Vec<String>,
         reason: String,
+    },
+
+    /// PSP-5 Phase 4: Tool readiness snapshot captured at session start
+    ToolReadiness {
+        /// Per-plugin readiness: (plugin_name, available_stages, degraded_stages, lsp_status)
+        plugins: Vec<PluginReadiness>,
+        /// Verifier strictness mode in effect
+        strictness: String,
     },
 }
 
