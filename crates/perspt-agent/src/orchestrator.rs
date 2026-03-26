@@ -448,20 +448,39 @@ impl SRBNOrchestrator {
     }
 
     /// Request approval from user and await response
-    /// Returns ApprovalResult with optional edited value
+    /// Returns ApprovalResult with optional edited value.
+    /// `review_node_id` is used for persisting the review audit record.
     async fn await_approval(
         &mut self,
         action_type: perspt_core::ActionType,
         description: String,
         diff: Option<String>,
     ) -> ApprovalResult {
+        self.await_approval_for_node(action_type, description, diff, None)
+            .await
+    }
+
+    /// Internal approval with optional node_id for audit persistence.
+    async fn await_approval_for_node(
+        &mut self,
+        action_type: perspt_core::ActionType,
+        description: String,
+        diff: Option<String>,
+        review_node_id: Option<&str>,
+    ) -> ApprovalResult {
         // If auto_approve is enabled, skip approval
         if self.auto_approve {
+            if let Some(nid) = review_node_id {
+                self.persist_review_decision(nid, "auto_approved", None);
+            }
             return ApprovalResult::Approved;
         }
 
         // If no TUI connected, default to approve (headless with --yes)
         if self.action_receiver.is_none() {
+            if let Some(nid) = review_node_id {
+                self.persist_review_decision(nid, "auto_approved", None);
+            }
             return ApprovalResult::Approved;
         }
 
@@ -471,7 +490,7 @@ impl SRBNOrchestrator {
         // Emit approval request
         self.emit_event(perspt_core::AgentEvent::ApprovalRequest {
             request_id: request_id.clone(),
-            node_id: "current".to_string(),
+            node_id: review_node_id.unwrap_or("current").to_string(),
             action_type,
             description,
             diff,
@@ -483,6 +502,9 @@ impl SRBNOrchestrator {
                 match action {
                     perspt_core::AgentAction::Approve { request_id: rid } if rid == request_id => {
                         self.emit_log("✓ Approved by user");
+                        if let Some(nid) = review_node_id {
+                            self.persist_review_decision(nid, "approved", None);
+                        }
                         return ApprovalResult::Approved;
                     }
                     perspt_core::AgentAction::ApproveWithEdit {
@@ -490,6 +512,9 @@ impl SRBNOrchestrator {
                         edited_value,
                     } if rid == request_id => {
                         self.emit_log(format!("✓ Approved with edit: {}", edited_value));
+                        if let Some(nid) = review_node_id {
+                            self.persist_review_decision(nid, "approved_with_edit", None);
+                        }
                         return ApprovalResult::ApprovedWithEdit(edited_value);
                     }
                     perspt_core::AgentAction::Reject {
@@ -498,10 +523,30 @@ impl SRBNOrchestrator {
                     } if rid == request_id => {
                         let msg = reason.unwrap_or_else(|| "User rejected".to_string());
                         self.emit_log(format!("✗ Rejected: {}", msg));
+                        if let Some(nid) = review_node_id {
+                            self.persist_review_decision(nid, "rejected", Some(&msg));
+                        }
+                        return ApprovalResult::Rejected;
+                    }
+                    perspt_core::AgentAction::RequestCorrection {
+                        request_id: rid,
+                        feedback,
+                    } if rid == request_id => {
+                        self.emit_log(format!("🔄 Correction requested: {}", feedback));
+                        if let Some(nid) = review_node_id {
+                            self.persist_review_decision(
+                                nid,
+                                "correction_requested",
+                                Some(&feedback),
+                            );
+                        }
                         return ApprovalResult::Rejected;
                     }
                     perspt_core::AgentAction::Abort => {
                         self.emit_log("⚠️ Session aborted by user");
+                        if let Some(nid) = review_node_id {
+                            self.persist_review_decision(nid, "aborted", None);
+                        }
                         return ApprovalResult::Rejected;
                     }
                     _ => {
@@ -513,6 +558,17 @@ impl SRBNOrchestrator {
         }
 
         ApprovalResult::Rejected // Channel closed
+    }
+
+    /// Persist a review decision to the audit trail.
+    fn persist_review_decision(&self, node_id: &str, outcome: &str, note: Option<&str>) {
+        let degraded = self.last_verification_result.as_ref().map(|vr| vr.degraded);
+        if let Err(e) = self
+            .ledger
+            .record_review_outcome(node_id, outcome, note, None, degraded, None)
+        {
+            log::warn!("Failed to persist review decision for {}: {}", node_id, e);
+        }
     }
 
     /// Add a dependency edge between nodes
@@ -2087,13 +2143,15 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             self.emit_log(format!("🔧 Command proposed: {}", command));
 
             // Request approval before executing command
+            let node_id = self.graph[idx].node_id.clone();
             let approval_result = self
-                .await_approval(
+                .await_approval_for_node(
                     perspt_core::ActionType::Command {
                         command: command.clone(),
                     },
                     format!("Execute shell command: {}", command),
                     None,
+                    Some(&node_id),
                 )
                 .await;
 
@@ -2137,13 +2195,15 @@ IMPORTANT: Output ONLY the JSON, no other text."#,
             let full_path = effective_dir.join(&filename);
 
             // Request approval before writing file
+            let node_id = self.graph[idx].node_id.clone();
             let approval_result = self
-                .await_approval(
+                .await_approval_for_node(
                     perspt_core::ActionType::FileWrite {
                         path: filename.clone(),
                     },
                     format!("Write file: {}", filename),
                     Some(code.clone()),
+                    Some(&node_id),
                 )
                 .await;
 

@@ -961,6 +961,48 @@ impl MerkleLedger {
     }
 
     // =========================================================================
+    // PSP-5 Phase 7: Review Outcome Persistence
+    // =========================================================================
+
+    /// Persist a review decision as an audit record.
+    pub fn record_review_outcome(
+        &self,
+        node_id: &str,
+        outcome: &str,
+        reviewer_note: Option<&str>,
+        energy_at_review: Option<f64>,
+        degraded: Option<bool>,
+        escalation_category: Option<&str>,
+    ) -> Result<()> {
+        let session_id = self.session_id()?;
+        let row = perspt_store::ReviewOutcomeRow {
+            session_id,
+            node_id: node_id.to_string(),
+            outcome: outcome.to_string(),
+            reviewer_note: reviewer_note.map(|s| s.to_string()),
+            energy_at_review,
+            degraded,
+            escalation_category: escalation_category.map(|s| s.to_string()),
+        };
+        self.store.record_review_outcome(&row)
+    }
+
+    /// Get all review outcomes for a node.
+    pub fn get_review_outcomes(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<perspt_store::ReviewOutcomeRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_review_outcomes(&session_id, node_id)
+    }
+
+    /// Get all review outcomes across the session.
+    pub fn get_all_review_outcomes(&self) -> Result<Vec<perspt_store::ReviewOutcomeRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_all_review_outcomes(&session_id)
+    }
+
+    // =========================================================================
     // PSP-5 Phase 7: Shared Review & Provenance Aggregation Helpers
     // =========================================================================
 
@@ -1077,6 +1119,25 @@ impl MerkleLedger {
             .get_branch_flushes(&session_id)
             .unwrap_or_default();
 
+        // Review audit aggregation
+        let review_outcomes = self
+            .store
+            .get_all_review_outcomes(&session_id)
+            .unwrap_or_default();
+        let review_total = review_outcomes.len();
+        let reviews_approved = review_outcomes
+            .iter()
+            .filter(|r| r.outcome.starts_with("approved") || r.outcome == "auto_approved")
+            .count();
+        let reviews_rejected = review_outcomes
+            .iter()
+            .filter(|r| r.outcome == "rejected" || r.outcome == "aborted")
+            .count();
+        let reviews_corrected = review_outcomes
+            .iter()
+            .filter(|r| r.outcome == "correction_requested")
+            .count();
+
         Ok(SessionReviewSummary {
             session_id,
             total_nodes,
@@ -1092,6 +1153,10 @@ impl MerkleLedger {
             merged_branches,
             flushed_branches,
             flush_decisions: flushes,
+            review_total,
+            reviews_approved,
+            reviews_rejected,
+            reviews_corrected,
         })
     }
 }
@@ -1131,6 +1196,11 @@ pub struct SessionReviewSummary {
     pub merged_branches: usize,
     pub flushed_branches: usize,
     pub flush_decisions: Vec<perspt_store::BranchFlushRow>,
+    /// Review audit: total decisions and breakdown
+    pub review_total: usize,
+    pub reviews_approved: usize,
+    pub reviews_rejected: usize,
+    pub reviews_corrected: usize,
 }
 
 /// Ledger statistics (Legacy)

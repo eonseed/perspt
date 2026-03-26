@@ -213,9 +213,15 @@ pub struct TaskGraphEdgeRow {
 pub struct ReviewOutcomeRow {
     pub session_id: String,
     pub node_id: String,
-    /// One of: "approved", "rejected", "edit_requested", "correction_requested"
+    /// One of: "approved", "rejected", "edit_requested", "correction_requested", "skipped"
     pub outcome: String,
     pub reviewer_note: Option<String>,
+    /// Energy at time of review decision
+    pub energy_at_review: Option<f64>,
+    /// Whether verification was degraded when decision was made
+    pub degraded: Option<bool>,
+    /// Escalation category if the node had been classified
+    pub escalation_category: Option<String>,
 }
 
 /// PSP-5 Phase 8: Record for verification result snapshot persistence
@@ -1221,16 +1227,21 @@ impl SessionStore {
     /// Record a review outcome (approval, rejection, edit request)
     pub fn record_review_outcome(&self, record: &ReviewOutcomeRow) -> Result<()> {
         let reviewer_note = record.reviewer_note.clone().unwrap_or_default();
+        let escalation_category = record.escalation_category.clone().unwrap_or_default();
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO review_outcomes (session_id, node_id, outcome, reviewer_note)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO review_outcomes (session_id, node_id, outcome, reviewer_note,
+                                         energy_at_review, degraded, escalation_category)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
-            [
-                &record.session_id,
-                &record.node_id,
-                &record.outcome,
-                &reviewer_note,
+            duckdb::params![
+                record.session_id,
+                record.node_id,
+                record.outcome,
+                reviewer_note,
+                record.energy_at_review.unwrap_or(0.0),
+                record.degraded.unwrap_or(false),
+                escalation_category,
             ],
         )?;
         Ok(())
@@ -1244,7 +1255,8 @@ impl SessionStore {
     ) -> Result<Vec<ReviewOutcomeRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, outcome, reviewer_note \
+            "SELECT session_id, node_id, outcome, reviewer_note, \
+             energy_at_review, degraded, escalation_category \
              FROM review_outcomes WHERE session_id = ? AND node_id = ? ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id, node_id])?;
@@ -1255,6 +1267,9 @@ impl SessionStore {
                 node_id: row.get(1)?,
                 outcome: row.get(2)?,
                 reviewer_note: row.get::<_, Option<String>>(3)?.filter(|s| !s.is_empty()),
+                energy_at_review: row.get::<_, Option<f64>>(4)?,
+                degraded: row.get::<_, Option<bool>>(5)?,
+                escalation_category: row.get::<_, Option<String>>(6)?.filter(|s| !s.is_empty()),
             });
         }
         Ok(records)
@@ -1268,7 +1283,8 @@ impl SessionStore {
     ) -> Result<Option<ReviewOutcomeRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, outcome, reviewer_note \
+            "SELECT session_id, node_id, outcome, reviewer_note, \
+             energy_at_review, degraded, escalation_category \
              FROM review_outcomes WHERE session_id = ? AND node_id = ? \
              ORDER BY created_at DESC LIMIT 1",
         )?;
@@ -1279,10 +1295,37 @@ impl SessionStore {
                 node_id: row.get(1)?,
                 outcome: row.get(2)?,
                 reviewer_note: row.get::<_, Option<String>>(3)?.filter(|s| !s.is_empty()),
+                energy_at_review: row.get::<_, Option<f64>>(4)?,
+                degraded: row.get::<_, Option<bool>>(5)?,
+                escalation_category: row.get::<_, Option<String>>(6)?.filter(|s| !s.is_empty()),
             }))
         } else {
             Ok(None)
         }
+    }
+
+    /// Get all review outcomes for a session (across all nodes).
+    pub fn get_all_review_outcomes(&self, session_id: &str) -> Result<Vec<ReviewOutcomeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, outcome, reviewer_note, \
+             energy_at_review, degraded, escalation_category \
+             FROM review_outcomes WHERE session_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(ReviewOutcomeRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                outcome: row.get(2)?,
+                reviewer_note: row.get::<_, Option<String>>(3)?.filter(|s| !s.is_empty()),
+                energy_at_review: row.get::<_, Option<f64>>(4)?,
+                degraded: row.get::<_, Option<bool>>(5)?,
+                escalation_category: row.get::<_, Option<String>>(6)?.filter(|s| !s.is_empty()),
+            });
+        }
+        Ok(records)
     }
 
     // =========================================================================

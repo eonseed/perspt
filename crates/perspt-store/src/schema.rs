@@ -440,6 +440,9 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             node_id VARCHAR NOT NULL,
             outcome VARCHAR NOT NULL,
             reviewer_note TEXT,
+            energy_at_review DOUBLE,
+            degraded BOOLEAN,
+            escalation_category VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (session_id) REFERENCES sessions(session_id)
         )

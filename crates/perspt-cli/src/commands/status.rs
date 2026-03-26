@@ -244,6 +244,38 @@ pub async fn run() -> Result<()> {
         }
     }
 
+    // PSP-5 Phase 7: Show review audit summary
+    let reviews = store.get_all_review_outcomes(&session.session_id)?;
+    if !reviews.is_empty() {
+        let approved = reviews
+            .iter()
+            .filter(|r| r.outcome.starts_with("approved") || r.outcome == "auto_approved")
+            .count();
+        let rejected = reviews
+            .iter()
+            .filter(|r| r.outcome == "rejected" || r.outcome == "aborted")
+            .count();
+        let corrected = reviews
+            .iter()
+            .filter(|r| r.outcome == "correction_requested")
+            .count();
+        let degraded_reviews = reviews.iter().filter(|r| r.degraded == Some(true)).count();
+
+        println!();
+        println!("📋 Review Audit:");
+        println!("   Total:          {}", reviews.len());
+        println!("   ✅ Approved:    {}", approved);
+        if rejected > 0 {
+            println!("   ❌ Rejected:    {}", rejected);
+        }
+        if corrected > 0 {
+            println!("   🔄 Corrected:   {}", corrected);
+        }
+        if degraded_reviews > 0 {
+            println!("   ⚠️  Degraded:    {}", degraded_reviews);
+        }
+    }
+
     println!();
     println!("{}", "─".repeat(70));
     println!("Commands:");
