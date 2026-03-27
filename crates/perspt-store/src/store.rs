@@ -400,13 +400,15 @@ impl SessionStore {
 
         let mut rows = stmt.query([session_id])?;
         if let Some(row) = rows.next()? {
+            // merkle_root is stored as BLOB; read directly as Option<Vec<u8>>
+            // to match list_recent_sessions and avoid type mismatch on Blob columns.
+            let merkle_root: Option<Vec<u8>> = row.get(3).ok();
+
             Ok(Some(SessionRecord {
                 session_id: row.get(0)?,
                 task: row.get(1)?,
                 working_dir: row.get(2)?,
-                merkle_root: row
-                    .get::<_, Option<String>>(3)?
-                    .and_then(|s| hex::decode(s).ok()),
+                merkle_root,
                 detected_toolchain: row.get(4)?,
                 status: row.get(5)?,
             }))
@@ -918,15 +920,15 @@ impl SessionStore {
         let mut rows = stmt.query([session_id])?;
         let mut records = Vec::new();
         while let Some(row) = rows.next()? {
+            // parent_seal_hash is BLOB; read directly as Option<Vec<u8>>
+            let parent_seal_hash: Option<Vec<u8>> = row.get(5).ok();
             records.push(ProvisionalBranchRow {
                 branch_id: row.get(0)?,
                 session_id: row.get(1)?,
                 node_id: row.get(2)?,
                 parent_node_id: row.get(3)?,
                 state: row.get(4)?,
-                parent_seal_hash: row
-                    .get::<_, Option<String>>(5)?
-                    .and_then(|h| hex::decode(h).ok()),
+                parent_seal_hash,
                 sandbox_dir: row.get::<_, Option<String>>(6)?,
             });
         }
@@ -949,15 +951,15 @@ impl SessionStore {
         let mut rows = stmt.query([session_id, parent_node_id])?;
         let mut records = Vec::new();
         while let Some(row) = rows.next()? {
+            // parent_seal_hash is BLOB; read directly as Option<Vec<u8>>
+            let parent_seal_hash: Option<Vec<u8>> = row.get(5).ok();
             records.push(ProvisionalBranchRow {
                 branch_id: row.get(0)?,
                 session_id: row.get(1)?,
                 node_id: row.get(2)?,
                 parent_node_id: row.get(3)?,
                 state: row.get(4)?,
-                parent_seal_hash: row
-                    .get::<_, Option<String>>(5)?
-                    .and_then(|h| hex::decode(h).ok()),
+                parent_seal_hash,
                 sandbox_dir: row.get::<_, Option<String>>(6)?,
             });
         }

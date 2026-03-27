@@ -15,7 +15,7 @@ categories = ["database"]
 perspt-core = { version = "0.5.4", path = "../perspt-core" }
 
 # DuckDB for persistence
-duckdb = { version = "1.1", features = ["bundled"] }
+duckdb = { workspace = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
