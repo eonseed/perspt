@@ -7,6 +7,7 @@ use crate::types::{AgentContext, AgentMessage, ModelTier, SRBNNode};
 use anyhow::Result;
 use async_trait::async_trait;
 use perspt_core::llm_provider::GenAIProvider;
+use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -88,24 +89,36 @@ impl ArchitectAgent {
 ## Instructions
 Analyze this task and produce a structured execution plan as JSON.
 
-### MODULAR PROJECT STRUCTURE (CRITICAL)
+### OWNERSHIP CLOSURE (CRITICAL — violating this will fail the build)
+Each file path MUST appear in the `output_files` of EXACTLY ONE task.
+- NO two tasks may list the same file in their `output_files`.
+- A task that creates `src/math.py` MUST NOT also appear in another task's `output_files`.
+- Test files (e.g., `tests/test_math.py`) are owned by whichever single task creates them.
+- If a task needs to READ a file owned by another task, list it in `context_files`, NOT `output_files`.
+
+### MODULAR PROJECT STRUCTURE
 Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
 
 1. **Entry Point First**: Create a main entry point file (e.g., `main.py`, `src/main.rs`, `index.js`)
 2. **Logical Modules**: Split functionality into separate files/modules with clear responsibilities
 3. **Proper Imports**: Ensure all cross-file imports will resolve correctly
 4. **Package Structure**: For Python, include `__init__.py` files in subdirectories
-5. **Test Isolation**: Put tests in a `tests/` directory or use `test_*.py` naming
+5. **One Test Task Per Module**: Each module's tests go in their OWN task with a UNIQUE test file.
+   - Task for `src/math.py` → its test task owns `tests/test_math.py`
+   - Task for `src/strings.py` → its test task owns `tests/test_strings.py`
+   - NEVER put tests for multiple modules in the same test file
 
 ### TASK ORDERING
 1. Create foundational modules before dependent ones
 2. Specify dependencies accurately between tasks
 3. Entry point task should depend on all modules it imports
+4. Test tasks depend on the module they test
 
 ### COMPLETENESS CHECKLIST
+- [ ] Every file path appears in exactly one task's `output_files` (no duplicates across tasks)
 - [ ] Every import in generated code must reference an existing or planned file
 - [ ] The project must be immediately runnable after all tasks complete
-- [ ] Include at least one test file for core functionality
+- [ ] Include at least one test file per core module
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
 ## CRITICAL CONSTRAINTS
@@ -121,9 +134,9 @@ Respond with ONLY a JSON object in this exact format:
   "tasks": [
     {{
       "id": "task_1",
-      "goal": "Description of what this task accomplishes",
-      "context_files": ["existing_file.py"],
-      "output_files": ["new_file.py"],
+      "goal": "Create module_a with core functionality",
+      "context_files": [],
+      "output_files": ["module_a.py"],
       "dependencies": [],
       "task_type": "code",
       "contract": {{
@@ -136,20 +149,36 @@ Respond with ONLY a JSON object in this exact format:
       }}
     }},
     {{
+      "id": "test_task_1",
+      "goal": "Unit tests for module_a (ONLY this module)",
+      "context_files": ["module_a.py"],
+      "output_files": ["tests/test_module_a.py"],
+      "dependencies": ["task_1"],
+      "task_type": "unit_test"
+    }},
+    {{
+      "id": "task_2",
+      "goal": "Create module_b with helper utilities",
+      "context_files": [],
+      "output_files": ["module_b.py"],
+      "dependencies": [],
+      "task_type": "code"
+    }},
+    {{
+      "id": "test_task_2",
+      "goal": "Unit tests for module_b (ONLY this module)",
+      "context_files": ["module_b.py"],
+      "output_files": ["tests/test_module_b.py"],
+      "dependencies": ["task_2"],
+      "task_type": "unit_test"
+    }},
+    {{
       "id": "main_entry",
       "goal": "Create main.py entry point that imports and uses other modules",
       "context_files": ["module_a.py", "module_b.py"],
       "output_files": ["main.py"],
       "dependencies": ["task_1", "task_2"],
       "task_type": "code"
-    }},
-    {{
-      "id": "test_1",
-      "goal": "Unit tests for task_1",
-      "context_files": ["new_file.py"],
-      "output_files": ["tests/test_new_file.py"],
-      "dependencies": ["task_1"],
-      "task_type": "unit_test"
     }}
   ]
 }}
@@ -219,6 +248,12 @@ impl ActuatorAgent {
 
     pub fn build_coding_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String {
         let contract = &node.contract;
+        let allowed_output_paths: Vec<String> = node
+            .output_targets
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect();
+        let workspace_import_hints = Self::workspace_import_hints(&ctx.working_dir);
 
         // Determine target file from output_targets or generate default
         let target_file = node
@@ -255,7 +290,9 @@ RULES:
 - Paths MUST be relative (no leading `/`)
 - Use `"write"` for new files or full rewrites
 - Use `"diff"` with proper unified diff format for small changes to existing files
-- Include ALL files needed for the task in a single bundle"#,
+- Include ALL files needed for the task in a single bundle
+- ONLY emit artifacts for the declared allowed output paths listed below
+- DO NOT create, modify, or patch any file not listed in `Allowed Output Paths`"#,
                 target_file = target_file
             )
         } else {
@@ -302,6 +339,8 @@ Forbidden Patterns: {forbidden:?}
 Working Directory: {working_dir:?}
 Files to Read: {context_files:?}
 Target Output File: {target_file}
+Allowed Output Paths: {allowed_output_paths:?}
+Workspace Import Hints: {workspace_import_hints:?}
 
 ## Instructions
 1. Implement the required functionality
@@ -312,6 +351,9 @@ Target Output File: {target_file}
 6. Include proper imports at the top of the file
 7. Add type annotations if missing
 8. Import any missing modules
+9. Restrict all file edits to `Allowed Output Paths` only
+10. If another file needs changes, do not modify it in this node; keep that need implicit for its owning node
+11. Use `Workspace Import Hints` exactly for crate/package imports in tests, entry points, and cross-file references
 
 {output_format}"#,
             goal = node.goal,
@@ -321,8 +363,135 @@ Target Output File: {target_file}
             working_dir = ctx.working_dir,
             context_files = node.context_files,
             target_file = target_file,
+            allowed_output_paths = allowed_output_paths,
+            workspace_import_hints = workspace_import_hints,
             output_format = output_format_section,
         )
+    }
+
+    fn workspace_import_hints(working_dir: &Path) -> Vec<String> {
+        let mut hints = Vec::new();
+
+        if let Some(crate_name) = Self::detect_rust_crate_name(working_dir) {
+            hints.push(format!(
+                "Rust crate name: {}. Integration tests and external modules must import via `{}`.",
+                crate_name, crate_name
+            ));
+        }
+
+        if let Some(package_name) = Self::detect_python_package_name(working_dir) {
+            hints.push(format!(
+                "Python package import root: {}. Tests and entry points must import `{}` and never `src.{}`.",
+                package_name, package_name, package_name
+            ));
+        }
+
+        hints
+    }
+
+    fn detect_rust_crate_name(working_dir: &Path) -> Option<String> {
+        let cargo_toml = fs::read_to_string(working_dir.join("Cargo.toml")).ok()?;
+        let mut in_package = false;
+
+        for raw_line in cargo_toml.lines() {
+            let line = raw_line.trim();
+            if line.starts_with('[') {
+                in_package = line == "[package]";
+                continue;
+            }
+
+            if in_package && line.starts_with("name") {
+                let (_, value) = line.split_once('=')?;
+                return Some(value.trim().trim_matches('"').to_string());
+            }
+        }
+
+        None
+    }
+
+    fn detect_python_package_name(working_dir: &Path) -> Option<String> {
+        let src_dir = working_dir.join("src");
+        if let Ok(entries) = fs::read_dir(&src_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().ok()?.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.starts_with('.') {
+                        return Some(name);
+                    }
+                }
+            }
+        }
+
+        let pyproject = fs::read_to_string(working_dir.join("pyproject.toml")).ok()?;
+        let mut in_project = false;
+        for raw_line in pyproject.lines() {
+            let line = raw_line.trim();
+            if line.starts_with('[') {
+                in_project = line == "[project]";
+                continue;
+            }
+
+            if in_project && line.starts_with("name") {
+                let (_, value) = line.split_once('=')?;
+                return Some(value.trim().trim_matches('"').replace('-', "_"));
+            }
+        }
+
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn build_coding_prompt_includes_rust_crate_hint() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"validator_lib\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let provider = Arc::new(GenAIProvider::new().unwrap());
+        let agent = ActuatorAgent::new(provider, Some("test-model".into()));
+        let mut node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        node.output_targets.push("tests/integration.rs".into());
+        let ctx = AgentContext {
+            working_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+
+        let prompt = agent.build_coding_prompt(&node, &ctx);
+        assert!(prompt.contains("Rust crate name: validator_lib"), "{prompt}");
+    }
+
+    #[test]
+    fn build_coding_prompt_includes_python_package_hint() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/psp5_python_verify")).unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"psp5-python-verify\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let provider = Arc::new(GenAIProvider::new().unwrap());
+        let agent = ActuatorAgent::new(provider, Some("test-model".into()));
+        let mut node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        node.output_targets.push("tests/test_main.py".into());
+        let ctx = AgentContext {
+            working_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+
+        let prompt = agent.build_coding_prompt(&node, &ctx);
+        assert!(
+            prompt.contains("Python package import root: psp5_python_verify"),
+            "{prompt}"
+        );
     }
 }
 
@@ -507,16 +676,5 @@ impl Agent for SpeculatorAgent {
 
     fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
         format!("Briefly analyze potential issues for: {}", node.goal)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // Note: Integration tests would require actual API keys
-    // These are unit tests for the prompt building logic
-
-    #[test]
-    fn test_architect_prompt_building() {
-        // Would need provider mock for full test
     }
 }

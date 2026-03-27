@@ -24,21 +24,51 @@ impl ModelTier {
     /// Get the recommended default model for this tier.
     ///
     /// Architect and Verifier tiers prefer higher-capability models for
-    /// reasoning and evaluation. Actuator uses a balanced model. Speculator
-    /// uses a lower-cost model. All defaults can be overridden per-tier via CLI.
+    /// reasoning and evaluation. Actuator and Speculator default to the
+    /// faster lower-cost Gemini tier. All defaults can be overridden per-tier
+    /// via CLI.
     pub fn default_model(&self) -> &'static str {
         match self {
-            ModelTier::Architect => "gemini-2.5-flash-preview-05-20",
-            ModelTier::Verifier => "gemini-2.5-flash-preview-05-20",
-            ModelTier::Actuator => "gemini-2.0-flash",
-            ModelTier::Speculator => "gemini-2.0-flash-lite",
+            ModelTier::Architect => "gemini-3.1-pro-preview",
+            ModelTier::Verifier => "gemini-3.1-pro-preview",
+            ModelTier::Actuator => "gemini-3.1-flash-lite-preview",
+            ModelTier::Speculator => "gemini-3.1-flash-lite-preview",
         }
     }
 
     /// Get the default model name (static, for use when no instance is available).
     /// Returns the Actuator default as the general-purpose fallback.
     pub fn default_model_name() -> &'static str {
-        "gemini-2.0-flash"
+        "gemini-3.1-flash-lite-preview"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelTier;
+
+    #[test]
+    fn gemini_defaults_use_requested_latest_models() {
+        assert_eq!(
+            ModelTier::Architect.default_model(),
+            "gemini-3.1-pro-preview"
+        );
+        assert_eq!(
+            ModelTier::Verifier.default_model(),
+            "gemini-3.1-pro-preview"
+        );
+        assert_eq!(
+            ModelTier::Actuator.default_model(),
+            "gemini-3.1-flash-lite-preview"
+        );
+        assert_eq!(
+            ModelTier::Speculator.default_model(),
+            "gemini-3.1-flash-lite-preview"
+        );
+        assert_eq!(
+            ModelTier::default_model_name(),
+            "gemini-3.1-flash-lite-preview"
+        );
     }
 }
 
@@ -740,6 +770,21 @@ impl TaskPlan {
             }
         }
 
+        // PSP-5: Check for duplicate output_files across tasks (ownership closure)
+        let mut file_owners: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for task in &self.tasks {
+            for file in &task.output_files {
+                if let Some(prev_owner) = file_owners.insert(file.as_str(), task.id.as_str()) {
+                    return Err(format!(
+                        "Ownership violation in plan: file '{}' claimed by both '{}' and '{}'. \
+                         Each output file must appear in exactly one task's output_files.",
+                        file, prev_owner, task.id
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -1005,13 +1050,19 @@ pub struct OwnershipEntry {
 ///
 /// Enforces ownership closure: a node may only modify files it owns,
 /// unless it is an Integration node (which may cross ownership boundaries).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OwnershipManifest {
     /// File path → ownership entry
     entries: std::collections::HashMap<String, OwnershipEntry>,
     /// Maximum files a single node may touch (bounded fanout)
     #[serde(default = "OwnershipManifest::default_fanout")]
     fanout_limit: usize,
+}
+
+impl Default for OwnershipManifest {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl OwnershipManifest {
@@ -2583,6 +2634,89 @@ mod psp5_tests {
         assert_eq!(new_entry.owner_node_id, "node_1");
         assert_eq!(new_entry.owner_plugin, "rust");
         assert_eq!(manifest.len(), 2);
+    }
+
+    // =========================================================================
+    // PSP-5: Plan Ownership Closure Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_plan_validate_duplicate_output_files_rejected() {
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math module".into(),
+                    output_files: vec!["src/math.py".into(), "tests/test_math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math module")
+                },
+                PlannedTask {
+                    id: "task_2".into(),
+                    goal: "Create tests".into(),
+                    output_files: vec!["tests/test_math.py".into()],
+                    ..PlannedTask::new("task_2", "Create tests")
+                },
+            ],
+        };
+        let result = plan.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("tests/test_math.py"),
+            "Error should mention the duplicate file: {}",
+            err
+        );
+        assert!(
+            err.contains("Ownership violation"),
+            "Error should mention ownership: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_plan_validate_unique_output_files_ok() {
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math module".into(),
+                    output_files: vec!["src/math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math module")
+                },
+                PlannedTask {
+                    id: "test_1".into(),
+                    goal: "Tests for math".into(),
+                    output_files: vec!["tests/test_math.py".into()],
+                    dependencies: vec!["task_1".into()],
+                    ..PlannedTask::new("test_1", "Tests for math")
+                },
+            ],
+        };
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_plan_validate_context_files_do_not_conflict_with_output_files() {
+        // Reading another task's file via context_files is fine
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math module".into(),
+                    output_files: vec!["src/math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math module")
+                },
+                PlannedTask {
+                    id: "test_1".into(),
+                    goal: "Tests for math".into(),
+                    context_files: vec!["src/math.py".into()], // reading, not owning
+                    output_files: vec!["tests/test_math.py".into()],
+                    dependencies: vec!["task_1".into()],
+                    ..PlannedTask::new("test_1", "Tests for math")
+                },
+            ],
+        };
+        assert!(plan.validate().is_ok());
     }
 
     // =========================================================================

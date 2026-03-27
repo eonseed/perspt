@@ -70,6 +70,32 @@ pub struct TestFailure {
     pub criticality: Criticality,
 }
 
+fn force_failure_on_nonzero_exit(
+    results: &mut TestResults,
+    command_name: &str,
+    exit_code: Option<i32>,
+    output: &str,
+) {
+    if results.failed == 0 {
+        results.failed = 1;
+    }
+    if results.total == 0 {
+        results.total = results.passed + results.failed + results.skipped;
+    }
+    if results.failures.is_empty() {
+        results.failures.push(TestFailure {
+            name: command_name.to_string(),
+            file: None,
+            line: None,
+            message: format!(
+                "{} exited with code {:?} without a parseable success summary. Output:\n{}",
+                command_name, exit_code, output
+            ),
+            criticality: Criticality::High,
+        });
+    }
+}
+
 /// Python test runner using uv and pytest
 ///
 /// Handles:
@@ -240,6 +266,9 @@ impl PythonTestRunner {
 
         let mut results = self.parse_pytest_output(&combined, duration_ms);
         results.run_succeeded = true; // We got output, run worked
+        if !output.status.success() {
+            force_failure_on_nonzero_exit(&mut results, "pytest", output.status.code(), &combined);
+        }
 
         // Log summary
         if results.all_passed() {
@@ -590,6 +619,9 @@ impl TestRunnerTrait for RustTestRunner {
 
         let mut results = self.parse_cargo_test_output(&combined);
         results.run_succeeded = true;
+        if !output.status.success() {
+            force_failure_on_nonzero_exit(&mut results, "cargo test", output.status.code(), &combined);
+        }
         Ok(results)
     }
 
@@ -886,6 +918,18 @@ mod tests {
         assert_eq!(failure.name, "test_divide_by_zero");
         assert_eq!(failure.file, Some("test_calculator.py".to_string()));
         assert!(failure.message.contains("ZeroDivisionError"));
+    }
+
+    #[test]
+    fn test_force_failure_on_nonzero_exit_marks_failure() {
+        let mut results = TestResults::default();
+
+        force_failure_on_nonzero_exit(&mut results, "pytest", Some(2), "collection error");
+
+        assert_eq!(results.failed, 1);
+        assert_eq!(results.total, 1);
+        assert_eq!(results.failures.len(), 1);
+        assert!(results.failures[0].message.contains("collection error"));
     }
 
     #[test]
