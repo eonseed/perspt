@@ -29,3 +29,7 @@ perspt-sandbox = { version = "0.5.4", path = "crates/perspt-sandbox" }
 perspt-store = { version = "0.5.4", path = "crates/perspt-store" }
 perspt-cli = { version = "0.5.4", path = "crates/perspt-cli" }
 perspt = { version = "0.5.4", path = "crates/perspt" }
+
+# Exact-pinned to avoid libduckdb-sys recompilation on `cargo update`.
+# Only changes when you explicitly bump the version here.
+duckdb = { version = "=1.10501.0", features = ["bundled"] }

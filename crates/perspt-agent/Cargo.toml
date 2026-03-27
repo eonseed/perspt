@@ -21,7 +21,7 @@ perspt-store = { version = "0.5.4", path = "../perspt-store" }
 petgraph = "0.8"
 
 # State persistence
-duckdb = "1.1"
+duckdb = { workspace = true }
 
 # LSP Client
 lsp-types = "0.97"
