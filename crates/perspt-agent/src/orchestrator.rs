@@ -63,6 +63,10 @@ pub struct SRBNOrchestrator {
     architect_model: String,
     /// Actuator model name for corrections
     actuator_model: String,
+    /// Verifier model name for correction guidance
+    verifier_model: String,
+    /// Speculator model name for lookahead hints
+    speculator_model: String,
     /// PSP-5: Fallback model for Architect tier (used when primary fails structured-output contract)
     architect_fallback_model: Option<String>,
     /// PSP-5: Fallback model for Actuator tier
@@ -137,6 +141,12 @@ impl SRBNOrchestrator {
         let stored_actuator_model = actuator_model
             .clone()
             .unwrap_or_else(|| ModelTier::Actuator.default_model().to_string());
+        let stored_verifier_model = verifier_model
+            .clone()
+            .unwrap_or_else(|| ModelTier::Verifier.default_model().to_string());
+        let stored_speculator_model = speculator_model
+            .clone()
+            .unwrap_or_else(|| ModelTier::Speculator.default_model().to_string());
 
         Self {
             graph: DiGraph::new(),
@@ -156,6 +166,8 @@ impl SRBNOrchestrator {
             provider,
             architect_model: stored_architect_model,
             actuator_model: stored_actuator_model,
+            verifier_model: stored_verifier_model,
+            speculator_model: stored_speculator_model,
             architect_fallback_model,
             actuator_fallback_model,
             event_sender: None,
@@ -1824,6 +1836,10 @@ Project name:"#,
 
     /// Create SRBN nodes from a parsed TaskPlan
     fn create_nodes_from_plan(&mut self, plan: &TaskPlan) -> Result<()> {
+        // PSP-5: Validate plan structure including ownership closure before creating nodes
+        plan.validate()
+            .map_err(|e| anyhow::anyhow!("Plan validation failed: {}", e))?;
+
         log::info!("Creating {} nodes from plan", plan.len());
 
         // Create all nodes first
@@ -1877,22 +1893,57 @@ Project name:"#,
     ///
     /// Assigns each task's output_files to the owning node, detecting the
     /// language plugin from file extension via the plugin registry.
+    /// Uses majority-vote across ALL output files instead of first-file-only heuristic.
     fn build_ownership_manifest_from_plan(&mut self, plan: &TaskPlan) {
         let registry = perspt_core::plugin::PluginRegistry::new();
 
         for task in &plan.tasks {
-            // Detect the plugin for this task's output files
-            let plugin_name = task
-                .output_files
-                .first()
-                .and_then(|f| {
-                    registry
-                        .all()
-                        .iter()
-                        .find(|p| p.owns_file(f))
-                        .map(|p| p.name().to_string())
-                })
+            // Detect plugin via majority vote across ALL output files
+            let mut plugin_votes: HashMap<String, usize> = HashMap::new();
+            for f in &task.output_files {
+                let detected = registry
+                    .all()
+                    .iter()
+                    .find(|p| p.owns_file(f))
+                    .map(|p| p.name().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                *plugin_votes.entry(detected).or_insert(0) += 1;
+            }
+
+            let plugin_name = plugin_votes
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(name, _)| name)
                 .unwrap_or_else(|| "unknown".to_string());
+
+            // Warn on mixed-plugin tasks (non-Integration nodes)
+            if task.node_class != perspt_core::types::NodeClass::Integration {
+                let mixed: Vec<String> = task
+                    .output_files
+                    .iter()
+                    .filter_map(|f| {
+                        let det = registry
+                            .all()
+                            .iter()
+                            .find(|p| p.owns_file(f))
+                            .map(|p| p.name().to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        if det != plugin_name {
+                            Some(format!("'{}' ({})", f, det))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !mixed.is_empty() {
+                    log::warn!(
+                        "Task '{}' has mixed-plugin outputs (primary: {}): {}",
+                        task.id,
+                        plugin_name,
+                        mixed.join(", ")
+                    );
+                }
+            }
 
             // Set owner_plugin on the node if we can find it
             if let Some(idx) = self.node_indices.get(&task.id) {
@@ -1901,10 +1952,18 @@ Project name:"#,
 
             // Register each output file in the manifest
             for file in &task.output_files {
+                // Detect per-file plugin for accurate manifest entries
+                let file_plugin = registry
+                    .all()
+                    .iter()
+                    .find(|p| p.owns_file(file))
+                    .map(|p| p.name().to_string())
+                    .unwrap_or_else(|| plugin_name.clone());
+
                 self.context.ownership_manifest.assign(
                     file.clone(),
                     task.id.clone(),
-                    plugin_name.clone(),
+                    file_plugin,
                     task.node_class,
                 );
             }
@@ -2049,7 +2108,11 @@ Project name:"#,
         let missing_owned: Vec<String> = restriction_map
             .owned_files
             .iter()
-            .filter(|f| !context_package.included_files.contains_key(*f))
+            .filter(|f| {
+                // Only treat as missing if not planned for creation by this node
+                !context_package.included_files.contains_key(*f)
+                    && !node.output_targets.iter().any(|ot| ot.to_string_lossy() == **f)
+            })
             .cloned()
             .collect();
 
@@ -2138,13 +2201,66 @@ Project name:"#,
         // Store formatted context for reuse in correction prompts
         self.last_formatted_context = formatted_context.clone();
 
+        // PSP-5: Speculator lookahead — ask the speculator tier for bounded
+        // hints about potential risks and downstream impacts before the
+        // actuator generates code. Stored as ephemeral context, not committed.
+        let speculator_hints = {
+            let node = &self.graph[idx];
+            let child_goals: Vec<String> = self
+                .graph
+                .edges(idx)
+                .filter_map(|edge| {
+                    let child = &self.graph[edge.target()];
+                    if child.state == NodeState::TaskQueued {
+                        Some(format!("- {}: {}", child.node_id, child.goal))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !child_goals.is_empty() {
+                let speculator_prompt = format!(
+                    "You are a Speculator agent. Given this task and its downstream dependents, \
+                     produce a brief (3-5 bullet) list of:\n\
+                     1. Interface contracts the current task must satisfy for dependents\n\
+                     2. Common pitfalls (e.g., import paths, missing exports)\n\
+                     3. Edge cases dependents may need\n\n\
+                     Current task: {} — {}\n\
+                     Downstream tasks:\n{}\n\n\
+                     Be concise. No code.",
+                    node.node_id,
+                    node.goal,
+                    child_goals.join("\n")
+                );
+
+                log::debug!(
+                    "Speculator lookahead for node {} using model {}",
+                    node.node_id,
+                    self.speculator_model
+                );
+                self.call_llm_with_logging(
+                    &self.speculator_model.clone(),
+                    &speculator_prompt,
+                    Some(&node.node_id),
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("Speculator lookahead failed ({}), proceeding without hints", e);
+                    String::new()
+                })
+            } else {
+                String::new()
+            }
+        };
+
         let actuator = &self.agents[1];
         let node = &self.graph[idx];
         let node_id = node.node_id.clone();
 
-        // Build prompt enriched with context package
+        // Build prompt enriched with context package and speculator hints
         let base_prompt = actuator.build_prompt(node, &self.context);
-        let prompt = if formatted_context.is_empty() {
+        let mut prompt = if formatted_context.is_empty() {
             base_prompt
         } else {
             format!(
@@ -2152,6 +2268,13 @@ Project name:"#,
                 base_prompt, formatted_context
             )
         };
+
+        if !speculator_hints.is_empty() {
+            prompt = format!(
+                "{}\n\n## Speculator Lookahead Hints\n\n{}",
+                prompt, speculator_hints
+            );
+        }
         let model = actuator.model().to_string();
 
         let response = self
@@ -2206,27 +2329,33 @@ Project name:"#,
                 self.emit_log(format!("❌ Command failed: {:?}", result.error));
             }
         }
-        // Then check for file code blocks (for TaskType::Code)
-        else if let Some((filename, code, is_diff)) = self.extract_code_from_response(content) {
-            log::info!("Extracted code for file: {} (diff={})", filename, is_diff);
+        // Then check for PSP-5 artifact bundles (with legacy single-file fallback inside)
+        else if let Some(bundle) = self.parse_artifact_bundle(content) {
+            let affected_files: Vec<String> = bundle
+                .affected_paths()
+                .into_iter()
+                .map(ToString::to_string)
+                .collect();
+            log::info!(
+                "Parsed artifact bundle for node {}: {} artifacts, {} commands",
+                node_id,
+                bundle.artifacts.len(),
+                bundle.commands.len()
+            );
             self.emit_log(format!(
-                "📝 File proposed: {} (diff: {})",
-                filename, is_diff
+                "📝 Bundle proposed: {} artifact(s) across {} file(s)",
+                bundle.artifacts.len(),
+                affected_files.len()
             ));
 
-            // Build full path — route to sandbox if the node has a provisional branch
-            let effective_dir = self.effective_working_dir(idx);
-            let full_path = effective_dir.join(&filename);
-
-            // Request approval before writing file
-            let node_id = self.graph[idx].node_id.clone();
             let approval_result = self
                 .await_approval_for_node(
-                    perspt_core::ActionType::FileWrite {
-                        path: filename.clone(),
+                    perspt_core::ActionType::BundleWrite {
+                        node_id: node_id.clone(),
+                        files: affected_files.clone(),
                     },
-                    format!("Write file: {}", filename),
-                    Some(code.clone()),
+                    format!("Apply bundle touching: {}", affected_files.join(", ")),
+                    serde_json::to_string_pretty(&bundle).ok(),
                     Some(&node_id),
                 )
                 .await;
@@ -2235,70 +2364,20 @@ Project name:"#,
                 approval_result,
                 ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
             ) {
-                self.emit_log("⏭️ File write skipped (not approved)");
+                self.emit_log("⏭️ Bundle application skipped (not approved)");
                 return Ok(());
             }
 
-            let mut args = HashMap::new();
-            args.insert("path".to_string(), filename.clone());
+            let node_class = self.graph[idx].node_class;
+            self.apply_bundle_transactionally(&bundle, &node_id, node_class)
+                .await?;
+            self.last_tool_failure = None;
 
-            let call = if is_diff {
-                args.insert("diff".to_string(), code.clone());
-                ToolCall {
-                    name: "apply_diff".to_string(),
-                    arguments: args,
-                }
-            } else {
-                args.insert("content".to_string(), code.clone());
-                ToolCall {
-                    name: "write_file".to_string(), // Previously alias for apply_patch (fs::write)
-                    arguments: args,
-                }
-            };
-
-            let result = self.tools.execute(&call).await;
-            if result.success {
-                log::info!("✓ Applied changes to: {}", filename);
-                self.emit_log(format!("✅ Applied changes to: {}", filename));
-                self.last_tool_failure = None; // Reset error
-
-                // Track the written file for LSP verification
-                self.last_written_file = Some(full_path.clone());
-                self.file_version += 1;
-
-                // Notify LSP of file change (if LSP is running)
-                let lsp_key = self.lsp_key_for_file(&full_path.to_string_lossy());
-                if let Some(client) = lsp_key.and_then(|k| self.lsp_clients.get_mut(&k)) {
-                    if self.file_version == 1 {
-                        let _ = client.did_open(&full_path, &code).await;
-                        if is_diff {
-                            if let Ok(new_content) = std::fs::read_to_string(&full_path) {
-                                let _ = client
-                                    .did_change(&full_path, &new_content, self.file_version)
-                                    .await;
-                            }
-                        } else {
-                            let _ = client.did_open(&full_path, &code).await;
-                        }
-                    } else {
-                        // For diff, read back file
-                        if is_diff {
-                            if let Ok(new_content) = std::fs::read_to_string(&full_path) {
-                                let _ = client
-                                    .did_change(&full_path, &new_content, self.file_version)
-                                    .await;
-                            }
-                        } else {
-                            let _ = client
-                                .did_change(&full_path, &code, self.file_version)
-                                .await;
-                        }
-                    }
-                }
-            } else {
-                log::warn!("Failed to apply changes: {:?}", result.error);
-                self.emit_log(format!("❌ Failed: {:?}", result.error));
-                self.last_tool_failure = result.error.clone();
+            if !bundle.commands.is_empty() {
+                self.emit_log(format!(
+                    "ℹ️ Bundle included {} post-write command(s); command execution is not yet wired into project-mode bundle application",
+                    bundle.commands.len()
+                ));
             }
         } else {
             log::debug!(
@@ -2520,7 +2599,9 @@ Project name:"#,
             let node = &self.graph[idx];
             if self.context.defer_tests {
                 self.emit_log("⏭️ Tests deferred (--defer-tests enabled)".to_string());
-            } else if !node.contract.weighted_tests.is_empty() {
+            } else if !node.contract.weighted_tests.is_empty()
+                && should_run_weighted_tests_for_node(node)
+            {
                 // PSP-5 Phase 4: select runner by the node's owner plugin
                 // PSP-5 Phase 6: use sandbox directory for speculative nodes
                 let plugin_name = &node.owner_plugin;
@@ -2580,6 +2661,11 @@ Project name:"#,
                         // Don't fail the verification, just log the error
                     }
                 }
+            } else if !node.contract.weighted_tests.is_empty() {
+                self.emit_log(format!(
+                    "⏭️ Skipping weighted tests for {} node '{}' until integration/test phase",
+                    node.node_class, node.node_id
+                ));
             }
         }
 
@@ -2981,14 +3067,57 @@ File: [same filename]
         }
     }
 
-    /// Call LLM for code correction (uses stored provider with exponential backoff retry)
+    /// Call LLM for code correction using a verifier-guided two-stage flow.
+    ///
+    /// Stage 1 (verifier tier): Analyze the failure diagnostics and produce
+    /// structured correction guidance — root cause, which lines/functions to
+    /// change, and constraints to preserve.
+    ///
+    /// Stage 2 (actuator tier): Apply the verifier's guidance to produce
+    /// the corrected code artifact.
     async fn call_llm_for_correction(&self, prompt: &str) -> Result<String> {
+        // Stage 1: Verifier analyzes the failure
+        let verifier_prompt = format!(
+            "You are a Verifier agent. Analyze the following correction request and produce \
+             concise, structured guidance for the code fixer. Identify:\n\
+             1. Root cause of each failure\n\
+             2. Which specific functions/lines need changes\n\
+             3. Constraints that must be preserved\n\
+             Do NOT produce code — only analysis and guidance.\n\n{}",
+            prompt
+        );
+
         log::debug!(
-            "Sending correction request to LLM model: {}",
+            "Stage 1: Sending analysis to verifier model: {}",
+            self.verifier_model
+        );
+        let guidance = self
+            .call_llm_with_logging(&self.verifier_model.clone(), &verifier_prompt, None)
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "Verifier analysis failed ({}), falling back to actuator-only correction",
+                    e
+                );
+                String::new()
+            });
+
+        // Stage 2: Actuator applies the guidance
+        let actuator_prompt = if guidance.is_empty() {
+            prompt.to_string()
+        } else {
+            format!(
+                "{}\n\n## Verifier Analysis\n{}\n\nApply the above analysis to produce corrected code.",
+                prompt, guidance
+            )
+        };
+
+        log::debug!(
+            "Stage 2: Sending correction to actuator model: {}",
             self.actuator_model
         );
         let response = self
-            .call_llm_with_logging(&self.actuator_model.clone(), prompt, None)
+            .call_llm_with_logging(&self.actuator_model.clone(), &actuator_prompt, None)
             .await?;
         log::debug!("Received correction response with {} chars", response.len());
 
@@ -4297,8 +4426,17 @@ File: [same filename]
         node_id: &str,
         node_class: perspt_core::types::NodeClass,
     ) -> Result<()> {
+        let idx = self
+            .node_indices
+            .get(node_id)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("Unknown node '{}' for bundle application", node_id))?;
+        let node_workdir = self.effective_working_dir(idx);
+
         // Validate structural integrity first
         bundle.validate().map_err(|e| anyhow::anyhow!(e))?;
+
+        self.validate_bundle_paths_against_node_targets(bundle, node_id)?;
 
         // PSP-5 Phase 2: Validate ownership boundaries
         self.context
@@ -4325,7 +4463,11 @@ File: [same filename]
 
         for op in &bundle.artifacts {
             let mut args = HashMap::new();
-            args.insert("path".to_string(), op.path().to_string());
+            let resolved_path = node_workdir.join(op.path());
+            args.insert(
+                "path".to_string(),
+                resolved_path.to_string_lossy().to_string(),
+            );
 
             let call = match op {
                 perspt_core::types::ArtifactOperation::Write { content, .. } => {
@@ -4346,7 +4488,7 @@ File: [same filename]
 
             let result = self.tools.execute(&call).await;
             if result.success {
-                let full_path = self.context.working_dir.join(op.path());
+                let full_path = resolved_path.clone();
 
                 if op.is_write() {
                     files_created.push(op.path().to_string());
@@ -4489,6 +4631,50 @@ File: [same filename]
 
         self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan.clone()));
         self.create_nodes_from_plan(&plan)?;
+
+        Ok(())
+    }
+
+    fn validate_bundle_paths_against_node_targets(
+        &self,
+        bundle: &perspt_core::types::ArtifactBundle,
+        node_id: &str,
+    ) -> Result<()> {
+        let idx = self
+            .node_indices
+            .get(node_id)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("Unknown node '{}' for bundle validation", node_id))?;
+
+        let allowed_paths: std::collections::HashSet<String> = self.graph[idx]
+            .output_targets
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect();
+
+        let unexpected_paths: Vec<String> = bundle
+            .affected_paths()
+            .into_iter()
+            .filter(|path| !allowed_paths.contains(*path))
+            .map(ToString::to_string)
+            .collect();
+
+        if !unexpected_paths.is_empty() {
+            let allowed_list = if allowed_paths.is_empty() {
+                "<none>".to_string()
+            } else {
+                let mut sorted: Vec<String> = allowed_paths.into_iter().collect();
+                sorted.sort();
+                sorted.join(", ")
+            };
+
+            anyhow::bail!(
+                "Bundle path validation failed: node '{}' attempted to modify undeclared path(s): {}. Allowed output_targets: {}",
+                node_id,
+                unexpected_paths.join(", "),
+                allowed_list
+            );
+        }
 
         Ok(())
     }
@@ -5292,6 +5478,10 @@ fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static 
     }
 }
 
+fn should_run_weighted_tests_for_node(node: &SRBNNode) -> bool {
+    matches!(node.node_class, perspt_core::types::NodeClass::Integration)
+}
+
 /// Parse a persisted state string back into a NodeState enum
 fn parse_node_state(s: &str) -> NodeState {
     match s {
@@ -5841,5 +6031,273 @@ mod tests {
         assert_ne!(arch, act, "Architect and Actuator defaults should differ");
         // Speculator should be the lightest
         assert_ne!(spec, arch, "Speculator should differ from Architect");
+    }
+
+    // =========================================================================
+    // PSP-5: Tier Wiring and Plan Validation Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_orchestrator_stores_all_four_tier_models() {
+        let orch = SRBNOrchestrator::new_with_models(
+            PathBuf::from("/tmp/test_tiers"),
+            false,
+            Some("arch-model".into()),
+            Some("act-model".into()),
+            Some("ver-model".into()),
+            Some("spec-model".into()),
+            None,
+            None,
+        );
+        assert_eq!(orch.architect_model, "arch-model");
+        assert_eq!(orch.actuator_model, "act-model");
+        assert_eq!(orch.verifier_model, "ver-model");
+        assert_eq!(orch.speculator_model, "spec-model");
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_default_tier_models() {
+        let orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_tier_defaults"), false);
+        assert_eq!(orch.architect_model, ModelTier::Architect.default_model());
+        assert_eq!(orch.actuator_model, ModelTier::Actuator.default_model());
+        assert_eq!(orch.verifier_model, ModelTier::Verifier.default_model());
+        assert_eq!(orch.speculator_model, ModelTier::Speculator.default_model());
+    }
+
+    #[tokio::test]
+    async fn test_create_nodes_rejects_duplicate_output_files() {
+        use perspt_core::types::PlannedTask;
+
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_dup_outputs"), false);
+
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math".into(),
+                    output_files: vec!["src/math.py".into(), "tests/test_math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math")
+                },
+                PlannedTask {
+                    id: "task_2".into(),
+                    goal: "Create tests".into(),
+                    output_files: vec!["tests/test_math.py".into()],
+                    ..PlannedTask::new("task_2", "Create tests")
+                },
+            ],
+        };
+
+        let result = orch.create_nodes_from_plan(&plan);
+        assert!(result.is_err(), "Should reject duplicate output_files");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("tests/test_math.py"),
+            "Error should mention the duplicate file: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_nodes_accepts_unique_output_files() {
+        use perspt_core::types::PlannedTask;
+
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_unique_outputs"), false);
+
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math".into(),
+                    output_files: vec!["src/math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math")
+                },
+                PlannedTask {
+                    id: "test_1".into(),
+                    goal: "Test math".into(),
+                    output_files: vec!["tests/test_math.py".into()],
+                    dependencies: vec!["task_1".into()],
+                    ..PlannedTask::new("test_1", "Test math")
+                },
+            ],
+        };
+
+        let result = orch.create_nodes_from_plan(&plan);
+        assert!(result.is_ok(), "Should accept unique output_files");
+        assert_eq!(orch.graph.node_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_ownership_manifest_built_with_majority_plugin_vote() {
+        use perspt_core::types::PlannedTask;
+
+        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_plugin_vote"), false);
+
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "task_1".into(),
+                goal: "Create Python module".into(),
+                output_files: vec![
+                    "src/main.py".into(),
+                    "src/helper.py".into(),
+                    "src/__init__.py".into(),
+                ],
+                ..PlannedTask::new("task_1", "Create Python module")
+            }],
+        };
+
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        // All three files should be in the manifest
+        assert_eq!(orch.context.ownership_manifest.len(), 3);
+        // The node should have the python plugin assigned
+        let idx = orch.node_indices["task_1"];
+        assert_eq!(orch.graph[idx].owner_plugin, "python");
+    }
+
+    #[tokio::test]
+    async fn test_apply_bundle_rejects_paths_outside_node_output_targets() {
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_bundle_target_guard_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+        let mut orch = SRBNOrchestrator::new(temp_dir.clone(), false);
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "validate_module".into(),
+                    goal: "Create validation module".into(),
+                    output_files: vec!["src/validate.rs".into()],
+                    ..PlannedTask::new("validate_module", "Create validation module")
+                },
+                PlannedTask {
+                    id: "lib_module".into(),
+                    goal: "Export validation module".into(),
+                    output_files: vec!["src/lib.rs".into()],
+                    dependencies: vec!["validate_module".into()],
+                    ..PlannedTask::new("lib_module", "Export validation module")
+                },
+            ],
+        };
+
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/validate.rs".into(),
+                    content: "pub fn ok() {}".into(),
+                },
+                ArtifactOperation::Write {
+                    path: "src/lib.rs".into(),
+                    content: "pub mod validate;".into(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        let err = orch
+            .apply_bundle_transactionally(
+                &bundle,
+                "validate_module",
+                perspt_core::types::NodeClass::Implementation,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("undeclared path(s): src/lib.rs"), "{err}");
+        assert!(err.contains("Allowed output_targets: src/validate.rs"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_apply_bundle_writes_into_branch_sandbox() {
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_branch_sandbox_write_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub fn old() {}\n").unwrap();
+
+        let mut orch = SRBNOrchestrator::new(temp_dir.clone(), false);
+        orch.context.session_id = uuid::Uuid::new_v4().to_string();
+
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "parent".into(),
+                    goal: "Parent node".into(),
+                    output_files: vec!["src/lib.rs".into()],
+                    ..PlannedTask::new("parent", "Parent node")
+                },
+                PlannedTask {
+                    id: "child".into(),
+                    goal: "Child node".into(),
+                    context_files: vec!["src/lib.rs".into()],
+                    output_files: vec!["src/child.rs".into()],
+                    dependencies: vec!["parent".into()],
+                    ..PlannedTask::new("child", "Child node")
+                },
+            ],
+        };
+
+        orch.create_nodes_from_plan(&plan).unwrap();
+        let child_idx = orch.node_indices["child"];
+        let branch_id = orch.maybe_create_provisional_branch(child_idx).unwrap();
+        let sandbox_dir = orch.sandbox_dir_for_node(child_idx).unwrap();
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "src/child.rs".into(),
+                content: "pub fn child() {}\n".into(),
+            }],
+            commands: vec![],
+        };
+
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "child",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .unwrap();
+
+        assert!(sandbox_dir.join("src/child.rs").exists());
+        assert!(!temp_dir.join("src/child.rs").exists());
+
+        orch.merge_provisional_branch(&branch_id, child_idx);
+    }
+
+    #[test]
+    fn test_weighted_tests_only_run_for_integration_nodes() {
+        let mut implementation_node =
+            SRBNNode::new("impl".into(), "Implement feature".into(), ModelTier::Actuator);
+        implementation_node.node_class = perspt_core::types::NodeClass::Implementation;
+        implementation_node
+            .contract
+            .weighted_tests
+            .push(perspt_core::types::WeightedTest {
+                test_name: "test_feature".into(),
+                criticality: perspt_core::types::Criticality::High,
+            });
+
+        let mut integration_node =
+            SRBNNode::new("test".into(), "Verify feature".into(), ModelTier::Actuator);
+        integration_node.node_class = perspt_core::types::NodeClass::Integration;
+        integration_node
+            .contract
+            .weighted_tests
+            .push(perspt_core::types::WeightedTest {
+                test_name: "test_feature".into(),
+                criticality: perspt_core::types::Criticality::High,
+            });
+
+        assert!(!should_run_weighted_tests_for_node(&implementation_node));
+        assert!(should_run_weighted_tests_for_node(&integration_node));
     }
 }

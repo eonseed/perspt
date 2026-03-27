@@ -233,6 +233,9 @@ Google AI (Gemini)
 ------------------
 
 Google's Gemini models offer multimodal capabilities and large context windows with competitive performance.
+Perspt defaults the higher-capability agent tiers to ``gemini-3.1-pro-preview``
+and the fast/low-cost tiers plus chat auto-detection to
+``gemini-3.1-flash-lite-preview``.
 
 Supported Models
 ~~~~~~~~~~~~~~~~
@@ -245,18 +248,18 @@ Supported Models
      - Context Length
      - Best For
      - Notes
-   * - ``gemini-2.0-flash-exp``
+   * - ``gemini-3.1-pro-preview``
+     - 2M tokens
+     - Planning, verification, complex analysis
+     - Default for architect and verifier tiers
+   * - ``gemini-3.1-flash-lite-preview``
      - 1M tokens
-     - Latest experimental model
-     - Cutting-edge capabilities (2025)
+     - Fast execution, chat, lower-cost runs
+     - Default for actuator, speculator, and chat
    * - ``gemini-1.5-pro``
      - 2M tokens
      - Large documents, complex analysis
-     - Largest context window
-   * - ``gemini-1.5-flash``
-     - 1M tokens
-     - Fast responses, good balance
-     - Recommended default
+     - Previous high-context model
    * - ``gemini-pro``
      - 32K tokens
      - General purpose tasks
@@ -270,7 +273,7 @@ Configuration
    {
      "provider_type": "google",
      "api_key": "your-google-api-key",
-     "default_model": "gemini-1.5-flash",
+     "default_model": "gemini-3.1-flash-lite-preview",
      "providers": {
        "google": "https://generativelanguage.googleapis.com"
      }
@@ -284,11 +287,11 @@ CLI Usage
    # Set environment variable and run
    export GEMINI_API_KEY="your-key-here"
    
-   # Use latest Gemini model
-   perspt chat --model gemini-2.0-flash-exp
+  # Use the fast default Gemini model
+  perspt chat --model gemini-3.1-flash-lite-preview
    
-   # Use model with largest context
-   perspt chat --model gemini-1.5-pro
+  # Use the flagship Gemini model
+  perspt chat --model gemini-3.1-pro-preview
 
 **Environment Variables**
 
@@ -429,14 +432,14 @@ Supported Models
      - Context Length
      - Best For
      - Notes
-   * - ``gemini-2.5-pro``
+   * - ``gemini-3.1-pro-preview``
      - 2M tokens
      - Advanced reasoning, analysis
-     - Latest and most capable
-   * - ``gemini-2.0-flash``
+     - Latest flagship preview
+   * - ``gemini-3.1-flash-lite-preview``
      - 1M tokens
      - Fast, efficient performance
-     - Optimized for speed
+     - Latest low-cost preview
    * - ``gemini-1.5-pro``
      - 2M tokens
      - Complex reasoning, long context

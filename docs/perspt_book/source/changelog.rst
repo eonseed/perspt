@@ -100,7 +100,7 @@ Changed
      # New
      perspt simple-chat
 
-- **Default model**: Now ``gemini-2.0-flash-lite`` with auto-detection
+- **Default Gemini models**: Now ``gemini-3.1-pro-preview`` for architect/verifier and ``gemini-3.1-flash-lite-preview`` for actuator/speculator/chat auto-detection
 - **Documentation**: Complete rewrite using 4C/ID methodology
 
 Removed
