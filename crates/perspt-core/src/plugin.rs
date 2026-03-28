@@ -247,6 +247,14 @@ pub trait LanguagePlugin: Send + Sync {
     /// Get the command to run the project (for verification)
     fn run_command(&self) -> String;
 
+    /// Get the command to run the project in a specific directory.
+    ///
+    /// Override this to inspect pyproject.toml, Cargo.toml, etc. and return a
+    /// more appropriate run command than the generic default.
+    fn run_command_for_dir(&self, _path: &Path) -> String {
+        self.run_command()
+    }
+
     // =========================================================================
     // PSP-5: Capability-Based Runtime Contract
     // =========================================================================
@@ -641,6 +649,51 @@ impl LanguagePlugin for PythonPlugin {
     }
 
     fn run_command(&self) -> String {
+        "uv run python -m main".to_string()
+    }
+
+    /// Detect the package name from pyproject.toml or src layout and return
+    /// an appropriate run command.
+    fn run_command_for_dir(&self, path: &Path) -> String {
+        // Check src/<pkg>/__main__.py first
+        if let Ok(entries) = std::fs::read_dir(path.join("src")) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.starts_with('.') && !name.starts_with('_') {
+                        return format!("uv run python -m {}", name);
+                    }
+                }
+            }
+        }
+
+        // Check for [project.scripts] in pyproject.toml
+        if let Ok(content) = std::fs::read_to_string(path.join("pyproject.toml")) {
+            if content.contains("[project.scripts]") {
+                // Parse the first script name
+                let mut in_scripts = false;
+                for raw_line in content.lines() {
+                    let line = raw_line.trim();
+                    if line == "[project.scripts]" {
+                        in_scripts = true;
+                        continue;
+                    }
+                    if in_scripts {
+                        if line.starts_with('[') {
+                            break;
+                        }
+                        if let Some((name, _)) = line.split_once('=') {
+                            let script = name.trim().trim_matches('"');
+                            if !script.is_empty() {
+                                return format!("uv run {}", script);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Default: run main module
         "uv run python -m main".to_string()
     }
 
@@ -1183,5 +1236,52 @@ mod tests {
         assert_eq!(format!("{}", VerifierStage::Build), "build");
         assert_eq!(format!("{}", VerifierStage::Test), "test");
         assert_eq!(format!("{}", VerifierStage::Lint), "lint");
+    }
+
+    #[test]
+    fn test_python_run_command_for_dir_src_layout() {
+        let dir = std::env::temp_dir().join(format!("perspt_test_pyrun_src_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("src/myapp")).unwrap();
+        std::fs::write(dir.join("src/myapp/__init__.py"), "").unwrap();
+
+        let plugin = PythonPlugin;
+        let cmd = plugin.run_command_for_dir(&dir);
+        assert_eq!(cmd, "uv run python -m myapp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_python_run_command_for_dir_scripts() {
+        let dir = std::env::temp_dir().join(format!("perspt_test_pyrun_scripts_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"myapp\"\n\n[project.scripts]\nmyapp = \"myapp:main\"\n",
+        )
+        .unwrap();
+
+        let plugin = PythonPlugin;
+        let cmd = plugin.run_command_for_dir(&dir);
+        assert_eq!(cmd, "uv run myapp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_python_run_command_for_dir_default() {
+        let dir = std::env::temp_dir().join(format!("perspt_test_pyrun_default_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"myapp\"\n",
+        )
+        .unwrap();
+
+        let plugin = PythonPlugin;
+        let cmd = plugin.run_command_for_dir(&dir);
+        assert_eq!(cmd, "uv run python -m main");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

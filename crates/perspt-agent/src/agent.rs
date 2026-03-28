@@ -357,7 +357,15 @@ Workspace Import Hints: {workspace_import_hints:?}
 10. If another file needs changes, do not modify it in this node; keep that need implicit for its owning node
 11. Use `Workspace Import Hints` exactly for crate/package imports in tests, entry points, and cross-file references
 12. For library source modules (e.g. `src/*.rs` in Rust), use `crate::` for intra-crate imports, never the package name. Only use the package name in `tests/`, `examples/`, or `main.rs`.
-13. When your code uses external crates/packages not already listed in the project manifest (e.g. `Cargo.toml`, `pyproject.toml`, `package.json`), you MUST include the install commands in the `commands` array. For Rust: `cargo add <crate>` (with `--features <f>` if needed). For Python: `pip install <pkg>`. For Node.js: `npm install <pkg>`. Without these commands, the build will fail due to missing dependencies.
+13. When your code uses external crates/packages not already listed in the project manifest (e.g. `Cargo.toml`, `pyproject.toml`, `package.json`), you MUST include the install commands in the `commands` array. For Rust: `cargo add <crate>` (with `--features <f>` if needed). For Python: `uv add <pkg>`. For Node.js: `npm install <pkg>`. Without these commands, the build will fail due to missing dependencies.
+14. For Python projects:
+    - Prefer src-layout: put all library code under `src/<package_name>/` with an `__init__.py`.
+    - Keep ALL modules inside the declared package directory — never mix top-level .py files with `src/<pkg>/` modules.
+    - Use relative imports (`from . import utils`, `from .core import Pipeline`) inside the package.
+    - Use the package name for imports from tests and entry points (`from mypackage.core import Foo`), never `src.mypackage`.
+    - Put tests in a top-level `tests/` directory (not inside `src/`), using `test_*.py` naming.
+    - Use `uv add <pkg>` (not `pip install`) for dependency commands. Use `uv add --dev <pkg>` for test/dev-only tools like `pytest` or `ruff`.
+    - Ensure test files import real symbols that actually exist in the generated code — do not invent class or function names that are not defined.
 
 {output_format}"#,
             goal = node.goal,
