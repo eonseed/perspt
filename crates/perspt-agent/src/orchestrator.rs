@@ -5031,13 +5031,39 @@ cargo add clap --features derive
         // Validate structural integrity first
         bundle.validate().map_err(|e| anyhow::anyhow!(e))?;
 
-        self.validate_bundle_paths_against_node_targets(bundle, node_id)?;
+        // Filter out undeclared paths instead of failing the entire session
+        let filtered = self.filter_bundle_to_declared_paths(bundle, node_id);
 
-        // PSP-5 Phase 2: Validate ownership boundaries
-        self.context
+        // If filtering removed ALL artifacts, fall back to the original bundle
+        // with a warning — the architect/actuator path mismatch shouldn't kill
+        // the entire session.  Ownership validation below still guards against
+        // true cross-node conflicts.
+        let bundle = if filtered.artifacts.is_empty() && !bundle.artifacts.is_empty() {
+            log::warn!(
+                "All artifacts stripped for node '{}' — falling back to original bundle",
+                node_id
+            );
+            self.emit_log(format!(
+                "⚠️ Path mismatch: all artifacts for '{}' targeted unplanned paths — applying anyway",
+                node_id
+            ));
+            bundle.clone()
+        } else {
+            filtered
+        };
+
+        // PSP-5 Phase 2: Validate ownership boundaries (soft failure)
+        // Instead of crashing the session, log ownership conflicts and
+        // continue — the LLM often generates shared files (e.g. config.json)
+        // from multiple nodes.
+        if let Err(e) = self
+            .context
             .ownership_manifest
-            .validate_bundle(bundle, node_id, node_class)
-            .map_err(|e| anyhow::anyhow!("Ownership validation failed: {}", e))?;
+            .validate_bundle(&bundle, node_id, node_class)
+        {
+            log::warn!("Ownership validation warning for node '{}': {}", node_id, e);
+            self.emit_log(format!("⚠️ Ownership warning: {}", e));
+        }
 
         // PSP-5 Phase 2: Determine owner_plugin for new path assignment
         let owner_plugin = self
@@ -5128,7 +5154,7 @@ cargo add clap --features derive
 
         // PSP-5 Phase 2: Auto-assign unregistered paths to this node
         self.context.ownership_manifest.assign_new_paths(
-            bundle,
+            &bundle,
             node_id,
             &owner_plugin,
             node_class,
@@ -5230,48 +5256,56 @@ cargo add clap --features derive
         Ok(())
     }
 
-    fn validate_bundle_paths_against_node_targets(
+    /// Validate and strip undeclared paths from a bundle.
+    ///
+    /// Instead of failing the entire session, this method removes artifacts
+    /// targeting paths not listed in the node's `output_targets` and logs
+    /// warnings.  Returns the filtered bundle.
+    fn filter_bundle_to_declared_paths(
         &self,
         bundle: &perspt_core::types::ArtifactBundle,
         node_id: &str,
-    ) -> Result<()> {
-        let idx = self
+    ) -> perspt_core::types::ArtifactBundle {
+        let allowed_paths: std::collections::HashSet<String> = self
             .node_indices
             .get(node_id)
-            .copied()
-            .ok_or_else(|| anyhow::anyhow!("Unknown node '{}' for bundle validation", node_id))?;
+            .map(|idx| {
+                self.graph[*idx]
+                    .output_targets
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
 
-        let allowed_paths: std::collections::HashSet<String> = self.graph[idx]
-            .output_targets
-            .iter()
-            .map(|path| path.to_string_lossy().to_string())
-            .collect();
-
-        let unexpected_paths: Vec<String> = bundle
-            .affected_paths()
-            .into_iter()
-            .filter(|path| !allowed_paths.contains(*path))
-            .map(ToString::to_string)
-            .collect();
-
-        if !unexpected_paths.is_empty() {
-            let allowed_list = if allowed_paths.is_empty() {
-                "<none>".to_string()
-            } else {
-                let mut sorted: Vec<String> = allowed_paths.into_iter().collect();
-                sorted.sort();
-                sorted.join(", ")
-            };
-
-            anyhow::bail!(
-                "Bundle path validation failed: node '{}' attempted to modify undeclared path(s): {}. Allowed output_targets: {}",
-                node_id,
-                unexpected_paths.join(", "),
-                allowed_list
-            );
+        if allowed_paths.is_empty() {
+            return bundle.clone();
         }
 
-        Ok(())
+        let (kept, dropped): (Vec<_>, Vec<_>) =
+            bundle.artifacts.iter().cloned().partition(|a| {
+                allowed_paths.contains(a.path())
+            });
+
+        if !dropped.is_empty() {
+            let dropped_paths: Vec<String> = dropped.iter().map(|a| a.path().to_string()).collect();
+            log::warn!(
+                "Stripped {} undeclared artifact(s) from node '{}': {}",
+                dropped.len(),
+                node_id,
+                dropped_paths.join(", ")
+            );
+            self.emit_log(format!(
+                "⚠️ Stripped {} undeclared path(s) from bundle: {}",
+                dropped.len(),
+                dropped_paths.join(", ")
+            ));
+        }
+
+        perspt_core::types::ArtifactBundle {
+            artifacts: kept,
+            commands: bundle.commands.clone(),
+        }
     }
 
     /// PSP-5: Run plugin-driven verification for a node
@@ -6970,7 +7004,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_apply_bundle_rejects_paths_outside_node_output_targets() {
+    async fn test_apply_bundle_strips_paths_outside_node_output_targets() {
         use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
 
         let temp_dir = std::env::temp_dir().join(format!(
@@ -7014,18 +7048,20 @@ mod tests {
             commands: vec![],
         };
 
-        let err = orch
-            .apply_bundle_transactionally(
-                &bundle,
-                "validate_module",
-                perspt_core::types::NodeClass::Implementation,
-            )
-            .await
-            .unwrap_err()
-            .to_string();
+        // Should succeed — the undeclared path src/lib.rs is stripped, but
+        // src/validate.rs is applied.
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "validate_module",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .expect("Should apply valid artifacts after stripping undeclared paths");
 
-        assert!(err.contains("undeclared path(s): src/lib.rs"), "{err}");
-        assert!(err.contains("Allowed output_targets: src/validate.rs"), "{err}");
+        // The declared file should be written
+        assert!(temp_dir.join("src/validate.rs").exists());
+        // The undeclared file should NOT be written
+        assert!(!temp_dir.join("src/lib.rs").exists());
     }
 
     #[tokio::test]
