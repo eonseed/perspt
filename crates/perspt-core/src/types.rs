@@ -608,6 +608,9 @@ pub struct AgentContext {
     /// PSP-5: Active language plugins detected for this workspace
     #[serde(default)]
     pub active_plugins: Vec<String>,
+    /// PSP-5: Workspace state classification (existing, greenfield, or ambiguous)
+    #[serde(default)]
+    pub workspace_state: WorkspaceState,
     /// PSP-5 Phase 2: Ownership manifest for file-to-node bindings
     #[serde(default)]
     pub ownership_manifest: OwnershipManifest,
@@ -630,6 +633,7 @@ impl Default for AgentContext {
             execution_mode: ExecutionMode::default(),
             verifier_strictness: VerifierStrictness::default(),
             active_plugins: Vec::new(),
+            workspace_state: WorkspaceState::default(),
             ownership_manifest: OwnershipManifest::default(),
         }
     }
@@ -985,6 +989,47 @@ impl std::fmt::Display for ExecutionMode {
         match self {
             ExecutionMode::Project => write!(f, "project"),
             ExecutionMode::Solo => write!(f, "solo"),
+        }
+    }
+}
+
+/// PSP-5: Workspace state classification
+///
+/// Determined at session start by inspecting the working directory for project
+/// metadata and cross-referencing with the task description. Drives the
+/// init/bootstrap/context strategy for the rest of the session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceState {
+    /// Directory contains recognized project metadata (Cargo.toml, pyproject.toml, etc.)
+    ExistingProject {
+        /// Plugin names detected in the workspace
+        plugins: Vec<String>,
+    },
+    /// Empty or non-project directory; language inferred from the task description
+    Greenfield {
+        /// Language inferred from task keywords (e.g. "rust", "python")
+        inferred_lang: Option<String>,
+    },
+    /// Directory has files but no recognized project metadata and no language inferred
+    #[default]
+    Ambiguous,
+}
+
+impl std::fmt::Display for WorkspaceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WorkspaceState::ExistingProject { plugins } => {
+                write!(f, "existing-project({})", plugins.join(", "))
+            }
+            WorkspaceState::Greenfield { inferred_lang } => {
+                write!(
+                    f,
+                    "greenfield({})",
+                    inferred_lang.as_deref().unwrap_or("unknown")
+                )
+            }
+            WorkspaceState::Ambiguous => write!(f, "ambiguous"),
         }
     }
 }

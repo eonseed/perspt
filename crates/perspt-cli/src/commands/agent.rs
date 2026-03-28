@@ -43,6 +43,8 @@ pub async fn run(
     verifier_strictness: String,
     architect_fallback_model: Option<String>,
     actuator_fallback_model: Option<String>,
+    verifier_fallback_model: Option<String>,
+    speculator_fallback_model: Option<String>,
     output_plan: Option<PathBuf>,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
@@ -95,6 +97,8 @@ pub async fn run(
         speculator,
         architect_fallback_model,
         actuator_fallback_model,
+        verifier_fallback_model,
+        speculator_fallback_model,
     );
 
     // Set complexity threshold, defer_tests, and log_llm
@@ -118,48 +122,19 @@ pub async fn run(
     println!("   Session: {}", orchestrator.session_id());
     println!("   Task: {}", task);
 
-    // PSP-5 Phase 4: Detect active plugins in the workspace
-    let registry = perspt_core::plugin::PluginRegistry::new();
-    let detected = registry.detect_all(&working_dir);
-    let active_names: Vec<&str> = detected.iter().map(|p| p.name()).collect();
-
-    if active_names.is_empty() {
-        println!("   Plugins: none detected (will use defaults)");
-    } else {
-        println!("   Plugins: {}", active_names.join(", "));
-        for plugin in &detected {
-            let profile = plugin.verifier_profile();
-            let available: Vec<String> = profile
-                .available_stages()
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
-            let lsp_status = if profile.lsp.primary_available {
-                format!("{} (primary)", profile.lsp.primary.server_binary)
-            } else if profile.lsp.fallback_available {
-                format!(
-                    "{} (fallback)",
-                    profile
-                        .lsp
-                        .fallback
-                        .as_ref()
-                        .map(|f| f.server_binary.as_str())
-                        .unwrap_or("?")
-                )
-            } else {
-                "none available".to_string()
-            };
-            println!(
-                "     {} — stages: [{}], lsp: {}",
-                plugin.name(),
-                available.join(", "),
-                lsp_status
-            );
+    // PSP-5: Provisional plugin scan for user feedback only.
+    // Authoritative detection happens inside orchestrator.run() after
+    // workspace classification and potential greenfield init.
+    {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let detected = registry.detect_all(&working_dir);
+        if detected.is_empty() {
+            println!("   Plugins: none detected yet (will re-detect after init)");
+        } else {
+            let names: Vec<&str> = detected.iter().map(|p| p.name()).collect();
+            println!("   Plugins (provisional): {}", names.join(", "));
         }
     }
-
-    // Store active plugins in context
-    orchestrator.context.active_plugins = active_names.iter().map(|s| s.to_string()).collect();
 
     println!();
 
@@ -172,17 +147,7 @@ pub async fn run(
         println!("(Use --yes flag to run headlessly)");
         println!();
 
-        // Start LSP for detected plugins
-        let plugin_refs: Vec<&str> = active_names.to_vec();
-        println!("   \u{1f50d} Starting language servers...");
-        if let Err(e) = orchestrator.start_lsp_for_plugins(&plugin_refs).await {
-            log::warn!("Failed to start LSP: {}", e);
-            println!("   ⚠️  Continuing without LSP");
-        } else {
-            println!("   ✅ Language servers ready");
-        }
-
-        // Run with TUI integration
+        // Run with TUI integration (orchestrator starts LSP internally after classification)
         perspt_tui::run_agent_tui_with_orchestrator(orchestrator, task).await?;
     } else {
         // Headless mode - run orchestrator directly
@@ -192,18 +157,7 @@ pub async fn run(
         );
         println!();
 
-        // Start LSP for detected plugins
-        let plugin_refs: Vec<&str> = active_names.to_vec();
-        println!("   \u{1f50d} Starting language servers...");
-        if let Err(e) = orchestrator.start_lsp_for_plugins(&plugin_refs).await {
-            log::warn!("Failed to start LSP: {}", e);
-            println!("   ⚠️  Continuing without LSP");
-        } else {
-            println!("   ✅ Language servers ready");
-        }
-        println!();
-
-        // Run the SRBN control loop
+        // Run the SRBN control loop (orchestrator starts LSP internally after classification)
         match orchestrator.run(task.clone()).await {
             Ok(()) => {
                 println!();

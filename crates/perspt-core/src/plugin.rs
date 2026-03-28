@@ -298,6 +298,15 @@ pub trait LanguagePlugin: Send + Sync {
         true
     }
 
+    /// Required host binaries for this plugin, grouped by role.
+    ///
+    /// Each entry is `(binary_name, role_description, install_hint)`.
+    /// The orchestrator checks these before init and emits install directions
+    /// for any that are missing.
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        Vec::new()
+    }
+
     /// Get fallback LSP config when primary is unavailable
     fn lsp_fallback(&self) -> Option<LspConfig> {
         None
@@ -394,6 +403,14 @@ impl LanguagePlugin for RustPlugin {
 
     fn key_files(&self) -> &[&str] {
         &["Cargo.toml", "Cargo.lock"]
+    }
+
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        vec![
+            ("cargo", "build/init", "Install Rust via https://rustup.rs"),
+            ("rustc", "compiler", "Install Rust via https://rustup.rs"),
+            ("rust-analyzer", "language server", "rustup component add rust-analyzer"),
+        ]
     }
 
     fn get_lsp_config(&self) -> LspConfig {
@@ -531,6 +548,14 @@ impl LanguagePlugin for PythonPlugin {
 
     fn key_files(&self) -> &[&str] {
         &["pyproject.toml", "setup.py", "requirements.txt", "uv.lock"]
+    }
+
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        vec![
+            ("uv", "package manager", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
+            ("python3", "interpreter", "uv python install (or install from https://python.org)"),
+            ("uvx", "tool runner/LSP", "Installed with uv — curl -LsSf https://astral.sh/uv/install.sh | sh"),
+        ]
     }
 
     fn get_lsp_config(&self) -> LspConfig {
@@ -711,6 +736,14 @@ impl LanguagePlugin for JsPlugin {
 
     fn key_files(&self) -> &[&str] {
         &["package.json", "tsconfig.json"]
+    }
+
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        vec![
+            ("node", "runtime", "Install Node.js from https://nodejs.org or via nvm"),
+            ("npm", "package manager", "Included with Node.js — install from https://nodejs.org"),
+            ("typescript-language-server", "language server", "npm install -g typescript-language-server typescript"),
+        ]
     }
 
     fn get_lsp_config(&self) -> LspConfig {

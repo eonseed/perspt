@@ -651,6 +651,7 @@ This PSP permits implementation of the following configuration capabilities:
 * **Phase 6:** Provisional branch ledger, interface-sealed speculation, and branch flush behavior
 * **Phase 7:** Review UX parity and provenance-rich status surfaces
 * **Phase 8:** Ledger-backed node commits, sheaf validation, and resume correctness
+* **Phase 9:** Universal verification pipeline and bundle command execution
 
 **Acceptance Criteria:**
 
@@ -898,6 +899,28 @@ The expected implementation work primarily affects:
 * ``crates/perspt-tui/src/agent_app.rs``: TUI dashboard handling for all five Phase 6 events.
 * Test coverage: unit tests covering branch lifecycle, seal prerequisites, descendant collection, flush cascades, unblock logic, and sandbox utilities.
 
+**Phase 6a: Workspace Classification, Tool Prerequisites, and Model Fallback** *(implemented)*
+
+* ``crates/perspt-core/src/types.rs``: ``WorkspaceState`` enum (``ExistingProject { plugins }``, ``Greenfield { inferred_lang }``, ``Ambiguous``) added to ``AgentContext``. The orchestrator classifies workspace state once before any init or planning work.
+* ``crates/perspt-core/src/plugin.rs``: ``required_binaries()`` trait method on ``LanguagePlugin`` — each plugin declares ``(binary, role, install_hint)`` tuples. ``RustPlugin`` requires ``cargo``, ``rustc``, ``rust-analyzer``; ``PythonPlugin`` requires ``uv``, ``python3``, ``uvx``; ``JsPlugin`` requires ``node``, ``npm``, ``typescript-language-server``.
+* ``crates/perspt-agent/src/orchestrator.rs``:
+
+  * ``classify_workspace(task) -> WorkspaceState``: inspects ``PluginRegistry::detect_all()`` → ``ExistingProject``, ``detect_language_from_task()`` → ``Greenfield``, empty dir → ``Greenfield { None }``, else → ``Ambiguous``.
+  * ``check_tool_prerequisites(plugin) -> bool``: probes common OS tools (``grep``, ``sed``, ``awk``) and language-specific binaries via ``host_binary_available()``. Critical tools (init/build) block greenfield init; optional tools (LSP, linters) warn but allow degraded mode. Emits structured install instructions.
+  * ``step_init_project()`` rewritten with three ``WorkspaceState`` arms: ``ExistingProject`` runs tooling sync only, ``Greenfield`` creates isolated project dirs (child dir if non-empty working dir) then updates ``working_dir`` and ``tools``, ``Ambiguous`` always creates a child project dir.
+  * ``redetect_plugins_after_init()``: re-runs ``detect_all()`` after greenfield init and updates ``active_plugins`` and ``workspace_state``.
+  * ``emit_plugin_readiness()``: extracted into reusable helper for pre- and post-init plugin status emission.
+  * Plugin timing in ``run()`` fixed: plugins detected immediately only for ``ExistingProject``; for ``Greenfield``/``Ambiguous``, detection deferred until after ``step_init_project()`` completes.
+  * Model fallback: ``call_llm_with_tier_fallback()`` retries with the same primary model when no explicit fallback is configured, instead of returning a broken response.
+  * Per-tier fallback fields: ``verifier_fallback_model`` and ``speculator_fallback_model`` added alongside existing architect/actuator fallbacks.
+  * Artifact extraction: ``output.txt`` generic fallback replaced with language-specific filenames (``index.js``, ``index.ts``, ``Cargo.toml``, etc.); unrecognized code-block languages log a warning and skip instead of creating ``output.txt``.
+
+* ``crates/perspt-cli/src/commands/agent.rs``: CLI plugin detection made provisional (display-only hint); LSP start moved into orchestrator where workspace state is known; ``--verifier-fallback-model`` and ``--speculator-fallback-model`` CLI args added.
+* ``crates/perspt-cli/src/main.rs``: new fallback CLI args wired through to ``new_with_models()``.
+* ``crates/perspt-agent/src/context_retriever.rs``: ``get_project_summary()`` method added — inspects detected plugins, dependency manifests, entry points, and test locations to produce a structured project summary for architect prompts.
+* Test infrastructure: ``MerkleLedger::in_memory()`` used for all orchestrator tests via ``#[cfg(test)]`` conditional, eliminating DuckDB lock contention that caused false test failures.
+* Test coverage: 224 tests across the workspace, including 16 new tests covering workspace classification (empty dir, existing Rust/Python/JS, ambiguous, greenfield with language inference), tool prerequisite checking, ``required_binaries()`` declarations, and model fallback configuration.
+
 **Phase 7: Review UX parity with structured diffs, node status, and energy output**
 
 * ``crates/perspt-tui/src/agent_app.rs``: wire runtime events into the dashboard, review modal, and node progression state.
@@ -912,6 +935,24 @@ The expected implementation work primarily affects:
 * ``crates/perspt-store/src/store.rs`` and ``crates/perspt-store/src/schema.rs``: store node-level artifact bundles, verification results, branch state, and resume state.
 * ``crates/perspt-agent/src/orchestrator.rs``: replace placeholder commit and sheaf-validation steps with persisted node commits and parent/child convergence checks.
 * ``crates/perspt-cli/src/commands/resume.rs``: reconstruct sessions from stored node state instead of in-memory assumptions.
+
+**Phase 9: Universal verification pipeline and bundle command execution** *(implemented)*
+
+Closes four bugs identified during live testing where generated projects compiled speculatively but were never verified by the host toolchain:
+
+1. **Bundle command execution** — Artifact bundle commands (e.g. ``cargo add``, ``pip install``) parsed by step_speculate are now executed via the approval-gated tool system instead of being logged as "not yet wired".
+2. **Per-node-class verification stages** — ``verification_stages_for_node()`` maps each ``NodeClass`` to the appropriate verification stages: Interface → SyntaxCheck; Implementation → SyntaxCheck + Build (+ Test when weighted_tests present); Integration → SyntaxCheck + Build + Test + Lint. Replaces the old filter that only ran tests for Integration nodes.
+3. **Short-circuit verification** — ``run_plugin_verification()`` accepts an ``allowed_stages`` filter and a ``working_dir`` parameter. Syntax failure skips build/test/lint; build failure skips test/lint. Each stage maps to energy components: syntax fail → V_syn ≤ 5.0, build fail → V_syn ≤ 8.0, test fail → V_log, lint fail → V_str += 0.3.
+4. **Artifact bundle persistence** — ``ledger.record_artifact_bundle()`` is now called in both the commit path and the escalation path, ensuring DuckDB records which commands were applied for each node.
+5. **Correction-loop feedback** — Verification raw output is fed into ``context.last_test_output`` so subsequent correction prompts include actual compiler/test errors. The correction prompt now includes raw ``cargo check``/``cargo build`` stderr alongside LSP diagnostics.
+6. **Actuator prompt guidance** — Instruction added for intra-crate imports (``crate::`` in library modules vs. package name in tests/examples/main). Instruction #13 added requiring the LLM to populate the ``commands`` array with dependency install commands (``cargo add``, ``pip install``, ``npm install``) when code uses external crates/packages not already in the project manifest.
+7. **Auto-dependency repair** — After ``run_plugin_verification()`` detects a syntax/build failure, ``extract_missing_crates()`` parses compiler stderr for patterns such as "undeclared crate or module", "can't find crate for", and "unresolved import". When missing crates are found, ``auto_install_crate_deps()`` runs ``cargo add <crate>`` automatically and re-runs verification. This closed the gap where generated projects would fail to compile due to missing dependencies in ``Cargo.toml``.
+8. **Correction command extraction** — The correction loop now parses ``Commands:`` sections from LLM correction responses and executes whitelisted dependency commands (``cargo add``, ``pip install``, ``npm install``, ``yarn add``, ``pnpm add``) before re-verification. The correction prompt output format was extended with a ``Commands:`` block.
+
+Files changed:
+
+* ``crates/perspt-agent/src/orchestrator.rs``: ``last_applied_bundle`` field, bundle command execution in ``step_speculate``, ``verification_stages_for_node()``, refactored ``run_plugin_verification()`` with stage filter and short-circuit, rewired ``step_verify`` to use universal verification, artifact bundle persistence in ``step_commit`` and escalation path, ``extract_missing_crates()`` and ``auto_install_crate_deps()`` for auto-dependency repair, ``extract_commands_from_correction()`` for correction command parsing, build output injection into correction prompts.
+* ``crates/perspt-agent/src/agent.rs``: added ``crate::`` import guidance and dependency command instructions to actuator coding prompt, updated multi-artifact bundle JSON example to show populated ``commands`` array.
 
 **Documentation Updates Required:**
 
