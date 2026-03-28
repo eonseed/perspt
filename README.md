@@ -199,6 +199,39 @@ Options:
       --max-steps <N>              Maximum iterations (0 = unlimited)
       --defer-tests                Defer tests until sheaf validation
       --log-llm                    Log all LLM requests/responses to database
+      --verifier-fallback-model <M>   Fallback model for Verifier tier
+      --speculator-fallback-model <M> Fallback model for Speculator tier
+```
+
+### Workspace Classification
+
+Before running any task, the agent classifies the workspace:
+
+| State | Detection | Behavior |
+|-------|-----------|----------|
+| **Existing Project** | `Cargo.toml`, `pyproject.toml`, `package.json` found | Skip init, check tooling sync (`cargo fetch`, `uv sync`, `npm install`), gather project context for planning |
+| **Greenfield** | Empty dir or language inferred from task | Run language-native init (`cargo init`, `uv init`, `npm init -y`), isolate in child dir if workspace is non-empty |
+| **Ambiguous** | Non-empty dir, no project files, no language keywords | Always create a child project dir to avoid polluting existing files |
+
+The agent checks for required tools **before** initialization and emits install instructions if anything is missing:
+
+```
+🚫 Missing critical tools: cargo (build/init), rustc (compiler)
+📋 Install instructions:
+  cargo (build/init): Install Rust via https://rustup.rs
+  rustc (compiler): Install Rust via https://rustup.rs
+```
+
+### Model Fallback
+
+When no explicit fallback model is configured, each tier retries with the same primary model on structured-output failure. Explicit fallbacks can be set per tier:
+
+```bash
+perspt agent \
+  --architect-model gemini-3.1-pro-preview \
+  --actuator-model gemini-3.1-flash-lite-preview \
+  --verifier-fallback-model gpt-5.4 \
+  "Build a REST API"
 ```
 
 ### Retry Policy (PSP-4)

@@ -9,7 +9,7 @@ members = [
     "crates/perspt-sandbox",
     "crates/perspt-cli",
     "crates/perspt-store",
-    "crates/perspt",
+    "crates/perspt", ".perspt-eval/rust_cli",
 ]
 
 [workspace.package]

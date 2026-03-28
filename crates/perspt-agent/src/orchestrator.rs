@@ -5,13 +5,13 @@
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
 use crate::context_retriever::ContextRetriever;
 use crate::lsp::LspClient;
-use crate::test_runner::{self, PythonTestRunner, TestRunnerTrait};
+use crate::test_runner::{self, PythonTestRunner, TestResults};
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
 use perspt_core::types::{
     EscalationCategory, EscalationReport, NodeClass, ProvisionalBranch, ProvisionalBranchState,
-    RewriteAction, RewriteRecord, SheafValidationResult, SheafValidatorClass,
+    RewriteAction, RewriteRecord, SheafValidationResult, SheafValidatorClass, WorkspaceState,
 };
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{EdgeRef, Topo, Walker};
@@ -71,6 +71,10 @@ pub struct SRBNOrchestrator {
     architect_fallback_model: Option<String>,
     /// PSP-5: Fallback model for Actuator tier
     actuator_fallback_model: Option<String>,
+    /// PSP-5: Fallback model for Verifier tier
+    verifier_fallback_model: Option<String>,
+    /// PSP-5: Fallback model for Speculator tier
+    speculator_fallback_model: Option<String>,
     /// Event sender for TUI updates (optional)
     event_sender: Option<perspt_core::events::channel::EventSender>,
     /// Action receiver for TUI commands (optional)
@@ -85,6 +89,8 @@ pub struct SRBNOrchestrator {
     last_formatted_context: String,
     /// PSP-5 Phase 4: Last plugin-driven verification result (for convergence checks)
     last_verification_result: Option<perspt_core::types::VerificationResult>,
+    /// PSP-5 Phase 9: Last applied artifact bundle (for persistence in step_commit)
+    last_applied_bundle: Option<perspt_core::types::ArtifactBundle>,
     /// PSP-5 Phase 6: Blocked dependencies awaiting parent interface seals
     blocked_dependencies: Vec<perspt_core::types::BlockedDependency>,
 }
@@ -101,7 +107,7 @@ fn epoch_seconds() -> i64 {
 impl SRBNOrchestrator {
     /// Create a new orchestrator with default models
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
-        Self::new_with_models(working_dir, auto_approve, None, None, None, None, None, None)
+        Self::new_with_models(working_dir, auto_approve, None, None, None, None, None, None, None, None)
     }
 
     /// Create a new orchestrator with custom model configuration
@@ -115,6 +121,8 @@ impl SRBNOrchestrator {
         speculator_model: Option<String>,
         architect_fallback_model: Option<String>,
         actuator_fallback_model: Option<String>,
+        verifier_fallback_model: Option<String>,
+        speculator_fallback_model: Option<String>,
     ) -> Self {
         let context = AgentContext {
             working_dir: working_dir.clone(),
@@ -170,13 +178,73 @@ impl SRBNOrchestrator {
             speculator_model: stored_speculator_model,
             architect_fallback_model,
             actuator_fallback_model,
+            verifier_fallback_model,
+            speculator_fallback_model,
             event_sender: None,
             action_receiver: None,
+            #[cfg(test)]
+            ledger: crate::ledger::MerkleLedger::in_memory().expect("Failed to create test ledger"),
+            #[cfg(not(test))]
             ledger: crate::ledger::MerkleLedger::new().expect("Failed to create ledger"),
             last_tool_failure: None,
             last_context_provenance: None,
             last_formatted_context: String::new(),
             last_verification_result: None,
+            last_applied_bundle: None,
+            blocked_dependencies: Vec::new(),
+        }
+    }
+
+    /// Create a new orchestrator for testing with an in-memory ledger
+    #[cfg(test)]
+    pub fn new_for_testing(working_dir: PathBuf) -> Self {
+        let context = AgentContext {
+            working_dir: working_dir.clone(),
+            auto_approve: true,
+            ..Default::default()
+        };
+
+        let provider = std::sync::Arc::new(
+            perspt_core::llm_provider::GenAIProvider::new().unwrap_or_else(|e| {
+                log::warn!("Failed to create GenAIProvider: {}, using default", e);
+                perspt_core::llm_provider::GenAIProvider::new().expect("GenAI must initialize")
+            }),
+        );
+
+        let tools = AgentTools::new(working_dir.clone(), false);
+
+        Self {
+            graph: DiGraph::new(),
+            node_indices: HashMap::new(),
+            context,
+            auto_approve: true,
+            lsp_clients: HashMap::new(),
+            agents: vec![
+                Box::new(ArchitectAgent::new(provider.clone(), None)),
+                Box::new(ActuatorAgent::new(provider.clone(), None)),
+                Box::new(VerifierAgent::new(provider.clone(), None)),
+                Box::new(SpeculatorAgent::new(provider.clone(), None)),
+            ],
+            tools,
+            last_written_file: None,
+            file_version: 0,
+            provider,
+            architect_model: ModelTier::Architect.default_model().to_string(),
+            actuator_model: ModelTier::Actuator.default_model().to_string(),
+            verifier_model: ModelTier::Verifier.default_model().to_string(),
+            speculator_model: ModelTier::Speculator.default_model().to_string(),
+            architect_fallback_model: None,
+            actuator_fallback_model: None,
+            verifier_fallback_model: None,
+            speculator_fallback_model: None,
+            event_sender: None,
+            action_receiver: None,
+            ledger: crate::ledger::MerkleLedger::in_memory().expect("Failed to create test ledger"),
+            last_tool_failure: None,
+            last_context_provenance: None,
+            last_formatted_context: String::new(),
+            last_verification_result: None,
+            last_applied_bundle: None,
             blocked_dependencies: Vec::new(),
         }
     }
@@ -689,87 +757,44 @@ impl SRBNOrchestrator {
             return self.run_solo_mode(task).await;
         }
 
-        // PSP-5: Detect active plugins before project init
-        let registry = perspt_core::plugin::PluginRegistry::new();
-        let active_plugins: Vec<String> = registry
-            .detect_all(&self.context.working_dir)
-            .iter()
-            .map(|p| p.name().to_string())
-            .collect();
-        self.context.active_plugins = active_plugins.clone();
+        // PSP-5: Classify workspace state before deciding plugin/init strategy
+        let workspace_state = self.classify_workspace(&task);
+        self.context.workspace_state = workspace_state.clone();
+        self.emit_log(format!("📋 Workspace: {}", workspace_state));
 
-        if !active_plugins.is_empty() {
-            self.emit_log(format!(
-                "🔌 Detected plugins: {}",
-                active_plugins.join(", ")
-            ));
-        }
-
-        // PSP-5 Phase 4: Probe verifier readiness at session start and emit
-        // ToolReadiness event so TUI/headless surfaces know which stages are
-        // available, degraded, or missing before any nodes execute.
-        {
-            let mut plugin_readiness = Vec::new();
-            for plugin_name in &active_plugins {
-                if let Some(plugin) = registry.get(plugin_name) {
-                    let profile = plugin.verifier_profile();
-                    let available: Vec<String> = profile
-                        .capabilities
-                        .iter()
-                        .filter(|c| c.available)
-                        .map(|c| c.stage.to_string())
-                        .collect();
-                    let degraded: Vec<String> = profile
-                        .capabilities
-                        .iter()
-                        .filter(|c| !c.available && c.fallback_available)
-                        .map(|c| format!("{} (fallback)", c.stage))
-                        .chain(
-                            profile
-                                .capabilities
-                                .iter()
-                                .filter(|c| !c.any_available())
-                                .map(|c| format!("{} (unavailable)", c.stage)),
-                        )
-                        .collect();
-                    let lsp_status = if profile.lsp.primary_available {
-                        format!("{} (primary)", profile.lsp.primary.server_binary)
-                    } else if profile.lsp.fallback_available {
-                        profile
-                            .lsp
-                            .fallback
-                            .as_ref()
-                            .map(|f| format!("{} (fallback)", f.server_binary))
-                            .unwrap_or_else(|| "fallback".to_string())
-                    } else {
-                        "unavailable".to_string()
-                    };
-
-                    if !degraded.is_empty() {
-                        self.emit_log(format!(
-                            "⚠️ Plugin '{}' degraded: {}",
-                            plugin_name,
-                            degraded.join(", ")
-                        ));
-                    }
-
-                    plugin_readiness.push(perspt_core::events::PluginReadiness {
-                        plugin_name: plugin_name.clone(),
-                        available_stages: available,
-                        degraded_stages: degraded,
-                        lsp_status,
-                    });
-                }
-            }
-
-            self.emit_event(perspt_core::AgentEvent::ToolReadiness {
-                plugins: plugin_readiness,
-                strictness: format!("{:?}", self.context.verifier_strictness),
-            });
+        // For existing projects, detect plugins and probe verifier readiness now.
+        // For greenfield/ambiguous, defer until after step_init_project().
+        if let WorkspaceState::ExistingProject { ref plugins } = workspace_state {
+            self.context.active_plugins = plugins.clone();
+            self.emit_log(format!("🔌 Detected plugins: {}", plugins.join(", ")));
+            self.emit_plugin_readiness();
         }
 
         // Team Mode: Full project initialization and DAG sheafification
         self.step_init_project(&task).await?;
+
+        // PSP-5: For greenfield/ambiguous workspaces, re-detect plugins after init
+        // and probe verifier readiness against the newly initialized project.
+        if !matches!(workspace_state, WorkspaceState::ExistingProject { .. }) {
+            self.redetect_plugins_after_init();
+        }
+
+        // Start LSP for detected plugins (after classification + init so we
+        // use the authoritative plugin set, not a provisional one).
+        {
+            let plugin_refs: Vec<String> = self.context.active_plugins.clone();
+            let refs: Vec<&str> = plugin_refs.iter().map(|s| s.as_str()).collect();
+            if !refs.is_empty() {
+                self.emit_log("🔍 Starting language servers...".to_string());
+                if let Err(e) = self.start_lsp_for_plugins(&refs).await {
+                    log::warn!("Failed to start LSP: {}", e);
+                    self.emit_log("⚠️ Continuing without LSP".to_string());
+                } else {
+                    self.emit_log("✅ Language servers ready".to_string());
+                }
+            }
+        }
+
         self.step_sheafify(task).await?;
 
         // PSP-5: Emit PlanReady event after sheafification
@@ -853,159 +878,393 @@ impl SRBNOrchestrator {
     }
 
     /// Step 0: Project Initialization
-    /// Checks for existing project or initializes new one based on task
+    ///
+    /// Check that required OS and language tools are available before
+    /// running init commands. Emits install instructions for any missing tools.
+    ///
+    /// Returns `true` if all critical tools (needed for init) are present.
+    /// Optional tools (LSP, linters) emit warnings but don't block.
+    fn check_tool_prerequisites(&self, plugin: &dyn perspt_core::plugin::LanguagePlugin) -> bool {
+        // Common OS tools that perspt uses for context retrieval and code manipulation
+        let common_tools: &[(&str, &str)] = &[
+            ("grep", "Install coreutils: brew install grep (macOS) or apt install grep (Linux)"),
+            ("sed", "Install coreutils: brew install gnu-sed (macOS) or apt install sed (Linux)"),
+            ("awk", "Install coreutils: brew install gawk (macOS) or apt install gawk (Linux)"),
+        ];
+
+        let mut missing_critical = Vec::new();
+        let mut missing_optional = Vec::new();
+        let mut install_instructions = Vec::new();
+
+        // Check common OS tools
+        for (binary, hint) in common_tools {
+            if !perspt_core::plugin::host_binary_available(binary) {
+                missing_optional.push((*binary, "OS utility"));
+                install_instructions.push(format!("  {} ({}): {}", binary, "OS utility", hint));
+            }
+        }
+
+        // Check language-specific tools
+        let required = plugin.required_binaries();
+        for (binary, role, hint) in &required {
+            if !perspt_core::plugin::host_binary_available(binary) {
+                // init and build tools are critical; LSP and linters are optional
+                if *role == "language server" || role.contains("lint") {
+                    missing_optional.push((*binary, role));
+                } else {
+                    missing_critical.push((*binary, role));
+                }
+                install_instructions.push(format!("  {} ({}): {}", binary, role, hint));
+            }
+        }
+
+        // Emit results
+        if !missing_critical.is_empty() {
+            let names: Vec<String> = missing_critical.iter().map(|(b, r)| format!("{} ({})", b, r)).collect();
+            self.emit_log(format!(
+                "🚫 Missing critical tools: {}",
+                names.join(", ")
+            ));
+        }
+        if !missing_optional.is_empty() {
+            let names: Vec<String> = missing_optional.iter().map(|(b, r)| format!("{} ({})", b, r)).collect();
+            self.emit_log(format!(
+                "⚠️ Missing optional tools (degraded mode): {}",
+                names.join(", ")
+            ));
+        }
+        if !install_instructions.is_empty() {
+            self.emit_log(format!(
+                "📋 Install instructions:\n{}",
+                install_instructions.join("\n")
+            ));
+        }
+
+        if missing_critical.is_empty() {
+            if missing_optional.is_empty() {
+                self.emit_log(format!("✅ All {} tools available", plugin.name()));
+            }
+            true
+        } else {
+            self.emit_log("❌ Cannot proceed with project initialization — install missing critical tools first.".to_string());
+            false
+        }
+    }
+
+    /// Uses the pre-computed `WorkspaceState` to branch between:
+    /// - ExistingProject: check tooling sync, gather context, never re-init.
+    /// - Greenfield: create isolated project dir, run language-native init.
+    /// - Ambiguous: create a child project dir to avoid polluting misc files.
     async fn step_init_project(&mut self, task: &str) -> Result<()> {
         let registry = perspt_core::plugin::PluginRegistry::new();
 
-        // 1. Check if project already exists
-        if let Some(plugin) = registry.detect(&self.context.working_dir) {
-            self.emit_log(format!("📂 Detected existing {} project", plugin.name()));
+        match self.context.workspace_state.clone() {
+            WorkspaceState::ExistingProject { ref plugins } => {
+                // Existing project — check tooling sync, never re-init
+                let plugin_name = plugins.first().map(|s| s.as_str()).unwrap_or("");
+                if let Some(plugin) = registry.get(plugin_name) {
+                    self.emit_log(format!("📂 Detected existing {} project", plugin.name()));
 
-            // For existing projects, check if tooling sync is needed
-            match plugin.check_tooling_action(&self.context.working_dir) {
-                perspt_core::plugin::ProjectAction::ExecCommand {
-                    command,
-                    description,
-                } => {
-                    self.emit_log(format!("🔧 Tooling action needed: {}", description));
+                    // Pre-flight: check required tools (non-blocking for existing projects)
+                    self.check_tool_prerequisites(plugin);
 
-                    // Request approval for tooling sync
-                    let approval_result = self
-                        .await_approval(
-                            perspt_core::ActionType::Command {
-                                command: command.clone(),
-                            },
-                            description.clone(),
-                            None,
-                        )
-                        .await;
+                    match plugin.check_tooling_action(&self.context.working_dir) {
+                        perspt_core::plugin::ProjectAction::ExecCommand {
+                            command,
+                            description,
+                        } => {
+                            self.emit_log(format!("🔧 Tooling action needed: {}", description));
 
-                    if matches!(
-                        approval_result,
-                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
-                    ) {
-                        let mut args = HashMap::new();
-                        args.insert("command".to_string(), command.clone());
-                        let call = ToolCall {
-                            name: "run_command".to_string(),
-                            arguments: args,
-                        };
-                        let result = self.tools.execute(&call).await;
-                        if result.success {
-                            self.emit_log(format!("✅ {}", description));
-                        } else {
-                            self.emit_log(format!("❌ Failed: {:?}", result.error));
+                            let approval_result = self
+                                .await_approval(
+                                    perspt_core::ActionType::Command {
+                                        command: command.clone(),
+                                    },
+                                    description.clone(),
+                                    None,
+                                )
+                                .await;
+
+                            if matches!(
+                                approval_result,
+                                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                            ) {
+                                let mut args = HashMap::new();
+                                args.insert("command".to_string(), command.clone());
+                                let call = ToolCall {
+                                    name: "run_command".to_string(),
+                                    arguments: args,
+                                };
+                                let result = self.tools.execute(&call).await;
+                                if result.success {
+                                    self.emit_log(format!("✅ {}", description));
+                                } else {
+                                    self.emit_log(format!("❌ Failed: {:?}", result.error));
+                                }
+                            }
+                        }
+                        perspt_core::plugin::ProjectAction::NoAction => {
+                            self.emit_log("✓ Project tooling is up to date".to_string());
                         }
                     }
                 }
-
-                perspt_core::plugin::ProjectAction::NoAction => {
-                    self.emit_log("✓ Project tooling is up to date");
-                }
             }
 
-            return Ok(());
-        }
-
-        // 2. If no project detected, heuristically detect language from task
-        let plugin_name = self.detect_language_from_task(task);
-
-        if let Some(name) = plugin_name {
-            // Check if this task actually requires a full project workspace/scaffold
-            if !self.check_workspace_requirement(task).await {
-                self.emit_log("ℹ️ Simple task detected, skipping project scaffolding.");
-                return Ok(());
-            }
-
-            if let Some(plugin) = registry.get(name) {
-                self.emit_log(format!("🌱 Initializing new {} project", name));
-
-                // Check if working directory is empty
-                let is_empty = std::fs::read_dir(&self.context.working_dir)
-                    .map(|mut i| i.next().is_none())
-                    .unwrap_or(true);
-
-                let project_name = if is_empty {
-                    ".".to_string() // Init in current directory
-                } else {
-                    // Suggest a meaningful project name from the task
-                    self.suggest_project_name(task).await
-                };
-
-                let opts = perspt_core::plugin::InitOptions {
-                    name: project_name.clone(),
-                    is_empty_dir: is_empty,
-                    ..Default::default()
-                };
-
-                // Use the new get_init_action method
-                match plugin.get_init_action(&opts) {
-                    perspt_core::plugin::ProjectAction::ExecCommand {
-                        command,
-                        description,
-                    } => {
-                        // Request approval for init with editable project name
-                        let result = self
-                            .await_approval(
-                                perspt_core::ActionType::ProjectInit {
-                                    command: command.clone(),
-                                    suggested_name: project_name.clone(),
-                                },
-                                description.clone(),
-                                None,
-                            )
-                            .await;
-
-                        // Determine final project name (may be edited by user)
-                        let final_name = match &result {
-                            ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
-                            _ => project_name.clone(),
-                        };
-
-                        if matches!(
-                            result,
-                            ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
-                        ) {
-                            // Regenerate command if name was edited
-                            let final_command = if final_name != project_name {
-                                let edited_opts = perspt_core::plugin::InitOptions {
-                                    name: final_name.clone(),
-                                    is_empty_dir: is_empty,
-                                    ..Default::default()
-                                };
-                                match plugin.get_init_action(&edited_opts) {
-                                    perspt_core::plugin::ProjectAction::ExecCommand {
-                                        command,
-                                        ..
-                                    } => command,
-                                    _ => command.clone(),
-                                }
-                            } else {
-                                command.clone()
-                            };
-
-                            // Run command
-                            let mut args = HashMap::new();
-                            args.insert("command".to_string(), final_command.clone());
-                            let call = ToolCall {
-                                name: "run_command".to_string(),
-                                arguments: args,
-                            };
-                            let result = self.tools.execute(&call).await;
-                            if result.success {
-                                self.emit_log(format!("✅ Project '{}' initialized", final_name));
-                            } else {
-                                self.emit_log(format!("❌ Init failed: {:?}", result.error));
+            WorkspaceState::Greenfield { ref inferred_lang } => {
+                let lang = match inferred_lang.as_deref() {
+                    Some(l) => l,
+                    None => {
+                        // Try to infer from task at init time
+                        match self.detect_language_from_task(task) {
+                            Some(l) => l,
+                            None => {
+                                self.emit_log("ℹ️ No language detected, skipping project init".to_string());
+                                return Ok(());
                             }
                         }
                     }
-                    perspt_core::plugin::ProjectAction::NoAction => {
-                        self.emit_log("ℹ️ No initialization action needed");
+                };
+
+                // Check if this task actually requires project scaffolding
+                if !self.check_workspace_requirement(task).await {
+                    self.emit_log("ℹ️ Simple task detected, skipping project scaffolding.".to_string());
+                    return Ok(());
+                }
+
+                if let Some(plugin) = registry.get(lang) {
+                    self.emit_log(format!("🌱 Initializing new {} project", lang));
+
+                    // Pre-flight: check required tools before attempting init
+                    if !self.check_tool_prerequisites(plugin) {
+                        return Ok(());
+                    }
+
+                    // Determine if working directory is empty
+                    let is_empty = std::fs::read_dir(&self.context.working_dir)
+                        .map(|mut i| i.next().is_none())
+                        .unwrap_or(true);
+
+                    // Isolation: if dir is non-empty, create a child directory
+                    // to avoid polluting existing files.
+                    let project_name = if is_empty {
+                        ".".to_string()
+                    } else {
+                        self.suggest_project_name(task).await
+                    };
+
+                    let opts = perspt_core::plugin::InitOptions {
+                        name: project_name.clone(),
+                        is_empty_dir: is_empty,
+                        ..Default::default()
+                    };
+
+                    match plugin.get_init_action(&opts) {
+                        perspt_core::plugin::ProjectAction::ExecCommand {
+                            command,
+                            description,
+                        } => {
+                            let result = self
+                                .await_approval(
+                                    perspt_core::ActionType::ProjectInit {
+                                        command: command.clone(),
+                                        suggested_name: project_name.clone(),
+                                    },
+                                    description.clone(),
+                                    None,
+                                )
+                                .await;
+
+                            let final_name = match &result {
+                                ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
+                                _ => project_name.clone(),
+                            };
+
+                            if matches!(
+                                result,
+                                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                            ) {
+                                let final_command = if final_name != project_name {
+                                    let edited_opts = perspt_core::plugin::InitOptions {
+                                        name: final_name.clone(),
+                                        is_empty_dir: is_empty,
+                                        ..Default::default()
+                                    };
+                                    match plugin.get_init_action(&edited_opts) {
+                                        perspt_core::plugin::ProjectAction::ExecCommand {
+                                            command,
+                                            ..
+                                        } => command,
+                                        _ => command.clone(),
+                                    }
+                                } else {
+                                    command.clone()
+                                };
+
+                                let mut args = HashMap::new();
+                                args.insert("command".to_string(), final_command.clone());
+                                let call = ToolCall {
+                                    name: "run_command".to_string(),
+                                    arguments: args,
+                                };
+                                let exec_result = self.tools.execute(&call).await;
+                                if exec_result.success {
+                                    self.emit_log(format!(
+                                        "✅ Project '{}' initialized",
+                                        final_name
+                                    ));
+
+                                    // Update working directory to point at the
+                                    // isolated project root if we created a child dir.
+                                    if final_name != "." {
+                                        let new_dir =
+                                            self.context.working_dir.join(&final_name);
+                                        if new_dir.is_dir() {
+                                            self.context.working_dir = new_dir.clone();
+                                            self.tools =
+                                                AgentTools::new(new_dir, !self.auto_approve);
+                                            if let Some(ref sender) = self.event_sender {
+                                                self.tools.set_event_sender(sender.clone());
+                                            }
+                                            self.emit_log(format!(
+                                                "📁 Working directory: {}",
+                                                self.context.working_dir.display()
+                                            ));
+                                        }
+                                    }
+                                } else {
+                                    self.emit_log(format!(
+                                        "❌ Init failed: {:?}",
+                                        exec_result.error
+                                    ));
+                                }
+                            }
+                        }
+                        perspt_core::plugin::ProjectAction::NoAction => {
+                            self.emit_log("ℹ️ No initialization action needed".to_string());
+                        }
                     }
                 }
             }
-        } else {
-            self.emit_log("ℹ️ No language detected, skipping project init");
+
+            WorkspaceState::Ambiguous => {
+                // Ambiguous workspace — try to infer language and create a child
+                // project directory rather than initializing in place.
+                if let Some(lang) = self.detect_language_from_task(task) {
+                    if !self.check_workspace_requirement(task).await {
+                        self.emit_log("ℹ️ Simple task detected, skipping project scaffolding.".to_string());
+                        return Ok(());
+                    }
+
+                    if let Some(plugin) = registry.get(lang) {
+                        let project_name = self.suggest_project_name(task).await;
+                        self.emit_log(format!(
+                            "🌱 Ambiguous workspace — creating isolated {} project '{}'",
+                            lang, project_name
+                        ));
+
+                        // Pre-flight: check required tools before attempting init
+                        if !self.check_tool_prerequisites(plugin) {
+                            return Ok(());
+                        }
+
+                        let opts = perspt_core::plugin::InitOptions {
+                            name: project_name.clone(),
+                            is_empty_dir: false,
+                            ..Default::default()
+                        };
+
+                        match plugin.get_init_action(&opts) {
+                            perspt_core::plugin::ProjectAction::ExecCommand {
+                                command,
+                                description,
+                            } => {
+                                let result = self
+                                    .await_approval(
+                                        perspt_core::ActionType::ProjectInit {
+                                            command: command.clone(),
+                                            suggested_name: project_name.clone(),
+                                        },
+                                        description.clone(),
+                                        None,
+                                    )
+                                    .await;
+
+                                let final_name = match &result {
+                                    ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
+                                    _ => project_name.clone(),
+                                };
+
+                                if matches!(
+                                    result,
+                                    ApprovalResult::Approved
+                                        | ApprovalResult::ApprovedWithEdit(_)
+                                ) {
+                                    let final_command = if final_name != project_name {
+                                        let edited_opts = perspt_core::plugin::InitOptions {
+                                            name: final_name.clone(),
+                                            is_empty_dir: false,
+                                            ..Default::default()
+                                        };
+                                        match plugin.get_init_action(&edited_opts) {
+                                            perspt_core::plugin::ProjectAction::ExecCommand {
+                                                command,
+                                                ..
+                                            } => command,
+                                            _ => command.clone(),
+                                        }
+                                    } else {
+                                        command.clone()
+                                    };
+
+                                    let mut args = HashMap::new();
+                                    args.insert("command".to_string(), final_command.clone());
+                                    let call = ToolCall {
+                                        name: "run_command".to_string(),
+                                        arguments: args,
+                                    };
+                                    let exec_result = self.tools.execute(&call).await;
+                                    if exec_result.success {
+                                        self.emit_log(format!(
+                                            "✅ Project '{}' initialized",
+                                            final_name
+                                        ));
+
+                                        let new_dir =
+                                            self.context.working_dir.join(&final_name);
+                                        if new_dir.is_dir() {
+                                            self.context.working_dir = new_dir.clone();
+                                            self.tools =
+                                                AgentTools::new(new_dir, !self.auto_approve);
+                                            if let Some(ref sender) = self.event_sender {
+                                                self.tools.set_event_sender(sender.clone());
+                                            }
+                                            self.emit_log(format!(
+                                                "📁 Working directory: {}",
+                                                self.context.working_dir.display()
+                                            ));
+                                        }
+                                    } else {
+                                        self.emit_log(format!(
+                                            "❌ Init failed: {:?}",
+                                            exec_result.error
+                                        ));
+                                    }
+                                }
+                            }
+                            perspt_core::plugin::ProjectAction::NoAction => {
+                                self.emit_log(
+                                    "ℹ️ No initialization action needed".to_string(),
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    self.emit_log(
+                        "ℹ️ Ambiguous workspace and no language detected, skipping project init"
+                            .to_string(),
+                    );
+                }
+            }
         }
 
         Ok(())
@@ -1044,6 +1303,140 @@ impl SRBNOrchestrator {
         // Default: Project mode for everything else
         log::debug!("Defaulting to Project Mode (PSP-5)");
         perspt_core::types::ExecutionMode::Project
+    }
+
+    /// PSP-5: Classify the workspace as existing project, greenfield, or ambiguous.
+    ///
+    /// This is the single source of truth that drives init/bootstrap/context
+    /// strategy for the session. Called once at the start of `run()`.
+    fn classify_workspace(&self, task: &str) -> WorkspaceState {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let detected: Vec<String> = registry
+            .detect_all(&self.context.working_dir)
+            .iter()
+            .map(|p| p.name().to_string())
+            .collect();
+
+        if !detected.is_empty() {
+            return WorkspaceState::ExistingProject { plugins: detected };
+        }
+
+        // No project metadata found — check if we can infer language from task
+        let inferred = self.detect_language_from_task(task).map(|s| s.to_string());
+
+        if inferred.is_some() {
+            return WorkspaceState::Greenfield {
+                inferred_lang: inferred,
+            };
+        }
+
+        // Check if directory is empty (empty dirs are greenfield with unknown lang)
+        let is_empty = std::fs::read_dir(&self.context.working_dir)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(true);
+
+        if is_empty {
+            return WorkspaceState::Greenfield {
+                inferred_lang: None,
+            };
+        }
+
+        // Has files but no project metadata and no language inferred
+        WorkspaceState::Ambiguous
+    }
+
+    /// Probe verifier readiness for active plugins and emit `ToolReadiness` event.
+    ///
+    /// Reads `self.context.active_plugins` and emits available/degraded stage
+    /// info so TUI/headless surfaces know which verification stages are ready.
+    fn emit_plugin_readiness(&self) {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let mut plugin_readiness = Vec::new();
+
+        for plugin_name in &self.context.active_plugins {
+            if let Some(plugin) = registry.get(plugin_name) {
+                let profile = plugin.verifier_profile();
+                let available: Vec<String> = profile
+                    .capabilities
+                    .iter()
+                    .filter(|c| c.available)
+                    .map(|c| c.stage.to_string())
+                    .collect();
+                let degraded: Vec<String> = profile
+                    .capabilities
+                    .iter()
+                    .filter(|c| !c.available && c.fallback_available)
+                    .map(|c| format!("{} (fallback)", c.stage))
+                    .chain(
+                        profile
+                            .capabilities
+                            .iter()
+                            .filter(|c| !c.any_available())
+                            .map(|c| format!("{} (unavailable)", c.stage)),
+                    )
+                    .collect();
+                let lsp_status = if profile.lsp.primary_available {
+                    format!("{} (primary)", profile.lsp.primary.server_binary)
+                } else if profile.lsp.fallback_available {
+                    profile
+                        .lsp
+                        .fallback
+                        .as_ref()
+                        .map(|f| format!("{} (fallback)", f.server_binary))
+                        .unwrap_or_else(|| "fallback".to_string())
+                } else {
+                    "unavailable".to_string()
+                };
+
+                if !degraded.is_empty() {
+                    self.emit_log(format!(
+                        "⚠️ Plugin '{}' degraded: {}",
+                        plugin_name,
+                        degraded.join(", ")
+                    ));
+                }
+
+                plugin_readiness.push(perspt_core::events::PluginReadiness {
+                    plugin_name: plugin_name.clone(),
+                    available_stages: available,
+                    degraded_stages: degraded,
+                    lsp_status,
+                });
+            }
+        }
+
+        self.emit_event_ref(perspt_core::AgentEvent::ToolReadiness {
+            plugins: plugin_readiness,
+            strictness: format!("{:?}", self.context.verifier_strictness),
+        });
+    }
+
+    /// Re-detect plugins after greenfield project initialization.
+    ///
+    /// Updates `self.context.active_plugins` and `workspace_state`, then
+    /// emits plugin readiness so the verifier stack matches the new project.
+    fn redetect_plugins_after_init(&mut self) {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let detected: Vec<String> = registry
+            .detect_all(&self.context.working_dir)
+            .iter()
+            .map(|p| p.name().to_string())
+            .collect();
+
+        if !detected.is_empty() {
+            self.emit_log(format!(
+                "🔌 Post-init plugins: {}",
+                detected.join(", ")
+            ));
+            self.context.active_plugins = detected.clone();
+            self.context.workspace_state = WorkspaceState::ExistingProject {
+                plugins: detected,
+            };
+        } else {
+            self.emit_log("⚠️ No plugins detected after project init".to_string());
+        }
+
+        self.emit_plugin_readiness();
     }
 
     /// Run Solo Mode: A tight loop for single-file tasks
@@ -1730,7 +2123,21 @@ Project name:"#,
     /// PSP-5 Fix F: Delegates to `ArchitectAgent::build_task_decomposition_prompt`
     /// so the JSON schema contract lives in one place.
     fn build_architect_prompt(&self, task: &str, last_error: Option<&str>) -> Result<String> {
-        let project_context = self.gather_project_context();
+        let mut project_context = self.gather_project_context();
+
+        // PSP-5: For existing projects, prepend a structured project summary
+        // so the architect respects existing structure rather than scaffolding.
+        if matches!(
+            self.context.workspace_state,
+            WorkspaceState::ExistingProject { .. }
+        ) {
+            let retriever = ContextRetriever::new(self.context.working_dir.clone());
+            let summary = retriever.get_project_summary();
+            if !summary.is_empty() {
+                project_context = format!("{}\n\n{}", summary, project_context);
+            }
+        }
+
         Ok(crate::agent::ArchitectAgent::build_task_decomposition_prompt(
             task,
             &self.context.working_dir,
@@ -2030,6 +2437,20 @@ Project name:"#,
 
             if let Err(e) = self.ledger.record_escalation_report(&report) {
                 log::warn!("Failed to persist escalation report: {}", e);
+            }
+
+            // PSP-5 Phase 9: Also persist artifact bundle on escalation path
+            if let Some(bundle) = self.last_applied_bundle.take() {
+                if let Err(e) = self
+                    .ledger
+                    .record_artifact_bundle(&self.graph[idx].node_id, &bundle)
+                {
+                    log::warn!(
+                        "Failed to persist artifact bundle on escalation for {}: {}",
+                        self.graph[idx].node_id,
+                        e
+                    );
+                }
             }
 
             self.emit_event(perspt_core::AgentEvent::EscalationClassified {
@@ -2373,11 +2794,63 @@ Project name:"#,
                 .await?;
             self.last_tool_failure = None;
 
+            // PSP-5 Phase 9: Store bundle for persistence in step_commit
+            self.last_applied_bundle = Some(bundle.clone());
+
+            // PSP-5 Phase 9: Execute post-write commands from the bundle
             if !bundle.commands.is_empty() {
                 self.emit_log(format!(
-                    "ℹ️ Bundle included {} post-write command(s); command execution is not yet wired into project-mode bundle application",
+                    "🔧 Executing {} bundle command(s)...",
                     bundle.commands.len()
                 ));
+                let work_dir = self.effective_working_dir(idx);
+                for command in &bundle.commands {
+                    // Request approval for each command (respects --yes auto-approve)
+                    let cmd_approval = self
+                        .await_approval_for_node(
+                            perspt_core::ActionType::Command {
+                                command: command.clone(),
+                            },
+                            format!("Execute bundle command: {}", command),
+                            None,
+                            Some(&node_id),
+                        )
+                        .await;
+
+                    if !matches!(
+                        cmd_approval,
+                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                    ) {
+                        self.emit_log(format!("⏭️ Bundle command skipped (not approved): {}", command));
+                        continue;
+                    }
+
+                    let mut args = HashMap::new();
+                    args.insert("command".to_string(), command.clone());
+                    args.insert("working_dir".to_string(), work_dir.to_string_lossy().to_string());
+
+                    let call = ToolCall {
+                        name: "run_command".to_string(),
+                        arguments: args,
+                    };
+
+                    let result = self.tools.execute(&call).await;
+                    if result.success {
+                        log::info!("✓ Bundle command succeeded: {}", command);
+                        self.emit_log(format!("✅ {}", command));
+                        if !result.output.is_empty() {
+                            // Truncate verbose output for log
+                            let truncated: String = result.output.chars().take(500).collect();
+                            self.emit_log(truncated);
+                        }
+                    } else {
+                        let err_msg = result.error.unwrap_or_else(|| result.output.clone());
+                        log::warn!("Bundle command failed: {} — {}", command, err_msg);
+                        self.emit_log(format!("❌ Command failed: {} — {}", command, err_msg));
+                        // Record as tool failure so step_verify picks it up via V_syn
+                        self.last_tool_failure = Some(format!("Bundle command '{}' failed: {}", command, err_msg));
+                    }
+                }
             }
         } else {
             log::debug!(
@@ -2475,13 +2948,28 @@ Project name:"#,
                 if !code_lines.is_empty() {
                     let code = code_lines.join("\n");
                     // Generate filename from language if not found
-                    let filename = file_path
-                        .clone()
-                        .unwrap_or_else(|| match code_lang.as_str() {
+                    let filename = match file_path.clone() {
+                        Some(p) => p,
+                        None => match code_lang.as_str() {
                             "python" | "py" => "main.py".to_string(),
                             "rust" | "rs" => "main.rs".to_string(),
-                            _ => "output.txt".to_string(),
-                        });
+                            "javascript" | "js" => "index.js".to_string(),
+                            "typescript" | "ts" => "index.ts".to_string(),
+                            "toml" => "Cargo.toml".to_string(),
+                            "json" => "config.json".to_string(),
+                            "yaml" | "yml" => "config.yaml".to_string(),
+                            other => {
+                                log::warn!(
+                                    "Skipping unnamed code block with unrecognized language tag '{}'",
+                                    other
+                                );
+                                code_lines.clear();
+                                file_path = None;
+                                code_lang.clear();
+                                continue;
+                            }
+                        },
+                    };
                     // Check if it's a diff
                     let is_diff = code_lang == "diff"
                         || code.starts_with("---")
@@ -2594,78 +3082,109 @@ Project name:"#,
                 }
             }
 
-            // V_log: Run tests and calculate logic energy
-            // Skip tests if defer_tests is enabled (will run at sheaf validation)
+            // PSP-5 Phase 9: Universal plugin verification for all node classes.
+            // Replaces the old weighted-test-only block that only ran for Integration nodes.
             let node = &self.graph[idx];
             if self.context.defer_tests {
                 self.emit_log("⏭️ Tests deferred (--defer-tests enabled)".to_string());
-            } else if !node.contract.weighted_tests.is_empty()
-                && should_run_weighted_tests_for_node(node)
-            {
-                // PSP-5 Phase 4: select runner by the node's owner plugin
-                // PSP-5 Phase 6: use sandbox directory for speculative nodes
-                let plugin_name = &node.owner_plugin;
+            } else {
+                let plugin_name = node.owner_plugin.clone();
                 let verify_dir = self.effective_working_dir(idx);
-                let registry = perspt_core::plugin::PluginRegistry::new();
-                let runner: Box<dyn TestRunnerTrait> =
-                    if let Some(plugin) = registry.get(plugin_name) {
-                        let profile = plugin.verifier_profile();
-                        self.emit_log(format!("🧪 Running tests via {} plugin...", plugin.name()));
-                        test_runner::test_runner_for_profile(profile, verify_dir.clone())
-                    } else {
-                        self.emit_log("🧪 Running tests (fallback Python runner)...".to_string());
-                        Box::new(PythonTestRunner::new(verify_dir.clone()))
-                    };
+                let stages = verification_stages_for_node(node);
 
-                match runner.run_tests().await {
-                    Ok(results) => {
-                        // V_log calculation still uses PythonTestRunner's method for
-                        // weighted-test matching. This is language-agnostic since it
-                        // only inspects failure names vs. contract weighted_tests.
-                        let py_runner = PythonTestRunner::new(verify_dir);
-                        energy.v_log = py_runner.calculate_v_log(&results, &node.contract);
+                if !stages.is_empty() && !plugin_name.is_empty() && plugin_name != "unknown" {
+                    self.emit_log(format!(
+                        "🔬 Running verification ({} stages) for {} node '{}'...",
+                        stages.len(),
+                        node.node_class,
+                        node.node_id
+                    ));
 
-                        if results.all_passed() {
-                            self.emit_log(format!(
-                                "✅ Tests passed: {}/{}",
-                                results.passed, results.total
-                            ));
-                        } else {
-                            self.emit_log(format!(
-                                "❌ Tests failed: {} passed, {} failed",
-                                results.passed, results.failed
-                            ));
+                    let mut vr = self
+                        .run_plugin_verification(&plugin_name, &stages, verify_dir.clone())
+                        .await;
 
-                            // Store test failures for correction prompt
-                            for failure in &results.failures {
+                    // Auto-dependency repair: if syntax/build failed, check if the
+                    // root cause is missing crate dependencies and auto-install them.
+                    if !vr.syntax_ok || !vr.build_ok {
+                        if let Some(ref raw) = vr.raw_output {
+                            let missing = Self::extract_missing_crates(raw);
+                            if !missing.is_empty() {
                                 self.emit_log(format!(
-                                    "   - {} in {:?}: {}",
-                                    failure.name, failure.file, failure.message
+                                    "📦 Auto-installing missing dependencies: {}",
+                                    missing.join(", ")
                                 ));
+                                let dep_ok = Self::auto_install_crate_deps(
+                                    &missing,
+                                    &verify_dir,
+                                ).await;
+                                if dep_ok > 0 {
+                                    self.emit_log(format!(
+                                        "📦 Installed {} crate(s), re-running verification...",
+                                        dep_ok
+                                    ));
+                                    // Re-run verification now that deps are installed
+                                    vr = self
+                                        .run_plugin_verification(
+                                            &plugin_name,
+                                            &stages,
+                                            verify_dir.clone(),
+                                        )
+                                        .await;
+                                }
                             }
-
-                            // Store test output in context for correction prompt
-                            self.context.last_test_output = Some(results.output.clone());
                         }
+                    }
 
-                        log::info!(
-                            "Test results: {}/{} passed, V_log={:.2}",
-                            results.passed,
-                            results.total,
-                            energy.v_log
-                        );
+                    // Map verification result to energy components:
+                    // - Syntax fail → V_syn (cap at 5.0, don't override tool-failure 10.0)
+                    if !vr.syntax_ok && energy.v_syn < 5.0 {
+                        energy.v_syn = 5.0;
                     }
-                    Err(e) => {
-                        log::warn!("Failed to run tests: {}", e);
-                        self.emit_log(format!("⚠️ Test execution failed: {}", e));
-                        // Don't fail the verification, just log the error
+                    // - Build fail → V_syn (cap at 8.0, don't override higher)
+                    if !vr.build_ok && energy.v_syn < 8.0 {
+                        energy.v_syn = 8.0;
                     }
+                    // - Test fail → V_log (weighted calculation)
+                    if !vr.tests_ok && vr.tests_failed > 0 {
+                        let node = &self.graph[idx];
+                        if !node.contract.weighted_tests.is_empty() {
+                            // Use weighted test calculation if contract has weights
+                            let py_runner = PythonTestRunner::new(verify_dir);
+                            let test_results = TestResults {
+                                passed: vr.tests_passed,
+                                failed: vr.tests_failed,
+                                total: vr.tests_passed + vr.tests_failed,
+                                output: vr.raw_output.clone().unwrap_or_default(),
+                                failures: Vec::new(),
+                                run_succeeded: true,
+                                skipped: 0,
+                                duration_ms: 0,
+                            };
+                            energy.v_log = py_runner.calculate_v_log(&test_results, &node.contract);
+                        } else {
+                            // Simple: proportion of failures
+                            let total = (vr.tests_passed + vr.tests_failed) as f32;
+                            if total > 0.0 {
+                                energy.v_log = (vr.tests_failed as f32 / total) * 10.0;
+                            }
+                        }
+                    }
+                    // - Lint fail → V_str penalty
+                    if !vr.lint_ok
+                        && self.context.verifier_strictness
+                            == perspt_core::types::VerifierStrictness::Strict
+                    {
+                        energy.v_str += 0.3;
+                    }
+
+                    // D1: Feed raw output into correction context
+                    if let Some(ref raw) = vr.raw_output {
+                        self.context.last_test_output = Some(raw.clone());
+                    }
+
+                    self.emit_log(format!("📊 Verification: {}", vr.summary));
                 }
-            } else if !node.contract.weighted_tests.is_empty() {
-                self.emit_log(format!(
-                    "⏭️ Skipping weighted tests for {} node '{}' until integration/test phase",
-                    node.node_class, node.node_id
-                ));
             }
         }
 
@@ -2903,6 +3422,42 @@ Project name:"#,
             }
         }
 
+        // Extract and execute any dependency commands from the correction response
+        let correction_cmds = Self::extract_commands_from_correction(&corrected);
+        if !correction_cmds.is_empty() {
+            self.emit_log(format!(
+                "📦 Running {} dependency command(s) from correction...",
+                correction_cmds.len()
+            ));
+            let work_dir = self.effective_working_dir(idx);
+            for cmd in &correction_cmds {
+                log::info!("Running correction command: {}", cmd);
+                let parts: Vec<&str> = cmd.split_whitespace().collect();
+                if parts.is_empty() {
+                    continue;
+                }
+                let output = tokio::process::Command::new(parts[0])
+                    .args(&parts[1..])
+                    .current_dir(&work_dir)
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .output()
+                    .await;
+                match output {
+                    Ok(o) if o.status.success() => {
+                        self.emit_log(format!("✅ {}", cmd));
+                    }
+                    Ok(o) => {
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        log::warn!("Command failed: {} — {}", cmd, stderr);
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to run command: {} — {}", cmd, e);
+                    }
+                }
+            }
+        }
+
         // Re-verify (recursive correction loop)
         let new_energy = self.step_verify(idx).await?;
         Box::pin(self.step_converge(idx, new_energy)).await
@@ -3015,6 +3570,25 @@ File: {}
             ));
         }
 
+        // Include raw build/test output from plugin verification if available.
+        // This is crucial because LSP diagnostics may not report missing crate
+        // errors that `cargo check` / `cargo build` would catch.
+        if let Some(ref test_output) = self.context.last_test_output {
+            if !test_output.is_empty() {
+                // Truncate to avoid blowing up the prompt
+                let truncated = if test_output.len() > 3000 {
+                    &test_output[..3000]
+                } else {
+                    test_output.as_str()
+                };
+                prompt.push_str(&format!(
+                    "\n### Build / Test Output\nThe following is the raw output from the build toolchain (e.g. `cargo check` / `cargo build`). \
+                     Use this to identify missing dependencies, unresolved imports, or type errors:\n```\n{}\n```\n",
+                    truncated
+                ));
+            }
+        }
+
         prompt.push_str(&format!(
             r#"
 ### Fix Requirements
@@ -3023,13 +3597,20 @@ File: {}
 3. Follow {} language conventions and idioms
 4. Import any missing modules or dependencies
 5. Return the COMPLETE corrected file, not just snippets
+6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency), list the required install commands
 
 ### Output Format
-Provide the complete corrected file:
+Provide the complete corrected file followed by any dependency commands needed:
 
 File: [same filename]
 ```{}
 [complete corrected code]
+```
+
+Commands: [optional, one per line]
+```
+cargo add thiserror
+cargo add clap --features derive
 ```
 "#,
             lang, lang
@@ -3043,7 +3624,11 @@ File: [same filename]
         let msg = diag.message.to_lowercase();
 
         if msg.contains("undefined") || msg.contains("unresolved") || msg.contains("not defined") {
-            "Define the missing variable/function, or import it from the correct module".into()
+            if msg.contains("crate") || msg.contains("module") {
+                "The crate may not be in Cargo.toml. Add it with `cargo add <crate>` in the Commands section, or use `crate::` for intra-crate imports".into()
+            } else {
+                "Define the missing variable/function, or import it from the correct module".into()
+            }
         } else if msg.contains("type") && (msg.contains("expected") || msg.contains("incompatible"))
         {
             "Change the value or add a type conversion to match the expected type".into()
@@ -3197,22 +3782,14 @@ File: [same filename]
         let fallback = match tier {
             ModelTier::Architect => self.architect_fallback_model.as_deref(),
             ModelTier::Actuator => self.actuator_fallback_model.as_deref(),
-            // Verifier and Speculator share the actuator fallback if any
-            _ => self.actuator_fallback_model.as_deref(),
+            ModelTier::Verifier => self.verifier_fallback_model.as_deref(),
+            ModelTier::Speculator => self.speculator_fallback_model.as_deref(),
         };
 
-        let fallback_model = match fallback {
-            Some(m) => m,
-            None => {
-                // No fallback configured — return the original response and let
-                // downstream parsing handle the error
-                log::warn!(
-                    "No fallback model configured for {:?} tier; returning primary response",
-                    tier
-                );
-                return Ok(response);
-            }
-        };
+        // If no explicit fallback configured, retry with the same primary model.
+        // This gives the LLM a second chance at structured output without
+        // requiring explicit fallback config for every tier.
+        let fallback_model = fallback.unwrap_or(primary_model);
 
         log::info!(
             "Falling back to model '{}' for {:?} tier",
@@ -3372,7 +3949,11 @@ File: [same filename]
             if !vr.build_ok {
                 validators.push(SheafValidatorClass::BuildGraphConsistency);
             }
-            if !vr.tests_ok {
+            // Only check test ownership when tests actually ran and failed
+            // (tests_failed > 0), not when tests were skipped due to
+            // syntax/build short-circuit (which leaves tests_ok = false
+            // with tests_failed = 0).
+            if !vr.tests_ok && vr.tests_failed > 0 {
                 validators.push(SheafValidatorClass::TestOwnershipConsistency);
             }
         }
@@ -3586,6 +4167,20 @@ File: [same filename]
                         e
                     )
                 })?;
+        }
+
+        // PSP-5 Phase 9: Persist artifact bundle if one was applied for this node
+        if let Some(bundle) = self.last_applied_bundle.take() {
+            if let Err(e) = self
+                .ledger
+                .record_artifact_bundle(&self.graph[idx].node_id, &bundle)
+            {
+                log::warn!(
+                    "Failed to persist artifact bundle for {}: {}",
+                    self.graph[idx].node_id,
+                    e
+                );
+            }
         }
 
         // PSP-5 Phase 8: Persist full node snapshot via the rich commit API.
@@ -4691,6 +5286,8 @@ File: [same filename]
     pub async fn run_plugin_verification(
         &mut self,
         plugin_name: &str,
+        allowed_stages: &[perspt_core::plugin::VerifierStage],
+        working_dir: std::path::PathBuf,
     ) -> perspt_core::types::VerificationResult {
         use perspt_core::plugin::VerifierStage;
         use perspt_core::types::{SensorStatus, StageOutcome};
@@ -4750,112 +5347,141 @@ File: [same filename]
         let test_sensor = sensor_status_for(VerifierStage::Test, &profile);
         let lint_sensor = sensor_status_for(VerifierStage::Lint, &profile);
 
-        let working_dir = self.context.working_dir.clone();
         let runner = test_runner::test_runner_for_profile(profile, working_dir);
 
         let mut result = perspt_core::types::VerificationResult::default();
 
+        // PSP-5 Phase 9: Only run stages that are in the allowed filter.
+        // Short-circuit: if syntax fails, skip build/test/lint.
+        //                if build fails, skip test/lint.
+
         // Syntax check
-        match runner.run_syntax_check().await {
-            Ok(r) => {
-                result.syntax_ok = r.passed > 0 && r.failed == 0;
-                if !result.syntax_ok && r.run_succeeded {
-                    result.diagnostics_count = r.output.lines().count();
-                    result.raw_output = Some(r.output.clone());
-                    self.emit_log(format!(
-                        "⚠️ Syntax check failed ({} diagnostics)",
-                        result.diagnostics_count
-                    ));
-                } else if result.syntax_ok {
-                    self.emit_log("✅ Syntax check passed".to_string());
+        if allowed_stages.contains(&VerifierStage::SyntaxCheck) {
+            match runner.run_syntax_check().await {
+                Ok(r) => {
+                    result.syntax_ok = r.passed > 0 && r.failed == 0;
+                    if !result.syntax_ok && r.run_succeeded {
+                        result.diagnostics_count = r.output.lines().count();
+                        result.raw_output = Some(r.output.clone());
+                        self.emit_log(format!(
+                            "⚠️ Syntax check failed ({} diagnostics)",
+                            result.diagnostics_count
+                        ));
+                    } else if result.syntax_ok {
+                        self.emit_log("✅ Syntax check passed".to_string());
+                    }
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::SyntaxCheck.to_string(),
+                        passed: result.syntax_ok,
+                        sensor_status: syn_sensor,
+                        output: Some(r.output),
+                    });
                 }
-                result.stage_outcomes.push(StageOutcome {
-                    stage: VerifierStage::SyntaxCheck.to_string(),
-                    passed: result.syntax_ok,
-                    sensor_status: syn_sensor,
-                    output: Some(r.output),
-                });
+                Err(e) => {
+                    log::warn!("Syntax check failed to run: {}", e);
+                    result.syntax_ok = false;
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::SyntaxCheck.to_string(),
+                        passed: false,
+                        sensor_status: SensorStatus::Unavailable {
+                            reason: format!("execution error: {}", e),
+                        },
+                        output: None,
+                    });
+                }
             }
-            Err(e) => {
-                log::warn!("Syntax check failed to run: {}", e);
-                result.syntax_ok = false;
-                result.stage_outcomes.push(StageOutcome {
-                    stage: VerifierStage::SyntaxCheck.to_string(),
-                    passed: false,
-                    sensor_status: SensorStatus::Unavailable {
-                        reason: format!("execution error: {}", e),
-                    },
-                    output: None,
-                });
+
+            // Short-circuit: if syntax fails, skip remaining stages
+            if !result.syntax_ok {
+                self.emit_log("⏭️ Skipping build/test/lint — syntax check failed".to_string());
+                result.build_ok = false;
+                result.tests_ok = false;
+                self.finalize_verification_result(&mut result, plugin_name);
+                return result;
             }
         }
 
         // Build check
-        match runner.run_build_check().await {
-            Ok(r) => {
-                result.build_ok = r.passed > 0 && r.failed == 0;
-                if result.build_ok {
-                    self.emit_log("✅ Build passed".to_string());
-                } else if r.run_succeeded {
-                    self.emit_log("⚠️ Build failed".to_string());
+        if allowed_stages.contains(&VerifierStage::Build) {
+            match runner.run_build_check().await {
+                Ok(r) => {
+                    result.build_ok = r.passed > 0 && r.failed == 0;
+                    if result.build_ok {
+                        self.emit_log("✅ Build passed".to_string());
+                    } else if r.run_succeeded {
+                        self.emit_log("⚠️ Build failed".to_string());
+                        result.raw_output = Some(r.output.clone());
+                    }
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::Build.to_string(),
+                        passed: result.build_ok,
+                        sensor_status: build_sensor,
+                        output: Some(r.output),
+                    });
                 }
-                result.stage_outcomes.push(StageOutcome {
-                    stage: VerifierStage::Build.to_string(),
-                    passed: result.build_ok,
-                    sensor_status: build_sensor,
-                    output: Some(r.output),
-                });
+                Err(e) => {
+                    log::warn!("Build check failed to run: {}", e);
+                    result.build_ok = false;
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::Build.to_string(),
+                        passed: false,
+                        sensor_status: SensorStatus::Unavailable {
+                            reason: format!("execution error: {}", e),
+                        },
+                        output: None,
+                    });
+                }
             }
-            Err(e) => {
-                log::warn!("Build check failed to run: {}", e);
-                result.build_ok = false;
-                result.stage_outcomes.push(StageOutcome {
-                    stage: VerifierStage::Build.to_string(),
-                    passed: false,
-                    sensor_status: SensorStatus::Unavailable {
-                        reason: format!("execution error: {}", e),
-                    },
-                    output: None,
-                });
+
+            // Short-circuit: if build fails, skip test/lint
+            if !result.build_ok {
+                self.emit_log("⏭️ Skipping test/lint — build failed".to_string());
+                result.tests_ok = false;
+                self.finalize_verification_result(&mut result, plugin_name);
+                return result;
             }
         }
 
         // Tests
-        match runner.run_tests().await {
-            Ok(r) => {
-                result.tests_ok = r.all_passed();
-                result.tests_passed = r.passed;
-                result.tests_failed = r.failed;
+        if allowed_stages.contains(&VerifierStage::Test) {
+            match runner.run_tests().await {
+                Ok(r) => {
+                    result.tests_ok = r.all_passed();
+                    result.tests_passed = r.passed;
+                    result.tests_failed = r.failed;
 
-                if result.tests_ok {
-                    self.emit_log(format!("✅ Tests passed ({})", plugin_name));
-                } else {
-                    self.emit_log(format!("❌ Tests failed ({})", plugin_name));
-                    result.raw_output = Some(r.output.clone());
+                    if result.tests_ok {
+                        self.emit_log(format!("✅ Tests passed ({})", plugin_name));
+                    } else {
+                        self.emit_log(format!("❌ Tests failed ({})", plugin_name));
+                        result.raw_output = Some(r.output.clone());
+                    }
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::Test.to_string(),
+                        passed: result.tests_ok,
+                        sensor_status: test_sensor,
+                        output: Some(r.output),
+                    });
                 }
-                result.stage_outcomes.push(StageOutcome {
-                    stage: VerifierStage::Test.to_string(),
-                    passed: result.tests_ok,
-                    sensor_status: test_sensor,
-                    output: Some(r.output),
-                });
-            }
-            Err(e) => {
-                log::warn!("Test command failed to run: {}", e);
-                result.tests_ok = false;
-                result.stage_outcomes.push(StageOutcome {
-                    stage: VerifierStage::Test.to_string(),
-                    passed: false,
-                    sensor_status: SensorStatus::Unavailable {
-                        reason: format!("execution error: {}", e),
-                    },
-                    output: None,
-                });
+                Err(e) => {
+                    log::warn!("Test command failed to run: {}", e);
+                    result.tests_ok = false;
+                    result.stage_outcomes.push(StageOutcome {
+                        stage: VerifierStage::Test.to_string(),
+                        passed: false,
+                        sensor_status: SensorStatus::Unavailable {
+                            reason: format!("execution error: {}", e),
+                        },
+                        output: None,
+                    });
+                }
             }
         }
 
-        // Lint (only in Strict mode)
-        if self.context.verifier_strictness == perspt_core::types::VerifierStrictness::Strict {
+        // Lint (only when allowed AND in Strict mode)
+        if allowed_stages.contains(&VerifierStage::Lint)
+            && self.context.verifier_strictness == perspt_core::types::VerifierStrictness::Strict
+        {
             match runner.run_lint().await {
                 Ok(r) => {
                     result.lint_ok = r.passed > 0 && r.failed == 0;
@@ -4884,11 +5510,175 @@ File: [same filename]
                     });
                 }
             }
+        } else if !allowed_stages.contains(&VerifierStage::Lint) {
+            result.lint_ok = true; // Skip lint when not in allowed stages
         } else {
             result.lint_ok = true; // Skip lint in non-strict mode
         }
 
-        // Mark overall degraded if any stage used fallback or unavailable sensor
+        self.finalize_verification_result(&mut result, plugin_name);
+        result
+    }
+
+    // =========================================================================
+    // Auto-dependency repair helpers
+    // =========================================================================
+
+    /// Parse `cargo check` / `cargo build` stderr and extract crate names that
+    /// are missing.  Handles patterns like:
+    ///   - `error[E0432]: unresolved import \`thiserror\``
+    ///   - `error[E0463]: can't find crate for \`serde\``
+    ///   - `use of undeclared crate or module \`clap\``
+    fn extract_missing_crates(output: &str) -> Vec<String> {
+        use std::collections::HashSet;
+
+        let mut crates: HashSet<String> = HashSet::new();
+
+        for line in output.lines() {
+            let lower = line.to_lowercase();
+
+            // Pattern: "use of undeclared crate or module `foo`"
+            if lower.contains("undeclared crate or module") {
+                if let Some(name) = Self::extract_backtick_ident(line) {
+                    if !name.contains("::") {
+                        crates.insert(name);
+                    }
+                }
+            }
+            // Pattern: "can't find crate for `foo`"
+            else if lower.contains("can't find crate for")
+                || lower.contains("cant find crate for")
+            {
+                if let Some(name) = Self::extract_backtick_ident(line) {
+                    crates.insert(name);
+                }
+            }
+            // Pattern: "unresolved import `thiserror`" at top level
+            else if lower.contains("unresolved import") {
+                if let Some(name) = Self::extract_backtick_ident(line) {
+                    let root = name.split("::").next().unwrap_or(&name).to_string();
+                    if root != "crate" && root != "self" && root != "super" {
+                        crates.insert(root);
+                    }
+                }
+            }
+        }
+
+        let builtins: HashSet<&str> = ["std", "core", "alloc", "proc_macro", "test"]
+            .iter()
+            .copied()
+            .collect();
+
+        crates
+            .into_iter()
+            .filter(|c| !builtins.contains(c.as_str()))
+            .collect()
+    }
+
+    /// Extract the first back-tick–quoted identifier from a line.
+    fn extract_backtick_ident(line: &str) -> Option<String> {
+        let start = line.find('`')? + 1;
+        let rest = &line[start..];
+        let end = rest.find('`')?;
+        let ident = &rest[..end];
+        if ident.is_empty() {
+            None
+        } else {
+            Some(ident.to_string())
+        }
+    }
+
+    /// Extract dependency commands from a correction LLM response.
+    fn extract_commands_from_correction(response: &str) -> Vec<String> {
+        let mut commands = Vec::new();
+        let mut in_commands_section = false;
+        let mut in_code_block = false;
+
+        let allowed_prefixes = [
+            "cargo add",
+            "pip install",
+            "npm install",
+            "yarn add",
+            "pnpm add",
+        ];
+
+        for line in response.lines() {
+            let trimmed = line.trim();
+
+            if trimmed.starts_with("Commands:")
+                || trimmed.starts_with("**Commands:")
+                || trimmed.starts_with("### Commands")
+            {
+                in_commands_section = true;
+                continue;
+            }
+
+            if in_commands_section {
+                if trimmed.starts_with("```") {
+                    in_code_block = !in_code_block;
+                    continue;
+                }
+
+                if !in_code_block
+                    && (trimmed.is_empty()
+                        || trimmed.starts_with('#')
+                        || trimmed.starts_with("File:")
+                        || trimmed.starts_with("Diff:"))
+                {
+                    in_commands_section = false;
+                    continue;
+                }
+
+                let cmd = trimmed
+                    .trim_start_matches("- ")
+                    .trim_start_matches("$ ")
+                    .trim();
+
+                if !cmd.is_empty() && allowed_prefixes.iter().any(|p| cmd.starts_with(p)) {
+                    commands.push(cmd.to_string());
+                }
+            }
+        }
+
+        commands
+    }
+
+    /// Run `cargo add <crate>` for each missing crate. Returns count of successes.
+    async fn auto_install_crate_deps(crates: &[String], working_dir: &std::path::Path) -> usize {
+        let mut installed = 0usize;
+        for krate in crates {
+            log::info!("Auto-installing crate: cargo add {}", krate);
+            let result = tokio::process::Command::new("cargo")
+                .args(["add", krate])
+                .current_dir(working_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+
+            match result {
+                Ok(output) if output.status.success() => {
+                    log::info!("Successfully installed crate: {}", krate);
+                    installed += 1;
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    log::warn!("Failed to install crate {}: {}", krate, stderr);
+                }
+                Err(e) => {
+                    log::warn!("Failed to run cargo add {}: {}", krate, e);
+                }
+            }
+        }
+        installed
+    }
+
+    /// PSP-5 Phase 9: Finalize verification result — mark degraded, emit events, build summary.
+    fn finalize_verification_result(
+        &mut self,
+        result: &mut perspt_core::types::VerificationResult,
+        plugin_name: &str,
+    ) {
         if result.has_degraded_stages() {
             result.degraded = true;
             let reasons = result.degraded_stage_reasons();
@@ -4896,7 +5686,7 @@ File: [same filename]
 
             // Emit per-stage SensorFallback events
             for outcome in &result.stage_outcomes {
-                if let SensorStatus::Fallback { actual, reason } = &outcome.sensor_status {
+                if let perspt_core::types::SensorStatus::Fallback { actual, reason } = &outcome.sensor_status {
                     self.emit_event(perspt_core::AgentEvent::SensorFallback {
                         node_id: plugin_name.to_string(),
                         stage: outcome.stage.clone(),
@@ -4921,8 +5711,6 @@ File: [same filename]
             if result.lint_ok { "✅" } else { "⏭️" },
             if result.degraded { " (degraded)" } else { "" },
         );
-
-        result
     }
 
     // =========================================================================
@@ -5478,8 +6266,33 @@ fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static 
     }
 }
 
-fn should_run_weighted_tests_for_node(node: &SRBNNode) -> bool {
-    matches!(node.node_class, perspt_core::types::NodeClass::Integration)
+/// PSP-5 Phase 9: Determine which verification stages to run based on NodeClass.
+///
+/// - **Interface**: SyntaxCheck only (signatures/schemas)
+/// - **Implementation**: SyntaxCheck + Build (+ Test if weighted_tests non-empty)
+/// - **Integration**: Full pipeline (SyntaxCheck + Build + Test + Lint)
+fn verification_stages_for_node(node: &SRBNNode) -> Vec<perspt_core::plugin::VerifierStage> {
+    use perspt_core::plugin::VerifierStage;
+    match node.node_class {
+        perspt_core::types::NodeClass::Interface => {
+            vec![VerifierStage::SyntaxCheck]
+        }
+        perspt_core::types::NodeClass::Implementation => {
+            let mut stages = vec![VerifierStage::SyntaxCheck, VerifierStage::Build];
+            if !node.contract.weighted_tests.is_empty() {
+                stages.push(VerifierStage::Test);
+            }
+            stages
+        }
+        perspt_core::types::NodeClass::Integration => {
+            vec![
+                VerifierStage::SyntaxCheck,
+                VerifierStage::Build,
+                VerifierStage::Test,
+                VerifierStage::Lint,
+            ]
+        }
+    }
 }
 
 /// Parse a persisted state string back into a NodeState enum
@@ -5517,13 +6330,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_orchestrator_creation() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         assert_eq!(orch.node_count(), 0);
     }
 
     #[tokio::test]
     async fn test_add_nodes() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
 
         let node1 = SRBNNode::new(
             "node1".to_string(),
@@ -5544,7 +6357,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_check_workspace_requirement() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
 
         // Positive heuristics
         assert!(
@@ -5565,7 +6378,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_lsp_key_for_file_resolves_by_plugin() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         // Insert a dummy LSP client key so the lookup has something to match
         orch.lsp_clients.insert(
             "rust".to_string(),
@@ -5592,7 +6405,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_split_node_creates_children() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let mut node = SRBNNode::new("parent".into(), "Do everything".into(), ModelTier::Actuator);
         node.output_targets = vec![PathBuf::from("a.rs"), PathBuf::from("b.rs")];
         orch.add_node(node);
@@ -5609,7 +6422,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_split_node_empty_children_is_noop() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let node = SRBNNode::new("n".into(), "g".into(), ModelTier::Actuator);
         orch.add_node(node);
         let idx = orch.node_indices["n"];
@@ -5620,7 +6433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_interface_node() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let n1 = SRBNNode::new("a".into(), "source".into(), ModelTier::Actuator);
         let n2 = SRBNNode::new("b".into(), "dest".into(), ModelTier::Actuator);
         orch.add_node(n1);
@@ -5637,7 +6450,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replan_subgraph_resets_nodes() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let mut n1 = SRBNNode::new("trigger".into(), "g1".into(), ModelTier::Actuator);
         n1.state = NodeState::Coding;
         let mut n2 = SRBNNode::new("dep".into(), "g2".into(), ModelTier::Actuator);
@@ -5656,7 +6469,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_select_validators_always_includes_dependency_graph() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let node = SRBNNode::new("n".into(), "g".into(), ModelTier::Actuator);
         orch.add_node(node);
         let idx = orch.node_indices["n"];
@@ -5667,7 +6480,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_select_validators_interface_node() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let mut node = SRBNNode::new("iface".into(), "g".into(), ModelTier::Actuator);
         node.node_class = perspt_core::types::NodeClass::Interface;
         orch.add_node(node);
@@ -5679,7 +6492,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_sheaf_validator_dependency_graph_no_cycles() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let n1 = SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator);
         let n2 = SRBNNode::new("b".into(), "g".into(), ModelTier::Actuator);
         orch.add_node(n1);
@@ -5694,7 +6507,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_classify_non_convergence_default() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let node = SRBNNode::new("n".into(), "g".into(), ModelTier::Actuator);
         orch.add_node(node);
         let idx = orch.node_indices["n"];
@@ -5706,7 +6519,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_affected_dependents() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let n1 = SRBNNode::new("root".into(), "g".into(), ModelTier::Actuator);
         let n2 = SRBNNode::new("child1".into(), "g".into(), ModelTier::Actuator);
         let n3 = SRBNNode::new("child2".into(), "g".into(), ModelTier::Actuator);
@@ -5729,7 +6542,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_maybe_create_provisional_branch_root_node() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_phase6"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_phase6"));
         orch.context.session_id = "test_session".into();
         let node = SRBNNode::new("root".into(), "root goal".into(), ModelTier::Actuator);
         orch.add_node(node);
@@ -5743,7 +6556,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_maybe_create_provisional_branch_child_node() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_phase6"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_phase6"));
         orch.context.session_id = "test_session".into();
         let parent = SRBNNode::new("parent".into(), "parent goal".into(), ModelTier::Actuator);
         let child = SRBNNode::new("child".into(), "child goal".into(), ModelTier::Actuator);
@@ -5759,7 +6572,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_descendants() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let n1 = SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator);
         let n2 = SRBNNode::new("b".into(), "g".into(), ModelTier::Actuator);
         let n3 = SRBNNode::new("c".into(), "g".into(), ModelTier::Actuator);
@@ -5779,7 +6592,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_seal_prerequisites_no_interface_parent() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let parent = SRBNNode::new("parent".into(), "g".into(), ModelTier::Actuator);
         let child = SRBNNode::new("child".into(), "g".into(), ModelTier::Actuator);
         orch.add_node(parent);
@@ -5794,7 +6607,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_seal_prerequisites_unsealed_interface() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let mut parent = SRBNNode::new("iface".into(), "g".into(), ModelTier::Actuator);
         parent.node_class = perspt_core::types::NodeClass::Interface;
         let child = SRBNNode::new("impl".into(), "g".into(), ModelTier::Actuator);
@@ -5811,7 +6624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_seal_prerequisites_sealed_interface() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let mut parent = SRBNNode::new("iface".into(), "g".into(), ModelTier::Actuator);
         parent.node_class = perspt_core::types::NodeClass::Interface;
         parent.interface_seal_hash = Some([1u8; 32]); // Already sealed
@@ -5828,7 +6641,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unblock_dependents() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("."), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         let parent = SRBNNode::new("parent".into(), "g".into(), ModelTier::Actuator);
         let child = SRBNNode::new("child".into(), "g".into(), ModelTier::Actuator);
         orch.add_node(parent);
@@ -5850,7 +6663,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_flush_descendant_branches() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_phase6_flush"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_phase6_flush"));
         orch.context.session_id = "test_session".into();
 
         let parent = SRBNNode::new("parent".into(), "g".into(), ModelTier::Actuator);
@@ -5879,7 +6692,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_effective_working_dir_no_branch() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("/test/workspace"), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/test/workspace"));
         // No nodes, but we can test the helper directly by adding one
         let mut orch = orch;
         let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
@@ -5894,7 +6707,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sandbox_dir_for_node_none_without_branch() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("/test/workspace"), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/test/workspace"));
         let mut orch = orch;
         let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
         orch.add_node(node);
@@ -5904,7 +6717,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rewrite_churn_guardrail() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_churn"), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_churn"));
         let mut orch = orch;
         let node = SRBNNode::new("node_a".into(), "goal".into(), ModelTier::Actuator);
         orch.add_node(node);
@@ -5915,7 +6728,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_resumed_skips_terminal_nodes() {
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_resume"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_resume"));
 
         let mut n1 = SRBNNode::new("done".into(), "completed".into(), ModelTier::Actuator);
         n1.state = NodeState::Completed;
@@ -5931,7 +6744,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_persist_review_decision_no_panic() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_review"), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_review"));
         // Should not panic even without a real ledger session —
         // it gracefully logs errors
         orch.persist_review_decision("node_x", "approved", None);
@@ -5945,7 +6758,7 @@ mod tests {
     async fn test_check_structural_dependencies_blocks_prose_only() {
         use perspt_core::types::{NodeClass, RestrictionMap};
 
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_struct_dep"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_struct_dep"));
 
         // Parent: Interface node (no structural digests)
         let mut parent =
@@ -5975,7 +6788,7 @@ mod tests {
     async fn test_check_structural_dependencies_passes_with_digest() {
         use perspt_core::types::{ArtifactKind, NodeClass, RestrictionMap, StructuralDigest};
 
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_struct_ok"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_struct_ok"));
 
         let mut parent =
             SRBNNode::new("iface_2".into(), "Define API".into(), ModelTier::Architect);
@@ -6007,7 +6820,7 @@ mod tests {
     async fn test_check_structural_dependencies_skips_non_implementation() {
         use perspt_core::types::{NodeClass, RestrictionMap};
 
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_struct_skip"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_struct_skip"));
 
         // An Integration node should NOT be checked
         let mut node =
@@ -6048,6 +6861,8 @@ mod tests {
             Some("spec-model".into()),
             None,
             None,
+            None,
+            None,
         );
         assert_eq!(orch.architect_model, "arch-model");
         assert_eq!(orch.actuator_model, "act-model");
@@ -6057,7 +6872,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_orchestrator_default_tier_models() {
-        let orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_tier_defaults"), false);
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_tier_defaults"));
         assert_eq!(orch.architect_model, ModelTier::Architect.default_model());
         assert_eq!(orch.actuator_model, ModelTier::Actuator.default_model());
         assert_eq!(orch.verifier_model, ModelTier::Verifier.default_model());
@@ -6068,7 +6883,7 @@ mod tests {
     async fn test_create_nodes_rejects_duplicate_output_files() {
         use perspt_core::types::PlannedTask;
 
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_dup_outputs"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_dup_outputs"));
 
         let plan = TaskPlan {
             tasks: vec![
@@ -6101,7 +6916,7 @@ mod tests {
     async fn test_create_nodes_accepts_unique_output_files() {
         use perspt_core::types::PlannedTask;
 
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_unique_outputs"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_unique_outputs"));
 
         let plan = TaskPlan {
             tasks: vec![
@@ -6130,7 +6945,7 @@ mod tests {
     async fn test_ownership_manifest_built_with_majority_plugin_vote() {
         use perspt_core::types::PlannedTask;
 
-        let mut orch = SRBNOrchestrator::new(PathBuf::from("/tmp/test_plugin_vote"), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_plugin_vote"));
 
         let plan = TaskPlan {
             tasks: vec![PlannedTask {
@@ -6164,7 +6979,7 @@ mod tests {
         ));
         std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
-        let mut orch = SRBNOrchestrator::new(temp_dir.clone(), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
         let plan = TaskPlan {
             tasks: vec![
                 PlannedTask {
@@ -6224,7 +7039,7 @@ mod tests {
         std::fs::create_dir_all(temp_dir.join("src")).unwrap();
         std::fs::write(temp_dir.join("src/lib.rs"), "pub fn old() {}\n").unwrap();
 
-        let mut orch = SRBNOrchestrator::new(temp_dir.clone(), false);
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
         orch.context.session_id = uuid::Uuid::new_v4().to_string();
 
         let plan = TaskPlan {
@@ -6274,10 +7089,26 @@ mod tests {
     }
 
     #[test]
-    fn test_weighted_tests_only_run_for_integration_nodes() {
+    fn test_verification_stages_for_node_classes() {
+        use perspt_core::plugin::VerifierStage;
+
+        // Interface → SyntaxCheck only
+        let interface_node =
+            SRBNNode::new("iface".into(), "Define trait".into(), ModelTier::Actuator);
+        // Default is Implementation, so override:
+        let mut interface_node = interface_node;
+        interface_node.node_class = perspt_core::types::NodeClass::Interface;
+        let stages = verification_stages_for_node(&interface_node);
+        assert_eq!(stages, vec![VerifierStage::SyntaxCheck]);
+
+        // Implementation without tests → SyntaxCheck + Build
         let mut implementation_node =
             SRBNNode::new("impl".into(), "Implement feature".into(), ModelTier::Actuator);
         implementation_node.node_class = perspt_core::types::NodeClass::Implementation;
+        let stages = verification_stages_for_node(&implementation_node);
+        assert_eq!(stages, vec![VerifierStage::SyntaxCheck, VerifierStage::Build]);
+
+        // Implementation with weighted tests → SyntaxCheck + Build + Test
         implementation_node
             .contract
             .weighted_tests
@@ -6285,7 +7116,13 @@ mod tests {
                 test_name: "test_feature".into(),
                 criticality: perspt_core::types::Criticality::High,
             });
+        let stages = verification_stages_for_node(&implementation_node);
+        assert_eq!(
+            stages,
+            vec![VerifierStage::SyntaxCheck, VerifierStage::Build, VerifierStage::Test]
+        );
 
+        // Integration → full pipeline
         let mut integration_node =
             SRBNNode::new("test".into(), "Verify feature".into(), ModelTier::Actuator);
         integration_node.node_class = perspt_core::types::NodeClass::Integration;
@@ -6296,8 +7133,216 @@ mod tests {
                 test_name: "test_feature".into(),
                 criticality: perspt_core::types::Criticality::High,
             });
+        let stages = verification_stages_for_node(&integration_node);
+        assert_eq!(
+            stages,
+            vec![
+                VerifierStage::SyntaxCheck,
+                VerifierStage::Build,
+                VerifierStage::Test,
+                VerifierStage::Lint,
+            ]
+        );
+    }
 
-        assert!(!should_run_weighted_tests_for_node(&implementation_node));
-        assert!(should_run_weighted_tests_for_node(&integration_node));
+    // =========================================================================
+    // Workspace Classification Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_classify_workspace_empty_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("build a web app");
+        // Empty dir with language keywords → Greenfield
+        assert!(matches!(state, WorkspaceState::Greenfield { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_empty_dir_no_lang() {
+        let temp = tempfile::tempdir().unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("do something");
+        // Empty dir, no keywords → Greenfield with no lang
+        match state {
+            WorkspaceState::Greenfield { inferred_lang } => assert!(inferred_lang.is_none()),
+            _ => panic!("expected Greenfield, got {:?}", state),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_existing_rust_project() {
+        let temp = tempfile::tempdir().unwrap();
+        // Create a Cargo.toml to make it look like a Rust project
+        std::fs::write(temp.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"").unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("add a feature");
+        match state {
+            WorkspaceState::ExistingProject { plugins } => {
+                assert!(plugins.contains(&"rust".to_string()));
+            }
+            _ => panic!("expected ExistingProject, got {:?}", state),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_existing_python_project() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("pyproject.toml"), "[project]\nname = \"test\"").unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("add a feature");
+        match state {
+            WorkspaceState::ExistingProject { plugins } => {
+                assert!(plugins.contains(&"python".to_string()));
+            }
+            _ => panic!("expected ExistingProject, got {:?}", state),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_existing_js_project() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("package.json"), "{}").unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("add auth");
+        match state {
+            WorkspaceState::ExistingProject { plugins } => {
+                assert!(plugins.contains(&"javascript".to_string()));
+            }
+            _ => panic!("expected ExistingProject, got {:?}", state),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_ambiguous_with_misc_files() {
+        let temp = tempfile::tempdir().unwrap();
+        // Non-empty dir with misc files that don't match any plugin
+        std::fs::write(temp.path().join("notes.txt"), "hello").unwrap();
+        std::fs::write(temp.path().join("data.csv"), "a,b,c").unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("do something");
+        assert!(matches!(state, WorkspaceState::Ambiguous));
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_greenfield_with_rust_task() {
+        let temp = tempfile::tempdir().unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("create a rust CLI tool");
+        match state {
+            WorkspaceState::Greenfield { inferred_lang } => {
+                assert_eq!(inferred_lang, Some("rust".to_string()));
+            }
+            _ => panic!("expected Greenfield, got {:?}", state),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_classify_workspace_greenfield_with_python_task() {
+        let temp = tempfile::tempdir().unwrap();
+        let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
+        let state = orch.classify_workspace("build a python flask API");
+        match state {
+            WorkspaceState::Greenfield { inferred_lang } => {
+                assert_eq!(inferred_lang, Some("python".to_string()));
+            }
+            _ => panic!("expected Greenfield, got {:?}", state),
+        }
+    }
+
+    // =========================================================================
+    // Tool Prerequisite Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_check_prerequisites_returns_true_when_tools_available() {
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        // Rust plugin — cargo/rustc should be available in dev environment
+        if let Some(plugin) = registry.get("rust") {
+            let result = orch.check_tool_prerequisites(plugin);
+            // We can't assert true (CI might not have rust-analyzer)
+            // but the method should not panic
+            let _ = result;
+        }
+    }
+
+    #[test]
+    fn test_required_binaries_rust_includes_cargo() {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let plugin = registry.get("rust").unwrap();
+        let bins = plugin.required_binaries();
+        assert!(bins.iter().any(|(name, _, _)| *name == "cargo"));
+        assert!(bins.iter().any(|(name, _, _)| *name == "rustc"));
+    }
+
+    #[test]
+    fn test_required_binaries_python_includes_uv() {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let plugin = registry.get("python").unwrap();
+        let bins = plugin.required_binaries();
+        assert!(bins.iter().any(|(name, _, _)| *name == "uv"));
+        assert!(bins.iter().any(|(name, _, _)| *name == "python3"));
+    }
+
+    #[test]
+    fn test_required_binaries_js_includes_node() {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let plugin = registry.get("javascript").unwrap();
+        let bins = plugin.required_binaries();
+        assert!(bins.iter().any(|(name, _, _)| *name == "node"));
+        assert!(bins.iter().any(|(name, _, _)| *name == "npm"));
+    }
+
+    // =========================================================================
+    // Fallback Resolution Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_fallback_defaults_to_none_without_explicit_config() {
+        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        assert!(orch.architect_fallback_model.is_none());
+        assert!(orch.actuator_fallback_model.is_none());
+        assert!(orch.verifier_fallback_model.is_none());
+        assert!(orch.speculator_fallback_model.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_explicit_fallback_stored_correctly() {
+        let orch = SRBNOrchestrator::new_with_models(
+            PathBuf::from("/tmp/test_fallback"),
+            false,
+            None,
+            None,
+            None,
+            None,
+            Some("gpt-4o".into()),
+            Some("gpt-4o-mini".into()),
+            Some("gpt-4o".into()),
+            Some("gpt-4o-mini".into()),
+        );
+        assert_eq!(orch.architect_fallback_model, Some("gpt-4o".to_string()));
+        assert_eq!(orch.actuator_fallback_model, Some("gpt-4o-mini".to_string()));
+        assert_eq!(orch.verifier_fallback_model, Some("gpt-4o".to_string()));
+        assert_eq!(orch.speculator_fallback_model, Some("gpt-4o-mini".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_per_tier_models_independent() {
+        let orch = SRBNOrchestrator::new_with_models(
+            PathBuf::from("/tmp/test_tiers_independent"),
+            false,
+            Some("arch".into()),
+            Some("act".into()),
+            Some("ver".into()),
+            Some("spec".into()),
+            None,
+            None,
+            None,
+            None,
+        );
+        // Each tier stores its own model, not shared
+        assert_ne!(orch.architect_model, orch.actuator_model);
+        assert_ne!(orch.verifier_model, orch.speculator_model);
     }
 }

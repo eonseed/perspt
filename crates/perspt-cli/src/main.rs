@@ -122,6 +122,14 @@ enum Commands {
         #[arg(long)]
         actuator_fallback_model: Option<String>,
 
+        /// Fallback model for Verifier tier (used when primary fails structured-output)
+        #[arg(long)]
+        verifier_fallback_model: Option<String>,
+
+        /// Fallback model for Speculator tier (used when primary fails structured-output)
+        #[arg(long)]
+        speculator_fallback_model: Option<String>,
+
         /// Export the task graph as JSON to a file after planning (before execution)
         #[arg(long)]
         output_plan: Option<PathBuf>,
@@ -260,6 +268,8 @@ async fn main() -> Result<()> {
             verifier_strictness,
             architect_fallback_model,
             actuator_fallback_model,
+            verifier_fallback_model,
+            speculator_fallback_model,
             output_plan,
         }) => {
             commands::agent::run(
@@ -279,6 +289,8 @@ async fn main() -> Result<()> {
                 verifier_strictness,
                 architect_fallback_model,
                 actuator_fallback_model,
+                verifier_fallback_model,
+                speculator_fallback_model,
                 output_plan,
             )
             .await

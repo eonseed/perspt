@@ -277,9 +277,11 @@ When producing multi-file output, use this JSON format wrapped in a ```json code
     {{ "path": "{target_file}", "operation": "write", "content": "..." }},
     {{ "path": "tests/test_main.py", "operation": "write", "content": "..." }}
   ],
-  "commands": []
+  "commands": ["cargo add serde --features derive", "cargo add thiserror"]
 }}
 ```
+
+The `commands` array should contain dependency install commands (e.g. `cargo add <crate>`, `pip install <pkg>`) that must run BEFORE the code can compile. Leave it empty `[]` only if no new dependencies are needed.
 
 Each artifact entry must have:
 - `path`: Relative path within the workspace
@@ -354,6 +356,8 @@ Workspace Import Hints: {workspace_import_hints:?}
 9. Restrict all file edits to `Allowed Output Paths` only
 10. If another file needs changes, do not modify it in this node; keep that need implicit for its owning node
 11. Use `Workspace Import Hints` exactly for crate/package imports in tests, entry points, and cross-file references
+12. For library source modules (e.g. `src/*.rs` in Rust), use `crate::` for intra-crate imports, never the package name. Only use the package name in `tests/`, `examples/`, or `main.rs`.
+13. When your code uses external crates/packages not already listed in the project manifest (e.g. `Cargo.toml`, `pyproject.toml`, `package.json`), you MUST include the install commands in the `commands` array. For Rust: `cargo add <crate>` (with `--features <f>` if needed). For Python: `pip install <pkg>`. For Node.js: `npm install <pkg>`. Without these commands, the build will fail due to missing dependencies.
 
 {output_format}"#,
             goal = node.goal,

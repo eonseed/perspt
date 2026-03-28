@@ -26,5 +26,5 @@ pub use types::{
     RestrictionMap, RetryPolicy, RewriteAction, RewriteRecord, SRBNNode, SensorStatus,
     SheafValidationResult, SheafValidatorClass, StabilityMonitor, StageOutcome, StructuralDigest,
     SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget,
-    VerificationResult, WeightedTest,
+    VerificationResult, WeightedTest, WorkspaceState,
 };
