@@ -203,6 +203,35 @@ impl PythonTestRunner {
             return self.install_pytest_directly().await;
         }
 
+        // Ensure pytest is available as a dev dependency.
+        // `uv sync --dev` only installs what's already in pyproject.toml;
+        // for freshly-generated projects pytest may not be declared yet.
+        if !self.has_pytest().await {
+            log::info!("pytest not available after sync — adding as dev dependency");
+            let add_output = Command::new("uv")
+                .args(["add", "--dev", "pytest"])
+                .current_dir(&self.working_dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await;
+            match add_output {
+                Ok(o) if o.status.success() => {
+                    log::info!("Added pytest as dev dependency");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    log::warn!("uv add --dev pytest failed: {}", stderr);
+                    // Last resort: install directly
+                    return self.install_pytest_directly().await;
+                }
+                Err(e) => {
+                    log::warn!("Failed to run uv add --dev pytest: {}", e);
+                    return self.install_pytest_directly().await;
+                }
+            }
+        }
+
         log::info!("Python environment ready");
         Ok(())
     }

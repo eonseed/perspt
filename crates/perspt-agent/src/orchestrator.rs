@@ -2804,7 +2804,15 @@ Project name:"#,
                     bundle.commands.len()
                 ));
                 let work_dir = self.effective_working_dir(idx);
-                for command in &bundle.commands {
+                let is_python = self.graph[idx].owner_plugin == "python";
+                for raw_command in &bundle.commands {
+                    // Normalize Python install commands to uv equivalents
+                    let command = if is_python {
+                        Self::normalize_command_to_uv(raw_command)
+                    } else {
+                        raw_command.clone()
+                    };
+
                     // Request approval for each command (respects --yes auto-approve)
                     let cmd_approval = self
                         .await_approval_for_node(
@@ -2849,6 +2857,30 @@ Project name:"#,
                         self.emit_log(format!("❌ Command failed: {} — {}", command, err_msg));
                         // Record as tool failure so step_verify picks it up via V_syn
                         self.last_tool_failure = Some(format!("Bundle command '{}' failed: {}", command, err_msg));
+                    }
+                }
+
+                // After all bundle commands, sync Python venv so new deps are available
+                if is_python {
+                    log::info!("Running uv sync --dev after bundle commands...");
+                    let sync_result = tokio::process::Command::new("uv")
+                        .args(["sync", "--dev"])
+                        .current_dir(&work_dir)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output()
+                        .await;
+                    match sync_result {
+                        Ok(output) if output.status.success() => {
+                            self.emit_log("🐍 uv sync --dev completed".to_string());
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            log::warn!("uv sync --dev failed: {}", stderr);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to run uv sync --dev: {}", e);
+                        }
                     }
                 }
             }
@@ -3132,6 +3164,48 @@ Project name:"#,
                                         )
                                         .await;
                                 }
+                            }
+                        }
+                    }
+
+                    // Auto-dependency repair for Python: parse
+                    // ModuleNotFoundError / ImportError from test output and
+                    // install missing packages via `uv add`.
+                    if plugin_name == "python" && (!vr.syntax_ok || !vr.tests_ok) {
+                        // Collect raw output from all stage outcomes for
+                        // broader error detection (syntax check may report
+                        // import errors too).
+                        let all_output: String = vr
+                            .stage_outcomes
+                            .iter()
+                            .filter_map(|so| so.output.as_deref())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        let combined = match vr.raw_output.as_deref() {
+                            Some(raw) => format!("{}\n{}", raw, all_output),
+                            None => all_output,
+                        };
+
+                        let missing = Self::extract_missing_python_modules(&combined);
+                        if !missing.is_empty() {
+                            self.emit_log(format!(
+                                "🐍 Auto-installing missing Python packages: {}",
+                                missing.join(", ")
+                            ));
+                            let dep_ok =
+                                Self::auto_install_python_deps(&missing, &verify_dir).await;
+                            if dep_ok > 0 {
+                                self.emit_log(format!(
+                                    "🐍 Installed {} package(s), re-running verification...",
+                                    dep_ok
+                                ));
+                                vr = self
+                                    .run_plugin_verification(
+                                        &plugin_name,
+                                        &stages,
+                                        verify_dir.clone(),
+                                    )
+                                    .await;
                             }
                         }
                     }
@@ -3597,7 +3671,7 @@ File: {}
 3. Follow {} language conventions and idioms
 4. Import any missing modules or dependencies
 5. Return the COMPLETE corrected file, not just snippets
-6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency), list the required install commands
+6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
 
 ### Output Format
 Provide the complete corrected file followed by any dependency commands needed:
@@ -3611,6 +3685,8 @@ Commands: [optional, one per line]
 ```
 cargo add thiserror
 cargo add clap --features derive
+uv add httpx
+uv add --dev pytest
 ```
 "#,
             lang, lang
@@ -3633,7 +3709,7 @@ cargo add clap --features derive
         {
             "Change the value or add a type conversion to match the expected type".into()
         } else if msg.contains("import") || msg.contains("no module named") {
-            "Add the correct import statement at the top of the file".into()
+            "Add the correct import statement at the top of the file. For Python: use `uv add <pkg>` for external packages; use relative imports (`from . import mod`) inside package modules.".into()
         } else if msg.contains("argument") && (msg.contains("missing") || msg.contains("expected"))
         {
             "Provide all required arguments to the function call".into()
@@ -5631,6 +5707,9 @@ cargo add clap --features derive
         let allowed_prefixes = [
             "cargo add",
             "pip install",
+            "pip3 install",
+            "uv add",
+            "uv pip install",
             "npm install",
             "yarn add",
             "pnpm add",
@@ -5705,6 +5784,199 @@ cargo add clap --features derive
             }
         }
         installed
+    }
+
+    // =========================================================================
+    // Python auto-dependency repair helpers (uv-first)
+    // =========================================================================
+
+    /// Parse Python test/import output and extract module names that are missing.
+    ///
+    /// Handles patterns like:
+    ///   - `ModuleNotFoundError: No module named 'httpx'`
+    ///   - `ImportError: cannot import name 'foo' from 'bar'`
+    ///   - `E   ModuleNotFoundError: No module named 'pydantic'`
+    fn extract_missing_python_modules(output: &str) -> Vec<String> {
+        use std::collections::HashSet;
+
+        let mut modules: HashSet<String> = HashSet::new();
+
+        for line in output.lines() {
+            let trimmed = line.trim().trim_start_matches("E").trim();
+
+            // Pattern: "ModuleNotFoundError: No module named 'foo'"
+            // Also matches: "ModuleNotFoundError: No module named 'foo.bar'"
+            // Can appear anywhere in the line (e.g. after FAILED test_x.py::test - ...)
+            if trimmed.contains("ModuleNotFoundError: No module named ") {
+                // Extract the quoted module name after "No module named "
+                if let Some(pos) = trimmed.find("No module named ") {
+                    let after = &trimmed[pos + "No module named ".len()..];
+                    let name = after.trim().trim_matches('\'').trim_matches('"');
+                    let root = name.split('.').next().unwrap_or(name);
+                    if !root.is_empty() {
+                        modules.insert(root.to_string());
+                    }
+                }
+            }
+            // Pattern: "ImportError: cannot import name 'X' from 'Y'"
+            // or "ImportError: No module named 'X'"
+            else if trimmed.contains("ImportError") && trimmed.contains("No module named") {
+                if let Some(start) = trimmed.find('\'') {
+                    let rest = &trimmed[start + 1..];
+                    if let Some(end) = rest.find('\'') {
+                        let name = &rest[..end];
+                        let root = name.split('.').next().unwrap_or(name);
+                        if !root.is_empty() {
+                            modules.insert(root.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Filter out standard library modules that are always present
+        let stdlib: HashSet<&str> = [
+            "os", "sys", "json", "re", "math", "datetime", "collections",
+            "itertools", "functools", "pathlib", "typing", "abc", "io",
+            "unittest", "logging", "argparse", "sqlite3", "csv", "hashlib",
+            "tempfile", "shutil", "copy", "contextlib", "dataclasses",
+            "enum", "textwrap", "importlib", "inspect", "traceback",
+            "subprocess", "threading", "multiprocessing", "asyncio",
+            "socket", "http", "urllib", "xml", "html", "email",
+            "string", "struct", "array", "queue", "heapq", "bisect",
+            "pprint", "decimal", "fractions", "random", "secrets",
+            "time", "calendar", "zlib", "gzip", "zipfile", "tarfile",
+            "glob", "fnmatch", "stat", "fileinput", "codecs", "uuid",
+            "base64", "binascii", "pickle", "shelve", "dbm", "platform",
+            "signal", "mmap", "ctypes", "configparser", "tomllib",
+            "warnings", "weakref", "types", "operator", "numbers",
+            "__future__",
+        ]
+        .iter()
+        .copied()
+        .collect();
+
+        modules
+            .into_iter()
+            .filter(|m| !stdlib.contains(m.as_str()))
+            .collect()
+    }
+
+    /// Map a Python import name to its PyPI package name.
+    ///
+    /// Most packages use the same name for import and install, but some
+    /// notable exceptions exist. We handle the common ones here.
+    fn python_import_to_package(import_name: &str) -> &str {
+        match import_name {
+            "PIL" | "pil" => "pillow",
+            "cv2" => "opencv-python",
+            "yaml" => "pyyaml",
+            "bs4" => "beautifulsoup4",
+            "sklearn" => "scikit-learn",
+            "attr" | "attrs" => "attrs",
+            "dateutil" => "python-dateutil",
+            "dotenv" => "python-dotenv",
+            "gi" => "PyGObject",
+            "serial" => "pyserial",
+            "usb" => "pyusb",
+            "wx" => "wxPython",
+            "lxml" => "lxml",
+            "Crypto" => "pycryptodome",
+            "jose" => "python-jose",
+            "jwt" => "PyJWT",
+            "magic" => "python-magic",
+            "docx" => "python-docx",
+            "pptx" => "python-pptx",
+            "git" => "gitpython",
+            "psycopg2" => "psycopg2-binary",
+            other => other,
+        }
+    }
+
+    /// Run `uv add <package>` for each missing Python module. Returns count of successes.
+    async fn auto_install_python_deps(
+        modules: &[String],
+        working_dir: &std::path::Path,
+    ) -> usize {
+        let mut installed = 0usize;
+        for module in modules {
+            let package = Self::python_import_to_package(module);
+            log::info!("Auto-installing Python package: uv add {}", package);
+            let result = tokio::process::Command::new("uv")
+                .args(["add", package])
+                .current_dir(working_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+
+            match result {
+                Ok(output) if output.status.success() => {
+                    log::info!("Successfully installed Python package: {}", package);
+                    installed += 1;
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    log::warn!("Failed to install Python package {}: {}", package, stderr);
+                }
+                Err(e) => {
+                    log::warn!("Failed to run uv add {}: {}", package, e);
+                }
+            }
+        }
+
+        // Always sync after adding dependencies to ensure venv is up-to-date
+        if installed > 0 {
+            log::info!("Running uv sync --dev after dependency install...");
+            let _ = tokio::process::Command::new("uv")
+                .args(["sync", "--dev"])
+                .current_dir(working_dir)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+        }
+
+        installed
+    }
+
+    /// Normalize a dependency command to its uv-first equivalent.
+    ///
+    /// Converts generic pip/pip3/python -m pip install commands to `uv add`,
+    /// leaving already-correct uv commands and non-Python commands unchanged.
+    fn normalize_command_to_uv(command: &str) -> String {
+        let trimmed = command.trim();
+
+        // pip install foo → uv add foo
+        // pip3 install foo → uv add foo
+        // python -m pip install foo → uv add foo
+        // python3 -m pip install foo → uv add foo
+        let pip_install_prefixes = [
+            "pip install ",
+            "pip3 install ",
+            "python -m pip install ",
+            "python3 -m pip install ",
+        ];
+        for prefix in &pip_install_prefixes {
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                let packages = rest.trim();
+                if packages.is_empty() {
+                    return command.to_string();
+                }
+                // Strip -r/--requirement flags (uv add doesn't support those directly)
+                if packages.starts_with("-r ") || packages.starts_with("--requirement ") {
+                    return format!("uv pip install {}", packages);
+                }
+                return format!("uv add {}", packages);
+            }
+        }
+
+        // pip install -e . → uv pip install -e .
+        if trimmed.starts_with("pip install -") || trimmed.starts_with("pip3 install -") {
+            return format!("uv {}", trimmed);
+        }
+
+        command.to_string()
     }
 
     /// PSP-5 Phase 9: Finalize verification result — mark degraded, emit events, build summary.
@@ -7380,5 +7652,124 @@ mod tests {
         // Each tier stores its own model, not shared
         assert_ne!(orch.architect_model, orch.actuator_model);
         assert_ne!(orch.verifier_model, orch.speculator_model);
+    }
+
+    // =========================================================================
+    // Python auto-dependency repair tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_missing_python_modules_basic() {
+        let output = r#"
+FAILED tests/test_core.py::TestPipeline::test_run - ModuleNotFoundError: No module named 'httpx'
+E   ModuleNotFoundError: No module named 'pydantic'
+ImportError: No module named 'pyarrow'
+"#;
+        let mut missing = SRBNOrchestrator::extract_missing_python_modules(output);
+        missing.sort();
+        assert_eq!(missing, vec!["httpx", "pyarrow", "pydantic"]);
+    }
+
+    #[test]
+    fn test_extract_missing_python_modules_subpackage() {
+        let output = "ModuleNotFoundError: No module named 'foo.bar.baz'";
+        let missing = SRBNOrchestrator::extract_missing_python_modules(output);
+        assert_eq!(missing, vec!["foo"]);
+    }
+
+    #[test]
+    fn test_extract_missing_python_modules_stdlib_filtered() {
+        let output = r#"
+ModuleNotFoundError: No module named 'numpy'
+ModuleNotFoundError: No module named 'os'
+ModuleNotFoundError: No module named 'json'
+"#;
+        let missing = SRBNOrchestrator::extract_missing_python_modules(output);
+        assert_eq!(missing, vec!["numpy"]);
+    }
+
+    #[test]
+    fn test_extract_missing_python_modules_empty() {
+        let output = "All tests passed!\n3 passed in 0.5s";
+        let missing = SRBNOrchestrator::extract_missing_python_modules(output);
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn test_python_import_to_package_mapping() {
+        assert_eq!(SRBNOrchestrator::python_import_to_package("PIL"), "pillow");
+        assert_eq!(SRBNOrchestrator::python_import_to_package("yaml"), "pyyaml");
+        assert_eq!(SRBNOrchestrator::python_import_to_package("cv2"), "opencv-python");
+        assert_eq!(SRBNOrchestrator::python_import_to_package("sklearn"), "scikit-learn");
+        assert_eq!(SRBNOrchestrator::python_import_to_package("bs4"), "beautifulsoup4");
+        // Direct passthrough for unknown
+        assert_eq!(SRBNOrchestrator::python_import_to_package("httpx"), "httpx");
+        assert_eq!(SRBNOrchestrator::python_import_to_package("fastapi"), "fastapi");
+    }
+
+    #[test]
+    fn test_normalize_command_to_uv_pip_install() {
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("pip install httpx"),
+            "uv add httpx"
+        );
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("pip3 install httpx pydantic"),
+            "uv add httpx pydantic"
+        );
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("python -m pip install requests"),
+            "uv add requests"
+        );
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("python3 -m pip install flask"),
+            "uv add flask"
+        );
+    }
+
+    #[test]
+    fn test_normalize_command_to_uv_requirements_file() {
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("pip install -r requirements.txt"),
+            "uv pip install -r requirements.txt"
+        );
+    }
+
+    #[test]
+    fn test_normalize_command_to_uv_passthrough() {
+        // Already uv commands pass through unchanged
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("uv add httpx"),
+            "uv add httpx"
+        );
+        // Non-Python commands pass through unchanged
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("cargo add serde"),
+            "cargo add serde"
+        );
+        assert_eq!(
+            SRBNOrchestrator::normalize_command_to_uv("npm install lodash"),
+            "npm install lodash"
+        );
+    }
+
+    #[test]
+    fn test_extract_commands_from_correction_includes_uv() {
+        let response = r#"Here's the fix:
+Commands:
+```
+uv add httpx
+uv add --dev pytest
+cargo add serde
+pip install numpy
+```
+File: main.py
+```python
+import httpx
+```"#;
+        let commands = SRBNOrchestrator::extract_commands_from_correction(response);
+        assert!(commands.contains(&"uv add httpx".to_string()), "{:?}", commands);
+        assert!(commands.contains(&"cargo add serde".to_string()), "{:?}", commands);
+        assert!(commands.contains(&"pip install numpy".to_string()), "{:?}", commands);
     }
 }
