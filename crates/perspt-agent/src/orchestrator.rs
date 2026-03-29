@@ -107,7 +107,18 @@ fn epoch_seconds() -> i64 {
 impl SRBNOrchestrator {
     /// Create a new orchestrator with default models
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
-        Self::new_with_models(working_dir, auto_approve, None, None, None, None, None, None, None, None)
+        Self::new_with_models(
+            working_dir,
+            auto_approve,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
     }
 
     /// Create a new orchestrator with custom model configuration
@@ -914,9 +925,18 @@ impl SRBNOrchestrator {
     fn check_tool_prerequisites(&self, plugin: &dyn perspt_core::plugin::LanguagePlugin) -> bool {
         // Common OS tools that perspt uses for context retrieval and code manipulation
         let common_tools: &[(&str, &str)] = &[
-            ("grep", "Install coreutils: brew install grep (macOS) or apt install grep (Linux)"),
-            ("sed", "Install coreutils: brew install gnu-sed (macOS) or apt install sed (Linux)"),
-            ("awk", "Install coreutils: brew install gawk (macOS) or apt install gawk (Linux)"),
+            (
+                "grep",
+                "Install coreutils: brew install grep (macOS) or apt install grep (Linux)",
+            ),
+            (
+                "sed",
+                "Install coreutils: brew install gnu-sed (macOS) or apt install sed (Linux)",
+            ),
+            (
+                "awk",
+                "Install coreutils: brew install gawk (macOS) or apt install gawk (Linux)",
+            ),
         ];
 
         let mut missing_critical = Vec::new();
@@ -947,14 +967,17 @@ impl SRBNOrchestrator {
 
         // Emit results
         if !missing_critical.is_empty() {
-            let names: Vec<String> = missing_critical.iter().map(|(b, r)| format!("{} ({})", b, r)).collect();
-            self.emit_log(format!(
-                "🚫 Missing critical tools: {}",
-                names.join(", ")
-            ));
+            let names: Vec<String> = missing_critical
+                .iter()
+                .map(|(b, r)| format!("{} ({})", b, r))
+                .collect();
+            self.emit_log(format!("🚫 Missing critical tools: {}", names.join(", ")));
         }
         if !missing_optional.is_empty() {
-            let names: Vec<String> = missing_optional.iter().map(|(b, r)| format!("{} ({})", b, r)).collect();
+            let names: Vec<String> = missing_optional
+                .iter()
+                .map(|(b, r)| format!("{} ({})", b, r))
+                .collect();
             self.emit_log(format!(
                 "⚠️ Missing optional tools (degraded mode): {}",
                 names.join(", ")
@@ -984,7 +1007,10 @@ impl SRBNOrchestrator {
     /// - Ambiguous: create a child project dir to avoid polluting misc files.
     async fn step_init_project(&mut self, task: &str) -> Result<()> {
         let registry = perspt_core::plugin::PluginRegistry::new();
-        log::info!("step_init_project: workspace_state={}", self.context.workspace_state);
+        log::info!(
+            "step_init_project: workspace_state={}",
+            self.context.workspace_state
+        );
 
         match self.context.workspace_state.clone() {
             WorkspaceState::ExistingProject { ref plugins } => {
@@ -1046,7 +1072,9 @@ impl SRBNOrchestrator {
                         match self.detect_language_from_task(task) {
                             Some(l) => l,
                             None => {
-                                self.emit_log("ℹ️ No language detected, skipping project init".to_string());
+                                self.emit_log(
+                                    "ℹ️ No language detected, skipping project init".to_string(),
+                                );
                                 return Ok(());
                             }
                         }
@@ -1063,12 +1091,18 @@ impl SRBNOrchestrator {
                 }
 
                 if let Some(plugin) = registry.get(lang) {
-                    log::info!("step_init_project: Greenfield lang={}, initializing project", lang);
+                    log::info!(
+                        "step_init_project: Greenfield lang={}, initializing project",
+                        lang
+                    );
                     self.emit_log(format!("🌱 Initializing new {} project", lang));
 
                     // Pre-flight: check required tools before attempting init
                     if !self.check_tool_prerequisites(plugin) {
-                        log::warn!("step_init_project: tool prerequisites check failed for {}", lang);
+                        log::warn!(
+                            "step_init_project: tool prerequisites check failed for {}",
+                            lang
+                        );
                         return Ok(());
                     }
 
@@ -1096,7 +1130,10 @@ impl SRBNOrchestrator {
                             command,
                             description,
                         } => {
-                            log::info!("step_init_project: init command='{}', awaiting approval", command);
+                            log::info!(
+                                "step_init_project: init command='{}', awaiting approval",
+                                command
+                            );
                             let result = self
                                 .await_approval(
                                     perspt_core::ActionType::ProjectInit {
@@ -1112,7 +1149,11 @@ impl SRBNOrchestrator {
                                 ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
                                 _ => project_name.clone(),
                             };
-                            log::info!("step_init_project: approval result={:?}, final_name={}", result, final_name);
+                            log::info!(
+                                "step_init_project: approval result={:?}, final_name={}",
+                                result,
+                                final_name
+                            );
 
                             if matches!(
                                 result,
@@ -1151,8 +1192,7 @@ impl SRBNOrchestrator {
                                     // Update working directory to point at the
                                     // isolated project root if we created a child dir.
                                     if final_name != "." {
-                                        let new_dir =
-                                            self.context.working_dir.join(&final_name);
+                                        let new_dir = self.context.working_dir.join(&final_name);
                                         if new_dir.is_dir() {
                                             self.context.working_dir = new_dir.clone();
                                             self.tools =
@@ -1232,8 +1272,7 @@ impl SRBNOrchestrator {
 
                                 if matches!(
                                     result,
-                                    ApprovalResult::Approved
-                                        | ApprovalResult::ApprovedWithEdit(_)
+                                    ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
                                 ) {
                                     let final_command = if final_name != project_name {
                                         let edited_opts = perspt_core::plugin::InitOptions {
@@ -1265,8 +1304,7 @@ impl SRBNOrchestrator {
                                             final_name
                                         ));
 
-                                        let new_dir =
-                                            self.context.working_dir.join(&final_name);
+                                        let new_dir = self.context.working_dir.join(&final_name);
                                         if new_dir.is_dir() {
                                             self.context.working_dir = new_dir.clone();
                                             self.tools =
@@ -1288,9 +1326,7 @@ impl SRBNOrchestrator {
                                 }
                             }
                             perspt_core::plugin::ProjectAction::NoAction => {
-                                self.emit_log(
-                                    "ℹ️ No initialization action needed".to_string(),
-                                );
+                                self.emit_log("ℹ️ No initialization action needed".to_string());
                             }
                         }
                     }
@@ -1460,14 +1496,9 @@ impl SRBNOrchestrator {
             .collect();
 
         if !detected.is_empty() {
-            self.emit_log(format!(
-                "🔌 Post-init plugins: {}",
-                detected.join(", ")
-            ));
+            self.emit_log(format!("🔌 Post-init plugins: {}", detected.join(", ")));
             self.context.active_plugins = detected.clone();
-            self.context.workspace_state = WorkspaceState::ExistingProject {
-                plugins: detected,
-            };
+            self.context.workspace_state = WorkspaceState::ExistingProject { plugins: detected };
         } else {
             self.emit_log("⚠️ No plugins detected after project init".to_string());
         }
@@ -2121,12 +2152,14 @@ Project name:"#,
             }
         }
 
-        Ok(crate::agent::ArchitectAgent::build_task_decomposition_prompt(
-            task,
-            &self.context.working_dir,
-            &project_context,
-            last_error,
-        ))
+        Ok(
+            crate::agent::ArchitectAgent::build_task_decomposition_prompt(
+                task,
+                &self.context.working_dir,
+                &project_context,
+                last_error,
+            ),
+        )
     }
 
     /// Gather existing project context for the Architect prompt
@@ -2515,7 +2548,10 @@ Project name:"#,
             .filter(|f| {
                 // Only treat as missing if not planned for creation by this node
                 !context_package.included_files.contains_key(*f)
-                    && !node.output_targets.iter().any(|ot| ot.to_string_lossy() == **f)
+                    && !node
+                        .output_targets
+                        .iter()
+                        .any(|ot| ot.to_string_lossy() == **f)
             })
             .cloned()
             .collect();
@@ -2581,7 +2617,8 @@ Project name:"#,
                         reason: dep_reason.clone(),
                     });
                 }
-                let dep_names: Vec<&str> = prose_only_deps.iter().map(|(id, _)| id.as_str()).collect();
+                let dep_names: Vec<&str> =
+                    prose_only_deps.iter().map(|(id, _)| id.as_str()).collect();
                 let block_reason = format!(
                     "Required structural dependencies lack machine-verifiable digests (only prose summaries): [{}]",
                     dep_names.join(", ")
@@ -2650,7 +2687,10 @@ Project name:"#,
                 )
                 .await
                 .unwrap_or_else(|e| {
-                    log::warn!("Speculator lookahead failed ({}), proceeding without hints", e);
+                    log::warn!(
+                        "Speculator lookahead failed ({}), proceeding without hints",
+                        e
+                    );
                     String::new()
                 })
             } else {
@@ -2812,13 +2852,19 @@ Project name:"#,
                         cmd_approval,
                         ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
                     ) {
-                        self.emit_log(format!("⏭️ Bundle command skipped (not approved): {}", command));
+                        self.emit_log(format!(
+                            "⏭️ Bundle command skipped (not approved): {}",
+                            command
+                        ));
                         continue;
                     }
 
                     let mut args = HashMap::new();
                     args.insert("command".to_string(), command.clone());
-                    args.insert("working_dir".to_string(), work_dir.to_string_lossy().to_string());
+                    args.insert(
+                        "working_dir".to_string(),
+                        work_dir.to_string_lossy().to_string(),
+                    );
 
                     let call = ToolCall {
                         name: "run_command".to_string(),
@@ -2839,7 +2885,8 @@ Project name:"#,
                         log::warn!("Bundle command failed: {} — {}", command, err_msg);
                         self.emit_log(format!("❌ Command failed: {} — {}", command, err_msg));
                         // Record as tool failure so step_verify picks it up via V_syn
-                        self.last_tool_failure = Some(format!("Bundle command '{}' failed: {}", command, err_msg));
+                        self.last_tool_failure =
+                            Some(format!("Bundle command '{}' failed: {}", command, err_msg));
                     }
                 }
 
@@ -2917,10 +2964,7 @@ Project name:"#,
     /// Unlike `extract_code_from_response` which returns only the first block,
     /// this collects every named code block so multi-file legacy responses are
     /// not silently truncated to a single artifact.
-    fn extract_all_code_blocks_from_response(
-        &self,
-        content: &str,
-    ) -> Vec<(String, String, bool)> {
+    fn extract_all_code_blocks_from_response(&self, content: &str) -> Vec<(String, String, bool)> {
         let lines: Vec<&str> = content.lines().collect();
         let mut results: Vec<(String, String, bool)> = Vec::new();
         let mut file_path: Option<String> = None;
@@ -2931,9 +2975,7 @@ Project name:"#,
 
         for line in &lines {
             // Look for file path patterns
-            if line.starts_with("File:")
-                || line.starts_with("**File:")
-                || line.starts_with("file:")
+            if line.starts_with("File:") || line.starts_with("**File:") || line.starts_with("file:")
             {
                 let path = line
                     .trim_start_matches("File:")
@@ -2949,9 +2991,7 @@ Project name:"#,
             }
 
             // Look for Diff patterns
-            if line.starts_with("Diff:")
-                || line.starts_with("**Diff:")
-                || line.starts_with("diff:")
+            if line.starts_with("Diff:") || line.starts_with("**Diff:") || line.starts_with("diff:")
             {
                 let path = line
                     .trim_start_matches("Diff:")
@@ -2999,9 +3039,7 @@ Project name:"#,
                             }
                         },
                     };
-                    let is_diff = is_diff_marker
-                        || code_lang == "diff"
-                        || code.starts_with("---");
+                    let is_diff = is_diff_marker || code_lang == "diff" || code.starts_with("---");
                     results.push((filename, code, is_diff));
                 }
                 code_lines.clear();
@@ -3142,10 +3180,8 @@ Project name:"#,
                                     "📦 Auto-installing missing dependencies: {}",
                                     missing.join(", ")
                                 ));
-                                let dep_ok = Self::auto_install_crate_deps(
-                                    &missing,
-                                    &verify_dir,
-                                ).await;
+                                let dep_ok =
+                                    Self::auto_install_crate_deps(&missing, &verify_dir).await;
                                 if dep_ok > 0 {
                                     self.emit_log(format!(
                                         "📦 Installed {} crate(s), re-running verification...",
@@ -5102,11 +5138,10 @@ uv add --dev pytest
         node_id: &str,
         node_class: perspt_core::types::NodeClass,
     ) -> Result<()> {
-        let idx = self
-            .node_indices
-            .get(node_id)
-            .copied()
-            .ok_or_else(|| anyhow::anyhow!("Unknown node '{}' for bundle application", node_id))?;
+        let idx =
+            self.node_indices.get(node_id).copied().ok_or_else(|| {
+                anyhow::anyhow!("Unknown node '{}' for bundle application", node_id)
+            })?;
         let node_workdir = self.effective_working_dir(idx);
 
         // Validate structural integrity first
@@ -5363,10 +5398,11 @@ uv add --dev pytest
             return bundle.clone();
         }
 
-        let (kept, dropped): (Vec<_>, Vec<_>) =
-            bundle.artifacts.iter().cloned().partition(|a| {
-                allowed_paths.contains(a.path())
-            });
+        let (kept, dropped): (Vec<_>, Vec<_>) = bundle
+            .artifacts
+            .iter()
+            .cloned()
+            .partition(|a| allowed_paths.contains(a.path()));
 
         if !dropped.is_empty() {
             let dropped_paths: Vec<String> = dropped.iter().map(|a| a.path().to_string()).collect();
@@ -5841,20 +5877,84 @@ uv add --dev pytest
 
         // Filter out standard library modules that are always present
         let stdlib: HashSet<&str> = [
-            "os", "sys", "json", "re", "math", "datetime", "collections",
-            "itertools", "functools", "pathlib", "typing", "abc", "io",
-            "unittest", "logging", "argparse", "sqlite3", "csv", "hashlib",
-            "tempfile", "shutil", "copy", "contextlib", "dataclasses",
-            "enum", "textwrap", "importlib", "inspect", "traceback",
-            "subprocess", "threading", "multiprocessing", "asyncio",
-            "socket", "http", "urllib", "xml", "html", "email",
-            "string", "struct", "array", "queue", "heapq", "bisect",
-            "pprint", "decimal", "fractions", "random", "secrets",
-            "time", "calendar", "zlib", "gzip", "zipfile", "tarfile",
-            "glob", "fnmatch", "stat", "fileinput", "codecs", "uuid",
-            "base64", "binascii", "pickle", "shelve", "dbm", "platform",
-            "signal", "mmap", "ctypes", "configparser", "tomllib",
-            "warnings", "weakref", "types", "operator", "numbers",
+            "os",
+            "sys",
+            "json",
+            "re",
+            "math",
+            "datetime",
+            "collections",
+            "itertools",
+            "functools",
+            "pathlib",
+            "typing",
+            "abc",
+            "io",
+            "unittest",
+            "logging",
+            "argparse",
+            "sqlite3",
+            "csv",
+            "hashlib",
+            "tempfile",
+            "shutil",
+            "copy",
+            "contextlib",
+            "dataclasses",
+            "enum",
+            "textwrap",
+            "importlib",
+            "inspect",
+            "traceback",
+            "subprocess",
+            "threading",
+            "multiprocessing",
+            "asyncio",
+            "socket",
+            "http",
+            "urllib",
+            "xml",
+            "html",
+            "email",
+            "string",
+            "struct",
+            "array",
+            "queue",
+            "heapq",
+            "bisect",
+            "pprint",
+            "decimal",
+            "fractions",
+            "random",
+            "secrets",
+            "time",
+            "calendar",
+            "zlib",
+            "gzip",
+            "zipfile",
+            "tarfile",
+            "glob",
+            "fnmatch",
+            "stat",
+            "fileinput",
+            "codecs",
+            "uuid",
+            "base64",
+            "binascii",
+            "pickle",
+            "shelve",
+            "dbm",
+            "platform",
+            "signal",
+            "mmap",
+            "ctypes",
+            "configparser",
+            "tomllib",
+            "warnings",
+            "weakref",
+            "types",
+            "operator",
+            "numbers",
             "__future__",
         ]
         .iter()
@@ -5899,10 +5999,7 @@ uv add --dev pytest
     }
 
     /// Run `uv add <package>` for each missing Python module. Returns count of successes.
-    async fn auto_install_python_deps(
-        modules: &[String],
-        working_dir: &std::path::Path,
-    ) -> usize {
+    async fn auto_install_python_deps(modules: &[String], working_dir: &std::path::Path) -> usize {
         let mut installed = 0usize;
         for module in modules {
             let package = Self::python_import_to_package(module);
@@ -5997,7 +6094,9 @@ uv add --dev pytest
 
             // Emit per-stage SensorFallback events
             for outcome in &result.stage_outcomes {
-                if let perspt_core::types::SensorStatus::Fallback { actual, reason } = &outcome.sensor_status {
+                if let perspt_core::types::SensorStatus::Fallback { actual, reason } =
+                    &outcome.sensor_status
+                {
                     self.emit_event(perspt_core::AgentEvent::SensorFallback {
                         node_id: plugin_name.to_string(),
                         stage: outcome.stage.clone(),
@@ -7051,13 +7150,11 @@ mod tests {
         let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_struct_dep"));
 
         // Parent: Interface node (no structural digests)
-        let mut parent =
-            SRBNNode::new("iface_1".into(), "Define API".into(), ModelTier::Architect);
+        let mut parent = SRBNNode::new("iface_1".into(), "Define API".into(), ModelTier::Architect);
         parent.node_class = NodeClass::Interface;
 
         // Child: Implementation node depending on the interface
-        let mut child =
-            SRBNNode::new("impl_1".into(), "Implement API".into(), ModelTier::Actuator);
+        let mut child = SRBNNode::new("impl_1".into(), "Implement API".into(), ModelTier::Actuator);
         child.node_class = NodeClass::Implementation;
 
         let parent_idx = orch.add_node(parent);
@@ -7080,12 +7177,10 @@ mod tests {
 
         let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_struct_ok"));
 
-        let mut parent =
-            SRBNNode::new("iface_2".into(), "Define API".into(), ModelTier::Architect);
+        let mut parent = SRBNNode::new("iface_2".into(), "Define API".into(), ModelTier::Architect);
         parent.node_class = NodeClass::Interface;
 
-        let mut child =
-            SRBNNode::new("impl_2".into(), "Implement API".into(), ModelTier::Actuator);
+        let mut child = SRBNNode::new("impl_2".into(), "Implement API".into(), ModelTier::Actuator);
         child.node_class = NodeClass::Implementation;
 
         let parent_idx = orch.add_node(parent);
@@ -7113,8 +7208,7 @@ mod tests {
         let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_struct_skip"));
 
         // An Integration node should NOT be checked
-        let mut node =
-            SRBNNode::new("integ_1".into(), "Wire modules".into(), ModelTier::Actuator);
+        let mut node = SRBNNode::new("integ_1".into(), "Wire modules".into(), ModelTier::Actuator);
         node.node_class = NodeClass::Integration;
         orch.add_node(node.clone());
 
@@ -7394,11 +7488,17 @@ mod tests {
         assert_eq!(stages, vec![VerifierStage::SyntaxCheck]);
 
         // Implementation without tests → SyntaxCheck + Build
-        let mut implementation_node =
-            SRBNNode::new("impl".into(), "Implement feature".into(), ModelTier::Actuator);
+        let mut implementation_node = SRBNNode::new(
+            "impl".into(),
+            "Implement feature".into(),
+            ModelTier::Actuator,
+        );
         implementation_node.node_class = perspt_core::types::NodeClass::Implementation;
         let stages = verification_stages_for_node(&implementation_node);
-        assert_eq!(stages, vec![VerifierStage::SyntaxCheck, VerifierStage::Build]);
+        assert_eq!(
+            stages,
+            vec![VerifierStage::SyntaxCheck, VerifierStage::Build]
+        );
 
         // Implementation with weighted tests → SyntaxCheck + Build + Test
         implementation_node
@@ -7411,7 +7511,11 @@ mod tests {
         let stages = verification_stages_for_node(&implementation_node);
         assert_eq!(
             stages,
-            vec![VerifierStage::SyntaxCheck, VerifierStage::Build, VerifierStage::Test]
+            vec![
+                VerifierStage::SyntaxCheck,
+                VerifierStage::Build,
+                VerifierStage::Test
+            ]
         );
 
         // Integration → full pipeline
@@ -7466,7 +7570,11 @@ mod tests {
     async fn test_classify_workspace_existing_rust_project() {
         let temp = tempfile::tempdir().unwrap();
         // Create a Cargo.toml to make it look like a Rust project
-        std::fs::write(temp.path().join("Cargo.toml"), "[package]\nname = \"test\"\nversion = \"0.1.0\"").unwrap();
+        std::fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"",
+        )
+        .unwrap();
         let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
         let state = orch.classify_workspace("add a feature");
         match state {
@@ -7480,7 +7588,11 @@ mod tests {
     #[tokio::test]
     async fn test_classify_workspace_existing_python_project() {
         let temp = tempfile::tempdir().unwrap();
-        std::fs::write(temp.path().join("pyproject.toml"), "[project]\nname = \"test\"").unwrap();
+        std::fs::write(
+            temp.path().join("pyproject.toml"),
+            "[project]\nname = \"test\"",
+        )
+        .unwrap();
         let orch = SRBNOrchestrator::new_for_testing(temp.path().to_path_buf());
         let state = orch.classify_workspace("add a feature");
         match state {
@@ -7614,9 +7726,15 @@ mod tests {
             Some("gpt-4o-mini".into()),
         );
         assert_eq!(orch.architect_fallback_model, Some("gpt-4o".to_string()));
-        assert_eq!(orch.actuator_fallback_model, Some("gpt-4o-mini".to_string()));
+        assert_eq!(
+            orch.actuator_fallback_model,
+            Some("gpt-4o-mini".to_string())
+        );
         assert_eq!(orch.verifier_fallback_model, Some("gpt-4o".to_string()));
-        assert_eq!(orch.speculator_fallback_model, Some("gpt-4o-mini".to_string()));
+        assert_eq!(
+            orch.speculator_fallback_model,
+            Some("gpt-4o-mini".to_string())
+        );
     }
 
     #[tokio::test]
@@ -7683,12 +7801,24 @@ ModuleNotFoundError: No module named 'json'
     fn test_python_import_to_package_mapping() {
         assert_eq!(SRBNOrchestrator::python_import_to_package("PIL"), "pillow");
         assert_eq!(SRBNOrchestrator::python_import_to_package("yaml"), "pyyaml");
-        assert_eq!(SRBNOrchestrator::python_import_to_package("cv2"), "opencv-python");
-        assert_eq!(SRBNOrchestrator::python_import_to_package("sklearn"), "scikit-learn");
-        assert_eq!(SRBNOrchestrator::python_import_to_package("bs4"), "beautifulsoup4");
+        assert_eq!(
+            SRBNOrchestrator::python_import_to_package("cv2"),
+            "opencv-python"
+        );
+        assert_eq!(
+            SRBNOrchestrator::python_import_to_package("sklearn"),
+            "scikit-learn"
+        );
+        assert_eq!(
+            SRBNOrchestrator::python_import_to_package("bs4"),
+            "beautifulsoup4"
+        );
         // Direct passthrough for unknown
         assert_eq!(SRBNOrchestrator::python_import_to_package("httpx"), "httpx");
-        assert_eq!(SRBNOrchestrator::python_import_to_package("fastapi"), "fastapi");
+        assert_eq!(
+            SRBNOrchestrator::python_import_to_package("fastapi"),
+            "fastapi"
+        );
     }
 
     #[test]
@@ -7752,9 +7882,21 @@ File: main.py
 import httpx
 ```"#;
         let commands = SRBNOrchestrator::extract_commands_from_correction(response);
-        assert!(commands.contains(&"uv add httpx".to_string()), "{:?}", commands);
-        assert!(commands.contains(&"cargo add serde".to_string()), "{:?}", commands);
-        assert!(commands.contains(&"pip install numpy".to_string()), "{:?}", commands);
+        assert!(
+            commands.contains(&"uv add httpx".to_string()),
+            "{:?}",
+            commands
+        );
+        assert!(
+            commands.contains(&"cargo add serde".to_string()),
+            "{:?}",
+            commands
+        );
+        assert!(
+            commands.contains(&"pip install numpy".to_string()),
+            "{:?}",
+            commands
+        );
     }
 
     #[test]

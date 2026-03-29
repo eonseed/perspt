@@ -52,7 +52,10 @@ impl ArchitectAgent {
         Self::build_task_decomposition_prompt(
             &node.goal,
             &ctx.working_dir,
-            &format!("Context Files: {:?}\nOutput Targets: {:?}", node.context_files, node.output_targets),
+            &format!(
+                "Context Files: {:?}\nOutput Targets: {:?}",
+                node.context_files, node.output_targets
+            ),
             None,
         )
     }
@@ -453,60 +456,6 @@ Workspace Import Hints: {workspace_import_hints:?}
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::tempdir;
-
-    #[test]
-    fn build_coding_prompt_includes_rust_crate_hint() {
-        let dir = tempdir().unwrap();
-        fs::write(
-            dir.path().join("Cargo.toml"),
-            "[package]\nname = \"validator_lib\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-
-        let provider = Arc::new(GenAIProvider::new().unwrap());
-        let agent = ActuatorAgent::new(provider, Some("test-model".into()));
-        let mut node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
-        node.output_targets.push("tests/integration.rs".into());
-        let ctx = AgentContext {
-            working_dir: dir.path().to_path_buf(),
-            ..Default::default()
-        };
-
-        let prompt = agent.build_coding_prompt(&node, &ctx);
-        assert!(prompt.contains("Rust crate name: validator_lib"), "{prompt}");
-    }
-
-    #[test]
-    fn build_coding_prompt_includes_python_package_hint() {
-        let dir = tempdir().unwrap();
-        fs::create_dir_all(dir.path().join("src/psp5_python_verify")).unwrap();
-        fs::write(
-            dir.path().join("pyproject.toml"),
-            "[project]\nname = \"psp5-python-verify\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-
-        let provider = Arc::new(GenAIProvider::new().unwrap());
-        let agent = ActuatorAgent::new(provider, Some("test-model".into()));
-        let mut node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
-        node.output_targets.push("tests/test_main.py".into());
-        let ctx = AgentContext {
-            working_dir: dir.path().to_path_buf(),
-            ..Default::default()
-        };
-
-        let prompt = agent.build_coding_prompt(&node, &ctx);
-        assert!(
-            prompt.contains("Python package import root: psp5_python_verify"),
-            "{prompt}"
-        );
-    }
-}
-
 #[async_trait]
 impl Agent for ActuatorAgent {
     async fn process(&self, node: &SRBNNode, ctx: &AgentContext) -> Result<AgentMessage> {
@@ -688,5 +637,62 @@ impl Agent for SpeculatorAgent {
 
     fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
         format!("Briefly analyze potential issues for: {}", node.goal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn build_coding_prompt_includes_rust_crate_hint() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"validator_lib\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let provider = Arc::new(GenAIProvider::new().unwrap());
+        let agent = ActuatorAgent::new(provider, Some("test-model".into()));
+        let mut node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        node.output_targets.push("tests/integration.rs".into());
+        let ctx = AgentContext {
+            working_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+
+        let prompt = agent.build_coding_prompt(&node, &ctx);
+        assert!(
+            prompt.contains("Rust crate name: validator_lib"),
+            "{prompt}"
+        );
+    }
+
+    #[test]
+    fn build_coding_prompt_includes_python_package_hint() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("src/psp5_python_verify")).unwrap();
+        fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"psp5-python-verify\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+
+        let provider = Arc::new(GenAIProvider::new().unwrap());
+        let agent = ActuatorAgent::new(provider, Some("test-model".into()));
+        let mut node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        node.output_targets.push("tests/test_main.py".into());
+        let ctx = AgentContext {
+            working_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+
+        let prompt = agent.build_coding_prompt(&node, &ctx);
+        assert!(
+            prompt.contains("Python package import root: psp5_python_verify"),
+            "{prompt}"
+        );
     }
 }

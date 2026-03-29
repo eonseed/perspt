@@ -539,20 +539,11 @@ impl ContextRetriever {
             }
         }
         if !found_entries.is_empty() {
-            summary.push_str(&format!(
-                "**Entry points:** {}\n",
-                found_entries.join(", ")
-            ));
+            summary.push_str(&format!("**Entry points:** {}\n", found_entries.join(", ")));
         }
 
         // Test locations
-        let test_candidates = [
-            "tests/",
-            "test/",
-            "src/tests/",
-            "tests.py",
-            "test_*.py",
-        ];
+        let test_candidates = ["tests/", "test/", "src/tests/", "tests.py", "test_*.py"];
         let mut found_tests = Vec::new();
         for candidate in &test_candidates {
             if self.working_dir.join(candidate).exists() {
@@ -560,10 +551,7 @@ impl ContextRetriever {
             }
         }
         if !found_tests.is_empty() {
-            summary.push_str(&format!(
-                "**Test locations:** {}\n",
-                found_tests.join(", ")
-            ));
+            summary.push_str(&format!("**Test locations:** {}\n", found_tests.join(", ")));
         }
 
         // Read key manifest content (truncated) for context
@@ -575,10 +563,7 @@ impl ContextRetriever {
                 } else {
                     content
                 };
-                summary.push_str(&format!(
-                    "\n### {}\n```\n{}\n```\n",
-                    manifest, truncated
-                ));
+                summary.push_str(&format!("\n### {}\n```\n{}\n```\n", manifest, truncated));
             }
         }
 

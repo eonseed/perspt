@@ -35,7 +35,7 @@ pub struct NodeStateRecord {
     pub owner_plugin: Option<String>,
     pub goal: Option<String>,
     pub parent_id: Option<String>,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub children: Option<String>,
     pub last_error_type: Option<String>,
     pub committed_at: Option<String>,
@@ -106,11 +106,11 @@ pub struct EscalationReportRecord {
     pub action: String,
     /// JSON-serialized EnergyComponents
     pub energy_snapshot: String,
-    /// JSON-serialized Vec<StageOutcome>
+    /// JSON-serialized `Vec<StageOutcome>`
     pub stage_outcomes: String,
     /// Human-readable evidence
     pub evidence: String,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub affected_node_ids: String,
 }
 
@@ -123,9 +123,9 @@ pub struct RewriteRecordRow {
     pub action: String,
     /// Serialized EscalationCategory
     pub category: String,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub requeued_nodes: String,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub inserted_nodes: String,
 }
 
@@ -138,10 +138,10 @@ pub struct SheafValidationRow {
     pub plugin_source: Option<String>,
     pub passed: bool,
     pub evidence_summary: String,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub affected_files: String,
     pub v_sheaf_contribution: f32,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub requeue_targets: String,
 }
 
@@ -188,9 +188,9 @@ pub struct BranchFlushRow {
     pub flush_id: String,
     pub session_id: String,
     pub parent_node_id: String,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub flushed_branch_ids: String,
-    /// JSON-serialized Vec<String>
+    /// JSON-serialized `Vec<String>`
     pub requeue_node_ids: String,
     pub reason: String,
 }
@@ -252,7 +252,7 @@ pub struct ArtifactBundleRow {
     pub bundle_json: String,
     pub artifact_count: i32,
     pub command_count: i32,
-    /// JSON-serialized Vec<String> of touched file paths
+    /// JSON-serialized `Vec<String>` of touched file paths
     pub touched_files: String,
 }
 
@@ -417,7 +417,7 @@ impl SessionStore {
         }
     }
 
-    /// Get the directory for session artifacts (~/.local/share/perspt/sessions/<id>)
+    /// Get the directory for session artifacts (`~/.local/share/perspt/sessions/<id>`)
     pub fn get_session_dir(&self, session_id: &str) -> Result<PathBuf> {
         let data_dir = dirs::data_local_dir()
             .context("Could not find local data directory")?
