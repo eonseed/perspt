@@ -1,6 +1,7 @@
 //! Agent command - SRBN agent execution mode
 
 use anyhow::Result;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 /// Execution mode
@@ -139,7 +140,7 @@ pub async fn run(
     println!();
 
     // Check if we should run in TUI mode or headless mode
-    let is_tty = atty::is(atty::Stream::Stdout);
+    let is_tty = std::io::stdout().is_terminal();
 
     if is_tty && !auto_approve {
         // Interactive mode with TUI - run orchestrator with TUI integration
@@ -174,7 +175,11 @@ pub async fn run(
                     match serde_json::to_string_pretty(&nodes) {
                         Ok(json) => {
                             if let Err(e) = std::fs::write(plan_path, &json) {
-                                eprintln!("⚠️  Failed to write plan to {}: {}", plan_path.display(), e);
+                                eprintln!(
+                                    "⚠️  Failed to write plan to {}: {}",
+                                    plan_path.display(),
+                                    e
+                                );
                             } else {
                                 println!("   Plan exported to {}", plan_path.display());
                             }

@@ -16,15 +16,15 @@ use ratatui::{
 /// Review decision
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewDecision {
-    /// Approve changes [y]
+    /// Approve changes `[y]`
     Approve,
-    /// Reject changes [n]
+    /// Reject changes `[n]`
     Reject,
-    /// Edit in external editor [e]
+    /// Edit in external editor `[e]`
     Edit,
-    /// View detailed diff [d]
+    /// View detailed diff `[d]`
     ViewDiff,
-    /// Request correction with feedback [c]
+    /// Request correction with feedback `[c]`
     RequestCorrection,
     /// Skip this review
     Skip,
@@ -524,7 +524,7 @@ mod tests {
 
     #[test]
     fn test_all_decisions_have_unique_hotkeys() {
-        let decisions = vec![
+        let decisions = [
             ReviewDecision::Approve,
             ReviewDecision::Reject,
             ReviewDecision::RequestCorrection,

@@ -649,7 +649,12 @@ impl TestRunnerTrait for RustTestRunner {
         let mut results = self.parse_cargo_test_output(&combined);
         results.run_succeeded = true;
         if !output.status.success() {
-            force_failure_on_nonzero_exit(&mut results, "cargo test", output.status.code(), &combined);
+            force_failure_on_nonzero_exit(
+                &mut results,
+                "cargo test",
+                output.status.code(),
+                &combined,
+            );
         }
         Ok(results)
     }

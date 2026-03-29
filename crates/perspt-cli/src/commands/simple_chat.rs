@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use perspt_core::{GenAIProvider, EOT_SIGNAL};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -85,7 +85,7 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
         }
 
         // Echo input if not running interactively (piped mode)
-        if !atty::is(atty::Stream::Stdin) {
+        if !std::io::stdin().is_terminal() {
             println!("{}", trimmed_input);
         }
 

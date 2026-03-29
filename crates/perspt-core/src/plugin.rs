@@ -417,7 +417,11 @@ impl LanguagePlugin for RustPlugin {
         vec![
             ("cargo", "build/init", "Install Rust via https://rustup.rs"),
             ("rustc", "compiler", "Install Rust via https://rustup.rs"),
-            ("rust-analyzer", "language server", "rustup component add rust-analyzer"),
+            (
+                "rust-analyzer",
+                "language server",
+                "rustup component add rust-analyzer",
+            ),
         ]
     }
 
@@ -560,9 +564,21 @@ impl LanguagePlugin for PythonPlugin {
 
     fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
         vec![
-            ("uv", "package manager", "curl -LsSf https://astral.sh/uv/install.sh | sh"),
-            ("python3", "interpreter", "uv python install (or install from https://python.org)"),
-            ("uvx", "tool runner/LSP", "Installed with uv — curl -LsSf https://astral.sh/uv/install.sh | sh"),
+            (
+                "uv",
+                "package manager",
+                "curl -LsSf https://astral.sh/uv/install.sh | sh",
+            ),
+            (
+                "python3",
+                "interpreter",
+                "uv python install (or install from https://python.org)",
+            ),
+            (
+                "uvx",
+                "tool runner/LSP",
+                "Installed with uv — curl -LsSf https://astral.sh/uv/install.sh | sh",
+            ),
         ]
     }
 
@@ -793,9 +809,21 @@ impl LanguagePlugin for JsPlugin {
 
     fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
         vec![
-            ("node", "runtime", "Install Node.js from https://nodejs.org or via nvm"),
-            ("npm", "package manager", "Included with Node.js — install from https://nodejs.org"),
-            ("typescript-language-server", "language server", "npm install -g typescript-language-server typescript"),
+            (
+                "node",
+                "runtime",
+                "Install Node.js from https://nodejs.org or via nvm",
+            ),
+            (
+                "npm",
+                "package manager",
+                "Included with Node.js — install from https://nodejs.org",
+            ),
+            (
+                "typescript-language-server",
+                "language server",
+                "npm install -g typescript-language-server typescript",
+            ),
         ]
     }
 
@@ -1240,7 +1268,8 @@ mod tests {
 
     #[test]
     fn test_python_run_command_for_dir_src_layout() {
-        let dir = std::env::temp_dir().join(format!("perspt_test_pyrun_src_{}", uuid::Uuid::new_v4()));
+        let dir =
+            std::env::temp_dir().join(format!("perspt_test_pyrun_src_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("src/myapp")).unwrap();
         std::fs::write(dir.join("src/myapp/__init__.py"), "").unwrap();
 
@@ -1253,7 +1282,10 @@ mod tests {
 
     #[test]
     fn test_python_run_command_for_dir_scripts() {
-        let dir = std::env::temp_dir().join(format!("perspt_test_pyrun_scripts_{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "perspt_test_pyrun_scripts_{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("pyproject.toml"),
@@ -1270,13 +1302,12 @@ mod tests {
 
     #[test]
     fn test_python_run_command_for_dir_default() {
-        let dir = std::env::temp_dir().join(format!("perspt_test_pyrun_default_{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!(
+            "perspt_test_pyrun_default_{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(
-            dir.join("pyproject.toml"),
-            "[project]\nname = \"myapp\"\n",
-        )
-        .unwrap();
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"myapp\"\n").unwrap();
 
         let plugin = PythonPlugin;
         let cmd = plugin.run_command_for_dir(&dir);
