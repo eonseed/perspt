@@ -5,18 +5,22 @@
 use anyhow::Result;
 use shell_words;
 
+fn has_windows_drive_prefix(part: &str) -> bool {
+    part
+        .chars()
+        .nth(1)
+        .is_some_and(|character| character == ':')
+}
+
 fn looks_like_path_argument(part: &str) -> bool {
-    part.contains('/') || part.contains('\\')
+    part.contains('/') || part.contains('\\') || has_windows_drive_prefix(part)
 }
 
 fn is_explicit_absolute_path(part: &str, candidate: &std::path::Path) -> bool {
     candidate.is_absolute()
         || part.starts_with('/')
         || part.starts_with('\\')
-        || part
-            .chars()
-            .nth(1)
-            .is_some_and(|character| character == ':')
+        || has_windows_drive_prefix(part)
 }
 
 /// Sanitization result
