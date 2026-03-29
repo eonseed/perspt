@@ -1,417 +1,517 @@
+.. _developer-guide-architecture:
+
 Architecture
 ============
 
-Perspt is built as a modern, modular Rust application using a **7-crate workspace architecture**. 
-This design enables clean separation of concerns, independent testing, and easy extensibility.
+Perspt is a Rust workspace with seven crates plus a root integration crate.
+Version 0.5.5 implements the PSP-5 specification for the experimental SRBN agent.
 
-Workspace Overview
-------------------
-
-.. graphviz::
-   :align: center
-   :caption: Perspt Workspace Structure
-
-   digraph workspace {
-       rankdir=TB;
-       node [shape=folder, style=filled, fontname="Helvetica"];
-       
-       subgraph cluster_workspace {
-           label="perspt/crates/";
-           style=dashed;
-           color=gray;
-           
-           cli [label="perspt-cli\n(CLI Entry)", fillcolor="#4ECDC4"];
-           core [label="perspt-core\n(LLM, Config)", fillcolor="#45B7D1"];
-           tui [label="perspt-tui\n(Terminal UI)", fillcolor="#96CEB4"];
-           agent [label="perspt-agent\n(SRBN Engine)", fillcolor="#FFEAA7"];
-           policy [label="perspt-policy\n(Security)", fillcolor="#DDA0DD"];
-           sandbox [label="perspt-sandbox\n(Isolation)", fillcolor="#F8B739"];
-           store [label="perspt-store\n(Persistence)", fillcolor="#87CEEB"];
-       }
-   }
-
-Crate Dependency Graph
-----------------------
-
-.. graphviz::
-   :align: center
-   :caption: Crate Dependencies
-
-   digraph dependencies {
-       rankdir=TB;
-       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11];
-       edge [color="#666666"];
-       
-       cli [label="perspt-cli\n━━━━━━━━━━━\n10 Subcommands", fillcolor="#4ECDC4"];
-       
-       subgraph cluster_middle {
-           rank=same;
-           style=invis;
-           tui [label="perspt-tui\n━━━━━━━━━━━\nAgent UI\nDashboard\nDiff Viewer", fillcolor="#96CEB4"];
-           agent [label="perspt-agent\n━━━━━━━━━━━\nOrchestrator\nLSP Client\nTools", fillcolor="#FFEAA7"];
-           core [label="perspt-core\n━━━━━━━━━━━\nGenAIProvider\nConfig\nMemory", fillcolor="#45B7D1"];
-       }
-       
-       subgraph cluster_bottom {
-           rank=same;
-           style=invis;
-           policy [label="perspt-policy\n━━━━━━━━━━━\nPolicyEngine\nSanitizer", fillcolor="#DDA0DD"];
-           sandbox [label="perspt-sandbox\n━━━━━━━━━━━\nSandboxedCommand", fillcolor="#F8B739"];
-           store [label="perspt-store\n━━━━━━━━━━━\nSQLite DB\nMerkle Tree", fillcolor="#87CEEB"];
-       }
-       
-       cli -> tui;
-       cli -> agent;
-       cli -> core;
-       cli -> store;
-       agent -> policy;
-       agent -> sandbox;
-       agent -> core;
-       agent -> store;
-   }
-
-SRBN Control Flow
------------------
-
-.. graphviz::
-   :align: center
-   :caption: Stabilized Recursive Barrier Network
-
-   digraph srbn {
-       rankdir=LR;
-       node [shape=box, style="rounded,filled", fontname="Helvetica"];
-       edge [fontname="Helvetica", fontsize=10];
-       
-       start [shape=circle, label="", fillcolor="#333333", width=0.3];
-       
-       sheaf [label="1. Sheafification\n━━━━━━━━━━━━━━\nTask → TaskPlan\n(Architect)", fillcolor="#E8F5E9"];
-       spec [label="2. Speculation\n━━━━━━━━━━━━━━\nGenerate Code\n(Actuator)", fillcolor="#E3F2FD"];
-       verify [label="3. Verification\n━━━━━━━━━━━━━━\nCompute V(x)\n(LSP + Tests)", fillcolor="#FFF3E0"];
-       
-       converge [shape=diamond, label="V(x) > ε?", fillcolor="#FFECB3"];
-       
-       commit [label="5. Commit\n━━━━━━━━━━━━━━\nMerkle Ledger\n(Record)", fillcolor="#F3E5F5"];
-       
-       end [shape=doublecircle, label="", fillcolor="#333333", width=0.3];
-       
-       start -> sheaf;
-       sheaf -> spec;
-       spec -> verify;
-       verify -> converge;
-       converge -> spec [label="Yes\n(retry)", style=dashed, color="#E53935"];
-       converge -> commit [label="No\n(stable)"];
-       commit -> end;
-   }
-
-Crate Details
--------------
-
-perspt-cli
-~~~~~~~~~~
-
-The command-line interface providing 10 subcommands:
-
-.. list-table:: CLI Subcommands
-   :header-rows: 1
-   :widths: 15 30 55
-   :class: longtable
-
-   * - Command
-     - Purpose
-     - Key Options
-   * - ``chat``
-     - Interactive TUI
-     - ``--model <MODEL>``
-   * - ``agent``
-     - SRBN autonomous coding
-     - | ``--architect-model``, ``--actuator-model``
-       | ``--energy-weights``, ``--mode``
-   * - ``init``
-     - Project setup
-     - ``--memory``, ``--rules``
-   * - ``config``
-     - Configuration
-     - ``--show``, ``--set``, ``--edit``
-   * - ``ledger``
-     - Merkle ledger
-     - ``--recent``, ``--rollback``, ``--stats``
-   * - ``status``
-     - Agent status
-     - *(none)*
-   * - ``abort``
-     - Cancel session
-     - ``--force``
-   * - ``resume``
-     - Resume session
-     - ``[SESSION_ID]``
-   * - ``logs``
-     - View LLM logs
-     - ``--tui``, ``--last``, ``--stats``
-   * - ``simple-chat``
-     - CLI chat mode
-     - ``--model``, ``--log-file``
-
-**Source**: :file:`crates/perspt-cli/src/`
-
-perspt-core
-~~~~~~~~~~~
-
-Thread-safe LLM provider and configuration:
-
-.. code-block:: rust
-   :caption: GenAIProvider - Thread-safe LLM abstraction
-
-   /// Thread-safe LLM provider using Arc<RwLock>.
-   /// Can be safely cloned and shared across async tasks.
-   #[derive(Clone)]
-   pub struct GenAIProvider {
-       client: Arc<Client>,
-       shared: Arc<RwLock<SharedState>>,
-   }
-
-   impl GenAIProvider {
-       pub fn new() -> Result<Self>
-       pub fn new_with_config(provider: Option<&str>, api_key: Option<&str>) -> Result<Self>
-       pub async fn generate_response_stream_to_channel(...) -> Result<()>
-       pub async fn get_total_tokens_used(&self) -> usize
-   }
-
-**Modules**:
-
-:config.rs: Simple Config struct (provider, model, api_key)
-:llm_provider.rs: GenAIProvider with streaming support
-:memory.rs: Conversation memory management
-
-**Source**: :file:`crates/perspt-core/src/`
-
-perspt-agent
-~~~~~~~~~~~~
-
-The Stabilized Recursive Barrier Network implementation.
-
-.. admonition:: Energy Computation
-   :class: tip
-
-   .. math::
-
-      V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log}
-
-   **Default weights**: α=1.0, β=0.5, γ=2.0
-
-**Key Modules**:
-
-.. list-table::
-   :widths: 25 10 65
-   :header-rows: 1
-
-   * - Module
-     - Size
-     - Description
-   * - :file:`orchestrator.rs`
-     - 34KB
-     - SRBN control loop, model tiers, retry policy
-   * - :file:`lsp.rs`
-     - 28KB
-     - LSP client for Python (``ty`` server)
-   * - :file:`tools.rs`
-     - 12KB
-     - Agent tools (search, read, write, shell)
-   * - :file:`types.rs`
-     - 24KB
-     - TaskPlan, Node, Energy, ToolCall types
-   * - :file:`ledger.rs`
-     - 6KB
-     - Merkle ledger for change tracking
-   * - :file:`test_runner.rs`
-     - 15KB
-     - pytest integration, V_log calculation
-   * - :file:`context_retriever.rs`
-     - 10KB
-     - Code context extraction
-
-**Source**: :file:`crates/perspt-agent/src/`
-
-perspt-tui
-~~~~~~~~~~
-
-Ratatui-based terminal interface components:
-
-:agent_app.rs: Main agent mode TUI application
-:dashboard.rs: Status dashboard with metrics
-:diff_viewer.rs: Side-by-side file diff display
-:review_modal.rs: Change approval/rejection UI
-:task_tree.rs: Hierarchical task visualization
-
-**Source**: :file:`crates/perspt-tui/src/`
-
-perspt-policy
-~~~~~~~~~~~~~
-
-Starlark-based policy engine for command approval:
-
-.. code-block:: rust
-   :caption: Security policy engine
-
-   pub struct PolicyEngine {
-       // Evaluates Starlark rules for command safety
-   }
-
-   pub struct Sanitizer {
-       // Cleans and validates shell commands
-       // Prevents path traversal, injection attacks
-   }
-
-**Source**: :file:`crates/perspt-policy/src/`
-
-perspt-sandbox
-~~~~~~~~~~~~~~
-
-Safe command execution with process isolation.
-
-**Source**: :file:`crates/perspt-sandbox/src/`
-
-perspt-store
-~~~~~~~~~~~~
-
-DuckDB-based persistence layer for session management and LLM logging:
-
-.. code-block:: rust
-   :caption: Session storage
-
-   pub struct SessionStore {
-       conn: Connection,
-   }
-
-   impl SessionStore {
-       pub fn new(db_path: &Path) -> Result<Self>
-       pub fn create_session(task: &str, workspace: &str) -> Result<String>
-       pub fn record_llm_request(...) -> Result<()>
-       pub fn get_llm_requests(session_id: &str) -> Result<Vec<LlmRequestRecord>>
-   }
-
-**Key Types**:
-
-- ``SessionRecord`` — Session metadata (id, task, status, timestamps)
-- ``LlmRequestRecord`` — LLM request/response with latency and tokens
-- ``EnergyRecord`` — Energy history for stability tracking
-- ``NodeStateRecord`` — SRBN node state snapshots
-
-**Source**: :file:`crates/perspt-store/src/`
-
-Design Principles
------------------
-
-.. grid:: 2
-   :gutter: 3
-
-   .. grid-item-card:: 🧩 Modularity
-      
-      Each crate has a single responsibility:
-      
-      - **perspt-cli** knows CLI, not LLM internals
-      - **perspt-core** provides LLM abstraction, not UI
-      - **perspt-agent** implements SRBN, delegates UI
-
-   .. grid-item-card:: 🔒 Thread Safety
-      
-      ``GenAIProvider`` uses ``Arc<RwLock<SharedState>>`` for:
-      
-      - Safe cloning across async tasks
-      - Shared token counting and rate limiting
-      - Concurrent access from orchestrator and UI
-
-   .. grid-item-card:: ⚠️ Error Handling
-      
-      All crates use ``anyhow::Result`` for:
-      
-      - Contextual error messages
-      - Error propagation with backtrace
-      - User-friendly error display
-
-   .. grid-item-card:: ⚡ Async Architecture
-      
-      Built on Tokio runtime with:
-      
-      - Streaming LLM responses via channels
-      - Non-blocking UI updates
-      - Concurrent tool execution
-
-Configuration Sources
----------------------
-
-.. list-table:: Configuration Priority (highest first)
-   :header-rows: 1
-   :widths: 10 30 60
-
-   * - Priority
-     - Source
-     - Example
-   * - 1
-     - CLI Arguments
-     - ``perspt agent --model gpt-5.2``
-   * - 2
-     - Environment Variables
-     - ``OPENAI_API_KEY=sk-...``
-   * - 3
-     - Config File
-     - ``~/.perspt/config.toml``
-   * - 4
-     - Built-in Defaults
-     - provider: openai, model: gpt-4
-
-Supported Providers
-~~~~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 35 45
-
-   * - Provider
-     - Environment Variable
-     - Models
-   * - OpenAI
-     - ``OPENAI_API_KEY``
-     - GPT-5.2, o3-mini, o1-preview
-   * - Anthropic
-     - ``ANTHROPIC_API_KEY``
-     - Claude Opus 4.5
-   * - Google
-     - ``GEMINI_API_KEY``
-     - Gemini 3 Flash/Pro
-   * - Groq
-     - ``GROQ_API_KEY``
-     - Llama 3.x
-   * - Ollama
-     - *(none)*
-     - Local models
-
-Extension Points
+Workspace Layout
 ----------------
 
-Adding a New Command
-~~~~~~~~~~~~~~~~~~~~
+.. code-block:: text
 
-1. Create :file:`crates/perspt-cli/src/commands/mycommand.rs`
-2. Add variant to ``Commands`` enum in :file:`main.rs`
-3. Add match arm in ``main()``
+   perspt/                       # Root: integration crate (perspt)
+   +-- crates/
+   |   +-- perspt-core/          # Types, config, LLM provider, events, plugins
+   |   +-- perspt-agent/         # SRBN orchestrator, agents, ledger, LSP, tools
+   |   +-- perspt-tui/           # Ratatui TUI (chat + agent + review modal)
+   |   +-- perspt-cli/           # Clap CLI entry point, subcommands
+   |   +-- perspt-store/         # DuckDB session store
+   |   +-- perspt-policy/        # Starlark policy engine
+   |   +-- perspt-sandbox/       # Command sandboxing
+   +-- tests/                    # Integration tests
+   +-- docs/                     # Sphinx documentation
 
-Adding a New Tool
-~~~~~~~~~~~~~~~~~
 
-1. Add tool definition to :file:`crates/perspt-agent/src/tools.rs`
-2. Register in ``AgentTools::available_tools()``
-3. Implement execution in ``execute_tool()``
+Dependency Graph
+----------------
 
-Adding a Provider
-~~~~~~~~~~~~~~~~~
+.. graphviz::
+   :align: center
 
-The ``genai`` crate handles providers. To customize:
+   digraph crates {
+       rankdir=BT;
+       node [shape=box, style=rounded];
+       "perspt-cli" -> "perspt-core";
+       "perspt-cli" -> "perspt-agent";
+       "perspt-cli" -> "perspt-tui";
+       "perspt-cli" -> "perspt-store";
+       "perspt-agent" -> "perspt-core";
+       "perspt-agent" -> "perspt-store";
+       "perspt-agent" -> "perspt-policy";
+       "perspt-agent" -> "perspt-sandbox";
+       "perspt-tui" -> "perspt-core";
+       "perspt-tui" -> "perspt-agent";
+       "perspt-store" -> "perspt-core";
+       "perspt-policy" [label="perspt-policy\n(Starlark)"];
+       "perspt-sandbox" [label="perspt-sandbox"];
+   }
 
-1. Set appropriate environment variable
-2. Use provider-specific model names
 
-.. seealso::
+Crate: ``perspt-core``
+-----------------------
 
-   - :doc:`../api/index` - Per-crate API reference
-   - :doc:`contributing` - How to contribute
-   - :doc:`testing` - Testing guide
+The foundation crate. Re-exports all canonical types.
+
+**Modules:**
+
+- ``types`` — All PSP-5 types (see :ref:`type-inventory` below)
+- ``config`` — ``Config { provider, model, api_key }``
+- ``events`` — ``AgentEvent`` (~30 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``
+- ``llm_provider`` — ``GenAIProvider`` wrapping the ``genai`` crate; ``EOT_SIGNAL``
+- ``plugin`` — ``LanguagePlugin`` trait + ``PythonPlugin``, ``RustPlugin``, ``JsPlugin``
+- ``memory`` — ``ProjectMemory`` loaded from ``.perspt/memory.toml``
+- ``normalize`` — Model and provider name normalization
+
+**Key Plugin Types:**
+
+.. code-block:: rust
+
+   pub trait LanguagePlugin: Send + Sync {
+       fn name(&self) -> &str;
+       fn detect(&self, path: &Path) -> bool;
+       fn get_init_action(&self, opts: &InitOptions) -> ProjectAction;
+       fn test_command(&self) -> Option<String>;
+       fn syntax_check_command(&self) -> Option<String>;
+       fn verifier_profile(&self) -> VerifierProfile;
+       fn owns_file(&self, path: &Path) -> bool;
+       // ... ~15 methods total
+   }
+
+Plugins provide verifier profiles with fallback chains:
+
+.. code-block:: rust
+
+   pub struct VerifierProfile {
+       pub plugin_name: String,
+       pub capabilities: Vec<VerifierCapability>,
+       pub lsp: LspCapability,
+   }
+
+   pub struct VerifierCapability {
+       pub stage: VerifierStage,       // SyntaxCheck | Build | Test | Lint
+       pub command: Option<String>,     // Primary command
+       pub available: bool,
+       pub fallback_command: Option<String>,
+       pub fallback_available: bool,
+   }
+
+
+Crate: ``perspt-agent``
+------------------------
+
+The experimental SRBN orchestrator and its subsystems.
+
+**Modules:**
+
+- ``orchestrator`` — ``SRBNOrchestrator`` with ``petgraph::DiGraph<SRBNNode, Dependency>``
+- ``agent`` — ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
+- ``tools`` — ``AgentTools`` (read_file, write_file, apply_diff, run_command, search_code, etc.)
+- ``ledger`` — ``MerkleLedger`` atop ``SessionStore``
+- ``lsp`` — ``LspClient`` (JSON-RPC over stdio)
+- ``test_runner`` — ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
+- ``context_retriever`` — ``ContextRetriever`` for workspace search
+
+**Agent Trait:**
+
+.. code-block:: rust
+
+   #[async_trait]
+   pub trait Agent: Send + Sync {
+       async fn process(&self, node: &SRBNNode, ctx: &AgentContext)
+           -> Result<AgentMessage>;
+       fn name(&self) -> &str;
+       fn can_handle(&self, node: &SRBNNode) -> bool;
+       fn model(&self) -> &str;
+       fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
+   }
+
+**Orchestrator:**
+
+.. code-block:: rust
+
+   pub struct SRBNOrchestrator {
+       pub graph: DiGraph<SRBNNode, Dependency>,
+       pub context: AgentContext,
+       // + ledger, agents (4 tiers), tools, LSP clients, test runners,
+       //   event/action channels, per-tier model names + fallbacks
+   }
+
+The orchestrator drives the PSP-5 lifecycle:
+
+1. ``detect_workspace()`` — Identify plugins and workspace state
+2. ``plan_task()`` — Architect decomposes task into DAG
+3. ``execute_dag()`` — Topological traversal with per-node verification loop
+4. ``verify_node()`` — Compute V(x) via plugin verifier profile
+5. ``sheaf_validate()`` — Cross-node contract checking
+6. ``review_node()`` — Interactive approval (unless ``--yes``)
+7. ``commit_node()`` — Record in Merkle ledger
+
+
+Crate: ``perspt-store``
+------------------------
+
+DuckDB-backed persistence. **Not SQLite.**
+
+.. code-block:: rust
+
+   pub struct SessionStore {
+       conn: Mutex<Connection>,  // duckdb::Connection
+   }
+
+Tables:
+
+- ``sessions`` — Session metadata (id, task, working_dir, merkle_root, status)
+- ``node_states`` — Per-node snapshots
+- ``energy_records`` — Energy history
+- ``llm_requests`` — Full LLM request/response logging
+- ``structural_digests`` — Content hashes for interface seals
+- ``context_provenance`` — Provenance tracking per node
+- ``escalation_reports`` — Classified escalations
+- ``rewrite_records`` — Graph rewrite audit trail
+- ``sheaf_validations`` — Cross-node validation results
+- ``provisional_branches`` — Branch lifecycle
+- ``branch_lineage`` — Parent-child branch relationships
+- ``interface_seals`` — Sealed interface records
+- ``branch_flushes`` — Flush cascade records
+- ``task_graph_edges`` — DAG edges
+- ``review_outcomes`` — Human review decisions
+- ``verification_results`` — Full verification snapshots
+- ``artifact_bundles`` — Bundle JSON per node
+
+
+Crate: ``perspt-tui``
+-----------------------
+
+Ratatui-based terminal UI with two modes:
+
+- **ChatApp** — Interactive chat with markdown rendering and streaming
+- **AgentApp** — Agent dashboard with DAG tree, energy display, review modal
+
+Key components:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Component
+     - Purpose
+   * - ``Dashboard``
+     - Main agent dashboard layout
+   * - ``TaskTree``
+     - DAG visualization with node states
+   * - ``ReviewModal``
+     - Grouped diff viewer with approve/reject/correct
+   * - ``DiffViewer``
+     - Unified diff display
+   * - ``LogsViewer``
+     - LLM log browser
+   * - ``FrameRateLimiter``
+     - 60fps cap, adaptive rendering
+
+
+Crate: ``perspt-policy``
+--------------------------
+
+Starlark policy evaluation:
+
+.. code-block:: rust
+
+   pub struct PolicyEngine {
+       policies: Vec<FrozenModule>,
+       policy_dir: PathBuf,
+   }
+
+   pub enum PolicyDecision {
+       Allow,
+       Prompt(String),
+       Deny(String),
+   }
+
+Utility functions:
+
+- ``sanitize_command(cmd)`` → ``SanitizeResult`` (split, validate, filter)
+- ``validate_workspace_bound(cmd, working_dir)`` — Ensure commands stay in scope
+- ``is_safe_for_auto_exec(cmd)`` — Whitelist check for auto-approval
+
+
+Crate: ``perspt-sandbox``
+---------------------------
+
+Process isolation:
+
+.. code-block:: rust
+
+   pub trait SandboxedCommand: Send + Sync {
+       fn execute(&self) -> Result<CommandResult>;
+       fn display(&self) -> String;
+       fn is_read_only(&self) -> bool;
+   }
+
+   pub struct BasicSandbox {
+       program: String,
+       args: Vec<String>,
+       working_dir: Option<PathBuf>,
+       timeout: Duration,
+   }
+
+
+.. _type-inventory:
+
+PSP-5 Type Inventory
+--------------------
+
+All canonical types live in ``perspt_core::types``:
+
+**SRBN Core:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``SRBNNode``
+     - DAG node: goal, output_targets, contract, tier, monitor, state, node_class, owner_plugin, provisional_branch_id, interface_seal_hash
+   * - ``NodeState`` (11 variants)
+     - TaskQueued → Planning → Coding → Verifying → Retry → SheafCheck → Committing → Completed / Failed / Escalated / Aborted
+   * - ``NodeClass``
+     - Interface, Implementation (default), Integration
+   * - ``ModelTier``
+     - Architect, Actuator, Verifier, Speculator
+   * - ``BehavioralContract``
+     - interface_signature, invariants, forbidden_patterns, weighted_tests, energy_weights
+   * - ``StabilityMonitor``
+     - energy_history, attempt_count, stable, stability_epsilon, max_retries, retry_policy
+   * - ``RetryPolicy``
+     - Per-error-type counters: compilation, tool, review
+
+**Energy:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Fields
+   * - ``EnergyComponents``
+     - v_syn (LSP), v_str (contracts), v_log (tests), v_boot (init), v_sheaf (cross-node)
+   * - ``Criticality``
+     - Critical (10.0), High (3.0), Low (1.0)
+   * - ``WeightedTest``
+     - test_name, criticality
+
+**Task Planning:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``TaskPlan``
+     - Container for ``Vec<PlannedTask>``
+   * - ``PlannedTask``
+     - id, goal, output_files, dependencies, task_type, contract, command_contract, node_class
+   * - ``TaskType``
+     - Code, Command, UnitTest, IntegrationTest, Refactor, Documentation
+   * - ``CommandContract``
+     - command, expected_exit_code, expected_files, forbidden_stderr_patterns
+
+**Artifact Bundle:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``ArtifactBundle``
+     - artifacts: Vec<ArtifactOperation>, commands: Vec<String>
+   * - ``ArtifactOperation``
+     - Write { path, content } | Diff { path, patch }
+   * - ``OwnershipManifest``
+     - entries: HashMap<String, OwnershipEntry>, fanout_limit
+
+**Verification:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``VerificationResult``
+     - syntax_ok, build_ok, tests_ok, lint_ok, diagnostics_count, tests_passed/failed, degraded, stage_outcomes
+   * - ``StageOutcome``
+     - stage, passed, sensor_status, output
+   * - ``SensorStatus``
+     - Available | Fallback { actual, reason } | Unavailable { reason }
+   * - ``VerifierStrictness``
+     - Default, Strict, Minimal
+
+**Context Management:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``AgentContext``
+     - working_dir, history, merkle_root, complexity_k, session_id, auto_approve, defer_tests, token_budget, execution_mode, active_plugins, ownership_manifest
+   * - ``TokenBudget``
+     - max_tokens, max_cost_usd, tokens_used (in/out), cost_usd, per-1k rates
+   * - ``ContextBudget``
+     - byte_limit (100KB), file_count_limit (20)
+   * - ``RestrictionMap``
+     - Per-node context scoping: owned_files, sealed_interfaces, structural_digests
+   * - ``ContextPackage``
+     - Assembled context with budget tracking
+   * - ``ContextProvenance``
+     - Audit trail of what context each node received
+
+**Escalation and Rewrite:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``EscalationCategory``
+     - ImplementationError, ContractMismatch, InsufficientModelCapability, DegradedSensors, TopologyMismatch
+   * - ``RewriteAction`` (9 variants)
+     - GroundedRetry, ContractRepair, CapabilityPromotion, SensorRecovery, DegradedValidationStop, NodeSplit, InterfaceInsertion, SubgraphReplan, UserEscalation
+   * - ``EscalationReport``
+     - node_id, category, action, energy_snapshot, stage_outcomes, evidence
+
+**Sheaf Validation:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``SheafValidatorClass`` (7 variants)
+     - ExportImportConsistency, DependencyGraphConsistency, SchemaContractCompatibility, BuildGraphConsistency, TestOwnershipConsistency, CrossLanguageBoundary, PolicyInvariantConsistency
+   * - ``SheafValidationResult``
+     - validator_class, plugin_source, passed, evidence_summary, v_sheaf_contribution, requeue_targets
+
+**Provisional Branches:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``ProvisionalBranch``
+     - branch_id, node_id, state, parent_seal_hash, sandbox_dir
+   * - ``ProvisionalBranchState``
+     - Active → Sealed → Merged / Flushed
+   * - ``InterfaceSealRecord``
+     - node_id, sealed_path, artifact_kind, seal_hash, version
+   * - ``BranchFlushRecord``
+     - parent_node_id, flushed_branch_ids, requeue_node_ids, reason
+   * - ``BlockedDependency``
+     - child_node_id, parent_node_id, required_seal_paths
+
+**Structural Digests:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``StructuralDigest``
+     - Content hash of Interface artifacts (signatures, schemas, seals)
+   * - ``SummaryDigest``
+     - Compressed summaries (IntentSummary, VerifierResults, DesignRationale)
+   * - ``ArtifactKind``
+     - Signature, Schema, SymbolInventory, InterfaceSeal
+
+
+Events System
+-------------
+
+The event system uses unbounded tokio channels:
+
+.. code-block:: rust
+
+   // In perspt_core::events::channel
+   pub type EventSender = UnboundedSender<AgentEvent>;
+   pub type EventReceiver = UnboundedReceiver<AgentEvent>;
+   pub type ActionSender = UnboundedSender<AgentAction>;
+   pub type ActionReceiver = UnboundedReceiver<AgentAction>;
+
+``AgentEvent`` has ~30 variants covering the full PSP-5 lifecycle:
+
+- **Planning**: ``PlanReady``, ``PlanGenerated``
+- **Execution**: ``NodeSelected``, ``BundleApplied``, ``NodeCompleted``
+- **Verification**: ``VerificationComplete``, ``DegradedVerification``, ``SensorFallback``
+- **Sheaf**: ``SheafValidationComplete``
+- **Branches**: ``BranchCreated``, ``InterfaceSealed``, ``BranchFlushed``, ``BranchMerged``
+- **Escalation**: ``EscalationClassified``, ``GraphRewriteApplied``
+- **Context**: ``ContextDegraded``, ``ContextBlocked``, ``ProvenanceDrift``
+- **UI**: ``ApprovalRequest``, ``TaskStatusChanged``, ``EnergyUpdated``, ``Log``
+- **Lifecycle**: ``Complete``, ``Error``, ``ModelFallback``, ``ToolReadiness``
+
+
+Data Flow
+---------
+
+.. code-block:: text
+
+   User Input
+       |
+   [perspt-cli]  Parse args (clap)
+       |
+   [perspt-core]  Config + Provider init
+       |
+   +---+---+
+   |       |
+   chat    agent
+   |       |
+   [tui]   [perspt-agent]
+   |       |
+   |       +-- SRBNOrchestrator
+   |       |     +-- detect_workspace()  -> [plugins]
+   |       |     +-- plan_task()         -> [Architect Agent]
+   |       |     +-- execute_dag()       -> [Actuator Agent]
+   |       |     +-- verify_node()       -> [LSP, TestRunner, Verifier Agent]
+   |       |     +-- sheaf_validate()    -> [Sheaf Validators]
+   |       |     +-- commit_node()       -> [MerkleLedger]
+   |       |
+   |       +-- AgentTools  (filesystem, search, commands)
+   |       +-- LspClient   (JSON-RPC stdio)
+   |       +-- TestRunner   (plugin-driven)
+   |       +-- ContextRetriever (workspace search)
+   |       |
+   |       +-- EventSender --> [perspt-tui AgentApp]
+   |       +-- ActionReceiver <-- [perspt-tui ReviewModal]
+   |
+   [perspt-store]  DuckDB persistence
+   [perspt-policy]  Starlark rule evaluation
+   [perspt-sandbox]  Process isolation
+
+
+Streaming Contract
+------------------
+
+Both chat and agent mode use the same streaming protocol:
+
+1. LLM requests stream chunks over ``mpsc::UnboundedSender<String>``
+2. End-of-response signaled by ``EOT_SIGNAL`` (``<<EOT>>``)
+3. Provider sends EOT — UI never adds its own
+4. UI batches channel messages, handles first EOT, ignores duplicates
+5. Streaming buffer updates the last assistant message live
+6. Pending inputs queue until EOT is received
+
+.. warning::
+
+   Never block the UI select loop. Spawn LLM work on tokio tasks and send
+   results via the channel.

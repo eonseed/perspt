@@ -234,6 +234,36 @@ impl AgentTools {
             }
         };
 
+        // PSP-5 Phase 4: Sanitize command through policy before execution
+        match perspt_policy::sanitize_command(cmd_str) {
+            Ok(sr) if sr.rejected => {
+                return ToolResult::failure(
+                    "run_command",
+                    format!(
+                        "Command rejected by policy: {}",
+                        sr.rejection_reason
+                            .unwrap_or_else(|| "unknown reason".to_string())
+                    ),
+                );
+            }
+            Ok(sr) => {
+                for warning in &sr.warnings {
+                    log::warn!("Command policy warning: {}", warning);
+                }
+            }
+            Err(e) => {
+                return ToolResult::failure(
+                    "run_command",
+                    format!("Command sanitization failed: {}", e),
+                );
+            }
+        }
+
+        // Validate workspace bounds
+        if let Err(e) = perspt_policy::validate_workspace_bound(cmd_str, &self.working_dir) {
+            return ToolResult::failure("run_command", format!("Command rejected: {}", e));
+        }
+
         if self.require_approval {
             log::info!("Command requires approval: {}", cmd_str);
         }
@@ -692,5 +722,212 @@ mod tests {
 
         let content = fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "Hello diffy\nThis is a test\n");
+    }
+}
+
+// =============================================================================
+// PSP-5 Phase 6: Sandbox workspace helpers
+// =============================================================================
+
+/// Create a sandbox workspace for provisional verification.
+///
+/// Copies key project files into a session-scoped temporary directory so
+/// speculative verification does not pollute committed workspace state.
+/// Returns the path to the sandbox root.
+pub fn create_sandbox(
+    working_dir: &Path,
+    session_id: &str,
+    branch_id: &str,
+) -> std::io::Result<PathBuf> {
+    let sandbox_root = working_dir
+        .join(".perspt")
+        .join("sandboxes")
+        .join(session_id)
+        .join(branch_id);
+
+    fs::create_dir_all(&sandbox_root)?;
+
+    log::debug!("Created sandbox workspace at {}", sandbox_root.display());
+
+    Ok(sandbox_root)
+}
+
+/// Clean up a specific sandbox workspace.
+pub fn cleanup_sandbox(sandbox_dir: &Path) -> std::io::Result<()> {
+    if sandbox_dir.exists() {
+        fs::remove_dir_all(sandbox_dir)?;
+        log::debug!("Cleaned up sandbox at {}", sandbox_dir.display());
+    }
+    Ok(())
+}
+
+/// Clean up all sandbox workspaces for a session.
+pub fn cleanup_session_sandboxes(working_dir: &Path, session_id: &str) -> std::io::Result<()> {
+    let session_sandbox = working_dir
+        .join(".perspt")
+        .join("sandboxes")
+        .join(session_id);
+
+    if session_sandbox.exists() {
+        fs::remove_dir_all(&session_sandbox)?;
+        log::debug!("Cleaned up all sandboxes for session {}", session_id);
+    }
+    Ok(())
+}
+
+/// Copy a file from the workspace into a sandbox, preserving relative paths.
+pub fn copy_to_sandbox(
+    working_dir: &Path,
+    sandbox_dir: &Path,
+    relative_path: &str,
+) -> std::io::Result<()> {
+    let src = working_dir.join(relative_path);
+    let dst = sandbox_dir.join(relative_path);
+
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if src.exists() {
+        fs::copy(&src, &dst)?;
+    }
+    Ok(())
+}
+
+/// Copy a file from a sandbox back to the live workspace, preserving relative paths.
+pub fn copy_from_sandbox(
+    sandbox_dir: &Path,
+    working_dir: &Path,
+    relative_path: &str,
+) -> std::io::Result<()> {
+    let src = sandbox_dir.join(relative_path);
+    let dst = working_dir.join(relative_path);
+
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    if src.exists() {
+        fs::copy(&src, &dst)?;
+    }
+    Ok(())
+}
+
+/// List all files in a sandbox directory as workspace-relative paths.
+pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
+    let mut files = Vec::new();
+    if !sandbox_dir.exists() {
+        return Ok(files);
+    }
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, base, out)?;
+            } else if let Ok(rel) = path.strip_prefix(base) {
+                let normalized = rel
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                out.push(normalized);
+            }
+        }
+        Ok(())
+    }
+    walk(sandbox_dir, sandbox_dir, &mut files)?;
+    Ok(files)
+}
+
+#[cfg(test)]
+mod sandbox_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_create_sandbox() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "branch1").unwrap();
+        assert!(sandbox.exists());
+        assert!(sandbox.ends_with("sess1/branch1"));
+    }
+
+    #[test]
+    fn test_cleanup_sandbox() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "branch1").unwrap();
+        assert!(sandbox.exists());
+        cleanup_sandbox(&sandbox).unwrap();
+        assert!(!sandbox.exists());
+    }
+
+    #[test]
+    fn test_cleanup_session_sandboxes() {
+        let dir = tempdir().unwrap();
+        create_sandbox(dir.path(), "sess1", "b1").unwrap();
+        create_sandbox(dir.path(), "sess1", "b2").unwrap();
+        let session_dir = dir.path().join(".perspt").join("sandboxes").join("sess1");
+        assert!(session_dir.exists());
+        cleanup_session_sandboxes(dir.path(), "sess1").unwrap();
+        assert!(!session_dir.exists());
+    }
+
+    #[test]
+    fn test_copy_to_sandbox() {
+        let dir = tempdir().unwrap();
+        // Create a source file
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
+
+        let sandbox = create_sandbox(dir.path(), "sess1", "b1").unwrap();
+        copy_to_sandbox(dir.path(), &sandbox, "src/main.rs").unwrap();
+
+        let copied = sandbox.join("src/main.rs");
+        assert!(copied.exists());
+        assert_eq!(fs::read_to_string(copied).unwrap(), "fn main() {}");
+    }
+
+    #[test]
+    fn test_copy_from_sandbox() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "b1").unwrap();
+
+        // Create a file inside the sandbox
+        let sandbox_src = sandbox.join("out");
+        fs::create_dir_all(&sandbox_src).unwrap();
+        fs::write(sandbox_src.join("result.txt"), "hello").unwrap();
+
+        // Copy back to live workspace
+        copy_from_sandbox(&sandbox, dir.path(), "out/result.txt").unwrap();
+
+        let dest = dir.path().join("out/result.txt");
+        assert!(dest.exists());
+        assert_eq!(fs::read_to_string(dest).unwrap(), "hello");
+    }
+
+    #[test]
+    fn test_list_sandbox_files_empty() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "b1").unwrap();
+        let files = list_sandbox_files(&sandbox).unwrap();
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_list_sandbox_files_nested() {
+        let dir = tempdir().unwrap();
+        let sandbox = create_sandbox(dir.path(), "sess1", "b1").unwrap();
+
+        // Create nested structure
+        let nested = sandbox.join("a/b");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(sandbox.join("top.txt"), "x").unwrap();
+        fs::write(nested.join("deep.txt"), "y").unwrap();
+
+        let mut files = list_sandbox_files(&sandbox).unwrap();
+        files.sort();
+        assert_eq!(files, vec!["a/b/deep.txt", "top.txt"]);
     }
 }

@@ -3,153 +3,84 @@
 First Chat
 ==========
 
-Your first conversation with an LLM using Perspt.
+Start your first conversation with an LLM using Perspt.
 
 Prerequisites
 -------------
 
-- Perspt installed (see :doc:`../quickstart`)
-- An API key for any provider
+- Perspt installed (see :doc:`../installation`)
+- An API key from any provider, or Ollama running locally
 
 Step 1: Set Your API Key
-------------------------
+-------------------------
 
-Choose your provider and set the environment variable:
+.. code-block:: bash
 
-.. tab-set::
+   export GEMINI_API_KEY="your-key"
 
-   .. tab-item:: OpenAI
-
-      .. code-block:: bash
-
-         export OPENAI_API_KEY="sk-..."
-
-   .. tab-item:: Anthropic
-
-      .. code-block:: bash
-
-         export ANTHROPIC_API_KEY="sk-ant-..."
-
-   .. tab-item:: Google
-
-      .. code-block:: bash
-
-         export GEMINI_API_KEY="..."
-
-   .. tab-item:: Ollama (Local)
-
-      .. code-block:: bash
-
-         # No key needed, just ensure Ollama is running
-         ollama serve
-
-Step 2: Launch Perspt
----------------------
+Step 2: Launch the TUI
+-----------------------
 
 .. code-block:: bash
 
    perspt
 
-Or with a specific model:
+Perspt auto-detects the provider from the environment variable and launches the
+chat TUI. You will see a status bar showing the provider and model.
 
-.. code-block:: bash
-
-   perspt chat --model gpt-5.2
-
-Step 3: The TUI Interface
--------------------------
-
-You'll see the Perspt TUI:
-
-.. code-block:: text
-
-   ┌─────────────────────────────────────────────────────────────┐
-   │  Perspt v0.5.0 - gpt-5.2                     Tokens: 0     │
-   ├─────────────────────────────────────────────────────────────┤
-   │                                                             │
-   │                                                             │
-   │                   Welcome to Perspt!                        │
-   │            Your Terminal's Window to the AI World           │
-   │                                                             │
-   │                                                             │
-   ├─────────────────────────────────────────────────────────────┤
-   │  > Type your message here...                                │
-   └─────────────────────────────────────────────────────────────┘
-
-Step 4: Send a Message
-----------------------
-
-Type your message and press **Enter**:
-
-.. code-block:: text
-
-   > What is the capital of France?
-
-The response will stream in real-time with markdown rendering.
-
-Step 5: Continue the Conversation
----------------------------------
-
-Keep chatting! The conversation history is maintained:
-
-.. code-block:: text
-
-   > And what's the population?
-
-   The population of Paris is approximately 2.1 million in the city
-   proper, and about 12 million in the metropolitan area.
-
-Step 6: Save Your Conversation
-------------------------------
-
-Use the ``/save`` command:
-
-.. code-block:: text
-
-   > /save my_chat.md
-
-Or with automatic timestamp:
-
-.. code-block:: text
-
-   > /save
-
-Step 7: Exit
+Step 3: Chat
 ------------
 
-Press **Esc** or **Ctrl+C** to exit cleanly.
+Type a message and press **Enter**. Perspt streams the response in real time with
+markdown formatting (code blocks, headers, lists, bold, italic).
 
-Key Bindings Reference
-----------------------
+.. code-block:: text
+
+   You: Explain Rust's ownership model in 3 sentences.
+
+   Assistant: Rust's ownership model ensures each value has exactly one owner at a
+   time. When the owner goes out of scope, the value is automatically dropped.
+   Borrowing rules allow temporary references without transferring ownership, and
+   the compiler enforces these rules at compile time to prevent data races and
+   dangling pointers.
+
+Step 4: Navigate
+----------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 80
+   :widths: 30 70
 
    * - Key
      - Action
    * - **Enter**
      - Send message
-   * - **Esc**
-     - Exit application
-   * - **↑/↓**
+   * - **Ctrl+J**
+     - Insert newline in input
+   * - **Page Up / Down**
      - Scroll chat history
-   * - **Page Up/Down**
-     - Fast scroll
-   * - **Ctrl+C**
-     - Force exit
+   * - **Ctrl+Up / Down**
+     - Scroll one line
+   * - **Esc** or **Ctrl+Q**
+     - Exit
+   * - **/save**
+     - Save conversation to file
 
-Tips
-----
+Step 5: Try Simple CLI Mode
+----------------------------
 
-1. **Markdown works**: Use ``code``, **bold**, and lists in your prompts
-2. **Long responses**: Scroll up to see earlier content
-3. **Token tracking**: Watch the token counter in the header
-4. **Model switching**: Use ``perspt chat --model <name>`` for different models
+For a minimal interface without the TUI:
+
+.. code-block:: bash
+
+   perspt simple-chat
+   # Or with logging:
+   perspt simple-chat --log-file session.txt
+
+Type your question, get a streamed text answer. Type ``exit`` or ``Ctrl+D`` to quit.
 
 Next Steps
 ----------
 
-- :doc:`local-models` — Use Ollama for offline AI
-- :doc:`agent-mode` — Try autonomous code generation
-- :doc:`../howto/configuration` — Customize your setup
+- :doc:`agent-mode` — Try autonomous multi-file coding
+- :doc:`local-models` — Use Ollama for offline conversations

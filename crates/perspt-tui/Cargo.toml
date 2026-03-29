@@ -1,6 +1,6 @@
 [package]
 name = "perspt-tui"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -12,9 +12,9 @@ keywords = ["tui", "terminal", "ui", "ratatui"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-perspt-core = { version = "0.5.4", path = "../perspt-core" }
-perspt-agent = { version = "0.5.4", path = "../perspt-agent" }
-perspt-store = { version = "0.5.4", path = "../perspt-store" }
+perspt-core = { version = "0.5.5", path = "../perspt-core" }
+perspt-agent = { version = "0.5.5", path = "../perspt-agent" }
+perspt-store = { version = "0.5.5", path = "../perspt-store" }
 
 # UI components
 ratatui = "0.30"

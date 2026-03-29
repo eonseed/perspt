@@ -3,29 +3,36 @@
 Perspt Documentation
 ====================
 
-**Your Terminal's Window to the AI World** 🤖
+**Your Terminal's Window to the AI World**
 
-Perspt is a high-performance terminal-based LLM interface with autonomous coding capabilities 
-powered by the **SRBN (Stabilized Recursive Barrier Network)** engine.
+Perspt is a high-performance terminal-based LLM interface that serves two purposes:
+a **simple CLI for testing and comparing LLM services** across 8 providers, and an
+**experimental implementation** of the **SRBN (Stabilized Recursive Barrier Network)**
+engine from the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for
+Long-Horizon LLM Reliability"* by **Vikrant R. and Ronak R.** (pre-publication).
+The SRBN agent plans multi-file projects as directed acyclic graphs, verifies each
+node with real LSP diagnostics and tests, and commits only when Lyapunov energy
+converges. The theoretical framework is mature; the implementation is under active
+development.
 
 .. only:: html
 
    .. grid:: 3
       :gutter: 3
 
-      .. grid-item-card:: 🚀 Quick Start
+      .. grid-item-card:: Quick Start
          :link: quickstart
          :link-type: doc
 
          Install and chat in 5 minutes.
 
-      .. grid-item-card:: 🤖 Agent Mode
+      .. grid-item-card:: Agent Mode
          :link: tutorials/agent-mode
          :link-type: doc
 
-         Autonomous code generation with SRBN.
+         Autonomous multi-file coding with the experimental SRBN engine.
 
-      .. grid-item-card:: 📖 Architecture
+      .. grid-item-card:: Architecture
          :link: developer-guide/architecture
          :link-type: doc
 
@@ -38,26 +45,32 @@ powered by the **SRBN (Stabilized Recursive Barrier Network)** engine.
       :widths: 5 95
       :class: borderless
 
-      * - 🤖
-        - **SRBN Agent Mode** — Autonomous coding with Lyapunov stability guarantees (v0.5.0)
-      * - 🔌
-        - **Multi-Provider** — OpenAI GPT-5.2, Claude Opus 4.5, Gemini 3, Groq, Ollama
-      * - 🔬
-        - **LSP Integration** — Real-time type checking via ``ty`` server
-      * - 🧪
-        - **Test Runner** — pytest integration with V_log energy
-      * - 💰
-        - **Token Budget** — Cost control with usage monitoring
-      * - 🎨
-        - **Beautiful TUI** — Ratatui-based with diff viewer and task tree
-      * - 🔒
-        - **Security** — Policy engine with command sanitization
+      * - **SRBN Agent**
+        - Experimental autonomous multi-file coding guided by Lyapunov energy, ownership closure, and sheaf validation (based on SRBN paper)
+      * - **Multi-Provider**
+        - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, Ollama
+      * - **LSP Sensors**
+        - Real-time type checking via ``rust-analyzer``, ``ty``, ``pyright``, ``typescript-language-server``, ``gopls``
+      * - **Test Runner**
+        - pytest integration with weighted V_log energy
+      * - **Per-Tier Models**
+        - Assign different models to Architect, Actuator, Verifier, and Speculator tiers
+      * - **Token Budget**
+        - Cost control with usage monitoring and per-request limits
+      * - **Beautiful TUI**
+        - Ratatui-based with diff viewer, task tree, dashboard, and review modal
+      * - **Security**
+        - Starlark policy engine with command sanitization and workspace-bound enforcement
+      * - **Merkle Ledger**
+        - Cryptographic change tracking with session resume and rollback
+      * - **Headless Mode**
+        - Fully autonomous operation with ``--yes`` for CI/CD and batch workflows
 
    ----
 
 .. toctree::
    :maxdepth: 2
-   :caption: 📚 Getting Started
+   :caption: Getting Started
 
    introduction
    quickstart
@@ -66,50 +79,50 @@ powered by the **SRBN (Stabilized Recursive Barrier Network)** engine.
 
 .. toctree::
    :maxdepth: 2
-   :caption: 🎓 Tutorials
+   :caption: Tutorials
 
    tutorials/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: 📖 User Guide
+   :caption: User Guide
 
    user-guide/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: 💡 Concepts
+   :caption: Concepts
 
    concepts/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: 🔧 How-To Guides
+   :caption: How-To Guides
 
    howto/index
    configuration
 
 .. toctree::
    :maxdepth: 2
-   :caption: 📋 Reference
+   :caption: Reference
 
    reference/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: 🔌 API Reference
+   :caption: API Reference
 
    api/index
 
 .. toctree::
    :maxdepth: 2
-   :caption: 🛠️ Developer Guide
+   :caption: Developer Guide
 
    developer-guide/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: 📎 Appendices
+   :caption: Appendices
 
    changelog
    license
@@ -131,4 +144,3 @@ Indices
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-

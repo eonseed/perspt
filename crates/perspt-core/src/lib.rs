@@ -4,6 +4,7 @@ pub mod config;
 pub mod events;
 pub mod llm_provider;
 pub mod memory;
+pub mod normalize;
 pub mod plugin;
 pub mod types;
 
@@ -17,7 +18,13 @@ pub use plugin::{
 
 // Re-export commonly used types
 pub use types::{
-    AgentContext, AgentMessage, BehavioralContract, CommandContract, Criticality, EnergyComponents,
-    ErrorType, ModelTier, NodeState, PlannedContract, PlannedTask, PlannedTest, RetryPolicy,
-    SRBNNode, StabilityMonitor, TaskPlan, TaskType, TokenBudget, WeightedTest,
+    AgentContext, AgentMessage, ArtifactKind, BehavioralContract, BlockedDependency,
+    BranchFlushRecord, BranchLineage, CommandContract, ContextBudget, ContextPackage,
+    ContextProvenance, Criticality, EnergyComponents, ErrorType, EscalationCategory,
+    EscalationReport, InterfaceSealRecord, ModelTier, NodeState, OwnershipManifest,
+    PlannedContract, PlannedTask, PlannedTest, ProvisionalBranch, ProvisionalBranchState,
+    RestrictionMap, RetryPolicy, RewriteAction, RewriteRecord, SRBNNode, SensorStatus,
+    SheafValidationResult, SheafValidatorClass, StabilityMonitor, StageOutcome, StructuralDigest,
+    SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget,
+    VerificationResult, WeightedTest, WorkspaceState,
 };

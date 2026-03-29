@@ -1,366 +1,146 @@
-.. _cli-reference:
+.. _reference-cli:
 
 CLI Reference
 =============
 
-Complete command-line interface reference for Perspt.
+.. code-block:: text
+
+   perspt [OPTIONS] [COMMAND]
 
 Global Options
 --------------
 
-.. code-block:: text
-
-   perspt [OPTIONS] <COMMAND>
-
 .. list-table::
    :header-rows: 1
-   :widths: 25 75
+   :widths: 30 70
 
-   * - Option
+   * - Flag
      - Description
-   * - ``-v, --verbose``
-     - Enable verbose logging
-   * - ``-c, --config <FILE>``
-     - Configuration file path
+   * - ``--config <PATH>``
+     - Path to configuration file
+   * - ``--api-key <KEY>``
+     - API key for the LLM provider
+   * - ``--provider-type <TYPE>``
+     - Provider: ``openai``, ``anthropic``, ``gemini``, ``groq``, ``cohere``, ``xai``, ``deepseek``, ``ollama``
+   * - ``--provider <NAME>``
+     - Provider name (equivalent to ``--provider-type``)
+   * - ``--model <MODEL>``
+     - Model identifier
+   * - ``--list-models``
+     - List available models and exit
    * - ``-h, --help``
-     - Print help information
+     - Print help
    * - ``-V, --version``
      - Print version
 
-Commands Overview
------------------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 15 85
+Commands
+--------
 
-   * - Command
-     - Description
-   * - ``chat``
-     - Start interactive TUI chat session
-   * - ``agent``
-     - Run SRBN agent for autonomous coding
-   * - ``init``
-     - Initialize project configuration
-   * - ``config``
-     - Manage configuration settings
-   * - ``ledger``
-     - Query and manage Merkle ledger
-   * - ``status``
-     - Show current agent status
-   * - ``abort``
-     - Abort current agent session
-   * - ``resume``
-     - Resume paused or crashed session
-   * - ``logs``
-     - View LLM request/response logs
-   * - ``simple-chat``
-     - Simple CLI chat mode (no TUI)
+``chat`` (default)
+~~~~~~~~~~~~~~~~~~
 
-perspt chat
------------
-
-**Usage**: ``perspt chat [OPTIONS]``
-
-Start an interactive TUI chat session.
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``-m, --model <MODEL>``
-     - Model to use (e.g., ``gpt-5.2``)
-
-**Example**:
+Launch the TUI chat interface.
 
 .. code-block:: bash
 
-   perspt chat
-   perspt chat --model claude-opus-4.5
+   perspt chat [--model MODEL] [--provider-type TYPE]
 
-perspt agent
-------------
 
-**Usage**: ``perspt agent [OPTIONS] <TASK>``
+``simple-chat``
+~~~~~~~~~~~~~~~
 
-Run the SRBN agent for autonomous coding.
-
-**Arguments**:
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``<TASK>``
-     - Task description or path to task file
-
-**Model Options**:
-
-.. list-table::
-   :widths: 30 70
-
-   * - ``--model <MODEL>``
-     - Override all model tiers
-   * - ``--architect-model <M>``
-     - Model for planning (deep reasoning)
-   * - ``--actuator-model <M>``
-     - Model for code generation
-   * - ``--verifier-model <M>``
-     - Model for stability checking
-   * - ``--speculator-model <M>``
-     - Model for fast lookahead
-
-**Execution Options**:
-
-.. list-table::
-   :widths: 30 70
-
-   * - ``-w, --workdir <DIR>``
-     - Working directory (default: current)
-   * - ``-y, --yes``
-     - Auto-approve all actions
-   * - ``--auto-approve-safe``
-     - Auto-approve read-only operations
-   * - ``-k, --complexity <K>``
-     - Max complexity before approval (default: 5)
-   * - ``--mode <MODE>``
-     - ``cautious``, ``balanced``, or ``yolo``
-
-**SRBN Options**:
-
-.. list-table::
-   :widths: 40 60
-
-   * - ``--energy-weights <α,β,γ>``
-     - Lyapunov weights (default: ``1.0,0.5,2.0``)
-   * - ``--stability-threshold <ε>``
-     - Convergence threshold (default: ``0.1``)
-
-**Limit Options**:
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``--max-cost <USD>``
-     - Maximum cost in dollars (0 = unlimited)
-   * - ``--max-steps <N>``
-     - Maximum iterations (0 = unlimited)
-
-**Execution Options**:
-
-.. list-table::
-   :widths: 30 70
-
-   * - ``--defer-tests``
-     - Defer tests until sheaf validation (faster iteration)
-   * - ``--log-llm``
-     - Log all LLM requests/responses to database
-
-**Examples**:
+Launch the plain-text CLI chat.
 
 .. code-block:: bash
 
-   perspt agent "Create a calculator"
-   perspt agent -y -w ./project "Add tests"
-   perspt agent --architect-model gpt-5.2 --actuator-model claude-opus-4.5 "Build API"
+   perspt simple-chat [--log-file FILE]
 
-perspt init
------------
 
-**Usage**: ``perspt init [OPTIONS]``
+``agent``
+~~~~~~~~~
 
-Initialize project configuration.
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``--memory``
-     - Create ``PERSPT.md`` project memory file
-   * - ``--rules``
-     - Create ``.perspt/rules.star`` policy file
-
-**Example**:
+Run the SRBN autonomous coding agent.
 
 .. code-block:: bash
 
-   perspt init --memory --rules
+   perspt agent [OPTIONS] <TASK>
 
-perspt config
--------------
+See :doc:`../howto/agent-options` for full agent options.
 
-**Usage**: ``perspt config [OPTIONS]``
 
-Manage configuration settings.
+``init``
+~~~~~~~~
 
-.. list-table::
-   :widths: 25 75
-
-   * - ``--show``
-     - Display current configuration
-   * - ``--set <KEY=VALUE>``
-     - Set a configuration value
-   * - ``--edit``
-     - Open in ``$EDITOR``
-
-**Examples**:
+Initialize a new project with Perspt configuration.
 
 .. code-block:: bash
 
-   perspt config --show
-   perspt config --set default.model=gpt-5.2
-   perspt config --edit
+   perspt init [--workdir DIR]
 
-perspt ledger
--------------
 
-**Usage**: ``perspt ledger [OPTIONS]``
+``config``
+~~~~~~~~~~
 
-Query and manage the Merkle change ledger.
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``--recent``
-     - Show recent commits
-   * - ``--rollback <HASH>``
-     - Rollback to specific commit
-   * - ``--stats``
-     - Show ledger statistics
-
-**Examples**:
+View or edit Perspt configuration.
 
 .. code-block:: bash
 
-   perspt ledger --recent
-   perspt ledger --rollback abc123
-   perspt ledger --stats
+   perspt config [show|edit|reset]
 
-perspt status
--------------
 
-**Usage**: ``perspt status``
+``ledger``
+~~~~~~~~~~
 
-Show current agent session status. Displays:
+Query the Merkle ledger.
 
-- Session ID
-- Current task
-- Energy levels (V_syn, V_str, V_log)
-- Token usage
+.. code-block:: bash
 
-perspt abort
-------------
+   perspt ledger [--recent] [--stats] [--node NODE_ID]
 
-**Usage**: ``perspt abort [OPTIONS]``
+
+``status``
+~~~~~~~~~~
+
+Show current session status.
+
+.. code-block:: bash
+
+   perspt status
+
+Displays: per-node lifecycle counts (queued, running, verifying, retrying,
+completed, failed, escalated), latest energy breakdown, total retry count,
+and recent escalation reports.
+
+
+``abort``
+~~~~~~~~~
 
 Abort the current agent session.
 
-.. list-table::
-   :widths: 25 75
+.. code-block:: bash
 
-   * - ``-f, --force``
-     - Force abort without confirmation
+   perspt abort
 
-perspt resume
--------------
 
-**Usage**: ``perspt resume [SESSION_ID]``
+``resume``
+~~~~~~~~~~
 
-Resume a paused or crashed session.
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``[SESSION_ID]``
-     - Session ID to resume (optional, uses latest if omitted)
-
-perspt simple-chat
------------------
-
-**Usage**: ``perspt simple-chat [OPTIONS]``
-
-Simple command-line chat mode for scripting and automation.
-No TUI - just a prompt with streaming responses.
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``-m, --model <MODEL>``
-     - Model to use for chat
-   * - ``--log-file <FILE>``
-     - Log session to file
-
-**Examples**:
+Resume an interrupted session.
 
 .. code-block:: bash
 
-   perspt simple-chat
-   perspt simple-chat --log-file session.txt
-   echo "Explain Rust" | perspt simple-chat
+   perspt resume [--last]
 
-perspt logs
------------
+Displays trust context before resuming: escalation count, last energy state,
+total retries.
 
-**Usage**: ``perspt logs [OPTIONS] [SESSION_ID]``
 
-View and analyze LLM request/response logs from agent sessions.
+``logs``
+~~~~~~~~
 
-**Arguments**:
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``[SESSION_ID]``
-     - Session ID to view (optional)
-
-**Options**:
-
-.. list-table::
-   :widths: 25 75
-
-   * - ``--last``
-     - Show logs from most recent session
-   * - ``--stats``
-     - Show usage statistics instead of individual requests
-   * - ``--tui``
-     - Launch interactive TUI logs viewer
-
-**Examples**:
+View LLM call logs (requires ``--log-llm`` during the session).
 
 .. code-block:: bash
 
-   # View most recent session logs
-   perspt logs --last
-
-   # Interactive TUI viewer
-   perspt logs --tui
-
-   # Usage statistics
-   perspt logs --stats
-
-   # Specific session
-   perspt logs abc123-session-id
-
-Exit Codes
-----------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 85
-
-   * - Code
-     - Meaning
-   * - 0
-     - Success
-   * - 1
-     - General error
-   * - 2
-     - Configuration error
-   * - 3
-     - Provider/API error
-   * - 4
-     - Agent aborted by user
-
-See Also
---------
-
-- :doc:`../howto/configuration` - Configuration guide
-- :doc:`../howto/agent-options` - Agent options detail
-- :doc:`../api/perspt-cli` - API documentation
+   perspt logs [--tui] [--last] [--stats]

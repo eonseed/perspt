@@ -36,6 +36,10 @@ pub struct EnergyComponents {
     pub v_str: f32,
     /// Logic energy (test failures)
     pub v_log: f32,
+    /// Bootstrap energy
+    pub v_boot: f32,
+    /// Sheaf validation energy
+    pub v_sheaf: f32,
     /// Total composite energy
     pub total: f32,
 }
@@ -46,6 +50,8 @@ impl EnergyComponents {
             v_syn,
             v_str,
             v_log,
+            v_boot: 0.0,
+            v_sheaf: 0.0,
             total: alpha * v_syn + beta * v_str + gamma * v_log,
         }
     }

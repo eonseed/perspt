@@ -33,6 +33,8 @@ pub struct DiffHunk {
     pub old_start: usize,
     /// New line number start
     pub new_start: usize,
+    /// Operation label (e.g. "created", "modified")
+    pub operation: Option<String>,
 }
 
 /// A diff line with its type
@@ -102,6 +104,25 @@ pub struct DiffViewer {
     theme: Theme,
     /// Total line count (cached for scrolling)
     total_lines: usize,
+    /// Bundle summary header (node id, file counts)
+    pub bundle_summary: Option<BundleSummary>,
+}
+
+/// Summary of a node bundle displayed as a header
+#[derive(Debug, Clone, Default)]
+pub struct BundleSummary {
+    /// Node identifier
+    pub node_id: String,
+    /// Node class (Interface, Implementation, etc.)
+    pub node_class: String,
+    /// Number of files created
+    pub files_created: usize,
+    /// Number of files modified
+    pub files_modified: usize,
+    /// Write operation count
+    pub writes_count: usize,
+    /// Diff operation count
+    pub diffs_count: usize,
 }
 
 impl Default for DiffViewer {
@@ -113,6 +134,7 @@ impl Default for DiffViewer {
             view_mode: DiffViewMode::Unified,
             theme: Theme::default(),
             total_lines: 0,
+            bundle_summary: None,
         }
     }
 }
@@ -139,6 +161,7 @@ impl DiffViewer {
             )],
             old_start: 1,
             new_start: 1,
+            operation: None,
         };
 
         let mut old_line = 1usize;
@@ -199,6 +222,7 @@ impl DiffViewer {
                     lines: vec![DiffLine::new(line, DiffLineType::Header)],
                     old_start: 1,
                     new_start: 1,
+                    operation: None,
                 });
                 old_line = 1;
                 new_line = 1;
@@ -264,6 +288,7 @@ impl DiffViewer {
         self.scroll = 0;
         self.selected_hunk = 0;
         self.total_lines = 0;
+        self.bundle_summary = None;
     }
 
     fn update_total_lines(&mut self) {
@@ -355,58 +380,99 @@ impl DiffViewer {
     }
 
     fn render_unified(&self, frame: &mut Frame, area: Rect) {
-        let lines: Vec<Line> = self
-            .hunks
-            .iter()
-            .enumerate()
-            .flat_map(|(hunk_idx, hunk)| {
-                hunk.lines.iter().map(move |line| {
-                    let (fg_color, bg_color, prefix) = match line.line_type {
-                        DiffLineType::Added => {
-                            (Color::Rgb(200, 255, 200), Some(Color::Rgb(30, 50, 30)), "+")
-                        }
-                        DiffLineType::Removed => {
-                            (Color::Rgb(255, 200, 200), Some(Color::Rgb(50, 30, 30)), "-")
-                        }
-                        DiffLineType::Header => (Color::Rgb(129, 212, 250), None, " "),
-                        DiffLineType::HunkHeader => {
-                            (Color::Rgb(186, 104, 200), Some(Color::Rgb(40, 30, 50)), " ")
-                        }
-                        DiffLineType::Context => (Color::Rgb(180, 180, 180), None, " "),
-                    };
+        let mut lines: Vec<Line> = Vec::new();
 
-                    // Build line number display
-                    let line_nums = match (line.old_line_number, line.new_line_number) {
-                        (Some(o), Some(n)) => format!("{:>4} {:>4} ", o, n),
-                        (Some(o), None) => format!("{:>4}      ", o),
-                        (None, Some(n)) => format!("     {:>4} ", n),
-                        (None, None) => "          ".to_string(),
-                    };
+        // Bundle summary header
+        if let Some(ref summary) = self.bundle_summary {
+            lines.push(Line::from(vec![
+                Span::styled("  Node: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    &summary.node_id,
+                    Style::default()
+                        .fg(Color::Rgb(129, 212, 250))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  [{}]", summary.node_class),
+                    Style::default().fg(Color::Rgb(179, 157, 219)),
+                ),
+            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "  {} created, {} modified — {} writes, {} diffs",
+                    summary.files_created,
+                    summary.files_modified,
+                    summary.writes_count,
+                    summary.diffs_count
+                ),
+                Style::default().fg(Color::Rgb(158, 158, 158)),
+            )]));
+            lines.push(Line::from(""));
+        }
 
-                    let mut spans = vec![
-                        Span::styled(line_nums, Style::default().fg(Color::Rgb(100, 100, 100))),
-                        Span::styled(format!("{} ", prefix), Style::default().fg(fg_color)),
-                    ];
+        for (hunk_idx, hunk) in self.hunks.iter().enumerate() {
+            // Per-file operation label
+            if let Some(ref op) = hunk.operation {
+                let op_color = match op.as_str() {
+                    "created" => Color::Rgb(102, 187, 106),
+                    "modified" => Color::Rgb(255, 183, 77),
+                    _ => Color::White,
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", op),
+                        Style::default().fg(op_color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        &hunk.file_path,
+                        Style::default().fg(Color::Rgb(129, 212, 250)),
+                    ),
+                ]));
+            }
 
-                    // Highlight selected hunk
-                    let content_style = if hunk_idx == self.selected_hunk {
-                        Style::default().fg(fg_color).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(fg_color)
-                    };
+            for line in &hunk.lines {
+                let (fg_color, bg_color, prefix) = match line.line_type {
+                    DiffLineType::Added => {
+                        (Color::Rgb(200, 255, 200), Some(Color::Rgb(30, 50, 30)), "+")
+                    }
+                    DiffLineType::Removed => {
+                        (Color::Rgb(255, 200, 200), Some(Color::Rgb(50, 30, 30)), "-")
+                    }
+                    DiffLineType::Header => (Color::Rgb(129, 212, 250), None, " "),
+                    DiffLineType::HunkHeader => {
+                        (Color::Rgb(186, 104, 200), Some(Color::Rgb(40, 30, 50)), " ")
+                    }
+                    DiffLineType::Context => (Color::Rgb(180, 180, 180), None, " "),
+                };
 
-                    let content_style = if let Some(bg) = bg_color {
-                        content_style.bg(bg)
-                    } else {
-                        content_style
-                    };
+                let line_nums = match (line.old_line_number, line.new_line_number) {
+                    (Some(o), Some(n)) => format!("{:>4} {:>4} ", o, n),
+                    (Some(o), None) => format!("{:>4}      ", o),
+                    (None, Some(n)) => format!("     {:>4} ", n),
+                    (None, None) => "          ".to_string(),
+                };
 
-                    spans.push(Span::styled(&line.content, content_style));
+                let mut spans = vec![
+                    Span::styled(line_nums, Style::default().fg(Color::Rgb(100, 100, 100))),
+                    Span::styled(format!("{} ", prefix), Style::default().fg(fg_color)),
+                ];
 
-                    Line::from(spans)
-                })
-            })
-            .collect();
+                let content_style = if hunk_idx == self.selected_hunk {
+                    Style::default().fg(fg_color).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(fg_color)
+                };
+
+                let content_style = if let Some(bg) = bg_color {
+                    content_style.bg(bg)
+                } else {
+                    content_style
+                };
+
+                spans.push(Span::styled(&line.content, content_style));
+                lines.push(Line::from(spans));
+            }
+        }
 
         let visible_lines = area.height.saturating_sub(2) as usize;
         let max_scroll = self.total_lines.saturating_sub(visible_lines);
@@ -592,5 +658,63 @@ mod tests {
     fn test_parse_hunk_header() {
         let result = parse_hunk_header("@@ -1,5 +1,7 @@");
         assert_eq!(result, Some((1, 5, 1, 7)));
+    }
+
+    #[test]
+    fn test_bundle_summary_default() {
+        let viewer = DiffViewer::new();
+        assert!(viewer.bundle_summary.is_none());
+    }
+
+    #[test]
+    fn test_bundle_summary_set_and_clear() {
+        let mut viewer = DiffViewer::new();
+        viewer.bundle_summary = Some(BundleSummary {
+            node_id: "node-1".to_string(),
+            node_class: "Implementation".to_string(),
+            files_created: 2,
+            files_modified: 3,
+            writes_count: 5,
+            diffs_count: 3,
+        });
+        assert!(viewer.bundle_summary.is_some());
+        viewer.clear();
+        assert!(viewer.bundle_summary.is_none());
+    }
+
+    #[test]
+    fn test_hunk_operation_label() {
+        let mut viewer = DiffViewer::new();
+        viewer.compute_diff("src/new.rs", "", "fn main() {}\n");
+        assert_eq!(viewer.hunks.len(), 1);
+        // Set operation manually as agent_app would
+        viewer.hunks[0].operation = Some("created".to_string());
+        assert_eq!(viewer.hunks[0].operation.as_deref(), Some("created"));
+    }
+
+    #[test]
+    fn test_parse_diff_multi_file() {
+        let mut viewer = DiffViewer::new();
+        let diff_text = "\
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+@@ -1,3 +1,4 @@
+ line1
++new line
+ line2
+ line3
+diff --git a/src/b.rs b/src/b.rs
+--- a/src/b.rs
++++ b/src/b.rs
+@@ -1,2 +1,2 @@
+-old
++new
+ same
+";
+        viewer.parse_diff(diff_text);
+        assert_eq!(viewer.hunks.len(), 2);
+        assert_eq!(viewer.hunks[0].file_path, "src/a.rs");
+        assert_eq!(viewer.hunks[1].file_path, "src/b.rs");
     }
 }

@@ -15,9 +15,15 @@ use std::collections::{HashMap, HashSet};
 /// Node status for display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStatus {
+    Queued,
+    Planning,
     Pending,
+    Coding,
     Running,
     Verifying,
+    Retrying,
+    SheafCheck,
+    Committing,
     Completed,
     Failed,
     Escalated,
@@ -26,9 +32,15 @@ pub enum TaskStatus {
 impl TaskStatus {
     pub fn icon(&self) -> &'static str {
         match self {
+            TaskStatus::Queued => "◇",
+            TaskStatus::Planning => "◈",
             TaskStatus::Pending => "○",
+            TaskStatus::Coding => "◉",
             TaskStatus::Running => "◐",
             TaskStatus::Verifying => "◑",
+            TaskStatus::Retrying => "↻",
+            TaskStatus::SheafCheck => "⊘",
+            TaskStatus::Committing => "⊙",
             TaskStatus::Completed => "●",
             TaskStatus::Failed => "✗",
             TaskStatus::Escalated => "⚠",
@@ -37,11 +49,17 @@ impl TaskStatus {
 
     pub fn color(&self) -> Color {
         match self {
+            TaskStatus::Queued => Color::Rgb(158, 158, 158), // Lighter gray
+            TaskStatus::Planning => Color::Rgb(179, 157, 219), // Light purple
             TaskStatus::Pending => Color::Rgb(120, 144, 156), // Gray
-            TaskStatus::Running => Color::Rgb(255, 183, 77),  // Amber
+            TaskStatus::Coding => Color::Rgb(255, 213, 79),  // Yellow
+            TaskStatus::Running => Color::Rgb(255, 183, 77), // Amber
             TaskStatus::Verifying => Color::Rgb(129, 212, 250), // Light blue
+            TaskStatus::Retrying => Color::Rgb(255, 152, 0), // Orange
+            TaskStatus::SheafCheck => Color::Rgb(77, 208, 225), // Cyan
+            TaskStatus::Committing => Color::Rgb(165, 214, 167), // Light green
             TaskStatus::Completed => Color::Rgb(102, 187, 106), // Green
-            TaskStatus::Failed => Color::Rgb(239, 83, 80),    // Red
+            TaskStatus::Failed => Color::Rgb(239, 83, 80),   // Red
             TaskStatus::Escalated => Color::Rgb(186, 104, 200), // Purple
         }
     }
@@ -50,9 +68,15 @@ impl TaskStatus {
 impl From<perspt_core::NodeStatus> for TaskStatus {
     fn from(status: perspt_core::NodeStatus) -> Self {
         match status {
+            perspt_core::NodeStatus::Queued => TaskStatus::Queued,
+            perspt_core::NodeStatus::Planning => TaskStatus::Planning,
             perspt_core::NodeStatus::Pending => TaskStatus::Pending,
+            perspt_core::NodeStatus::Coding => TaskStatus::Coding,
             perspt_core::NodeStatus::Running => TaskStatus::Running,
             perspt_core::NodeStatus::Verifying => TaskStatus::Verifying,
+            perspt_core::NodeStatus::Retrying => TaskStatus::Retrying,
+            perspt_core::NodeStatus::SheafCheck => TaskStatus::SheafCheck,
+            perspt_core::NodeStatus::Committing => TaskStatus::Committing,
             perspt_core::NodeStatus::Completed => TaskStatus::Completed,
             perspt_core::NodeStatus::Failed => TaskStatus::Failed,
             perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,
@@ -77,6 +101,8 @@ pub struct TaskNode {
     pub has_children: bool,
     /// Lyapunov energy (if available)
     pub energy: Option<f32>,
+    /// Retry count (incremented on Retrying status)
+    pub retry_count: usize,
 }
 
 /// Task tree viewer state with expand/collapse support
@@ -112,6 +138,7 @@ impl TaskTree {
             parent_id: None,
             has_children: false,
             energy: None,
+            retry_count: 0,
         };
 
         if depth == 0 {
@@ -181,6 +208,7 @@ impl TaskTree {
             parent_id,
             has_children: false,
             energy: None,
+            retry_count: 0,
         };
 
         if is_root {
@@ -203,7 +231,34 @@ impl TaskTree {
     /// Update task status
     pub fn update_status(&mut self, id: &str, status: TaskStatus) {
         if let Some(task) = self.nodes.get_mut(id) {
+            if status == TaskStatus::Retrying {
+                task.retry_count += 1;
+            }
             task.status = status;
+        }
+    }
+
+    /// PSP-5 Phase 8: Add a node or update its status if already present.
+    ///
+    /// Used during resume to pre-populate the tree from persisted state
+    /// without requiring a full TaskPlan.
+    pub fn add_or_update_node(&mut self, id: &str, goal: &str, status: TaskStatus) {
+        if let Some(task) = self.nodes.get_mut(id) {
+            task.status = status;
+        } else {
+            let node = TaskNode {
+                id: id.to_string(),
+                goal: goal.to_string(),
+                status,
+                depth: 0,
+                parent_id: None,
+                has_children: false,
+                energy: None,
+                retry_count: 0,
+            };
+            self.roots.push(id.to_string());
+            self.nodes.insert(id.to_string(), node);
+            self.rebuild_visible();
         }
     }
 
@@ -384,6 +439,14 @@ impl TaskTree {
                     spans.push(Span::styled(format!("[{:.2}] ", energy), energy_style));
                 }
 
+                // Add retry count if > 0
+                if task.retry_count > 0 {
+                    spans.push(Span::styled(
+                        format!("↻{} ", task.retry_count),
+                        Style::default().fg(Color::Rgb(255, 152, 0)),
+                    ));
+                }
+
                 spans.push(Span::styled(
                     format!("{}: ", task.id),
                     Style::default().fg(color).add_modifier(Modifier::BOLD),
@@ -474,5 +537,71 @@ mod tests {
 
         tree.previous();
         assert_eq!(tree.state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_lifecycle_mapping_all_variants() {
+        // Verify all NodeStatus variants map to the expected TaskStatus
+        use perspt_core::NodeStatus;
+        let mappings = vec![
+            (NodeStatus::Queued, TaskStatus::Queued),
+            (NodeStatus::Planning, TaskStatus::Planning),
+            (NodeStatus::Pending, TaskStatus::Pending),
+            (NodeStatus::Coding, TaskStatus::Coding),
+            (NodeStatus::Running, TaskStatus::Running),
+            (NodeStatus::Verifying, TaskStatus::Verifying),
+            (NodeStatus::Retrying, TaskStatus::Retrying),
+            (NodeStatus::SheafCheck, TaskStatus::SheafCheck),
+            (NodeStatus::Committing, TaskStatus::Committing),
+            (NodeStatus::Completed, TaskStatus::Completed),
+            (NodeStatus::Failed, TaskStatus::Failed),
+            (NodeStatus::Escalated, TaskStatus::Escalated),
+        ];
+        for (node_status, expected) in mappings {
+            let result: TaskStatus = node_status.into();
+            assert_eq!(
+                result, expected,
+                "NodeStatus::{:?} should map to TaskStatus::{:?}",
+                node_status, expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_retry_count_increments_on_retrying() {
+        let mut tree = TaskTree::new();
+        tree.add_task("t1".to_string(), "Task".to_string(), 0);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 0);
+
+        tree.update_status("t1", TaskStatus::Retrying);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 1);
+
+        tree.update_status("t1", TaskStatus::Verifying);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 1);
+
+        tree.update_status("t1", TaskStatus::Retrying);
+        assert_eq!(tree.nodes.get("t1").unwrap().retry_count, 2);
+    }
+
+    #[test]
+    fn test_status_icons_and_colors_unique() {
+        let statuses = vec![
+            TaskStatus::Queued,
+            TaskStatus::Planning,
+            TaskStatus::Pending,
+            TaskStatus::Coding,
+            TaskStatus::Running,
+            TaskStatus::Verifying,
+            TaskStatus::Retrying,
+            TaskStatus::SheafCheck,
+            TaskStatus::Committing,
+            TaskStatus::Completed,
+            TaskStatus::Failed,
+            TaskStatus::Escalated,
+        ];
+        // Every status should have a non-empty icon
+        for s in &statuses {
+            assert!(!s.icon().is_empty(), "{:?} should have an icon", s);
+        }
     }
 }

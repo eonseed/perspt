@@ -5,6 +5,19 @@
 
 use serde::{Deserialize, Serialize};
 
+/// PSP-5 Phase 4: Per-plugin readiness summary for session-start reporting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginReadiness {
+    /// Plugin name (e.g. "rust", "python")
+    pub plugin_name: String,
+    /// Verifier stages that have at least one available tool
+    pub available_stages: Vec<String>,
+    /// Verifier stages where only a fallback or no tool is available
+    pub degraded_stages: Vec<String>,
+    /// LSP status description
+    pub lsp_status: String,
+}
+
 /// Events emitted by the Orchestrator for TUI consumption
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
@@ -37,17 +50,224 @@ pub enum AgentEvent {
 
     /// Error occurred
     Error(String),
+
+    // =========================================================================
+    // PSP-5: Lifecycle Events
+    // =========================================================================
+    /// PSP-5: Plan ready after sheafification with detected plugins and execution mode
+    PlanReady {
+        nodes: usize,
+        plugins: Vec<String>,
+        execution_mode: String,
+    },
+
+    /// PSP-5: Node selected for execution
+    NodeSelected {
+        node_id: String,
+        goal: String,
+        node_class: String,
+    },
+
+    /// PSP-5: Deterministic fallback planner activated
+    FallbackPlanner { reason: String },
+
+    /// PSP-5: Verification completed for a node
+    VerificationComplete {
+        node_id: String,
+        syntax_ok: bool,
+        build_ok: bool,
+        tests_ok: bool,
+        lint_ok: bool,
+        diagnostics_count: usize,
+        tests_passed: usize,
+        tests_failed: usize,
+        energy: f32,
+        /// PSP-5 Phase 7: Full energy component breakdown
+        energy_components: crate::types::EnergyComponents,
+        /// PSP-5 Phase 7: Per-stage verification outcomes with sensor status
+        stage_outcomes: Vec<crate::types::StageOutcome>,
+        /// PSP-5 Phase 7: Whether verification ran in degraded mode
+        degraded: bool,
+        /// PSP-5 Phase 7: Human-readable reasons for each degraded stage
+        degraded_reasons: Vec<String>,
+        /// PSP-5 Phase 7: Summary suitable for display
+        summary: String,
+        /// PSP-5 Phase 7: Node class for display context
+        node_class: String,
+    },
+
+    /// PSP-5: Artifact bundle applied to workspace
+    BundleApplied {
+        node_id: String,
+        files_created: Vec<String>,
+        files_modified: Vec<String>,
+        /// PSP-5 Phase 7: Number of write (new file) operations
+        writes_count: usize,
+        /// PSP-5 Phase 7: Number of diff (patch) operations
+        diffs_count: usize,
+        /// PSP-5 Phase 7: Node class for display context
+        node_class: String,
+    },
+
+    /// PSP-5 Phase 4: A sensor fell back to an alternative tool
+    SensorFallback {
+        node_id: String,
+        stage: String,
+        primary: String,
+        actual: String,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 4: Verification completed with degraded stages
+    DegradedVerification {
+        node_id: String,
+        degraded_stages: Vec<String>,
+        stability_blocked: bool,
+    },
+
+    /// PSP-5 Phase 5: Non-convergence classified with a repair action
+    EscalationClassified {
+        node_id: String,
+        category: String,
+        action: String,
+    },
+
+    /// PSP-5 Phase 5: Sheaf validation completed for a node
+    SheafValidationComplete {
+        node_id: String,
+        validators_run: usize,
+        failures: usize,
+        v_sheaf: f32,
+    },
+
+    /// PSP-5 Phase 5: Graph rewrite applied (split, interface insertion, replan)
+    GraphRewriteApplied {
+        trigger_node: String,
+        action: String,
+        nodes_affected: usize,
+    },
+
+    /// PSP-5 Phase 6: Provisional branch created for speculative child work
+    BranchCreated {
+        branch_id: String,
+        node_id: String,
+        parent_node_id: String,
+    },
+
+    /// PSP-5 Phase 6: Interface sealed for a node (dependents may proceed)
+    InterfaceSealed {
+        node_id: String,
+        sealed_paths: Vec<String>,
+        seal_hash: String,
+    },
+
+    /// PSP-5 Phase 6: Provisional branches flushed due to parent failure
+    BranchFlushed {
+        parent_node_id: String,
+        flushed_branch_ids: Vec<String>,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 6: Blocked dependent unblocked after parent seal
+    DependentUnblocked {
+        child_node_id: String,
+        parent_node_id: String,
+    },
+
+    /// PSP-5 Phase 6: Provisional branch merged into committed state
+    BranchMerged { branch_id: String, node_id: String },
+
+    /// PSP-5 Phase 3: Context assembly degraded (budget exceeded or missing artifacts)
+    ContextDegraded {
+        node_id: String,
+        budget_exceeded: bool,
+        missing_owned_files: Vec<String>,
+        included_file_count: usize,
+        total_bytes: usize,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 3: Context blocked — required structural context is untrustworthy.
+    /// The node SHALL NOT proceed silently (PSP-5 §3 requirement).
+    ContextBlocked {
+        node_id: String,
+        missing_owned_files: Vec<String>,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 3: Structural dependency pre-check failed — a required
+    /// dependency only has prose summaries, no machine-verifiable digests.
+    StructuralDependencyMissing {
+        node_id: String,
+        dependency_node_id: String,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 1/4: Model fallback triggered for a tier after structured-output failure
+    ModelFallback {
+        node_id: String,
+        tier: String,
+        primary_model: String,
+        fallback_model: String,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 3: Context provenance drift detected on resume
+    ProvenanceDrift {
+        node_id: String,
+        missing_files: Vec<String>,
+        reason: String,
+    },
+
+    /// PSP-5 Phase 4: Tool readiness snapshot captured at session start
+    ToolReadiness {
+        /// Per-plugin readiness: (plugin_name, available_stages, degraded_stages, lsp_status)
+        plugins: Vec<PluginReadiness>,
+        /// Verifier strictness mode in effect
+        strictness: String,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeStatus {
+    /// Queued, waiting for dependencies
+    Queued,
+    /// Planning phase (Architect)
+    Planning,
     Pending,
+    /// Active coding / implementation phase
+    Coding,
     Running,
     Verifying,
+    /// PSP-5: Node is retrying after a failed verification
+    Retrying,
+    /// PSP-5 Phase 7: Sheaf consistency check underway
+    SheafCheck,
+    /// PSP-5 Phase 7: Committing stable state to ledger
+    Committing,
     Completed,
     Failed,
     Escalated,
+}
+
+impl From<crate::types::NodeState> for NodeStatus {
+    fn from(state: crate::types::NodeState) -> Self {
+        use crate::types::NodeState;
+        match state {
+            NodeState::TaskQueued => NodeStatus::Queued,
+            NodeState::Planning => NodeStatus::Planning,
+            NodeState::Coding => NodeStatus::Coding,
+            NodeState::Verifying => NodeStatus::Verifying,
+            NodeState::Retry => NodeStatus::Retrying,
+            NodeState::SheafCheck => NodeStatus::SheafCheck,
+            NodeState::Committing => NodeStatus::Committing,
+            NodeState::Escalated => NodeStatus::Escalated,
+            NodeState::Completed => NodeStatus::Completed,
+            NodeState::Failed => NodeStatus::Failed,
+            NodeState::Aborted => NodeStatus::Failed,
+        }
+    }
 }
 
 /// Type of action requiring approval
@@ -63,6 +283,13 @@ pub enum ActionType {
     ProjectInit {
         command: String,
         suggested_name: String,
+    },
+    /// PSP-5: Multi-file artifact bundle write
+    BundleWrite {
+        /// Node that produced the bundle
+        node_id: String,
+        /// Files being written or modified
+        files: Vec<String>,
     },
 }
 
@@ -87,6 +314,11 @@ pub enum AgentAction {
     Resume,
     /// Abort the entire session
     Abort,
+    /// PSP-5 Phase 7: Request correction with structured user feedback
+    RequestCorrection {
+        request_id: String,
+        feedback: String,
+    },
 }
 
 /// Channel types for agent communication

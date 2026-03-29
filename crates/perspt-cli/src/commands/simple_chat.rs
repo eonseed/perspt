@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use perspt_core::{GenAIProvider, EOT_SIGNAL};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
@@ -85,7 +85,7 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
         }
 
         // Echo input if not running interactively (piped mode)
-        if !atty::is(atty::Stream::Stdin) {
+        if !std::io::stdin().is_terminal() {
             println!("{}", trimmed_input);
         }
 
@@ -171,7 +171,7 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
 /// Detect provider and default model from environment variables
 fn detect_provider_from_env() -> (&'static str, &'static str) {
     if std::env::var("GEMINI_API_KEY").is_ok() {
-        ("gemini", "gemini-flash-lite-latest")
+        ("gemini", "gemini-3.1-flash-lite-preview")
     } else if std::env::var("OPENAI_API_KEY").is_ok() {
         ("openai", "gpt-4o-mini")
     } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {

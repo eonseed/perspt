@@ -3,171 +3,144 @@
 Extending Perspt
 ================
 
-How to add new capabilities to Perspt.
-
-Adding a New CLI Command
+Adding a Language Plugin
 ------------------------
 
-1. **Create command file**: ``crates/perspt-cli/src/commands/mycommand.rs``
+Language plugins implement the ``LanguagePlugin`` trait from ``perspt-core``.
+
+1. Create a new module in ``crates/perspt-core/src/plugin/``:
 
    .. code-block:: rust
 
-      use anyhow::Result;
+      pub struct GoPlugin;
 
-      pub async fn run(arg: String) -> Result<()> {
-          println!("Running mycommand with: {}", arg);
-          Ok(())
-      }
+      impl LanguagePlugin for GoPlugin {
+          fn name(&self) -> &str { "go" }
+          fn extensions(&self) -> &[&str] { &["go"] }
+          fn key_files(&self) -> &[&str] { &["go.mod", "go.sum"] }
 
-2. **Register in mod.rs**: ``crates/perspt-cli/src/commands/mod.rs``
+          fn detect(&self, path: &Path) -> bool {
+              path.join("go.mod").exists()
+          }
 
-   .. code-block:: rust
-
-      pub mod mycommand;
-
-3. **Add to CLI enum**: ``crates/perspt-cli/src/main.rs``
-
-   .. code-block:: rust
-
-      #[derive(Subcommand)]
-      enum Commands {
-          // ... existing commands
-          
-          /// My new command
-          Mycommand {
-              /// Argument
-              arg: String,
-          },
-      }
-
-4. **Add match arm**:
-
-   .. code-block:: rust
-
-      Some(Commands::Mycommand { arg }) => commands::mycommand::run(arg).await,
-
-Adding a New Agent Tool
------------------------
-
-1. **Define tool in tools.rs**: ``crates/perspt-agent/src/tools.rs``
-
-   .. code-block:: rust
-
-      pub fn available_tools() -> Vec<ToolDefinition> {
-          vec![
-              // ... existing tools
-              ToolDefinition {
-                  name: "my_tool".to_string(),
-                  description: "Does something useful".to_string(),
-                  parameters: json!({
-                      "type": "object",
-                      "properties": {
-                          "input": { "type": "string", "description": "The input" }
-                      },
-                      "required": ["input"]
-                  }),
-              },
-          ]
-      }
-
-2. **Implement execution**:
-
-   .. code-block:: rust
-
-      pub async fn execute(&self, call: &ToolCall) -> Result<ToolResult> {
-          match call.name.as_str() {
-              // ... existing tools
-              "my_tool" => {
-                  let input = call.arguments["input"].as_str().unwrap();
-                  Ok(ToolResult::Success(format!("Processed: {}", input)))
+          fn get_init_action(&self, opts: &InitOptions) -> ProjectAction {
+              ProjectAction::ExecCommand {
+                  command: format!("go mod init {}", opts.name),
+                  description: "Initialize Go module".into(),
               }
-              _ => Err(anyhow!("Unknown tool: {}", call.name)),
+          }
+
+          fn test_command(&self) -> Option<String> {
+              Some("go test ./...".into())
+          }
+
+          fn syntax_check_command(&self) -> Option<String> {
+              Some("go vet ./...".into())
+          }
+
+          fn verifier_profile(&self) -> VerifierProfile {
+              // Define capabilities for each verifier stage
+              // with primary and fallback commands
           }
       }
 
-Adding a Custom Provider
-------------------------
+2. Register in the ``PluginRegistry``
+3. Add LSP config for ``gopls``
 
-The ``genai`` crate handles providers. To add custom support:
+Adding an Agent Tool
+--------------------
 
-1. **Set environment variable** for new provider
-2. **Use provider-specific model names**
-
-For custom API endpoints, modify ``perspt-core/src/llm_provider.rs``.
-
-Adding TUI Components
----------------------
-
-1. **Create widget in perspt-tui**: ``crates/perspt-tui/src/my_widget.rs``
-
-   .. code-block:: rust
-
-      use ratatui::{prelude::*, widgets::*};
-
-      pub struct MyWidget {
-          data: String,
-      }
-
-      impl MyWidget {
-          pub fn new(data: String) -> Self {
-              Self { data }
-          }
-
-          pub fn render(&self, frame: &mut Frame, area: Rect) {
-              let block = Block::default().title("My Widget").borders(Borders::ALL);
-              let paragraph = Paragraph::new(self.data.clone()).block(block);
-              frame.render_widget(paragraph, area);
-          }
-      }
-
-2. **Register in lib.rs**:
-
-   .. code-block:: rust
-
-      pub mod my_widget;
-      pub use my_widget::MyWidget;
-
-Adding Policy Rules
--------------------
-
-Extend the Starlark policy engine in ``crates/perspt-policy/src/engine.rs``:
+Tools are defined in ``crates/perspt-agent/src/tools.rs``:
 
 .. code-block:: rust
 
-   pub fn add_custom_rule(&mut self, pattern: &str, action: Action) {
-       self.rules.push(Rule {
-           pattern: pattern.to_string(),
-           action,
-           reason: None,
-       });
+   impl AgentTools {
+       pub fn get_available_tools(&self) -> Vec<ToolDefinition> {
+           vec![
+               // ... existing tools ...
+               ToolDefinition {
+                   name: "my_tool".into(),
+                   description: "Description".into(),
+                   parameters: vec![
+                       ToolParameter {
+                           name: "arg1".into(),
+                           description: "First argument".into(),
+                           required: true,
+                       },
+                   ],
+               },
+           ]
+       }
+
+       async fn execute_my_tool(&self, args: &HashMap<String, String>)
+           -> ToolResult
+       {
+           // Implementation
+       }
    }
 
-Testing Extensions
-------------------
 
-.. code-block:: bash
+Adding a Sheaf Validator
+-------------------------
 
-   # Test specific crate
-   cargo test -p perspt-agent
+Sheaf validators check cross-node contracts. Add a new variant to
+``SheafValidatorClass`` in ``perspt-core/src/types.rs``:
 
-   # Run all tests
-   cargo test --all
+.. code-block:: rust
 
-   # With coverage
-   cargo tarpaulin
+   pub enum SheafValidatorClass {
+       ExportImportConsistency,
+       DependencyGraphConsistency,
+       // ... existing variants ...
+       MyNewValidator,     // Add new variant
+   }
 
-Documentation
--------------
+Then implement the validation logic in the orchestrator's sheaf validation phase.
 
-Update docs when extending:
 
-1. Update API docs in ``docs/perspt_book/source/api/``
-2. Add usage examples to relevant tutorials
-3. Rebuild: ``cd docs/perspt_book && make html``
+Adding an LLM Provider
+-----------------------
 
-See Also
---------
+The ``genai`` adapter in ``perspt-core/src/llm_provider.rs`` handles providers.
+To add a new provider:
 
-- :doc:`architecture` - Crate design
-- :doc:`testing` - Testing guide
-- :doc:`../api/index` - API reference
+1. Add the adapter kind to ``str_to_adapter_kind()``
+2. Map the env var in ``new_with_config()``
+3. Add default model fallbacks in ``perspt-cli/src/main.rs``
+4. Update the auto-detection priority in config
+
+.. code-block:: rust
+
+   fn str_to_adapter_kind(provider: &str) -> AdapterKind {
+       match provider {
+           "openai" => AdapterKind::OpenAI,
+           "anthropic" => AdapterKind::Anthropic,
+           // ... existing providers ...
+           "newprovider" => AdapterKind::NewProvider,
+           _ => AdapterKind::OpenAI,
+       }
+   }
+
+
+Adding a Starlark Policy
+--------------------------
+
+Create a ``.star`` file in the policy directory (``~/.config/perspt/policies/``):
+
+.. code-block:: python
+
+   # custom_policy.star
+
+   def check_file_write(path, content):
+       # Called before any file write.
+       if path.endswith(".env"):
+           return deny("Cannot write .env files")
+       return allow()
+
+   def check_command(cmd):
+       # Called before any command execution.
+       if "curl" in cmd and "http://" in cmd:
+           return prompt("Insecure HTTP request: " + cmd)
+       return allow()
+
+The ``PolicyEngine`` loads all ``.star`` files from the policy directory automatically.

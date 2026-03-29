@@ -1,169 +1,71 @@
-.. _api-reference:
+.. _api-index:
 
 API Reference
 =============
 
-Complete API documentation for Perspt's 7-crate workspace architecture.
+Crate-level API documentation for Perspt's Rust workspace.
 
-.. graphviz::
-   :align: center
-   :caption: Crate Overview
+.. tip::
 
-   digraph crates {
-       rankdir=LR;
-       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-       
-       cli [label="perspt-cli", fillcolor="#4ECDC4", href="perspt-cli.html"];
-       core [label="perspt-core", fillcolor="#45B7D1", href="perspt-core.html"];
-       tui [label="perspt-tui", fillcolor="#96CEB4", href="perspt-tui.html"];
-       agent [label="perspt-agent", fillcolor="#FFEAA7", href="perspt-agent.html"];
-       policy [label="perspt-policy", fillcolor="#DDA0DD", href="perspt-policy.html"];
-       sandbox [label="perspt-sandbox", fillcolor="#F8B739", href="perspt-sandbox.html"];
-       store [label="perspt-store", fillcolor="#87CEEB", href="perspt-store.html"];
-   }
+   For full Rustdoc-generated documentation, run:
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Crate APIs
+   .. code-block:: bash
 
-   perspt-cli
-   perspt-core
-   perspt-agent
-   perspt-tui
-   perspt-policy
-   perspt-sandbox
-   perspt-store
-
-Crate Summary
--------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 50 30
-
-   * - Crate
-     - Description
-     - Key Types
-   * - :doc:`perspt-cli`
-     - CLI entry point with 10 subcommands
-     - ``Commands``, ``Cli``
-   * - :doc:`perspt-core`
-     - LLM provider, config, memory
-     - ``GenAIProvider``, ``Config``
-   * - :doc:`perspt-agent`
-     - SRBN engine for autonomous coding
-     - ``SRBNOrchestrator``, ``TaskPlan``, ``Energy``
-   * - :doc:`perspt-tui`
-     - Terminal UI components
-     - ``AgentApp``, ``Dashboard``, ``DiffViewer``
-   * - :doc:`perspt-policy`
-     - Security policy engine
-     - ``PolicyEngine``, ``Sanitizer``
-   * - :doc:`perspt-sandbox`
-     - Process isolation
-     - ``SandboxedCommand``
-   * - :doc:`perspt-store`
-     - DuckDB session persistence
-     - ``SessionStore``, ``LlmRequestRecord``
-
-Architecture Quick Reference
-----------------------------
+      cargo doc --open --no-deps --all-features
 
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: 🖥️ perspt-cli
-      :link: perspt-cli
-      :link-type: doc
-
-      **10 Subcommands**: chat, agent, init, config, ledger, status, abort, resume, logs, simple-chat
-
-   .. grid-item-card:: 🔌 perspt-core
+   .. grid-item-card:: perspt-core
       :link: perspt-core
       :link-type: doc
 
-      **Thread-safe LLM**: GenAIProvider with Arc<RwLock>
+      Types, config, LLM provider, events, plugins.
 
-   .. grid-item-card:: 🤖 perspt-agent
+   .. grid-item-card:: perspt-agent
       :link: perspt-agent
       :link-type: doc
 
-      **SRBN Engine**: Orchestrator, LSP, Tools, Ledger
+      SRBN orchestrator, agents, ledger, tools.
 
-   .. grid-item-card:: 🎨 perspt-tui
+   .. grid-item-card:: perspt-tui
       :link: perspt-tui
       :link-type: doc
 
-      **Ratatui UI**: Dashboard, DiffViewer, ReviewModal
+      Ratatui terminal UI (chat + agent).
 
-   .. grid-item-card:: 🛡️ perspt-policy
-      :link: perspt-policy
+   .. grid-item-card:: perspt-cli
+      :link: perspt-cli
       :link-type: doc
 
-      **Security**: Starlark rules, command sanitization
+      Clap CLI entry point and subcommands.
 
-   .. grid-item-card:: 📦 perspt-sandbox
-      :link: perspt-sandbox
-      :link-type: doc
-
-      **Isolation**: Resource limits, process control
-
-   .. grid-item-card:: 💾 perspt-store
+   .. grid-item-card:: perspt-store
       :link: perspt-store
       :link-type: doc
 
-      **Persistence**: DuckDB sessions, LLM logging
+      DuckDB session persistence.
 
-Common Patterns
----------------
+   .. grid-item-card:: perspt-policy
+      :link: perspt-policy
+      :link-type: doc
 
-Error Handling
-~~~~~~~~~~~~~~
+      Starlark policy engine.
 
-All crates use ``anyhow::Result`` for error propagation:
+   .. grid-item-card:: perspt-sandbox
+      :link: perspt-sandbox
+      :link-type: doc
 
-.. code-block:: rust
+      Command sandboxing and isolation.
 
-   use anyhow::{Context, Result};
+.. toctree::
+   :maxdepth: 2
+   :hidden:
 
-   fn example() -> Result<()> {
-       do_something()
-           .context("Failed to do something")?;
-       Ok(())
-   }
-
-Async Operations
-~~~~~~~~~~~~~~~~
-
-Built on Tokio async runtime:
-
-.. code-block:: rust
-
-   use tokio::sync::mpsc;
-
-   async fn stream_response(sender: mpsc::Sender<String>) -> Result<()> {
-       // Stream tokens as they arrive
-   }
-
-Thread-Safe Sharing
-~~~~~~~~~~~~~~~~~~~
-
-Use ``Arc`` for sharing across tasks:
-
-.. code-block:: rust
-
-   use std::sync::Arc;
-
-   let provider = Arc::new(GenAIProvider::new()?);
-   let provider_clone = Arc::clone(&provider);
-
-   tokio::spawn(async move {
-       provider_clone.generate_response(...).await
-   });
-
-See Also
---------
-
-- :doc:`../developer-guide/architecture` - Workspace architecture overview
-- :doc:`../developer-guide/contributing` - How to contribute
-- :doc:`../developer-guide/testing` - Testing guide
+   perspt-core
+   perspt-agent
+   perspt-tui
+   perspt-cli
+   perspt-store
+   perspt-policy
+   perspt-sandbox
