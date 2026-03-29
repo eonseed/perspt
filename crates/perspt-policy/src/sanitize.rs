@@ -151,7 +151,17 @@ pub fn is_safe_for_auto_exec(command: &str) -> bool {
 /// workspace root.  Returns `Ok(())` when all path-like arguments resolve
 /// inside the workspace, or an error describing the violation.
 pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path) -> Result<()> {
-    let parts = shell_words::split(command)?;
+    // On Windows, normalize backslash path separators to forward slashes
+    // before POSIX-style shell tokenization (`shell_words` treats `\` as
+    // an escape character, which mangles Windows paths).
+    let normalized;
+    let command_for_parse = if cfg!(windows) {
+        normalized = command.replace('\\', "/");
+        &normalized
+    } else {
+        command
+    };
+    let parts = shell_words::split(command_for_parse)?;
 
     for part in &parts {
         // Skip flags and non-path arguments
