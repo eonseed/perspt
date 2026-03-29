@@ -546,15 +546,28 @@ impl SRBNOrchestrator {
                 status: perspt_core::NodeStatus::Running,
             });
 
-            self.execute_node(*idx).await?;
-
-            if let Some(node) = self.graph.node_weight(*idx) {
-                self.emit_event(perspt_core::AgentEvent::NodeCompleted {
-                    node_id: node.node_id.clone(),
-                    goal: node.goal.clone(),
-                });
+            match self.execute_node(*idx).await {
+                Ok(()) => {
+                    if let Some(node) = self.graph.node_weight(*idx) {
+                        self.emit_event(perspt_core::AgentEvent::NodeCompleted {
+                            node_id: node.node_id.clone(),
+                            goal: node.goal.clone(),
+                        });
+                    }
+                    executed += 1;
+                }
+                Err(e) => {
+                    let node_id = self.graph[*idx].node_id.clone();
+                    log::error!("Node {} failed on resume: {}", node_id, e);
+                    self.emit_log(format!("❌ Node {} failed: {}", node_id, e));
+                    self.graph[*idx].state = NodeState::Escalated;
+                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                        node_id,
+                        status: perspt_core::NodeStatus::Escalated,
+                    });
+                    continue;
+                }
             }
-            executed += 1;
         }
 
         log::info!(
@@ -849,14 +862,28 @@ impl SRBNOrchestrator {
                 });
             }
 
-            self.execute_node(*idx).await?;
-
-            // Emit completed status
-            if let Some(node) = self.graph.node_weight(*idx) {
-                self.emit_event(perspt_core::AgentEvent::NodeCompleted {
-                    node_id: node.node_id.clone(),
-                    goal: node.goal.clone(),
-                });
+            match self.execute_node(*idx).await {
+                Ok(()) => {
+                    // Emit completed status
+                    if let Some(node) = self.graph.node_weight(*idx) {
+                        self.emit_event(perspt_core::AgentEvent::NodeCompleted {
+                            node_id: node.node_id.clone(),
+                            goal: node.goal.clone(),
+                        });
+                    }
+                }
+                Err(e) => {
+                    let node_id = self.graph[*idx].node_id.clone();
+                    log::error!("Node {} failed: {}", node_id, e);
+                    self.emit_log(format!("❌ Node {} failed: {}", node_id, e));
+                    self.graph[*idx].state = NodeState::Escalated;
+                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                        node_id: node_id.clone(),
+                        status: perspt_core::NodeStatus::Escalated,
+                    });
+                    // Continue to next node instead of stopping all execution
+                    continue;
+                }
             }
         }
 
@@ -957,6 +984,7 @@ impl SRBNOrchestrator {
     /// - Ambiguous: create a child project dir to avoid polluting misc files.
     async fn step_init_project(&mut self, task: &str) -> Result<()> {
         let registry = perspt_core::plugin::PluginRegistry::new();
+        log::info!("step_init_project: workspace_state={}", self.context.workspace_state);
 
         match self.context.workspace_state.clone() {
             WorkspaceState::ExistingProject { ref plugins } => {
@@ -1025,17 +1053,22 @@ impl SRBNOrchestrator {
                     }
                 };
 
-                // Check if this task actually requires project scaffolding
-                if !self.check_workspace_requirement(task).await {
-                    self.emit_log("ℹ️ Simple task detected, skipping project scaffolding.".to_string());
+                // In Team/Project mode we always scaffold — the Solo check
+                // already ran in run() and would have short-circuited.
+                // Only consult the LLM heuristic when execution mode was not
+                // explicitly set (defensive guard for future callers).
+                if self.context.execution_mode == perspt_core::types::ExecutionMode::Solo {
+                    self.emit_log("ℹ️ Solo mode, skipping project scaffolding.".to_string());
                     return Ok(());
                 }
 
                 if let Some(plugin) = registry.get(lang) {
+                    log::info!("step_init_project: Greenfield lang={}, initializing project", lang);
                     self.emit_log(format!("🌱 Initializing new {} project", lang));
 
                     // Pre-flight: check required tools before attempting init
                     if !self.check_tool_prerequisites(plugin) {
+                        log::warn!("step_init_project: tool prerequisites check failed for {}", lang);
                         return Ok(());
                     }
 
@@ -1063,6 +1096,7 @@ impl SRBNOrchestrator {
                             command,
                             description,
                         } => {
+                            log::info!("step_init_project: init command='{}', awaiting approval", command);
                             let result = self
                                 .await_approval(
                                     perspt_core::ActionType::ProjectInit {
@@ -1078,6 +1112,7 @@ impl SRBNOrchestrator {
                                 ApprovalResult::ApprovedWithEdit(edited) => edited.clone(),
                                 _ => project_name.clone(),
                             };
+                            log::info!("step_init_project: approval result={:?}, final_name={}", result, final_name);
 
                             if matches!(
                                 result,
@@ -1150,8 +1185,9 @@ impl SRBNOrchestrator {
                 // Ambiguous workspace — try to infer language and create a child
                 // project directory rather than initializing in place.
                 if let Some(lang) = self.detect_language_from_task(task) {
-                    if !self.check_workspace_requirement(task).await {
-                        self.emit_log("ℹ️ Simple task detected, skipping project scaffolding.".to_string());
+                    // Same as Greenfield: in Team/Project mode always scaffold.
+                    if self.context.execution_mode == perspt_core::types::ExecutionMode::Solo {
+                        self.emit_log("ℹ️ Solo mode, skipping project scaffolding.".to_string());
                         return Ok(());
                     }
 
@@ -1764,59 +1800,6 @@ File: {filename}
             Err(e) => {
                 log::warn!("Failed to run doctest: {}", e);
                 0.0 // Don't penalize if doctest runner fails
-            }
-        }
-    }
-
-    /// Check if the task requires a full project workspace/scaffold
-    /// Uses heuristics and LLM decision making to avoid unnecessary initialization
-    async fn check_workspace_requirement(&self, task: &str) -> bool {
-        let task_lower = task.to_lowercase();
-
-        // 1. Simple heuristics: keywords that strongly suggest a single file
-        let single_file_keywords = [
-            "script",
-            "single file",
-            "snippet",
-            "just a file",
-            "one file",
-            "standalone",
-        ];
-        if single_file_keywords.iter().any(|&k| task_lower.contains(k)) {
-            return false;
-        }
-
-        // 2. Short tasks are often single files
-        if task.len() < 50 && !task_lower.contains("project") && !task_lower.contains("app") {
-            return false;
-        }
-
-        // 3. Fallback to LLM for a binary decision
-        let prompt = format!(
-            r#"Analyze this task and decide if it requires a full project workspace/scaffold (e.g., uv init, cargo init, npm init) or if it can be done as a simple standalone file.
-- Full workspace is needed for multi-file projects, web servers, complex apps with dependencies.
-- Simple standalone file is better for scripts, utility functions, or single-logic snippets.
-
-Task: "{}"
-
-Respond with ONLY 'WORKSPACE' or 'STANDALONE'."#,
-            task
-        );
-
-        match self
-            .call_llm_with_logging(&self.architect_model.clone(), &prompt, None)
-            .await
-        {
-            Ok(response) => {
-                let decision = response.trim().to_uppercase();
-                decision.contains("WORKSPACE")
-            }
-            Err(e) => {
-                log::warn!(
-                    "Failed to get workspace decision from LLM: {}, defaulting to WORKSPACE",
-                    e
-                );
-                true // Default to safety
             }
         }
     }
@@ -2923,22 +2906,34 @@ Project name:"#,
     /// Extract code from LLM response
     /// Returns (filename, code_content, is_diff) if found
     fn extract_code_from_response(&self, content: &str) -> Option<(String, String, bool)> {
-        // Look for patterns like:
-        // File: hello_world.py
-        // ```python
-        // def hello():
-        //     print("Hello World")
-        // ```
+        // Return only the first block for backward compatibility
+        self.extract_all_code_blocks_from_response(content)
+            .into_iter()
+            .next()
+    }
 
+    /// Extract ALL File:/Diff: code blocks from an LLM response.
+    ///
+    /// Unlike `extract_code_from_response` which returns only the first block,
+    /// this collects every named code block so multi-file legacy responses are
+    /// not silently truncated to a single artifact.
+    fn extract_all_code_blocks_from_response(
+        &self,
+        content: &str,
+    ) -> Vec<(String, String, bool)> {
         let lines: Vec<&str> = content.lines().collect();
+        let mut results: Vec<(String, String, bool)> = Vec::new();
         let mut file_path: Option<String> = None;
+        let mut is_diff_marker = false;
         let mut in_code_block = false;
         let mut code_lines: Vec<&str> = Vec::new();
         let mut code_lang = String::new();
 
         for line in &lines {
             // Look for file path patterns
-            if line.starts_with("File:") || line.starts_with("**File:") || line.starts_with("file:")
+            if line.starts_with("File:")
+                || line.starts_with("**File:")
+                || line.starts_with("file:")
             {
                 let path = line
                     .trim_start_matches("File:")
@@ -2949,11 +2944,14 @@ Project name:"#,
                     .trim();
                 if !path.is_empty() {
                     file_path = Some(path.to_string());
+                    is_diff_marker = false;
                 }
             }
 
             // Look for Diff patterns
-            if line.starts_with("Diff:") || line.starts_with("**Diff:") || line.starts_with("diff:")
+            if line.starts_with("Diff:")
+                || line.starts_with("**Diff:")
+                || line.starts_with("diff:")
             {
                 let path = line
                     .trim_start_matches("Diff:")
@@ -2964,6 +2962,7 @@ Project name:"#,
                     .trim();
                 if !path.is_empty() {
                     file_path = Some(path.to_string());
+                    is_diff_marker = true;
                 }
             }
 
@@ -2976,11 +2975,9 @@ Project name:"#,
 
             if line.starts_with("```") && in_code_block {
                 in_code_block = false;
-                // If we found code, return it
                 if !code_lines.is_empty() {
                     let code = code_lines.join("\n");
-                    // Generate filename from language if not found
-                    let filename = match file_path.clone() {
+                    let filename = match file_path.take() {
                         Some(p) => p,
                         None => match code_lang.as_str() {
                             "python" | "py" => "main.py".to_string(),
@@ -2996,21 +2993,20 @@ Project name:"#,
                                     other
                                 );
                                 code_lines.clear();
-                                file_path = None;
                                 code_lang.clear();
+                                is_diff_marker = false;
                                 continue;
                             }
                         },
                     };
-                    // Check if it's a diff
-                    let is_diff = code_lang == "diff"
-                        || code.starts_with("---")
-                        || file_path
-                            .as_ref()
-                            .map(|_| content.contains("Diff:"))
-                            .unwrap_or(false);
-                    return Some((filename, code, is_diff));
+                    let is_diff = is_diff_marker
+                        || code_lang == "diff"
+                        || code.starts_with("---");
+                    results.push((filename, code, is_diff));
                 }
+                code_lines.clear();
+                code_lang.clear();
+                is_diff_marker = false;
                 continue;
             }
 
@@ -3019,7 +3015,7 @@ Project name:"#,
             }
         }
 
-        None
+        results
     }
 
     /// Step 4: Stability Verification
@@ -5043,24 +5039,33 @@ uv add --dev pytest
             }
         }
 
-        // Fall back to legacy File:/Diff: extraction
-        if let Some((filename, code, is_diff)) = self.extract_code_from_response(content) {
-            let op = if is_diff {
-                perspt_core::types::ArtifactOperation::Diff {
-                    path: filename,
-                    patch: code,
-                }
-            } else {
-                perspt_core::types::ArtifactOperation::Write {
-                    path: filename,
-                    content: code,
-                }
-            };
+        // Fall back to legacy File:/Diff: extraction — collect ALL blocks
+        let blocks = self.extract_all_code_blocks_from_response(content);
+        if !blocks.is_empty() {
+            let artifacts: Vec<perspt_core::types::ArtifactOperation> = blocks
+                .into_iter()
+                .map(|(filename, code, is_diff)| {
+                    if is_diff {
+                        perspt_core::types::ArtifactOperation::Diff {
+                            path: filename,
+                            patch: code,
+                        }
+                    } else {
+                        perspt_core::types::ArtifactOperation::Write {
+                            path: filename,
+                            content: code,
+                        }
+                    }
+                })
+                .collect();
+            log::info!(
+                "Constructed {}-artifact bundle from legacy extraction",
+                artifacts.len()
+            );
             let bundle = perspt_core::types::ArtifactBundle {
-                artifacts: vec![op],
+                artifacts,
                 commands: vec![],
             };
-            log::info!("Constructed single-artifact bundle from legacy extraction");
             return Some(bundle);
         }
 
@@ -6662,27 +6667,6 @@ mod tests {
         assert_eq!(orch.node_count(), 2);
     }
     #[tokio::test]
-    async fn test_check_workspace_requirement() {
-        let orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
-
-        // Positive heuristics
-        assert!(
-            !orch
-                .check_workspace_requirement("write a python script")
-                .await
-        );
-        assert!(!orch.check_workspace_requirement("simple script").await);
-        assert!(!orch.check_workspace_requirement("standalone file").await);
-
-        // Negative heuristics (length or project keywords)
-        // Note: For long strings without keywords, it would fall back to LLM which would fail in test
-        // but the current implementation logs warning and returns true.
-        // We'll test things that are definitely short and don't match or long but definitely project.
-
-        assert!(!orch.check_workspace_requirement("calc sum").await); // Short, no project keywords -> STANDALONE
-    }
-
-    #[tokio::test]
     async fn test_lsp_key_for_file_resolves_by_plugin() {
         let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
         // Insert a dummy LSP client key so the lookup has something to match
@@ -7771,5 +7755,97 @@ import httpx
         assert!(commands.contains(&"uv add httpx".to_string()), "{:?}", commands);
         assert!(commands.contains(&"cargo add serde".to_string()), "{:?}", commands);
         assert!(commands.contains(&"pip install numpy".to_string()), "{:?}", commands);
+    }
+
+    #[test]
+    fn test_extract_all_code_blocks_multiple_files() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = r#"Here are the files:
+
+File: src/etl_pipeline/core.py
+```python
+def run_pipeline():
+    pass
+```
+
+File: src/etl_pipeline/validator.py
+```python
+def validate(data):
+    return True
+```
+
+File: tests/test_core.py
+```python
+from etl_pipeline.core import run_pipeline
+
+def test_run():
+    run_pipeline()
+```
+"#;
+        let blocks = orch.extract_all_code_blocks_from_response(content);
+        assert_eq!(blocks.len(), 3, "Expected 3 blocks, got {:?}", blocks);
+        assert_eq!(blocks[0].0, "src/etl_pipeline/core.py");
+        assert_eq!(blocks[1].0, "src/etl_pipeline/validator.py");
+        assert_eq!(blocks[2].0, "tests/test_core.py");
+        assert!(!blocks[0].2, "core.py should not be a diff");
+    }
+
+    #[test]
+    fn test_extract_all_code_blocks_single_file() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = r#"File: main.py
+```python
+print("hello")
+```"#;
+        let blocks = orch.extract_all_code_blocks_from_response(content);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].0, "main.py");
+    }
+
+    #[test]
+    fn test_extract_all_code_blocks_mixed_file_and_diff() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = r#"File: new_module.py
+```python
+def new_fn():
+    pass
+```
+
+Diff: existing.py
+```diff
+--- existing.py
++++ existing.py
+@@ -1 +1,2 @@
++import new_module
+ def old_fn():
+```"#;
+        let blocks = orch.extract_all_code_blocks_from_response(content);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].0, "new_module.py");
+        assert!(!blocks[0].2, "new_module.py should be a write");
+        assert_eq!(blocks[1].0, "existing.py");
+        assert!(blocks[1].2, "existing.py should be a diff");
+    }
+
+    #[test]
+    fn test_parse_artifact_bundle_legacy_multi_file() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = r#"File: core.py
+```python
+def core():
+    pass
+```
+
+File: utils.py
+```python
+def util():
+    pass
+```"#;
+        let bundle = orch.parse_artifact_bundle(content);
+        assert!(bundle.is_some(), "Should parse multi-file legacy response");
+        let bundle = bundle.unwrap();
+        assert_eq!(bundle.artifacts.len(), 2, "Should have 2 artifacts");
+        assert_eq!(bundle.artifacts[0].path(), "core.py");
+        assert_eq!(bundle.artifacts[1].path(), "utils.py");
     }
 }
