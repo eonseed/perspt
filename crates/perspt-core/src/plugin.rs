@@ -596,11 +596,11 @@ impl LanguagePlugin for PythonPlugin {
                 }
             }
             _ => {
-                // Default to uv
+                // Default to uv --lib for src-layout with build-system
                 if opts.is_empty_dir || opts.name == "." || opts.name == "./" {
-                    "uv init".to_string()
+                    "uv init --lib".to_string()
                 } else {
-                    format!("uv init {}", opts.name)
+                    format!("uv init --lib {}", opts.name)
                 }
             }
         };
@@ -639,8 +639,8 @@ impl LanguagePlugin for PythonPlugin {
                 format!("poetry new {}", opts.name)
             }
         } else {
-            // uv init supports "." for current directory
-            format!("uv init {}", opts.name)
+            // uv init --lib for src-layout with build-system
+            format!("uv init --lib {}", opts.name)
         }
     }
 

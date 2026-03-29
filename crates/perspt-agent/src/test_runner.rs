@@ -164,9 +164,9 @@ impl PythonTestRunner {
                 log::warn!(
                     "No pyproject.toml found. Project should be initialized via 'uv init' first."
                 );
-                log::info!("Attempting to run 'uv init' as fallback...");
+                log::info!("Attempting to run 'uv init --lib' as fallback...");
                 let init_output = Command::new("uv")
-                    .args(["init"])
+                    .args(["init", "--lib"])
                     .current_dir(&self.working_dir)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
