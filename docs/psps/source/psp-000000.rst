@@ -109,7 +109,7 @@ The numerical index contains a table of all PSPs, ordered by number.
      - Enhancement
      - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
-     - Draft
+     - Active
 
 ====================
 Index by Category
@@ -183,7 +183,7 @@ Enhancement PSPs improve existing Perspt functionality.
      - Enhancement
      - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
-     - Draft
+     - Active
 
 UI/UX PSPs
 ===========
@@ -234,11 +234,6 @@ Draft PSPs (under development)
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
      - Vikrant Rathore
      - Draft
-   * - :psp:`000005`
-     - Enhancement
-     - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
-     - Vikrant Rathore
-     - Draft
 
 Discussion PSPs (under review)
 ===============================
@@ -269,6 +264,11 @@ Final PSPs (implemented and complete)
    * - :psp:`000003`
      - Feature
      - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
+     - Vikrant Rathore
+     - Active
+   * - :psp:`000005`
+     - Enhancement
+     - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
      - Active
 
