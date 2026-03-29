@@ -3,8 +3,8 @@
 Agent Mode
 ==========
 
-The agent command activates the SRBN (Self-Regulating Bayesian Network) engine
-for autonomous multi-file code generation.
+The agent command activates the experimental SRBN (Stabilized Recursive Barrier Network)
+engine for autonomous multi-file code generation.
 
 Launching Agent Mode
 --------------------

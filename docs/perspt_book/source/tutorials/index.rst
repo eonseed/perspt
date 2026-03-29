@@ -18,13 +18,13 @@ Step-by-step guides to master Perspt.
       :link: agent-mode
       :link-type: doc
 
-      Autonomous multi-file coding with SRBN.
+      Autonomous multi-file coding with the experimental SRBN engine.
 
    .. grid-item-card:: Headless Mode
       :link: headless-mode
       :link-type: doc
 
-      Fully autonomous operation for CI/CD and batch workflows.
+      Fully autonomous operation for CI/CD and batch workflows (experimental).
 
    .. grid-item-card:: Local Models
       :link: local-models

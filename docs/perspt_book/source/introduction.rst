@@ -33,9 +33,11 @@ to Large Language Models. It serves two complementary purposes:
    (SRBN)** framework described in the paper *"Stability is All You Need:
    Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by
    **Vikrant R. and Ronak R.** (pre-publication). The SRBN engine decomposes
-   coding tasks into DAGs, enforces Lyapunov stability through multi-stage
-   verification barriers, and commits only when energy converges — bringing
-   control-theoretic rigor to autonomous code generation.
+   coding tasks into DAGs, uses Lyapunov energy as a stability measure through
+   multi-stage verification barriers, and commits only when energy converges —
+   applying control-theoretic ideas to autonomous code generation. The theoretical
+   framework is mature; the implementation is under active development and has not
+   yet been benchmarked.
 
 .. admonition:: Version 0.5.4 Highlights
    :class: tip
@@ -108,7 +110,7 @@ Key Features
 
    * - **SRBN**
      - **Agent Mode**
-     - Autonomous multi-file coding. Plans a task DAG, generates artifact bundles per node,
+     - Experimental autonomous multi-file coding. Plans a task DAG, generates artifact bundles per node,
        verifies with LSP + tests, retries until energy converges, and commits to the ledger.
    * - **LLM**
      - **Multi-Provider**
@@ -145,17 +147,19 @@ The SRBN engine in Perspt is based on the paper *"Stability is All You Need:
 Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.
 and Ronak R.** (pre-publication). The paper introduces a topological framework
 that reformulates LLM agency as a sheaf-theoretic control problem, replacing
-probabilistic search with Lyapunov stability guarantees. Key theoretical
+probabilistic search with Lyapunov stability analysis. Key theoretical
 contributions include:
 
 - **Input-to-State Stability (ISS)** proof showing bounded reasoning errors
-  result in bounded system deviation
+  result in bounded system deviation (paper result)
 - **Flow Matching Barriers** that project diverging agent trajectories back onto
-  the safe manifold
+  the safe manifold (paper result)
 - **Adaptive Flow Speculation** for latency reduction via branch prediction
-- Reliability scaling from exponential decay to logarithmic: :math:`O(\log N)`
+- Theoretical reliability scaling from exponential decay to logarithmic: :math:`O(\log N)` (paper prediction)
 
-Perspt implements this theory as a practical coding agent, governed by PSP-5:
+Perspt implements this theory as an experimental coding agent, governed by PSP-5.
+The mathematical framework is mature; empirical benchmarks on this implementation
+have not yet been published.
 
 .. graphviz::
    :align: center
@@ -210,7 +214,7 @@ CLI Commands
      - Interactive TUI chat (default)
      - ``perspt chat --model gemini-pro-latest``
    * - ``agent``
-     - Autonomous multi-file coding
+     - Autonomous multi-file coding (experimental)
      - ``perspt agent "Create a REST API in Rust"``
    * - ``init``
      - Initialize project config
@@ -288,7 +292,7 @@ Perspt embodies the belief that AI tools should be:
 
 - **Accessible** — A simple ``perspt`` command connects you to any LLM provider
 - **Fast** — Rust-native performance with async streaming
-- **Stable** — Lyapunov-guaranteed convergence before commit (SRBN agent)
+- **Stable** — Lyapunov energy guides convergence before commit (SRBN agent, based on paper theory)
 - **Secure** — Policy-controlled execution with workspace bounds
 - **Extensible** — Modular 7-crate architecture
 - **Experimental** — A testbed for control-theoretic approaches to LLM reliability

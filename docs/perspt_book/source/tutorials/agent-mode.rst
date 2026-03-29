@@ -3,7 +3,7 @@
 Agent Mode Tutorial
 ===================
 
-Master autonomous multi-file code generation with the SRBN engine.
+Master autonomous multi-file code generation with the experimental SRBN engine.
 
 Overview
 --------
@@ -12,6 +12,13 @@ Agent mode lets Perspt plan, write, test, and commit multi-file projects
 autonomously. The PSP-5 runtime decomposes tasks into a directed acyclic graph
 (DAG) of nodes, each owning specific output files, verified by real LSP
 diagnostics and test runners.
+
+.. admonition:: Experimental Feature
+   :class: note
+
+   Agent mode implements the SRBN theoretical framework. The engine is functional
+   and usable, but has not yet been benchmarked. Results may vary depending on model
+   capability and task complexity.
 
 Prerequisites
 -------------

@@ -6,22 +6,23 @@ Perspt is built on the shoulders of giants. We extend our gratitude to the many 
 Theoretical Foundation
 ----------------------
 
-The SRBN engine at the heart of Perspt's autonomous agent mode is based on the paper:
+The SRBN engine at the heart of Perspt's experimental agent mode is based on the paper:
 
    **"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"**
    by **Vikrant R.** and **Ronak R.** (pre-publication).
 
 The paper introduces a topological framework that reformulates LLM agency as a
 sheaf-theoretic control problem, replacing probabilistic search with Lyapunov
-stability guarantees. Key contributions adopted in Perspt include:
+stability analysis. Key theoretical contributions adopted in Perspt include:
 
-- **Input-to-State Stability (ISS)** — bounded reasoning errors yield bounded system deviation
-- **Flow Matching Barriers** — project diverging trajectories back onto the safe manifold
+- **Input-to-State Stability (ISS)** — bounded reasoning errors yield bounded system deviation (paper proof)
+- **Flow Matching Barriers** — project diverging trajectories back onto the safe manifold (paper result)
 - **Adaptive Flow Speculation** — latency reduction via predictive branch execution
-- **Logarithmic Reliability Scaling** — :math:`O(\log N)` instead of exponential decay
+- **Logarithmic Reliability Scaling** — the paper predicts :math:`O(\log N)` retry cost instead of exponential decay
 
-Perspt serves as a practical testbed for validating these theoretical results in
-real-world multi-file coding workloads.
+Perspt serves as an experimental testbed for exploring these theoretical ideas in
+real-world multi-file coding workloads. The mathematical framework is mature;
+empirical benchmarks on Perspt's implementation have not yet been published.
 
 Core Dependencies
 -----------------

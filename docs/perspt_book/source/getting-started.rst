@@ -100,7 +100,7 @@ Type your question, get a streamed answer. Type ``exit`` or press ``Ctrl+D`` to 
 Your First Agent Run
 --------------------
 
-Agent mode lets Perspt plan and write multi-file projects autonomously:
+Agent mode (experimental) lets the SRBN engine plan and write multi-file projects autonomously:
 
 .. code-block:: bash
 
