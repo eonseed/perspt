@@ -4,7 +4,7 @@ Author: Vikrant Rathore (@vikrantrathore)
 Status: Discussion
 Type: Enhancement
 Created: 2026-03-23
-Discussion-To: https://github.com/eonseed/perspt/pull/95
+Discussion-To: https://github.com/eonseed/perspt/discussions/97
 Replaces: 000004
 
 ========
@@ -323,20 +323,20 @@ Required artifact schema:
        reject -> bundle [style=dashed, label="correction"];
    }
 
-  **3. Graph-Derived Context Supply and Restriction Maps**
+**3. Graph-Derived Context Supply and Restriction Maps**
 
-  The task graph SHALL define not only execution order but also the authoritative context boundary for each node. This is required for SRBN to remain stable on long-running, large-project work.
+The task graph SHALL define not only execution order but also the authoritative context boundary for each node. This is required for SRBN to remain stable on long-running, large-project work.
 
-  Each node SHALL execute against a stratified context package composed from the graph, the ledger, and the active plugin capabilities.
+Each node SHALL execute against a stratified context package composed from the graph, the ledger, and the active plugin capabilities.
 
-  **Structural Context (Authoritative)**
+**Structural Context (Authoritative)**
 
-  Structural context SHALL provide the machine-verifiable artifacts required for compile-critical and type-critical work. It includes:
+Structural context SHALL provide the machine-verifiable artifacts required for compile-critical and type-critical work. It includes:
 
-  * exact exported signatures, trait or protocol definitions, API schemas, and generated interface files
-  * ownership manifests and node-to-file bindings
-  * dependency commit hashes, structural digests, and interface seals
-  * symbol inventories, migration shapes, or equivalent plugin-defined structural representations
+* exact exported signatures, trait or protocol definitions, API schemas, and generated interface files
+* ownership manifests and node-to-file bindings
+* dependency commit hashes, structural digests, and interface seals
+* symbol inventories, migration shapes, or equivalent plugin-defined structural representations
 
   **Semantic Context (Advisory)**
 
