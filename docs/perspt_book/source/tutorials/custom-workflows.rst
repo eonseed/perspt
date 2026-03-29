@@ -3,163 +3,87 @@
 Custom Workflows
 ================
 
-Build automated pipelines with Perspt.
+Integrate Perspt into scripts, CI/CD pipelines, and automation.
 
-Overview
---------
+Simple CLI for Scripting
+------------------------
 
-Perspt can be integrated into automated workflows for:
+The ``simple-chat`` command provides a Unix-friendly interface:
 
-- CI/CD code generation
-- Batch processing
-- Scripted interactions
-- Test automation
+.. code-block:: bash
 
-Scripting with Agent Mode
--------------------------
+   # Interactive
+   perspt simple-chat
 
-Use agent mode in scripts:
+   # With session logging
+   perspt simple-chat --log-file session.txt
+
+Batch Agent Runs
+----------------
+
+Run multiple agent tasks from a script:
 
 .. code-block:: bash
 
    #!/bin/bash
-   # generate_tests.sh
+   set -e
+   export GEMINI_API_KEY="your-key"
 
-   for file in src/*.py; do
-       perspt agent -y -w . "Add unit tests for $file"
-   done
-
-Batch Code Generation
----------------------
-
-Process a list of tasks:
-
-.. code-block:: bash
-
-   #!/bin/bash
-   # batch_tasks.sh
-
-   TASKS=(
-       "Add type hints to utils.py"
-       "Create docstrings for api.py"
-       "Add error handling to db.py"
-   )
-
-   for task in "${TASKS[@]}"; do
-       echo "Processing: $task"
-       perspt agent -y --max-cost 1.0 "$task"
-   done
+   perspt agent --yes --max-cost 2.0 -w /tmp/proj1 "Create a Python CSV parser"
+   perspt agent --yes --max-cost 2.0 -w /tmp/proj2 "Create a Rust CLI calculator"
 
 CI/CD Integration
 -----------------
 
-GitHub Actions example:
+Use headless mode in CI/CD pipelines:
 
 .. code-block:: yaml
 
-   # .github/workflows/code-review.yml
-   name: AI Code Review
-   on: [pull_request]
-   
+   # GitHub Actions example
+   name: Generate Boilerplate
+   on:
+     workflow_dispatch:
+       inputs:
+         task:
+           description: 'Task description'
+           required: true
+
    jobs:
-     review:
+     generate:
        runs-on: ubuntu-latest
        steps:
          - uses: actions/checkout@v4
-         
          - name: Install Perspt
            run: cargo install perspt
-         
-         - name: Run AI Review
+         - name: Run Agent
            env:
-             OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+             GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
            run: |
-             perspt agent -y "Review code changes and suggest improvements"
+             perspt agent --yes --max-cost 5.0 \
+               -w ./generated "${{ inputs.task }}"
+         - name: Commit Results
+           run: |
+             git add generated/
+             git commit -m "Generated: ${{ inputs.task }}"
 
-Programmatic API
-----------------
 
-Use perspt-agent crate directly:
-
-.. code-block:: rust
-
-   use perspt_agent::{SRBNOrchestrator, OrchestratorOptions};
-   use perspt_core::GenAIProvider;
-   use std::sync::Arc;
-
-   #[tokio::main]
-   async fn main() -> anyhow::Result<()> {
-       let provider = Arc::new(GenAIProvider::new()?);
-       
-       let options = OrchestratorOptions {
-           architect_model: Some("gpt-5.2".to_string()),
-           actuator_model: Some("claude-opus-4.5".to_string()),
-           ..Default::default()
-       };
-       
-       let mut orchestrator = SRBNOrchestrator::new(
-           provider,
-           ".".into(),
-           options,
-       ).await?;
-       
-       let result = orchestrator.execute("Add unit tests").await?;
-       println!("Result: {:?}", result);
-       
-       Ok(())
-   }
-
-Ledger Automation
+Post-Run Analysis
 -----------------
 
-Automate rollbacks on failure:
+After an agent run, use the management commands:
 
 .. code-block:: bash
 
-   #!/bin/bash
-   # safe_agent.sh
+   # Session status
+   perspt status
 
-   # Store current state
-   BEFORE=$(perspt ledger --recent | head -1 | cut -d' ' -f1)
+   # LLM logs (requires --log-llm during the run)
+   perspt logs --tui
+   perspt logs --stats
 
-   # Run agent
-   perspt agent -y "$1"
+   # Ledger history
+   perspt ledger --recent
+   perspt ledger --stats
 
-   # Run tests
-   if ! python -m pytest; then
-       echo "Tests failed, rolling back..."
-       perspt ledger --rollback "$BEFORE"
-       exit 1
-   fi
-
-   echo "Success!"
-
-Policy Automation
------------------
-
-Create project-specific rules:
-
-.. code-block:: bash
-
-   # Initialize with rules
-   perspt init --rules
-
-   # Edit .perspt/rules.star
-   cat > .perspt/rules.star << 'EOF'
-   # Allow read operations
-   allow("cat *")
-   allow("ls *")
-
-   # Prompt for writes
-   prompt("rm *", reason="File deletion")
-
-   # Deny dangerous
-   deny("rm -rf *")
-   EOF
-
-See Also
---------
-
-- :doc:`agent-mode` - Agent fundamentals
-- :doc:`../howto/configuration` - Project config
-- :doc:`../api/perspt-agent` - Programmatic API
+   # Resume incomplete sessions
+   perspt resume --last

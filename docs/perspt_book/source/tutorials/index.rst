@@ -8,29 +8,53 @@ Step-by-step guides to master Perspt.
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: 💬 First Chat
+   .. grid-item-card:: First Chat
       :link: first-chat
       :link-type: doc
 
       Your first conversation with an LLM.
 
-   .. grid-item-card:: 🤖 Agent Mode
+   .. grid-item-card:: Agent Mode
       :link: agent-mode
       :link-type: doc
 
-      Autonomous code generation with SRBN.
+      Autonomous multi-file coding with SRBN.
 
-   .. grid-item-card:: 🏠 Local Models
+   .. grid-item-card:: Headless Mode
+      :link: headless-mode
+      :link-type: doc
+
+      Fully autonomous operation for CI/CD and batch workflows.
+
+   .. grid-item-card:: Local Models
       :link: local-models
       :link-type: doc
 
       Use Ollama for offline AI.
 
-   .. grid-item-card:: 🔧 Custom Workflows
+   .. grid-item-card:: Custom Workflows
       :link: custom-workflows
       :link-type: doc
 
-      Build automated pipelines.
+      Scripting, batch processing, and CI/CD integration.
+
+   .. grid-item-card:: Example: Python ETL
+      :link: example-python-etl
+      :link-type: doc
+
+      Build a data pipeline with agent mode.
+
+   .. grid-item-card:: Example: Rust CLI
+      :link: example-rust-cli
+      :link-type: doc
+
+      Build a Rust command-line tool.
+
+   .. grid-item-card:: Example: Scientific Computing
+      :link: example-scientific
+      :link-type: doc
+
+      CFD simulation setup and wind tunnel analysis.
 
 Learning Path
 -------------
@@ -50,10 +74,22 @@ Learning Path
      - Set up Ollama for privacy
    * - 3
      - :doc:`agent-mode`
-     - Master autonomous coding
+     - Master multi-file autonomous coding
    * - 4
+     - :doc:`headless-mode`
+     - Run agent without interactive prompts
+   * - 5
      - :doc:`custom-workflows`
-     - Automate complex tasks
+     - Automate with scripts and CI/CD
+   * - 6
+     - :doc:`example-python-etl`
+     - Build a real Python project from scratch
+   * - 7
+     - :doc:`example-rust-cli`
+     - Build a real Rust project from scratch
+   * - 8
+     - :doc:`example-scientific`
+     - Apply agent mode to scientific computing
 
 .. toctree::
    :maxdepth: 2
@@ -61,5 +97,9 @@ Learning Path
 
    first-chat
    agent-mode
+   headless-mode
    local-models
    custom-workflows
+   example-python-etl
+   example-rust-cli
+   example-scientific

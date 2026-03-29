@@ -1,487 +1,83 @@
-perspt-agent API
+.. _api-perspt-agent:
+
+``perspt-agent``
 ================
 
-The SRBN (Stabilized Recursive Barrier Network) engine for autonomous coding.
+The SRBN orchestrator and all supporting subsystems.
 
-Overview
---------
+Modules
+-------
 
-``perspt-agent`` implements the core autonomous coding capabilities:
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
 
-- **SRBNOrchestrator** - Main control loop for task execution
-- **LspClient** - Language Server Protocol integration
-- **AgentTools** - File and shell operations
-- **PythonTestRunner** - pytest integration with V_log calculation
-- **MerkleLedger** - Change tracking with integrity verification
+   * - Module
+     - Description
+   * - ``orchestrator``
+     - ``SRBNOrchestrator`` — petgraph-based DAG execution with PSP-5 lifecycle
+   * - ``agent``
+     - ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
+   * - ``tools``
+     - ``AgentTools`` — 10+ filesystem and shell tools (read_file, write_file, apply_diff, run_command, search_code, list_files, apply_patch, sed_replace, awk_filter, diff_files)
+   * - ``ledger``
+     - ``MerkleLedger`` — Content-addressed commit tracking over DuckDB
+   * - ``lsp``
+     - ``LspClient`` — JSON-RPC stdio client for rust-analyzer, ty, pyright, etc.
+   * - ``test_runner``
+     - ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
+   * - ``context_retriever``
+     - ``ContextRetriever`` — Workspace search with byte budget limits
 
-SRBN Control Loop
------------------
-
-The orchestrator follows the SRBN algorithm:
-
-.. graphviz::
-   :align: center
-   :caption: SRBN Control Flow
-
-   digraph srbn {
-       rankdir=LR;
-       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11];
-       edge [fontname="Helvetica", fontsize=10];
-       
-       start [shape=point, width=0.2];
-       
-       sheaf [label="Sheafification\n━━━━━━━━━━━━\nTask → TaskPlan", fillcolor="#E8F5E9"];
-       spec [label="Speculation\n━━━━━━━━━━━━\nGenerate Code", fillcolor="#E3F2FD"];
-       verify [label="Verification\n━━━━━━━━━━━━\nCompute V(x)", fillcolor="#FFF3E0"];
-       
-       converge [shape=diamond, label="V(x) > ε?", fillcolor="#FFECB3"];
-       
-       commit [label="Commit\n━━━━━━━━━━━━\nMerkle Ledger", fillcolor="#F3E5F5"];
-       
-       end [shape=doublecircle, width=0.2, label=""];
-       
-       start -> sheaf;
-       sheaf -> spec;
-       spec -> verify;
-       verify -> converge;
-       converge -> spec [label="Yes (retry)", style=dashed, color="#E53935"];
-       converge -> commit [label="No (stable)"];
-       commit -> end;
-   }
-
-SRBNOrchestrator
-----------------
-
-The main orchestrator class:
-
-.. code-block:: rust
-
-   pub struct SRBNOrchestrator {
-       provider: Arc<GenAIProvider>,
-       workspace: PathBuf,
-       lsp_client: Option<LspClient>,
-       test_runner: Option<PythonTestRunner>,
-       ledger: MerkleLedger,
-       tools: AgentTools,
-       
-       // Model configuration
-       architect_model: String,
-       actuator_model: String,
-       verifier_model: String,
-       speculator_model: String,
-       
-       // Energy weights
-       alpha: f32,  // V_syn weight (default: 1.0)
-       beta: f32,   // V_str weight (default: 0.5)
-       gamma: f32,  // V_log weight (default: 2.0)
-       
-       // Convergence threshold
-       epsilon: f32,  // Default: 0.1
-   }
-
-Constructor
-~~~~~~~~~~~
-
-.. code-block:: rust
-
-   impl SRBNOrchestrator {
-       pub async fn new(
-           provider: Arc<GenAIProvider>,
-           workspace: PathBuf,
-           options: OrchestratorOptions,
-       ) -> Result<Self>
-   }
-
-   pub struct OrchestratorOptions {
-       pub architect_model: Option<String>,
-       pub actuator_model: Option<String>,
-       pub verifier_model: Option<String>,
-       pub speculator_model: Option<String>,
-       pub alpha: f32,
-       pub beta: f32,
-       pub gamma: f32,
-       pub epsilon: f32,
-       pub max_retries_compile: usize,  // Default: 3
-       pub max_retries_tool: usize,     // Default: 5
-   }
-
-Main Execution
-~~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   impl SRBNOrchestrator {
-       /// Execute a task through the SRBN loop
-       pub async fn execute(&mut self, task: &str) -> Result<ExecutionResult>
-       
-       /// Execute with approval callback for complexity > K
-       pub async fn execute_with_approval<F>(
-           &mut self,
-           task: &str,
-           complexity_k: usize,
-           approval_fn: F,
-       ) -> Result<ExecutionResult>
-       where
-           F: Fn(&TaskPlan) -> bool
-   }
-
-Energy Computation
-------------------
-
-Lyapunov Energy V(x):
-
-.. math::
-
-   V(x) = α \cdot V_{syn} + β \cdot V_{str} + γ \cdot V_{log}
-
-Components:
-
-- **V_syn** - Syntax energy from LSP diagnostics
-- **V_str** - Structural energy from code analysis
-- **V_log** - Logic energy from test failures
-
-.. code-block:: rust
-
-   pub struct Energy {
-       pub v_syn: f32,
-       pub v_str: f32,
-       pub v_log: f32,
-       pub total: f32,
-   }
-
-   impl Energy {
-       pub fn compute(
-           lsp_diagnostics: &[Diagnostic],
-           test_results: &TestResults,
-           alpha: f32,
-           beta: f32,
-           gamma: f32,
-       ) -> Self
-   }
-
-Types
------
-
-TaskPlan
-~~~~~~~~
-
-.. code-block:: rust
-
-   /// JSON-serializable task decomposition
-   #[derive(Debug, Clone, Serialize, Deserialize)]
-   pub struct TaskPlan {
-       pub nodes: Vec<TaskNode>,
-       pub dependencies: Vec<(usize, usize)>,
-   }
-
-   #[derive(Debug, Clone, Serialize, Deserialize)]
-   pub struct TaskNode {
-       pub id: usize,
-       pub description: String,
-       pub node_type: NodeType,
-       pub status: NodeStatus,
-       pub files_affected: Vec<String>,
-   }
-
-   pub enum NodeType {
-       Create,
-       Modify,
-       Delete,
-       Test,
-       Shell,
-   }
-
-   pub enum NodeStatus {
-       Pending,
-       InProgress,
-       Completed,
-       Failed(String),
-   }
-
-ToolCall
-~~~~~~~~
-
-.. code-block:: rust
-
-   #[derive(Debug, Clone, Serialize, Deserialize)]
-   pub struct ToolCall {
-       pub name: String,
-       pub arguments: serde_json::Value,
-   }
-
-   pub enum ToolResult {
-       Success(String),
-       Error(String),
-   }
-
-LspClient
----------
-
-Language Server Protocol client for real-time diagnostics:
-
-.. code-block:: rust
-
-   pub struct LspClient {
-       process: Child,
-       reader: BufReader<ChildStdout>,
-       writer: BufWriter<ChildStdin>,
-   }
-
-   impl LspClient {
-       /// Start LSP server for Python using `ty`
-       pub async fn new_python(workspace: &Path) -> Result<Self>
-       
-       /// Get diagnostics for a file
-       pub async fn get_diagnostics(&mut self, file: &Path) -> Result<Vec<Diagnostic>>
-       
-       /// Notify file change
-       pub async fn did_change(&mut self, file: &Path, content: &str) -> Result<()>
-   }
-
-   pub struct Diagnostic {
-       pub severity: DiagnosticSeverity,
-       pub message: String,
-       pub range: Range,
-   }
-
-   pub enum DiagnosticSeverity {
-       Error,
-       Warning,
-       Information,
-       Hint,
-   }
-
-PythonTestRunner
-----------------
-
-pytest integration with V_log calculation:
-
-.. code-block:: rust
-
-   pub struct PythonTestRunner {
-       workspace: PathBuf,
-   }
-
-   impl PythonTestRunner {
-       pub fn new(workspace: PathBuf) -> Self
-       
-       /// Run pytest and compute V_log
-       pub async fn run(&self) -> Result<TestResults>
-   }
-
-   pub struct TestResults {
-       pub passed: usize,
-       pub failed: usize,
-       pub errors: usize,
-       pub v_log: f32,
-       pub failures: Vec<TestFailure>,
-   }
-
-   pub struct TestFailure {
-       pub test_name: String,
-       pub message: String,
-       pub criticality: f32,  // Weight for V_log
-   }
-
-AgentTools
+Key Traits
 ----------
 
-Available tools for the agent:
-
-.. list-table::
-   :header-rows: 1
-
-   * - Tool
-     - Description
-   * - ``read_file``
-     - Read file contents
-   * - ``write_file``
-     - Write/create file
-   * - ``search_files``
-     - Search for patterns in files
-   * - ``list_directory``
-     - List directory contents
-   * - ``execute_shell``
-     - Run shell command (sandboxed)
-   * - ``get_diagnostics``
-     - Get LSP diagnostics
-   * - ``run_tests``
-     - Execute pytest
+**Agent** — Per-tier LLM interaction:
 
 .. code-block:: rust
 
-   pub struct AgentTools {
-       workspace: PathBuf,
-       policy_engine: Arc<PolicyEngine>,
-       sandbox: SandboxedCommand,
+   #[async_trait]
+   pub trait Agent: Send + Sync {
+       async fn process(&self, node: &SRBNNode, ctx: &AgentContext)
+           -> Result<AgentMessage>;
+       fn name(&self) -> &str;
+       fn can_handle(&self, node: &SRBNNode) -> bool;
+       fn model(&self) -> &str;
+       fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
    }
 
-   impl AgentTools {
-       pub fn available_tools() -> Vec<ToolDefinition>
-       pub async fn execute(&self, call: &ToolCall) -> Result<ToolResult>
+**TestRunnerTrait** — Plugin-driven verification:
+
+.. code-block:: rust
+
+   #[async_trait]
+   pub trait TestRunnerTrait: Send + Sync {
+       async fn run_syntax_check(&self) -> Result<TestResults>;
+       async fn run_tests(&self) -> Result<TestResults>;
+       async fn run_build_check(&self) -> Result<TestResults>;
+       async fn run_lint(&self) -> Result<TestResults>;
+       async fn run_stage(&self, stage: VerifierStage) -> Result<TestResults>;
+       fn name(&self) -> &str;
    }
 
-MerkleLedger
+Ledger Types
 ------------
 
-Git-style change tracking with Merkle tree:
-
-.. code-block:: rust
-
-   pub struct MerkleLedger {
-       root: Option<Hash>,
-       commits: Vec<Commit>,
-   }
-
-   impl MerkleLedger {
-       pub fn new() -> Self
-       
-       /// Record a commit
-       pub fn commit(&mut self, changes: Vec<Change>) -> Hash
-       
-       /// Get commit by hash
-       pub fn get(&self, hash: &Hash) -> Option<&Commit>
-       
-       /// Rollback to previous commit
-       pub fn rollback(&mut self, hash: &Hash) -> Result<()>
-   }
-
-Retry Policy
-------------
-
-PSP-4 compliant retry limits:
-
 .. list-table::
    :header-rows: 1
+   :widths: 30 70
 
-   * - Error Type
-     - Max Retries
-     - Action on Exhaustion
-   * - Compilation errors
-     - 3
-     - Escalate to user
-   * - Tool failures
-     - 5
-     - Escalate to user
-   * - Review rejections
-     - 3
-     - Escalate to user
-
-Provisional Branches
---------------------
-
-Phase 6 adds provisional branch tracking to isolate speculative child work from
-committed ledger state.
-
-Branch Types
-~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   /// Lifecycle state of a provisional branch
-   pub enum ProvisionalBranchState {
-       Active,   // Speculation in progress
-       Sealed,   // Interface locked, children may proceed
-       Merged,   // Parent committed, work accepted
-       Flushed,  // Parent failed, work discarded
-   }
-
-   /// A provisional branch for speculative node execution
-   pub struct ProvisionalBranch {
-       pub branch_id: String,
-       pub session_id: String,
-       pub parent_node_id: String,
-       pub node_id: String,
-       pub state: ProvisionalBranchState,
-       pub created_at: u64,
-       pub sealed_at: Option<u64>,
-       pub merged_at: Option<u64>,
-       pub flushed_at: Option<u64>,
-   }
-
-   /// Record of a sealed interface digest
-   pub struct InterfaceSealRecord {
-       pub seal_id: String,
-       pub session_id: String,
-       pub node_id: String,
-       pub sealed_paths: Vec<String>,
-       pub seal_hash: [u8; 32],
-       pub created_at: u64,
-   }
-
-Orchestrator Helpers
-~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   impl SRBNOrchestrator {
-       /// Create a provisional branch before speculating on a node
-       fn maybe_create_provisional_branch(&mut self, node_id: &str)
-
-       /// Merge branch work into the global ledger after parent commits
-       fn merge_provisional_branch(&mut self, node_id: &str)
-
-       /// Flush a branch when parent verification fails
-       fn flush_provisional_branch(&mut self, node_id: &str, reason: &str)
-
-       /// Cascade flushes to all descendant branches in the DAG
-       fn flush_descendant_branches(&mut self, parent_id: &str, reason: &str)
-
-       /// Emit interface seals after Interface-class node commits
-       fn emit_interface_seals(&mut self, node_id: &str)
-
-       /// Check if all parent interface seals are available
-       fn check_seal_prerequisites(&self, node_id: &str) -> bool
-
-       /// Inject sealed interface digests into a node's restriction map
-       fn inject_sealed_interfaces(&self, node_id: &str)
-
-       /// Release blocked children when a seal becomes available
-       fn unblock_dependents(&mut self, parent_id: &str)
-   }
-
-Sandbox Utilities
-~~~~~~~~~~~~~~~~~
-
-.. code-block:: rust
-
-   /// Create an isolated sandbox directory for provisional verification
-   pub fn create_sandbox(session_id: &str, branch_id: &str) -> Result<PathBuf>
-
-   /// Remove a single sandbox after branch completion
-   pub fn cleanup_sandbox(sandbox_path: &Path) -> Result<()>
-
-   /// Remove all sandboxes for a session at shutdown
-   pub fn cleanup_session_sandboxes(session_id: &str) -> Result<()>
-
-   /// Copy workspace files into a sandbox for isolated verification
-   pub fn copy_to_sandbox(source: &Path, sandbox: &Path) -> Result<()>
-
-Branch Events
-~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-
-   * - Event
+   * - Type
      - Description
-   * - ``BranchCreated``
-     - A provisional branch was opened for a node
-   * - ``InterfaceSealed``
-     - An Interface-class node's public API was sealed
-   * - ``BranchFlushed``
-     - One or more branches were discarded after parent failure
-   * - ``DependentUnblocked``
-     - A blocked child was released after its parent was sealed
-   * - ``BranchMerged``
-     - A provisional branch was merged into the global ledger
-
-Source Code
------------
-
-- ``crates/perspt-agent/src/orchestrator.rs`` (34KB)
-- ``crates/perspt-agent/src/lsp.rs`` (28KB)
-- ``crates/perspt-agent/src/tools.rs`` (12KB)
-- ``crates/perspt-agent/src/types.rs`` (24KB)
-- ``crates/perspt-agent/src/ledger.rs`` (6KB)
-- ``crates/perspt-agent/src/test_runner.rs`` (15KB)
+   * - ``MerkleCommit``
+     - commit_id, session_id, node_id, merkle_root, parent_hash, energy, stable
+   * - ``NodeCommitPayload``
+     - Snapshot of node state for ledger commit
+   * - ``LedgerStats``
+     - total_sessions, total_commits, db_size_bytes
+   * - ``NodeReviewSummary``
+     - Energy history, escalations, seals, provenance for a single node
+   * - ``SessionReviewSummary``
+     - Aggregate stats: total/completed/failed/escalated, branches, review outcomes
+   * - ``SessionSnapshot``
+     - Full session state for resume: node_details, edges, branches, escalations

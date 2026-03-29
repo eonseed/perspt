@@ -3,32 +3,14 @@
 Contributing
 ============
 
-How to contribute to Perspt.
-
-Getting Started
----------------
-
-1. **Fork** the repository on GitHub
-2. **Clone** your fork:
-
-   .. code-block:: bash
-
-      git clone https://github.com/YOUR_USERNAME/perspt.git
-      cd perspt
-
-3. **Create a branch**:
-
-   .. code-block:: bash
-
-      git checkout -b feat/your-feature
-
 Development Setup
 -----------------
 
 .. code-block:: bash
 
-   # Install Rust (if needed)
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   # Clone
+   git clone https://github.com/eonseed/perspt.git
+   cd perspt
 
    # Build
    cargo build
@@ -36,82 +18,86 @@ Development Setup
    # Run tests
    cargo test
 
-   # Run with debug
-   cargo run -- chat
+   # Lint
+   cargo clippy -- -D warnings
 
-Code Style
-----------
+   # Format check
+   cargo fmt -- --check
 
-- **Rust**: Follow ``rustfmt`` and ``clippy``
-- **Commit messages**: Conventional Commits format
-- **Documentation**: Update docs for API changes
 
-.. code-block:: bash
-
-   # Format code
-   cargo fmt
-
-   # Run linter
-   cargo clippy --all-targets
-
-Commit Messages
----------------
-
-Use `Conventional Commits <https://www.conventionalcommits.org/>`_:
-
-.. code-block:: text
-
-   feat: add new agent tool
-   fix: correct energy calculation
-   docs: update SRBN documentation
-   refactor: simplify orchestrator
-   test: add integration tests
-   chore: update dependencies
-
-Pull Request Process
---------------------
-
-1. Ensure all tests pass:
-
-   .. code-block:: bash
-
-      cargo test --all
-
-2. Update documentation if needed
-3. Create a PR with clear description
-4. Address review feedback
-5. Squash and merge when approved
-
-PSP Process
------------
-
-For significant changes, create a PSP (Perspt Specification Proposal):
-
-1. Get PSP number from maintainers
-2. Create ``docs/psps/source/psp-00000N.rst``
-3. Submit for review
-4. Implement after acceptance
-
-See :doc:`../concepts/psp-process` for details.
-
-Crate Structure
----------------
+Project Structure
+-----------------
 
 .. code-block:: text
 
    crates/
-   ├── perspt-cli/     # CLI entry point
-   ├── perspt-core/    # LLM provider
-   ├── perspt-tui/     # Terminal UI
-   ├── perspt-agent/   # SRBN engine
-   ├── perspt-policy/  # Security
-   └── perspt-sandbox/ # Isolation
+     perspt-core/     # Types, config, LLM, events, plugins
+     perspt-agent/    # Orchestrator, agents, ledger, tools
+     perspt-tui/      # Chat + Agent TUI
+     perspt-cli/      # CLI entry (clap)
+     perspt-store/    # DuckDB persistence
+     perspt-policy/   # Starlark policies
+     perspt-sandbox/  # Command sandboxing
+   tests/             # Integration tests
+   docs/              # Sphinx documentation
 
-When contributing, add to the appropriate crate.
 
-See Also
---------
+Coding Standards
+----------------
 
-- :doc:`architecture` - Crate design
-- :doc:`testing` - Testing guide
-- :doc:`../concepts/psp-process` - PSP process
+1. **Clippy clean** — ``cargo clippy -- -D warnings`` must pass
+2. **Formatted** — ``cargo fmt`` with default settings
+3. **Tests pass** — ``cargo test`` must pass all tests
+4. **No ``println!`` in UI paths** — Use the event system or ``env_logger``
+5. **Error types** — Use ``ErrorType`` enum for categorized errors
+6. **Streaming safety** — Never block the UI select loop; spawn on tokio tasks
+
+Commit Messages
+---------------
+
+- Describe what changed, not the sequence
+- Do NOT include phase numbers or commit sequence numbers
+- Keep the subject line under 72 characters
+
+.. code-block:: text
+
+   # Good
+   Add sheaf validation for cross-language boundaries
+
+   # Bad
+   Commit 3/7: Phase 2 - Add sheaf validation
+
+
+PR Workflow
+-----------
+
+1. Create a feature branch from ``main``
+2. Make changes with passing tests
+3. Run the full check suite:
+
+   .. code-block:: bash
+
+      cargo build && cargo test && cargo clippy -- -D warnings && cargo fmt -- --check
+
+4. Push and open a PR
+5. Address review feedback
+
+
+Documentation
+-------------
+
+Documentation uses Sphinx with reStructuredText:
+
+.. code-block:: bash
+
+   # Build HTML docs
+   cd docs/perspt_book && uv run make html
+
+   # Build PDF docs
+   cd docs/perspt_book && uv run make latexpdf
+
+   # Live preview
+   cd docs/perspt_book && uv run sphinx-autobuild source build/html
+
+See the ``Generate Documentation`` and ``Build Sphinx HTML Documentation`` VS Code
+tasks for convenience.

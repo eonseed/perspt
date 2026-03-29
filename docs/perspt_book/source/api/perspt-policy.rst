@@ -1,202 +1,49 @@
-perspt-policy API
+.. _api-perspt-policy:
+
+``perspt-policy``
 =================
 
-Security policy engine for command approval and sanitization.
+Starlark-based policy engine for agent action governance.
 
-Overview
---------
-
-``perspt-policy`` provides security controls for agent operations:
-
-.. graphviz::
-   :align: center
-   :caption: Policy Engine Flow
-
-   digraph policy {
-       rankdir=LR;
-       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=11];
-       edge [fontname="Helvetica", fontsize=10];
-       
-       cmd [label="Command\nRequest", fillcolor="#E3F2FD"];
-       sanitize [label="Sanitizer\n━━━━━━━━━\nClean Input", fillcolor="#FFF3E0"];
-       engine [label="PolicyEngine\n━━━━━━━━━\nEvaluate Rules", fillcolor="#E8F5E9"];
-       
-       allow [label="✓ Allow", shape=ellipse, fillcolor="#C8E6C9"];
-       deny [label="✗ Deny", shape=ellipse, fillcolor="#FFCDD2"];
-       
-       cmd -> sanitize;
-       sanitize -> engine;
-       engine -> allow [label="pass"];
-       engine -> deny [label="fail"];
-   }
-
-PolicyEngine
-------------
-
-Starlark-based policy evaluation engine.
+Core Types
+----------
 
 .. code-block:: rust
-   :caption: PolicyEngine structure
 
    pub struct PolicyEngine {
-       rules: Vec<Rule>,
-       default_action: Action,
+       policies: Vec<FrozenModule>,
+       policy_dir: PathBuf,
    }
 
-   pub enum Action {
+   pub enum PolicyDecision {
        Allow,
-       Deny,
-       Prompt,
+       Prompt(String),
+       Deny(String),
    }
 
-   pub struct Rule {
-       pub pattern: String,
-       pub action: Action,
-       pub reason: Option<String>,
+   pub struct SanitizeResult {
+       pub parts: Vec<String>,
+       pub warnings: Vec<String>,
+       pub rejected: bool,
+       pub rejection_reason: Option<String>,
    }
 
-   impl PolicyEngine {
-       /// Create engine with default rules
-       pub fn new() -> Self
-
-       /// Load rules from Starlark file
-       pub fn load_rules(path: &Path) -> Result<Self>
-
-       /// Evaluate a command against rules
-       pub fn evaluate(&self, command: &str) -> PolicyDecision
-   }
-
-   pub struct PolicyDecision {
-       pub action: Action,
-       pub matched_rule: Option<Rule>,
-       pub reason: String,
-   }
-
-Default Rules
-~~~~~~~~~~~~~
-
-The engine includes built-in safety rules:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 15 55
-
-   * - Pattern
-     - Action
-     - Reason
-   * - ``rm -rf /``
-     - Deny
-     - Destructive root deletion
-   * - ``rm -rf ~``
-     - Deny
-     - Home directory deletion
-   * - ``chmod 777``
-     - Prompt
-     - Insecure permissions
-   * - ``curl | bash``
-     - Deny
-     - Remote code execution
-   * - ``sudo *``
-     - Prompt
-     - Privilege escalation
-
-Sanitizer
+Functions
 ---------
 
-Command input sanitization and validation.
-
-.. code-block:: rust
-   :caption: Sanitizer structure
-
-   pub struct Sanitizer {
-       // Sanitization rules
-   }
-
-   impl Sanitizer {
-       pub fn new() -> Self
-
-       /// Sanitize a command string
-       pub fn sanitize(&self, command: &str) -> Result<String>
-
-       /// Check for path traversal attempts
-       pub fn check_path_traversal(&self, path: &str) -> bool
-
-       /// Check for command injection
-       pub fn check_injection(&self, input: &str) -> bool
-   }
-
-Security Checks
-~~~~~~~~~~~~~~~
-
 .. list-table::
    :header-rows: 1
-   :widths: 25 75
+   :widths: 40 60
 
-   * - Check
+   * - Function
      - Description
-   * - Path Traversal
-     - Detects ``../`` patterns escaping workspace
-   * - Command Injection
-     - Detects ``;``, ``|``, ``&&``, ``$()`` in untrusted input
-   * - Null Bytes
-     - Removes null bytes that can truncate strings
-   * - Shell Metacharacters
-     - Escapes or rejects dangerous characters
-
-Custom Rules
-------------
-
-Create custom Starlark rules in ``.perspt/rules.star``:
-
-.. code-block:: python
-   :caption: Example rules.star
-
-   # Allow read operations
-   allow("cat *")
-   allow("head *")
-   allow("tail *")
-
-   # Prompt for writes
-   prompt("rm *", reason="File deletion")
-   prompt("mv *", reason="File move/rename")
-
-   # Deny dangerous operations
-   deny("rm -rf *", reason="Recursive force delete")
-   deny("chmod -R *", reason="Recursive permission change")
-
-Usage Example
--------------
-
-.. code-block:: rust
-   :caption: Using PolicyEngine
-
-   use perspt_policy::{PolicyEngine, Sanitizer, Action};
-
-   fn check_command(cmd: &str) -> Result<()> {
-       let sanitizer = Sanitizer::new();
-       let engine = PolicyEngine::new();
-
-       // Sanitize input
-       let clean_cmd = sanitizer.sanitize(cmd)?;
-
-       // Evaluate policy
-       let decision = engine.evaluate(&clean_cmd);
-
-       match decision.action {
-           Action::Allow => execute(clean_cmd),
-           Action::Prompt => {
-               if user_approves(&decision.reason) {
-                   execute(clean_cmd)
-               }
-           }
-           Action::Deny => {
-               eprintln!("Denied: {}", decision.reason);
-           }
-       }
-   }
-
-Source Code
------------
-
-:file:`crates/perspt-policy/src/engine.rs`: Policy engine (7KB)
-:file:`crates/perspt-policy/src/sanitize.rs`: Sanitizer (5KB)
+   * - ``PolicyEngine::new()``
+     - Create engine instance
+   * - ``PolicyEngine::load_policies()``
+     - Load all .star files from policy directory
+   * - ``sanitize_command(cmd)``
+     - Parse, validate, and filter a shell command
+   * - ``validate_workspace_bound(cmd, dir)``
+     - Ensure command stays within working directory
+   * - ``is_safe_for_auto_exec(cmd)``
+     - Whitelist check for auto-approval in balanced mode

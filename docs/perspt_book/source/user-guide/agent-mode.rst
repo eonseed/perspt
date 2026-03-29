@@ -3,118 +3,114 @@
 Agent Mode
 ==========
 
-Autonomous code generation with SRBN.
+The agent command activates the SRBN (Self-Regulating Bayesian Network) engine
+for autonomous multi-file code generation.
 
-What is Agent Mode?
--------------------
-
-Agent Mode uses the **Stabilized Recursive Barrier Network (SRBN)** to autonomously:
-
-1. Decompose tasks into subtasks
-2. Generate code for each subtask
-3. Verify with LSP and tests
-4. Commit stable changes to the Merkle ledger
-
-Quick Start
------------
+Launching Agent Mode
+--------------------
 
 .. code-block:: bash
 
-   perspt agent "Create a Python calculator"
+   perspt agent -w <DIR> "<task>"
 
-How It Works
+   # Examples
+   perspt agent -w ./my-project "Create a Python REST API"
+   perspt agent -y -w /tmp/demo "Build a Rust CLI tool"
+
+Core Workflow
+-------------
+
+The SRBN agent follows the PSP-5 lifecycle:
+
+1. **Detection** — Identify workspace state (greenfield/brownfield) and select
+   language plugins
+2. **Planning** — Architect model decomposes the task into a DAG of nodes with
+   assigned classes (Interface, Implementation, Integration)
+3. **Execution** — For each node in topological order:
+
+   a. Actuator generates a multi-artifact bundle (writes, diffs, commands)
+   b. Bundle is applied transactionally
+   c. Verification computes Lyapunov energy: V(x) = α·V_syn + β·V_str + γ·V_log + V_boot + V_sheaf
+   d. If V(x) < ε (default 0.10), node is stable; otherwise retry
+
+4. **Sheaf Validation** — Cross-node contract verification
+5. **Review** — In interactive mode: grouped-diff modal with approve/reject/correct
+6. **Commit** — Stable nodes are committed to the Merkle ledger
+
+Node Classes
 ------------
 
-.. graphviz::
-   :align: center
-
-   digraph srbn {
-       rankdir=LR;
-       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-       
-       task [label="Task", shape=ellipse, fillcolor="#E3F2FD"];
-       sheaf [label="Sheafify", fillcolor="#E8F5E9"];
-       spec [label="Speculate", fillcolor="#FFF3E0"];
-       verify [label="Verify", fillcolor="#F3E5F5"];
-       commit [label="Commit", fillcolor="#C8E6C9"];
-       
-       task -> sheaf -> spec -> verify;
-       verify -> spec [label="retry", style=dashed];
-       verify -> commit [label="stable"];
-   }
-
-Model Tiers
------------
+Each DAG node belongs to a class that governs scheduling and verification:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
+   :widths: 25 75
 
-   * - Tier
-     - Purpose
-     - Example
-   * - Architect
-     - Task decomposition
-     - ``--architect-model gpt-5.2``
-   * - Actuator
-     - Code generation
-     - ``--actuator-model claude-opus-4.5``
-   * - Verifier
-     - Stability check
-     - ``--verifier-model gemini-3-pro``
-   * - Speculator
-     - Fast lookahead
-     - ``--speculator-model gemini-3-flash``
+   * - Class
+     - Description
+   * - **Interface**
+     - Public API definitions, type signatures, traits. Scheduled first.
+   * - **Implementation**
+     - Internal logic. May depend on Interface nodes.
+   * - **Integration**
+     - Wiring, main entry, config assembly. Scheduled last.
 
-Common Commands
----------------
+Artifact Bundle Protocol
+------------------------
 
-.. code-block:: bash
+Each node produces a bundle with three artifact types:
 
-   # Basic
-   perspt agent "Create module"
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
 
-   # With workspace
-   perspt agent -w ./project "Add tests"
+   * - Type
+     - Description
+   * - ``write``
+     - Create a new file with full content
+   * - ``diff``
+     - Modify an existing file (unified diff format)
+   * - ``command``
+     - Execute a shell command (e.g., ``uv add pandas``)
 
-   # Auto-approve
-   perspt agent -y "Refactor"
+Ownership closure ensures no two nodes own the same file.
 
-   # Production-grade
-   perspt agent \
-     --architect-model gpt-5.2 \
-     --stability-threshold 0.05 \
-     --max-cost 10.0 \
-     "Implement auth"
+Review Modal (Interactive)
+--------------------------
 
-Review Process
---------------
-
-When changes need approval:
+When running without ``--yes``, the review modal presents:
 
 .. code-block:: text
 
-   ╭─────────────────────────────╮
-   │  Review Changes             │
-   ╞═════════════════════════════╡
-   │  + main.py (new)           │
-   │  + tests/test_main.py (new)│
-   │                             │
-   │  [y] Approve  [n] Reject   │
-   ╰─────────────────────────────╯
+   Review Node 3: Implement data transformer
+   ──────────────────────────────────────────
+   Bundle: 1 created, 1 modified
+   + src/transformer.py    [create] (45 lines)
+   ~ src/pipeline.py       [diff]   (+3, -1)
 
-Session Control
----------------
+   Verification: V_syn OK | V_str OK | V_log OK | V_boot OK
+   Energy: V(x) = 0.00
+
+   [y] Approve  [n] Reject  [c] Correct  [e] Edit  [d] Diff
+
+- **y** — Approve and commit to ledger
+- **n** — Reject and regenerate
+- **c** — Send feedback for correction
+- **e** — Open files in your editor
+- **d** — Toggle full diff view
+
+Session Management
+------------------
 
 .. code-block:: bash
 
-   perspt status  # Check progress
-   perspt abort   # Cancel
-   perspt resume  # Resume
+   # Check session state (per-node counts, energy, escalations)
+   perspt status
 
-See Also
---------
+   # Abort the current session
+   perspt abort
 
-- :doc:`../tutorials/agent-mode` - Full tutorial
-- :doc:`../concepts/srbn-architecture` - Technical details
-- :doc:`../howto/agent-options` - CLI reference
+   # Resume with trust context (shows escalation count, energy, retries)
+   perspt resume --last
+
+See :doc:`advanced-features` for model tiers, energy tuning, and cost controls.

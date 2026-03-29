@@ -3,14 +3,21 @@
 SRBN Architecture
 =================
 
-The **Stabilized Recursive Barrier Network (SRBN)** is Perspt's core innovation for 
-autonomous coding with mathematically guaranteed stability.
+The **Stabilized Recursive Barrier Network (SRBN)** is Perspt's core innovation for
+autonomous coding with mathematically guaranteed stability. SRBN is based on the
+paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM
+Reliability"* by **Vikrant R. and Ronak R.** (pre-publication), which reformulates
+LLM agency as a sheaf-theoretic control problem and proves Input-to-State Stability
+(ISS) guarantees under persistent noise. The implementation in Perspt is defined by
+**PSP-5** (Perspt Specification Proposal 5).
 
 Overview
 --------
 
-SRBN ensures that AI-generated code converges to a stable state before being committed,
-using concepts from control theory (Lyapunov stability) and software verification (LSP, tests).
+SRBN executes coding tasks as a directed acyclic graph (DAG) of nodes. Each node
+owns a set of output files (ownership closure), generates a multi-artifact bundle,
+and must pass multi-stage verification before its energy falls below the convergence
+threshold. Only then is the node committed to the Merkle ledger.
 
 .. graphviz::
    :align: center
@@ -20,8 +27,8 @@ using concepts from control theory (Lyapunov stability) and software verificatio
        rankdir=TB;
        compound=true;
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-       
-       subgraph cluster_models {
+
+       subgraph cluster_tiers {
            label="Model Tiers";
            style=dashed;
            arch [label="Architect\n(Deep Reasoning)", fillcolor="#E8F5E9"];
@@ -29,36 +36,42 @@ using concepts from control theory (Lyapunov stability) and software verificatio
            ver [label="Verifier\n(Stability Check)", fillcolor="#F3E5F5"];
            spec [label="Speculator\n(Fast Lookahead)", fillcolor="#FFF3E0"];
        }
-       
+
        subgraph cluster_barriers {
-           label="Stability Barriers";
+           label="Verification Barriers";
            style=dashed;
-           lsp [label="LSP\n(V_syn)", fillcolor="#FFECB3"];
-           tests [label="Tests\n(V_log)", fillcolor="#FFECB3"];
-           struct [label="Structure\n(V_str)", fillcolor="#FFECB3"];
+           lsp [label="V_syn\n(LSP)", fillcolor="#FFECB3"];
+           tests [label="V_log\n(Tests)", fillcolor="#FFECB3"];
+           boot [label="V_boot\n(Build)", fillcolor="#FFECB3"];
+           struct [label="V_str\n(Contracts)", fillcolor="#FFECB3"];
+           sheaf [label="V_sheaf\n(Cross-Node)", fillcolor="#FFECB3"];
        }
-       
+
        subgraph cluster_output {
            label="Output";
            style=dashed;
-           ledger [label="Merkle Ledger", fillcolor="#C8E6C9"];
+           ledger [label="Merkle Ledger\n(DuckDB)", fillcolor="#C8E6C9"];
        }
-       
+
        arch -> act;
        act -> lsp;
        act -> tests;
+       act -> boot;
        act -> struct;
        lsp -> ver;
        tests -> ver;
+       boot -> ver;
        struct -> ver;
        ver -> act [label="retry", style=dashed];
-       ver -> ledger [label="stable"];
+       ver -> sheaf [label="stable"];
+       sheaf -> ledger [label="commit"];
    }
+
 
 The Control Loop
 ----------------
 
-The SRBN control loop executes 5 phases for each task:
+The SRBN control loop (PSP-5) executes seven phases for each task:
 
 .. list-table::
    :header-rows: 1
@@ -68,20 +81,40 @@ The SRBN control loop executes 5 phases for each task:
      - Phase
      - Description
    * - 1
-     - **Sheafification**
-     - Architect model decomposes task into a JSON ``TaskPlan`` with dependency graph
+     - **Detection**
+     - Inspect the repository. Select language plugins (Rust, Python, JS, Go) based on
+       existing files or the task description. Each plugin provides an LSP server, test
+       runner, and init command.
    * - 2
-     - **Speculation**
-     - Actuator model generates code for each node with tool calls (write_file, etc.)
+     - **Planning**
+     - Architect model decomposes the task into a ``TaskPlan`` DAG. Each node has an ID,
+       goal, context files, output files, dependencies, task type, and node class
+       (Interface, Implementation, or Integration). The **ownership closure** rule
+       ensures each output file appears in exactly one node.
    * - 3
-     - **Verification**
-     - Compute Lyapunov Energy V(x) from LSP diagnostics, structure, and tests
+     - **Generation**
+     - Actuator model generates a multi-artifact bundle per node. The bundle is a JSON
+       structure with ``write``, ``diff``, and ``command`` operations. All files are
+       written transactionally.
    * - 4
-     - **Convergence**
-     - If V(x) > ε, retry with error feedback; otherwise proceed
+     - **Verification**
+     - Compute five energy components: V_syn (LSP diagnostics), V_str (contract
+       violations), V_log (test failures), V_boot (init/build exit codes), and V_sheaf
+       (cross-node consistency). Total energy is V(x).
    * - 5
+     - **Convergence**
+     - If V(x) > epsilon, generate a grounded correction prompt containing the specific
+       error messages and retry. Bounded by ``RetryPolicy`` per error type.
+   * - 6
+     - **Sheaf Validation**
+     - After all nodes converge individually, run cross-node consistency checks.
+       Validates import paths, shared type signatures, and interface-seal digests.
+   * - 7
      - **Commit**
-     - Record changes in Merkle Ledger with cryptographic integrity
+     - Record stable node state in the Merkle ledger with cryptographic hashing.
+       Emit ``NodeCompleted`` event. When all nodes are committed, the session is
+       complete.
+
 
 Lyapunov Energy
 ---------------
@@ -91,9 +124,11 @@ The stability of generated code is measured using a Lyapunov energy function:
 .. admonition:: Energy Formula
    :class: important
 
-   **V(x) = α·V_syn + β·V_str + γ·V_log**
+   .. math::
 
-   Default weights: α = 1.0, β = 0.5, γ = 2.0
+      V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
+
+   Default weights: alpha = 1.0, beta = 0.5, gamma = 2.0
 
 Components
 ~~~~~~~~~~
@@ -107,13 +142,24 @@ Components
      - Description
    * - **V_syn**
      - LSP Diagnostics
-     - Count of errors and warnings from ``ty`` (Python type checker)
+     - Count of errors and warnings from the language server (``rust-analyzer``, ``ty``,
+       ``pyright``, ``typescript-language-server``, ``gopls``).
    * - **V_str**
-     - Structural Analysis
-     - Code complexity, dead code, pattern violations
+     - Contract Verification
+     - Violations of ``BehavioralContract`` constraints: interface signatures, invariants,
+       and forbidden patterns.
    * - **V_log**
      - Test Failures
-     - Weighted sum of pytest failures (critical tests have higher weight)
+     - Weighted sum of test failures. Critical tests carry weight 10, high-priority 3,
+       low-priority 1. Computed via pytest or ``cargo test``.
+   * - **V_boot**
+     - Bootstrap Commands
+     - Non-zero exit codes from init commands (``uv init --lib``, ``cargo init``),
+       build commands, and dependency installs.
+   * - **V_sheaf**
+     - Cross-Node Consistency
+     - Failures from sheaf validators: import-path resolution, shared-type agreement,
+       and interface-seal digest mismatches.
 
 Convergence Criterion
 ~~~~~~~~~~~~~~~~~~~~~
@@ -124,12 +170,47 @@ The system is considered stable when:
 
    V(x) \leq \varepsilon
 
-Default: ε = 0.1
+Default: epsilon = 0.10. Configurable via ``--stability-threshold``.
+
+
+Node Classes
+------------
+
+PSP-5 introduces three node classes that govern execution order and verification:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Class
+     - Description
+   * - **Interface**
+     - Define exported signatures, schemas, and seals. Must be committed before
+       dependent Implementation nodes can proceed. Produces an interface-seal digest.
+   * - **Implementation**
+     - Operate on owned files using sealed interfaces from parent nodes. The bulk of
+       code generation happens here.
+   * - **Integration**
+     - Reconcile cross-owner boundaries after all dependent nodes converge. Used for
+       multi-language projects or cross-module wiring.
+
+
+Ownership Closure
+-----------------
+
+The **ownership closure** rule is a fundamental invariant of PSP-5:
+
+   *Each output file appears in exactly one node's* ``output_files`` *list.*
+
+This prevents conflicting writes. When the Architect generates a task plan, the
+orchestrator validates ownership closure before execution begins. If two nodes
+claim the same file, the plan is rejected and re-generated.
+
 
 Model Tiers
 -----------
 
-SRBN uses multiple specialized models:
+SRBN uses four specialized model tiers. Each tier can be configured independently:
 
 .. list-table::
    :header-rows: 1
@@ -137,35 +218,38 @@ SRBN uses multiple specialized models:
 
    * - Tier
      - Purpose
-     - Recommended Model
+     - Default Model
    * - **Architect**
-     - Deep reasoning, task decomposition
-     - GPT-5.2, Claude Opus 4.5
+     - Deep reasoning, task decomposition, DAG planning
+     - ``gemini-pro-latest``
    * - **Actuator**
-     - Code generation, tool calls
-     - Claude Opus 4.5, GPT-5.2
+     - Code generation, artifact bundle emission
+     - ``gemini-3.1-flash-lite-preview``
    * - **Verifier**
-     - Stability analysis
-     - Gemini 3 Pro
+     - LSP diagnostics, contract checking, energy computation
+     - ``gemini-pro-latest``
    * - **Speculator**
-     - Fast lookahead, branch prediction
-     - Gemini 3 Flash, Groq Llama
+     - Fast lookahead, provisional branch prediction
+     - ``gemini-3.1-flash-lite-preview``
 
-Configure model tiers via CLI:
+Configure per-tier models via CLI:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gpt-5.2 \
-     --actuator-model claude-opus-4.5 \
-     --verifier-model gemini-3-pro \
-     --speculator-model gemini-3-flash \
+     --architect-model gemini-pro-latest \
+     --actuator-model gemini-3.1-flash-lite-preview \
+     --verifier-model gemini-pro-latest \
+     --speculator-model gemini-3.1-flash-lite-preview \
      "Build a REST API"
+
+Each tier also supports a fallback model (``--architect-fallback-model``, etc.).
+
 
 Retry Policy
 ------------
 
-SRBN implements bounded retries per PSP-0004:
+SRBN implements bounded retries per error type:
 
 .. list-table::
    :header-rows: 1
@@ -176,83 +260,141 @@ SRBN implements bounded retries per PSP-0004:
      - Escalation
    * - Compilation errors (LSP)
      - 3
-     - Escalate to user with context
+     - Escalate to user with diagnostic context
    * - Tool failures (file ops)
      - 5
      - Escalate with error logs
-   * - Review rejections
+   * - Review rejections (user)
      - 3
      - Escalate with diff summary
 
-TaskPlan Structure
-------------------
+When retries are exhausted, the node transitions to **Escalated** state. In headless
+mode (``--yes``), escalations are logged and the node is marked **Failed**.
 
-The Architect generates a JSON TaskPlan:
+
+Artifact Bundle Protocol
+------------------------
+
+The Actuator emits a JSON artifact bundle for each node:
 
 .. code-block:: json
 
    {
-     "nodes": [
+     "artifacts": [
        {
-         "id": 1,
-         "description": "Create Calculator class",
-         "type": "create",
-         "files": ["calculator.py"],
-         "dependencies": []
+         "path": "src/lib.rs",
+         "operation": "write",
+         "content": "pub fn add(a: i32, b: i32) -> i32 { a + b }"
        },
        {
-         "id": 2,
-         "description": "Add arithmetic methods",
-         "type": "modify",
-         "files": ["calculator.py"],
-         "dependencies": [1]
-       },
-       {
-         "id": 3,
-         "description": "Write unit tests",
-         "type": "create",
-         "files": ["test_calculator.py"],
-         "dependencies": [2]
+         "path": "src/main.rs",
+         "operation": "diff",
+         "patch": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,3 @@..."
        }
+     ],
+     "commands": [
+       "cargo build"
      ]
    }
+
+Operations:
+
+- **write** — Create or overwrite a file with the given content
+- **diff** — Apply a unified diff patch to an existing file
+- **command** — Execute a shell command (validated by policy engine)
+
+All artifacts are applied transactionally. If any operation fails, the entire
+bundle is rolled back.
+
+
+Plugin-Driven Verification
+--------------------------
+
+Language plugins determine the verification toolchain:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 20 20 20 25
+
+   * - Plugin
+     - LSP Server
+     - Test Runner
+     - Init Command
+     - Required Binaries
+   * - **Rust**
+     - ``rust-analyzer``
+     - ``cargo test``
+     - ``cargo init``
+     - ``cargo``, ``rustc``
+   * - **Python**
+     - ``ty`` or ``pyright``
+     - ``pytest``
+     - ``uv init --lib``
+     - ``uv``, ``python3``
+   * - **JavaScript**
+     - ``typescript-language-server``
+     - ``npm test``
+     - ``npm init -y``
+     - ``node``, ``npm``
+   * - **Go**
+     - ``gopls``
+     - ``go test``
+     - ``go mod init``
+     - ``go``
+
+The plugin is selected automatically during the Detection phase based on existing
+project files or the task description. Multi-language projects activate multiple
+plugins simultaneously.
+
+
+Degraded Verification
+---------------------
+
+When a verification tool is unavailable (e.g., ``ty`` not installed), the SRBN
+engine falls back to degraded mode:
+
+- **Sensor fallback**: If the primary LSP server is not found, try a secondary
+  (e.g., ``pyright`` instead of ``ty``). Emit a ``SensorFallback`` event.
+- **Degraded stages**: If no LSP server is available at all, V_syn is set to 0.0
+  and the stage is marked degraded. Energy convergence proceeds without that
+  component.
+- **Stability blocked**: If too many stages degrade, the node cannot converge and
+  is escalated.
+
 
 Merkle Ledger
 -------------
 
-All changes are recorded in a Merkle tree for:
+All changes are recorded in a DuckDB-backed Merkle ledger:
 
-- **Integrity** — Cryptographic verification of change history
-- **Rollback** — Revert to any previous state
-- **Audit** — Complete trail of AI-generated changes
+- **Integrity** — Each commit has a cryptographic hash chaining to its parent
+- **Rollback** — Revert to any previous state via ``perspt ledger --rollback``
+- **Resume** — ``perspt resume`` rehydrates session state including energy history,
+  retry counts, and escalation reports
+- **Audit** — Complete trail of AI-generated changes with energy breakdowns
 
 .. code-block:: bash
 
-   # View recent commits
-   perspt ledger --recent
-
-   # Rollback to commit
+   perspt ledger --recent     # View recent commits
    perspt ledger --rollback abc123
+   perspt ledger --stats      # Session statistics
 
-   # Statistics
-   perspt ledger --stats
 
 Provisional Branches
 --------------------
 
 When SRBN speculates on child nodes before the parent is fully committed, it uses
-**provisional branches** to isolate speculative work from the committed ledger state.
+**provisional branches** to isolate speculative work.
 
 .. admonition:: Key Invariant
    :class: important
 
    Provisional work is **never** merged into the global ledger until the parent node
-   meets the stability threshold. If the parent fails, all dependent branches are flushed.
+   meets the stability threshold. If the parent fails, all dependent branches are
+   flushed.
 
 Branch Lifecycle
 ~~~~~~~~~~~~~~~~
-
-Each provisional branch tracks state through four stages:
 
 .. list-table::
    :header-rows: 1
@@ -261,50 +403,33 @@ Each provisional branch tracks state through four stages:
    * - State
      - Description
    * - **Active**
-     - Branch is open, speculative work is in progress
+     - Branch is open, speculative work in progress
    * - **Sealed**
      - Parent interface is sealed; children may proceed
    * - **Merged**
-     - Parent committed; branch work is merged into the global ledger
+     - Parent committed; branch work merged into global ledger
    * - **Flushed**
-     - Parent failed; branch work is discarded and may be replayed later
+     - Parent failed; branch work discarded (may be replayed later)
 
-Interface Seal Prerequisites
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Interface Seals
+~~~~~~~~~~~~~~~
 
-Downstream speculation requires that the parent node's public interface be sealed and
-hashed. This prevents children from coding against unstable signatures:
+Interface nodes produce a structural digest (SHA-256 hash) of their public API
+after reaching the Commit phase. This seal is injected into child node restriction
+maps, ensuring children code against stable signatures.
 
 1. Parent node reaches **Commit** phase
-2. If the node is an **Interface** class, its structural digest is sealed
+2. If the node is an **Interface** class, its exported signatures are hashed
 3. ``InterfaceSealed`` event is emitted with sealed paths and hash
-4. Blocked dependents are released and may begin speculation
-5. Sealed digests are injected into child restriction maps for compilation
+4. Blocked dependents are released
+5. Seal digests are available to child verifiers for contract checking
 
 Flush Cascade
 ~~~~~~~~~~~~~
 
-When a parent node's verification fails:
+When a parent node fails verification:
 
 1. The parent's provisional branch is flushed
 2. ``collect_descendants`` walks the DAG to find all transitive children
 3. Each descendant branch is flushed recursively
-4. ``BranchFlushed`` event is emitted with the reason and affected branch IDs
-5. Surviving branch state may be replayed after the parent is repaired
-
-Sandboxed Verification
-~~~~~~~~~~~~~~~~~~~~~~
-
-Provisional branches execute verification against isolated sandbox workspaces:
-
-- ``create_sandbox()`` creates a temporary directory for the branch
-- ``copy_to_sandbox()`` copies workspace files into the sandbox
-- ``cleanup_sandbox()`` removes a single sandbox after branch completion
-- ``cleanup_session_sandboxes()`` removes all session sandboxes at shutdown
-
-See Also
---------
-
-- :doc:`psp-process` - The PSP-0004 specification
-- :doc:`../api/perspt-agent` - API documentation
-- :doc:`../tutorials/agent-mode` - Tutorial walkthrough
+4. ``BranchFlushed`` event is emitted with the reason and affected IDs
