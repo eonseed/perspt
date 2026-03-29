@@ -23,7 +23,7 @@ diagnostics and test runners.
 Prerequisites
 -------------
 
-- Perspt v0.5.4+
+- Perspt v0.5.5+
 - An API key for a capable model
 - For Python projects: ``uv`` and ``python3`` installed
 - For Rust projects: ``cargo`` and ``rustc`` installed
