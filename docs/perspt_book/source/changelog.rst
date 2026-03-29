@@ -3,6 +3,40 @@
 Changelog
 =========
 
+Version 0.5.5 — "ikigai 生き甲斐"
+-----------------------------------
+
+*PSP-5 and SRBN Experimental Support Release*
+
+   "A reason for being — the happiness of always being busy with what you love."
+
+**Cross-Platform Fixes:**
+
+- **Windows sandbox path normalization** — ``list_sandbox_files`` now returns
+  forward-slash-separated relative paths on all platforms
+- **Windows workspace-bound validation** — ``validate_workspace_bound`` correctly
+  detects absolute paths with Windows drive prefixes (``C:\...``) and normalizes
+  backslash path separators before POSIX shell tokenization
+- **Clippy and fmt CI compliance** — Resolved ``items_after_test_module`` and
+  ``useless_vec`` warnings that were failing CI on all platforms
+
+**Build and CI Improvements:**
+
+- **Removed accidental eval workspace member** — ``.perspt-eval/rust_cli`` removed
+  from workspace members; ``.perspt-eval/`` added to ``.gitignore``
+- **Stabilized cargo doc** — Added ``doc = false`` to CLI bin target to prevent
+  output collision with the ``perspt`` library crate
+- **Removed deprecated atty dependency** — Replaced with ``std::io::IsTerminal``
+  for TTY detection
+- **Lockfile refresh** — Cleared hard ``cargo audit`` vulnerability failures via
+  dependency updates
+
+**Documentation:**
+
+- Updated workspace coding instructions to match current multi-crate architecture
+- Refreshed all version references across the Perspt Book and Sphinx configuration
+- Changelog updated for 0.5.5 release
+
 Version 0.5.4
 -------------
 

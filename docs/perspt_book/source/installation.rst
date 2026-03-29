@@ -40,7 +40,7 @@ Verify Installation
 .. code-block:: bash
 
    perspt --version
-   # perspt 0.5.4
+   # perspt 0.5.5
 
    perspt --help
 
