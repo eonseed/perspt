@@ -1,7 +1,7 @@
 PSP: 000005
 Title: SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Draft
+Status: Discussion
 Type: Enhancement
 Created: 2026-03-23
 Discussion-To: https://github.com/eonseed/perspt/pull/95
@@ -643,17 +643,21 @@ This PSP permits implementation of the following configuration capabilities:
 
 **Implementation Phases:**
 
+All phases described below have been implemented. See the Reference Implementation section for per-phase implementation details.
+
 * **Phase 1:** Project-first execution model, deterministic planner fallback, and capability-based plugin contracts
 * **Phase 2:** Ownership manifests, node classes, and bounded multi-artifact validation
 * **Phase 3:** Stratified restriction maps, structural digests, and context provenance
 * **Phase 4:** Provider-neutral output contracts, repo-native verifier attribution, and degraded-sensor handling
 * **Phase 5:** Escalation semantics, local graph rewrite, and sheaf validator targeting
 * **Phase 6:** Provisional branch ledger, interface-sealed speculation, and branch flush behavior
+* **Phase 6a:** Workspace classification, tool prerequisites, and model fallback
 * **Phase 7:** Review UX parity and provenance-rich status surfaces
 * **Phase 8:** Ledger-backed node commits, sheaf validation, and resume correctness
 * **Phase 9:** Universal verification pipeline and bundle command execution
+* **Phase 10:** uv-first Python developer experience
 
-**Acceptance Criteria:**
+.. rubric:: Acceptance Criteria
 
 * A request for a new application with modules and tests results in a multi-file plan and a multi-file applied project by default.
 * Rust repositories use Rust-native verification rather than Python-only checks.
@@ -731,9 +735,9 @@ Backwards Compatibility
 
 **Migration Strategy:**
 
-* The project-first behavior SHOULD become the default once multi-artifact execution is implemented.
-* Solo Mode SHOULD be retained behind explicit intent detection or an explicit CLI flag.
-* Existing sessions are not guaranteed to become resumable under the new semantics until Phase 8 persistence work is complete.
+* Project-first behavior is the default now that multi-artifact execution is implemented.
+* Solo Mode is retained behind explicit intent detection or an explicit CLI flag.
+* Session resume operates under the new ledger-backed semantics introduced in Phase 8.
 
 ========================
 Reference Implementation
@@ -741,7 +745,7 @@ Reference Implementation
 
 **Implementation Notes:**
 
-The expected implementation work primarily affects:
+The implementation work primarily affects:
 
 * ``crates/perspt-agent/src/orchestrator.rs``
 * ``crates/perspt-agent/src/agent.rs``
@@ -839,7 +843,7 @@ The expected implementation work primarily affects:
 
 **File-by-File Implementation Appendix:**
 
-**Phase 1: Project-first execution model and deterministic planner fallback**
+**Phase 1: Project-first execution model and deterministic planner fallback** *(implemented)*
 
 * ``crates/perspt-agent/src/orchestrator.rs``: replace Solo Mode heuristics with explicit single-file intent detection, add deterministic fallback graph generation, and route default execution through project planning.
 * ``crates/perspt-agent/src/agent.rs``: revise planner and actuator prompts to describe node contracts, expected outputs, and multi-file scope.
@@ -848,14 +852,14 @@ The expected implementation work primarily affects:
 * ``crates/perspt-agent/src/context_retriever.rs``: add graph-aware context assembly primitives, ownership manifests, and structural digest retrieval instead of raw file-list expansion.
 * ``crates/perspt-core/src/llm_provider.rs`` and ``crates/perspt-cli/src/commands/agent.rs``: support explicit per-tier model selection and fallback configuration independent of provider.
 
-**Phase 2: Ownership manifests, node classes, and bounded multi-artifact validation**
+**Phase 2: Ownership manifests, node classes, and bounded multi-artifact validation** *(implemented)*
 
 * ``crates/perspt-agent/src/agent.rs``: replace single-target output instructions with structured bundle instructions covering multiple file operations.
 * ``crates/perspt-agent/src/orchestrator.rs``: classify node types, validate ownership closure before mutation, and apply bounded bundles atomically.
 * ``crates/perspt-agent/src/tools.rs``: enforce workspace-bounded path resolution and transactional file operation helpers.
 * ``crates/perspt-core/src/types.rs``: define artifact bundle, ownership-manifest, interface-seal, and node-class types shared across orchestration, storage, and UI.
 
-**Phase 3: Stratified restriction maps, structural digests, and context provenance**
+**Phase 3: Stratified restriction maps, structural digests, and context provenance** *(implemented)*
 
 * ``crates/perspt-agent/src/context_retriever.rs``: build reproducible node context packages from structural artifacts, semantic summaries, target files, and verifier state.
 * ``crates/perspt-agent/src/orchestrator.rs``: persist and replay context package hashes, enforce context budgets, and block execution when required structural artifacts are missing.
@@ -873,9 +877,9 @@ The expected implementation work primarily affects:
 * ``crates/perspt-core/src/events.rs``: ``SensorFallback`` and ``DegradedVerification`` event variants.
 * ``crates/perspt-agent/src/tools.rs`` and ``crates/perspt-policy/src/sanitize.rs``: ``validate_workspace_bound`` for path-escape detection; ``run_command`` and ``exec_command`` enforce sanitisation before execution.
 * ``crates/perspt-cli/src/commands/agent.rs``: startup detects active plugins via ``PluginRegistry::detect_all``, reports verifier stages and LSP status, and uses detected plugins for ``start_lsp_for_plugins``.
-* Test coverage: 123 tests across the workspace covering normalization, plugin capabilities, verifier runners, degraded-state propagation, policy rejection, and orchestrator routing.
+* Test coverage: normalization, plugin capabilities, verifier runners, degraded-state propagation, policy rejection, and orchestrator routing.
 
-**Phase 5: Escalation semantics, local graph rewrite, and sheaf validator targeting**
+**Phase 5: Escalation semantics, local graph rewrite, and sheaf validator targeting** *(implemented)*
 
 * ``crates/perspt-core/src/types.rs``: ``EscalationCategory`` (5 variants), ``RewriteAction`` (9 variants with structured payloads), ``SheafValidatorClass`` (7 validator types), ``SheafValidationResult`` (passed/failed constructors with V_sheaf contribution), ``EscalationReport``, ``RewriteRecord``, ``TargetedRequeue``, and ``StabilityMonitor::reset_for_replan`` for subgraph replans.
 * ``crates/perspt-store/src/schema.rs``: ``escalation_reports``, ``rewrite_records``, and ``sheaf_validations`` tables with session-scoped indexes.
@@ -884,7 +888,7 @@ The expected implementation work primarily affects:
 * ``crates/perspt-agent/src/orchestrator.rs``: ``classify_non_convergence`` categorises failures (DegradedSensors → ContractMismatch → TopologyMismatch → InsufficientModelCapability → ImplementationError); ``choose_repair_action`` selects least-drastic fix; ``apply_repair_action`` handles local repairs (GroundedRetry, ContractRepair, CapabilityPromotion, SensorRecovery) and bounded graph rewrites (``split_node``, ``insert_interface_node``, ``replan_subgraph``); ``select_validators`` targets validators by node class, plugin ownership, and verification state; ``run_sheaf_validator`` dispatches seven validator classes with V_sheaf scoring and requeue targeting.
 * ``crates/perspt-core/src/events.rs``: ``EscalationClassified``, ``SheafValidationComplete``, and ``GraphRewriteApplied`` event variants.
 * ``crates/perspt-tui/src/agent_app.rs``: TUI dashboard handling for all three Phase 5 events.
-* Test coverage: 140 tests across the workspace covering Phase 5 type construction, serialization, graph rewrite correctness, validator targeting, and classification defaults.
+* Test coverage: type construction, serialization, graph rewrite correctness, validator targeting, and classification defaults.
 
 **Phase 6: Provisional branch ledger and interface-sealed speculation** *(implemented)*
 
@@ -919,9 +923,9 @@ The expected implementation work primarily affects:
 * ``crates/perspt-cli/src/main.rs``: new fallback CLI args wired through to ``new_with_models()``.
 * ``crates/perspt-agent/src/context_retriever.rs``: ``get_project_summary()`` method added — inspects detected plugins, dependency manifests, entry points, and test locations to produce a structured project summary for architect prompts.
 * Test infrastructure: ``MerkleLedger::in_memory()`` used for all orchestrator tests via ``#[cfg(test)]`` conditional, eliminating DuckDB lock contention that caused false test failures.
-* Test coverage: 224 tests across the workspace, including 16 new tests covering workspace classification (empty dir, existing Rust/Python/JS, ambiguous, greenfield with language inference), tool prerequisite checking, ``required_binaries()`` declarations, and model fallback configuration.
+* Test coverage: workspace classification (empty dir, existing Rust/Python/JS, ambiguous, greenfield with language inference), tool prerequisite checking, ``required_binaries()`` declarations, and model fallback configuration.
 
-**Phase 7: Review UX parity with structured diffs, node status, and energy output**
+**Phase 7: Review UX parity with structured diffs, node status, and energy output** *(implemented)*
 
 * ``crates/perspt-tui/src/agent_app.rs``: wire runtime events into the dashboard, review modal, and node progression state.
 * ``crates/perspt-tui/src/diff_viewer.rs``: render grouped multi-file node bundles with summary and detailed diff views.
@@ -929,7 +933,7 @@ The expected implementation work primarily affects:
 * ``crates/perspt-tui/src/task_tree.rs``: expose queued, verifying, failed, escalated, provisional, and committed states.
 * ``crates/perspt-cli/src/commands/status.rs`` and ``crates/perspt-cli/src/commands/logs.rs``: mirror node states, verifier output, energy breakdown, branch provenance, and context provenance in headless mode.
 
-**Phase 8: Ledger-backed node commits, sheaf validation, and resume correctness**
+**Phase 8: Ledger-backed node commits, sheaf validation, and resume correctness** *(implemented)*
 
 * ``crates/perspt-agent/src/ledger.rs``: persist stable node metadata, Merkle material, retries, provisional lineage, and sheaf validation inputs.
 * ``crates/perspt-store/src/store.rs`` and ``crates/perspt-store/src/schema.rs``: store node-level artifact bundles, verification results, branch state, and resume state.
@@ -938,40 +942,36 @@ The expected implementation work primarily affects:
 
 **Phase 9: Universal verification pipeline and bundle command execution** *(implemented)*
 
-Closes four bugs identified during live testing where generated projects compiled speculatively but were never verified by the host toolchain:
+This phase implements the universal verification pipeline, wires bundle command execution into the SRBN runtime, and closes the gap between speculative generation and host-toolchain verification:
 
-1. **Bundle command execution** — Artifact bundle commands (e.g. ``cargo add``, ``pip install``) parsed by step_speculate are now executed via the approval-gated tool system instead of being logged as "not yet wired".
-2. **Per-node-class verification stages** — ``verification_stages_for_node()`` maps each ``NodeClass`` to the appropriate verification stages: Interface → SyntaxCheck; Implementation → SyntaxCheck + Build (+ Test when weighted_tests present); Integration → SyntaxCheck + Build + Test + Lint. Replaces the old filter that only ran tests for Integration nodes.
+1. **Bundle command execution** — Artifact bundle commands (e.g. ``cargo add``, ``pip install``) parsed by ``step_speculate`` are executed via the approval-gated tool system.
+2. **Per-node-class verification stages** — ``verification_stages_for_node()`` maps each ``NodeClass`` to the appropriate verification stages: Interface → SyntaxCheck; Implementation → SyntaxCheck + Build (+ Test when weighted tests are present); Integration → SyntaxCheck + Build + Test + Lint.
 3. **Short-circuit verification** — ``run_plugin_verification()`` accepts an ``allowed_stages`` filter and a ``working_dir`` parameter. Syntax failure skips build/test/lint; build failure skips test/lint. Each stage maps to energy components: syntax fail → V_syn ≤ 5.0, build fail → V_syn ≤ 8.0, test fail → V_log, lint fail → V_str += 0.3.
-4. **Artifact bundle persistence** — ``ledger.record_artifact_bundle()`` is now called in both the commit path and the escalation path, ensuring DuckDB records which commands were applied for each node.
-5. **Correction-loop feedback** — Verification raw output is fed into ``context.last_test_output`` so subsequent correction prompts include actual compiler/test errors. The correction prompt now includes raw ``cargo check``/``cargo build`` stderr alongside LSP diagnostics.
-6. **Actuator prompt guidance** — Instruction added for intra-crate imports (``crate::`` in library modules vs. package name in tests/examples/main). Instruction #13 added requiring the LLM to populate the ``commands`` array with dependency install commands (``cargo add``, ``pip install``, ``npm install``) when code uses external crates/packages not already in the project manifest.
-7. **Auto-dependency repair** — After ``run_plugin_verification()`` detects a syntax/build failure, ``extract_missing_crates()`` parses compiler stderr for patterns such as "undeclared crate or module", "can't find crate for", and "unresolved import". When missing crates are found, ``auto_install_crate_deps()`` runs ``cargo add <crate>`` automatically and re-runs verification. This closed the gap where generated projects would fail to compile due to missing dependencies in ``Cargo.toml``.
-8. **Correction command extraction** — The correction loop now parses ``Commands:`` sections from LLM correction responses and executes whitelisted dependency commands (``cargo add``, ``pip install``, ``npm install``, ``yarn add``, ``pnpm add``) before re-verification. The correction prompt output format was extended with a ``Commands:`` block.
-
-Files changed:
+4. **Artifact bundle persistence** — ``ledger.record_artifact_bundle()`` is called in both the commit path and the escalation path, ensuring the ledger records which commands were applied for each node.
+5. **Correction-loop feedback** — Verification raw output is fed into ``context.last_test_output`` so that subsequent correction prompts include actual compiler and test errors. The correction prompt includes raw ``cargo check``/``cargo build`` stderr alongside LSP diagnostics.
+6. **Actuator prompt guidance** — The actuator prompt includes guidance for intra-crate imports (``crate::`` in library modules vs. package name in tests/examples/main). Instruction #13 requires the LLM to populate the ``commands`` array with dependency install commands (``cargo add``, ``pip install``, ``npm install``) when code uses external packages not already in the project manifest.
+7. **Auto-dependency repair** — After ``run_plugin_verification()`` detects a syntax/build failure, ``extract_missing_crates()`` parses compiler stderr for patterns such as "undeclared crate or module", "can't find crate for", and "unresolved import". When missing crates are found, ``auto_install_crate_deps()`` runs ``cargo add <crate>`` automatically and re-runs verification.
+8. **Correction command extraction** — The correction loop parses ``Commands:`` sections from LLM correction responses and executes whitelisted dependency commands (``cargo add``, ``pip install``, ``npm install``, ``yarn add``, ``pnpm add``) before re-verification. The correction prompt output format includes a ``Commands:`` block.
 
 * ``crates/perspt-agent/src/orchestrator.rs``: ``last_applied_bundle`` field, bundle command execution in ``step_speculate``, ``verification_stages_for_node()``, refactored ``run_plugin_verification()`` with stage filter and short-circuit, rewired ``step_verify`` to use universal verification, artifact bundle persistence in ``step_commit`` and escalation path, ``extract_missing_crates()`` and ``auto_install_crate_deps()`` for auto-dependency repair, ``extract_commands_from_correction()`` for correction command parsing, build output injection into correction prompts.
-* ``crates/perspt-agent/src/agent.rs``: added ``crate::`` import guidance and dependency command instructions to actuator coding prompt, updated multi-artifact bundle JSON example to show populated ``commands`` array.
+* ``crates/perspt-agent/src/agent.rs``: ``crate::`` import guidance and dependency command instructions added to actuator coding prompt, multi-artifact bundle JSON example updated to show populated ``commands`` array.
 
 **Phase 10: uv-first Python developer experience** *(implemented)*
 
-Addresses the quality gap in Python project generation identified during live testing: all nodes in a Python ETL pipeline escalated despite generating synactically valid files, because missing third-party dependencies were never installed, package layout was inconsistent (top-level vs. src-layout), and test files referenced symbols that didn't exist in the generated code.
+This phase establishes uv as the default Python toolchain integration and ensures Python project generation produces complete, verifiable projects with correct package layout, dependency management, and test alignment:
 
 1. **Python auto-dependency repair** — ``extract_missing_python_modules()`` parses ``ModuleNotFoundError`` and ``ImportError`` patterns from verification output, including nested ``No module named 'foo.bar'`` variants. ``python_import_to_package()`` maps common import-name mismatches (e.g. ``PIL`` → ``pillow``, ``yaml`` → ``pyyaml``, ``cv2`` → ``opencv-python``, ``sklearn`` → ``scikit-learn``). ``auto_install_python_deps()`` runs ``uv add <package>`` for each missing module and follows with ``uv sync --dev`` to refresh the venv. On success, verification is re-run automatically.
 2. **Bundle command normalization** — Before executing bundle commands for Python nodes, the orchestrator normalizes generic pip/pip3 install commands to their uv equivalents: ``pip install foo`` → ``uv add foo``, ``python -m pip install foo`` → ``uv add foo``, ``pip install -r requirements.txt`` → ``uv pip install -r requirements.txt``. Non-Python commands and already-correct uv commands pass through unchanged.
 3. **Post-bundle uv sync** — After executing bundle commands for Python nodes, ``uv sync --dev`` is run automatically to ensure newly-added dependencies are available in the venv before verification begins.
-4. **Python-specific actuator prompt guidance** — Instruction #14 in the actuator prompt now directs the LLM to: prefer src-layout (``src/<package>/``), keep all modules inside the declared package, use relative imports within the package, put tests in ``tests/`` using real symbol names from generated code, and emit ``uv add`` (not ``pip install``) for dependency commands.
-5. **Correction prompt improvements** — The ``Commands:`` output format now includes ``uv add`` examples. Fix direction for import errors now recommends ``uv add <pkg>`` and relative imports. The correction command extractor allowlist was extended with ``uv add`` and ``uv pip install``.
-6. **Improved Python environment setup** — ``PythonTestRunner::setup_environment()`` now ensures pytest is available as a dev dependency after ``uv sync --dev``: if pytest is not found, it runs ``uv add --dev pytest`` before falling back to ``uv pip install pytest``.
-7. **Dynamic run command** — ``PythonPlugin::run_command_for_dir()`` inspects the project directory to return context-appropriate run commands instead of the hardcoded ``uv run python -m main``. It checks ``src/<pkg>/`` directories first, then ``[project.scripts]`` entries in ``pyproject.toml``, defaulting to the generic command only when neither is found. The ``LanguagePlugin`` trait now includes ``run_command_for_dir()`` with a default implementation delegating to ``run_command()``.
+4. **Python-specific actuator prompt guidance** — Instruction #14 in the actuator prompt directs the LLM to: prefer src-layout (``src/<package>/``), keep all modules inside the declared package, use relative imports within the package, put tests in ``tests/`` using real symbol names from generated code, and emit ``uv add`` (not ``pip install``) for dependency commands.
+5. **Correction prompt improvements** — The ``Commands:`` output format includes ``uv add`` examples. Fix direction for import errors recommends ``uv add <pkg>`` and relative imports. The correction command extractor allowlist includes ``uv add`` and ``uv pip install``.
+6. **Improved Python environment setup** — ``PythonTestRunner::setup_environment()`` ensures pytest is available as a dev dependency after ``uv sync --dev``: if pytest is not found, it runs ``uv add --dev pytest`` before falling back to ``uv pip install pytest``.
+7. **Dynamic run command** — ``PythonPlugin::run_command_for_dir()`` inspects the project directory to return context-appropriate run commands instead of the hardcoded ``uv run python -m main``. It checks ``src/<pkg>/`` directories first, then ``[project.scripts]`` entries in ``pyproject.toml``, defaulting to the generic command only when neither is found. The ``LanguagePlugin`` trait includes ``run_command_for_dir()`` with a default implementation delegating to ``run_command()``.
 
-Files changed:
-
-* ``crates/perspt-agent/src/orchestrator.rs``: ``extract_missing_python_modules()`` with stdlib filter, ``python_import_to_package()`` mapping table, ``auto_install_python_deps()`` with uv add + uv sync, ``normalize_command_to_uv()`` command rewriter, Python auto-repair wiring in ``step_verify``, bundle command normalization in ``step_speculate``, post-bundle ``uv sync --dev``, extended command allowlist with ``uv add`` and ``uv pip install``. Nine new unit tests for module extraction, package mapping, command normalization, and correction parsing.
+* ``crates/perspt-agent/src/orchestrator.rs``: ``extract_missing_python_modules()`` with stdlib filter, ``python_import_to_package()`` mapping table, ``auto_install_python_deps()`` with uv add + uv sync, ``normalize_command_to_uv()`` command rewriter, Python auto-repair wiring in ``step_verify``, bundle command normalization in ``step_speculate``, post-bundle ``uv sync --dev``, extended command allowlist with ``uv add`` and ``uv pip install``.
 * ``crates/perspt-agent/src/agent.rs``: instruction #13 updated for ``uv add`` instead of ``pip install``, instruction #14 added for Python src-layout, relative imports, test alignment, and uv command conventions.
 * ``crates/perspt-agent/src/test_runner.rs``: ``PythonTestRunner::setup_environment()`` ensures pytest is declared as a dev dependency via ``uv add --dev pytest`` when not already available.
-* ``crates/perspt-core/src/plugin.rs``: ``run_command_for_dir()`` added to ``LanguagePlugin`` trait with default implementation, ``PythonPlugin::run_command_for_dir()`` inspects src layout and ``[project.scripts]``. Three new unit tests for run command detection.
+* ``crates/perspt-core/src/plugin.rs``: ``run_command_for_dir()`` added to ``LanguagePlugin`` trait with default implementation, ``PythonPlugin::run_command_for_dir()`` inspects src layout and ``[project.scripts]``.
 
 **Documentation Updates Required:**
 
