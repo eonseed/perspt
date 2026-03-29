@@ -3,154 +3,105 @@
 Configuration
 =============
 
-How to configure Perspt for your workflow.
-
-Configuration Sources
----------------------
-
-Perspt loads configuration from (highest priority first):
-
-1. **CLI Arguments** — ``perspt --model gpt-5.2``
-2. **Environment Variables** — ``export OPENAI_API_KEY=...``
-3. **Config File** — ``~/.perspt/config.toml``
-4. **Defaults** — Built-in fallbacks
-
 Config File Location
 --------------------
 
-.. code-block:: text
+Perspt searches for configuration in this order:
 
-   ~/.perspt/config.toml
-
-Create it:
-
-.. code-block:: bash
-
-   mkdir -p ~/.perspt
-   perspt config --edit
+1. ``--config <path>`` (CLI flag)
+2. ``~/.config/perspt/config.json``
+3. Environment variables
+4. Auto-detection
 
 Config File Format
 ------------------
 
-.. code-block:: toml
+.. code-block:: json
 
-   # ~/.perspt/config.toml
-
-   [default]
-   provider = "openai"
-   model = "gpt-5.2"
-
-   [providers.openai]
-   api_key = "sk-..."
-   
-   [providers.anthropic]
-   api_key = "sk-ant-..."
-
-   [agent]
-   architect_model = "gpt-5.2"
-   actuator_model = "claude-opus-4.5"
-   verifier_model = "gemini-3-pro"
-   energy_weights = [1.0, 0.5, 2.0]
-   stability_threshold = 0.1
-   max_retries_compile = 3
-   max_retries_tool = 5
+   {
+     "default_provider": "gemini",
+     "default_model": "gemini-3.1-flash-lite-preview",
+     "api_key": "AIza...",
+     "provider_type": "gemini",
+     "providers": {
+       "openai": {
+         "api_key": "sk-xxx",
+         "default_model": "gpt-4.1"
+       },
+       "anthropic": {
+         "api_key": "sk-ant-xxx",
+         "default_model": "claude-sonnet-4-20250514"
+       }
+     }
+   }
 
 Environment Variables
 ---------------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 70
+   :widths: 35 20 45
 
    * - Variable
-     - Description
-   * - ``OPENAI_API_KEY``
-     - OpenAI API key
+     - Provider
+     - Priority
    * - ``ANTHROPIC_API_KEY``
-     - Anthropic API key
+     - Anthropic
+     - Highest
+   * - ``OPENAI_API_KEY``
+     - OpenAI
+     - 2
    * - ``GEMINI_API_KEY``
-     - Google Gemini API key
+     - Gemini
+     - 3
    * - ``GROQ_API_KEY``
-     - Groq API key
+     - Groq
+     - 4
    * - ``COHERE_API_KEY``
-     - Cohere API key
+     - Cohere
+     - 5
    * - ``XAI_API_KEY``
-     - XAI (Grok) API key
+     - xAI
+     - 6
    * - ``DEEPSEEK_API_KEY``
-     - DeepSeek API key
+     - DeepSeek
+     - 7
+   * - *(none)*
+     - Ollama
+     - Fallback
 
-CLI Configuration Commands
---------------------------
+.. note::
+
+   When multiple keys are set, the highest-priority provider is used. Override
+   with ``--provider-type``.
+
+
+CLI Flag Override
+-----------------
+
+CLI flags always take precedence:
 
 .. code-block:: bash
 
-   # Show current configuration
-   perspt config --show
+   # Override provider
+   perspt chat --provider-type openai --model gpt-4.1
 
-   # Set a value
-   perspt config --set default.model=gpt-5.2
+   # Override API key
+   perspt chat --api-key "sk-xxx"
 
-   # Edit in $EDITOR
-   perspt config --edit
+   # Use a specific config file
+   perspt chat --config /path/to/config.json
 
-Project Configuration
+Logging Configuration
 ---------------------
 
-Initialize project-specific config:
-
 .. code-block:: bash
 
-   cd my-project
-   perspt init --memory --rules
+   # Default: error-level logging only (avoids TUI noise)
+   perspt
 
-This creates:
+   # Enable debug logging with RUST_LOG
+   RUST_LOG=debug perspt simple-chat
 
-.. code-block:: text
-
-   my-project/
-   ├── PERSPT.md         # Project memory/context
-   └── .perspt/
-       ├── config.toml   # Project config
-       └── rules.star    # Policy rules
-
-PERSPT.md
-~~~~~~~~~
-
-Project memory file that provides context to the agent:
-
-.. code-block:: markdown
-
-   # My Project
-
-   ## Overview
-   This is a Python web application using FastAPI.
-
-   ## Architecture
-   - `api/` - REST endpoints
-   - `core/` - Business logic
-   - `tests/` - pytest suite
-
-   ## Conventions
-   - Use type hints everywhere
-   - 100% test coverage required
-
-Per-Session Configuration
--------------------------
-
-Override for a single session:
-
-.. code-block:: bash
-
-   perspt chat --model claude-opus-4.5
-
-   perspt agent \
-     --architect-model gpt-5.2 \
-     --actuator-model claude-opus-4.5 \
-     "Create module"
-
-See Also
---------
-
-- :doc:`providers` - Provider-specific setup
-- :doc:`agent-options` - Agent configuration
-- :doc:`security-rules` - Policy rules
+   # Agent LLM logging to DuckDB
+   perspt agent --log-llm -w . "Task"

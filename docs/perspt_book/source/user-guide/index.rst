@@ -3,49 +3,47 @@
 User Guide
 ==========
 
-Comprehensive guide for Perspt users.
+In-depth coverage of every Perspt feature.
 
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: 🚀 Basic Usage
+   .. grid-item-card:: Basic Usage
       :link: basic-usage
       :link-type: doc
 
-      Day-to-day operations and workflows.
+      TUI navigation, chat commands, and session management.
 
-   .. grid-item-card:: 🔧 Advanced Features
-      :link: advanced-features
-      :link-type: doc
-
-      Power user capabilities.
-
-   .. grid-item-card:: 🤖 Agent Mode
+   .. grid-item-card:: Agent Mode
       :link: agent-mode
       :link-type: doc
 
-      Autonomous code generation with SRBN.
+      SRBN lifecycle, DAG planning, node verification, and review.
 
-   .. grid-item-card:: 🔌 Providers
+   .. grid-item-card:: Advanced Features
+      :link: advanced-features
+      :link-type: doc
+
+      Per-tier models, energy tuning, ledger, resume, and cost control.
+
+   .. grid-item-card:: Providers
       :link: providers
       :link-type: doc
 
-      Working with different LLM providers.
+      Configure OpenAI, Anthropic, Gemini, Ollama, and more.
 
-   .. grid-item-card:: ❓ Troubleshooting
+   .. grid-item-card:: Troubleshooting
       :link: troubleshooting
       :link-type: doc
 
-      Common issues and solutions.
-
-Contents
---------
+      Diagnose and fix common issues.
 
 .. toctree::
    :maxdepth: 2
+   :hidden:
 
    basic-usage
-   advanced-features
    agent-mode
+   advanced-features
    providers
    troubleshooting

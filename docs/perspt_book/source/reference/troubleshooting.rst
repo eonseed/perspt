@@ -1,208 +1,137 @@
 .. _reference-troubleshooting:
 
-Troubleshooting
-===============
+Advanced Troubleshooting
+========================
 
-Common issues and solutions.
-
-API Key Issues
---------------
-
-**Error**: ``API key not found``
-
-.. code-block:: bash
-
-   # Check if key is set
-   echo $OPENAI_API_KEY
-
-   # Set the key
-   export OPENAI_API_KEY="sk-..."
-
-**Error**: ``Invalid API key``
-
-- Verify the key is correct (no extra spaces)
-- Check if the key has been revoked
-- Regenerate from provider dashboard
-
-Provider Connection
+Diagnostic Commands
 -------------------
 
-**Error**: ``Connection refused``
-
 .. code-block:: bash
 
-   # Check internet connectivity
-   curl https://api.openai.com
-
-   # For Ollama, ensure it's running
-   ollama serve
-
-**Error**: ``Rate limit exceeded``
-
-- Wait and retry
-- Reduce request frequency
-- Consider using a different provider
-
-Model Issues
-------------
-
-**Error**: ``Model not found``
-
-.. code-block:: bash
-
-   # List available models
-   perspt --list-models
-   
-   # For Ollama
-   ollama list
-
-**Error**: ``Context length exceeded``
-
-- Use a model with longer context
-- Reduce conversation history
-- Clear chat and start fresh
-
-Agent Mode Issues
------------------
-
-**Agent stuck in retry loop**
-
-1. Check LSP is working:
-
-   .. code-block:: bash
-
-      ty check file.py
-
-2. Lower stability threshold:
-
-   .. code-block:: bash
-
-      perspt agent --stability-threshold 0.5 "task"
-
-3. Check for unsolvable errors in code
-
-**High energy despite clean code**
-
-1. Run tests manually:
-
-   .. code-block:: bash
-
-      pytest -v
-
-2. Check LSP diagnostics
-3. Adjust energy weights:
-
-   .. code-block:: bash
-
-      perspt agent --energy-weights "0.5,0.5,1.0" "task"
-
-**Agent aborted unexpectedly**
-
-.. code-block:: bash
-
-   # Check session status
+   # Session status with per-node details
    perspt status
 
-   # Resume if possible
-   perspt resume
+   # LLM call log browser
+   perspt logs --tui
 
-TUI Issues
-----------
+   # Usage statistics
+   perspt logs --stats
 
-**Terminal rendering problems**
+   # Ledger integrity check
+   perspt ledger --stats
 
-- Ensure terminal supports 256 colors
-- Try a different terminal emulator
-- Check ``$TERM`` environment variable
+   # Enable verbose logging
+   RUST_LOG=debug perspt simple-chat 2>debug.log
 
-**Keyboard shortcuts not working**
 
-- Check terminal keybinding conflicts
-- Try raw mode: ``perspt --raw``
+Common Error Patterns
+---------------------
 
-Configuration Issues
+``ErrorType::ApiKeyMissing``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+No API key found for the selected provider. Set the environment variable or
+pass ``--api-key``.
+
+
+``ErrorType::ModelNotFound``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The model identifier is not recognized by the provider. Use ``perspt --list-models``
+to see available models.
+
+
+``ErrorType::ConnectionFailed``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cannot reach the provider endpoint. Check:
+
+- Internet connectivity
+- Ollama service status (``ollama serve``)
+- Firewall/proxy settings
+
+
+``ErrorType::RateLimitExceeded``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Provider rate limit hit. Wait and retry, or switch providers.
+
+
+``ErrorType::BudgetExceeded``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LLM spend exceeded ``--max-cost`` limit. Increase the limit or reduce task scope.
+
+
+Agent-Specific Issues
+---------------------
+
+**Ownership conflict:**
+
+Two nodes attempted to write the same file. The Architect replans the DAG to
+resolve the conflict. If this persists, simplify the task description.
+
+**Sheaf validation failure:**
+
+Cross-node contracts are incompatible. Common causes:
+
+1. Inconsistent function signatures across modules
+2. Missing imports between files
+3. Type mismatches at module boundaries
+
+The agent automatically retries with feedback from the sheaf validator.
+
+
+**Degraded verification mode:**
+
+Missing tool binaries cause fallback to heuristic verification:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Component
+     - Full Mode
+     - Degraded Mode
+   * - V_syn
+     - LSP diagnostics (ty, rust-analyzer)
+     - Regex pattern matching
+   * - V_log
+     - Test runner (pytest, cargo test)
+     - Exit code stubs
+   * - V_boot
+     - Init commands (uv init, cargo init)
+     - Skipped
+
+Install the required tools to restore full verification.
+
+
+Terminal Restoration
 --------------------
 
-**Config file not found**
+If Perspt crashes and leaves the terminal in raw mode:
 
 .. code-block:: bash
 
-   # Create config directory
-   mkdir -p ~/.perspt
+   reset
+   # or
+   stty sane
 
-   # Initialize config
-   perspt config --edit
+Perspt installs a panic hook that attempts to restore the terminal automatically
+(raw mode off, leave alternate screen). If this fails, ``reset`` will fix it.
 
-**Invalid config format**
 
-Check TOML syntax:
+Performance
+-----------
 
-.. code-block:: bash
+**Slow response streaming:**
 
-   # Validate TOML
-   python -c "import tomllib; tomllib.load(open('~/.perspt/config.toml', 'rb'))"
+1. Check network latency to the provider
+2. Try a faster model (e.g., ``gemini-3.1-flash-lite-preview``)
+3. Use Groq for the fastest inference
 
-Build Issues
-------------
+**High memory usage in agent mode:**
 
-**Compilation errors**
-
-.. code-block:: bash
-
-   # Update Rust
-   rustup update
-
-   # Clean and rebuild
-   cargo clean
-   cargo build --release
-
-**Missing dependencies**
-
-.. code-block:: bash
-
-   # macOS
-   brew install openssl pkg-config
-
-   # Ubuntu/Debian
-   sudo apt install libssl-dev pkg-config
-
-Performance Issues
-------------------
-
-**Slow response times**
-
-- Try Groq for faster inference
-- Use smaller models (e.g., ``gemini-3-flash``)
-- Check network latency
-
-**High memory usage**
-
-- Reduce conversation history
-- Use streaming mode
-- Restart application periodically
-
-Debug Mode
-----------
-
-Enable verbose logging:
-
-.. code-block:: bash
-
-   perspt -v chat
-   perspt -v agent "task"
-
-   # Maximum verbosity
-   RUST_LOG=debug perspt chat
-
-Getting Help
-------------
-
-1. **Check documentation**: This book
-2. **GitHub Issues**: `github.com/eonseed/perspt/issues <https://github.com/eonseed/perspt/issues>`_
-3. **Logs**: Check ``~/.perspt/logs/``
-
-See Also
---------
-
-- :doc:`cli-reference` - Command reference
-- :doc:`../howto/configuration` - Configuration guide
+1. Large DAGs with many nodes consume more memory
+2. Use ``--single-file`` for simple tasks
+3. Use ``--max-steps`` to bound total iterations

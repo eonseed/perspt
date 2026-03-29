@@ -1,4 +1,6 @@
-# 👁️ Perspt: Your Terminal's Window to the AI World 🤖
+# Perspt
+
+**Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
 >  AI's wisdom, a steady flow.\
@@ -7,316 +9,354 @@
 >  We ponder and chat, with code as our guide,\
 >  Is AI our helper or our human pride?"
 
-**Perspt** (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a high-performance command-line interface (CLI) application that gives you a peek into the mind of Large Language Models (LLMs). Built with Rust for speed and reliability, it allows you to chat with various AI models from multiple providers directly in your terminal using the modern **genai** crate's unified API.
+Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a terminal-based interface to Large Language Models, built in Rust. It does two things:
+
+1. **Chat with any LLM from your terminal.** Set an API key, run `perspt`, and start talking. Supports OpenAI, Anthropic, Google Gemini, Groq, Cohere, xAI, DeepSeek, and Ollama out of the box.
+
+2. **Run an autonomous coding agent.** The SRBN (Stabilized Recursive Barrier Network) engine decomposes coding tasks into a DAG of nodes, generates code, verifies each node with real LSP diagnostics and tests, and commits only when Lyapunov energy converges. The SRBN engine is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication).
 
 [![Perspt in Action](docs/screencast/perspt_terminal_ui.jpg)](https://github.com/user-attachments/assets/f80f7109-1615-487b-b2a8-b76e16ebf6a7)
 
-## 🎯 Why Perspt?
+---
 
-- **🚀 Latest Model Support**: Built on the modern `genai` crate with support for state-of-the-art models like **OpenAI GPT-5.2**, **Google Gemini 3**, and **Anthropic Claude Opus 4.5**
-- **⚡ Real-time Streaming**: Ultra-responsive streaming responses with proper reasoning chunk handling
-- **🛡️ Rock-solid Reliability**: Comprehensive panic recovery and error handling that keeps your terminal safe
-- **🎨 Beautiful Interface**: Modern terminal UI with markdown rendering and smooth animations
-- **🤖 Zero-Config Startup**: Automatic provider detection from environment variables - just set your API key and go!
-- **🔧 Flexible Configuration**: CLI arguments, environment variables, and JSON config files all work seamlessly
-
-## ✨ Features
-
-- **🤖 SRBN Agent Mode:** NEW! Autonomous coding assistant using Stabilized Recursive Barrier Networks - decomposes tasks, generates code, verifies via LSP, and self-corrects errors.
-- **🎨 Interactive Chat Interface:** A colorful and responsive chat interface powered by Ratatui with smooth scrolling and custom markdown rendering.
-- **🖥️ Simple CLI Mode:** Minimal command-line mode for direct Q&A without TUI overlay - perfect for scripting, accessibility, or Unix-style workflows.
-- **⚡ Advanced Streaming:** Real-time streaming of LLM responses with support for reasoning chunks and proper event handling.
-- **🔬 LSP Integration:** Built-in Language Server Protocol client using `ty` for Python - provides real-time type checking and error detection.
-- **🧪 Test Runner:** Integrated pytest runner with V_log (Logic Energy) calculation from weighted test failures.
-- **🤖 Automatic Provider Detection:** Zero-config startup that detects and uses available providers based on environment variables.
-- **🔀 Latest Provider Support**: Built on the modern `genai` crate with support for cutting-edge models.
-- **📊 Token Budget Tracking:** Tracks input/output tokens and cost estimation with configurable limits.
-- **🔧 Retry Policy:** PSP-4 compliant retry limits (3 for compilation, 5 for tools) with automatic escalation.
-- **💾 Conversation Export:** Save your chat conversations to text files using the `/save` command.
-- **📜 Custom Markdown Parser:** Built-in markdown parser optimized for terminal rendering.
-- **🛡️ Graceful Error Handling:** Robust handling of network issues, API errors, and edge cases.
-
-## 🚀 Getting Started
-
-### 🤖 Zero-Config Automatic Provider Detection
-
-Perspt features intelligent automatic provider detection. Simply set an environment variable for any supported provider, and Perspt will automatically detect and use it!
-
-**Priority Detection Order:**
-1. OpenAI (`OPENAI_API_KEY`)
-2. Anthropic (`ANTHROPIC_API_KEY`) 
-3. Google Gemini (`GEMINI_API_KEY`)
-4. Groq (`GROQ_API_KEY`)
-5. Cohere (`COHERE_API_KEY`)
-6. XAI (`XAI_API_KEY`)
-7. DeepSeek (`DEEPSEEK_API_KEY`)
-8. Ollama (no API key needed - auto-detected if running)
-
-**Quick Start:**
+## Try It in 60 Seconds
 
 ```bash
-# Set your API key
-export OPENAI_API_KEY="sk-your-openai-key"
-
-# That's it! Start chatting
-./target/release/perspt
-```
-
-### 📚 Documentation
-
-**Read the [perspt book](docs/perspt.pdf)** - This illustrated guide walks through the project and explains key concepts.
-
-### 🛠️ Prerequisites
-
-- **Rust:** Ensure you have the Rust toolchain installed. Get it from [rustup.rs](https://rustup.rs/).
-- **🔑 LLM API Key:** For cloud providers, you'll need an API key:
-  - **OpenAI**: [platform.openai.com](https://platform.openai.com) (supports GPT-5.2, o3-mini, o1-preview)
-  - **Anthropic**: [console.anthropic.com](https://console.anthropic.com) (supports Claude Opus 4.5)
-  - **Google Gemini**: [aistudio.google.com](https://aistudio.google.com) (supports Gemini 3 Flash/Pro)
-  - **Groq**: [console.groq.com](https://console.groq.com)
-  - **Cohere**: [dashboard.cohere.com](https://dashboard.cohere.com)
-  - **XAI**: [console.x.ai](https://console.x.ai)
-  - **DeepSeek**: [platform.deepseek.com](https://platform.deepseek.com)
-  - **Ollama**: [ollama.ai](https://ollama.ai) (no API key needed - local models)
-
-### 📦 Installation
-
-```bash
-# Clone the repository
+# Install
 git clone https://github.com/eonseed/perspt.git
-cd perspt
+cd perspt && cargo build --release
 
-# Build the project
-cargo build --release
+# Set any supported API key
+export OPENAI_API_KEY="sk-..."
 
-# Run Perspt
+# Chat (TUI mode)
 ./target/release/perspt
+
+# Or use simple CLI mode for scripting
+./target/release/perspt simple-chat
 ```
 
-### ⚙️ Configuration
+Perspt auto-detects whichever provider key you have set. No config file required.
 
-Perspt can be configured using environment variables, a `config.json` file, or command-line arguments.
+| Provider   | Environment Variable    | API Key Required |
+|------------|-------------------------|------------------|
+| OpenAI     | `OPENAI_API_KEY`        | Yes              |
+| Anthropic  | `ANTHROPIC_API_KEY`     | Yes              |
+| Gemini     | `GEMINI_API_KEY`        | Yes              |
+| Groq       | `GROQ_API_KEY`          | Yes              |
+| Cohere     | `COHERE_API_KEY`        | Yes              |
+| xAI        | `XAI_API_KEY`           | Yes              |
+| DeepSeek   | `DEEPSEEK_API_KEY`      | Yes              |
+| Ollama     | *(none)*                | No               |
 
-**Environment Variables (Recommended):**
-```bash
-export OPENAI_API_KEY="sk-your-key"
-./target/release/perspt
+---
+
+## What You Get
+
+**Interactive TUI** -- A Ratatui-powered chat interface with markdown rendering, streaming responses, smooth scrolling, and conversation export (`/save`).
+
+**Simple CLI Mode** -- A minimal prompt for direct Q&A, piping, and session logging. Ideal for scripting and accessibility.
+
+**Agent Mode (SRBN)** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold.
+
+**Zero-Config Startup** -- Automatic provider detection from environment variables. Set a key and go.
+
+**Local Models via Ollama** -- Full privacy, no API fees, works offline.
+
+---
+
+## Why SRBN is Different
+
+Most coding agents work by trial and error: generate code, check if it compiles, and retry if it fails. This is fine for small tasks, but it breaks down as projects grow. Each step has a chance of going wrong, and those chances multiply. A ten-file project might need dozens of retries; a fifty-file project might never finish.
+
+Two problems make this worse:
+
+- **Errors compound.** Each generation step builds on the previous one. A small mistake early on gets baked into everything that follows. By the time the agent notices, the fix requires re-doing most of the work.
+
+- **Retries don't help when the agent is lost.** If the agent conditions on its own broken output, it tends to repeat the same class of mistake. Blind re-prompting circles around the problem instead of converging on a solution.
+
+SRBN takes a different approach. Instead of hoping each step is correct, it **measures how wrong the current state is** and **steers corrections based on that measurement**. Think of it like a thermostat, not a dice roll:
+
+1. **Break the task into pieces.** The Architect decomposes your request into a graph of subtasks, each owning specific files.
+
+2. **Generate code for each piece.** The Actuator writes code for one node at a time.
+
+3. **Measure the damage.** Real tools -- your actual LSP server, your actual test runner, your actual compiler -- score the output. Zero means perfect. Higher means more broken.
+
+4. **Fix what's broken, specifically.** The error details (which diagnostic, which test, which file) go back to the model as targeted context. This is not "try again"; it is "here is exactly what is wrong."
+
+5. **Only commit when stable.** The score must drop below a threshold before the node is accepted. Then adjacent nodes are checked for consistency -- do imports resolve, do types match across files?
+
+The result: instead of reliability decaying exponentially with project size, the retry cost grows logarithmically. A hundred-node project costs only modestly more than a ten-node one.
+
+This approach is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.** and **Ronak R.** (pre-publication), which formalizes this intuition using control theory and proves it mathematically. The next section covers the theory for those interested.
+
+---
+
+## Theoretical Foundation
+
+The SRBN engine is grounded in the theoretical framework from *"Stability is All You Need"* (Vikrant R. and Ronak R., pre-publication). This section presents the mathematical machinery for researchers and developers who want to understand the guarantees.
+
+### The Problem, Formally
+
+Over $N$ generation steps with per-step error rate $\delta$, the probability of a fully correct output decays as $(1 - \delta)^N$ -- exponential degradation. When the agent conditions on its own erroneous output, errors correlate rather than cancel (correlated entropy collapse), making naive retry ineffective.
+
+### Core Idea: Sheaf-Theoretic Control
+
+SRBN reformulates LLM agency as a **sheaf over a task DAG**. Each node in the DAG owns a set of output files. A sheaf assigns local data (code, tests, configs) to each node, subject to a **consistency condition**: overlapping data between adjacent nodes must agree.
+
+The system defines a **Lyapunov energy function** that measures how far the current state is from this consistent, correct target:
+
+$$
+V(x) = \sum_{V \supseteq U} \| \rho_{VU}(x_U) - x_V \|^2
+$$
+
+where $\rho_{VU}$ is the restriction map from node $U$ to node $V$. When $V(x) = 0$, every node agrees with its neighbors and all verification checks pass.
+
+Perspt implements this as a weighted sum of five measurable verification barriers:
+
+$$
+V(x) = \alpha \cdot V_{\text{syn}} + \beta \cdot V_{\text{str}} + \gamma \cdot V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+$$
+
+| Barrier | What It Measures | How It Is Computed |
+|---------|-----------------|--------------------|
+| $V_{\text{syn}}$ | Syntax correctness | LSP diagnostic count (errors weighted 1.0, warnings 0.3) |
+| $V_{\text{str}}$ | Structural contracts | Interface signature match, forbidden pattern absence |
+| $V_{\text{log}}$ | Logical correctness | Weighted test failures: $\sum w_i \cdot \mathbb{1}[\text{test}_i\ \text{failed}]$ |
+| $V_{\text{boot}}$ | Build integrity | Binary: 1.0 if build fails, 0.0 if it succeeds |
+| $V_{\text{sheaf}}$ | Cross-node consistency | Import resolution, type agreement across file boundaries |
+
+Default weights: $\alpha = 1.0$, $\beta = 0.5$, $\gamma = 2.0$.
+
+### Key Theorems
+
+The paper proves three results that underpin SRBN's reliability:
+
+**Theorem 1 (Global Exponential Decay).** If the control law $u(x) = -K \nabla V(x)$ is applied at each retry step, then:
+
+$$
+V(x_t) \leq V(x_0) \cdot e^{-2\mu K t}
+$$
+
+where $\mu$ is the Polyak-Lojasiewicz constant of the energy landscape. Energy decays exponentially toward zero -- the system converges.
+
+**Theorem 2 (Input-to-State Stability).** Under persistent bounded noise $\| w_t \| \leq \bar{w}$ (imperfect LLM outputs), the energy remains bounded:
+
+$$
+V(x_t) \leq V(x_0) \cdot e^{-\lambda t} + \frac{\bar{w}^2}{\lambda}
+$$
+
+The system does not need perfect LLM responses to converge. Bounded errors yield bounded deviation -- the hallmark of robust control.
+
+**Corollary (Role of Topology).** Convergence rate depends on the **Fiedler value** $\lambda_2$ of the task DAG's Laplacian. Well-connected graphs (higher $\lambda_2$) converge faster; long chains converge slowly. This guides how the Architect should decompose tasks.
+
+### How This Changes Reliability Scaling
+
+Traditional agents: reliability $\sim (1 - \delta)^N$ (exponential decay).
+
+SRBN with Lyapunov control: reliability $\sim O(\log N)$ retry cost for an $N$-node project.
+
+The barrier mechanism transforms the problem from "hope each step is correct" to "measure deviation, correct, and prove convergence."
+
+### SRBN Control Loop
+
+The following diagram illustrates how a coding task flows through the SRBN engine:
+
+```mermaid
+flowchart TD
+    A["Task Description"] --> B["Architect: Decompose into DAG"]
+    B --> C["Actuator: Generate Code per Node"]
+    C --> D{"Compute V(x)"}
+    D -->|"V(x) > epsilon"| E["Flow Matching: Correct with Error Feedback"]
+    E --> C
+    D -->|"V(x) <= epsilon"| F["Sheaf Validation: Cross-Node Consistency"]
+    F -->|"V_sheaf > 0"| G["Repair Inconsistencies"]
+    G --> D
+    F -->|"V_sheaf = 0"| H["Commit to Merkle Ledger"]
+
+    subgraph Verification Barriers
+        D1["V_syn: LSP Diagnostics"]
+        D2["V_str: Structural Contracts"]
+        D3["V_log: Test Runner"]
+        D4["V_boot: Build Check"]
+    end
+
+    C --> D1 & D2 & D3 & D4
+    D1 & D2 & D3 & D4 --> D
 ```
 
-**Config File (`config.json`):**
-```json
-{
-  "provider_type": "openai",
-  "default_model": "gpt-5.2",
-  "api_key": "sk-your-api-key"
-}
-```
+Each retry is not blind re-prompting. The flow matching barrier projects the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
 
-### ⌨️ Commands Overview
+For the complete theoretical treatment, proofs, and experimental methodology, see the [Perspt Book](docs/perspt_book/build/html/index.html).
 
-Perspt uses subcommands. Running `perspt` with no command defaults to `chat`.
+---
 
-| Command | Description |
-|---------|-------------|
-| `chat` | Start interactive TUI chat session (default) |
-| `agent` | Run SRBN agent for autonomous coding |
-| `init` | Initialize project configuration |
-| `config` | Manage configuration settings |
-| `ledger` | Query and manage Merkle ledger |
-| `status` | Show lifecycle counts, energy breakdown, and escalation reports |
-| `abort` | Abort current agent session |
-| `resume` | Resume session with trust context (energy, retries, escalations) |
-| `logs` | View LLM request/response logs |
-| `simple-chat` | Simple CLI chat mode (no TUI) |
+## Commands
 
-**Global Options (apply to all commands):**
+Perspt uses subcommands. Running `perspt` with no arguments defaults to `chat`.
 
-| Option | Description |
-|--------|-------------|
-| `-v, --verbose` | Enable verbose logging |
-| `-c, --config <FILE>` | Configuration file path |
-| `-h, --help` | Print help information |
-| `-V, --version` | Print version |
+| Command        | Description                                              |
+|----------------|----------------------------------------------------------|
+| `chat`         | Interactive TUI chat session (default)                   |
+| `simple-chat`  | Simple CLI chat mode (no TUI)                            |
+| `agent`        | Run SRBN agent for autonomous coding                     |
+| `init`         | Initialize project configuration                         |
+| `config`       | Manage configuration settings                            |
+| `ledger`       | Query and manage the Merkle ledger                       |
+| `status`       | Show lifecycle counts, energy breakdown, escalation reports |
+| `resume`       | Resume a session with trust context                      |
+| `abort`        | Abort the current agent session                          |
+| `logs`         | View LLM request/response logs                           |
 
-## 🤖 Agent Mode - Autonomous Coding Assistant (v0.5.0)
+Global options: `-v` (verbose), `-c <FILE>` (config path), `-h` (help), `-V` (version).
 
-**Agent Mode** uses the **Stabilized Recursive Barrier Network (SRBN)** to autonomously decompose coding tasks, generate code, and verify correctness via LSP diagnostics.
+---
+
+## Agent Mode
+
+Agent mode uses the SRBN engine to autonomously write, test, and commit code.
 
 ### Quick Start
 
 ```bash
-# Basic agent mode - create a Python project
+# Create a Python project from scratch
 perspt agent "Create a Python calculator with add, subtract, multiply, divide"
 
-# With explicit workspace directory
+# Work in an existing project
 perspt agent -w /path/to/project "Add unit tests for the existing API"
 
-# Auto-approve all actions (no prompts)
+# Fully autonomous (no prompts)
 perspt agent -y "Refactor the parser for better error handling"
 ```
 
 ### How SRBN Works
 
-The SRBN control loop executes these steps for each task:
+See [Theoretical Foundation](#theoretical-foundation-stability-is-all-you-need) for the full mathematical treatment. In practice, the control loop for each task is:
 
-1. **Sheafification** - Architect decomposes task into JSON TaskPlan
-2. **Speculation** - Actuator generates code for each sub-task
-3. **Verification** - LSP diagnostics compute Lyapunov Energy $V(x)$
-4. **Convergence** - If $V(x) > \epsilon$, retry with error feedback
-5. **Commit** - When stable, record changes in Merkle Ledger
+1. **Sheafification** -- Architect decomposes the task into a JSON TaskPlan (DAG of nodes)
+2. **Speculation** -- Actuator generates code for each node
+3. **Verification** -- LSP diagnostics and tests compute Lyapunov energy $V(x)$
+4. **Convergence** -- If $V(x) > \epsilon$, flow matching corrects with targeted error feedback
+5. **Commit** -- When $V(x) \leq \epsilon$, record changes in the Merkle ledger
 
-**Lyapunov Energy**:
+The energy function:
 
-```math
-V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log}
-```
+$$
+V(x) = \alpha \cdot V_{\text{syn}} + \beta \cdot V_{\text{str}} + \gamma \cdot V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+$$
 
 | Component | Source | Default Weight |
 |-----------|--------|----------------|
-| $V_{syn}$ | LSP diagnostics (errors, warnings) | $\alpha = 1.0$ |
-| $V_{str}$ | Structural analysis | $\beta = 0.5$ |
-| $V_{log}$ | Test failures (weighted by criticality) | $\gamma = 2.0$ |
-
-### Agent Mode Options
-
-```bash
-perspt agent [OPTIONS] <TASK>
-
-Options:
-  -w, --workdir <DIR>              Working directory (default: current)
-  -y, --yes                        Auto-approve all actions
-      --auto-approve-safe          Auto-approve only safe (read-only) operations
-  -k, --complexity <K>             Max complexity K for sub-graph approval (default: 5)
-      --mode <MODE>                Execution mode: cautious, balanced, or yolo (default: balanced)
-      --model <MODEL>              Model to use for ALL agent tiers
-      --architect-model <M>        Model for Architect tier (deep reasoning/planning)
-      --actuator-model <M>         Model for Actuator tier (code generation)
-      --verifier-model <M>         Model for Verifier tier (stability checking)
-      --speculator-model <M>       Model for Speculator tier (fast lookahead)
-      --energy-weights <α,β,γ>     Lyapunov weights (default: 1.0,0.5,2.0)
-      --stability-threshold <ε>    Convergence threshold (default: 0.1)
-      --max-cost <USD>             Maximum cost in dollars (0 = unlimited)
-      --max-steps <N>              Maximum iterations (0 = unlimited)
-      --defer-tests                Defer tests until sheaf validation
-      --log-llm                    Log all LLM requests/responses to database
-      --verifier-fallback-model <M>   Fallback model for Verifier tier
-      --speculator-fallback-model <M> Fallback model for Speculator tier
-```
+| $V_{\text{syn}}$ | LSP diagnostics (errors, warnings) | $\alpha = 1.0$ |
+| $V_{\text{str}}$ | Structural contracts | $\beta = 0.5$ |
+| $V_{\text{log}}$ | Test failures (weighted) | $\gamma = 2.0$ |
+| $V_{\text{boot}}$ | Build success/failure | 1.0 |
+| $V_{\text{sheaf}}$ | Cross-node consistency | 1.0 |
 
 ### Workspace Classification
 
-Before running any task, the agent classifies the workspace:
+Before running a task, the agent inspects the workspace:
 
-| State | Detection | Behavior |
-|-------|-----------|----------|
-| **Existing Project** | `Cargo.toml`, `pyproject.toml`, `package.json` found | Skip init, check tooling sync (`cargo fetch`, `uv sync`, `npm install`), gather project context for planning |
-| **Greenfield** | Empty dir or language inferred from task | Run language-native init (`cargo init`, `uv init`, `npm init -y`), isolate in child dir if workspace is non-empty |
-| **Ambiguous** | Non-empty dir, no project files, no language keywords | Always create a child project dir to avoid polluting existing files |
+| State              | Detection                                     | Behavior                                          |
+|--------------------|-----------------------------------------------|---------------------------------------------------|
+| Existing Project   | `Cargo.toml`, `pyproject.toml`, etc. found    | Skip init, sync tooling, gather project context   |
+| Greenfield         | Empty dir or language inferred from task      | Run language-native init, isolate in child dir    |
+| Ambiguous          | Non-empty dir, no project files               | Create a child project dir to avoid conflicts     |
 
-The agent checks for required tools **before** initialization and emits install instructions if anything is missing:
+### Review and Approval
+
+Each node presents a grouped diff review with verification context:
+
+| Key | Action           | Description                                 |
+|-----|------------------|---------------------------------------------|
+| `y` | Approve          | Accept the node and commit to ledger        |
+| `n` | Reject           | Discard and re-generate                     |
+| `c` | Correct          | Send targeted feedback for the agent to fix |
+| `e` | Edit externally  | Open files in your editor, then return      |
+| `d` | View Diff        | Toggle full unified diff view               |
+
+### Retry Policy
+
+| Error Type          | Max Retries | On Exhaustion    |
+|---------------------|-------------|------------------|
+| Compilation errors  | 3           | Escalate to user |
+| Tool failures       | 5           | Escalate to user |
+| Review rejections   | 3           | Escalate to user |
+
+### Headless Mode
+
+With `--yes`, the agent runs fully autonomously and prints structured progress:
 
 ```
-🚫 Missing critical tools: cargo (build/init), rustc (compiler)
-📋 Install instructions:
-  cargo (build/init): Install Rust via https://rustup.rs
-  rustc (compiler): Install Rust via https://rustup.rs
-```
-
-### Model Fallback
-
-When no explicit fallback model is configured, each tier retries with the same primary model on structured-output failure. Explicit fallbacks can be set per tier:
-
-```bash
-perspt agent \
-  --architect-model gemini-3.1-pro-preview \
-  --actuator-model gemini-3.1-flash-lite-preview \
-  --verifier-fallback-model gpt-5.4 \
-  "Build a REST API"
-```
-
-### Retry Policy (PSP-4)
-
-| Error Type | Max Retries | Action on Exhaustion |
-|------------|-------------|---------------------|
-| Compilation errors | 3 | Escalate to user |
-| Tool failures | 5 | Escalate to user |
-| Review rejections | 3 | Escalate to user |
-
-### Review Experience
-
-The agent presents a **grouped diff review** for each node with full verification context:
-
-- **Bundle summary** showing created/modified files, write and diff counts, and node class
-- **Verification gates** — syntax, build, test, and lint status at a glance (e.g. `✓syn ✓build ✗test ✓lint`)
-- **Energy breakdown** with per-component values (`V_boot`, `V_sheaf`) and convergence status
-- **Degradation warnings** when a node converged with non-zero energy
-
-**Review actions:**
-
-| Key | Action | Description |
-|-----|--------|-------------|
-| `y` | Approve | Accept the node and commit to ledger |
-| `n` | Reject | Discard and re-generate |
-| `c` | Correct | Send targeted feedback for the agent to fix |
-| `e` | Edit externally | Open files in your editor, return to approval |
-| `d` | View Diff | Toggle full unified diff view |
-
-### Headless Output
-
-When running with `--yes` (auto-approve), the agent prints structured progress:
-
-```text
-[VERIFY] syntax=ok build=ok tests=8/8 lint=ok degraded=false
-[ENERGY] V(x)=0.05 boot=0.00 sheaf=0.00
+[VERIFY]   syntax=ok build=ok tests=8/8 lint=ok degraded=false
+[ENERGY]   V(x)=0.05 boot=0.00 sheaf=0.00
 [ESCALATE] 0 escalations
-[BRANCH] 1 active
-[COMMIT] session abc123 committed
+[COMMIT]   session abc123 committed
 ```
 
-## 🖥️ Simple CLI Mode
+### Agent Options
 
-A minimal, Unix-like command prompt interface for direct Q&A:
+```
+perspt agent [OPTIONS] <TASK>
 
-```bash
-# Basic simple CLI mode
-perspt simple-chat
-
-# With session logging
-perspt simple-chat --log-file session.txt
-
-# Perfect for scripting
-echo "What is quantum computing?" | perspt simple-chat
+  -w, --workdir <DIR>              Working directory (default: current)
+  -y, --yes                        Auto-approve all actions
+      --auto-approve-safe          Auto-approve only safe operations
+  -k, --complexity <K>             Max sub-graph complexity (default: 5)
+      --mode <MODE>                cautious | balanced | yolo (default: balanced)
+      --model <MODEL>              Model for all tiers
+      --architect-model <M>        Model for Architect tier
+      --actuator-model <M>         Model for Actuator tier
+      --verifier-model <M>         Model for Verifier tier
+      --speculator-model <M>       Model for Speculator tier
+      --energy-weights <a,b,g>     Lyapunov weights (default: 1.0,0.5,2.0)
+      --stability-threshold <e>    Convergence threshold (default: 0.1)
+      --max-cost <USD>             Cost limit (0 = unlimited)
+      --max-steps <N>              Iteration limit (0 = unlimited)
+      --defer-tests                Defer tests until sheaf validation
+      --log-llm                    Log all LLM requests to database
 ```
 
-## 💬 Chat Interface & Commands
+---
 
-### Built-in Commands
+## Configuration
 
-| Command | Description |
-|---------|-------------|
-| `/save` | Save conversation with timestamp |
-| `/save <file>` | Save to specific file |
+Perspt accepts configuration via environment variables, a JSON config file, or CLI arguments.
 
-### Key Bindings
-
-| Key | Action |
-|-----|--------|
-| **Enter** | Send message |
-| **Esc** | Exit application |
-| **Ctrl+C / Ctrl+D** | Exit with cleanup |
-| **↑/↓ Arrow Keys** | Scroll chat history |
-| **Page Up/Down** | Fast scroll |
-
-## 🏠 Using Ollama for Local Models
-
-Ollama provides local AI models without API keys or internet connectivity.
-
-### Quick Setup
+**Environment variable (simplest):**
 
 ```bash
-# Install Ollama
-brew install ollama  # macOS
-# or: curl -fsSL https://ollama.ai/install.sh | sh  # Linux
+export OPENAI_API_KEY="sk-..."
+perspt
+```
+
+**Config file (`config.json`):**
+
+```json
+{
+  "provider_type": "openai",
+  "default_model": "gpt-4o-mini",
+  "api_key": "sk-..."
+}
+```
+
+**CLI arguments:**
+
+```bash
+perspt --provider-type anthropic --model claude-sonnet-4-20250514
+```
+
+---
+
+## Using Ollama for Local Models
+
+Ollama runs models locally with no API key and no internet connection.
+
+```bash
+# Install
+brew install ollama        # macOS
+# curl -fsSL https://ollama.ai/install.sh | sh   # Linux
 
 # Start and pull a model
 ollama serve
@@ -326,85 +366,103 @@ ollama pull llama3.2
 perspt --provider-type ollama --model llama3.2
 ```
 
-### Benefits
-
-- **🔒 Privacy**: All processing happens locally
-- **💰 Cost-effective**: No API fees or usage limits
-- **⚡ Offline capable**: Works without internet
-
-## 🏗️ Architecture
-
-Perspt is organized as a Cargo workspace:
-
-```
-perspt/crates/
-├── perspt-cli     # CLI entry point
-├── perspt-core    # Config, LLM provider (genai)
-├── perspt-tui     # Terminal UI (Ratatui)
-├── perspt-agent   # SRBN orchestrator, tools, LSP
-├── perspt-policy  # Security sandbox
-└── perspt-sandbox # Process isolation (future)
-```
-
-### Technical Highlights
-
-- **genai crate (v0.3.5)**: Unified access to all LLM providers with streaming support
-- **Custom Markdown Parser**: Built-in parser optimized for terminal rendering
-- **Ratatui TUI**: Modern terminal UI framework with responsive design
-- **Tokio Async Runtime**: Efficient concurrent operations and streaming
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**"API key not found" error:**
-```bash
-# Use environment variable
-export OPENAI_API_KEY="your-key-here"
-
-# Or use CLI argument
-perspt --provider-type openai --api-key YOUR_KEY
-```
-
-**Connection timeout:**
-- Check internet connection
-- Verify API key is valid
-- Try a different model
-
-**Ollama not connecting:**
-```bash
-# Ensure Ollama is running
-ollama serve
-
-# Check connection
-curl http://localhost:11434/api/tags
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-```bash
-# Run tests
-cargo test --workspace
-
-# Check formatting
-cargo fmt --check
-```
-
-## 📄 License
-
-This project is licensed under the LGPL-3.0 License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [genai](https://crates.io/crates/genai) - Unified LLM provider access
-- [Ratatui](https://ratatui.rs/) - Terminal UI framework
-- [Tokio](https://tokio.rs/) - Async runtime
-- All the LLM providers for their amazing APIs
+Benefits: full privacy, zero API cost, offline operation.
 
 ---
 
-**Made with ❤️ by the Perspt Team**
+## Chat Interface
 
-*Your Terminal's Window to the AI World* 🤖
+### Key Bindings
+
+| Key              | Action              |
+|------------------|---------------------|
+| Enter            | Send message        |
+| Esc              | Exit application    |
+| Ctrl+C / Ctrl+D  | Exit with cleanup   |
+| Up/Down arrows   | Scroll chat history |
+| Page Up/Down     | Fast scroll         |
+
+### Built-in Commands
+
+| Command         | Description                      |
+|-----------------|----------------------------------|
+| `/save`         | Save conversation with timestamp |
+| `/save <file>`  | Save to a specific file          |
+
+---
+
+## Architecture
+
+Perspt is organized as a Cargo workspace with seven crates:
+
+```
+perspt/crates/
+  perspt-cli       CLI entry point and subcommand dispatch
+  perspt-core      Configuration, LLM provider adapter (genai), events
+  perspt-tui       Terminal UI (Ratatui)
+  perspt-agent     SRBN orchestrator, tools, LSP client, test runner
+  perspt-store     Session persistence (DuckDB)
+  perspt-policy    Security policy engine (Starlark)
+  perspt-sandbox   Process isolation (future)
+```
+
+Key implementation details:
+
+- **genai crate** provides unified streaming access to all LLM providers
+- **Ratatui** powers the TUI with a custom markdown-to-lines renderer
+- **Tokio** async runtime for concurrent streaming and non-blocking UI
+- **DuckDB** persists session state, energy history, and the Merkle ledger
+- **Starlark** evaluates security policies that gate file writes and command execution
+
+The SRBN engine is an experimental implementation of the theoretical framework described in *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). The paper reformulates LLM agency as a sheaf-theoretic control problem, replacing probabilistic search with Lyapunov stability guarantees and Input-to-State Stability (ISS) proofs. See the [Theoretical Foundation](#theoretical-foundation-stability-is-all-you-need) section for details.
+
+---
+
+## Troubleshooting
+
+**API key not found:**
+
+```bash
+export OPENAI_API_KEY="your-key-here"
+# or pass directly
+perspt --provider-type openai --api-key YOUR_KEY
+```
+
+**Connection timeout:** Verify your internet connection and API key validity. Try a different provider or model.
+
+**Ollama not connecting:**
+
+```bash
+ollama serve                              # ensure it is running
+curl http://localhost:11434/api/tags      # verify connectivity
+```
+
+---
+
+## Documentation
+
+For a comprehensive guide covering installation, configuration, tutorials, the SRBN architecture, developer internals, and the API reference, read the **[Perspt Book](docs/perspt_book/build/html/index.html)** (also available as [PDF](docs/perspt_book/build/latex/perspt.pdf)).
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+```bash
+cargo test --workspace       # run tests
+cargo clippy -- -D warnings  # lint
+cargo fmt --check            # formatting
+```
+
+## License
+
+LGPL-3.0. See [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- [genai](https://crates.io/crates/genai) -- Unified LLM provider access
+- [Ratatui](https://ratatui.rs/) -- Terminal UI framework
+- [Tokio](https://tokio.rs/) -- Async runtime
+- [DuckDB](https://duckdb.org/) -- Embedded analytics database
+- The LLM provider communities for their APIs and models

@@ -3,139 +3,161 @@
 Agent Mode Tutorial
 ===================
 
-Master autonomous code generation with SRBN.
+Master autonomous multi-file code generation with the SRBN engine.
 
 Overview
 --------
 
-Agent Mode lets Perspt autonomously write, test, and verify code using the 
-**Stabilized Recursive Barrier Network (SRBN)** engine.
+Agent mode lets Perspt plan, write, test, and commit multi-file projects
+autonomously. The PSP-5 runtime decomposes tasks into a directed acyclic graph
+(DAG) of nodes, each owning specific output files, verified by real LSP
+diagnostics and test runners.
 
 Prerequisites
 -------------
 
-- Perspt v0.5.0+ installed
-- API key for a capable model (GPT-5.2, Claude Opus 4.5 recommended)
-- Python 3.9+ (for LSP integration)
+- Perspt v0.5.4+
+- An API key for a capable model
+- For Python projects: ``uv`` and ``python3`` installed
+- For Rust projects: ``cargo`` and ``rustc`` installed
 
 Basic Usage
 -----------
 
 .. code-block:: bash
 
-   # Simple task
-   perspt agent "Create a Python calculator"
+   # Plan and build a project in a new directory
+   perspt agent -w ./my-project "Create a Python calculator package"
 
-   # With workspace
-   perspt agent -w ./my-project "Add unit tests"
+   # Auto-approve all changes (headless)
+   perspt agent -y -w ./my-project "Create a REST API in Rust"
 
-   # Auto-approve all
-   perspt agent -y "Refactor error handling"
+   # Use specific models per tier
+   perspt agent \
+     --architect-model gemini-pro-latest \
+     --actuator-model gemini-3.1-flash-lite-preview \
+     -w ./project "Build an ETL pipeline"
 
-Step-by-Step Example
---------------------
 
-Let's create a Python calculator:
+Step-by-Step: Python Calculator
+-------------------------------
 
 Step 1: Start the Agent
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   mkdir calculator-demo && cd calculator-demo
-   perspt agent "Create a Python calculator with add, subtract, multiply, divide operations. Include type hints and a comprehensive test suite."
+   mkdir calc-demo && cd calc-demo
+   perspt agent -w . \
+     "Create a Python calculator package with add, subtract, multiply,
+      divide operations. Include type hints, a pyproject.toml with
+      build-system, and comprehensive pytest tests."
 
 Step 2: Watch the SRBN Loop
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The agent will:
+The agent proceeds through the PSP-5 phases:
 
-1. **Sheafify**: Decompose into subtasks
+**Detection** — Perspt identifies Python from the task description and selects
+the ``python`` plugin:
 
-   .. code-block:: json
+.. code-block:: text
 
-      {
-        "nodes": [
-          {"id": 1, "description": "Create Calculator class"},
-          {"id": 2, "description": "Add arithmetic methods"},
-          {"id": 3, "description": "Write unit tests"}
-        ]
-      }
+   [detect] Workspace: greenfield
+   [detect] Plugin: python (LSP: ty, tests: pytest, init: uv init --lib)
 
-2. **Speculate**: Generate code for each node
+**Planning** — The Architect decomposes the task into a DAG:
 
-3. **Verify**: Check with LSP and tests
+.. code-block:: text
 
-   .. code-block:: text
+   [plan] TaskPlan: 4 nodes, 1 plugin
+   [plan]   node-1: Initialize Python package (Command)
+   [plan]   node-2: Create calculator module (Code) -> [node-1]
+   [plan]   node-3: Create main entry point (Code) -> [node-2]
+   [plan]   node-4: Write pytest tests (UnitTest) -> [node-2]
 
-      V(x) = 1.0·V_syn + 0.5·V_str + 2.0·V_log
-      V_syn = 0 (no LSP errors)
-      V_str = 0.1 (clean structure)
-      V_log = 0 (all tests pass)
-      V(x) = 0.05 < ε (stable!)
+Each node owns specific output files (ownership closure):
 
-4. **Commit**: Record in ledger
+- node-1: ``pyproject.toml``
+- node-2: ``src/calculator/__init__.py``, ``src/calculator/core.py``
+- node-3: ``src/main.py``
+- node-4: ``tests/test_calculator.py``
+
+**Execution** — Nodes execute in topological order. For each node:
+
+1. Actuator generates a multi-artifact bundle (writes, diffs, commands)
+2. Files are applied transactionally
+3. LSP diagnostics run (V_syn), contracts check (V_str), tests run (V_log)
+4. Bootstrap commands check (V_boot)
+
+.. code-block:: text
+
+   [node-2] Generating artifact bundle...
+   [node-2] Bundle: 2 files created (write), 0 modified (diff)
+   [node-2] Verification:
+             V_syn  = 0.00 (ty: 0 errors, 0 warnings)
+             V_str  = 0.00 (contracts satisfied)
+             V_log  = 0.00 (deferred or passed)
+             V_boot = 0.00 (all commands succeeded)
+             V_sheaf = 0.00 (pending final check)
+             V(x)  = 0.00 < epsilon=0.10 -> STABLE
 
 Step 3: Review Changes
 ~~~~~~~~~~~~~~~~~~~~~~
 
-When prompted, review the generated code. The review modal shows a grouped
-diff view with per-node bundle summary, verification gates, and energy
-breakdown:
+In interactive mode, the review modal presents grouped diffs:
 
 .. code-block:: text
 
-   ╭─────────────────────────────────────────────────────╮
-   │  Review Node 2 — Actuator                           │
-   ╞═════════════════════════════════════════════════════╡
-   │  Bundle: 2 created, 0 modified (3 writes, 2 diffs) │
-   │  + calculator.py   [create] (45 lines)             │
-   │  + test_calculator.py [create] (62 lines)          │
-   │                                                     │
-   │  Verification: ✓syn ✓build ✓test ✓lint             │
-   │  Tests: 8 passed, 0 failed                         │
-   │  Energy: V(x) = 0.05  [boot 0.0 sheaf 0.0]        │
-   │                                                     │
-   │  [y] Approve  [n] Reject  [c] Correct              │
-   │  [e] Edit externally  [d] View Diff                │
-   ╰─────────────────────────────────────────────────────╯
+   Review Node 2: Create calculator module
+   ────────────────────────────────────────
+   Bundle: 2 created, 0 modified
+   + src/calculator/__init__.py  [create] (3 lines)
+   + src/calculator/core.py      [create] (45 lines)
 
-Review actions:
+   Verification: V_syn OK | V_str OK | V_log OK | V_boot OK
+   Energy: V(x) = 0.00
 
-- **Approve** (``y``) — accept the node and commit to ledger
-- **Reject** (``n``) — discard and re-generate from scratch
-- **Correct** (``c``) — send targeted feedback for the agent to fix specific issues
-- **Edit externally** (``e``) — open files in your editor, then return to the
-  same approval boundary
-- **View Diff** (``d``) — toggle the full unified diff view with per-file
-  operation labels
+   [y] Approve  [n] Reject  [c] Correct  [e] Edit  [d] Diff
 
-Step 4: Check Results
-~~~~~~~~~~~~~~~~~~~~~
+Actions:
+
+- **y** — Approve and commit to ledger
+- **n** — Reject and re-generate from scratch
+- **c** — Send correction feedback to the agent
+- **e** — Open files in your editor, then return
+- **d** — Toggle full unified diff view
+
+Step 4: Inspect Results
+~~~~~~~~~~~~~~~~~~~~~~~
+
+After all nodes converge and pass sheaf validation:
 
 .. code-block:: bash
 
-   # View generated files
    ls -la
-   # calculator.py
-   # test_calculator.py
+   # pyproject.toml  src/  tests/  uv.lock
 
-   # Run tests
-   python -m pytest test_calculator.py -v
+   # Run the tests
+   cd calc-demo && uv run pytest -v
+
+   # Check the ledger
+   perspt ledger --recent
+
 
 Model Tier Configuration
 ------------------------
 
-Use specialized models for different SRBN phases:
+Assign specialized models to each SRBN phase:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gpt-5.2 \
-     --actuator-model claude-opus-4.5 \
-     --verifier-model gemini-3-pro \
-     --speculator-model gemini-3-flash \
-     "Build a REST API"
+     --architect-model gemini-pro-latest \
+     --actuator-model gemini-3.1-flash-lite-preview \
+     --verifier-model gemini-pro-latest \
+     --speculator-model gemini-3.1-flash-lite-preview \
+     -w ./project "Build a web server"
 
 .. list-table::
    :header-rows: 1
@@ -145,17 +167,18 @@ Use specialized models for different SRBN phases:
      - Purpose
      - Recommendation
    * - Architect
-     - Task decomposition
-     - Deep reasoning (GPT-5.2)
+     - Task decomposition, DAG planning
+     - Deep reasoning model (e.g., Gemini Pro, Claude Sonnet)
    * - Actuator
-     - Code generation
-     - Strong coding (Claude)
+     - Code generation, artifact bundles
+     - Fast coding model (e.g., Gemini Flash)
    * - Verifier
-     - Stability check
-     - Fast analysis (Gemini Pro)
+     - Stability analysis, contract checking
+     - Analytical model (e.g., Gemini Pro)
    * - Speculator
-     - Branch prediction
-     - Ultra-fast (Gemini Flash)
+     - Branch prediction, lookahead
+     - Ultra-fast model (e.g., Gemini Flash Lite)
+
 
 Energy Tuning
 -------------
@@ -164,11 +187,14 @@ Customize the Lyapunov energy weights:
 
 .. code-block:: bash
 
-   # Prioritize test passing (higher γ)
-   perspt agent --energy-weights "1.0,0.5,3.0" "Add tests"
+   # Prioritize test passing (higher gamma)
+   perspt agent --energy-weights "1.0,0.5,3.0" -w . "Add tests"
 
-   # Prioritize type safety (higher α)
-   perspt agent --energy-weights "2.0,0.5,1.0" "Add type hints"
+   # Prioritize type safety (higher alpha)
+   perspt agent --energy-weights "2.0,0.5,1.0" -w . "Add type hints"
+
+   # Custom convergence threshold
+   perspt agent --stability-threshold 0.5 -w . "Quick prototype"
 
 Execution Modes
 ---------------
@@ -180,28 +206,16 @@ Execution Modes
    * - Mode
      - Behavior
    * - ``cautious``
-     - Prompt for approval on every change
+     - Prompt for approval on every node
    * - ``balanced``
      - Prompt when complexity > K (default)
    * - ``yolo``
-     - Auto-approve everything (dangerous!)
+     - Auto-approve everything (use with caution)
 
 .. code-block:: bash
 
-   perspt agent --mode cautious "Modify database schema"
+   perspt agent --mode cautious -w . "Modify database schema"
 
-Complexity Threshold
---------------------
-
-Control when to prompt for approval:
-
-.. code-block:: bash
-
-   # Approve up to 3 files without prompting
-   perspt agent -k 3 "Refactor module"
-
-   # Always prompt (k=0)
-   perspt agent -k 0 "Any task"
 
 Cost and Step Limits
 --------------------
@@ -209,100 +223,87 @@ Cost and Step Limits
 .. code-block:: bash
 
    # Maximum $5 cost
-   perspt agent --max-cost 5.0 "Large refactor"
+   perspt agent --max-cost 5.0 -w . "Large refactor"
 
-   # Maximum 10 iterations
-   perspt agent --max-steps 10 "Iterative improvement"
+   # Maximum 20 iterations across all nodes
+   perspt agent --max-steps 20 -w . "Iterative improvement"
+
 
 Managing Sessions
 -----------------
 
 .. code-block:: bash
 
-   # Check status — shows lifecycle counts, energy breakdown, escalations
+   # Show session status: lifecycle counts, energy breakdown, escalations
    perspt status
 
-   # Abort current
+   # Abort the current session
    perspt abort
 
-   # Resume interrupted — displays trust context (energy, retries, escalations)
-   perspt resume
+   # Resume the last interrupted session with trust context
+   perspt resume --last
 
-The ``status`` command shows per-node lifecycle counts (queued, running,
-verifying, retrying, completed, failed, escalated), the latest energy component
-breakdown, total retry count, and recent escalation reports.
+The ``status`` command shows per-node lifecycle counts (queued, running, verifying,
+retrying, completed, failed, escalated), the latest energy breakdown, total retry
+count, and recent escalation reports.
 
 The ``resume`` command displays trust context before resuming: escalation count,
-last energy state with component values, and total retries across all nodes.
+last energy state, and total retries across all nodes.
 
-Change Tracking
----------------
 
-.. code-block:: bash
-
-   # View history
-   perspt ledger --recent
-
-   # Rollback
-   perspt ledger --rollback abc123
-
-   # Statistics
-   perspt ledger --stats
-
-LLM Logging and Debugging
--------------------------
-
-Enable LLM request logging for debugging:
+LLM Logging
+-----------
 
 .. code-block:: bash
 
-   # Log all LLM requests to database
-   perspt agent --log-llm "Debug task"
+   # Log all LLM calls to the DuckDB store
+   perspt agent --log-llm -w . "Debug task"
 
-   # Defer tests until sheaf validation (faster iteration)
-   perspt agent --defer-tests "Rapid prototyping"
-
-View logged requests:
-
-.. code-block:: bash
-
-   # Interactive TUI viewer
+   # View logs interactively
    perspt logs --tui
 
-   # Most recent session
+   # View most recent session
    perspt logs --last
 
    # Usage statistics
    perspt logs --stats
 
+
 Best Practices
 --------------
 
-1. **Start small**: Test with simple tasks first
-2. **Use workspace**: Always specify ``-w`` for clarity
-3. **Set limits**: Use ``--max-cost`` and ``--max-steps``
-4. **Review carefully**: Check diffs before approving
-5. **Use tiers**: Match models to task requirements
-6. **Track changes**: Use ``perspt ledger`` regularly
+1. **Start with a clear task description** — Include language, package structure,
+   and testing requirements in the prompt
+2. **Use workspace directories** — Always specify ``-w <dir>`` for clarity
+3. **Set cost limits** — Use ``--max-cost`` to prevent runaway spending
+4. **Review before committing** — In interactive mode, inspect diffs carefully
+5. **Use per-tier models** — Match model capabilities to task complexity
+6. **Track changes** — Use ``perspt ledger`` to review and rollback
+
 
 Troubleshooting
 ---------------
 
-**Agent stuck in retry loop**:
+**Agent stuck in retry loop:**
 
-- Check LSP is working: ``ty check file.py``
+- Check LSP is working: ``ty check file.py`` or ``cargo check``
 - Lower stability threshold: ``--stability-threshold 0.5``
-- Reduce energy weights for less strict verification
+- Use ``--defer-tests`` to skip V_log during coding
 
-**High energy despite clean code**:
+**High energy despite clean code:**
 
-- Check test failures: ``pytest -v``
+- Check test failures: ``uv run pytest -v``
 - Review LSP diagnostics
 - Adjust weights: ``--energy-weights "0.5,0.5,1.0"``
+
+**Plugin not detected:**
+
+- Ensure required binaries are installed (``uv``, ``cargo``, ``node``, etc.)
+- Check ``perspt status`` for active plugins
 
 See Also
 --------
 
-- :doc:`../concepts/srbn-architecture` - SRBN details
-- :doc:`../howto/agent-options` - Full CLI reference
-- :doc:`../api/perspt-agent` - API documentation
+- :doc:`headless-mode` — Fully autonomous operation
+- :doc:`../concepts/srbn-architecture` — SRBN technical details
+- :doc:`../howto/agent-options` — Full CLI reference

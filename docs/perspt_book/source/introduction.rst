@@ -5,29 +5,56 @@ Introduction to Perspt
 
    <div style="text-align: center; margin: 2em 0;">
    <pre style="font-family: monospace; font-size: 0.8em; line-height: 1.2; margin: 0 auto; display: inline-block;">
-     ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
-     ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
-  ██████╔╝█████╗  ██████╔╝███████╗██████╔╝   ██║   
-  ██╔═══╝ ██╔══╝  ██╔══██╗╚════██║██╔═══╝    ██║   
-  ██║     ███████╗██║  ██║███████║██║        ██║   
-  ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝   
+   ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
+   ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
+   ██████╔╝█████╗  ██████╔╝███████╗██████╔╝   ██║
+   ██╔═══╝ ██╔══╝  ██╔══██╗╚════██║██╔═══╝    ██║
+   ██║     ███████╗██║  ██║███████║██║        ██║
+   ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
    </pre>
-   <p><em>Your Terminal's Window to the AI World 🤖</em></p>
+   <p><em>Your Terminal's Window to the AI World</em></p>
    </div>
 
 What is Perspt?
 ---------------
 
-**Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum **P**\ ertaining **T**\ houghts) is a 
-high-performance, terminal-based interface to Large Language Models with **autonomous coding capabilities**.
+**Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum
+**P**\ ertaining **T**\ houghts) is a high-performance, terminal-based interface
+to Large Language Models. It serves two complementary purposes:
 
-.. admonition:: Version 0.5.0 Highlights
+1. **A simple CLI for testing LLM services** — Connect to OpenAI, Anthropic,
+   Google Gemini, Groq, Cohere, xAI, DeepSeek, or Ollama with a single command.
+   Auto-detect your API key, chat interactively in a beautiful TUI, or pipe
+   responses through the simple-chat mode. Perspt makes it effortless to
+   evaluate and compare different LLM providers from your terminal.
+
+2. **An experimental implementation of the SRBN engine** — Perspt's agent mode
+   is a practical implementation of the **Stabilized Recursive Barrier Network
+   (SRBN)** framework described in the paper *"Stability is All You Need:
+   Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by
+   **Vikrant R. and Ronak R.** (pre-publication). The SRBN engine decomposes
+   coding tasks into DAGs, enforces Lyapunov stability through multi-stage
+   verification barriers, and commits only when energy converges — bringing
+   control-theoretic rigor to autonomous code generation.
+
+.. admonition:: Version 0.5.4 Highlights
    :class: tip
 
-   - **SRBN Agent Mode** — Autonomous coding with Lyapunov stability guarantees
-   - **7-Crate Architecture** -- Modular, extensible workspace design
-   - **LSP Integration** — Real-time type checking with ``ty`` server
-   - **Latest Models** — GPT-5.2, Claude Opus 4.5, Gemini 3
+   **LLM CLI:**
+
+   - **Multi-Provider Chat** — 8 providers with zero-config auto-detection
+   - **Beautiful TUI** — Markdown rendering, streaming responses, scroll navigation
+   - **Simple CLI Mode** — Pipe-friendly ``simple-chat`` for scripting and logging
+
+   **SRBN Agent (Experimental):**
+
+   - **PSP-5 Runtime** — Project-first multi-file execution with ownership closure
+   - **Five-Component Energy** — V(x) = alpha * V_syn + beta * V_str + gamma * V_log + V_boot + V_sheaf
+   - **Plugin-Driven Verification** — Language plugins select LSP server, test runner, and init commands
+   - **Sheaf Validation** — Cross-node consistency checks after all nodes converge
+   - **Provisional Branches** — Speculative child-node execution isolated until parent commits
+   - **Headless Mode** — ``--yes`` flag for fully autonomous CI/CD operation
+   - **Session Resume** — ``perspt resume`` rehydrates energy, retries, and escalation state
 
 Architecture
 ------------
@@ -41,29 +68,29 @@ Perspt is built as a **7-crate Rust workspace**:
    digraph arch {
        rankdir=TB;
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-       
+
        subgraph cluster_cli {
            label="User Interface";
            style=dashed;
            cli [label="perspt-cli\n10 commands", fillcolor="#4ECDC4"];
            tui [label="perspt-tui\nTerminal UI", fillcolor="#96CEB4"];
        }
-       
+
        subgraph cluster_core {
            label="Core Engine";
            style=dashed;
-           core [label="perspt-core\nLLM Provider", fillcolor="#45B7D1"];
+           core [label="perspt-core\nLLM Provider + Types", fillcolor="#45B7D1"];
            agent [label="perspt-agent\nSRBN Engine", fillcolor="#FFEAA7"];
-           store [label="perspt-store\nSession DB", fillcolor="#B8D4E3"];
+           store [label="perspt-store\nDuckDB Sessions", fillcolor="#B8D4E3"];
        }
-       
+
        subgraph cluster_security {
            label="Security";
            style=dashed;
-           policy [label="perspt-policy\nPolicy Engine", fillcolor="#DDA0DD"];
+           policy [label="perspt-policy\nStarlark Rules", fillcolor="#DDA0DD"];
            sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
        }
-       
+
        cli -> tui;
        cli -> agent;
        agent -> core;
@@ -79,64 +106,95 @@ Key Features
    :widths: 5 25 70
    :class: borderless
 
-   * - 🤖
-     - **SRBN Agent Mode**
-     - Autonomous coding with stability guarantees. Decomposes tasks, generates code, verifies with LSP.
-   * - 🔌
+   * - **SRBN**
+     - **Agent Mode**
+     - Autonomous multi-file coding. Plans a task DAG, generates artifact bundles per node,
+       verifies with LSP + tests, retries until energy converges, and commits to the ledger.
+   * - **LLM**
      - **Multi-Provider**
-     - OpenAI GPT-5.2, Anthropic Claude Opus 4.5, Google Gemini 3, Groq, Cohere, XAI, DeepSeek, Ollama.
-   * - 🔬
-     - **LSP Integration**
-     - Real-time Python type checking using ``ty`` server. Computes syntax energy V_syn.
-   * - 🧪
+     - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, and Ollama (local).
+       Zero-config auto-detection from environment variables.
+   * - **LSP**
+     - **Sensor Architecture**
+     - Plugin-driven LSP selection: ``rust-analyzer`` for Rust, ``ty`` or ``pyright`` for Python,
+       ``typescript-language-server`` for JS/TS, ``gopls`` for Go. Computes V_syn.
+   * - **Test**
      - **Test Runner**
-     - pytest integration with weighted failure scoring for logic energy V_log.
-   * - 📝
+     - pytest integration with weighted failure scoring. Critical tests carry weight 10,
+       high-priority 3, low-priority 1. Produces V_log.
+   * - **Ledger**
      - **Merkle Ledger**
-     - Git-style change tracking with rollback support.
-   * - 🔒
+     - DuckDB-backed cryptographic change tracking. Supports rollback, session resume,
+       energy history, and escalation reports.
+   * - **Policy**
      - **Security**
-     - Starlark policy rules and command sanitization.
-   * - 💰
+     - Starlark policy engine validates commands before execution. Workspace-bound
+       enforcement prevents escaping the project directory.
+   * - **Budget**
      - **Token Budget**
-     - Cost tracking with per-request limits.
-   * - 🎨
-     - **Beautiful TUI**
-     - Ratatui-based with markdown rendering, diff viewer, task tree.
+     - Per-session cost tracking with ``--max-cost`` USD limit and ``--max-steps`` iteration cap.
+   * - **TUI**
+     - **Terminal UI**
+     - Ratatui-based with markdown rendering, diff viewer, task tree, dashboard,
+       review modal, and logs viewer.
 
 SRBN: Stabilized Recursive Barrier Network
 ------------------------------------------
 
-The core innovation in Perspt v0.5.0 is the SRBN control loop:
+The SRBN engine in Perspt is based on the paper *"Stability is All You Need:
+Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.
+and Ronak R.** (pre-publication). The paper introduces a topological framework
+that reformulates LLM agency as a sheaf-theoretic control problem, replacing
+probabilistic search with Lyapunov stability guarantees. Key theoretical
+contributions include:
+
+- **Input-to-State Stability (ISS)** proof showing bounded reasoning errors
+  result in bounded system deviation
+- **Flow Matching Barriers** that project diverging agent trajectories back onto
+  the safe manifold
+- **Adaptive Flow Speculation** for latency reduction via branch prediction
+- Reliability scaling from exponential decay to logarithmic: :math:`O(\log N)`
+
+Perspt implements this theory as a practical coding agent, governed by PSP-5:
 
 .. graphviz::
    :align: center
-   :caption: SRBN Control Flow
+   :caption: SRBN Control Flow (PSP-5)
 
    digraph srbn {
        rankdir=LR;
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-       
-       task [label="Task", shape=ellipse, fillcolor="#E3F2FD"];
-       sheaf [label="Sheafify\n(Architect)", fillcolor="#E8F5E9"];
-       spec [label="Speculate\n(Actuator)", fillcolor="#FFF3E0"];
-       verify [label="Verify\n(LSP + Tests)", fillcolor="#F3E5F5"];
-       check [label="V(x) > ε?", shape=diamond, fillcolor="#FFECB3"];
+
+       detect [label="Detect\nPlugins", fillcolor="#E0F7FA"];
+       plan [label="Plan\n(Architect)", fillcolor="#E8F5E9"];
+       gen [label="Generate\n(Actuator)", fillcolor="#FFF3E0"];
+       verify [label="Verify\n(LSP+Tests)", fillcolor="#F3E5F5"];
+       check [label="V(x) < e?", shape=diamond, fillcolor="#FFECB3"];
+       sheaf [label="Sheaf\nValidation", fillcolor="#E8EAF6"];
        commit [label="Commit\n(Ledger)", fillcolor="#C8E6C9"];
-       
-       task -> sheaf;
-       sheaf -> spec;
-       spec -> verify;
+
+       detect -> plan;
+       plan -> gen;
+       gen -> verify;
        verify -> check;
-       check -> spec [label="retry", style=dashed, color="#E53935"];
-       check -> commit [label="stable"];
+       check -> gen [label="retry", style=dashed, color="#E53935"];
+       check -> sheaf [label="stable"];
+       sheaf -> commit;
    }
 
-**Lyapunov Energy**: V(x) = α·V_syn + β·V_str + γ·V_log
+**Lyapunov Energy**:
 
-- **V_syn**: LSP diagnostics (errors, warnings)
-- **V_str**: Structural analysis
-- **V_log**: Test failures (weighted by criticality)
+.. math::
+
+   V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
+
+- **V_syn** — LSP diagnostic count (errors + warnings)
+- **V_str** — Structural contract violations
+- **V_log** — Weighted test failures (pytest)
+- **V_boot** — Bootstrap command exit codes (build, init)
+- **V_sheaf** — Cross-node consistency failures
+
+Default weights: alpha = 1.0, beta = 0.5, gamma = 2.0. Convergence threshold: epsilon = 0.10.
 
 CLI Commands
 ------------
@@ -149,34 +207,34 @@ CLI Commands
      - Description
      - Example
    * - ``chat``
-     - Interactive TUI
-     - ``perspt chat``
+     - Interactive TUI chat (default)
+     - ``perspt chat --model gemini-pro-latest``
    * - ``agent``
-     - Autonomous coding
-     - ``perspt agent "create calculator"``
+     - Autonomous multi-file coding
+     - ``perspt agent "Create a REST API in Rust"``
    * - ``init``
-     - Project setup
-     - ``perspt init --memory``
+     - Initialize project config
+     - ``perspt init --memory --rules``
    * - ``config``
-     - Configuration
+     - View or edit configuration
      - ``perspt config --show``
    * - ``ledger``
-     - Change history
+     - Query Merkle change history
      - ``perspt ledger --recent``
    * - ``status``
-     - Agent status
+     - Session lifecycle and energy
      - ``perspt status``
    * - ``abort``
-     - Cancel session
+     - Cancel running session
      - ``perspt abort``
    * - ``resume``
-     - Resume session
-     - ``perspt resume``
+     - Resume interrupted session
+     - ``perspt resume --last``
    * - ``logs``
-     - View LLM logs
+     - View LLM request logs
      - ``perspt logs --tui``
    * - ``simple-chat``
-     - Simple CLI mode
+     - CLI chat without TUI
      - ``perspt simple-chat``
 
 Supported Providers
@@ -188,19 +246,19 @@ Supported Providers
 
    * - Provider
      - Environment Variable
-     - Models (2025)
+     - Notes
    * - OpenAI
      - ``OPENAI_API_KEY``
-     - GPT-5.2, o3-mini, o1-preview
+     - GPT-4o, o3-mini, o1-preview, GPT-4.1
    * - Anthropic
      - ``ANTHROPIC_API_KEY``
-     - Claude Opus 4.5
+     - Claude Sonnet 4, Claude Opus 4
    * - Google
      - ``GEMINI_API_KEY``
-     - Gemini 3 Flash, Gemini 3 Pro
+     - Gemini 2.5 Pro/Flash, Gemini 3.1 Pro/Flash
    * - Groq
      - ``GROQ_API_KEY``
-     - Llama 3.x (ultra-fast)
+     - Llama-based models (ultra-fast inference)
    * - Cohere
      - ``COHERE_API_KEY``
      - Command R+
@@ -212,7 +270,7 @@ Supported Providers
      - DeepSeek Coder
    * - Ollama
      - *(none)*
-     - Local models
+     - Local models — no API key required
 
 Philosophy
 ----------
@@ -228,10 +286,12 @@ Philosophy
 
 Perspt embodies the belief that AI tools should be:
 
-- **Fast** — Rust-native performance
-- **Stable** — Lyapunov-guaranteed convergence  
-- **Secure** — Policy-controlled execution
-- **Extensible** — Modular crate architecture
+- **Accessible** — A simple ``perspt`` command connects you to any LLM provider
+- **Fast** — Rust-native performance with async streaming
+- **Stable** — Lyapunov-guaranteed convergence before commit (SRBN agent)
+- **Secure** — Policy-controlled execution with workspace bounds
+- **Extensible** — Modular 7-crate architecture
+- **Experimental** — A testbed for control-theoretic approaches to LLM reliability
 
 Next Steps
 ----------
@@ -239,19 +299,19 @@ Next Steps
 .. grid:: 3
    :gutter: 3
 
-   .. grid-item-card:: 🚀 Quick Start
+   .. grid-item-card:: Quick Start
       :link: quickstart
       :link-type: doc
 
       Get running in 5 minutes.
 
-   .. grid-item-card:: 🤖 Agent Mode
+   .. grid-item-card:: Agent Mode
       :link: tutorials/agent-mode
       :link-type: doc
 
-      Autonomous code generation.
+      Autonomous multi-file coding.
 
-   .. grid-item-card:: 📖 Architecture
+   .. grid-item-card:: Architecture
       :link: developer-guide/architecture
       :link-type: doc
 
