@@ -826,7 +826,12 @@ pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
             if path.is_dir() {
                 walk(&path, base, out)?;
             } else if let Ok(rel) = path.strip_prefix(base) {
-                out.push(rel.to_string_lossy().to_string());
+                let normalized = rel
+                    .components()
+                    .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                out.push(normalized);
             }
         }
         Ok(())
