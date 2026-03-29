@@ -3,236 +3,137 @@
 Workspace Crates
 ================
 
-Perspt is organized as a **7-crate Cargo workspace** for modularity and maintainability.
-
-Crate Overview
---------------
+Perspt is organized as a **7-crate Rust workspace** under the ``crates/`` directory,
+plus a meta-crate (``perspt``) that re-exports all libraries.
 
 .. graphviz::
    :align: center
-   :caption: Crate Dependency Graph
+   :caption: Crate Dependencies
 
-   digraph workspace {
+   digraph deps {
        rankdir=TB;
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-       edge [color="#666666"];
-       
-       cli [label="perspt-cli\n━━━━━━━━━\nCLI Entry Point\n10 Subcommands", fillcolor="#4ECDC4"];
-       core [label="perspt-core\n━━━━━━━━━\nGenAIProvider\nConfig, Memory", fillcolor="#45B7D1"];
-       tui [label="perspt-tui\n━━━━━━━━━\nAgentApp\nDashboard", fillcolor="#96CEB4"];
-       agent [label="perspt-agent\n━━━━━━━━━\nOrchestrator\nLSP, Tools", fillcolor="#FFEAA7"];
-       policy [label="perspt-policy\n━━━━━━━━━\nPolicyEngine\nSanitizer", fillcolor="#DDA0DD"];
-       sandbox [label="perspt-sandbox\n━━━━━━━━━\nSandboxedCommand", fillcolor="#F8B739"];
-       store [label="perspt-store\n━━━━━━━━━\nSession Persistence\nLLM Logging", fillcolor="#FFD700"];
-       
-       cli -> core;
+
+       cli [label="perspt-cli\n10 commands", fillcolor="#4ECDC4"];
+       tui [label="perspt-tui\nRatatui UI", fillcolor="#96CEB4"];
+       agent [label="perspt-agent\nSRBN Engine", fillcolor="#FFEAA7"];
+       core [label="perspt-core\nLLM + Types", fillcolor="#45B7D1"];
+       store [label="perspt-store\nDuckDB", fillcolor="#87CEEB"];
+       policy [label="perspt-policy\nStarlark", fillcolor="#DDA0DD"];
+       sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
+
        cli -> tui;
        cli -> agent;
+       cli -> core;
        cli -> store;
        agent -> core;
+       agent -> store;
        agent -> policy;
        agent -> sandbox;
-       agent -> store;
    }
 
-Crate Details
+Crate Summary
 -------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 42 40
+
+   * - Crate
+     - Purpose
+     - Key Types
+   * - **perspt-cli**
+     - Binary entry point with 10 subcommands
+     - ``Cli``, ``Commands``
+   * - **perspt-core**
+     - LLM provider abstraction, config, types, events, plugins
+     - ``GenAIProvider``, ``Config``, ``SRBNNode``, ``AgentContext``, ``AgentEvent``
+   * - **perspt-agent**
+     - SRBN orchestrator, agents, LSP client, tools, test runner, ledger
+     - ``SRBNOrchestrator``, ``Agent`` trait, ``LspClient``, ``AgentTools``, ``MerkleLedger``
+   * - **perspt-tui**
+     - Ratatui-based terminal UI for chat and agent monitoring
+     - ``ChatApp``, ``AgentApp``, ``DiffViewer``, ``ReviewModal``, ``TaskTree``
+   * - **perspt-store**
+     - DuckDB persistence for sessions, energy, LLM logs
+     - ``SessionStore``, ``EnergyRecord``, ``LlmRequestRecord``
+   * - **perspt-policy**
+     - Starlark-based policy engine and command sanitization
+     - ``PolicyEngine``, ``sanitize_command``, ``SanitizeResult``
+   * - **perspt-sandbox**
+     - Sandboxed command execution with resource limits
+     - ``SandboxedCommand``, ``CommandResult``
 
 perspt-cli
 ~~~~~~~~~~
 
-**Purpose**: Command-line interface entry point
-
-**Location**: ``crates/perspt-cli/``
-
-**Key Components**:
-
-- ``main.rs`` — CLI argument parsing with clap
-- ``commands/`` — Subcommand implementations
-
-**Subcommands**:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Command
-     - Function
-   * - ``chat``
-     - Launch interactive TUI
-   * - ``agent``
-     - Run SRBN orchestrator
-   * - ``init``
-     - Initialize project config
-   * - ``config``
-     - Manage configuration
-   * - ``ledger``
-     - Query Merkle ledger
-   * - ``status``
-     - Show agent status
-   * - ``abort``
-     - Cancel current session
-   * - ``resume``
-     - Resume interrupted session
-   * - ``logs``
-     - View LLM request/response logs
-   * - ``simple-chat``
-     - Simple CLI chat (no TUI)
+The CLI crate parses arguments with ``clap`` and dispatches to the appropriate
+handler. Subcommands: ``chat``, ``agent``, ``simple-chat``, ``init``, ``config``,
+``ledger``, ``status``, ``abort``, ``resume``, ``logs``.
 
 perspt-core
 ~~~~~~~~~~~
 
-**Purpose**: Core abstractions for LLM interaction
+Contains all shared types used across the workspace:
 
-**Location**: ``crates/perspt-core/``
-
-**Key Components**:
-
-- ``config.rs`` — Simple Config struct
-- ``llm_provider.rs`` — Thread-safe GenAIProvider
-- ``memory.rs`` — Conversation memory
-
-**Thread Safety**: GenAIProvider uses ``Arc<RwLock<SharedState>>`` for concurrent access.
+- **Types**: ``SRBNNode``, ``NodeState``, ``NodeClass``, ``ModelTier``, ``TaskPlan``,
+  ``BehavioralContract``, ``StabilityMonitor``, ``EnergyComponents``, ``AgentContext``,
+  ``TokenBudget``, ``RetryPolicy``, ``OwnershipManifest``
+- **Events**: ``AgentEvent`` enum with 40+ lifecycle event variants (PSP-5)
+- **Plugins**: Language plugin registry (Rust, Python, JS, Go) with LSP config,
+  test runner, init commands, and required binaries
+- **Config**: ``Config`` struct with provider, model, and API key
+- **LLM Provider**: ``GenAIProvider`` — thread-safe wrapper around the ``genai``
+  crate with streaming support and retry logic
 
 perspt-agent
 ~~~~~~~~~~~~
 
-**Purpose**: SRBN autonomous coding engine
+The heart of SRBN:
 
-**Location**: ``crates/perspt-agent/``
-
-**Key Components**:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 10 65
-
-   * - Module
-     - Size
-     - Description
-   * - ``orchestrator.rs``
-     - 34KB
-     - SRBN control loop, model tiers
-   * - ``lsp.rs``
-     - 28KB
-     - LSP client for Python (``ty``)
-   * - ``tools.rs``
-     - 12KB
-     - Agent tools (read, write, search, shell)
-   * - ``types.rs``
-     - 24KB
-     - TaskPlan, Node, Energy types
-   * - ``ledger.rs``
-     - 6KB
-     - Merkle change tracking
-   * - ``test_runner.rs``
-     - 15KB
-     - pytest integration
-   * - ``context_retriever.rs``
-     - 10KB
-     - Code context extraction
+- **Orchestrator**: ``SRBNOrchestrator`` manages the DAG (``petgraph``), drives the
+  7-phase control loop, manages LSP clients, and integrates TUI events
+- **Agents**: ``Agent`` trait with four implementations — ``ArchitectAgent``,
+  ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
+- **Tools**: ``AgentTools`` — ``read_file``, ``write_file``, ``apply_patch``,
+  ``apply_diff``, ``run_command``, ``search_code``, ``list_files``,
+  ``sed_replace``, ``awk_filter``, ``diff_files``
+- **LSP Client**: Native LSP client supporting ``rust-analyzer``, ``ty``,
+  ``pyright``, ``typescript-language-server``, ``gopls``
+- **Test Runner**: ``PythonTestRunner`` (pytest) with V_log calculation
+- **Ledger**: ``MerkleLedger`` backed by ``perspt-store``
+- **Context Retriever**: ``ripgrep``-based code search for context injection
 
 perspt-tui
 ~~~~~~~~~~
 
-**Purpose**: Terminal UI components
+Ratatui components:
 
-**Location**: ``crates/perspt-tui/``
-
-**Key Components**:
-
-- ``agent_app.rs`` — Main agent TUI
-- ``dashboard.rs`` — Status metrics
-- ``diff_viewer.rs`` — File diff display
-- ``review_modal.rs`` — Change approval
-- ``task_tree.rs`` — Task hierarchy
-
-perspt-policy
-~~~~~~~~~~~~~
-
-**Purpose**: Security policy enforcement
-
-**Location**: ``crates/perspt-policy/``
-
-**Key Components**:
-
-- ``engine.rs`` — Starlark policy evaluator
-- ``sanitize.rs`` — Command sanitization
-
-perspt-sandbox
-~~~~~~~~~~~~~~
-
-**Purpose**: Process isolation
-
-**Location**: ``crates/perspt-sandbox/``
-
-**Key Component**: ``command.rs`` — Sandboxed command execution with resource limits
+- **ChatApp** — Interactive chat with markdown rendering and virtual scrolling
+- **AgentApp** — SRBN monitoring with dashboard, task tree, and diff viewer
+- **ReviewModal** — Approval UI with grouped diff view and verification gates
+- **LogsViewer** — LLM request/response log inspector
+- **Dashboard** — Status display with energy breakdown
+- **TaskTree** — Node execution tree with state indicators
 
 perspt-store
 ~~~~~~~~~~~~
 
-**Purpose**: DuckDB-based session persistence and LLM logging
+DuckDB-based persistence layer. Tables include sessions, node states, energy
+records, verification results, LLM request logs, provisional branches, interface
+seals, artifact bundles, escalation reports, and sheaf validations.
 
-**Location**: ``crates/perspt-store/``
+perspt-policy
+~~~~~~~~~~~~~
 
-**Key Components**:
+Starlark-based execution policy:
 
-- ``store.rs`` — SessionStore with CRUD operations
-- ``schema.rs`` — Database schema initialization
+- ``sanitize_command()`` validates commands before execution
+- ``validate_workspace_bound()`` ensures file operations stay within the project
+- ``is_safe_for_auto_exec()`` checks if a command can be auto-approved
 
-**Key Types**:
+perspt-sandbox
+~~~~~~~~~~~~~~
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``SessionRecord``
-     - Session metadata (id, task, status, timestamps)
-   * - ``LlmRequestRecord``
-     - LLM request/response with latency and tokens
-   * - ``EnergyRecord``
-     - Energy history for stability tracking
-   * - ``NodeStateRecord``
-     - SRBN node state snapshots
-
-Building Individual Crates
---------------------------
-
-.. code-block:: bash
-
-   # Build specific crate
-   cargo build -p perspt-cli
-   cargo build -p perspt-agent
-
-   # Run tests for crate
-   cargo test -p perspt-core
-
-   # Generate docs for crate
-   cargo doc -p perspt-agent --open
-
-Adding a New Crate
-------------------
-
-1. Create directory: ``crates/perspt-newcrate/``
-2. Add ``Cargo.toml`` with package metadata
-3. Register in root ``Cargo.toml``:
-
-   .. code-block:: toml
-
-      [workspace]
-      members = [
-          "crates/perspt-core",
-          "crates/perspt-newcrate",  # Add here
-          # ...
-      ]
-
-4. Add dependencies to consuming crates
-
-See Also
---------
-
-- :doc:`../developer-guide/architecture` - Architecture overview
-- :doc:`../developer-guide/extending` - Extension guide
-- :doc:`../api/index` - Per-crate API reference
+Sandboxed command execution with resource limits. Used for running build and
+test commands in controlled environments during provisional branch verification.

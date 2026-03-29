@@ -1,6 +1,6 @@
 [package]
 name = "perspt-agent"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -12,16 +12,16 @@ keywords = ["agent", "srbn", "llm", "coding"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-perspt-core = { version = "0.5.4", path = "../perspt-core" }
-perspt-policy = { version = "0.5.4", path = "../perspt-policy" }
-perspt-sandbox = { version = "0.5.4", path = "../perspt-sandbox" }
-perspt-store = { version = "0.5.4", path = "../perspt-store" }
+perspt-core = { version = "0.5.5", path = "../perspt-core" }
+perspt-policy = { version = "0.5.5", path = "../perspt-policy" }
+perspt-sandbox = { version = "0.5.5", path = "../perspt-sandbox" }
+perspt-store = { version = "0.5.5", path = "../perspt-store" }
 
 # Graph management
 petgraph = "0.8"
 
 # State persistence
-duckdb = "1.1"
+duckdb = { workspace = true }
 
 # LSP Client
 lsp-types = "0.97"

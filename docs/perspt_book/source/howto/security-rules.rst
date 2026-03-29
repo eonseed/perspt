@@ -1,152 +1,105 @@
 .. _howto-security-rules:
 
-Security Rules
-==============
+Security and Policy Rules
+=========================
 
-How to configure Starlark policy rules for agent operations.
+Perspt provides multiple layers of security for agent mode.
 
-Overview
---------
+Starlark Policies (perspt-policy)
+---------------------------------
 
-The policy engine evaluates commands before execution using Starlark rules.
-This prevents dangerous operations and provides fine-grained control.
+The ``perspt-policy`` crate evaluates Starlark scripts to enforce rules on
+agent actions. Policies can:
 
-Initialize Rules
-----------------
+- **Allow/deny file operations** — Prevent writes to sensitive paths
+- **Restrict shell commands** — Block dangerous commands (``rm -rf``, etc.)
+- **Enforce naming conventions** — Require files match patterns
+- **Limit resource usage** — Cap file sizes, directory depth
+
+.. code-block:: python
+
+   # Example Starlark policy
+   def check_file_write(path, content):
+       if path.startswith("/etc/") or path.startswith("/usr/"):
+           return deny("Cannot write to system directories")
+       if len(content) > 1_000_000:
+           return deny("File too large (>1MB)")
+       return allow()
+
+   def check_command(cmd):
+       forbidden = ["rm -rf", "sudo", "chmod 777"]
+       for f in forbidden:
+           if f in cmd:
+               return deny("Forbidden command: " + f)
+       return allow()
+
+
+Sandbox Isolation (perspt-sandbox)
+----------------------------------
+
+The ``perspt-sandbox`` crate provides filesystem and process isolation for
+agent-executed commands:
+
+- **Filesystem scoping** — Commands run in a restricted view of the filesystem
+- **Process limits** — Timeout, memory, and CPU constraints
+- **Network control** — Optional network access restriction
+
+Configuration:
 
 .. code-block:: bash
 
-   perspt init --rules
+   # Agent with sandbox enabled
+   perspt agent -w ./project "Task"
 
-This creates ``.perspt/rules.star``:
+   # The sandbox restricts commands to the working directory
 
-.. code-block:: text
 
-   my-project/
-   └── .perspt/
-       └── rules.star
+Ownership Closure
+-----------------
 
-Rule Syntax
------------
+The PSP-5 ownership closure rule ensures:
 
-Rules use three functions:
+- Each file is owned by exactly one DAG node
+- No two nodes can write to the same file
+- Violations trigger a re-plan by the Architect
 
-.. code-block:: python
+This prevents conflicting edits and provides a clear audit trail.
 
-   allow("pattern")                    # Always allow
-   prompt("pattern", reason="...")     # Ask user
-   deny("pattern", reason="...")       # Always deny
 
-**Patterns** support glob syntax:
-
-- ``*`` — Any characters
-- ``?`` — Single character
-- ``[abc]`` — Character set
-
-Default Rules
--------------
-
-.. code-block:: python
-
-   # .perspt/rules.star
-
-   # Safe read operations
-   allow("cat *")
-   allow("head *")
-   allow("tail *")
-   allow("ls *")
-   allow("find *")
-   allow("grep *")
-
-   # Prompt for modifications
-   prompt("rm *", reason="File deletion")
-   prompt("mv *", reason="File move/rename")
-   prompt("cp *", reason="File copy")
-   prompt("chmod *", reason="Permission change")
-
-   # Deny dangerous operations
-   deny("rm -rf /", reason="Root deletion")
-   deny("rm -rf ~", reason="Home deletion")
-   deny("rm -rf /*", reason="Wildcard root deletion")
-   deny("chmod 777 *", reason="Insecure permissions")
-   deny("curl * | bash", reason="Remote code execution")
-   deny("wget * | bash", reason="Remote code execution")
-
-Custom Rules
+Review Modal
 ------------
 
-For a Node.js project:
+In interactive mode (without ``--yes``), every node's changes must be manually
+approved. The review modal shows:
 
-.. code-block:: python
+- Full diff of all changes
+- Verification results (V_syn, V_str, V_log, V_boot, V_sheaf)
+- Options to reject, correct, or edit
 
-   # .perspt/rules.star
+For security-sensitive projects, always use interactive mode.
 
-   # Allow package management
-   allow("npm install")
-   allow("npm test")
-   allow("npm run *")
 
-   # Prompt for global operations
-   prompt("npm install -g *", reason="Global install")
-   prompt("npm uninstall *", reason="Package removal")
-
-   # Deny destructive
-   deny("rm -rf node_modules", reason="Use npm prune instead")
-
-For a Python project:
-
-.. code-block:: python
-
-   # .perspt/rules.star
-
-   # Allow common operations
-   allow("python *")
-   allow("pip install *")
-   allow("pytest *")
-   allow("uv *")
-
-   # Prompt for system changes
-   prompt("pip uninstall *", reason="Package removal")
-   prompt("pip install --user *", reason="User install")
-
-   # Deny dangerous
-   deny("pip install --break-system-packages *")
-
-Testing Rules
+Merkle Ledger
 -------------
 
-Test your rules before deployment:
+Every committed change is recorded in a content-addressed Merkle tree stored in
+DuckDB. This provides:
+
+- **Tamper detection** — Hash chain integrity
+- **Full auditability** — Every node's input/output is recorded
+- **Rollback capability** — Restore to any point in the session
 
 .. code-block:: bash
 
-   # Simulate a command
-   perspt policy test "rm -rf /"
-   # Output: DENIED - Root deletion
+   perspt ledger --recent
+   perspt ledger --stats
 
-   perspt policy test "cat README.md"
-   # Output: ALLOWED
 
-Project-Specific Overrides
---------------------------
+Best Practices
+--------------
 
-Rules are inherited hierarchically:
-
-1. Global: ``~/.perspt/rules.star``
-2. Project: ``.perspt/rules.star``
-
-Project rules override global rules.
-
-Bypass for Trusted Tasks
-------------------------
-
-Use ``-y`` or ``--mode yolo`` to skip policy checks (⚠️ dangerous):
-
-.. code-block:: bash
-
-   perspt agent -y "Install dependencies"
-
-See Also
---------
-
-- :doc:`../api/perspt-policy` - Policy engine API
-- :doc:`agent-options` - Agent configuration
+1. **Use interactive mode for production code** — Always review diffs
+2. **Set cost limits** — ``--max-cost`` prevents runaway spending
+3. **Use workspace directories** — ``-w <dir>`` scopes agent writes
+4. **Enable LLM logging** — ``--log-llm`` for post-run auditing
+5. **Review ledger after headless runs** — ``perspt ledger --recent``

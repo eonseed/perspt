@@ -1,9 +1,14 @@
-//! Python Test Runner
+//! Verification Runners
 //!
-//! Executes pytest in Python workspaces using `uv` as the package manager.
-//! Handles project setup (pyproject.toml) and test execution for V_log calculation.
+//! Provides test, syntax-check, build, and lint execution for language plugins.
 //!
-//! Future phases will add support for other languages (Rust, JavaScript, etc.)
+//! - `PythonTestRunner`: pytest-specific runner with detailed output parsing.
+//! - `RustTestRunner`: cargo-based runner with test output parsing.
+//! - `PluginVerifierRunner` (PSP-5 Phase 4): generic runner driven entirely by
+//!   a plugin's `VerifierProfile`. It executes whatever commands the profile
+//!   declares, including fallback commands, without hardcoding language details.
+//!
+//! The `TestRunnerTrait` is the unified async interface consumed by the orchestrator.
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -11,6 +16,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 use crate::types::{BehavioralContract, Criticality};
+use perspt_core::plugin::{VerifierProfile, VerifierStage};
 
 /// Result of a test run
 #[derive(Debug, Clone, Default)]
@@ -62,6 +68,32 @@ pub struct TestFailure {
     pub message: String,
     /// Criticality (from weighted tests if matched)
     pub criticality: Criticality,
+}
+
+fn force_failure_on_nonzero_exit(
+    results: &mut TestResults,
+    command_name: &str,
+    exit_code: Option<i32>,
+    output: &str,
+) {
+    if results.failed == 0 {
+        results.failed = 1;
+    }
+    if results.total == 0 {
+        results.total = results.passed + results.failed + results.skipped;
+    }
+    if results.failures.is_empty() {
+        results.failures.push(TestFailure {
+            name: command_name.to_string(),
+            file: None,
+            line: None,
+            message: format!(
+                "{} exited with code {:?} without a parseable success summary. Output:\n{}",
+                command_name, exit_code, output
+            ),
+            criticality: Criticality::High,
+        });
+    }
 }
 
 /// Python test runner using uv and pytest
@@ -132,9 +164,9 @@ impl PythonTestRunner {
                 log::warn!(
                     "No pyproject.toml found. Project should be initialized via 'uv init' first."
                 );
-                log::info!("Attempting to run 'uv init' as fallback...");
+                log::info!("Attempting to run 'uv init --lib' as fallback...");
                 let init_output = Command::new("uv")
-                    .args(["init"])
+                    .args(["init", "--lib"])
                     .current_dir(&self.working_dir)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -169,6 +201,35 @@ impl PythonTestRunner {
             log::warn!("uv sync failed: {}", stderr);
             // Try just installing pytest directly
             return self.install_pytest_directly().await;
+        }
+
+        // Ensure pytest is available as a dev dependency.
+        // `uv sync --dev` only installs what's already in pyproject.toml;
+        // for freshly-generated projects pytest may not be declared yet.
+        if !self.has_pytest().await {
+            log::info!("pytest not available after sync — adding as dev dependency");
+            let add_output = Command::new("uv")
+                .args(["add", "--dev", "pytest"])
+                .current_dir(&self.working_dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await;
+            match add_output {
+                Ok(o) if o.status.success() => {
+                    log::info!("Added pytest as dev dependency");
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    log::warn!("uv add --dev pytest failed: {}", stderr);
+                    // Last resort: install directly
+                    return self.install_pytest_directly().await;
+                }
+                Err(e) => {
+                    log::warn!("Failed to run uv add --dev pytest: {}", e);
+                    return self.install_pytest_directly().await;
+                }
+            }
         }
 
         log::info!("Python environment ready");
@@ -234,6 +295,9 @@ impl PythonTestRunner {
 
         let mut results = self.parse_pytest_output(&combined, duration_ms);
         results.run_succeeded = true; // We got output, run worked
+        if !output.status.success() {
+            force_failure_on_nonzero_exit(&mut results, "pytest", output.status.code(), &combined);
+        }
 
         // Log summary
         if results.all_passed() {
@@ -378,14 +442,492 @@ impl PythonTestRunner {
     }
 }
 
-// Re-export PythonTestRunner as TestRunner for now
-// In future phases, we'll add a generic TestRunner trait
+// =============================================================================
+// PSP-5: Generic Test Runner Trait
+// =============================================================================
+
+/// PSP-5: Language-agnostic test runner trait
+///
+/// Allows the orchestrator to run verification steps through any language's
+/// toolchain without hardcoding Python paths.
+#[async_trait::async_trait]
+pub trait TestRunnerTrait: Send + Sync {
+    /// Run syntax/type check (e.g., `cargo check`, `uv run ty check .`)
+    async fn run_syntax_check(&self) -> Result<TestResults>;
+
+    /// Run the test suite (e.g., `cargo test`, `uv run pytest`)
+    async fn run_tests(&self) -> Result<TestResults>;
+
+    /// Run build check (e.g., `cargo build`)
+    async fn run_build_check(&self) -> Result<TestResults>;
+
+    /// Run lint check (e.g., `cargo clippy`, `uv run ruff check .`)
+    ///
+    /// Default: returns a no-op pass for plugins without a lint stage.
+    async fn run_lint(&self) -> Result<TestResults> {
+        Ok(TestResults {
+            passed: 1,
+            total: 1,
+            run_succeeded: true,
+            output: "No lint stage configured".to_string(),
+            ..Default::default()
+        })
+    }
+
+    /// Run a specific verifier stage by enum variant.
+    ///
+    /// Dispatches to the appropriate method. Convenience for generic callers.
+    async fn run_stage(&self, stage: VerifierStage) -> Result<TestResults> {
+        match stage {
+            VerifierStage::SyntaxCheck => self.run_syntax_check().await,
+            VerifierStage::Build => self.run_build_check().await,
+            VerifierStage::Test => self.run_tests().await,
+            VerifierStage::Lint => self.run_lint().await,
+        }
+    }
+
+    /// Name of the runner (for logging)
+    fn name(&self) -> &str;
+}
+
+#[async_trait::async_trait]
+impl TestRunnerTrait for PythonTestRunner {
+    async fn run_syntax_check(&self) -> Result<TestResults> {
+        // Use ty (via uv) for type checking
+        let output = Command::new("uv")
+            .args(["run", "ty", "check", "."])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run ty check")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: format!("{}\n{}", stdout, stderr),
+            ..Default::default()
+        })
+    }
+
+    async fn run_tests(&self) -> Result<TestResults> {
+        self.run_pytest(&[]).await
+    }
+
+    async fn run_build_check(&self) -> Result<TestResults> {
+        // Python doesn't have a separate build step
+        Ok(TestResults {
+            passed: 1,
+            total: 1,
+            run_succeeded: true,
+            output: "No build step for Python".to_string(),
+            ..Default::default()
+        })
+    }
+
+    async fn run_lint(&self) -> Result<TestResults> {
+        let output = Command::new("uv")
+            .args(["run", "ruff", "check", "."])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run ruff check")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: format!("{}\n{}", stdout, stderr),
+            ..Default::default()
+        })
+    }
+
+    fn name(&self) -> &str {
+        "python"
+    }
+}
+
+/// PSP-5: Rust test runner using cargo
+pub struct RustTestRunner {
+    /// Working directory (workspace root)
+    working_dir: PathBuf,
+}
+
+impl RustTestRunner {
+    /// Create a new Rust test runner
+    pub fn new(working_dir: PathBuf) -> Self {
+        Self { working_dir }
+    }
+
+    /// Parse `cargo test` output for pass/fail counts
+    fn parse_cargo_test_output(&self, output: &str) -> TestResults {
+        let mut results = TestResults {
+            output: output.to_string(),
+            run_succeeded: true,
+            ..Default::default()
+        };
+
+        for line in output.lines() {
+            let line = line.trim();
+
+            // Parse "test result: ok. X passed; Y failed; Z ignored"
+            if line.starts_with("test result:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                for i in 0..parts.len() {
+                    if (parts[i] == "passed;" || parts[i] == "passed") && i > 0 {
+                        if let Ok(n) = parts[i - 1].parse::<usize>() {
+                            results.passed = n;
+                        }
+                    } else if (parts[i] == "failed;" || parts[i] == "failed") && i > 0 {
+                        if let Ok(n) = parts[i - 1].parse::<usize>() {
+                            results.failed = n;
+                        }
+                    } else if (parts[i] == "ignored;" || parts[i] == "ignored") && i > 0 {
+                        if let Ok(n) = parts[i - 1].parse::<usize>() {
+                            results.skipped = n;
+                        }
+                    }
+                }
+            }
+        }
+
+        results.total = results.passed + results.failed + results.skipped;
+        results
+    }
+}
+
+#[async_trait::async_trait]
+impl TestRunnerTrait for RustTestRunner {
+    async fn run_syntax_check(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["check"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo check")?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: stderr,
+            ..Default::default()
+        })
+    }
+
+    async fn run_tests(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["test"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo test")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let combined = format!("{}\n{}", stdout, stderr);
+
+        let mut results = self.parse_cargo_test_output(&combined);
+        results.run_succeeded = true;
+        if !output.status.success() {
+            force_failure_on_nonzero_exit(
+                &mut results,
+                "cargo test",
+                output.status.code(),
+                &combined,
+            );
+        }
+        Ok(results)
+    }
+
+    async fn run_build_check(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["build"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo build")?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: stderr,
+            ..Default::default()
+        })
+    }
+
+    async fn run_lint(&self) -> Result<TestResults> {
+        let output = Command::new("cargo")
+            .args(["clippy", "--", "-D", "warnings"])
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .context("Failed to run cargo clippy")?;
+
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: stderr,
+            ..Default::default()
+        })
+    }
+
+    fn name(&self) -> &str {
+        "rust"
+    }
+}
+
+// =============================================================================
+// PSP-5 Phase 4: Plugin-Driven Verifier Runner
+// =============================================================================
+
+/// Generic verifier runner driven by a plugin's `VerifierProfile`.
+///
+/// Instead of hardcoding language-specific commands, this runner reads the
+/// profile's `VerifierCapability` entries and executes the best available
+/// command (primary → fallback → skip) for each stage.
+///
+/// For languages with detailed output parsers (e.g., pytest, cargo test),
+/// prefer the language-specific runners. `PluginVerifierRunner` is the
+/// fallback for plugins that don't have a dedicated runner or when the
+/// orchestrator wants uniform dispatch across all detected plugins.
+pub struct PluginVerifierRunner {
+    /// Working directory for command execution.
+    working_dir: PathBuf,
+    /// Snapshot of the plugin's verifier capabilities.
+    profile: VerifierProfile,
+}
+
+impl PluginVerifierRunner {
+    /// Create a new runner from a plugin's verifier profile.
+    pub fn new(working_dir: PathBuf, profile: VerifierProfile) -> Self {
+        Self {
+            working_dir,
+            profile,
+        }
+    }
+
+    /// Execute a shell command string, returning a `TestResults`.
+    ///
+    /// The command is split on whitespace for arg parsing. This is
+    /// intentionally simple; complex pipelines should use `sh -c`.
+    ///
+    /// PSP-5 Phase 4: Commands pass through policy sanitization and
+    /// workspace-bound validation before execution.
+    async fn exec_command(&self, command: &str, stage: VerifierStage) -> Result<TestResults> {
+        // Sanitize command through policy
+        let sr = perspt_policy::sanitize_command(command)?;
+        if sr.rejected {
+            anyhow::bail!(
+                "{} command rejected by policy: {}",
+                stage,
+                sr.rejection_reason.unwrap_or_default()
+            );
+        }
+        for warning in &sr.warnings {
+            log::warn!(
+                "[{}] policy warning for {} stage: {}",
+                self.profile.plugin_name,
+                stage,
+                warning
+            );
+        }
+
+        // Validate workspace bounds
+        perspt_policy::validate_workspace_bound(command, &self.working_dir)?;
+
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.is_empty() {
+            anyhow::bail!("empty command for stage {}", stage);
+        }
+
+        let program = parts[0];
+        let args = &parts[1..];
+
+        log::info!(
+            "[{}] running {} stage: {}",
+            self.profile.plugin_name,
+            stage,
+            command
+        );
+
+        let output = Command::new(program)
+            .args(args)
+            .current_dir(&self.working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .with_context(|| format!("Failed to run {} for {} stage", command, stage))?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        Ok(TestResults {
+            passed: if output.status.success() { 1 } else { 0 },
+            failed: if output.status.success() { 0 } else { 1 },
+            total: 1,
+            run_succeeded: true,
+            output: format!("{}\n{}", stdout, stderr),
+            ..Default::default()
+        })
+    }
+
+    /// Run a verifier stage using the profile's best available command.
+    ///
+    /// Returns a no-op pass if the stage is not declared or has no available tool.
+    async fn run_profile_stage(&self, stage: VerifierStage) -> Result<TestResults> {
+        let cap = match self.profile.get(stage) {
+            Some(c) => c,
+            None => {
+                return Ok(TestResults {
+                    passed: 1,
+                    total: 1,
+                    run_succeeded: true,
+                    output: format!(
+                        "No {} stage declared for {}",
+                        stage, self.profile.plugin_name
+                    ),
+                    ..Default::default()
+                });
+            }
+        };
+
+        match cap.effective_command() {
+            Some(cmd) => self.exec_command(cmd, stage).await,
+            None => {
+                log::warn!(
+                    "[{}] {} stage declared but no tool available (degraded)",
+                    self.profile.plugin_name,
+                    stage
+                );
+                Ok(TestResults {
+                    passed: 0,
+                    failed: 0,
+                    total: 0,
+                    run_succeeded: false,
+                    output: format!(
+                        "{} stage skipped: no tool available for {}",
+                        stage, self.profile.plugin_name
+                    ),
+                    ..Default::default()
+                })
+            }
+        }
+    }
+
+    /// Run all available stages in order, returning results keyed by stage.
+    pub async fn run_all_stages(&self) -> Vec<(VerifierStage, Result<TestResults>)> {
+        let stages = [
+            VerifierStage::SyntaxCheck,
+            VerifierStage::Build,
+            VerifierStage::Test,
+            VerifierStage::Lint,
+        ];
+        let mut results = Vec::new();
+        for stage in stages {
+            if self.profile.get(stage).is_some() {
+                results.push((stage, self.run_profile_stage(stage).await));
+            }
+        }
+        results
+    }
+
+    /// Get the underlying profile.
+    pub fn profile(&self) -> &VerifierProfile {
+        &self.profile
+    }
+}
+
+#[async_trait::async_trait]
+impl TestRunnerTrait for PluginVerifierRunner {
+    async fn run_syntax_check(&self) -> Result<TestResults> {
+        self.run_profile_stage(VerifierStage::SyntaxCheck).await
+    }
+
+    async fn run_tests(&self) -> Result<TestResults> {
+        self.run_profile_stage(VerifierStage::Test).await
+    }
+
+    async fn run_build_check(&self) -> Result<TestResults> {
+        self.run_profile_stage(VerifierStage::Build).await
+    }
+
+    async fn run_lint(&self) -> Result<TestResults> {
+        self.run_profile_stage(VerifierStage::Lint).await
+    }
+
+    fn name(&self) -> &str {
+        &self.profile.plugin_name
+    }
+}
+
+/// PSP-5: Factory function to create a test runner for a given plugin
+pub fn test_runner_for_plugin(plugin_name: &str, working_dir: PathBuf) -> Box<dyn TestRunnerTrait> {
+    match plugin_name {
+        "rust" => Box::new(RustTestRunner::new(working_dir)),
+        "python" => Box::new(PythonTestRunner::new(working_dir)),
+        _ => Box::new(PythonTestRunner::new(working_dir)), // Default fallback
+    }
+}
+
+/// PSP-5 Phase 4: Create a runner from a verifier profile.
+///
+/// For Rust and Python, this returns the specialised runner (which has
+/// detailed output parsing). For anything else it returns a generic
+/// `PluginVerifierRunner` that executes whatever commands the profile declares.
+pub fn test_runner_for_profile(
+    profile: VerifierProfile,
+    working_dir: PathBuf,
+) -> Box<dyn TestRunnerTrait> {
+    match profile.plugin_name.as_str() {
+        "rust" => Box::new(RustTestRunner::new(working_dir)),
+        "python" => Box::new(PythonTestRunner::new(working_dir)),
+        _ => Box::new(PluginVerifierRunner::new(working_dir, profile)),
+    }
+}
+
+// Re-export PythonTestRunner as TestRunner for backward compatibility
 pub type TestRunner = PythonTestRunner;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::WeightedTest;
+    use perspt_core::plugin::{
+        LanguagePlugin, LspCapability, LspConfig, VerifierCapability, VerifierProfile,
+    };
 
     #[test]
     fn test_parse_pytest_summary() {
@@ -413,6 +955,18 @@ mod tests {
     }
 
     #[test]
+    fn test_force_failure_on_nonzero_exit_marks_failure() {
+        let mut results = TestResults::default();
+
+        force_failure_on_nonzero_exit(&mut results, "pytest", Some(2), "collection error");
+
+        assert_eq!(results.failed, 1);
+        assert_eq!(results.total, 1);
+        assert_eq!(results.failures.len(), 1);
+        assert!(results.failures[0].message.contains("collection error"));
+    }
+
+    #[test]
     fn test_calculate_v_log() {
         let runner = PythonTestRunner::new(PathBuf::from("."));
 
@@ -436,5 +990,210 @@ mod tests {
         let v_log = runner.calculate_v_log(&results, &contract);
         // gamma (2.0) * Critical weight (10.0) = 20.0
         assert!((v_log - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_cargo_test_output() {
+        let runner = RustTestRunner::new(PathBuf::from("."));
+
+        let output = r#"
+running 5 tests
+test tests::test_add ... ok
+test tests::test_sub ... ok
+test tests::test_mul ... FAILED
+test tests::test_div ... ok
+test tests::test_rem ... ignored
+
+test result: ok. 3 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out
+"#;
+        let results = runner.parse_cargo_test_output(output);
+        assert_eq!(results.passed, 3);
+        assert_eq!(results.failed, 1);
+        assert_eq!(results.skipped, 1);
+        assert_eq!(results.total, 5);
+    }
+
+    #[test]
+    fn test_runner_for_plugin_factory() {
+        let rust_runner = test_runner_for_plugin("rust", PathBuf::from("."));
+        assert_eq!(rust_runner.name(), "rust");
+
+        let python_runner = test_runner_for_plugin("python", PathBuf::from("."));
+        assert_eq!(python_runner.name(), "python");
+
+        // Unknown falls back to Python
+        let fallback = test_runner_for_plugin("go", PathBuf::from("."));
+        assert_eq!(fallback.name(), "python");
+    }
+
+    // =========================================================================
+    // PluginVerifierRunner tests
+    // =========================================================================
+
+    fn make_test_profile(name: &str, caps: Vec<VerifierCapability>) -> VerifierProfile {
+        VerifierProfile {
+            plugin_name: name.to_string(),
+            capabilities: caps,
+            lsp: LspCapability {
+                primary: LspConfig {
+                    server_binary: "test-ls".to_string(),
+                    args: vec![],
+                    language_id: name.to_string(),
+                },
+                primary_available: false,
+                fallback: None,
+                fallback_available: false,
+            },
+        }
+    }
+
+    #[test]
+    fn test_plugin_verifier_runner_name() {
+        let profile = make_test_profile("go", vec![]);
+        let runner = PluginVerifierRunner::new(PathBuf::from("."), profile);
+        assert_eq!(runner.name(), "go");
+    }
+
+    #[tokio::test]
+    async fn test_plugin_verifier_runner_no_stage_declared() {
+        // When no capability is declared for a stage, run_stage returns a no-op pass
+        let profile = make_test_profile("go", vec![]);
+        let runner = PluginVerifierRunner::new(PathBuf::from("."), profile);
+        let result = runner.run_syntax_check().await.unwrap();
+        assert_eq!(result.passed, 1);
+        assert_eq!(result.total, 1);
+        assert!(result.output.contains("No syntax_check stage"));
+    }
+
+    #[tokio::test]
+    async fn test_plugin_verifier_runner_no_tool_available() {
+        // Stage is declared but neither primary nor fallback tool is available
+        let profile = make_test_profile(
+            "go",
+            vec![VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("go build ./...".to_string()),
+                available: false,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("."), profile);
+        let result = runner.run_build_check().await.unwrap();
+        assert!(!result.run_succeeded);
+        assert!(result.output.contains("no tool available"));
+    }
+
+    #[tokio::test]
+    async fn test_plugin_verifier_runner_echo_command() {
+        // Use `echo` as a trivially-available command to test real execution
+        let profile = make_test_profile(
+            "echo-lang",
+            vec![VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("echo syntax-ok".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("."), profile);
+        let result = runner.run_syntax_check().await.unwrap();
+        assert_eq!(result.passed, 1);
+        assert!(result.run_succeeded);
+        assert!(result.output.contains("syntax-ok"));
+    }
+
+    #[tokio::test]
+    async fn test_plugin_verifier_runner_run_all_stages() {
+        let profile = make_test_profile(
+            "echo-lang",
+            vec![
+                VerifierCapability {
+                    stage: VerifierStage::SyntaxCheck,
+                    command: Some("echo check".to_string()),
+                    available: true,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+                VerifierCapability {
+                    stage: VerifierStage::Lint,
+                    command: Some("echo lint".to_string()),
+                    available: true,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+            ],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("."), profile);
+        let results = runner.run_all_stages().await;
+        // Only the 2 declared stages should appear
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].0, VerifierStage::SyntaxCheck);
+        assert_eq!(results[1].0, VerifierStage::Lint);
+        assert!(results[0].1.is_ok());
+        assert!(results[1].1.is_ok());
+    }
+
+    #[test]
+    fn test_runner_for_profile_factory() {
+        use perspt_core::plugin::RustPlugin;
+        // Known plugins get specialised runners
+        let rust_profile = RustPlugin.verifier_profile();
+        let runner = test_runner_for_profile(rust_profile, PathBuf::from("."));
+        assert_eq!(runner.name(), "rust");
+
+        // Unknown plugins get PluginVerifierRunner
+        let custom = make_test_profile("go", vec![]);
+        let runner = test_runner_for_profile(custom, PathBuf::from("."));
+        assert_eq!(runner.name(), "go");
+    }
+
+    #[tokio::test]
+    async fn test_exec_command_rejects_dangerous_pattern() {
+        let profile = make_test_profile(
+            "danger",
+            vec![VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("rm -rf /".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("/tmp"), profile);
+        let result = runner.run_syntax_check().await;
+        // The command should be rejected by policy sanitisation
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_exec_command_rejects_workspace_escape() {
+        let profile = make_test_profile(
+            "escape",
+            vec![VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("cat /etc/passwd".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+        );
+        let runner = PluginVerifierRunner::new(PathBuf::from("/home/user/project"), profile);
+        let result = runner.run_syntax_check().await;
+        // The command references a path outside the workspace
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fallback_command_selected_when_primary_unavailable() {
+        let cap = VerifierCapability {
+            stage: VerifierStage::Test,
+            command: Some("uv run pytest".to_string()),
+            available: false,
+            fallback_command: Some("python -m pytest".to_string()),
+            fallback_available: true,
+        };
+        assert_eq!(cap.effective_command(), Some("python -m pytest"));
     }
 }

@@ -1,7 +1,7 @@
 //! SRBN Types
 //!
 //! Core types for the Stabilized Recursive Barrier Network.
-//! Based on PSP-000004 specification.
+//! Based on PSP-000004 and PSP-000005 specifications.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -21,17 +21,54 @@ pub enum ModelTier {
 }
 
 impl ModelTier {
-    /// Get the recommended model for this tier
-    /// Default: gemini-flash-lite-latest for all tiers (can be overridden via CLI)
+    /// Get the recommended default model for this tier.
+    ///
+    /// Architect and Verifier tiers prefer higher-capability models for
+    /// reasoning and evaluation. Actuator and Speculator default to the
+    /// faster lower-cost Gemini tier. All defaults can be overridden per-tier
+    /// via CLI.
     pub fn default_model(&self) -> &'static str {
-        // Use gemini-flash-lite-latest as the default for all tiers
-        // This can be overridden per-tier via CLI: --architect-model, --actuator-model, etc.
-        Self::default_model_name()
+        match self {
+            ModelTier::Architect => "gemini-3.1-pro-preview",
+            ModelTier::Verifier => "gemini-3.1-pro-preview",
+            ModelTier::Actuator => "gemini-3.1-flash-lite-preview",
+            ModelTier::Speculator => "gemini-3.1-flash-lite-preview",
+        }
     }
 
-    /// Get the default model name (static, for use when no instance is available)
+    /// Get the default model name (static, for use when no instance is available).
+    /// Returns the Actuator default as the general-purpose fallback.
     pub fn default_model_name() -> &'static str {
-        "gemini-flash-lite-latest"
+        "gemini-3.1-flash-lite-preview"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ModelTier;
+
+    #[test]
+    fn gemini_defaults_use_requested_latest_models() {
+        assert_eq!(
+            ModelTier::Architect.default_model(),
+            "gemini-3.1-pro-preview"
+        );
+        assert_eq!(
+            ModelTier::Verifier.default_model(),
+            "gemini-3.1-pro-preview"
+        );
+        assert_eq!(
+            ModelTier::Actuator.default_model(),
+            "gemini-3.1-flash-lite-preview"
+        );
+        assert_eq!(
+            ModelTier::Speculator.default_model(),
+            "gemini-3.1-flash-lite-preview"
+        );
+        assert_eq!(
+            ModelTier::default_model_name(),
+            "gemini-3.1-flash-lite-preview"
+        );
     }
 }
 
@@ -317,6 +354,14 @@ impl StabilityMonitor {
         let prev = &self.energy_history[self.energy_history.len() - 2];
         last < prev
     }
+
+    /// Reset monitor state for a subgraph replan, preserving history but
+    /// clearing attempt count and stability flag so the node can be retried.
+    pub fn reset_for_replan(&mut self) {
+        self.attempt_count = 0;
+        self.stable = false;
+        self.retry_policy = RetryPolicy::default();
+    }
 }
 
 /// SRBN Node - the fundamental unit of control
@@ -342,6 +387,14 @@ pub struct SRBNNode {
     pub parent_id: Option<String>,
     /// Child node IDs
     pub children: Vec<String>,
+    /// PSP-5 Phase 2: Node class (Interface / Implementation / Integration)
+    pub node_class: NodeClass,
+    /// PSP-5 Phase 2: The language plugin that owns this node's files
+    pub owner_plugin: String,
+    /// PSP-5 Phase 6: Provisional branch ID if this node is executing speculatively
+    pub provisional_branch_id: Option<String>,
+    /// PSP-5 Phase 6: Interface seal hash once this node's public interface is sealed
+    pub interface_seal_hash: Option<[u8; 32]>,
 }
 
 impl SRBNNode {
@@ -358,6 +411,10 @@ impl SRBNNode {
             state: NodeState::TaskQueued,
             parent_id: None,
             children: Vec::new(),
+            node_class: NodeClass::default(),
+            owner_plugin: String::new(),
+            provisional_branch_id: None,
+            interface_seal_hash: None,
         }
     }
 }
@@ -542,6 +599,21 @@ pub struct AgentContext {
     /// Last test output for correction prompts
     #[serde(skip)]
     pub last_test_output: Option<String>,
+    /// PSP-5: Execution mode (Project vs Solo)
+    #[serde(default)]
+    pub execution_mode: ExecutionMode,
+    /// PSP-5: Verifier strictness preset
+    #[serde(default)]
+    pub verifier_strictness: VerifierStrictness,
+    /// PSP-5: Active language plugins detected for this workspace
+    #[serde(default)]
+    pub active_plugins: Vec<String>,
+    /// PSP-5: Workspace state classification (existing, greenfield, or ambiguous)
+    #[serde(default)]
+    pub workspace_state: WorkspaceState,
+    /// PSP-5 Phase 2: Ownership manifest for file-to-node bindings
+    #[serde(default)]
+    pub ownership_manifest: OwnershipManifest,
 }
 
 impl Default for AgentContext {
@@ -558,6 +630,11 @@ impl Default for AgentContext {
             last_diagnostics: Vec::new(),
             token_budget: TokenBudget::default(),
             last_test_output: None,
+            execution_mode: ExecutionMode::default(),
+            verifier_strictness: VerifierStrictness::default(),
+            active_plugins: Vec::new(),
+            workspace_state: WorkspaceState::default(),
+            ownership_manifest: OwnershipManifest::default(),
         }
     }
 }
@@ -697,6 +774,21 @@ impl TaskPlan {
             }
         }
 
+        // PSP-5: Check for duplicate output_files across tasks (ownership closure)
+        let mut file_owners: std::collections::HashMap<&str, &str> =
+            std::collections::HashMap::new();
+        for task in &self.tasks {
+            for file in &task.output_files {
+                if let Some(prev_owner) = file_owners.insert(file.as_str(), task.id.as_str()) {
+                    return Err(format!(
+                        "Ownership violation in plan: file '{}' claimed by both '{}' and '{}'. \
+                         Each output file must appear in exactly one task's output_files.",
+                        file, prev_owner, task.id
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -732,6 +824,9 @@ pub struct PlannedTask {
     /// Command contract (only for TaskType::Command)
     #[serde(default)]
     pub command_contract: Option<CommandContract>,
+    /// PSP-5: Node class (Interface / Implementation / Integration)
+    #[serde(default)]
+    pub node_class: NodeClass,
 }
 
 impl PlannedTask {
@@ -746,6 +841,7 @@ impl PlannedTask {
             task_type: TaskType::Code,
             contract: PlannedContract::default(),
             command_contract: None,
+            node_class: NodeClass::default(),
         }
     }
 
@@ -755,6 +851,7 @@ impl PlannedTask {
         node.context_files = self.context_files.iter().map(PathBuf::from).collect();
         node.output_targets = self.output_files.iter().map(PathBuf::from).collect();
         node.contract = self.contract.to_behavioral_contract();
+        node.node_class = self.node_class;
         node
     }
 }
@@ -866,5 +963,2323 @@ impl CommandContract {
         }
 
         energy
+    }
+}
+
+// =============================================================================
+// PSP-000005 Types — Project-First Execution Model
+// =============================================================================
+
+/// PSP-5: Execution mode for the runtime
+///
+/// Project mode is the default. Solo mode only activates on explicit single-file
+/// intent keywords or via `--single-file` CLI flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Default: treat task as a multi-file project
+    #[default]
+    Project,
+    /// Explicit single-file execution
+    Solo,
+}
+
+impl std::fmt::Display for ExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionMode::Project => write!(f, "project"),
+            ExecutionMode::Solo => write!(f, "solo"),
+        }
+    }
+}
+
+/// PSP-5: Workspace state classification
+///
+/// Determined at session start by inspecting the working directory for project
+/// metadata and cross-referencing with the task description. Drives the
+/// init/bootstrap/context strategy for the rest of the session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceState {
+    /// Directory contains recognized project metadata (Cargo.toml, pyproject.toml, etc.)
+    ExistingProject {
+        /// Plugin names detected in the workspace
+        plugins: Vec<String>,
+    },
+    /// Empty or non-project directory; language inferred from the task description
+    Greenfield {
+        /// Language inferred from task keywords (e.g. "rust", "python")
+        inferred_lang: Option<String>,
+    },
+    /// Directory has files but no recognized project metadata and no language inferred
+    #[default]
+    Ambiguous,
+}
+
+impl std::fmt::Display for WorkspaceState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WorkspaceState::ExistingProject { plugins } => {
+                write!(f, "existing-project({})", plugins.join(", "))
+            }
+            WorkspaceState::Greenfield { inferred_lang } => {
+                write!(
+                    f,
+                    "greenfield({})",
+                    inferred_lang.as_deref().unwrap_or("unknown")
+                )
+            }
+            WorkspaceState::Ambiguous => write!(f, "ambiguous"),
+        }
+    }
+}
+
+/// PSP-5: Node class distinguishing interface, implementation, and integration nodes
+///
+/// - **Interface** nodes define exported signatures, schemas, and verifier scope.
+/// - **Implementation** nodes operate on node-owned files plus sealed interfaces.
+/// - **Integration** nodes reconcile cross-owner or cross-plugin boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeClass {
+    /// Defines exported signatures, schemas, ownership manifests
+    Interface,
+    /// Operates on node-owned files plus adjacent sealed interfaces
+    #[default]
+    Implementation,
+    /// Reconciles cross-owner or cross-plugin boundaries
+    Integration,
+}
+
+impl std::fmt::Display for NodeClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeClass::Interface => write!(f, "interface"),
+            NodeClass::Implementation => write!(f, "implementation"),
+            NodeClass::Integration => write!(f, "integration"),
+        }
+    }
+}
+
+/// PSP-5: Verifier strictness presets
+///
+/// Controls which verification stages are required for stability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VerifierStrictness {
+    /// Default: compilation + tests required, warnings allowed
+    #[default]
+    Default,
+    /// Strict: compilation + tests + linting (e.g. clippy -D warnings)
+    Strict,
+    /// Minimal: syntax/parse check only, no tests required
+    Minimal,
+}
+
+// =============================================================================
+// PSP-5 Phase 2: Ownership Manifests
+// =============================================================================
+
+/// PSP-5 Phase 2: A single ownership entry mapping a file to its owning node
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnershipEntry {
+    /// The node ID that owns this file
+    pub owner_node_id: String,
+    /// The language plugin responsible for this file
+    pub owner_plugin: String,
+    /// The node class of the owning node
+    pub node_class: NodeClass,
+}
+
+/// PSP-5 Phase 2: Ownership manifest tracking file-to-node bindings
+///
+/// Enforces ownership closure: a node may only modify files it owns,
+/// unless it is an Integration node (which may cross ownership boundaries).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnershipManifest {
+    /// File path → ownership entry
+    entries: std::collections::HashMap<String, OwnershipEntry>,
+    /// Maximum files a single node may touch (bounded fanout)
+    #[serde(default = "OwnershipManifest::default_fanout")]
+    fanout_limit: usize,
+}
+
+impl Default for OwnershipManifest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OwnershipManifest {
+    /// Create a new empty manifest with the default fanout limit
+    pub fn new() -> Self {
+        Self {
+            entries: std::collections::HashMap::new(),
+            fanout_limit: Self::default_fanout(),
+        }
+    }
+
+    /// Create with a custom fanout limit
+    pub fn with_fanout_limit(limit: usize) -> Self {
+        Self {
+            entries: std::collections::HashMap::new(),
+            fanout_limit: limit,
+        }
+    }
+
+    fn default_fanout() -> usize {
+        20
+    }
+
+    /// Assign a file to an owning node
+    pub fn assign(
+        &mut self,
+        path: impl Into<String>,
+        owner_node_id: impl Into<String>,
+        owner_plugin: impl Into<String>,
+        node_class: NodeClass,
+    ) {
+        self.entries.insert(
+            path.into(),
+            OwnershipEntry {
+                owner_node_id: owner_node_id.into(),
+                owner_plugin: owner_plugin.into(),
+                node_class,
+            },
+        );
+    }
+
+    /// Look up the owner of a file path
+    pub fn owner_of(&self, path: &str) -> Option<&OwnershipEntry> {
+        self.entries.get(path)
+    }
+
+    /// List all files owned by a specific node
+    pub fn files_owned_by(&self, node_id: &str) -> Vec<&str> {
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.owner_node_id == node_id)
+            .map(|(path, _)| path.as_str())
+            .collect()
+    }
+
+    /// Get the total number of entries
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if the manifest is empty
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get the fanout limit
+    pub fn fanout_limit(&self) -> usize {
+        self.fanout_limit
+    }
+
+    /// Validate that a bundle respects ownership boundaries
+    ///
+    /// Rules:
+    /// - **Implementation** nodes: all paths must be owned by this node
+    /// - **Interface** nodes: all paths must be owned by this node
+    /// - **Integration** nodes: paths may cross ownership boundaries
+    /// - Fanout limit: bundle must not exceed max files per node
+    /// - Unregistered paths (new files) are allowed and will be auto-assigned
+    pub fn validate_bundle(
+        &self,
+        bundle: &ArtifactBundle,
+        node_id: &str,
+        node_class: NodeClass,
+    ) -> Result<(), String> {
+        let artifact_count = bundle.len();
+
+        // Check fanout limit
+        if artifact_count > self.fanout_limit {
+            return Err(format!(
+                "Bundle has {} artifacts, exceeding fanout limit of {}",
+                artifact_count, self.fanout_limit
+            ));
+        }
+
+        // Integration nodes can cross ownership boundaries
+        if node_class == NodeClass::Integration {
+            return Ok(());
+        }
+
+        // For Interface and Implementation nodes, check ownership
+        for op in &bundle.artifacts {
+            let path = op.path();
+            if let Some(entry) = self.entries.get(path) {
+                if entry.owner_node_id != node_id {
+                    return Err(format!(
+                        "Ownership violation: file '{}' is owned by node '{}', \
+                         but node '{}' ({}) attempted to modify it. \
+                         Only Integration nodes may cross ownership boundaries.",
+                        path, entry.owner_node_id, node_id, node_class
+                    ));
+                }
+            }
+            // Unregistered paths (new files) are allowed — they'll be assigned to this node
+        }
+
+        Ok(())
+    }
+
+    /// Auto-assign unregistered paths from a bundle to a node
+    ///
+    /// Called after validate_bundle succeeds, this registers any new paths
+    /// in the manifest so future nodes can't claim them.
+    pub fn assign_new_paths(
+        &mut self,
+        bundle: &ArtifactBundle,
+        node_id: &str,
+        owner_plugin: &str,
+        node_class: NodeClass,
+    ) {
+        for op in &bundle.artifacts {
+            let path = op.path();
+            if !self.entries.contains_key(path) {
+                self.assign(path, node_id, owner_plugin, node_class);
+            }
+        }
+    }
+}
+
+/// PSP-5: A single artifact operation within an artifact bundle
+///
+/// Each operation represents one file mutation: either a full write or a diff patch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum ArtifactOperation {
+    /// Write the full file contents
+    Write {
+        /// Relative path within the workspace
+        path: String,
+        /// Full file content
+        content: String,
+    },
+    /// Apply a unified diff patch
+    Diff {
+        /// Relative path within the workspace
+        path: String,
+        /// Unified diff content
+        patch: String,
+    },
+}
+
+impl ArtifactOperation {
+    /// Get the file path this operation targets
+    pub fn path(&self) -> &str {
+        match self {
+            ArtifactOperation::Write { path, .. } => path,
+            ArtifactOperation::Diff { path, .. } => path,
+        }
+    }
+
+    /// Check if this is a write (new file) operation
+    pub fn is_write(&self) -> bool {
+        matches!(self, ArtifactOperation::Write { .. })
+    }
+
+    /// Check if this is a diff (patch) operation
+    pub fn is_diff(&self) -> bool {
+        matches!(self, ArtifactOperation::Diff { .. })
+    }
+}
+
+/// PSP-5: Multi-artifact bundle from the Actuator
+///
+/// A node response containing one or more file operations applied as a unit.
+/// The orchestrator SHALL parse all operations before mutating the workspace
+/// and SHALL fail atomically if any operation is invalid.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactBundle {
+    /// File operations to apply
+    pub artifacts: Vec<ArtifactOperation>,
+    /// Optional commands to run after file operations
+    #[serde(default)]
+    pub commands: Vec<String>,
+}
+
+impl ArtifactBundle {
+    /// Create an empty bundle
+    pub fn new() -> Self {
+        Self {
+            artifacts: Vec::new(),
+            commands: Vec::new(),
+        }
+    }
+
+    /// Number of file operations
+    pub fn len(&self) -> usize {
+        self.artifacts.len()
+    }
+
+    /// Check if bundle is empty
+    pub fn is_empty(&self) -> bool {
+        self.artifacts.is_empty()
+    }
+
+    /// Get all unique file paths affected by this bundle
+    pub fn affected_paths(&self) -> Vec<&str> {
+        let mut paths: Vec<&str> = self.artifacts.iter().map(|a| a.path()).collect();
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    /// Count of file writes (new files)
+    pub fn writes_count(&self) -> usize {
+        self.artifacts.iter().filter(|a| a.is_write()).count()
+    }
+
+    /// Count of file diffs (patches)
+    pub fn diffs_count(&self) -> usize {
+        self.artifacts.iter().filter(|a| a.is_diff()).count()
+    }
+
+    /// Validate the bundle: checks for empty paths and duplicate targets
+    pub fn validate(&self) -> Result<(), String> {
+        if self.artifacts.is_empty() {
+            return Err("Artifact bundle is empty".to_string());
+        }
+
+        for (i, op) in self.artifacts.iter().enumerate() {
+            if op.path().is_empty() {
+                return Err(format!("Artifact {} has empty path", i));
+            }
+            // Reject absolute paths
+            if op.path().starts_with('/') || op.path().starts_with('\\') {
+                return Err(format!(
+                    "Artifact {} has absolute path '{}', must be relative",
+                    i,
+                    op.path()
+                ));
+            }
+            // Reject path traversal
+            if op.path().contains("..") {
+                return Err(format!(
+                    "Artifact {} has path traversal in '{}'",
+                    i,
+                    op.path()
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for ArtifactBundle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// PSP-5: Structured verification result from a plugin-driven verifier
+///
+/// Holds the outcome of running syntax checks, build, tests, and lint
+/// through the active language plugin's toolchain.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerificationResult {
+    /// Whether the syntax/type check passed
+    pub syntax_ok: bool,
+    /// Whether the build succeeded
+    pub build_ok: bool,
+    /// Whether tests passed
+    pub tests_ok: bool,
+    /// Whether lint passed (only in Strict mode)
+    pub lint_ok: bool,
+    /// Number of diagnostics from LSP / compiler
+    pub diagnostics_count: usize,
+    /// Number of tests passed
+    pub tests_passed: usize,
+    /// Number of tests failed
+    pub tests_failed: usize,
+    /// Summary output from verification tools
+    pub summary: String,
+    /// Raw tool output (for correction prompts)
+    pub raw_output: Option<String>,
+    /// Whether verification ran in degraded mode (missing tools)
+    pub degraded: bool,
+    /// Reason for degraded mode
+    pub degraded_reason: Option<String>,
+    /// Per-stage outcomes with sensor status
+    #[serde(default)]
+    pub stage_outcomes: Vec<StageOutcome>,
+}
+
+impl VerificationResult {
+    /// Check if all verification stages passed
+    pub fn all_passed(&self) -> bool {
+        self.syntax_ok && self.build_ok && self.tests_ok && !self.degraded
+    }
+
+    /// Create a degraded result when tools are unavailable
+    pub fn degraded(reason: impl Into<String>) -> Self {
+        Self {
+            degraded: true,
+            degraded_reason: Some(reason.into()),
+            summary: "Verification ran in degraded mode".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Check whether any stage ran with a fallback or unavailable sensor.
+    ///
+    /// When true the caller should NOT treat a passing result as a genuine
+    /// stability proof — the energy surface was only partially observable.
+    pub fn has_degraded_stages(&self) -> bool {
+        self.stage_outcomes
+            .iter()
+            .any(|s| !matches!(s.sensor_status, SensorStatus::Available))
+    }
+
+    /// Collect human-readable descriptions of all degraded stages.
+    pub fn degraded_stage_reasons(&self) -> Vec<String> {
+        self.stage_outcomes
+            .iter()
+            .filter_map(|s| match &s.sensor_status {
+                SensorStatus::Available => None,
+                SensorStatus::Fallback { actual, reason } => Some(format!(
+                    "{}: used fallback '{}' ({})",
+                    s.stage, actual, reason
+                )),
+                SensorStatus::Unavailable { reason } => {
+                    Some(format!("{}: unavailable ({})", s.stage, reason))
+                }
+            })
+            .collect()
+    }
+}
+
+/// Sensor availability status for a single verification stage.
+///
+/// Tells downstream consumers whether the preferred tool was available,
+/// a fallback was used, or the stage had no usable sensor at all.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SensorStatus {
+    /// The preferred tool ran successfully.
+    Available,
+    /// A fallback tool was used instead of the primary.
+    Fallback {
+        /// Name of the tool that actually ran.
+        actual: String,
+        /// Why the primary was not available.
+        reason: String,
+    },
+    /// No tool was available for this stage.
+    Unavailable {
+        /// What went wrong.
+        reason: String,
+    },
+}
+
+impl std::fmt::Display for SensorStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SensorStatus::Available => write!(f, "available"),
+            SensorStatus::Fallback { actual, .. } => write!(f, "fallback({})", actual),
+            SensorStatus::Unavailable { reason } => write!(f, "unavailable({})", reason),
+        }
+    }
+}
+
+/// Outcome of a single verification stage (syntax, build, test, lint).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageOutcome {
+    /// Which verification stage this covers.
+    pub stage: String,
+    /// Whether the stage passed.
+    pub passed: bool,
+    /// Sensor status for this stage.
+    pub sensor_status: SensorStatus,
+    /// Optional output captured from the tool.
+    pub output: Option<String>,
+}
+
+// =============================================================================
+// PSP-5 Phase 3: Context Provenance, Structural Digests, Restriction Maps
+// =============================================================================
+
+/// PSP-5 Phase 3: Kind of structural artifact being digested
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    /// Exported function/trait/class signature
+    Signature,
+    /// API schema (JSON schema, protobuf, etc.)
+    Schema,
+    /// Module-level symbol inventory
+    SymbolInventory,
+    /// Interface seal for dependency checking
+    InterfaceSeal,
+}
+
+impl std::fmt::Display for ArtifactKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArtifactKind::Signature => write!(f, "signature"),
+            ArtifactKind::Schema => write!(f, "schema"),
+            ArtifactKind::SymbolInventory => write!(f, "symbol_inventory"),
+            ArtifactKind::InterfaceSeal => write!(f, "interface_seal"),
+        }
+    }
+}
+
+/// PSP-5 Phase 3: Hash of a compile-critical structural artifact
+///
+/// Structural digests represent machine-verifiable content (exported signatures,
+/// schemas, symbol inventories) that nodes depend on. When the digest changes,
+/// dependent nodes must re-verify.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuralDigest {
+    /// Unique digest identifier
+    pub digest_id: String,
+    /// What kind of structural artifact this is
+    pub artifact_kind: ArtifactKind,
+    /// SHA-256 hash of the artifact content
+    pub hash: [u8; 32],
+    /// Node that produced this artifact
+    pub source_node_id: String,
+    /// Source file path (relative to workspace)
+    pub source_path: String,
+    /// Monotonically increasing version
+    pub version: u32,
+}
+
+impl StructuralDigest {
+    /// Create a new digest from raw content
+    pub fn from_content(
+        source_node_id: impl Into<String>,
+        source_path: impl Into<String>,
+        artifact_kind: ArtifactKind,
+        content: &[u8],
+    ) -> Self {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut sha = [0u8; 32];
+        // Use a simple hash for the digest (real impl would use SHA-256)
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        let h = hasher.finish().to_le_bytes();
+        sha[..8].copy_from_slice(&h);
+
+        let node_id = source_node_id.into();
+        let path = source_path.into();
+        let digest_id = format!("{}:{}:{}", node_id, path, artifact_kind);
+
+        Self {
+            digest_id,
+            artifact_kind,
+            hash: sha,
+            source_node_id: node_id,
+            source_path: path,
+            version: 1,
+        }
+    }
+
+    /// Check if this digest matches another (same content hash)
+    pub fn matches(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+
+/// PSP-5 Phase 3: Kind of semantic summary being digested
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummaryKind {
+    /// Intent summary from parent/architect
+    IntentSummary,
+    /// Verifier results summary
+    VerifierResults,
+    /// Design rationale
+    DesignRationale,
+}
+
+/// PSP-5 Phase 3: Condensed summary with hash for provenance tracking
+///
+/// Summary digests represent advisory semantic content (intent summaries,
+/// verifier results) whose hashes are recorded for reproducibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SummaryDigest {
+    /// Unique identifier
+    pub digest_id: String,
+    /// Node that produced this summary
+    pub source_node_id: String,
+    /// What kind of summary this is
+    pub kind: SummaryKind,
+    /// SHA-256 hash of the summary content
+    pub hash: [u8; 32],
+    /// Byte length of original content
+    pub original_byte_length: usize,
+    /// The condensed summary text
+    pub summary_text: String,
+}
+
+/// PSP-5 Phase 3: Context budget controlling node context assembly
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextBudget {
+    /// Maximum total bytes for the context package
+    pub byte_limit: usize,
+    /// Maximum number of files to include
+    pub file_count_limit: usize,
+}
+
+impl Default for ContextBudget {
+    fn default() -> Self {
+        Self {
+            byte_limit: 100 * 1024, // 100KB default
+            file_count_limit: 20,
+        }
+    }
+}
+
+/// PSP-5 Phase 3: Restriction map defining a node's context boundary
+///
+/// The restriction map bounds what a node can see. It is derived from the
+/// task graph, ownership manifest, and parent scope. A node SHALL NOT receive
+/// the full repository by default.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RestrictionMap {
+    /// The node this restriction applies to
+    pub node_id: String,
+    /// Context budget (byte and file-count limits)
+    #[serde(default)]
+    pub budget: ContextBudget,
+    /// Files the node owns and can see in full
+    #[serde(default)]
+    pub owned_files: Vec<String>,
+    /// Adjacent sealed interfaces the node can reference
+    #[serde(default)]
+    pub sealed_interfaces: Vec<String>,
+    /// Structural digests for external dependencies (preferred over raw files)
+    #[serde(default)]
+    pub structural_digests: Vec<StructuralDigest>,
+    /// Summary digests for advisory context
+    #[serde(default)]
+    pub summary_digests: Vec<SummaryDigest>,
+    /// Dependency commit hashes this node relies on
+    #[serde(default)]
+    pub dependency_commits: std::collections::HashMap<String, Vec<u8>>,
+}
+
+impl RestrictionMap {
+    /// Create a restriction map for a node with default budget
+    pub fn for_node(node_id: impl Into<String>) -> Self {
+        Self {
+            node_id: node_id.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Total structural bytes (approximation)
+    pub fn structural_bytes(&self) -> usize {
+        self.structural_digests
+            .iter()
+            .map(|d| d.source_path.len() + 64)
+            .sum::<usize>()
+            + self.sealed_interfaces.len() * 128
+    }
+}
+
+/// PSP-5 Phase 3: Reproducible context package for node execution
+///
+/// A context package is the complete, bounded input assembled for a node's
+/// LLM prompt. It records exactly what was included so the same context can
+/// be reconstructed from the ledger and repository state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContextPackage {
+    /// Unique package identifier
+    pub package_id: String,
+    /// The node this context was assembled for
+    pub node_id: String,
+    /// The restriction map used
+    pub restriction_map: RestrictionMap,
+    /// Raw file contents included (path → content)
+    #[serde(default)]
+    pub included_files: std::collections::HashMap<String, String>,
+    /// Structural digests included in this package
+    #[serde(default)]
+    pub structural_digests: Vec<StructuralDigest>,
+    /// Summary digests included in this package
+    #[serde(default)]
+    pub summary_digests: Vec<SummaryDigest>,
+    /// Total byte size of the assembled context
+    pub total_bytes: usize,
+    /// Whether budget was exceeded and content was trimmed
+    pub budget_exceeded: bool,
+    /// Timestamp of assembly
+    pub created_at: i64,
+}
+
+impl ContextPackage {
+    /// Create a new empty context package for a node
+    pub fn new(node_id: impl Into<String>) -> Self {
+        let nid = node_id.into();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        Self {
+            package_id: format!("ctx_{}_{}", nid, ts),
+            node_id: nid,
+            created_at: ts,
+            ..Default::default()
+        }
+    }
+
+    /// Add a file to the context package, respecting budget
+    pub fn add_file(&mut self, path: &str, content: String) -> bool {
+        let new_bytes = self.total_bytes + content.len();
+        if new_bytes > self.restriction_map.budget.byte_limit {
+            self.budget_exceeded = true;
+            return false;
+        }
+        if self.included_files.len() >= self.restriction_map.budget.file_count_limit {
+            self.budget_exceeded = true;
+            return false;
+        }
+        self.total_bytes = new_bytes;
+        self.included_files.insert(path.to_string(), content);
+        true
+    }
+
+    /// Add a structural digest (always fits, they're small)
+    pub fn add_structural_digest(&mut self, digest: StructuralDigest) {
+        self.structural_digests.push(digest);
+    }
+
+    /// Add a summary digest
+    pub fn add_summary_digest(&mut self, digest: SummaryDigest) {
+        self.total_bytes += digest.summary_text.len();
+        self.summary_digests.push(digest);
+    }
+
+    /// Get the provenance record for this package
+    pub fn provenance(&self) -> ContextProvenance {
+        ContextProvenance {
+            node_id: self.node_id.clone(),
+            context_package_id: self.package_id.clone(),
+            structural_digest_hashes: self
+                .structural_digests
+                .iter()
+                .map(|d| (d.digest_id.clone(), d.hash))
+                .collect(),
+            summary_digest_hashes: self
+                .summary_digests
+                .iter()
+                .map(|d| (d.digest_id.clone(), d.hash))
+                .collect(),
+            dependency_commit_hashes: self
+                .restriction_map
+                .dependency_commits
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            included_file_count: self.included_files.len(),
+            total_bytes: self.total_bytes,
+            created_at: self.created_at,
+        }
+    }
+}
+
+/// PSP-5 Phase 3: Provenance record tracking what context was used
+///
+/// Records the hashes of all summaries, contracts, and dependency commits
+/// used to derive a node's prompt context. This enables reproducibility:
+/// the same context package can be reconstructed from persisted state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContextProvenance {
+    /// Node this provenance belongs to
+    pub node_id: String,
+    /// Context package ID
+    pub context_package_id: String,
+    /// Structural digest ID → hash pairs used
+    #[serde(default)]
+    pub structural_digest_hashes: Vec<(String, [u8; 32])>,
+    /// Summary digest ID → hash pairs used
+    #[serde(default)]
+    pub summary_digest_hashes: Vec<(String, [u8; 32])>,
+    /// Dependency node → commit hash pairs
+    #[serde(default)]
+    pub dependency_commit_hashes: Vec<(String, Vec<u8>)>,
+    /// Number of raw files included
+    pub included_file_count: usize,
+    /// Total bytes in context package
+    pub total_bytes: usize,
+    /// When this provenance was recorded
+    pub created_at: i64,
+}
+
+// =============================================================================
+// PSP-5 Phase 5: Escalation Semantics, Local Graph Rewrite, Sheaf Targeting
+// =============================================================================
+
+/// PSP-5 Phase 5: Category of non-convergence detected by the verifier.
+///
+/// When a node exceeds its retry budget or fails to decrease energy, the
+/// orchestrator classifies the failure into one of these categories so the
+/// runtime can choose a targeted repair action instead of only escalating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EscalationCategory {
+    /// Compilation, type, or syntax errors that remain after retries.
+    ImplementationError,
+    /// Node output violates its behavioral contract or interface seal.
+    ContractMismatch,
+    /// Model is unable to produce acceptable output for this node's tier.
+    InsufficientModelCapability,
+    /// Required verifier tools are missing or degraded.
+    DegradedSensors,
+    /// Node scope does not match ownership or dependency graph structure.
+    TopologyMismatch,
+}
+
+impl std::fmt::Display for EscalationCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EscalationCategory::ImplementationError => write!(f, "implementation_error"),
+            EscalationCategory::ContractMismatch => write!(f, "contract_mismatch"),
+            EscalationCategory::InsufficientModelCapability => {
+                write!(f, "insufficient_model_capability")
+            }
+            EscalationCategory::DegradedSensors => write!(f, "degraded_sensors"),
+            EscalationCategory::TopologyMismatch => write!(f, "topology_mismatch"),
+        }
+    }
+}
+
+/// PSP-5 Phase 5: Repair action chosen by the orchestrator after classifying
+/// non-convergence.
+///
+/// Actions are ordered from least destructive (retry with evidence) to most
+/// disruptive (user escalation).  The orchestrator picks the first action
+/// that is safe given the current evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RewriteAction {
+    /// Re-attempt the node with a correction prompt grounded in verifier output.
+    GroundedRetry {
+        /// Human-readable summary of the evidence fed back to the LLM.
+        evidence_summary: String,
+    },
+    /// Refine or tighten the node's behavioral contract or interface seal.
+    ContractRepair {
+        /// Which contract fields need adjustment.
+        fields: Vec<String>,
+    },
+    /// Promote the node to a higher-capability model tier.
+    CapabilityPromotion {
+        /// Current tier.
+        from_tier: ModelTier,
+        /// Proposed tier.
+        to_tier: ModelTier,
+    },
+    /// Attempt to recover a degraded sensor or stop with explicit degradation.
+    SensorRecovery {
+        /// Stages that are degraded.
+        degraded_stages: Vec<String>,
+    },
+    /// Stop the node with an explicit degraded-validation marker rather than
+    /// claiming false stability.
+    DegradedValidationStop {
+        /// Reason the runtime is stopping without full verification.
+        reason: String,
+    },
+    /// Split the current node by ownership closure into smaller nodes.
+    NodeSplit {
+        /// Proposed child node IDs after splitting.
+        proposed_children: Vec<String>,
+    },
+    /// Insert an interface node between this node and its dependents.
+    InterfaceInsertion {
+        /// The boundary that motivated the insertion.
+        boundary: String,
+    },
+    /// Re-plan a local subgraph rooted at the failing node.
+    SubgraphReplan {
+        /// Node IDs in the affected subgraph.
+        affected_nodes: Vec<String>,
+    },
+    /// Escalate to the user with stored evidence (last resort).
+    UserEscalation {
+        /// Structured evidence for the user.
+        evidence: String,
+    },
+}
+
+impl std::fmt::Display for RewriteAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RewriteAction::GroundedRetry { .. } => write!(f, "grounded_retry"),
+            RewriteAction::ContractRepair { .. } => write!(f, "contract_repair"),
+            RewriteAction::CapabilityPromotion { .. } => write!(f, "capability_promotion"),
+            RewriteAction::SensorRecovery { .. } => write!(f, "sensor_recovery"),
+            RewriteAction::DegradedValidationStop { .. } => {
+                write!(f, "degraded_validation_stop")
+            }
+            RewriteAction::NodeSplit { .. } => write!(f, "node_split"),
+            RewriteAction::InterfaceInsertion { .. } => write!(f, "interface_insertion"),
+            RewriteAction::SubgraphReplan { .. } => write!(f, "subgraph_replan"),
+            RewriteAction::UserEscalation { .. } => write!(f, "user_escalation"),
+        }
+    }
+}
+
+/// PSP-5 Phase 5: Sheaf validator class.
+///
+/// Each class checks a different cross-node consistency property after child
+/// nodes converge and before the parent node is committed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SheafValidatorClass {
+    /// Exported symbols, trait impls, and module imports match dependency interfaces.
+    ExportImportConsistency,
+    /// Repository dependency edges remain acyclic and node-local changes do not
+    /// introduce invalid module or package references.
+    DependencyGraphConsistency,
+    /// JSON schemas, API types, and serialization contracts remain compatible.
+    SchemaContractCompatibility,
+    /// Plugin-selected build targets remain satisfiable for the affected subgraph.
+    BuildGraphConsistency,
+    /// Failing tests are attributed to the owning node or interface boundary.
+    TestOwnershipConsistency,
+    /// FFI layers, generated clients, and protocol bindings across plugin boundaries.
+    CrossLanguageBoundary,
+    /// Repository-wide invariants and forbidden patterns still hold.
+    PolicyInvariantConsistency,
+}
+
+impl std::fmt::Display for SheafValidatorClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SheafValidatorClass::ExportImportConsistency => write!(f, "export_import"),
+            SheafValidatorClass::DependencyGraphConsistency => write!(f, "dependency_graph"),
+            SheafValidatorClass::SchemaContractCompatibility => write!(f, "schema_contract"),
+            SheafValidatorClass::BuildGraphConsistency => write!(f, "build_graph"),
+            SheafValidatorClass::TestOwnershipConsistency => write!(f, "test_ownership"),
+            SheafValidatorClass::CrossLanguageBoundary => write!(f, "cross_language"),
+            SheafValidatorClass::PolicyInvariantConsistency => write!(f, "policy_invariant"),
+        }
+    }
+}
+
+/// PSP-5 Phase 5: Result of a single sheaf validation pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SheafValidationResult {
+    /// Which validator class produced this result.
+    pub validator_class: SheafValidatorClass,
+    /// Plugin that owns the validator (if any).
+    pub plugin_source: Option<String>,
+    /// Whether the validation passed.
+    pub passed: bool,
+    /// Boundaries that were validated.
+    pub validated_boundaries: Vec<String>,
+    /// Evidence summary when validation fails.
+    pub evidence_summary: String,
+    /// Files or interfaces affected by the failure.
+    pub affected_files: Vec<String>,
+    /// Energy contribution to V_sheaf.
+    pub v_sheaf_contribution: f32,
+    /// Node IDs recommended for requeue on failure.
+    pub requeue_targets: Vec<String>,
+}
+
+impl SheafValidationResult {
+    /// Create a passing result.
+    pub fn passed(class: SheafValidatorClass, boundaries: Vec<String>) -> Self {
+        Self {
+            validator_class: class,
+            plugin_source: None,
+            passed: true,
+            validated_boundaries: boundaries,
+            evidence_summary: String::new(),
+            affected_files: Vec::new(),
+            v_sheaf_contribution: 0.0,
+            requeue_targets: Vec::new(),
+        }
+    }
+
+    /// Create a failing result with evidence.
+    pub fn failed(
+        class: SheafValidatorClass,
+        evidence: impl Into<String>,
+        affected: Vec<String>,
+        requeue: Vec<String>,
+        v_sheaf: f32,
+    ) -> Self {
+        Self {
+            validator_class: class,
+            plugin_source: None,
+            passed: false,
+            validated_boundaries: Vec::new(),
+            evidence_summary: evidence.into(),
+            affected_files: affected,
+            v_sheaf_contribution: v_sheaf,
+            requeue_targets: requeue,
+        }
+    }
+}
+
+/// PSP-5 Phase 5: Full escalation report assembled by the orchestrator.
+///
+/// Captures everything needed for persistence, user display, and later
+/// resume: the failing node, the classified category, the chosen repair
+/// action, verifier evidence, and energy snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EscalationReport {
+    /// Node that triggered escalation.
+    pub node_id: String,
+    /// Session this report belongs to.
+    pub session_id: String,
+    /// Classified failure category.
+    pub category: EscalationCategory,
+    /// Repair action chosen (or UserEscalation if none was safe).
+    pub action: RewriteAction,
+    /// Energy at the time of escalation.
+    pub energy_snapshot: EnergyComponents,
+    /// Verifier stage outcomes at the time of escalation.
+    pub stage_outcomes: Vec<StageOutcome>,
+    /// Human-readable evidence summary.
+    pub evidence: String,
+    /// Node IDs affected by the chosen action (requeue targets).
+    pub affected_node_ids: Vec<String>,
+    /// Timestamp (epoch seconds).
+    pub timestamp: i64,
+}
+
+/// PSP-5 Phase 5: Record of a local graph rewrite applied by the orchestrator.
+///
+/// Stored in the ledger so Phase 8 resume can replay or audit rewrite history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewriteRecord {
+    /// Node that was rewritten.
+    pub node_id: String,
+    /// Session this record belongs to.
+    pub session_id: String,
+    /// The rewrite action that was applied.
+    pub action: RewriteAction,
+    /// Category that triggered the rewrite.
+    pub category: EscalationCategory,
+    /// Node IDs that were requeued as a result.
+    pub requeued_nodes: Vec<String>,
+    /// Node IDs that were newly inserted (e.g. interface insertion).
+    pub inserted_nodes: Vec<String>,
+    /// Timestamp (epoch seconds).
+    pub timestamp: i64,
+}
+
+/// PSP-5 Phase 5: Targeted requeue entry.
+///
+/// When a sheaf validator or escalation identifies a subset of nodes for
+/// re-execution, this record tracks the targeting metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetedRequeue {
+    /// Node IDs targeted for requeue.
+    pub node_ids: Vec<String>,
+    /// Reason for the requeue (validator class or escalation category).
+    pub reason: String,
+    /// Evidence that justified targeting these specific nodes.
+    pub evidence: String,
+    /// Sheaf validation results that triggered this requeue (if any).
+    pub sheaf_results: Vec<SheafValidationResult>,
+    /// Timestamp (epoch seconds).
+    pub timestamp: i64,
+}
+
+// =============================================================================
+// PSP-5 Phase 6: Provisional Branch Ledger and Interface-Sealed Speculation
+// =============================================================================
+
+/// PSP-5 Phase 6: State of a provisional branch.
+///
+/// Provisional branches store speculative child work separately from committed
+/// ledger state.  A branch transitions through Active → Sealed → Merged or
+/// Flushed, and never enters committed node state without explicit merge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvisionalBranchState {
+    /// Branch is executing speculatively; verification has not yet completed.
+    Active,
+    /// Interface for the branch's parent node is sealed; child work may proceed.
+    Sealed,
+    /// Branch was merged into committed state after parent met stability threshold.
+    Merged,
+    /// Branch was discarded because parent verification failed.
+    Flushed,
+}
+
+impl std::fmt::Display for ProvisionalBranchState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProvisionalBranchState::Active => write!(f, "active"),
+            ProvisionalBranchState::Sealed => write!(f, "sealed"),
+            ProvisionalBranchState::Merged => write!(f, "merged"),
+            ProvisionalBranchState::Flushed => write!(f, "flushed"),
+        }
+    }
+}
+
+/// PSP-5 Phase 6: Provisional branch tracking speculative child work.
+///
+/// Created before speculative generation begins so the runtime can track
+/// branch lifecycle, enforce seal prerequisites, and flush on parent failure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProvisionalBranch {
+    /// Unique branch identifier.
+    pub branch_id: String,
+    /// Session this branch belongs to.
+    pub session_id: String,
+    /// The node executing speculatively in this branch.
+    pub node_id: String,
+    /// Parent node whose interface this branch depends on.
+    pub parent_node_id: String,
+    /// Current branch state.
+    pub state: ProvisionalBranchState,
+    /// SHA-256 hash of the parent interface seal this branch depends on.
+    /// `None` if the parent has not yet produced a seal.
+    pub parent_seal_hash: Option<[u8; 32]>,
+    /// Sandbox workspace directory (if verification ran in sandbox).
+    pub sandbox_dir: Option<String>,
+    /// Timestamp of branch creation (epoch seconds).
+    pub created_at: i64,
+    /// Timestamp of last state transition (epoch seconds).
+    pub updated_at: i64,
+}
+
+impl ProvisionalBranch {
+    /// Create a new active provisional branch.
+    pub fn new(
+        branch_id: impl Into<String>,
+        session_id: impl Into<String>,
+        node_id: impl Into<String>,
+        parent_node_id: impl Into<String>,
+    ) -> Self {
+        let now = epoch_secs();
+        Self {
+            branch_id: branch_id.into(),
+            session_id: session_id.into(),
+            node_id: node_id.into(),
+            parent_node_id: parent_node_id.into(),
+            state: ProvisionalBranchState::Active,
+            parent_seal_hash: None,
+            sandbox_dir: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Whether this branch is still eligible for merge (active or sealed).
+    pub fn is_live(&self) -> bool {
+        matches!(
+            self.state,
+            ProvisionalBranchState::Active | ProvisionalBranchState::Sealed
+        )
+    }
+
+    /// Whether this branch has been discarded.
+    pub fn is_flushed(&self) -> bool {
+        self.state == ProvisionalBranchState::Flushed
+    }
+}
+
+/// PSP-5 Phase 6: Parent → child branch lineage record.
+///
+/// Records the dependency edge between a parent branch (or committed node)
+/// and a child provisional branch.  Used by flush propagation to find all
+/// descendants that must be discarded when a parent fails.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchLineage {
+    /// Unique lineage record ID.
+    pub lineage_id: String,
+    /// Parent branch ID (or committed node ID if the parent is committed).
+    pub parent_branch_id: String,
+    /// Child branch ID.
+    pub child_branch_id: String,
+    /// Whether the dependency is on the parent's sealed interface (vs. full output).
+    pub depends_on_seal: bool,
+}
+
+/// PSP-5 Phase 6: Record of a sealed interface produced by a node.
+///
+/// An interface seal is a hash over the exported signatures, schemas, or symbol
+/// inventories that downstream nodes depend on.  Once sealed, the interface is
+/// immutable within the current SRBN iteration — dependent context is assembled
+/// from the seal rather than from mutable parent implementation files.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InterfaceSealRecord {
+    /// Unique seal identifier.
+    pub seal_id: String,
+    /// Session this seal belongs to.
+    pub session_id: String,
+    /// Node that produced (and owns) this seal.
+    pub node_id: String,
+    /// Path of the sealed artifact (relative to workspace).
+    pub sealed_path: String,
+    /// The kind of structural artifact that was sealed.
+    pub artifact_kind: ArtifactKind,
+    /// SHA-256 hash of the sealed content.
+    pub seal_hash: [u8; 32],
+    /// Monotonically increasing version (incremented on re-seal after parent retry).
+    pub version: u32,
+    /// Timestamp of seal creation (epoch seconds).
+    pub created_at: i64,
+}
+
+impl InterfaceSealRecord {
+    /// Create a new seal from existing structural digest data.
+    pub fn from_digest(
+        session_id: impl Into<String>,
+        node_id: impl Into<String>,
+        digest: &StructuralDigest,
+    ) -> Self {
+        let nid = node_id.into();
+        let sid = session_id.into();
+        let seal_id = format!("seal_{}_{}", nid, digest.source_path);
+        Self {
+            seal_id,
+            session_id: sid,
+            node_id: nid,
+            sealed_path: digest.source_path.clone(),
+            artifact_kind: digest.artifact_kind,
+            seal_hash: digest.hash,
+            version: digest.version,
+            created_at: epoch_secs(),
+        }
+    }
+
+    /// Check whether this seal matches a given digest hash.
+    pub fn matches_hash(&self, hash: &[u8; 32]) -> bool {
+        self.seal_hash == *hash
+    }
+}
+
+/// PSP-5 Phase 6: Record of a branch flush decision.
+///
+/// Persisted so that resume and status surfaces can show why speculative work
+/// was discarded and which nodes need re-execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchFlushRecord {
+    /// Unique flush record ID.
+    pub flush_id: String,
+    /// Session this flush belongs to.
+    pub session_id: String,
+    /// Parent node whose failure triggered the flush.
+    pub parent_node_id: String,
+    /// Branch IDs that were flushed.
+    pub flushed_branch_ids: Vec<String>,
+    /// Node IDs that should be requeued after the parent stabilizes.
+    pub requeue_node_ids: Vec<String>,
+    /// Human-readable reason for the flush.
+    pub reason: String,
+    /// Timestamp of the flush decision (epoch seconds).
+    pub created_at: i64,
+}
+
+impl BranchFlushRecord {
+    /// Create a new flush record.
+    pub fn new(
+        session_id: impl Into<String>,
+        parent_node_id: impl Into<String>,
+        flushed_branch_ids: Vec<String>,
+        requeue_node_ids: Vec<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self {
+            flush_id: format!("flush_{}", uuid_v4()),
+            session_id: session_id.into(),
+            parent_node_id: parent_node_id.into(),
+            flushed_branch_ids,
+            requeue_node_ids,
+            reason: reason.into(),
+            created_at: epoch_secs(),
+        }
+    }
+}
+
+/// PSP-5 Phase 6: Dependency tracking for nodes blocked on a parent seal.
+///
+/// When a child node depends on a parent's sealed interface that has not yet
+/// been produced, the child is registered as a blocked dependent.  Once the
+/// parent seals its interface, blocked dependents are unblocked.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockedDependency {
+    /// Child node that is blocked.
+    pub child_node_id: String,
+    /// Parent node whose seal the child requires.
+    pub parent_node_id: String,
+    /// Sealed interface paths the child depends on.
+    pub required_seal_paths: Vec<String>,
+    /// Timestamp when the block was registered (epoch seconds).
+    pub blocked_at: i64,
+}
+
+impl BlockedDependency {
+    /// Create a new blocked dependency record.
+    pub fn new(
+        child_node_id: impl Into<String>,
+        parent_node_id: impl Into<String>,
+        required_seal_paths: Vec<String>,
+    ) -> Self {
+        Self {
+            child_node_id: child_node_id.into(),
+            parent_node_id: parent_node_id.into(),
+            required_seal_paths,
+            blocked_at: epoch_secs(),
+        }
+    }
+}
+
+/// Helper: current epoch seconds.
+fn epoch_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
+
+/// Helper: generate a UUID v4 string (simplified).
+fn uuid_v4() -> String {
+    // Use timestamp + random-ish counter for unique IDs without pulling uuid crate
+    // The orchestrator and ledger layers use the `uuid` crate directly when available.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let mut hasher = DefaultHasher::new();
+    now.as_nanos().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod psp5_tests {
+    use super::*;
+
+    #[test]
+    fn test_execution_mode_default_is_project() {
+        assert_eq!(ExecutionMode::default(), ExecutionMode::Project);
+    }
+
+    #[test]
+    fn test_node_class_default_is_implementation() {
+        assert_eq!(NodeClass::default(), NodeClass::Implementation);
+    }
+
+    #[test]
+    fn test_artifact_bundle_roundtrip() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "fn main() {}".to_string(),
+                },
+                ArtifactOperation::Diff {
+                    path: "src/lib.rs".to_string(),
+                    patch: "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new".to_string(),
+                },
+            ],
+            commands: vec!["cargo build".to_string()],
+        };
+
+        let json = serde_json::to_string(&bundle).unwrap();
+        let deser: ArtifactBundle = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deser.len(), 2);
+        assert_eq!(deser.writes_count(), 1);
+        assert_eq!(deser.diffs_count(), 1);
+        assert_eq!(deser.commands.len(), 1);
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_empty() {
+        let bundle = ArtifactBundle::new();
+        assert!(bundle.validate().is_err());
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_absolute_path() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "/etc/passwd".to_string(),
+                content: "bad".to_string(),
+            }],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_err());
+        assert!(bundle.validate().unwrap_err().contains("absolute path"));
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_path_traversal() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "../../etc/passwd".to_string(),
+                content: "bad".to_string(),
+            }],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_err());
+        assert!(bundle.validate().unwrap_err().contains("path traversal"));
+    }
+
+    #[test]
+    fn test_artifact_bundle_validate_ok() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "src/main.rs".to_string(),
+                content: "fn main() {}".to_string(),
+            }],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_ok());
+    }
+
+    #[test]
+    fn test_artifact_operation_accessors() {
+        let write = ArtifactOperation::Write {
+            path: "foo.rs".to_string(),
+            content: "bar".to_string(),
+        };
+        assert_eq!(write.path(), "foo.rs");
+        assert!(write.is_write());
+        assert!(!write.is_diff());
+
+        let diff = ArtifactOperation::Diff {
+            path: "baz.rs".to_string(),
+            patch: "patch".to_string(),
+        };
+        assert_eq!(diff.path(), "baz.rs");
+        assert!(!diff.is_write());
+        assert!(diff.is_diff());
+    }
+
+    #[test]
+    fn test_affected_paths_deduplication() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "v1".to_string(),
+                },
+                ArtifactOperation::Diff {
+                    path: "src/main.rs".to_string(),
+                    patch: "patch".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+        assert_eq!(bundle.affected_paths().len(), 1);
+    }
+
+    #[test]
+    fn test_verification_result_all_passed() {
+        let mut result = VerificationResult::default();
+        assert!(!result.all_passed()); // all false by default
+
+        result.syntax_ok = true;
+        result.build_ok = true;
+        result.tests_ok = true;
+        assert!(result.all_passed());
+    }
+
+    #[test]
+    fn test_verification_result_degraded() {
+        let result = VerificationResult::degraded("no cargo");
+        assert!(result.degraded);
+        assert!(!result.all_passed());
+        assert_eq!(result.degraded_reason.unwrap(), "no cargo");
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 2: Ownership Manifest Tests
+    // =========================================================================
+
+    #[test]
+    fn test_ownership_manifest_assign_and_lookup() {
+        let mut manifest = OwnershipManifest::new();
+        manifest.assign("src/main.rs", "node_1", "rust", NodeClass::Implementation);
+        manifest.assign("src/lib.rs", "node_1", "rust", NodeClass::Implementation);
+        manifest.assign("tests/test.rs", "node_2", "rust", NodeClass::Integration);
+
+        // owner_of
+        let entry = manifest.owner_of("src/main.rs").unwrap();
+        assert_eq!(entry.owner_node_id, "node_1");
+        assert_eq!(entry.owner_plugin, "rust");
+        assert_eq!(entry.node_class, NodeClass::Implementation);
+
+        assert!(manifest.owner_of("nonexistent.rs").is_none());
+
+        // files_owned_by
+        let mut files = manifest.files_owned_by("node_1");
+        files.sort();
+        assert_eq!(files, vec!["src/lib.rs", "src/main.rs"]);
+
+        let files_2 = manifest.files_owned_by("node_2");
+        assert_eq!(files_2, vec!["tests/test.rs"]);
+
+        assert_eq!(manifest.len(), 3);
+        assert!(!manifest.is_empty());
+    }
+
+    #[test]
+    fn test_ownership_manifest_validate_bundle_ok() {
+        let mut manifest = OwnershipManifest::new();
+        manifest.assign("src/main.rs", "node_1", "rust", NodeClass::Implementation);
+        manifest.assign("src/lib.rs", "node_1", "rust", NodeClass::Implementation);
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "fn main() {}".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "src/lib.rs".to_string(),
+                    content: "pub fn lib() {}".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        // node_1 owns both files → should pass
+        assert!(manifest
+            .validate_bundle(&bundle, "node_1", NodeClass::Implementation)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_ownership_manifest_validate_bundle_cross_owner_rejected() {
+        let mut manifest = OwnershipManifest::new();
+        manifest.assign("src/main.rs", "node_1", "rust", NodeClass::Implementation);
+        manifest.assign("src/other.rs", "node_2", "rust", NodeClass::Implementation);
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "fn main() {}".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "src/other.rs".to_string(),
+                    content: "fn other() {}".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        // node_1 tries to modify node_2's file → rejected
+        let result = manifest.validate_bundle(&bundle, "node_1", NodeClass::Implementation);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Ownership violation"));
+    }
+
+    #[test]
+    fn test_ownership_manifest_validate_integration_cross_owner_ok() {
+        let mut manifest = OwnershipManifest::new();
+        manifest.assign("src/main.rs", "node_1", "rust", NodeClass::Implementation);
+        manifest.assign("src/other.rs", "node_2", "rust", NodeClass::Implementation);
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "fn main() {}".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "src/other.rs".to_string(),
+                    content: "fn other() {}".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        // Integration node can cross ownership boundaries
+        let result = manifest.validate_bundle(&bundle, "node_3", NodeClass::Integration);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ownership_manifest_fanout_limit() {
+        let manifest = OwnershipManifest::with_fanout_limit(2);
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "a.rs".to_string(),
+                    content: "a".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "b.rs".to_string(),
+                    content: "b".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "c.rs".to_string(),
+                    content: "c".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        // 3 artifacts exceeds fanout limit of 2
+        let result = manifest.validate_bundle(&bundle, "node_1", NodeClass::Implementation);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("fanout limit"));
+
+        // Exactly at the limit should pass
+        let small_bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "a.rs".to_string(),
+                    content: "a".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "b.rs".to_string(),
+                    content: "b".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+        assert!(manifest
+            .validate_bundle(&small_bundle, "node_1", NodeClass::Implementation)
+            .is_ok());
+    }
+
+    #[test]
+    fn test_ownership_manifest_assign_new_paths() {
+        let mut manifest = OwnershipManifest::new();
+        manifest.assign("src/main.rs", "node_1", "rust", NodeClass::Implementation);
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".to_string(),
+                    content: "existing".to_string(),
+                },
+                ArtifactOperation::Write {
+                    path: "src/new_file.rs".to_string(),
+                    content: "new".to_string(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        manifest.assign_new_paths(&bundle, "node_1", "rust", NodeClass::Implementation);
+
+        // Existing entry unchanged
+        assert_eq!(
+            manifest.owner_of("src/main.rs").unwrap().owner_node_id,
+            "node_1"
+        );
+        // New path auto-assigned
+        let new_entry = manifest.owner_of("src/new_file.rs").unwrap();
+        assert_eq!(new_entry.owner_node_id, "node_1");
+        assert_eq!(new_entry.owner_plugin, "rust");
+        assert_eq!(manifest.len(), 2);
+    }
+
+    // =========================================================================
+    // PSP-5: Plan Ownership Closure Validation Tests
+    // =========================================================================
+
+    #[test]
+    fn test_plan_validate_duplicate_output_files_rejected() {
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math module".into(),
+                    output_files: vec!["src/math.py".into(), "tests/test_math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math module")
+                },
+                PlannedTask {
+                    id: "task_2".into(),
+                    goal: "Create tests".into(),
+                    output_files: vec!["tests/test_math.py".into()],
+                    ..PlannedTask::new("task_2", "Create tests")
+                },
+            ],
+        };
+        let result = plan.validate();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("tests/test_math.py"),
+            "Error should mention the duplicate file: {}",
+            err
+        );
+        assert!(
+            err.contains("Ownership violation"),
+            "Error should mention ownership: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_plan_validate_unique_output_files_ok() {
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math module".into(),
+                    output_files: vec!["src/math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math module")
+                },
+                PlannedTask {
+                    id: "test_1".into(),
+                    goal: "Tests for math".into(),
+                    output_files: vec!["tests/test_math.py".into()],
+                    dependencies: vec!["task_1".into()],
+                    ..PlannedTask::new("test_1", "Tests for math")
+                },
+            ],
+        };
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_plan_validate_context_files_do_not_conflict_with_output_files() {
+        // Reading another task's file via context_files is fine
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "task_1".into(),
+                    goal: "Create math module".into(),
+                    output_files: vec!["src/math.py".into()],
+                    ..PlannedTask::new("task_1", "Create math module")
+                },
+                PlannedTask {
+                    id: "test_1".into(),
+                    goal: "Tests for math".into(),
+                    context_files: vec!["src/math.py".into()], // reading, not owning
+                    output_files: vec!["tests/test_math.py".into()],
+                    dependencies: vec!["task_1".into()],
+                    ..PlannedTask::new("test_1", "Tests for math")
+                },
+            ],
+        };
+        assert!(plan.validate().is_ok());
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 3: Structural Digests, Context Packages, Provenance Tests
+    // =========================================================================
+
+    #[test]
+    fn test_structural_digest_from_content() {
+        let digest = StructuralDigest::from_content(
+            "node_1",
+            "src/main.rs",
+            ArtifactKind::Signature,
+            b"fn main() {}",
+        );
+
+        assert_eq!(digest.source_node_id, "node_1");
+        assert_eq!(digest.source_path, "src/main.rs");
+        assert_eq!(digest.artifact_kind, ArtifactKind::Signature);
+        assert_eq!(digest.version, 1);
+        assert!(!digest.digest_id.is_empty());
+        // Hash must be non-zero
+        assert_ne!(digest.hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_structural_digest_matches() {
+        let d1 = StructuralDigest::from_content(
+            "node_1",
+            "src/main.rs",
+            ArtifactKind::Signature,
+            b"fn main() {}",
+        );
+        let d2 = StructuralDigest::from_content(
+            "node_1",
+            "src/main.rs",
+            ArtifactKind::Signature,
+            b"fn main() {}",
+        );
+        let d3 = StructuralDigest::from_content(
+            "node_1",
+            "src/main.rs",
+            ArtifactKind::Signature,
+            b"fn main() { println!(); }",
+        );
+
+        assert!(d1.matches(&d2));
+        assert!(!d1.matches(&d3));
+    }
+
+    #[test]
+    fn test_context_budget_default() {
+        let budget = ContextBudget::default();
+        assert_eq!(budget.byte_limit, 100 * 1024); // 100KB
+        assert_eq!(budget.file_count_limit, 20);
+    }
+
+    #[test]
+    fn test_restriction_map_for_node() {
+        let map = RestrictionMap::for_node("node_1".to_string());
+        assert_eq!(map.node_id, "node_1");
+        assert!(map.owned_files.is_empty());
+        assert!(map.sealed_interfaces.is_empty());
+        assert_eq!(map.budget, ContextBudget::default());
+    }
+
+    #[test]
+    fn test_restriction_map_structural_bytes() {
+        let mut map = RestrictionMap::for_node("node_1".to_string());
+        let d = StructuralDigest::from_content(
+            "n1",
+            "src/a.rs",
+            ArtifactKind::InterfaceSeal,
+            b"content",
+        );
+        map.structural_digests.push(d);
+        // structural_bytes = source_path.len() + 64 per digest + sealed_interfaces * 128
+        assert!(map.structural_bytes() > 0);
+    }
+
+    #[test]
+    fn test_context_package_add_file_within_budget() {
+        let mut pkg = ContextPackage::new("node_1".to_string());
+        pkg.restriction_map.budget.byte_limit = 1024;
+
+        assert!(pkg.add_file("a.rs", "hello world".to_string()));
+        assert_eq!(pkg.included_files.len(), 1);
+        assert_eq!(pkg.total_bytes, 11);
+        assert!(!pkg.budget_exceeded);
+    }
+
+    #[test]
+    fn test_context_package_add_file_exceeds_budget() {
+        let mut pkg = ContextPackage::new("node_1".to_string());
+        pkg.restriction_map.budget.byte_limit = 10;
+
+        let result = pkg.add_file("big.rs", "this is more than ten bytes".to_string());
+        assert!(!result);
+        assert!(pkg.budget_exceeded);
+        // File should not have been added
+        assert!(pkg.included_files.is_empty());
+    }
+
+    #[test]
+    fn test_context_package_provenance() {
+        let mut pkg = ContextPackage::new("node_1".to_string());
+        pkg.add_file("a.rs", "content".to_string());
+
+        let d = StructuralDigest::from_content("n1", "src/a.rs", ArtifactKind::Signature, b"data");
+        pkg.add_structural_digest(d);
+
+        let prov = pkg.provenance();
+        assert_eq!(prov.node_id, "node_1");
+        assert_eq!(prov.context_package_id, pkg.package_id);
+        assert_eq!(prov.included_file_count, 1);
+        assert_eq!(prov.structural_digest_hashes.len(), 1);
+        assert!(prov.total_bytes > 0);
+    }
+
+    #[test]
+    fn test_context_provenance_default() {
+        let prov = ContextProvenance::default();
+        assert!(prov.node_id.is_empty());
+        assert!(prov.structural_digest_hashes.is_empty());
+        assert_eq!(prov.included_file_count, 0);
+    }
+
+    #[test]
+    fn test_artifact_kind_display() {
+        assert_eq!(format!("{}", ArtifactKind::Signature), "signature");
+        assert_eq!(format!("{}", ArtifactKind::InterfaceSeal), "interface_seal");
+    }
+
+    #[test]
+    fn test_sensor_status_display() {
+        assert_eq!(format!("{}", SensorStatus::Available), "available");
+        assert_eq!(
+            format!(
+                "{}",
+                SensorStatus::Fallback {
+                    actual: "ruff".into(),
+                    reason: "primary not found".into()
+                }
+            ),
+            "fallback(ruff)"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                SensorStatus::Unavailable {
+                    reason: "not installed".into()
+                }
+            ),
+            "unavailable(not installed)"
+        );
+    }
+
+    #[test]
+    fn test_verification_result_no_degraded_stages() {
+        let result = VerificationResult {
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: true,
+            lint_ok: true,
+            stage_outcomes: vec![StageOutcome {
+                stage: "syntax_check".into(),
+                passed: true,
+                sensor_status: SensorStatus::Available,
+                output: None,
+            }],
+            ..Default::default()
+        };
+        assert!(result.all_passed());
+        assert!(!result.has_degraded_stages());
+        assert!(result.degraded_stage_reasons().is_empty());
+    }
+
+    #[test]
+    fn test_verification_result_with_fallback_blocks_stability() {
+        let result = VerificationResult {
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: true,
+            lint_ok: true,
+            stage_outcomes: vec![
+                StageOutcome {
+                    stage: "syntax_check".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Available,
+                    output: None,
+                },
+                StageOutcome {
+                    stage: "test".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Fallback {
+                        actual: "python -m pytest".into(),
+                        reason: "uv not found".into(),
+                    },
+                    output: None,
+                },
+            ],
+            ..Default::default()
+        };
+        // All tools passed but a fallback was used — should flag degraded
+        assert!(result.has_degraded_stages());
+        let reasons = result.degraded_stage_reasons();
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("test"));
+        assert!(reasons[0].contains("fallback"));
+    }
+
+    #[test]
+    fn test_verification_result_unavailable_stage() {
+        let result = VerificationResult {
+            syntax_ok: false,
+            stage_outcomes: vec![StageOutcome {
+                stage: "lint".into(),
+                passed: false,
+                sensor_status: SensorStatus::Unavailable {
+                    reason: "clippy not installed".into(),
+                },
+                output: None,
+            }],
+            ..Default::default()
+        };
+        assert!(result.has_degraded_stages());
+        let reasons = result.degraded_stage_reasons();
+        assert!(reasons[0].contains("clippy not installed"));
+    }
+
+    #[test]
+    fn test_verification_result_mixed_stages() {
+        // A realistic result: syntax passed on primary, lint fell back, tests unavailable
+        let result = VerificationResult {
+            syntax_ok: true,
+            tests_ok: false,
+            lint_ok: false,
+            stage_outcomes: vec![
+                StageOutcome {
+                    stage: "syntax_check".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Available,
+                    output: Some("OK".into()),
+                },
+                StageOutcome {
+                    stage: "lint".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Fallback {
+                        actual: "cargo check".into(),
+                        reason: "clippy not found".into(),
+                    },
+                    output: Some("warnings only".into()),
+                },
+                StageOutcome {
+                    stage: "test".into(),
+                    passed: false,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: "no test runner".into(),
+                    },
+                    output: None,
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(result.has_degraded_stages());
+        let reasons = result.degraded_stage_reasons();
+        // Both lint (fallback) and test (unavailable) should be degraded
+        assert_eq!(reasons.len(), 2);
+        assert!(reasons.iter().any(|r| r.contains("lint")));
+        assert!(reasons.iter().any(|r| r.contains("test")));
+    }
+
+    // =========================================================================
+    // Phase 5: Escalation, graph rewrite, and sheaf validator types
+    // =========================================================================
+
+    #[test]
+    fn test_escalation_category_display() {
+        assert_eq!(
+            EscalationCategory::ImplementationError.to_string(),
+            "implementation_error"
+        );
+        assert_eq!(
+            EscalationCategory::ContractMismatch.to_string(),
+            "contract_mismatch"
+        );
+        assert_eq!(
+            EscalationCategory::DegradedSensors.to_string(),
+            "degraded_sensors"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_action_grounded_retry() {
+        let action = RewriteAction::GroundedRetry {
+            evidence_summary: "build failed twice".into(),
+        };
+        match action {
+            RewriteAction::GroundedRetry { evidence_summary } => {
+                assert!(evidence_summary.contains("build failed"));
+            }
+            _ => panic!("Expected GroundedRetry"),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_action_node_split() {
+        let action = RewriteAction::NodeSplit {
+            proposed_children: vec!["child_a".into(), "child_b".into()],
+        };
+        match action {
+            RewriteAction::NodeSplit { proposed_children } => {
+                assert_eq!(proposed_children.len(), 2);
+            }
+            _ => panic!("Expected NodeSplit"),
+        }
+    }
+
+    #[test]
+    fn test_sheaf_validator_class_display() {
+        assert_eq!(
+            SheafValidatorClass::DependencyGraphConsistency.to_string(),
+            "dependency_graph"
+        );
+        assert_eq!(
+            SheafValidatorClass::CrossLanguageBoundary.to_string(),
+            "cross_language"
+        );
+    }
+
+    #[test]
+    fn test_sheaf_validation_result_passed() {
+        let result = SheafValidationResult::passed(
+            SheafValidatorClass::DependencyGraphConsistency,
+            vec!["node_1".into()],
+        );
+        assert!(result.passed);
+        assert_eq!(result.v_sheaf_contribution, 0.0);
+        assert!(result.evidence_summary.is_empty());
+        assert!(result.requeue_targets.is_empty());
+    }
+
+    #[test]
+    fn test_sheaf_validation_result_failed() {
+        let result = SheafValidationResult::failed(
+            SheafValidatorClass::ExportImportConsistency,
+            "ownership mismatch on 2 files",
+            vec!["src/a.rs".into(), "src/b.rs".into()],
+            vec!["node_2".into()],
+            0.3,
+        );
+        assert!(!result.passed);
+        assert_eq!(result.v_sheaf_contribution, 0.3);
+        assert!(result.evidence_summary.contains("ownership mismatch"));
+        assert_eq!(result.affected_files.len(), 2);
+        assert_eq!(result.requeue_targets, vec!["node_2"]);
+    }
+
+    #[test]
+    fn test_escalation_report_roundtrip() {
+        let report = EscalationReport {
+            node_id: "test_node".into(),
+            session_id: "sess_1".into(),
+            category: EscalationCategory::TopologyMismatch,
+            action: RewriteAction::InterfaceInsertion {
+                boundary: "module_boundary".into(),
+            },
+            energy_snapshot: EnergyComponents::default(),
+            stage_outcomes: Vec::new(),
+            evidence: "violation at boundary".into(),
+            affected_node_ids: vec!["dep_1".into()],
+            timestamp: 12345,
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        let deser: EscalationReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.node_id, "test_node");
+        assert_eq!(deser.category, EscalationCategory::TopologyMismatch);
+        assert_eq!(deser.affected_node_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_stability_monitor_reset_for_replan() {
+        let mut monitor = StabilityMonitor::new();
+        monitor.record_energy(0.8);
+        monitor.record_energy(0.5);
+        monitor.record_failure(ErrorType::Compilation);
+        assert_eq!(monitor.attempt_count, 2);
+
+        monitor.reset_for_replan();
+        assert_eq!(monitor.attempt_count, 0);
+        assert!(!monitor.stable);
+        // History is preserved
+        assert_eq!(monitor.energy_history.len(), 2);
+    }
+
+    #[test]
+    fn test_rewrite_record_serialization() {
+        let record = RewriteRecord {
+            node_id: "n1".into(),
+            session_id: "s1".into(),
+            action: RewriteAction::SubgraphReplan {
+                affected_nodes: vec!["n2".into(), "n3".into()],
+            },
+            category: EscalationCategory::InsufficientModelCapability,
+            requeued_nodes: vec!["n2".into(), "n3".into()],
+            inserted_nodes: Vec::new(),
+            timestamp: 99999,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let deser: RewriteRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.requeued_nodes.len(), 2);
+        assert!(deser.inserted_nodes.is_empty());
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 6: Provisional Branch and Seal Tests
+    // =========================================================================
+
+    #[test]
+    fn test_provisional_branch_state_display() {
+        assert_eq!(ProvisionalBranchState::Active.to_string(), "active");
+        assert_eq!(ProvisionalBranchState::Sealed.to_string(), "sealed");
+        assert_eq!(ProvisionalBranchState::Merged.to_string(), "merged");
+        assert_eq!(ProvisionalBranchState::Flushed.to_string(), "flushed");
+    }
+
+    #[test]
+    fn test_provisional_branch_lifecycle() {
+        let branch = ProvisionalBranch::new("b1", "s1", "node_child", "node_parent");
+        assert_eq!(branch.state, ProvisionalBranchState::Active);
+        assert!(branch.is_live());
+        assert!(!branch.is_flushed());
+        assert!(branch.parent_seal_hash.is_none());
+        assert!(branch.sandbox_dir.is_none());
+        assert!(branch.created_at > 0);
+    }
+
+    #[test]
+    fn test_provisional_branch_flushed_not_live() {
+        let mut branch = ProvisionalBranch::new("b1", "s1", "n1", "p1");
+        branch.state = ProvisionalBranchState::Flushed;
+        assert!(!branch.is_live());
+        assert!(branch.is_flushed());
+    }
+
+    #[test]
+    fn test_provisional_branch_sealed_is_live() {
+        let mut branch = ProvisionalBranch::new("b1", "s1", "n1", "p1");
+        branch.state = ProvisionalBranchState::Sealed;
+        assert!(branch.is_live());
+        assert!(!branch.is_flushed());
+    }
+
+    #[test]
+    fn test_provisional_branch_serialization() {
+        let branch = ProvisionalBranch::new("b1", "s1", "n1", "p1");
+        let json = serde_json::to_string(&branch).unwrap();
+        let deser: ProvisionalBranch = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.branch_id, "b1");
+        assert_eq!(deser.state, ProvisionalBranchState::Active);
+    }
+
+    #[test]
+    fn test_branch_lineage_serialization() {
+        let lineage = BranchLineage {
+            lineage_id: "lin_1".into(),
+            parent_branch_id: "parent_b".into(),
+            child_branch_id: "child_b".into(),
+            depends_on_seal: true,
+        };
+        let json = serde_json::to_string(&lineage).unwrap();
+        let deser: BranchLineage = serde_json::from_str(&json).unwrap();
+        assert!(deser.depends_on_seal);
+        assert_eq!(deser.parent_branch_id, "parent_b");
+    }
+
+    #[test]
+    fn test_interface_seal_from_digest() {
+        let digest = StructuralDigest::from_content(
+            "node_iface",
+            "src/api.rs",
+            ArtifactKind::InterfaceSeal,
+            b"pub fn hello() -> String",
+        );
+        let seal = InterfaceSealRecord::from_digest("sess1", "node_iface", &digest);
+        assert_eq!(seal.node_id, "node_iface");
+        assert_eq!(seal.sealed_path, "src/api.rs");
+        assert!(seal.matches_hash(&digest.hash));
+        assert!(!seal.matches_hash(&[0u8; 32]));
+    }
+
+    #[test]
+    fn test_branch_flush_record() {
+        let flush = BranchFlushRecord::new(
+            "s1",
+            "parent_node",
+            vec!["b1".into(), "b2".into()],
+            vec!["child1".into(), "child2".into()],
+            "Parent failed verification",
+        );
+        assert!(flush.flush_id.starts_with("flush_"));
+        assert_eq!(flush.flushed_branch_ids.len(), 2);
+        assert_eq!(flush.requeue_node_ids.len(), 2);
+        assert!(flush.created_at > 0);
+    }
+
+    #[test]
+    fn test_blocked_dependency() {
+        let dep = BlockedDependency::new("child_node", "parent_node", vec!["src/api.rs".into()]);
+        assert_eq!(dep.child_node_id, "child_node");
+        assert_eq!(dep.parent_node_id, "parent_node");
+        assert_eq!(dep.required_seal_paths.len(), 1);
+        assert!(dep.blocked_at > 0);
+    }
+
+    #[test]
+    fn test_srbn_node_phase6_fields() {
+        let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
+        assert!(node.provisional_branch_id.is_none());
+        assert!(node.interface_seal_hash.is_none());
     }
 }

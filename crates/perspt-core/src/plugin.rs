@@ -2,6 +2,8 @@
 //!
 //! Provides a trait-based plugin system for polyglot support.
 //! Each language (Rust, Python, JS, etc.) implements this trait.
+//!
+//! PSP-000005 expands plugins from init-only to full runtime verification contracts.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -15,6 +17,150 @@ pub struct LspConfig {
     pub args: Vec<String>,
     /// Language ID for textDocument/didOpen
     pub language_id: String,
+}
+
+// =============================================================================
+// PSP-5 Phase 4: Verifier Capability Declarations
+// =============================================================================
+
+/// Verification stage in the plugin-driven pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VerifierStage {
+    /// Syntax / type check (e.g. `cargo check`, `uv run ty check .`)
+    SyntaxCheck,
+    /// Build step (e.g. `cargo build`, `npm run build`)
+    Build,
+    /// Test execution (e.g. `cargo test`, `uv run pytest`)
+    Test,
+    /// Lint pass (e.g. `cargo clippy`, `uv run ruff check .`)
+    Lint,
+}
+
+impl std::fmt::Display for VerifierStage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerifierStage::SyntaxCheck => write!(f, "syntax_check"),
+            VerifierStage::Build => write!(f, "build"),
+            VerifierStage::Test => write!(f, "test"),
+            VerifierStage::Lint => write!(f, "lint"),
+        }
+    }
+}
+
+/// A single verifier sensor: one stage of the verification pipeline.
+///
+/// Each capability independently declares its command, host-tool availability,
+/// and optional fallback. This replaces the coarse single `host_tool_available()`
+/// check with per-sensor probing.
+#[derive(Debug, Clone)]
+pub struct VerifierCapability {
+    /// Which stage this capability covers.
+    pub stage: VerifierStage,
+    /// Primary command to execute (None if this stage is not supported).
+    pub command: Option<String>,
+    /// Whether the primary command's host tool is available on this machine.
+    pub available: bool,
+    /// Fallback command when the primary tool is unavailable.
+    pub fallback_command: Option<String>,
+    /// Whether the fallback tool is available.
+    pub fallback_available: bool,
+}
+
+impl VerifierCapability {
+    /// True if either the primary or fallback tool is available.
+    pub fn any_available(&self) -> bool {
+        self.available || self.fallback_available
+    }
+
+    /// The best available command, preferring primary over fallback.
+    pub fn effective_command(&self) -> Option<&str> {
+        if self.available {
+            self.command.as_deref()
+        } else if self.fallback_available {
+            self.fallback_command.as_deref()
+        } else {
+            None
+        }
+    }
+}
+
+/// LSP availability and fallback for a plugin.
+#[derive(Debug, Clone)]
+pub struct LspCapability {
+    /// Primary LSP configuration.
+    pub primary: LspConfig,
+    /// Whether the primary LSP binary is available on the host.
+    pub primary_available: bool,
+    /// Fallback LSP configuration (if any).
+    pub fallback: Option<LspConfig>,
+    /// Whether the fallback binary is available.
+    pub fallback_available: bool,
+}
+
+impl LspCapability {
+    /// Return the best available LSP config, preferring primary.
+    pub fn effective_config(&self) -> Option<&LspConfig> {
+        if self.primary_available {
+            Some(&self.primary)
+        } else if self.fallback_available {
+            self.fallback.as_ref()
+        } else {
+            None
+        }
+    }
+}
+
+/// Complete verifier profile for a plugin.
+///
+/// Bundles all per-sensor capabilities and LSP availability into one
+/// inspectable structure. Built by `LanguagePlugin::verifier_profile()`.
+#[derive(Debug, Clone)]
+pub struct VerifierProfile {
+    /// Name of the plugin that produced this profile.
+    pub plugin_name: String,
+    /// Per-stage verifier capabilities.
+    pub capabilities: Vec<VerifierCapability>,
+    /// LSP availability and fallback.
+    pub lsp: LspCapability,
+}
+
+impl VerifierProfile {
+    /// Get the capability for a given stage, if declared.
+    pub fn get(&self, stage: VerifierStage) -> Option<&VerifierCapability> {
+        self.capabilities.iter().find(|c| c.stage == stage)
+    }
+
+    /// Stages that have at least one available tool (primary or fallback).
+    pub fn available_stages(&self) -> Vec<VerifierStage> {
+        self.capabilities
+            .iter()
+            .filter(|c| c.any_available())
+            .map(|c| c.stage)
+            .collect()
+    }
+
+    /// True when every declared stage has zero available tools.
+    pub fn fully_degraded(&self) -> bool {
+        self.capabilities.iter().all(|c| !c.any_available())
+    }
+}
+
+// =============================================================================
+// Utility: host binary probe
+// =============================================================================
+
+/// Check whether a given binary name is available on the host PATH.
+///
+/// Runs `<binary> --version` silently; returns `true` if the process exits
+/// successfully. Used by plugins for per-sensor host-tool probing.
+pub fn host_binary_available(binary: &str) -> bool {
+    std::process::Command::new(binary)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Options for project initialization
@@ -45,6 +191,9 @@ pub enum ProjectAction {
 }
 
 /// A plugin for a specific programming language
+///
+/// PSP-5 expands this trait beyond init/test/run to a full capability-based
+/// runtime contract that governs detection, verification, LSP, and ownership.
 pub trait LanguagePlugin: Send + Sync {
     /// Name of the language
     fn name(&self) -> &str;
@@ -97,6 +246,155 @@ pub trait LanguagePlugin: Send + Sync {
 
     /// Get the command to run the project (for verification)
     fn run_command(&self) -> String;
+
+    /// Get the command to run the project in a specific directory.
+    ///
+    /// Override this to inspect pyproject.toml, Cargo.toml, etc. and return a
+    /// more appropriate run command than the generic default.
+    fn run_command_for_dir(&self, _path: &Path) -> String {
+        self.run_command()
+    }
+
+    // =========================================================================
+    // PSP-5: Capability-Based Runtime Contract
+    // =========================================================================
+
+    /// Get the syntax/type check command (e.g., `cargo check`, `uv run ty check .`)
+    ///
+    /// Returns None if the plugin has no syntax check command (uses LSP only).
+    fn syntax_check_command(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the build command (e.g., `cargo build`, `npm run build`)
+    ///
+    /// Returns None if the language doesn't have a separate build step.
+    fn build_command(&self) -> Option<String> {
+        None
+    }
+
+    /// Get the lint command (e.g., `cargo clippy -- -D warnings`)
+    ///
+    /// Used only in VerifierStrictness::Strict mode.
+    fn lint_command(&self) -> Option<String> {
+        None
+    }
+
+    /// File glob patterns this plugin owns (e.g., `["*.rs", "Cargo.toml"]`)
+    ///
+    /// Used for node ownership matching in multi-language repos.
+    fn file_ownership_patterns(&self) -> &[&str] {
+        self.extensions()
+    }
+
+    /// PSP-5 Phase 2: Check if a file path belongs to this plugin's ownership domain
+    ///
+    /// Uses `file_ownership_patterns()` for suffix/extension matching.
+    fn owns_file(&self, path: &str) -> bool {
+        let path_lower = path.to_lowercase();
+        self.file_ownership_patterns().iter().any(|pattern| {
+            let pattern = pattern.trim_start_matches('*');
+            path_lower.ends_with(pattern)
+        })
+    }
+
+    /// Check if the host has the required build tools available
+    ///
+    /// Returns true if the plugin's primary toolchain is installed and callable.
+    /// When false, the runtime enters degraded-validation mode.
+    fn host_tool_available(&self) -> bool {
+        true
+    }
+
+    /// Required host binaries for this plugin, grouped by role.
+    ///
+    /// Each entry is `(binary_name, role_description, install_hint)`.
+    /// The orchestrator checks these before init and emits install directions
+    /// for any that are missing.
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        Vec::new()
+    }
+
+    /// Get fallback LSP config when primary is unavailable
+    fn lsp_fallback(&self) -> Option<LspConfig> {
+        None
+    }
+
+    // =========================================================================
+    // PSP-5 Phase 4: Verifier Profile Assembly
+    // =========================================================================
+
+    /// Build a complete verifier profile by probing each capability.
+    ///
+    /// The default implementation auto-assembles from the existing
+    /// `syntax_check_command()`, `build_command()`, `test_command()`,
+    /// `lint_command()`, and `host_tool_available()` methods.
+    ///
+    /// Plugins override this method to provide per-sensor probing
+    /// with distinct fallback commands and independent availability checks.
+    fn verifier_profile(&self) -> VerifierProfile {
+        let tool_available = self.host_tool_available();
+
+        let mut capabilities = Vec::new();
+
+        if let Some(cmd) = self.syntax_check_command() {
+            capabilities.push(VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some(cmd),
+                available: tool_available,
+                fallback_command: None,
+                fallback_available: false,
+            });
+        }
+
+        if let Some(cmd) = self.build_command() {
+            capabilities.push(VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some(cmd),
+                available: tool_available,
+                fallback_command: None,
+                fallback_available: false,
+            });
+        }
+
+        // Test always has a command (test_command is required)
+        capabilities.push(VerifierCapability {
+            stage: VerifierStage::Test,
+            command: Some(self.test_command()),
+            available: tool_available,
+            fallback_command: None,
+            fallback_available: false,
+        });
+
+        if let Some(cmd) = self.lint_command() {
+            capabilities.push(VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some(cmd),
+                available: tool_available,
+                fallback_command: None,
+                fallback_available: false,
+            });
+        }
+
+        let primary_config = self.get_lsp_config();
+        let primary_available = host_binary_available(&primary_config.server_binary);
+        let fallback = self.lsp_fallback();
+        let fallback_available = fallback
+            .as_ref()
+            .map(|f| host_binary_available(&f.server_binary))
+            .unwrap_or(false);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary: primary_config,
+                primary_available,
+                fallback,
+                fallback_available,
+            },
+        }
+    }
 }
 
 /// Rust language plugin
@@ -113,6 +411,18 @@ impl LanguagePlugin for RustPlugin {
 
     fn key_files(&self) -> &[&str] {
         &["Cargo.toml", "Cargo.lock"]
+    }
+
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        vec![
+            ("cargo", "build/init", "Install Rust via https://rustup.rs"),
+            ("rustc", "compiler", "Install Rust via https://rustup.rs"),
+            (
+                "rust-analyzer",
+                "language server",
+                "rustup component add rust-analyzer",
+            ),
+        ]
     }
 
     fn get_lsp_config(&self) -> LspConfig {
@@ -162,6 +472,78 @@ impl LanguagePlugin for RustPlugin {
     fn run_command(&self) -> String {
         "cargo run".to_string()
     }
+
+    // PSP-5 capability methods
+
+    fn syntax_check_command(&self) -> Option<String> {
+        Some("cargo check".to_string())
+    }
+
+    fn build_command(&self) -> Option<String> {
+        Some("cargo build".to_string())
+    }
+
+    fn lint_command(&self) -> Option<String> {
+        Some("cargo clippy -- -D warnings".to_string())
+    }
+
+    fn file_ownership_patterns(&self) -> &[&str] {
+        &["rs"]
+    }
+
+    fn host_tool_available(&self) -> bool {
+        host_binary_available("cargo")
+    }
+
+    fn verifier_profile(&self) -> VerifierProfile {
+        let cargo = host_binary_available("cargo");
+        let clippy = cargo; // clippy is a cargo subcommand, same binary
+
+        let capabilities = vec![
+            VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("cargo check".to_string()),
+                available: cargo,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("cargo build".to_string()),
+                available: cargo,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Test,
+                command: Some("cargo test".to_string()),
+                available: cargo,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some("cargo clippy -- -D warnings".to_string()),
+                available: clippy,
+                fallback_command: None,
+                fallback_available: false,
+            },
+        ];
+
+        let primary = self.get_lsp_config();
+        let primary_available = host_binary_available(&primary.server_binary);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary,
+                primary_available,
+                fallback: None,
+                fallback_available: false,
+            },
+        }
+    }
 }
 
 /// Python language plugin (uses ty via uvx)
@@ -178,6 +560,26 @@ impl LanguagePlugin for PythonPlugin {
 
     fn key_files(&self) -> &[&str] {
         &["pyproject.toml", "setup.py", "requirements.txt", "uv.lock"]
+    }
+
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        vec![
+            (
+                "uv",
+                "package manager",
+                "curl -LsSf https://astral.sh/uv/install.sh | sh",
+            ),
+            (
+                "python3",
+                "interpreter",
+                "uv python install (or install from https://python.org)",
+            ),
+            (
+                "uvx",
+                "tool runner/LSP",
+                "Installed with uv — curl -LsSf https://astral.sh/uv/install.sh | sh",
+            ),
+        ]
     }
 
     fn get_lsp_config(&self) -> LspConfig {
@@ -210,11 +612,11 @@ impl LanguagePlugin for PythonPlugin {
                 }
             }
             _ => {
-                // Default to uv
+                // Default to uv --lib for src-layout with build-system
                 if opts.is_empty_dir || opts.name == "." || opts.name == "./" {
-                    "uv init".to_string()
+                    "uv init --lib".to_string()
                 } else {
-                    format!("uv init {}", opts.name)
+                    format!("uv init --lib {}", opts.name)
                 }
             }
         };
@@ -253,8 +655,8 @@ impl LanguagePlugin for PythonPlugin {
                 format!("poetry new {}", opts.name)
             }
         } else {
-            // uv init supports "." for current directory
-            format!("uv init {}", opts.name)
+            // uv init --lib for src-layout with build-system
+            format!("uv init --lib {}", opts.name)
         }
     }
 
@@ -264,6 +666,128 @@ impl LanguagePlugin for PythonPlugin {
 
     fn run_command(&self) -> String {
         "uv run python -m main".to_string()
+    }
+
+    /// Detect the package name from pyproject.toml or src layout and return
+    /// an appropriate run command.
+    fn run_command_for_dir(&self, path: &Path) -> String {
+        // Check src/<pkg>/__main__.py first
+        if let Ok(entries) = std::fs::read_dir(path.join("src")) {
+            for entry in entries.flatten() {
+                if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.starts_with('.') && !name.starts_with('_') {
+                        return format!("uv run python -m {}", name);
+                    }
+                }
+            }
+        }
+
+        // Check for [project.scripts] in pyproject.toml
+        if let Ok(content) = std::fs::read_to_string(path.join("pyproject.toml")) {
+            if content.contains("[project.scripts]") {
+                // Parse the first script name
+                let mut in_scripts = false;
+                for raw_line in content.lines() {
+                    let line = raw_line.trim();
+                    if line == "[project.scripts]" {
+                        in_scripts = true;
+                        continue;
+                    }
+                    if in_scripts {
+                        if line.starts_with('[') {
+                            break;
+                        }
+                        if let Some((name, _)) = line.split_once('=') {
+                            let script = name.trim().trim_matches('"');
+                            if !script.is_empty() {
+                                return format!("uv run {}", script);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Default: run main module
+        "uv run python -m main".to_string()
+    }
+
+    // PSP-5 capability methods
+
+    fn syntax_check_command(&self) -> Option<String> {
+        Some("uv run ty check .".to_string())
+    }
+
+    fn lint_command(&self) -> Option<String> {
+        Some("uv run ruff check .".to_string())
+    }
+
+    fn file_ownership_patterns(&self) -> &[&str] {
+        &["py"]
+    }
+
+    fn host_tool_available(&self) -> bool {
+        host_binary_available("uv")
+    }
+
+    fn lsp_fallback(&self) -> Option<LspConfig> {
+        Some(LspConfig {
+            server_binary: "pyright-langserver".to_string(),
+            args: vec!["--stdio".to_string()],
+            language_id: "python".to_string(),
+        })
+    }
+
+    fn verifier_profile(&self) -> VerifierProfile {
+        let uv = host_binary_available("uv");
+        let pyright = host_binary_available("pyright");
+
+        let capabilities = vec![
+            VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("uv run ty check .".to_string()),
+                available: uv,
+                // pyright as CLI fallback for syntax checking
+                fallback_command: Some("pyright .".to_string()),
+                fallback_available: pyright,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Test,
+                command: Some("uv run pytest".to_string()),
+                available: uv,
+                // bare pytest fallback
+                fallback_command: Some("python -m pytest".to_string()),
+                fallback_available: host_binary_available("python3")
+                    || host_binary_available("python"),
+            },
+            VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some("uv run ruff check .".to_string()),
+                available: uv,
+                fallback_command: Some("ruff check .".to_string()),
+                fallback_available: host_binary_available("ruff"),
+            },
+        ];
+
+        let primary = self.get_lsp_config();
+        let primary_available = host_binary_available("uvx");
+        let fallback = self.lsp_fallback();
+        let fallback_available = fallback
+            .as_ref()
+            .map(|f| host_binary_available(&f.server_binary))
+            .unwrap_or(false);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary,
+                primary_available,
+                fallback,
+                fallback_available,
+            },
+        }
     }
 }
 
@@ -281,6 +805,26 @@ impl LanguagePlugin for JsPlugin {
 
     fn key_files(&self) -> &[&str] {
         &["package.json", "tsconfig.json"]
+    }
+
+    fn required_binaries(&self) -> Vec<(&str, &str, &str)> {
+        vec![
+            (
+                "node",
+                "runtime",
+                "Install Node.js from https://nodejs.org or via nvm",
+            ),
+            (
+                "npm",
+                "package manager",
+                "Included with Node.js — install from https://nodejs.org",
+            ),
+            (
+                "typescript-language-server",
+                "language server",
+                "npm install -g typescript-language-server typescript",
+            ),
+        ]
     }
 
     fn get_lsp_config(&self) -> LspConfig {
@@ -353,6 +897,78 @@ impl LanguagePlugin for JsPlugin {
     fn run_command(&self) -> String {
         "npm start".to_string()
     }
+
+    // PSP-5 capability methods
+
+    fn syntax_check_command(&self) -> Option<String> {
+        Some("npx tsc --noEmit".to_string())
+    }
+
+    fn build_command(&self) -> Option<String> {
+        Some("npm run build".to_string())
+    }
+
+    fn lint_command(&self) -> Option<String> {
+        Some("npx eslint .".to_string())
+    }
+
+    fn file_ownership_patterns(&self) -> &[&str] {
+        &["js", "ts", "jsx", "tsx"]
+    }
+
+    fn host_tool_available(&self) -> bool {
+        host_binary_available("node")
+    }
+
+    fn verifier_profile(&self) -> VerifierProfile {
+        let node = host_binary_available("node");
+        let npx = host_binary_available("npx");
+
+        let capabilities = vec![
+            VerifierCapability {
+                stage: VerifierStage::SyntaxCheck,
+                command: Some("npx tsc --noEmit".to_string()),
+                available: npx,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("npm run build".to_string()),
+                available: node,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Test,
+                command: Some("npm test".to_string()),
+                available: node,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Lint,
+                command: Some("npx eslint .".to_string()),
+                available: npx,
+                fallback_command: None,
+                fallback_available: false,
+            },
+        ];
+
+        let primary = self.get_lsp_config();
+        let primary_available = host_binary_available(&primary.server_binary);
+
+        VerifierProfile {
+            plugin_name: self.name().to_string(),
+            capabilities,
+            lsp: LspCapability {
+                primary,
+                primary_available,
+                fallback: None,
+                fallback_available: false,
+            },
+        }
+    }
 }
 
 /// Plugin registry for dynamic language detection
@@ -372,12 +988,24 @@ impl PluginRegistry {
         }
     }
 
-    /// Detect which plugin should handle the given path
+    /// Detect which plugin should handle the given path (first match)
     pub fn detect(&self, path: &Path) -> Option<&dyn LanguagePlugin> {
         self.plugins
             .iter()
             .find(|p| p.detect(path))
             .map(|p| p.as_ref())
+    }
+
+    /// PSP-5: Detect ALL plugins that match the given path (polyglot support)
+    ///
+    /// Returns all matching plugins instead of just the first, enabling
+    /// multi-language verification in polyglot repositories.
+    pub fn detect_all(&self, path: &Path) -> Vec<&dyn LanguagePlugin> {
+        self.plugins
+            .iter()
+            .filter(|p| p.detect(path))
+            .map(|p| p.as_ref())
+            .collect()
     }
 
     /// Get a plugin by name
@@ -397,5 +1025,294 @@ impl PluginRegistry {
 impl Default for PluginRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plugin_owns_file() {
+        let rust = RustPlugin;
+        assert!(rust.owns_file("src/main.rs"));
+        assert!(rust.owns_file("crates/core/src/lib.rs"));
+        assert!(!rust.owns_file("main.py"));
+        assert!(!rust.owns_file("index.js"));
+
+        let python = PythonPlugin;
+        assert!(python.owns_file("main.py"));
+        assert!(python.owns_file("tests/test_main.py"));
+        assert!(!python.owns_file("src/main.rs"));
+
+        let js = JsPlugin;
+        assert!(js.owns_file("index.js"));
+        assert!(js.owns_file("src/app.ts"));
+        assert!(!js.owns_file("main.py"));
+        assert!(!js.owns_file("src/main.rs"));
+    }
+
+    // =========================================================================
+    // Verifier Capability & Profile Tests
+    // =========================================================================
+
+    #[test]
+    fn test_verifier_capability_effective_command() {
+        // Primary available → primary wins
+        let cap = VerifierCapability {
+            stage: VerifierStage::SyntaxCheck,
+            command: Some("cargo check".to_string()),
+            available: true,
+            fallback_command: Some("rustc --edition 2021".to_string()),
+            fallback_available: true,
+        };
+        assert_eq!(cap.effective_command(), Some("cargo check"));
+        assert!(cap.any_available());
+
+        // Primary unavailable, fallback available → fallback wins
+        let cap2 = VerifierCapability {
+            stage: VerifierStage::Lint,
+            command: Some("uv run ruff check .".to_string()),
+            available: false,
+            fallback_command: Some("ruff check .".to_string()),
+            fallback_available: true,
+        };
+        assert_eq!(cap2.effective_command(), Some("ruff check ."));
+        assert!(cap2.any_available());
+
+        // Both unavailable → None
+        let cap3 = VerifierCapability {
+            stage: VerifierStage::Build,
+            command: Some("cargo build".to_string()),
+            available: false,
+            fallback_command: None,
+            fallback_available: false,
+        };
+        assert_eq!(cap3.effective_command(), None);
+        assert!(!cap3.any_available());
+    }
+
+    #[test]
+    fn test_verifier_profile_get_and_available_stages() {
+        let profile = VerifierProfile {
+            plugin_name: "test".to_string(),
+            capabilities: vec![
+                VerifierCapability {
+                    stage: VerifierStage::SyntaxCheck,
+                    command: Some("check".to_string()),
+                    available: true,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+                VerifierCapability {
+                    stage: VerifierStage::Build,
+                    command: Some("build".to_string()),
+                    available: false,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+                VerifierCapability {
+                    stage: VerifierStage::Test,
+                    command: Some("test".to_string()),
+                    available: true,
+                    fallback_command: None,
+                    fallback_available: false,
+                },
+            ],
+            lsp: LspCapability {
+                primary: LspConfig {
+                    server_binary: "test-ls".to_string(),
+                    args: vec![],
+                    language_id: "test".to_string(),
+                },
+                primary_available: false,
+                fallback: None,
+                fallback_available: false,
+            },
+        };
+
+        assert!(profile.get(VerifierStage::SyntaxCheck).is_some());
+        assert!(profile.get(VerifierStage::Lint).is_none());
+
+        let available = profile.available_stages();
+        assert_eq!(available.len(), 2);
+        assert!(available.contains(&VerifierStage::SyntaxCheck));
+        assert!(available.contains(&VerifierStage::Test));
+        assert!(!available.contains(&VerifierStage::Build));
+        assert!(!profile.fully_degraded());
+    }
+
+    #[test]
+    fn test_verifier_profile_fully_degraded() {
+        let profile = VerifierProfile {
+            plugin_name: "empty".to_string(),
+            capabilities: vec![VerifierCapability {
+                stage: VerifierStage::Build,
+                command: Some("build".to_string()),
+                available: false,
+                fallback_command: None,
+                fallback_available: false,
+            }],
+            lsp: LspCapability {
+                primary: LspConfig {
+                    server_binary: "none".to_string(),
+                    args: vec![],
+                    language_id: "none".to_string(),
+                },
+                primary_available: false,
+                fallback: None,
+                fallback_available: false,
+            },
+        };
+        assert!(profile.fully_degraded());
+        assert!(profile.available_stages().is_empty());
+    }
+
+    #[test]
+    fn test_lsp_capability_effective_config() {
+        let lsp = LspCapability {
+            primary: LspConfig {
+                server_binary: "rust-analyzer".to_string(),
+                args: vec![],
+                language_id: "rust".to_string(),
+            },
+            primary_available: true,
+            fallback: None,
+            fallback_available: false,
+        };
+        assert_eq!(
+            lsp.effective_config().unwrap().server_binary,
+            "rust-analyzer"
+        );
+
+        // Primary unavailable, fallback available
+        let lsp2 = LspCapability {
+            primary: LspConfig {
+                server_binary: "uvx".to_string(),
+                args: vec![],
+                language_id: "python".to_string(),
+            },
+            primary_available: false,
+            fallback: Some(LspConfig {
+                server_binary: "pyright-langserver".to_string(),
+                args: vec!["--stdio".to_string()],
+                language_id: "python".to_string(),
+            }),
+            fallback_available: true,
+        };
+        assert_eq!(
+            lsp2.effective_config().unwrap().server_binary,
+            "pyright-langserver"
+        );
+
+        // Both unavailable
+        let lsp3 = LspCapability {
+            primary: LspConfig {
+                server_binary: "nope".to_string(),
+                args: vec![],
+                language_id: "none".to_string(),
+            },
+            primary_available: false,
+            fallback: None,
+            fallback_available: false,
+        };
+        assert!(lsp3.effective_config().is_none());
+    }
+
+    #[test]
+    fn test_rust_plugin_verifier_profile_shape() {
+        let rust = RustPlugin;
+        let profile = rust.verifier_profile();
+        assert_eq!(profile.plugin_name, "rust");
+        // Rust should declare all 4 stages
+        assert_eq!(profile.capabilities.len(), 4);
+        let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
+        assert!(stages.contains(&VerifierStage::SyntaxCheck));
+        assert!(stages.contains(&VerifierStage::Build));
+        assert!(stages.contains(&VerifierStage::Test));
+        assert!(stages.contains(&VerifierStage::Lint));
+    }
+
+    #[test]
+    fn test_python_plugin_verifier_profile_shape() {
+        let py = PythonPlugin;
+        let profile = py.verifier_profile();
+        assert_eq!(profile.plugin_name, "python");
+        // Python: syntax_check, test, lint (no build)
+        assert_eq!(profile.capabilities.len(), 3);
+        let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
+        assert!(stages.contains(&VerifierStage::SyntaxCheck));
+        assert!(stages.contains(&VerifierStage::Test));
+        assert!(stages.contains(&VerifierStage::Lint));
+        assert!(!stages.contains(&VerifierStage::Build));
+        // Python has an LSP fallback declared
+        assert!(profile.lsp.fallback.is_some());
+    }
+
+    #[test]
+    fn test_js_plugin_verifier_profile_shape() {
+        let js = JsPlugin;
+        let profile = js.verifier_profile();
+        assert_eq!(profile.plugin_name, "javascript");
+        // JS: all 4 stages
+        assert_eq!(profile.capabilities.len(), 4);
+    }
+
+    #[test]
+    fn test_verifier_stage_display() {
+        assert_eq!(format!("{}", VerifierStage::SyntaxCheck), "syntax_check");
+        assert_eq!(format!("{}", VerifierStage::Build), "build");
+        assert_eq!(format!("{}", VerifierStage::Test), "test");
+        assert_eq!(format!("{}", VerifierStage::Lint), "lint");
+    }
+
+    #[test]
+    fn test_python_run_command_for_dir_src_layout() {
+        let dir =
+            std::env::temp_dir().join(format!("perspt_test_pyrun_src_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("src/myapp")).unwrap();
+        std::fs::write(dir.join("src/myapp/__init__.py"), "").unwrap();
+
+        let plugin = PythonPlugin;
+        let cmd = plugin.run_command_for_dir(&dir);
+        assert_eq!(cmd, "uv run python -m myapp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_python_run_command_for_dir_scripts() {
+        let dir = std::env::temp_dir().join(format!(
+            "perspt_test_pyrun_scripts_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pyproject.toml"),
+            "[project]\nname = \"myapp\"\n\n[project.scripts]\nmyapp = \"myapp:main\"\n",
+        )
+        .unwrap();
+
+        let plugin = PythonPlugin;
+        let cmd = plugin.run_command_for_dir(&dir);
+        assert_eq!(cmd, "uv run myapp");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_python_run_command_for_dir_default() {
+        let dir = std::env::temp_dir().join(format!(
+            "perspt_test_pyrun_default_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"myapp\"\n").unwrap();
+
+        let plugin = PythonPlugin;
+        let cmd = plugin.run_command_for_dir(&dir);
+        assert_eq!(cmd, "uv run python -m main");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

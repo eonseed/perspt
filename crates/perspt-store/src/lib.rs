@@ -7,4 +7,9 @@ mod schema;
 mod store;
 
 pub use schema::init_schema;
-pub use store::{EnergyRecord, LlmRequestRecord, NodeStateRecord, SessionRecord, SessionStore};
+pub use store::{
+    ArtifactBundleRow, BranchFlushRow, BranchLineageRow, ContextProvenanceRecord, EnergyRecord,
+    EscalationReportRecord, InterfaceSealRow, LlmRequestRecord, NodeStateRecord,
+    ProvisionalBranchRow, ReviewOutcomeRow, RewriteRecordRow, SessionRecord, SessionStore,
+    SheafValidationRow, StructuralDigestRecord, TaskGraphEdgeRow, VerificationResultRow,
+};

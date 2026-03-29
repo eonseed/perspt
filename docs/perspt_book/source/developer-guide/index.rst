@@ -3,34 +3,34 @@
 Developer Guide
 ===============
 
-Guide for extending and contributing to Perspt.
+Internals, architecture, and contribution guide for Perspt developers.
 
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: 🏗️ Architecture
+   .. grid-item-card:: Architecture
       :link: architecture
       :link-type: doc
 
-      7-crate workspace design and SRBN engine.
+      Crate structure, data flow, and PSP-5 internals (including the experimental SRBN engine).
 
-   .. grid-item-card:: 🤝 Contributing
+   .. grid-item-card:: Contributing
       :link: contributing
       :link-type: doc
 
-      How to contribute to Perspt.
+      Dev setup, coding standards, and PR workflow.
 
-   .. grid-item-card:: 🔌 Extending
+   .. grid-item-card:: Extending Perspt
       :link: extending
       :link-type: doc
 
-      Add commands, tools, and providers.
+      Add providers, plugins, tools, and sheaf validators.
 
-   .. grid-item-card:: 🧪 Testing
+   .. grid-item-card:: Testing
       :link: testing
       :link-type: doc
 
-      Testing strategies and tools.
+      Test infrastructure, patterns, and conventions.
 
 .. toctree::
    :maxdepth: 2

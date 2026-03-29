@@ -28,6 +28,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Start an interactive chat session (default)
     Chat {
@@ -104,6 +105,34 @@ enum Commands {
         /// Log all LLM requests/responses to database for debugging
         #[arg(long)]
         log_llm: bool,
+
+        /// Force single-file execution (Solo Mode) instead of project-first planning
+        #[arg(long)]
+        single_file: bool,
+
+        /// Verifier strictness: default, strict, or minimal
+        #[arg(long, default_value = "default")]
+        verifier_strictness: String,
+
+        /// Fallback model for Architect tier (used when primary fails structured-output)
+        #[arg(long)]
+        architect_fallback_model: Option<String>,
+
+        /// Fallback model for Actuator tier (used when primary fails structured-output)
+        #[arg(long)]
+        actuator_fallback_model: Option<String>,
+
+        /// Fallback model for Verifier tier (used when primary fails structured-output)
+        #[arg(long)]
+        verifier_fallback_model: Option<String>,
+
+        /// Fallback model for Speculator tier (used when primary fails structured-output)
+        #[arg(long)]
+        speculator_fallback_model: Option<String>,
+
+        /// Export the task graph as JSON to a file after planning (before execution)
+        #[arg(long)]
+        output_plan: Option<PathBuf>,
     },
 
     /// Initialize project configuration
@@ -235,6 +264,13 @@ async fn main() -> Result<()> {
             max_steps: _,
             defer_tests,
             log_llm,
+            single_file,
+            verifier_strictness,
+            architect_fallback_model,
+            actuator_fallback_model,
+            verifier_fallback_model,
+            speculator_fallback_model,
+            output_plan,
         }) => {
             commands::agent::run(
                 task,
@@ -249,6 +285,13 @@ async fn main() -> Result<()> {
                 speculator_model,
                 defer_tests,
                 log_llm,
+                single_file,
+                verifier_strictness,
+                architect_fallback_model,
+                actuator_fallback_model,
+                verifier_fallback_model,
+                speculator_fallback_model,
+                output_plan,
             )
             .await
         }

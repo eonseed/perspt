@@ -46,6 +46,48 @@ impl ActiveTab {
     }
 }
 
+/// PSP-5 Phase 7: Aggregated review state for the active approval boundary.
+///
+/// Populated incrementally as VerificationComplete, BundleApplied, and
+/// ApprovalRequest events arrive. Consumed by the review modal and diff viewer.
+#[derive(Debug, Clone, Default)]
+pub struct NodeReviewState {
+    /// Node currently under review
+    pub node_id: Option<String>,
+    /// Node class (Interface, Implementation, Integration)
+    pub node_class: Option<String>,
+    /// Files created by the bundle
+    pub files_created: Vec<String>,
+    /// Files modified by the bundle
+    pub files_modified: Vec<String>,
+    /// Write operation count
+    pub writes_count: usize,
+    /// Diff operation count
+    pub diffs_count: usize,
+    /// Latest verification result fields
+    pub syntax_ok: Option<bool>,
+    pub build_ok: Option<bool>,
+    pub tests_ok: Option<bool>,
+    pub lint_ok: Option<bool>,
+    pub diagnostics_count: Option<usize>,
+    pub tests_passed: Option<usize>,
+    pub tests_failed: Option<usize>,
+    pub energy: Option<f32>,
+    /// Full energy component breakdown
+    pub energy_components: Option<perspt_core::EnergyComponents>,
+    /// Per-stage outcomes with sensor status
+    pub stage_outcomes: Vec<perspt_core::StageOutcome>,
+    /// Whether verification ran degraded
+    pub degraded: bool,
+    pub degraded_reasons: Vec<String>,
+    /// Verification summary line
+    pub summary: Option<String>,
+    /// Diff text for the viewer
+    pub diff: Option<String>,
+    /// Approval request description
+    pub description: Option<String>,
+}
+
 /// Agent app state
 pub struct AgentApp {
     /// Dashboard component
@@ -62,6 +104,8 @@ pub struct AgentApp {
     pub active_tab: ActiveTab,
     /// Pending approval request ID
     pub pending_request_id: Option<String>,
+    /// PSP-5 Phase 7: Aggregated review state for the active approval
+    pub review_state: NodeReviewState,
     /// Should quit
     pub should_quit: bool,
     /// Is paused
@@ -78,6 +122,7 @@ impl Default for AgentApp {
             review_modal: ReviewModal::new(),
             action_sender: None,
             pending_request_id: None,
+            review_state: NodeReviewState::default(),
             should_quit: false,
             paused: false,
         }
@@ -93,6 +138,41 @@ impl AgentApp {
     /// Set action sender
     pub fn set_action_sender(&mut self, sender: perspt_core::events::channel::ActionSender) {
         self.action_sender = Some(sender);
+    }
+
+    /// PSP-5 Phase 8: Prepopulate task tree from persisted node states.
+    ///
+    /// Called before resuming so the TUI shows completed nodes immediately
+    /// instead of waiting for orchestrator events (which skip terminal nodes).
+    pub fn prepopulate_from_store(&mut self, session_id: &str) {
+        let Ok(store) = perspt_store::SessionStore::new() else {
+            return;
+        };
+
+        let nodes = store.get_latest_node_states(session_id).unwrap_or_default();
+
+        for ns in &nodes {
+            let status = match ns.state.as_str() {
+                "Completed" | "COMPLETED" | "STABLE" => TaskStatus::Completed,
+                "Failed" | "FAILED" => TaskStatus::Failed,
+                "Escalated" | "ESCALATED" => TaskStatus::Escalated,
+                "Coding" => TaskStatus::Coding,
+                "Verifying" => TaskStatus::Verifying,
+                "Committing" => TaskStatus::Committing,
+                _ => TaskStatus::Pending,
+            };
+
+            // Add the node to the task tree if not already present
+            let goal = ns.goal.clone().unwrap_or_else(|| ns.node_id.clone());
+            self.task_tree
+                .add_or_update_node(&ns.node_id, &goal, status);
+        }
+
+        self.dashboard.log(format!(
+            "📦 Restored {} nodes from session {}",
+            nodes.len(),
+            &session_id[..8.min(session_id.len())]
+        ));
     }
 
     /// Run the app main loop
@@ -181,6 +261,17 @@ impl AgentApp {
             }
             AgentEvent::TaskStatusChanged { node_id, status } => {
                 self.task_tree.update_status(&node_id, status.into());
+                // Update verifier stage indicator
+                let status_label: crate::task_tree::TaskStatus = status.into();
+                if matches!(
+                    status_label,
+                    crate::task_tree::TaskStatus::Verifying
+                        | crate::task_tree::TaskStatus::SheafCheck
+                        | crate::task_tree::TaskStatus::Coding
+                        | crate::task_tree::TaskStatus::Committing
+                ) {
+                    self.dashboard.verifier_stage = Some(format!("{:?}", status_label));
+                }
                 self.dashboard
                     .log(format!("🔄 Task {} -> {:?}", node_id, status));
             }
@@ -197,21 +288,334 @@ impl AgentApp {
                 node_id,
                 action_type,
                 description,
-                diff: _,
+                diff,
             } => {
                 self.pending_request_id = Some(request_id);
-                // Map ActionType to a set of files or something similar for the modal
-                let files = match action_type {
-                    perspt_core::ActionType::FileWrite { path } => vec![path],
-                    _ => vec![],
+                // Populate review state node context
+                self.review_state.description = Some(description.clone());
+                self.review_state.diff = diff.clone();
+                if self.review_state.node_id.is_none() {
+                    self.review_state.node_id = Some(node_id.clone());
+                }
+                // Collect affected files from action type
+                let files = match &action_type {
+                    perspt_core::ActionType::FileWrite { path } => vec![path.clone()],
+                    perspt_core::ActionType::BundleWrite { files, .. } => files.clone(),
+                    _ => self
+                        .review_state
+                        .files_created
+                        .iter()
+                        .chain(self.review_state.files_modified.iter())
+                        .cloned()
+                        .collect(),
                 };
-                self.review_modal
-                    .show(format!("Approval: {}", node_id), description, files);
+
+                // PSP-5 Phase 7: Populate diff viewer bundle summary
+                self.diff_viewer.bundle_summary = Some(crate::diff_viewer::BundleSummary {
+                    node_id: node_id.clone(),
+                    node_class: self.review_state.node_class.clone().unwrap_or_default(),
+                    files_created: self.review_state.files_created.len(),
+                    files_modified: self.review_state.files_modified.len(),
+                    writes_count: self.review_state.writes_count,
+                    diffs_count: self.review_state.diffs_count,
+                });
+                if let Some(ref diff_text) = diff {
+                    self.diff_viewer.parse_diff(diff_text);
+                    // Tag hunks with operation labels from review state
+                    for hunk in &mut self.diff_viewer.hunks {
+                        if self.review_state.files_created.contains(&hunk.file_path) {
+                            hunk.operation = Some("created".to_string());
+                        } else if self.review_state.files_modified.contains(&hunk.file_path) {
+                            hunk.operation = Some("modified".to_string());
+                        }
+                    }
+                }
+
+                // PSP-5 Phase 7: Build stability metrics with verification context
+                use crate::review_modal::StabilityMetrics;
+                let stability = if self.review_state.energy.is_some()
+                    || self.review_state.syntax_ok.is_some()
+                {
+                    let energy = self.review_state.energy.unwrap_or(0.0);
+                    Some(StabilityMetrics {
+                        energy: crate::telemetry::EnergyComponents {
+                            v_syn: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_syn)
+                                .unwrap_or(0.0),
+                            v_str: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_str)
+                                .unwrap_or(0.0),
+                            v_log: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_log)
+                                .unwrap_or(0.0),
+                            v_boot: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_boot)
+                                .unwrap_or(0.0),
+                            v_sheaf: self
+                                .review_state
+                                .energy_components
+                                .as_ref()
+                                .map(|e| e.v_sheaf)
+                                .unwrap_or(0.0),
+                            total: energy,
+                        },
+                        is_stable: energy < 0.1,
+                        threshold: 0.1,
+                        attempts: 0,
+                        max_attempts: 0,
+                        syntax_ok: self.review_state.syntax_ok,
+                        build_ok: self.review_state.build_ok,
+                        tests_ok: self.review_state.tests_ok,
+                        lint_ok: self.review_state.lint_ok,
+                        tests_passed: self.review_state.tests_passed,
+                        tests_failed: self.review_state.tests_failed,
+                        degraded: self.review_state.degraded,
+                        degraded_reasons: self.review_state.degraded_reasons.clone(),
+                        node_class: self.review_state.node_class.clone(),
+                    })
+                } else {
+                    None
+                };
+
+                if let Some(stability) = stability {
+                    self.review_modal.show_with_stability(
+                        format!("Approval: {}", node_id),
+                        description,
+                        files,
+                        stability,
+                    );
+                } else {
+                    self.review_modal
+                        .show(format!("Approval: {}", node_id), description, files);
+                }
             }
             AgentEvent::Complete { success, message } => {
                 let emoji = if success { "🎉" } else { "❌" };
                 self.dashboard
                     .log(format!("{} Session Complete: {}", emoji, message));
+            }
+            AgentEvent::EscalationClassified {
+                node_id,
+                category,
+                action,
+            } => {
+                self.dashboard.escalation_count += 1;
+                self.dashboard.log(format!(
+                    "⚠️ Escalation: {} → {} (action: {})",
+                    node_id, category, action
+                ));
+            }
+            AgentEvent::SheafValidationComplete {
+                node_id,
+                validators_run,
+                failures,
+                v_sheaf,
+            } => {
+                if failures > 0 {
+                    self.dashboard.log(format!(
+                        "🔍 Sheaf: {} — {}/{} failed (V_sheaf={:.3})",
+                        node_id, failures, validators_run, v_sheaf
+                    ));
+                } else {
+                    self.dashboard.log(format!(
+                        "✓ Sheaf: {} — {}/{} passed",
+                        node_id, validators_run, validators_run
+                    ));
+                }
+            }
+            AgentEvent::GraphRewriteApplied {
+                trigger_node,
+                action,
+                nodes_affected,
+            } => {
+                self.dashboard.log(format!(
+                    "🔧 Rewrite: {} via {} ({} nodes)",
+                    trigger_node, action, nodes_affected
+                ));
+            }
+            // PSP-5 Phase 6: Provisional branch lifecycle events
+            AgentEvent::BranchCreated {
+                branch_id,
+                node_id,
+                parent_node_id,
+            } => {
+                self.dashboard.active_branches += 1;
+                self.dashboard.log(format!(
+                    "🌿 Branch: {} for {} (parent: {})",
+                    &branch_id[..branch_id.len().min(16)],
+                    node_id,
+                    parent_node_id
+                ));
+            }
+            AgentEvent::InterfaceSealed {
+                node_id,
+                sealed_paths,
+                seal_hash,
+            } => {
+                self.dashboard.log(format!(
+                    "🔒 Sealed: {} ({} artifact{}) [{}]",
+                    node_id,
+                    sealed_paths.len(),
+                    if sealed_paths.len() == 1 { "" } else { "s" },
+                    &seal_hash[..seal_hash.len().min(12)]
+                ));
+            }
+            AgentEvent::BranchFlushed {
+                parent_node_id,
+                flushed_branch_ids,
+                reason,
+            } => {
+                self.dashboard.active_branches = self
+                    .dashboard
+                    .active_branches
+                    .saturating_sub(flushed_branch_ids.len());
+                self.dashboard.log(format!(
+                    "🗑️  Flushed: {} branch(es) from {} — {}",
+                    flushed_branch_ids.len(),
+                    parent_node_id,
+                    reason
+                ));
+            }
+            AgentEvent::DependentUnblocked {
+                child_node_id,
+                parent_node_id,
+            } => {
+                self.dashboard.log(format!(
+                    "🔓 Unblocked: {} (parent {} sealed)",
+                    child_node_id, parent_node_id
+                ));
+            }
+            AgentEvent::BranchMerged { branch_id, node_id } => {
+                self.dashboard.active_branches = self.dashboard.active_branches.saturating_sub(1);
+                self.dashboard.log(format!(
+                    "✅ Merged: branch {} for {}",
+                    &branch_id[..branch_id.len().min(16)],
+                    node_id
+                ));
+            }
+            AgentEvent::ContextDegraded {
+                node_id,
+                budget_exceeded,
+                missing_owned_files,
+                included_file_count,
+                total_bytes: _,
+                reason,
+            } => {
+                let detail = if budget_exceeded {
+                    format!("{} files included (budget exceeded)", included_file_count)
+                } else {
+                    format!("{} owned file(s) missing", missing_owned_files.len())
+                };
+                self.dashboard.log(format!(
+                    "⚠️ Context degraded: {} — {} ({})",
+                    node_id, reason, detail
+                ));
+            }
+            AgentEvent::ProvenanceDrift {
+                node_id,
+                missing_files,
+                reason: _,
+            } => {
+                self.dashboard.log(format!(
+                    "⚠️ Provenance drift: {} — {} file(s) missing since last run",
+                    node_id,
+                    missing_files.len()
+                ));
+            }
+            AgentEvent::ToolReadiness {
+                plugins,
+                strictness,
+            } => {
+                self.dashboard
+                    .log(format!("🔧 Verifier strictness: {}", strictness));
+                for pr in &plugins {
+                    if pr.degraded_stages.is_empty() {
+                        self.dashboard
+                            .log(format!("🔌 {} — all stages available", pr.plugin_name));
+                    } else {
+                        self.dashboard.log(format!(
+                            "🔌 {} — degraded: {}",
+                            pr.plugin_name,
+                            pr.degraded_stages.join(", ")
+                        ));
+                    }
+                }
+            }
+            // PSP-5 Phase 7: Populate review state from verification and bundle events
+            AgentEvent::VerificationComplete {
+                node_id,
+                syntax_ok,
+                build_ok,
+                tests_ok,
+                lint_ok,
+                diagnostics_count,
+                tests_passed,
+                tests_failed,
+                energy,
+                energy_components,
+                stage_outcomes,
+                degraded,
+                degraded_reasons,
+                summary,
+                node_class,
+            } => {
+                self.review_state.node_id = Some(node_id.clone());
+                self.review_state.node_class = Some(node_class);
+                self.review_state.syntax_ok = Some(syntax_ok);
+                self.review_state.build_ok = Some(build_ok);
+                self.review_state.tests_ok = Some(tests_ok);
+                self.review_state.lint_ok = Some(lint_ok);
+                self.review_state.diagnostics_count = Some(diagnostics_count);
+                self.review_state.tests_passed = Some(tests_passed);
+                self.review_state.tests_failed = Some(tests_failed);
+                self.review_state.energy = Some(energy);
+                self.review_state.energy_components = Some(energy_components.clone());
+                self.review_state.stage_outcomes = stage_outcomes;
+                self.review_state.degraded = degraded;
+                self.review_state.degraded_reasons = degraded_reasons;
+                self.review_state.summary = Some(summary.clone());
+
+                self.dashboard.update_energy(energy);
+                self.dashboard.energy_components = Some(energy_components);
+                self.dashboard.verifier_stage = Some(if degraded {
+                    "Degraded".to_string()
+                } else {
+                    "Complete".to_string()
+                });
+                self.dashboard
+                    .log(format!("🔍 Verified: {} — {}", node_id, summary));
+            }
+            AgentEvent::BundleApplied {
+                node_id,
+                files_created,
+                files_modified,
+                writes_count,
+                diffs_count,
+                node_class,
+            } => {
+                self.review_state.node_id = Some(node_id.clone());
+                self.review_state.node_class = Some(node_class);
+                self.review_state.files_created = files_created.clone();
+                self.review_state.files_modified = files_modified.clone();
+                self.review_state.writes_count = writes_count;
+                self.review_state.diffs_count = diffs_count;
+
+                self.dashboard.log(format!(
+                    "📦 Bundle: {} ({} writes, {} diffs)",
+                    node_id, writes_count, diffs_count
+                ));
             }
             _ => {}
         }
@@ -219,6 +623,8 @@ impl AgentApp {
 
     fn handle_review_decision(&mut self, decision: ReviewDecision) {
         let request_id = self.pending_request_id.take();
+        // PSP-5 Phase 7: Reset review state after decision
+        self.review_state = NodeReviewState::default();
 
         match decision {
             ReviewDecision::Approve => {
@@ -241,6 +647,15 @@ impl AgentApp {
             }
             ReviewDecision::ViewDiff => {
                 self.active_tab = ActiveTab::Diff;
+            }
+            ReviewDecision::RequestCorrection => {
+                self.dashboard.log("🔄 Correction requested".to_string());
+                if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
+                    let _ = sender.send(perspt_core::AgentAction::RequestCorrection {
+                        request_id: rid,
+                        feedback: "User requested correction via TUI review".to_string(),
+                    });
+                }
             }
             ReviewDecision::Skip => {
                 self.dashboard.log("⏭ Skipped review".to_string());

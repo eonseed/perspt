@@ -8,19 +8,19 @@ Understanding the foundations of Perspt.
 .. grid:: 2
    :gutter: 3
 
-   .. grid-item-card:: 🧠 SRBN Architecture
+   .. grid-item-card:: SRBN Architecture
       :link: srbn-architecture
       :link-type: doc
 
-      The Stabilized Recursive Barrier Network engine for autonomous coding.
+      The theoretical framework and its experimental implementation in Perspt.
 
-   .. grid-item-card:: 📦 Workspace Crates
+   .. grid-item-card:: Workspace Crates
       :link: workspace-crates
       :link-type: doc
 
       The 7-crate modular architecture.
 
-   .. grid-item-card:: 📋 PSP Process
+   .. grid-item-card:: PSP Process
       :link: psp-process
       :link-type: doc
 

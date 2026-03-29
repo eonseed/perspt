@@ -1,161 +1,95 @@
 .. _howto-providers:
 
-Providers
-=========
-
-How to set up each LLM provider with Perspt.
+Set Up Providers
+================
 
 OpenAI
 ------
 
-**Models**: GPT-5.2, o3-mini, o1-preview, GPT-4
-
 .. code-block:: bash
 
-   # Set API key
-   export OPENAI_API_KEY="sk-..."
+   export OPENAI_API_KEY="sk-xxx"
+   perspt chat --model gpt-4.1
 
-   # Use with Perspt
-   perspt chat --model gpt-5.2
+Supported models: ``gpt-4.1``, ``gpt-4.1-mini``, ``gpt-4.1-nano``, ``o4-mini``,
+``o3``, and others listed by ``perspt --list-models``.
 
-**Get API Key**: `platform.openai.com <https://platform.openai.com/api-keys>`_
 
 Anthropic
 ---------
 
-**Models**: Claude Opus 4.5, Claude 3.5 Sonnet
-
 .. code-block:: bash
 
-   export ANTHROPIC_API_KEY="sk-ant-..."
-   perspt chat --model claude-opus-4.5
+   export ANTHROPIC_API_KEY="sk-ant-xxx"
+   perspt chat --model claude-sonnet-4-20250514
 
-**Get API Key**: `console.anthropic.com <https://console.anthropic.com/account/keys>`_
+Supported models: ``claude-sonnet-4-20250514``, ``claude-opus-4-20250514`` and others.
+
 
 Google Gemini
 -------------
 
-**Models**: Gemini 3 Flash, Gemini 3 Pro
-
 .. code-block:: bash
 
-   export GEMINI_API_KEY="..."
-   perspt chat --model gemini-3-flash
+   export GEMINI_API_KEY="AIza..."
+   perspt chat --model gemini-3.1-flash-lite-preview
 
-**Get API Key**: `aistudio.google.com <https://aistudio.google.com/apikey>`_
+Supported models: ``gemini-pro-latest``, ``gemini-3.1-flash-lite-preview``, ``gemini-2.0-flash``,
+and others.
+
 
 Groq
 ----
 
-**Models**: Llama 3.x (ultra-fast inference)
-
 .. code-block:: bash
 
-   export GROQ_API_KEY="..."
-   perspt chat --model llama-3.3-70b
+   export GROQ_API_KEY="gsk_xxx"
+   perspt chat --model llama-3.3-70b-versatile
 
-**Get API Key**: `console.groq.com <https://console.groq.com/keys>`_
+Groq provides ultra-fast inference for open-source models.
 
-**Best for**: Fast prototyping, testing
 
 Cohere
 ------
 
-**Models**: Command R, Command R+
-
 .. code-block:: bash
 
-   export COHERE_API_KEY="..."
+   export COHERE_API_KEY="xxx"
    perspt chat --model command-r-plus
 
-**Get API Key**: `dashboard.cohere.com <https://dashboard.cohere.com/api-keys>`_
 
-XAI (Grok)
-----------
-
-**Models**: Grok
+xAI
+---
 
 .. code-block:: bash
 
-   export XAI_API_KEY="..."
-   perspt chat --model grok-2
+   export XAI_API_KEY="xxx"
+   perspt chat --model grok-3-mini-fast
 
-**Get API Key**: `console.x.ai <https://console.x.ai/>`_
 
 DeepSeek
 --------
 
-**Models**: DeepSeek Coder, DeepSeek Chat
-
 .. code-block:: bash
 
-   export DEEPSEEK_API_KEY="..."
-   perspt chat --model deepseek-coder
+   export DEEPSEEK_API_KEY="xxx"
+   perspt chat --model deepseek-chat
 
-**Get API Key**: `platform.deepseek.com <https://platform.deepseek.com/>`_
 
 Ollama (Local)
 --------------
 
-**Models**: Llama 3.2, CodeLlama, DeepSeek Coder (local)
+No API key needed. Ollama is the fallback when no cloud keys are set.
 
 .. code-block:: bash
 
-   # No API key needed
+   # Start Ollama
    ollama serve
+
+   # Pull a model
    ollama pull llama3.2
+
+   # Use with Perspt
    perspt chat --model llama3.2
 
-**Setup**: See :doc:`../tutorials/local-models`
-
-Provider Comparison
--------------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 20 35 30
-
-   * - Provider
-     - Speed
-     - Best For
-     - Cost
-   * - OpenAI
-     - Medium
-     - Reasoning, complex tasks
-     - $$$
-   * - Anthropic
-     - Medium
-     - Code generation, safety
-     - $$$
-   * - Google
-     - Fast
-     - Long context, multimodal
-     - $$
-   * - Groq
-     - Ultra-fast
-     - Prototyping, testing
-     - $
-   * - Ollama
-     - Variable
-     - Privacy, offline use
-     - Free
-
-Agent Mode Recommendations
---------------------------
-
-For optimal SRBN performance:
-
-.. code-block:: bash
-
-   perspt agent \
-     --architect-model gpt-5.2 \       # Deep reasoning
-     --actuator-model claude-opus-4.5 \ # Strong coding
-     --verifier-model gemini-3-pro \   # Fast analysis
-     --speculator-model gemini-3-flash \ # Ultra-fast
-     "Your task"
-
-See Also
---------
-
-- :doc:`configuration` - Config file setup
-- :doc:`../tutorials/local-models` - Ollama guide
+Multiple concurrent models are supported. Use ``ollama list`` to see installed models.

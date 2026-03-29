@@ -1,231 +1,137 @@
 .. _howto-agent-options:
 
-Agent Options
-=============
+Agent Options Reference
+=======================
 
-Complete reference for SRBN agent configuration.
+Complete reference for ``perspt agent`` flags.
 
-Basic Usage
------------
-
-.. code-block:: bash
-
-   perspt agent [OPTIONS] <TASK>
-
-Required Arguments
-------------------
-
-.. list-table::
-   :widths: 20 80
-
-   * - ``<TASK>``
-     - Task description or path to task file
-
-Model Selection
----------------
+Basic Options
+-------------
 
 .. list-table::
    :header-rows: 1
    :widths: 30 70
 
-   * - Option
+   * - Flag
      - Description
+   * - ``<TASK>``
+     - Task description (positional argument)
+   * - ``-w, --workdir <DIR>``
+     - Working directory for code generation
+   * - ``-y, --yes``
+     - Auto-approve all changes (headless mode)
    * - ``--model <MODEL>``
-     - Override ALL model tiers
-   * - ``--architect-model <MODEL>``
-     - Model for task decomposition (deep reasoning)
-   * - ``--actuator-model <MODEL>``
+     - LLM model for all tiers
+   * - ``--single-file``
+     - Single-file mode (no DAG planning)
+
+Per-Tier Model Selection
+------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Flag
+     - Description
+   * - ``--architect-model <M>``
+     - Model for task decomposition and planning
+   * - ``--actuator-model <M>``
      - Model for code generation
-   * - ``--verifier-model <MODEL>``
-     - Model for stability checking
-   * - ``--speculator-model <MODEL>``
-     - Model for fast lookahead
+   * - ``--verifier-model <M>``
+     - Model for stability analysis
+   * - ``--speculator-model <M>``
+     - Model for branch prediction
+   * - ``--architect-fallback-model <M>``
+     - Fallback for architect tier
+   * - ``--actuator-fallback-model <M>``
+     - Fallback for actuator tier
+   * - ``--verifier-fallback-model <M>``
+     - Fallback for verifier tier
+   * - ``--speculator-fallback-model <M>``
+     - Fallback for speculator tier
 
-**Example**:
+Energy and Convergence
+----------------------
 
-.. code-block:: bash
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
 
-   perspt agent \
-     --architect-model gpt-5.2 \
-     --actuator-model claude-opus-4.5 \
-     "Build REST API"
+   * - Flag
+     - Description
+   * - ``--energy-weights <W>``
+     - Comma-separated ``alpha,beta,gamma`` (default: ``1.0,0.5,1.0``)
+   * - ``--stability-threshold <E>``
+     - Convergence epsilon (default: ``0.10``)
+   * - ``--verifier-strictness <S>``
+     - ``default``, ``strict``, or ``minimal``
+
+Cost and Limits
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Flag
+     - Description
+   * - ``--max-cost <USD>``
+     - Maximum total LLM spend
+   * - ``--max-steps <N>``
+     - Maximum total iterations across all nodes
 
 Execution Control
 -----------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 70
+   :widths: 35 65
 
-   * - Option
+   * - Flag
      - Description
-   * - ``-w, --workdir <DIR>``
-     - Working directory (default: current)
-   * - ``-y, --yes``
-     - Auto-approve all actions
-   * - ``--auto-approve-safe``
-     - Auto-approve read-only operations only
-   * - ``-k, --complexity <K>``
-     - Max tasks before approval prompt (default: 5)
    * - ``--mode <MODE>``
-     - Execution mode: ``cautious``, ``balanced``, ``yolo``
-
-**Modes**:
-
-.. list-table::
-   :widths: 20 80
-
-   * - ``cautious``
-     - Prompt for every change
-   * - ``balanced``
-     - Prompt when complexity > K (default)
-   * - ``yolo``
-     - Auto-approve everything (⚠️ dangerous)
-
-SRBN Parameters
----------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 40 60
-
-   * - Option
-     - Description
-   * - ``--energy-weights <α,β,γ>``
-     - Lyapunov weights (default: ``1.0,0.5,2.0``)
-   * - ``--stability-threshold <ε>``
-     - Convergence threshold (default: ``0.1``)
-
-**Energy Formula**: V(x) = α·V_syn + β·V_str + γ·V_log
-
-**Tuning Examples**:
-
-.. code-block:: bash
-
-   # Prioritize tests (raise γ)
-   perspt agent --energy-weights "1.0,0.5,3.0" "Add tests"
-
-   # Prioritize type safety (raise α)
-   perspt agent --energy-weights "2.0,0.5,1.0" "Add type hints"
-
-   # More lenient (raise ε)
-   perspt agent --stability-threshold 0.5 "Quick prototype"
-
-Limits
-------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Option
-     - Description
-   * - ``--max-cost <USD>``
-     - Maximum cost in dollars (0 = unlimited)
-   * - ``--max-steps <N>``
-     - Maximum iterations (0 = unlimited)
-
-**Example**:
-
-.. code-block:: bash
-
-   perspt agent --max-cost 5.0 --max-steps 20 "Large refactor"
-
-Logging and Debugging
----------------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Option
-     - Description
-   * - ``--log-llm``
-     - Log all LLM requests/responses to database
+     - ``cautious``, ``balanced``, or ``yolo``
+   * - ``-k <N>``
+     - Complexity threshold for balanced mode
+   * - ``--complexity <LEVEL>``
+     - ``low``, ``medium``, ``high``, ``critical``
    * - ``--defer-tests``
-     - Defer tests until sheaf validation (faster iteration)
+     - Skip V_log during node coding
+   * - ``--auto-approve-safe``
+     - Auto-approve nodes below complexity threshold
 
-**Example**:
-
-.. code-block:: bash
-
-   # Debug with full LLM logging
-   perspt agent --log-llm "Debug task"
-
-   # View logs after run
-   perspt logs --tui
-
-Session Management
+Logging and Output
 ------------------
 
-.. code-block:: bash
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
 
-   # Check current status
-   perspt status
+   * - Flag
+     - Description
+   * - ``--log-llm``
+     - Log all LLM calls to DuckDB
+   * - ``--output-plan <FILE>``
+     - Export task plan as JSON before execution
 
-   # Cancel current session
-   perspt abort
-   perspt abort --force  # No confirmation
-
-   # Resume interrupted session
-   perspt resume
-   perspt resume <session_id>
-
-Ledger Operations
------------------
-
-.. code-block:: bash
-
-   # View recent changes
-   perspt ledger --recent
-
-   # Rollback to commit
-   perspt ledger --rollback <hash>
-
-   # Statistics
-   perspt ledger --stats
-
-Full Examples
--------------
-
-**Conservative approach**:
-
-.. code-block:: bash
-
-   perspt agent \
-     --mode cautious \
-     -k 1 \
-     --max-cost 1.0 \
-     --max-steps 10 \
-     -w ./project \
-     "Add input validation"
-
-**Fast prototyping**:
-
-.. code-block:: bash
-
-   perspt agent -y \
-     --model gemini-3-flash \
-     --stability-threshold 0.5 \
-     "Create boilerplate"
-
-**Production-grade**:
-
-.. code-block:: bash
-
-   perspt agent \
-     --architect-model gpt-5.2 \
-     --actuator-model claude-opus-4.5 \
-     --verifier-model gemini-3-pro \
-     --energy-weights "2.0,1.0,3.0" \
-     --stability-threshold 0.05 \
-     --max-cost 10.0 \
-     -w ./project \
-     "Implement authentication system"
-
-See Also
+Examples
 --------
 
-- :doc:`../concepts/srbn-architecture` - SRBN details
-- :doc:`../tutorials/agent-mode` - Tutorial
-- :doc:`configuration` - Config file
+.. code-block:: bash
+
+   # Simple headless run
+   perspt agent -y -w /tmp/proj "Create a Python calculator"
+
+   # Full control
+   perspt agent \
+     --architect-model gemini-pro-latest \
+     --actuator-model gemini-3.1-flash-lite-preview \
+     --verifier-model gemini-pro-latest \
+     --energy-weights "1.0,1.0,2.0" \
+     --stability-threshold 0.05 \
+     --max-cost 5.0 \
+     --max-steps 30 \
+     --log-llm \
+     --mode balanced \
+     -w ./project "Build a web server"

@@ -3,51 +3,168 @@
 Advanced Features
 =================
 
-Power user capabilities in Perspt.
-
-Model Tier Configuration
+Per-Tier Model Selection
 ------------------------
 
-Use specialized models for each SRBN phase:
+Assign different models to each SRBN tier:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gpt-5.2 \
-     --actuator-model claude-opus-4.5 \
-     --verifier-model gemini-3-pro \
-     --speculator-model gemini-3-flash \
-     "Build API"
+     --architect-model gemini-pro-latest \
+     --actuator-model gemini-3.1-flash-lite-preview \
+     --verifier-model gemini-pro-latest \
+     --speculator-model gemini-3.1-flash-lite-preview \
+     -w ./project "Task description"
 
-Energy Tuning
--------------
-
-Customize Lyapunov energy weights:
-
-.. math::
-
-   V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log}
+Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failover:
 
 .. code-block:: bash
 
-   # Prioritize tests (raise γ)
-   perspt agent --energy-weights "1.0,0.5,3.0" "Add tests"
+   perspt agent \
+     --architect-model gemini-pro-latest \
+     --architect-fallback-model gemini-3.1-flash-lite-preview \
+     -w ./project "Task"
 
-   # Prioritize type safety (raise α)
-   perspt agent --energy-weights "2.0,0.5,1.0" "Add type hints"
+
+Energy Weights
+--------------
+
+Customize the Lyapunov energy function:
+
+.. math::
+
+   V(x) = \alpha \cdot V_{\text{syn}} + \beta \cdot V_{\text{str}} + \gamma \cdot V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+
+.. code-block:: bash
+
+   # Default: alpha=1.0, beta=0.5, gamma=1.0
+   perspt agent --energy-weights "1.0,0.5,1.0" -w . "Task"
+
+   # Prioritize tests (higher gamma)
+   perspt agent --energy-weights "0.5,0.5,3.0" -w . "Add tests"
+
+   # Prioritize type safety (higher alpha)
+   perspt agent --energy-weights "2.0,1.0,0.5" -w . "Add types"
+
 
 Stability Threshold
 -------------------
 
-Control convergence sensitivity:
+.. code-block:: bash
+
+   # Default: epsilon = 0.10
+   perspt agent --stability-threshold 0.10 -w . "Precise task"
+
+   # Relaxed for prototyping
+   perspt agent --stability-threshold 0.5 -w . "Quick prototype"
+
+
+Cost and Step Limits
+--------------------
 
 .. code-block:: bash
 
-   # Stricter (production)
-   perspt agent --stability-threshold 0.05 "Critical fix"
+   # Cap total LLM spend at $5
+   perspt agent --max-cost 5.0 -w . "Large refactor"
 
-   # Lenient (prototyping)
-   perspt agent --stability-threshold 0.5 "Quick draft"
+   # Cap total iterations across all nodes
+   perspt agent --max-steps 20 -w . "Iterative task"
+
+
+Complexity Control
+------------------
+
+.. code-block:: bash
+
+   # Set complexity threshold
+   perspt agent -k 3 -w . "Simple task"
+
+   # Explicit complexity estimation
+   perspt agent --complexity medium -w . "Medium task"
+
+
+Deferred Testing
+----------------
+
+Skip unit tests during per-node verification; only run them at sheaf validation:
+
+.. code-block:: bash
+
+   perspt agent --defer-tests -w . "Speed-optimized generation"
+
+This sets V_log = 0.0 during node coding. Tests run only at the final sheaf stage.
+
+
+Verifier Strictness
+-------------------
+
+.. code-block:: bash
+
+   # Default strictness
+   perspt agent --verifier-strictness default -w . "Task"
+
+   # Strict: fail on any warning
+   perspt agent --verifier-strictness strict -w . "Production code"
+
+   # Minimal: only fail on errors
+   perspt agent --verifier-strictness minimal -w . "Prototype"
+
+
+LLM Logging and Analytics
+--------------------------
+
+.. code-block:: bash
+
+   # Enable LLM call logging to DuckDB
+   perspt agent --log-llm -w . "Task"
+
+   # Interactive log browser
+   perspt logs --tui
+
+   # Show most recent session
+   perspt logs --last
+
+   # Usage statistics (tokens, cost, timing)
+   perspt logs --stats
+
+
+Merkle Ledger
+--------------
+
+Every stable node is committed to a content-addressed Merkle ledger stored in
+DuckDB. This provides:
+
+- **Auditability** — Full trace of what each node produced
+- **Rollback** — Restore to any point in the session
+- **Resume** — Continue interrupted sessions with verified context
+
+.. code-block:: bash
+
+   perspt ledger --recent
+   perspt ledger --stats
+
+
+Single-File Mode
+----------------
+
+Force the agent to produce a single file without DAG planning:
+
+.. code-block:: bash
+
+   perspt agent --single-file -w . "Create a Python utility script"
+
+
+Plan Export
+-----------
+
+Save the task plan as JSON before execution:
+
+.. code-block:: bash
+
+   perspt agent --output-plan plan.json -w . "Create a web app"
+   cat plan.json
+
 
 Execution Modes
 ---------------
@@ -59,85 +176,8 @@ Execution Modes
    * - Mode
      - Behavior
    * - ``cautious``
-     - Prompt for every change
+     - Prompt for approval on every node
    * - ``balanced``
-     - Prompt when complexity > K (default)
+     - Prompt when complexity exceeds threshold K (default)
    * - ``yolo``
-     - Auto-approve everything (⚠️ dangerous)
-
-Cost and Step Limits
---------------------
-
-.. code-block:: bash
-
-   # Set budget
-   perspt agent --max-cost 5.0 "Large refactor"
-
-   # Limit iterations
-   perspt agent --max-steps 10 "Iterative task"
-
-Merkle Ledger
--------------
-
-Track and rollback changes:
-
-.. code-block:: bash
-
-   # View history
-   perspt ledger --recent
-
-   # Rollback
-   perspt ledger --rollback abc123
-
-   # Statistics
-   perspt ledger --stats
-
-Policy Rules
-------------
-
-Create custom Starlark rules:
-
-.. code-block:: python
-
-   # .perspt/rules.star
-   allow("cat *")
-   prompt("rm *", reason="File deletion")
-   deny("rm -rf /")
-
-Project Memory
---------------
-
-Use ``PERSPT.md`` for project context:
-
-.. code-block:: markdown
-
-   # My Project
-
-   ## Tech Stack
-   - Python 3.11
-   - FastAPI
-   - PostgreSQL
-
-   ## Conventions
-   - Type hints everywhere
-   - 100% test coverage
-
-Session Management
-------------------
-
-.. code-block:: bash
-
-   # Check status
-   perspt status
-
-   # Abort
-   perspt abort
-
-   # Resume
-   perspt resume
-
-See Also
---------
-
-- :doc:`../howto/agent-options` - Full CLI reference
-- :doc:`../concepts/srbn-architecture` - SRBN details
+     - Auto-approve everything without review
