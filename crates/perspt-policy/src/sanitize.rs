@@ -5,6 +5,20 @@
 use anyhow::Result;
 use shell_words;
 
+fn looks_like_path_argument(part: &str) -> bool {
+    part.contains('/') || part.contains('\\')
+}
+
+fn is_explicit_absolute_path(part: &str, candidate: &std::path::Path) -> bool {
+    candidate.is_absolute()
+        || part.starts_with('/')
+        || part.starts_with('\\')
+        || part
+            .chars()
+            .nth(1)
+            .is_some_and(|character| character == ':')
+}
+
 /// Sanitization result
 #[derive(Debug, Clone)]
 pub struct SanitizeResult {
@@ -138,12 +152,12 @@ pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path)
 
     for part in &parts {
         // Skip flags and non-path arguments
-        if part.starts_with('-') || !part.contains('/') {
+        if part.starts_with('-') || !looks_like_path_argument(part) {
             continue;
         }
 
         let candidate = std::path::Path::new(part);
-        if candidate.is_absolute() {
+        if is_explicit_absolute_path(part, candidate) {
             // Absolute path — must be inside workspace
             if !candidate.starts_with(workspace_root) {
                 anyhow::bail!(
@@ -216,14 +230,36 @@ mod tests {
 
     #[test]
     fn test_workspace_bound_absolute_inside() {
-        let ws = std::path::PathBuf::from("/home/user/project");
-        assert!(validate_workspace_bound("cat /home/user/project/src/main.rs", &ws).is_ok());
+        let (ws, command) = if cfg!(windows) {
+            (
+                std::path::PathBuf::from(r"C:\Users\user\project"),
+                r"cat C:\Users\user\project\src\main.rs",
+            )
+        } else {
+            (
+                std::path::PathBuf::from("/home/user/project"),
+                "cat /home/user/project/src/main.rs",
+            )
+        };
+
+        assert!(validate_workspace_bound(command, &ws).is_ok());
     }
 
     #[test]
     fn test_workspace_bound_absolute_outside_rejected() {
-        let ws = std::path::PathBuf::from("/home/user/project");
-        let result = validate_workspace_bound("cat /etc/passwd", &ws);
+        let (ws, command) = if cfg!(windows) {
+            (
+                std::path::PathBuf::from(r"C:\Users\user\project"),
+                r"cat C:\Windows\System32\drivers\etc\hosts",
+            )
+        } else {
+            (
+                std::path::PathBuf::from("/home/user/project"),
+                "cat /etc/passwd",
+            )
+        };
+
+        let result = validate_workspace_bound(command, &ws);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
