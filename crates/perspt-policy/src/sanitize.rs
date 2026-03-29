@@ -6,8 +6,7 @@ use anyhow::Result;
 use shell_words;
 
 fn has_windows_drive_prefix(part: &str) -> bool {
-    part
-        .chars()
+    part.chars()
         .nth(1)
         .is_some_and(|character| character == ':')
 }
