@@ -18,7 +18,7 @@ In-depth coverage of every Perspt feature.
       :link: agent-mode
       :link-type: doc
 
-      SRBN lifecycle, DAG planning, node verification, and review.
+      Experimental SRBN lifecycle, DAG planning, node verification, and review.
 
    .. grid-item-card:: Advanced Features
       :link: advanced-features

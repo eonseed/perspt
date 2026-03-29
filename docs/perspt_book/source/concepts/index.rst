@@ -12,7 +12,7 @@ Understanding the foundations of Perspt.
       :link: srbn-architecture
       :link-type: doc
 
-      The Stabilized Recursive Barrier Network engine for autonomous coding.
+      The theoretical framework and its experimental implementation in Perspt.
 
    .. grid-item-card:: Workspace Crates
       :link: workspace-crates

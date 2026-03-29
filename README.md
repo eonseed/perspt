@@ -13,7 +13,7 @@ Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertainin
 
 1. **Chat with any LLM from your terminal.** Set an API key, run `perspt`, and start talking. Supports OpenAI, Anthropic, Google Gemini, Groq, Cohere, xAI, DeepSeek, and Ollama out of the box.
 
-2. **Run an autonomous coding agent.** The SRBN (Stabilized Recursive Barrier Network) engine decomposes coding tasks into a DAG of nodes, generates code, verifies each node with real LSP diagnostics and tests, and commits only when Lyapunov energy converges. The SRBN engine is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication).
+2. **Run an experimental autonomous coding agent.** The SRBN (Stabilized Recursive Barrier Network) engine decomposes coding tasks into a DAG of nodes, generates code, verifies each node with real LSP diagnostics and tests, and commits only when Lyapunov energy converges. SRBN is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). Agent mode is under active development; the theoretical framework is mature, but the implementation has not yet been benchmarked.
 
 [![Perspt in Action](docs/screencast/perspt_terminal_ui.jpg)](https://github.com/user-attachments/assets/f80f7109-1615-487b-b2a8-b76e16ebf6a7)
 
@@ -57,7 +57,7 @@ Perspt auto-detects whichever provider key you have set. No config file required
 
 **Simple CLI Mode** -- A minimal prompt for direct Q&A, piping, and session logging. Ideal for scripting and accessibility.
 
-**Agent Mode (SRBN)** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold.
+**Agent Mode (SRBN) [Experimental]** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold. Based on the SRBN paper's theoretical framework; under active development.
 
 **Zero-Config Startup** -- Automatic provider detection from environment variables. Set a key and go.
 
@@ -87,15 +87,17 @@ SRBN takes a different approach. Instead of hoping each step is correct, it **me
 
 5. **Only commit when stable.** The score must drop below a threshold before the node is accepted. Then adjacent nodes are checked for consistency -- do imports resolve, do types match across files?
 
-The result: instead of reliability decaying exponentially with project size, the retry cost grows logarithmically. A hundred-node project costs only modestly more than a ten-node one.
+The theoretical result: instead of reliability decaying exponentially with project size, the paper predicts that retry cost grows logarithmically. A hundred-node project should cost only modestly more than a ten-node one.
 
-This approach is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.** and **Ronak R.** (pre-publication), which formalizes this intuition using control theory and proves it mathematically. The next section covers the theory for those interested.
+This approach is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.** and **Ronak R.** (pre-publication), which formalizes this intuition using control theory and proves it mathematically. Perspt's agent mode is an experimental implementation of this theory -- the mathematical framework is mature, but repository-level benchmarks have not yet been published. The next section covers the theory for those interested.
 
 ---
 
 ## Theoretical Foundation
 
-The SRBN engine is grounded in the theoretical framework from *"Stability is All You Need"* (Vikrant R. and Ronak R., pre-publication). This section presents the mathematical machinery for researchers and developers who want to understand the guarantees.
+The SRBN engine is grounded in the theoretical framework from *"Stability is All You Need"* (Vikrant R. and Ronak R., pre-publication). This section presents the paper's mathematical machinery for researchers and developers who want to understand the theoretical guarantees.
+
+> **Note:** The theorems below are results from the SRBN paper. They describe properties of the formal system under stated assumptions. Perspt implements this framework as an experimental agent, but these theoretical results have not yet been empirically validated through published benchmarks on this implementation.
 
 ### The Problem, Formally
 
@@ -129,9 +131,9 @@ $$
 
 Default weights: $\alpha = 1.0$, $\beta = 0.5$, $\gamma = 2.0$.
 
-### Key Theorems
+### Key Theorems (from the Paper)
 
-The paper proves three results that underpin SRBN's reliability:
+The paper proves three results that underpin SRBN's theoretical reliability model:
 
 **Theorem 1 (Global Exponential Decay).** If the control law $u(x) = -K \nabla V(x)$ is applied at each retry step, then:
 
@@ -151,13 +153,13 @@ The system does not need perfect LLM responses to converge. Bounded errors yield
 
 **Corollary (Role of Topology).** Convergence rate depends on the **Fiedler value** $\lambda_2$ of the task DAG's Laplacian. Well-connected graphs (higher $\lambda_2$) converge faster; long chains converge slowly. This guides how the Architect should decompose tasks.
 
-### How This Changes Reliability Scaling
+### How This Changes Reliability Scaling (Theoretical)
 
 Traditional agents: reliability $\sim (1 - \delta)^N$ (exponential decay).
 
-SRBN with Lyapunov control: reliability $\sim O(\log N)$ retry cost for an $N$-node project.
+SRBN with Lyapunov control (paper prediction): retry cost $\sim O(\log N)$ for an $N$-node project.
 
-The barrier mechanism transforms the problem from "hope each step is correct" to "measure deviation, correct, and prove convergence."
+The barrier mechanism is designed to transform the problem from "hope each step is correct" to "measure deviation, correct, and steer toward convergence." Whether Perspt's implementation fully realizes this theoretical scaling is an open empirical question.
 
 ### SRBN Control Loop
 
@@ -186,9 +188,9 @@ flowchart TD
     D1 & D2 & D3 & D4 --> D
 ```
 
-Each retry is not blind re-prompting. The flow matching barrier projects the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
+Each retry is not blind re-prompting. The flow matching barrier is designed to project the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
 
-For the complete theoretical treatment, proofs, and experimental methodology, see the [Perspt Book](docs/perspt_book/build/html/index.html).
+For the complete theoretical treatment, proofs, and design rationale, see the [Perspt Book](docs/perspt_book/build/html/index.html).
 
 ---
 
@@ -215,7 +217,7 @@ Global options: `-v` (verbose), `-c <FILE>` (config path), `-h` (help), `-V` (ve
 
 ## Agent Mode
 
-Agent mode uses the SRBN engine to autonomously write, test, and commit code.
+Agent mode uses the experimental SRBN engine to autonomously write, test, and commit code.
 
 ### Quick Start
 
@@ -414,7 +416,7 @@ Key implementation details:
 - **DuckDB** persists session state, energy history, and the Merkle ledger
 - **Starlark** evaluates security policies that gate file writes and command execution
 
-The SRBN engine is an experimental implementation of the theoretical framework described in *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). The paper reformulates LLM agency as a sheaf-theoretic control problem, replacing probabilistic search with Lyapunov stability guarantees and Input-to-State Stability (ISS) proofs. See the [Theoretical Foundation](#theoretical-foundation-stability-is-all-you-need) section for details.
+The SRBN engine is an experimental implementation of the theoretical framework described in *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). The paper reformulates LLM agency as a sheaf-theoretic control problem, replacing probabilistic search with Lyapunov stability analysis and Input-to-State Stability (ISS) proofs. See the [Theoretical Foundation](#theoretical-foundation) section for details.
 
 ---
 

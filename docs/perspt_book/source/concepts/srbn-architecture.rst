@@ -3,21 +3,33 @@
 SRBN Architecture
 =================
 
-The **Stabilized Recursive Barrier Network (SRBN)** is Perspt's core innovation for
-autonomous coding with mathematically guaranteed stability. SRBN is based on the
-paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM
-Reliability"* by **Vikrant R. and Ronak R.** (pre-publication), which reformulates
-LLM agency as a sheaf-theoretic control problem and proves Input-to-State Stability
-(ISS) guarantees under persistent noise. The implementation in Perspt is defined by
-**PSP-5** (Perspt Specification Proposal 5).
+The **Stabilized Recursive Barrier Network (SRBN)** is the theoretical framework behind
+Perspt's experimental autonomous coding agent. SRBN is based on the paper *"Stability
+is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"*
+by **Vikrant R. and Ronak R.** (pre-publication), which reformulates LLM agency as a
+sheaf-theoretic control problem and proves Input-to-State Stability (ISS) under
+persistent noise. Perspt's implementation of this framework is defined by **PSP-5**
+(Perspt Specification Proposal 5).
+
+.. admonition:: Theory vs. Implementation
+   :class: note
+
+   This page describes both the SRBN paper's theoretical model and how Perspt's
+   PSP-5 runtime implements it. Where a claim comes from the paper's formal proofs,
+   it is noted as a **paper result**. Where PSP-5 makes engineering choices that
+   approximate or extend the theory, those are noted as **implementation details**.
+   The theoretical framework is mature; empirical benchmarks on Perspt's implementation
+   have not yet been published.
 
 Overview
 --------
 
-SRBN executes coding tasks as a directed acyclic graph (DAG) of nodes. Each node
-owns a set of output files (ownership closure), generates a multi-artifact bundle,
-and must pass multi-stage verification before its energy falls below the convergence
-threshold. Only then is the node committed to the Merkle ledger.
+The SRBN paper models coding tasks as a directed acyclic graph (DAG) of nodes with
+a sheaf structure that enforces consistency across shared boundaries. PSP-5 implements
+this model concretely: each node owns a set of output files (ownership closure),
+generates a multi-artifact bundle, and must pass multi-stage verification before its
+energy falls below the convergence threshold. Only then is the node committed to the
+Merkle ledger.
 
 .. graphviz::
    :align: center
@@ -68,10 +80,10 @@ threshold. Only then is the node committed to the Merkle ledger.
    }
 
 
-The Control Loop
-----------------
+The Control Loop (PSP-5 Implementation)
+---------------------------------------
 
-The SRBN control loop (PSP-5) executes seven phases for each task:
+The SRBN control loop as implemented by PSP-5 executes seven phases for each task:
 
 .. list-table::
    :header-rows: 1
@@ -119,7 +131,8 @@ The SRBN control loop (PSP-5) executes seven phases for each task:
 Lyapunov Energy
 ---------------
 
-The stability of generated code is measured using a Lyapunov energy function:
+The stability of generated code is measured using a Lyapunov energy function, adapted
+from the paper's sheaf-theoretic formulation into five concrete verification barriers:
 
 .. admonition:: Energy Formula
    :class: important

@@ -3,8 +3,8 @@
 Headless Mode
 =============
 
-Run Perspt's SRBN agent without interactive prompts. This is ideal for CI/CD
-pipelines, batch code generation, and automated workflows.
+Run Perspt's experimental SRBN agent without interactive prompts. This is designed
+for CI/CD pipelines, batch code generation, and automated workflows.
 
 Overview
 --------

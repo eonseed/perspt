@@ -12,7 +12,7 @@ Internals, architecture, and contribution guide for Perspt developers.
       :link: architecture
       :link-type: doc
 
-      Crate structure, data flow, and PSP-5 internals.
+      Crate structure, data flow, and PSP-5 internals (including the experimental SRBN engine).
 
    .. grid-item-card:: Contributing
       :link: contributing

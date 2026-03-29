@@ -12,7 +12,8 @@ engine from the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies f
 Long-Horizon LLM Reliability"* by **Vikrant R. and Ronak R.** (pre-publication).
 The SRBN agent plans multi-file projects as directed acyclic graphs, verifies each
 node with real LSP diagnostics and tests, and commits only when Lyapunov energy
-converges.
+converges. The theoretical framework is mature; the implementation is under active
+development.
 
 .. only:: html
 
@@ -29,7 +30,7 @@ converges.
          :link: tutorials/agent-mode
          :link-type: doc
 
-         Autonomous multi-file coding with SRBN.
+         Autonomous multi-file coding with the experimental SRBN engine.
 
       .. grid-item-card:: Architecture
          :link: developer-guide/architecture
@@ -45,7 +46,7 @@ converges.
       :class: borderless
 
       * - **SRBN Agent**
-        - Autonomous multi-file coding with Lyapunov stability, ownership closure, and sheaf validation
+        - Experimental autonomous multi-file coding guided by Lyapunov energy, ownership closure, and sheaf validation (based on SRBN paper)
       * - **Multi-Provider**
         - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, Ollama
       * - **LSP Sensors**

@@ -72,7 +72,7 @@ Type your message and press **Enter**. Press **Esc** to exit.
 Try Agent Mode
 --------------
 
-Let Perspt autonomously plan and build multi-file projects:
+Let the experimental SRBN agent autonomously plan and build multi-file projects:
 
 .. code-block:: bash
 
@@ -116,7 +116,7 @@ Choose Your Mode
      - Interactive conversations with markdown rendering
    * - **Agent**
      - ``perspt agent "<task>"``
-     - Autonomous multi-file code generation
+     - Autonomous multi-file code generation (experimental)
    * - **Simple Chat**
      - ``perspt simple-chat``
      - Scripting, pipelines, no TUI
