@@ -4,7 +4,7 @@ Concise, repo-specific guidance for the current multi-crate workspace.
 
 ## Big picture
 - Perspt is now a Rust workspace, not a single-crate app. The active code lives under `crates/`; the legacy top-level `src/` tree is no longer the main runtime surface.
-- Root workspace members in `Cargo.toml`: `crates/perspt-core`, `crates/perspt-agent`, `crates/perspt-tui`, `crates/perspt-cli`, `crates/perspt-store`, `crates/perspt-policy`, `crates/perspt-sandbox`, `crates/perspt`, and `.perspt-eval/rust_cli`.
+- Root workspace members in `Cargo.toml`: `crates/perspt-core`, `crates/perspt-agent`, `crates/perspt-tui`, `crates/perspt-cli`, `crates/perspt-store`, `crates/perspt-policy`, `crates/perspt-sandbox`, and `crates/perspt`.
 - The `perspt` binary entry point is `crates/perspt-cli/src/main.rs`. The umbrella library crate is `crates/perspt/src/lib.rs`.
 
 ## Crate boundaries
@@ -37,8 +37,7 @@ Concise, repo-specific guidance for the current multi-crate workspace.
 - Current implementation detail: the correction loop is verifier-guided prompting over one shared provider. Do not describe it as an already-independent multi-provider correction barrier unless the code actually changes.
 
 ## Workspace-specific notes
-- `.perspt-eval/rust_cli` is a real workspace member and is included in workspace-wide `cargo` checks.
-- Scratch outputs under `.perspt-eval/**/.perspt/` are generated sandbox artifacts; avoid editing them unless the task explicitly targets evaluation fixtures or test data.
+- `.perspt-eval/` contains generated evaluation artifacts and scratch sandboxes. Keep it out of commits unless a task explicitly targets evaluation fixtures.
 - Prefer fixing logic in the owning crate rather than patching re-export layers.
 
 ## CI and verification (match PR gates)
@@ -61,7 +60,7 @@ Concise, repo-specific guidance for the current multi-crate workspace.
 ## Editing tips
 - Keep provider/config changes centralized in `perspt-core`; avoid duplicating env/config logic in CLI or TUI crates.
 - Respect the streaming/EOT contract and avoid blocking TUI event loops.
-- When changing manifests, features, or workspace-level dependencies, remember that the whole workspace, including `.perspt-eval/rust_cli`, must still compile under `--all-features`.
+- When changing manifests, features, or workspace-level dependencies, make sure the checked-in workspace crates still compile under `--all-features`.
 - Avoid editing generated logs, `target/`, conversation transcripts, or scratch sandbox data unless the task explicitly targets them.
 
 Questions or mismatches in these instructions should be resolved in favor of the checked-in workspace layout and `.github/workflows/ci.yml`.

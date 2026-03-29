@@ -116,6 +116,9 @@ docs/custom.css.bak
 *.swo
 *~
 
+# Generated evaluation artifacts
+.perspt-eval/
+
 # Temporary documentation files
 docs/temp/
 *.tmp.md
