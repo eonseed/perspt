@@ -94,7 +94,13 @@ impl SRBNOrchestrator {
         let node_workdir = self.effective_working_dir(idx);
 
         // Validate structural integrity first
-        bundle.validate().map_err(|e| anyhow::anyhow!(e))?;
+        bundle.validate().map_err(|e| {
+            eprintln!(
+                "[SRBN-DIAG] Bundle validation failed for '{}': {}",
+                node_id, e
+            );
+            anyhow::anyhow!(e)
+        })?;
 
         // Filter out undeclared paths instead of failing the entire session
         let filtered = self.filter_bundle_to_declared_paths(bundle, node_id);
@@ -109,6 +115,10 @@ impl SRBNOrchestrator {
                 .iter()
                 .map(|a| a.path().to_string())
                 .collect();
+            eprintln!(
+                "[SRBN-DIAG] All artifacts stripped for '{}': {:?}",
+                node_id, dropped_paths
+            );
             log::warn!(
                 "All artifacts stripped for node '{}' — skipping bundle application. \
                  Dropped paths: {}",

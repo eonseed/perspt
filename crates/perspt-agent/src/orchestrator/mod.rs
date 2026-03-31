@@ -1059,8 +1059,19 @@ impl SRBNOrchestrator {
                 }
                 Err(e) => {
                     let node_id = self.graph[*idx].node_id.clone();
+                    eprintln!("[SRBN-DIAG] Node {} failed: {:#}", node_id, e);
                     log::error!("Node {} failed: {}", node_id, e);
                     self.emit_log(format!("❌ Node {} failed: {}", node_id, e));
+
+                    // Flush the node's provisional branch so sandbox files
+                    // don't leak. Without this, files written to the sandbox
+                    // are lost when step_commit/step_sheaf_validate fails
+                    // before merge.
+                    if let Some(bid) = self.graph[*idx].provisional_branch_id.clone() {
+                        self.flush_provisional_branch(&bid, &node_id);
+                    }
+                    self.flush_descendant_branches(*idx);
+
                     self.graph[*idx].state = NodeState::Escalated;
                     self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                         node_id: node_id.clone(),
@@ -1282,11 +1293,12 @@ impl SRBNOrchestrator {
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Escalated,
                 });
-                return Err(anyhow::anyhow!(
+                let err_msg = format!(
                     "Context blocked for node '{}': {}. Node escalated.",
-                    self.graph[idx].node_id,
-                    reason
-                ));
+                    self.graph[idx].node_id, reason
+                );
+                eprintln!("[SRBN-DIAG] {}", err_msg);
+                return Err(anyhow::anyhow!(err_msg));
             }
         }
 
@@ -1308,6 +1320,10 @@ impl SRBNOrchestrator {
                 let block_reason = format!(
                     "Required structural dependencies lack machine-verifiable digests (only prose summaries): [{}]",
                     dep_names.join(", ")
+                );
+                eprintln!(
+                    "[SRBN-DIAG] Structural dependency check failed for '{}': {}",
+                    self.graph[idx].node_id, block_reason
                 );
                 self.emit_log(format!("🚫 {}", block_reason));
                 self.graph[idx].state = NodeState::Escalated;
