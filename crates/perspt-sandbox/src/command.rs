@@ -238,6 +238,7 @@ mod tests {
     // Baseline regression tests — freeze pre-refactor behavior
     // =========================================================================
 
+    #[cfg(unix)]
     #[test]
     fn test_basic_sandbox_with_working_dir() {
         let temp = std::env::temp_dir();
@@ -253,6 +254,28 @@ mod tests {
         assert_eq!(
             actual, expected,
             "pwd should match the specified working dir"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_basic_sandbox_with_working_dir() {
+        // Use a uniquely-named subdirectory so we can verify the working dir
+        // by name alone, avoiding junction/symlink resolution mismatches
+        // (e.g. C:\Users\...\Temp junction → D:\tmp on CI runners).
+        let unique = format!("perspt_test_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sandbox =
+            BasicSandbox::new("cmd".to_string(), vec!["/C".to_string(), "cd".to_string()])
+                .with_working_dir(dir.to_string_lossy().to_string());
+        let result = sandbox.execute().unwrap();
+        let _ = std::fs::remove_dir(&dir);
+        assert!(result.success(), "cmd /C cd should succeed");
+        let output = result.stdout.trim();
+        assert!(
+            output.ends_with(&unique),
+            "working dir output should end with our unique dir name, got: {output}"
         );
     }
 
