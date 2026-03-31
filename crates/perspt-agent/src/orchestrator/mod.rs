@@ -1979,9 +1979,18 @@ impl SRBNOrchestrator {
                         }
                     }
                 }
-                // Also copy parent output targets that this node depends on
-                for pidx in &parents {
-                    for target in &self.graph[*pidx].output_targets {
+                // Also copy output targets from ALL ancestors (not just
+                // direct parents) so transitive dependencies are available.
+                // e.g. task_test_solver depends on task_solver which depends
+                // on task_cfd_core — the solver test sandbox needs cfd-core
+                // source files to build.
+                let mut ancestor_queue: Vec<NodeIndex> = parents.clone();
+                let mut visited = std::collections::HashSet::new();
+                while let Some(ancestor_idx) = ancestor_queue.pop() {
+                    if !visited.insert(ancestor_idx) {
+                        continue;
+                    }
+                    for target in &self.graph[ancestor_idx].output_targets {
                         if let Some(rel) = target.to_str() {
                             if let Err(e) = crate::tools::copy_to_sandbox(
                                 &self.context.working_dir,
@@ -1989,12 +1998,19 @@ impl SRBNOrchestrator {
                                 rel,
                             ) {
                                 log::debug!(
-                                    "Could not seed sandbox with parent file {}: {}",
+                                    "Could not seed sandbox with ancestor file {}: {}",
                                     rel,
                                     e
                                 );
                             }
                         }
+                    }
+                    // Walk further up the graph
+                    for grandparent in self
+                        .graph
+                        .neighbors_directed(ancestor_idx, petgraph::Direction::Incoming)
+                    {
+                        ancestor_queue.push(grandparent);
                     }
                 }
             }
