@@ -318,7 +318,11 @@ impl SRBNOrchestrator {
                 self.graph[*idx]
                     .output_targets
                     .iter()
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| {
+                        let raw = p.to_string_lossy();
+                        perspt_core::path::normalize_artifact_path(&raw)
+                            .unwrap_or_else(|_| raw.to_string())
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -327,11 +331,11 @@ impl SRBNOrchestrator {
             return bundle.clone();
         }
 
-        let (kept, dropped): (Vec<_>, Vec<_>) = bundle
-            .artifacts
-            .iter()
-            .cloned()
-            .partition(|a| allowed_paths.contains(a.path()));
+        let (kept, dropped): (Vec<_>, Vec<_>) = bundle.artifacts.iter().cloned().partition(|a| {
+            let normalized = perspt_core::path::normalize_artifact_path(a.path())
+                .unwrap_or_else(|_| a.path().to_string());
+            allowed_paths.contains(&normalized)
+        });
 
         if !dropped.is_empty() {
             let dropped_paths: Vec<String> = dropped.iter().map(|a| a.path().to_string()).collect();

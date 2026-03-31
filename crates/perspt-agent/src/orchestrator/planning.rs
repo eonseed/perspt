@@ -425,7 +425,7 @@ impl SRBNOrchestrator {
     ///
     /// When the Architect fails to produce a valid JSON plan after MAX_ATTEMPTS,
     /// this creates a minimal 3-node graph: scaffold → implement → test.
-    fn create_deterministic_fallback_graph(&mut self, task: &str) -> Result<()> {
+    pub(super) fn create_deterministic_fallback_graph(&mut self, task: &str) -> Result<()> {
         log::warn!("Using deterministic fallback graph (PSP-5)");
         self.emit_log("📦 Using deterministic fallback plan");
 

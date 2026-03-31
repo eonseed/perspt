@@ -294,6 +294,7 @@ impl From<crate::types::NodeState> for NodeStatus {
             NodeState::Completed => NodeStatus::Completed,
             NodeState::Failed => NodeStatus::Failed,
             NodeState::Aborted => NodeStatus::Failed,
+            NodeState::Superseded => NodeStatus::Completed,
         }
     }
 }
