@@ -12,6 +12,9 @@ keywords = ["policy", "starlark", "security", "rules"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+# Core types and path normalization
+perspt-core = { path = "../perspt-core" }
+
 # Starlark policy engine
 starlark = "0.13"
 
