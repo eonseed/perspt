@@ -99,23 +99,44 @@ impl SRBNOrchestrator {
         // Filter out undeclared paths instead of failing the entire session
         let filtered = self.filter_bundle_to_declared_paths(bundle, node_id);
 
-        // If filtering removed ALL artifacts, fall back to the original bundle
-        // with a warning — the architect/actuator path mismatch shouldn't kill
-        // the entire session.  Ownership validation below still guards against
-        // true cross-node conflicts.
-        let bundle = if filtered.artifacts.is_empty() && !bundle.artifacts.is_empty() {
+        // If filtering removed ALL artifacts, fail so the correction loop can
+        // retry with proper paths.  The old fallback applied the *unfiltered*
+        // bundle, causing cross-node file pollution (e.g., overwriting root
+        // Cargo.toml with a crate-level manifest).
+        if filtered.artifacts.is_empty() && !bundle.artifacts.is_empty() {
+            let dropped_paths: Vec<String> = bundle
+                .artifacts
+                .iter()
+                .map(|a| a.path().to_string())
+                .collect();
             log::warn!(
-                "All artifacts stripped for node '{}' — falling back to original bundle",
-                node_id
+                "All artifacts stripped for node '{}' — skipping bundle application. \
+                 Dropped paths: {}",
+                node_id,
+                dropped_paths.join(", ")
             );
             self.emit_log(format!(
-                "⚠️ Path mismatch: all artifacts for '{}' targeted unplanned paths — applying anyway",
+                "⚠️ All artifacts for '{}' targeted undeclared paths — bundle skipped. \
+                 The actuator's output_files don't match the plan.",
                 node_id
             ));
-            bundle.clone()
-        } else {
-            filtered
-        };
+            return Err(anyhow::anyhow!(
+                "All {} artifact(s) targeted undeclared paths for node '{}': [{}]. \
+                 Expected paths: {:?}",
+                bundle.artifacts.len(),
+                node_id,
+                dropped_paths.join(", "),
+                self.node_indices
+                    .get(node_id)
+                    .map(|idx| self.graph[*idx]
+                        .output_targets
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect::<Vec<_>>())
+                    .unwrap_or_default()
+            ));
+        }
+        let bundle = filtered;
 
         // PSP-5 Phase 2: Validate ownership boundaries (soft failure)
         // Instead of crashing the session, log ownership conflicts and

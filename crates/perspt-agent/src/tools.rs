@@ -236,6 +236,15 @@ impl AgentTools {
             }
         };
 
+        // Honor explicit working_dir from the caller (e.g. sandbox path),
+        // falling back to self.working_dir (the main workspace).
+        let effective_dir = call
+            .arguments
+            .get("working_dir")
+            .map(PathBuf::from)
+            .filter(|d| d.is_dir())
+            .unwrap_or_else(|| self.working_dir.clone());
+
         // PSP-5 Phase 4: Sanitize command through policy before execution
         match perspt_policy::sanitize_command(cmd_str) {
             Ok(sr) if sr.rejected => {
@@ -272,7 +281,7 @@ impl AgentTools {
 
         let mut child = match AsyncCommand::new("sh")
             .args(["-c", cmd_str])
-            .current_dir(&self.working_dir)
+            .current_dir(&effective_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -934,6 +943,55 @@ pub fn create_sandbox(
     log::debug!("Created sandbox workspace at {}", sandbox_root.display());
 
     Ok(sandbox_root)
+}
+
+/// Seed a sandbox with plugin-identified project manifests (Cargo.toml,
+/// pyproject.toml, etc.) so that build/test commands can find them.
+///
+/// Walks the workspace looking for each plugin's `key_files()` and copies
+/// any that exist into the sandbox at the same relative path.
+pub fn seed_sandbox_manifests(
+    working_dir: &Path,
+    sandbox_dir: &Path,
+    plugins: &[&str],
+) -> std::io::Result<()> {
+    let registry = perspt_core::plugin::PluginRegistry::new();
+    let mut seeded = Vec::new();
+
+    for plugin_name in plugins {
+        if let Some(plugin) = registry.get(plugin_name) {
+            for key_file in plugin.key_files() {
+                // Check workspace root
+                if working_dir.join(key_file).exists() {
+                    copy_to_sandbox(working_dir, sandbox_dir, key_file)?;
+                    seeded.push(key_file.to_string());
+                }
+                // Also walk one level of subdirectories (e.g. crates/*/Cargo.toml)
+                if let Ok(entries) = fs::read_dir(working_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.file_name().is_none_or(|n| n != ".perspt") {
+                            let sub_key = path.join(key_file);
+                            if sub_key.exists() {
+                                let rel = sub_key
+                                    .strip_prefix(working_dir)
+                                    .unwrap_or(&sub_key)
+                                    .to_string_lossy()
+                                    .to_string();
+                                let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
+                                seeded.push(rel);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !seeded.is_empty() {
+        log::debug!("Seeded sandbox with manifests: {}", seeded.join(", "));
+    }
+    Ok(())
 }
 
 /// Clean up a specific sandbox workspace.

@@ -116,6 +116,11 @@ impl SRBNOrchestrator {
 
                     // Create nodes from the plan
                     self.create_nodes_from_plan(&plan)?;
+
+                    // Post-plan: reconcile workspace structure if plan
+                    // introduces sub-crate / sub-package directories.
+                    self.reconcile_workspace_structure(&plan);
+
                     return Ok(());
                 }
                 Err(e) => {
@@ -414,6 +419,143 @@ impl SRBNOrchestrator {
             "Built ownership manifest: {} entries",
             self.context.ownership_manifest.len()
         );
+    }
+
+    /// Post-plan workspace reconciliation.
+    ///
+    /// When the architect produces a plan with sub-crate paths (e.g.,
+    /// `crates/<name>/Cargo.toml`), the init-created root manifest is a
+    /// single-package `[package]` that doesn't know about workspace members.
+    /// This function:
+    /// 1. Detects sub-crate/sub-package prefixes from the plan's output_files.
+    /// 2. Rewrites the root manifest to a workspace manifest.
+    /// 3. Removes the init-scaffolded `src/` directory to avoid confusion.
+    fn reconcile_workspace_structure(&self, plan: &TaskPlan) {
+        let all_output_files: Vec<&str> = plan
+            .tasks
+            .iter()
+            .flat_map(|t| t.output_files.iter().map(|s| s.as_str()))
+            .collect();
+
+        // Detect Rust workspace: any file under crates/<name>/
+        let rust_crate_dirs: std::collections::BTreeSet<String> = all_output_files
+            .iter()
+            .filter_map(|f| {
+                let parts: Vec<&str> = f.split('/').collect();
+                if parts.len() >= 2 && parts[0] == "crates" {
+                    Some(parts[1].to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !rust_crate_dirs.is_empty() {
+            self.convert_to_rust_workspace(&rust_crate_dirs);
+            return;
+        }
+
+        // Detect Node.js workspace: any file under packages/<name>/
+        let js_pkg_dirs: std::collections::BTreeSet<String> = all_output_files
+            .iter()
+            .filter_map(|f| {
+                let parts: Vec<&str> = f.split('/').collect();
+                if parts.len() >= 2 && parts[0] == "packages" {
+                    Some(parts[1].to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !js_pkg_dirs.is_empty() {
+            self.convert_to_js_workspace(&js_pkg_dirs);
+        }
+    }
+
+    /// Convert root Cargo.toml from `[package]` to `[workspace]` and remove
+    /// the init-scaffolded `src/` directory.
+    fn convert_to_rust_workspace(&self, crate_dirs: &std::collections::BTreeSet<String>) {
+        let root = &self.context.working_dir;
+        let cargo_toml = root.join("Cargo.toml");
+
+        if !cargo_toml.exists() {
+            return;
+        }
+
+        // Build explicit member paths for better cargo compatibility
+        let members: Vec<String> = crate_dirs
+            .iter()
+            .map(|d| format!("\"crates/{}\"", d))
+            .collect();
+        let members_str = members.join(", ");
+
+        let workspace_content = format!(
+            "[workspace]\nmembers = [{}]\nresolver = \"2\"\n",
+            members_str
+        );
+
+        if let Err(e) = std::fs::write(&cargo_toml, &workspace_content) {
+            log::warn!("Failed to convert root Cargo.toml to workspace: {}", e);
+            return;
+        }
+
+        log::info!(
+            "Converted root Cargo.toml to workspace with members: {:?}",
+            crate_dirs
+        );
+        self.emit_log(format!(
+            "📦 Converted to Cargo workspace with {} member(s)",
+            crate_dirs.len()
+        ));
+
+        // Remove init-scaffolded src/ directory — the plan's sub-crates
+        // define their own src/ directories.
+        let scaffold_src = root.join("src");
+        if scaffold_src.is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(&scaffold_src) {
+                log::warn!("Failed to remove init-scaffolded src/: {}", e);
+            } else {
+                log::info!("Removed init-scaffolded src/ directory");
+            }
+        }
+
+        // Create crate directories so cargo can find them
+        for crate_name in crate_dirs {
+            let crate_dir = root.join("crates").join(crate_name).join("src");
+            if !crate_dir.exists() {
+                if let Err(e) = std::fs::create_dir_all(&crate_dir) {
+                    log::debug!("Could not pre-create {}: {}", crate_dir.display(), e);
+                }
+            }
+        }
+    }
+
+    /// Convert root package.json to a workspace (npm/yarn/pnpm).
+    fn convert_to_js_workspace(&self, _pkg_dirs: &std::collections::BTreeSet<String>) {
+        let root = &self.context.working_dir;
+        let pkg_json = root.join("package.json");
+
+        if !pkg_json.exists() {
+            return;
+        }
+
+        // Read existing package.json and add workspaces field
+        if let Ok(content) = std::fs::read_to_string(&pkg_json) {
+            if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&content) {
+                if json.get("workspaces").is_none() {
+                    json["workspaces"] = serde_json::json!(["packages/*"]);
+                    if let Ok(new_content) = serde_json::to_string_pretty(&json) {
+                        if let Err(e) = std::fs::write(&pkg_json, new_content) {
+                            log::warn!("Failed to add workspaces to package.json: {}", e);
+                        } else {
+                            log::info!("Added workspaces field to package.json");
+                            self.emit_log("📦 Converted to npm workspace".to_string());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Get the Architect model name

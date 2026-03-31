@@ -303,16 +303,41 @@ impl SRBNOrchestrator {
     /// multi-file context (not just the single last-written file).
     fn build_correction_prompt(
         &self,
-        _node_id: &str,
+        node_id: &str,
         goal: &str,
         energy: &EnergyComponents,
     ) -> Result<String> {
         let diagnostics = &self.context.last_diagnostics;
 
+        // Determine the node's owner plugin for language-specific examples
+        let owner_plugin = self
+            .node_indices
+            .get(node_id)
+            .map(|idx| self.graph[*idx].owner_plugin.as_str())
+            .unwrap_or("");
+
         // Collect files to include in the prompt.
-        // When a repair footprint exists, include all affected files
-        // so the LLM has multi-file context for bundle-level repairs.
+        // Priority: node's declared output_targets > repair footprint > last_written_file.
+        // The old approach of falling back to last_written_file could show
+        // the wrong file (e.g., root src/lib.rs from another node).
         let mut file_sections = Vec::new();
+        let mut seen_paths = std::collections::HashSet::new();
+
+        // 1. Include all of the node's declared output_targets (the files it SHOULD produce)
+        if let Some(idx) = self.node_indices.get(node_id) {
+            let node_workdir = self.effective_working_dir(*idx);
+            for target in &self.graph[*idx].output_targets {
+                let target_str = target.to_string_lossy().to_string();
+                let full_path = node_workdir.join(target);
+                if let Ok(content) = std::fs::read_to_string(&full_path) {
+                    if !content.is_empty() && seen_paths.insert(target_str.clone()) {
+                        file_sections.push((target_str, content));
+                    }
+                }
+            }
+        }
+
+        // 2. Supplement with repair footprint files (may include files written by correction)
         if let Some(ref footprint) = self.last_repair_footprint {
             let node_workdir = if let Some(idx) = self.node_indices.get(&footprint.node_id) {
                 self.effective_working_dir(*idx)
@@ -324,15 +349,36 @@ impl SRBNOrchestrator {
                 self.context.working_dir.clone()
             };
             for file_path in &footprint.affected_files {
-                let full_path = node_workdir.join(file_path);
-                let content = std::fs::read_to_string(&full_path).unwrap_or_default();
-                if !content.is_empty() {
-                    file_sections.push((file_path.clone(), content));
+                if seen_paths.insert(file_path.clone()) {
+                    let full_path = node_workdir.join(file_path);
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        if !content.is_empty() {
+                            file_sections.push((file_path.clone(), content));
+                        }
+                    }
                 }
             }
         }
 
-        // Fallback to last_written_file if no footprint files were read
+        // 3. Include the workspace root manifest for structural context
+        //    (helps the LLM understand crate layout for cross-crate imports)
+        let root_manifest_names = ["Cargo.toml", "package.json", "pyproject.toml"];
+        for manifest_name in &root_manifest_names {
+            let manifest_path = self.context.working_dir.join(manifest_name);
+            if manifest_path.exists() {
+                let rel = manifest_name.to_string();
+                if seen_paths.insert(rel.clone()) {
+                    if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+                        if !content.is_empty() {
+                            file_sections.push((rel, content));
+                        }
+                    }
+                }
+                break; // Only include one root manifest
+            }
+        }
+
+        // 4. Fallback to last_written_file only if nothing else was found
         if file_sections.is_empty() {
             let current_code = if let Some(ref path) = self.last_written_file {
                 std::fs::read_to_string(path).unwrap_or_default()
@@ -451,6 +497,14 @@ impl SRBNOrchestrator {
             "Return the COMPLETE corrected file, not just snippets"
         };
 
+        // Generate language-specific dependency command examples
+        let commands_example = match owner_plugin {
+            "rust" => "cargo add thiserror\ncargo add clap --features derive",
+            "python" => "uv add httpx\nuv add --dev pytest",
+            "javascript" => "npm install express\nnpm install --save-dev jest",
+            _ => "cargo add thiserror\nuv add httpx",
+        };
+
         prompt.push_str(&format!(
             r#"
 ### Fix Requirements
@@ -471,13 +525,10 @@ File: [same filename]
 
 Commands: [optional, one per line]
 ```
-cargo add thiserror
-cargo add clap --features derive
-uv add httpx
-uv add --dev pytest
+{}
 ```
 "#,
-            lang, file_instruction, lang
+            lang, file_instruction, lang, commands_example
         ));
 
         Ok(prompt)

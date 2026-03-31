@@ -1932,6 +1932,23 @@ impl SRBNOrchestrator {
         match crate::tools::create_sandbox(&self.context.working_dir, &session_id, &branch_id) {
             Ok(sandbox_path) => {
                 log::debug!("Sandbox created at {}", sandbox_path.display());
+
+                // Seed sandbox with plugin-identified project manifests
+                // (Cargo.toml, pyproject.toml, etc.) so build/test commands work.
+                let plugin_refs: Vec<&str> = self
+                    .context
+                    .active_plugins
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect();
+                if let Err(e) = crate::tools::seed_sandbox_manifests(
+                    &self.context.working_dir,
+                    &sandbox_path,
+                    &plugin_refs,
+                ) {
+                    log::warn!("Failed to seed sandbox manifests: {}", e);
+                }
+
                 // Copy node's owned output targets into the sandbox so
                 // verification and builds can find them.
                 let node = &self.graph[idx];

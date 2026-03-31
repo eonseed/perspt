@@ -151,11 +151,10 @@ impl ActuatorAgent {
     fn workspace_import_hints(working_dir: &Path) -> Vec<String> {
         let mut hints = Vec::new();
 
-        if let Some(crate_name) = Self::detect_rust_crate_name(working_dir) {
-            hints.push(format!(
-                "Rust crate name: {}. Integration tests and external modules must import via `{}`.",
-                crate_name, crate_name
-            ));
+        // Rust: detect workspace members OR single-crate name
+        let rust_hints = Self::detect_rust_workspace_crates(working_dir);
+        if !rust_hints.is_empty() {
+            hints.extend(rust_hints);
         }
 
         if let Some(package_name) = Self::detect_python_package_name(working_dir) {
@@ -168,24 +167,106 @@ impl ActuatorAgent {
         hints
     }
 
-    fn detect_rust_crate_name(working_dir: &Path) -> Option<String> {
-        let cargo_toml = fs::read_to_string(working_dir.join("Cargo.toml")).ok()?;
+    /// Detect Rust crate names for import hints.
+    ///
+    /// Handles both:
+    /// - Single-crate projects: `[package]` with a `name`
+    /// - Workspace projects: `[workspace]` with `members`, enumerating each member's crate name
+    fn detect_rust_workspace_crates(working_dir: &Path) -> Vec<String> {
+        let cargo_toml = match fs::read_to_string(working_dir.join("Cargo.toml")) {
+            Ok(content) => content,
+            Err(_) => return Vec::new(),
+        };
+
+        // Check if this is a workspace manifest
+        let mut in_workspace = false;
         let mut in_package = false;
+        let mut members: Vec<String> = Vec::new();
+        let mut single_crate_name: Option<String> = None;
+        let mut is_workspace = false;
 
         for raw_line in cargo_toml.lines() {
             let line = raw_line.trim();
             if line.starts_with('[') {
+                in_workspace = line == "[workspace]";
                 in_package = line == "[package]";
+                if in_workspace {
+                    is_workspace = true;
+                }
                 continue;
             }
 
+            // Parse [package] name for single-crate projects
             if in_package && line.starts_with("name") {
-                let (_, value) = line.split_once('=')?;
-                return Some(value.trim().trim_matches('"').to_string());
+                if let Some((_, value)) = line.split_once('=') {
+                    single_crate_name = Some(value.trim().trim_matches('"').to_string());
+                }
+            }
+
+            // Parse [workspace] members
+            if in_workspace && line.starts_with("members") {
+                if let Some((_, value)) = line.split_once('=') {
+                    let raw = value.trim();
+                    // Parse inline array: members = ["crates/foo", "crates/bar"]
+                    if raw.starts_with('[') {
+                        let inner = raw.trim_start_matches('[').trim_end_matches(']');
+                        for item in inner.split(',') {
+                            let member = item.trim().trim_matches('"').trim_matches('\'');
+                            if !member.is_empty() {
+                                members.push(member.to_string());
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        None
+        if is_workspace && !members.is_empty() {
+            // Enumerate each member crate's name
+            let mut hints = Vec::new();
+            let mut crate_names = Vec::new();
+
+            for member in &members {
+                let member_cargo = working_dir.join(member).join("Cargo.toml");
+                if let Ok(content) = fs::read_to_string(&member_cargo) {
+                    let mut in_pkg = false;
+                    for raw_line in content.lines() {
+                        let line = raw_line.trim();
+                        if line.starts_with('[') {
+                            in_pkg = line == "[package]";
+                            continue;
+                        }
+                        if in_pkg && line.starts_with("name") {
+                            if let Some((_, value)) = line.split_once('=') {
+                                let name = value.trim().trim_matches('"').to_string();
+                                crate_names.push(name);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !crate_names.is_empty() {
+                hints.push(format!(
+                    "Rust workspace with {} crate(s): {}. \
+                     Cross-crate imports use `use <crate_name>::...;`. \
+                     Add dependencies between workspace crates via `<name>.workspace = true` \
+                     or `<name> = {{ path = \"../other\" }}`.",
+                    crate_names.len(),
+                    crate_names.join(", ")
+                ));
+            }
+
+            hints
+        } else if let Some(name) = single_crate_name {
+            vec![format!(
+                "Rust crate name: {}. Integration tests and external modules must import via `{}`.",
+                name, name
+            )]
+        } else {
+            Vec::new()
+        }
     }
 
     fn detect_python_package_name(working_dir: &Path) -> Option<String> {
