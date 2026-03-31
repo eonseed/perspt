@@ -520,13 +520,34 @@ impl SRBNOrchestrator {
             }
         }
 
-        // Create crate directories so cargo can find them
+        // Create crate directories and stub Cargo.toml for each member so
+        // `cargo check` can resolve the workspace even before all nodes run.
         for crate_name in crate_dirs {
-            let crate_dir = root.join("crates").join(crate_name).join("src");
-            if !crate_dir.exists() {
-                if let Err(e) = std::fs::create_dir_all(&crate_dir) {
-                    log::debug!("Could not pre-create {}: {}", crate_dir.display(), e);
+            let crate_dir = root.join("crates").join(crate_name);
+            let src_dir = crate_dir.join("src");
+            if !src_dir.exists() {
+                if let Err(e) = std::fs::create_dir_all(&src_dir) {
+                    log::debug!("Could not pre-create {}: {}", src_dir.display(), e);
                 }
+            }
+
+            // Create a stub Cargo.toml so cargo recognises this member.
+            // The actuator's bundle will overwrite it with the real manifest.
+            let stub_cargo = crate_dir.join("Cargo.toml");
+            if !stub_cargo.exists() {
+                let stub_content = format!(
+                    "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                    crate_name
+                );
+                if let Err(e) = std::fs::write(&stub_cargo, &stub_content) {
+                    log::debug!("Could not write stub {}: {}", stub_cargo.display(), e);
+                }
+            }
+
+            // Create a stub src/lib.rs so cargo check doesn't fail on missing entry
+            let stub_lib = src_dir.join("lib.rs");
+            if !stub_lib.exists() {
+                let _ = std::fs::write(&stub_lib, "// stub — will be replaced by agent\n");
             }
         }
     }
