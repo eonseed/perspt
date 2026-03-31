@@ -2178,9 +2178,18 @@ Project name:"#,
     fn build_architect_prompt(&self, task: &str, last_error: Option<&str>) -> Result<String> {
         let mut project_context = self.gather_project_context();
 
+        let error_feedback = if let Some(e) = last_error {
+            format!(
+                "\n## Previous Attempt Failed\nError: {}\nPlease fix the JSON format and try again.\n",
+                e
+            )
+        } else {
+            String::new()
+        };
+
         // PSP-5: For existing projects, prepend a structured project summary
-        // so the architect respects existing structure rather than scaffolding.
-        if matches!(
+        // and gather evidence (API seams, module boundaries, test layout).
+        let (template, evidence_section) = if matches!(
             self.context.workspace_state,
             WorkspaceState::ExistingProject { .. }
         ) {
@@ -2189,16 +2198,20 @@ Project name:"#,
             if !summary.is_empty() {
                 project_context = format!("{}\n\n{}", summary, project_context);
             }
-        }
+            let evidence = retriever.gather_architect_evidence();
+            (crate::prompts::ARCHITECT_EXISTING, evidence)
+        } else {
+            (crate::prompts::ARCHITECT_GREENFIELD, String::new())
+        };
 
-        Ok(
-            crate::agent::ArchitectAgent::build_task_decomposition_prompt(
-                task,
-                &self.context.working_dir,
-                &project_context,
-                last_error,
-            ),
-        )
+        Ok(crate::prompts::render_architect(
+            template,
+            task,
+            &self.context.working_dir,
+            &project_context,
+            &error_feedback,
+            &evidence_section,
+        ))
     }
 
     /// Gather existing project context for the Architect prompt
