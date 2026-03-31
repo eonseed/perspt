@@ -1011,7 +1011,105 @@ pub fn seed_sandbox_manifests(
     if !seeded.is_empty() {
         log::debug!("Seeded sandbox with manifests: {}", seeded.join(", "));
     }
+
+    // For Rust workspaces: ensure every workspace member in the sandbox has
+    // at minimum a valid Cargo.toml + source target, so commands like
+    // `cargo add -p <crate>` can resolve the workspace graph.
+    if plugins.contains(&"rust") {
+        ensure_rust_workspace_members_in_sandbox(working_dir, sandbox_dir);
+    }
+
     Ok(())
+}
+
+/// Ensure all Cargo workspace members in a sandbox have valid Cargo.toml +
+/// source target stubs.  Without this, `cargo add -p X` (or any cargo
+/// command) fails with "failed to load manifest for workspace member Y"
+/// because the sandbox only gets the current node's files but the root
+/// Cargo.toml references ALL members.
+fn ensure_rust_workspace_members_in_sandbox(working_dir: &Path, sandbox_dir: &Path) {
+    let cargo_toml = sandbox_dir.join("Cargo.toml");
+    let content = match fs::read_to_string(&cargo_toml) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // Quick parse: extract [workspace] members
+    let mut in_workspace = false;
+    let mut members: Vec<String> = Vec::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') {
+            in_workspace = line == "[workspace]";
+            continue;
+        }
+        if in_workspace && line.starts_with("members") {
+            if let Some((_, value)) = line.split_once('=') {
+                let raw = value.trim();
+                if raw.starts_with('[') {
+                    let inner = raw.trim_start_matches('[').trim_end_matches(']');
+                    for item in inner.split(',') {
+                        let member = item.trim().trim_matches('"').trim_matches('\'');
+                        if !member.is_empty() {
+                            members.push(member.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for member in &members {
+        let member_dir = sandbox_dir.join(member);
+        let member_cargo = member_dir.join("Cargo.toml");
+
+        // Try to copy from main workspace first (preserves any real content)
+        let src_cargo = working_dir.join(member).join("Cargo.toml");
+        if src_cargo.exists() && !member_cargo.exists() {
+            let _ = fs::create_dir_all(&member_dir);
+            let _ = fs::copy(&src_cargo, &member_cargo);
+        }
+
+        // Create a stub Cargo.toml if still missing
+        if !member_cargo.exists() {
+            let _ = fs::create_dir_all(&member_dir);
+            let name = member.rsplit('/').next().unwrap_or(member);
+            let stub = format!(
+                "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                name
+            );
+            let _ = fs::write(&member_cargo, &stub);
+        }
+
+        // Ensure at least one source target exists (src/lib.rs or src/main.rs)
+        let src_dir = member_dir.join("src");
+        let has_lib = src_dir.join("lib.rs").exists();
+        let has_main = src_dir.join("main.rs").exists();
+        if !has_lib && !has_main {
+            let _ = fs::create_dir_all(&src_dir);
+            // Try copying from main workspace
+            let ws_lib = working_dir.join(member).join("src").join("lib.rs");
+            let ws_main = working_dir.join(member).join("src").join("main.rs");
+            if ws_lib.exists() {
+                let _ = fs::copy(&ws_lib, src_dir.join("lib.rs"));
+            } else if ws_main.exists() {
+                let _ = fs::copy(&ws_main, src_dir.join("main.rs"));
+            } else {
+                // Create minimal stub so cargo doesn't complain about missing targets
+                let _ = fs::write(
+                    src_dir.join("lib.rs"),
+                    "// stub — will be replaced by agent\n",
+                );
+            }
+        }
+    }
+
+    if !members.is_empty() {
+        log::debug!(
+            "Ensured {} workspace member(s) have valid stubs in sandbox",
+            members.len()
+        );
+    }
 }
 
 /// Clean up a specific sandbox workspace.
