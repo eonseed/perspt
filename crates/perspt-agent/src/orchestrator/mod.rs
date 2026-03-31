@@ -369,6 +369,29 @@ impl SRBNOrchestrator {
 
         let snapshot = self.ledger.load_session_snapshot()?;
 
+        // PSP-5 Phase 12: Restore budget envelope from persisted state so
+        // resume honours the same step/cost/revision caps.
+        if let Ok(Some(row)) = self.ledger.get_budget_envelope() {
+            self.budget = perspt_core::types::BudgetEnvelope {
+                session_id: row.session_id,
+                max_steps: row.max_steps.map(|v| v as u32),
+                steps_used: row.steps_used as u32,
+                max_revisions: row.max_revisions.map(|v| v as u32),
+                revisions_used: row.revisions_used as u32,
+                max_cost_usd: row.max_cost_usd,
+                cost_used_usd: row.cost_used_usd,
+            };
+            log::info!(
+                "Restored budget envelope: steps {}/{:?}, revisions {}/{:?}, cost ${:.2}/{:?}",
+                self.budget.steps_used,
+                self.budget.max_steps,
+                self.budget.revisions_used,
+                self.budget.max_revisions,
+                self.budget.cost_used_usd,
+                self.budget.max_cost_usd,
+            );
+        }
+
         // PSP-5 Phase 8: Corruption / backward-compatibility checks
         if snapshot.node_details.is_empty() {
             anyhow::bail!(
@@ -882,9 +905,7 @@ impl SRBNOrchestrator {
             }
         }
 
-        self.step_sheafify(task).await?;
-
-        // Select planning policy based on workspace state.
+        // Select planning policy based on workspace state before architect runs.
         // Greenfield workspaces use GreenfieldBuild; existing projects
         // default to FeatureIncrement (callers may override via set_planning_policy).
         if self.planning_policy == perspt_core::PlanningPolicy::default() {
@@ -895,8 +916,57 @@ impl SRBNOrchestrator {
                 }
                 WorkspaceState::Ambiguous => perspt_core::PlanningPolicy::FeatureIncrement,
             };
-            self.emit_log(format!("📐 Planning policy: {:?}", self.planning_policy));
         }
+
+        // PSP-5 Phase 12: Create a default FeatureCharter so the
+        // file-budget gate in step_sheafify has bounds to enforce.
+        // Derive sensible defaults from the planning policy.
+        if self.ledger.get_feature_charter().ok().flatten().is_none() {
+            let mut charter = perspt_core::FeatureCharter::new(&self.context.session_id, &task);
+            match self.planning_policy {
+                perspt_core::PlanningPolicy::LocalEdit => {
+                    charter.max_modules = Some(1);
+                    charter.max_files = Some(5);
+                    charter.max_revisions = Some(3);
+                }
+                perspt_core::PlanningPolicy::FeatureIncrement => {
+                    charter.max_modules = Some(10);
+                    charter.max_files = Some(30);
+                    charter.max_revisions = Some(5);
+                }
+                perspt_core::PlanningPolicy::LargeFeature
+                | perspt_core::PlanningPolicy::GreenfieldBuild
+                | perspt_core::PlanningPolicy::ArchitecturalRevision => {
+                    charter.max_modules = Some(25);
+                    charter.max_files = Some(80);
+                    charter.max_revisions = Some(10);
+                }
+            }
+            if let Some(ref lang) = self.context.active_plugins.first() {
+                charter.language_constraint = Some(lang.to_string());
+            }
+            if let Err(e) = self.ledger.record_feature_charter(&charter) {
+                log::warn!("Failed to persist default FeatureCharter: {}", e);
+            } else {
+                log::info!(
+                    "Registered default FeatureCharter (max_modules={:?}, max_files={:?})",
+                    charter.max_modules,
+                    charter.max_files
+                );
+            }
+        }
+
+        // Gate architect planning on policy: LocalEdit skips the architect
+        // and creates a single-node deterministic graph directly.
+        if self.planning_policy.needs_architect() {
+            self.step_sheafify(task).await?;
+        } else {
+            self.emit_log("📐 LocalEdit policy — skipping architect, single-node plan".to_string());
+            self.create_deterministic_fallback_graph(&task)?;
+        }
+
+        // Planning policy is already resolved above; log it after sheafification.
+        self.emit_log(format!("📐 Planning policy: {:?}", self.planning_policy));
 
         // PSP-5: Emit PlanReady event after sheafification
         let node_count = self.graph.node_count();
@@ -1261,7 +1331,8 @@ impl SRBNOrchestrator {
         // PSP-5: Speculator lookahead — ask the speculator tier for bounded
         // hints about potential risks and downstream impacts before the
         // actuator generates code. Stored as ephemeral context, not committed.
-        let speculator_hints = {
+        // Gated by planning policy: only LargeFeature/Greenfield/ArchitecturalRevision activate it.
+        let speculator_hints = if self.planning_policy.needs_speculator() {
             let node = &self.graph[idx];
             let child_goals: Vec<String> = self
                 .graph
@@ -1304,6 +1375,8 @@ impl SRBNOrchestrator {
             } else {
                 String::new()
             }
+        } else {
+            String::new()
         };
 
         let actuator = &self.agents[1];
@@ -2325,6 +2398,7 @@ fn parse_node_state(s: &str) -> NodeState {
         "Completed" | "COMPLETED" | "STABLE" => NodeState::Completed,
         "Failed" | "FAILED" => NodeState::Failed,
         "Aborted" | "ABORTED" => NodeState::Aborted,
+        "Superseded" | "SUPERSEDED" => NodeState::Superseded,
         _ => NodeState::TaskQueued, // Default for unknown states
     }
 }

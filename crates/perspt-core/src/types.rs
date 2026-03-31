@@ -447,6 +447,8 @@ pub enum NodeState {
     Failed,
     /// Aborted by user
     Aborted,
+    /// Superseded by a plan amendment (Phase 14)
+    Superseded,
 }
 
 impl NodeState {
@@ -454,7 +456,7 @@ impl NodeState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            NodeState::Completed | NodeState::Failed | NodeState::Aborted
+            NodeState::Completed | NodeState::Failed | NodeState::Aborted | NodeState::Superseded
         )
     }
 }
