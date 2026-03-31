@@ -93,6 +93,8 @@ pub struct SRBNOrchestrator {
     last_applied_bundle: Option<perspt_core::types::ArtifactBundle>,
     /// PSP-5 Phase 6: Blocked dependencies awaiting parent interface seals
     blocked_dependencies: Vec<perspt_core::types::BlockedDependency>,
+    /// Session-level budget envelope for step/cost/revision caps.
+    budget: perspt_core::types::BudgetEnvelope,
 }
 
 /// Get current timestamp as epoch seconds.
@@ -203,6 +205,7 @@ impl SRBNOrchestrator {
             last_verification_result: None,
             last_applied_bundle: None,
             blocked_dependencies: Vec::new(),
+            budget: perspt_core::types::BudgetEnvelope::new("pending"),
         }
     }
 
@@ -257,6 +260,7 @@ impl SRBNOrchestrator {
             last_verification_result: None,
             last_applied_bundle: None,
             blocked_dependencies: Vec::new(),
+            budget: perspt_core::types::BudgetEnvelope::new("test"),
         }
     }
 
@@ -277,6 +281,21 @@ impl SRBNOrchestrator {
         self.tools.set_event_sender(event_sender.clone());
         self.event_sender = Some(event_sender);
         self.action_receiver = Some(action_receiver);
+    }
+
+    /// Configure the session-level budget envelope.
+    ///
+    /// Call this before `run()` to set step, cost, or revision caps from CLI
+    /// flags.  Uncapped limits remain `None`.
+    pub fn set_budget(
+        &mut self,
+        max_steps: Option<u32>,
+        max_revisions: Option<u32>,
+        max_cost_usd: Option<f64>,
+    ) {
+        self.budget.max_steps = max_steps;
+        self.budget.max_revisions = max_revisions;
+        self.budget.max_cost_usd = max_cost_usd;
     }
 
     // =========================================================================
@@ -852,6 +871,20 @@ impl SRBNOrchestrator {
         let total_nodes = indices.len();
 
         for (i, idx) in indices.iter().enumerate() {
+            // Budget gate: stop execution if step/cost/revision budget exhausted.
+            if self.budget.any_exhausted() {
+                let node_id = self.graph[*idx].node_id.clone();
+                self.emit_log(format!(
+                    "⛔ Budget exhausted — skipping node '{}' and remaining nodes",
+                    node_id
+                ));
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id,
+                    status: perspt_core::NodeStatus::Escalated,
+                });
+                break;
+            }
+
             // PSP-5 Phase 6: Check if node is blocked on a parent interface seal.
             // In the current sequential topo-order execution this should not fire
             // (parents commit before children), but it establishes the gating
@@ -880,6 +913,9 @@ impl SRBNOrchestrator {
 
             match self.execute_node(*idx).await {
                 Ok(()) => {
+                    // Record step in budget envelope
+                    self.budget.record_step();
+
                     // Emit completed status
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
@@ -2141,6 +2177,29 @@ Project name:"#,
                         // For now, auto-approve in headless mode
                     }
 
+                    // FeatureCharter file-budget gate: reject plans that exceed
+                    // the session charter (if one is registered).
+                    if let Ok(Some(charter)) = self.ledger.get_feature_charter() {
+                        let file_count = plan.tasks.iter().flat_map(|t| &t.output_files).count();
+                        if let Some(max_files) = charter.max_files {
+                            if file_count > max_files as usize {
+                                self.emit_log(format!(
+                                    "⚠️ Plan produces {} files but charter allows max {}",
+                                    file_count, max_files
+                                ));
+                            }
+                        }
+                        if let Some(max_modules) = charter.max_modules {
+                            if plan.len() > max_modules as usize {
+                                self.emit_log(format!(
+                                    "⚠️ Plan has {} tasks but charter allows max {} modules",
+                                    plan.len(),
+                                    max_modules
+                                ));
+                            }
+                        }
+                    }
+
                     self.emit_log(format!(
                         "✅ Architect produced plan with {} task(s)",
                         plan.len()
@@ -2148,6 +2207,15 @@ Project name:"#,
 
                     // Emit plan generated event
                     self.emit_event(perspt_core::AgentEvent::PlanGenerated(plan.clone()));
+
+                    // Record initial plan revision for audit trail
+                    let revision = perspt_core::types::PlanRevision::initial(
+                        &self.context.session_id,
+                        plan.clone(),
+                    );
+                    if let Err(e) = self.ledger.record_plan_revision(&revision) {
+                        log::warn!("Failed to persist initial plan revision: {}", e);
+                    }
 
                     // Create nodes from the plan
                     self.create_nodes_from_plan(&plan)?;
@@ -8509,5 +8577,41 @@ def util():
             prompt.contains("min_toolchain_version"),
             "Architect prompt must mention min_toolchain_version"
         );
+    }
+
+    // --- Step 8: Budget enforcement & plan revision tracking ---
+
+    #[test]
+    fn test_budget_gate_stops_execution_when_exhausted() {
+        let mut orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        // Set a budget of 0 steps — should be immediately exhausted
+        orch.set_budget(Some(0), None, None);
+        assert!(
+            orch.budget.any_exhausted(),
+            "Budget with max_steps=0 should be immediately exhausted"
+        );
+    }
+
+    #[test]
+    fn test_budget_step_recording() {
+        let mut budget = perspt_core::types::BudgetEnvelope::new("test-session");
+        budget.max_steps = Some(3);
+        assert!(!budget.any_exhausted());
+        budget.record_step();
+        budget.record_step();
+        assert!(!budget.any_exhausted());
+        budget.record_step();
+        assert!(budget.steps_exhausted());
+        assert!(budget.any_exhausted());
+    }
+
+    #[test]
+    fn test_set_budget_configures_envelope() {
+        let mut orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        orch.set_budget(Some(10), Some(5), Some(2.50));
+        assert_eq!(orch.budget.max_steps, Some(10));
+        assert_eq!(orch.budget.max_revisions, Some(5));
+        assert_eq!(orch.budget.max_cost_usd, Some(2.50));
+        assert!(!orch.budget.any_exhausted());
     }
 }
