@@ -7,6 +7,7 @@ pub mod context_retriever;
 pub mod ledger;
 pub mod lsp;
 pub mod orchestrator;
+pub mod prompts;
 pub mod test_runner;
 pub mod tools;
 pub mod types;

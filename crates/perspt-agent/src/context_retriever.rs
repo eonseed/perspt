@@ -569,6 +569,108 @@ impl ContextRetriever {
 
         summary
     }
+
+    /// Gather bounded evidence for the architect: API seams, module
+    /// boundaries, test-to-source mapping, and dependency hotspots.
+    ///
+    /// Returns a markdown section suitable for injection into the architect
+    /// prompt so it respects existing architecture rather than re-scaffolding.
+    pub fn gather_architect_evidence(&self) -> String {
+        let mut sections: Vec<String> = Vec::new();
+
+        // 1. Public API seams: scan for exported symbols
+        let api_hits = self.search(r"pub\s+(fn|struct|trait|enum|type|mod)\b", 30);
+        if !api_hits.is_empty() {
+            let mut lines: Vec<String> = Vec::new();
+            for hit in &api_hits {
+                let rel = hit
+                    .file
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(&hit.file);
+                lines.push(format!(
+                    "- `{}` L{}: {}",
+                    rel.display(),
+                    hit.line,
+                    hit.content.trim()
+                ));
+            }
+            sections.push(format!(
+                "### API Seams (public symbols)\n{}",
+                lines.join("\n")
+            ));
+        }
+
+        // 2. Module boundaries: look for `mod` declarations
+        let mod_hits = self.search(r"^pub\s+mod\s+\w+", 20);
+        if !mod_hits.is_empty() {
+            let mut lines: Vec<String> = Vec::new();
+            for hit in &mod_hits {
+                let rel = hit
+                    .file
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(&hit.file);
+                lines.push(format!(
+                    "- `{}` L{}: {}",
+                    rel.display(),
+                    hit.line,
+                    hit.content.trim()
+                ));
+            }
+            sections.push(format!("### Module Boundaries\n{}", lines.join("\n")));
+        }
+
+        // 3. Test layout: map test files to source modules
+        let test_hits = self.search(r"#\[test\]|#\[cfg\(test\)\]|def test_|class Test", 20);
+        if !test_hits.is_empty() {
+            let mut test_files: Vec<String> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for hit in &test_hits {
+                let rel = hit
+                    .file
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(&hit.file);
+                let key = rel.display().to_string();
+                if seen.insert(key.clone()) {
+                    test_files.push(format!("- `{}`", key));
+                }
+            }
+            sections.push(format!(
+                "### Test Layout\nFiles containing tests:\n{}",
+                test_files.join("\n")
+            ));
+        }
+
+        // 4. Dependency hotspots: most-imported modules
+        let import_hits = self.search(r"^use |^from \w+ import|^import |require\(", 40);
+        if !import_hits.is_empty() {
+            let mut counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            for hit in &import_hits {
+                let rel = hit
+                    .file
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(&hit.file);
+                *counts.entry(rel.display().to_string()).or_insert(0) += 1;
+            }
+            let mut sorted: Vec<_> = counts.into_iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(&a.1));
+            let top: Vec<String> = sorted
+                .iter()
+                .take(10)
+                .map(|(f, c)| format!("- `{}`: {} import statements", f, c))
+                .collect();
+            sections.push(format!(
+                "### Dependency Hotspots (files with most imports)\n{}",
+                top.join("\n")
+            ));
+        }
+
+        if sections.is_empty() {
+            String::new()
+        } else {
+            format!("## Architect Evidence\n\n{}\n", sections.join("\n\n"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -735,5 +837,51 @@ mod tests {
         assert_eq!(digest.source_node_id, "node_1");
         assert_eq!(digest.source_path, "test.rs");
         assert_ne!(digest.hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn test_gather_architect_evidence_rust_project() {
+        let dir = tempdir().unwrap();
+        // Create a small Rust-like project
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(
+            dir.path().join("src/lib.rs"),
+            "pub mod math;\npub mod utils;\n\nuse crate::math::add;\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/math.rs"),
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn test_add() { assert_eq!(super::add(1, 2), 3); }\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("src/utils.rs"),
+            "pub struct Config { pub name: String }\n",
+        )
+        .unwrap();
+
+        let retriever = ContextRetriever::new(dir.path().to_path_buf());
+        let evidence = retriever.gather_architect_evidence();
+
+        assert!(
+            evidence.contains("Architect Evidence"),
+            "Should produce an evidence section"
+        );
+        assert!(evidence.contains("API Seams"), "Should find public symbols");
+        assert!(
+            evidence.contains("pub fn add") || evidence.contains("pub mod math"),
+            "Should list at least one public API"
+        );
+    }
+
+    #[test]
+    fn test_gather_architect_evidence_empty_dir() {
+        let dir = tempdir().unwrap();
+        let retriever = ContextRetriever::new(dir.path().to_path_buf());
+        let evidence = retriever.gather_architect_evidence();
+        assert!(
+            evidence.is_empty(),
+            "Empty projects should produce no evidence"
+        );
     }
 }
