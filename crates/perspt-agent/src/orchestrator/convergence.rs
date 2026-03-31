@@ -159,6 +159,7 @@ impl SRBNOrchestrator {
                 &bundle,
                 &diagnosis_str,
             );
+            self.last_repair_footprint = Some(footprint.clone());
             if let Err(e) = self.ledger.record_repair_footprint(&footprint) {
                 log::warn!("Failed to record repair footprint: {}", e);
             }
@@ -296,6 +297,10 @@ impl SRBNOrchestrator {
     /// PSP-5 Phase 3: Language-agnostic, uses the node's actual output targets
     /// and includes formatted restriction-map context so the LLM has structural
     /// awareness during correction.
+    ///
+    /// When a RepairFootprint is available from a previous correction attempt,
+    /// all affected files are included in the prompt so the LLM can see
+    /// multi-file context (not just the single last-written file).
     fn build_correction_prompt(
         &self,
         _node_id: &str,
@@ -304,29 +309,53 @@ impl SRBNOrchestrator {
     ) -> Result<String> {
         let diagnostics = &self.context.last_diagnostics;
 
-        // Read current code from the last written file
-        let current_code = if let Some(ref path) = self.last_written_file {
-            std::fs::read_to_string(path).unwrap_or_default()
-        } else {
-            String::new()
-        };
+        // Collect files to include in the prompt.
+        // When a repair footprint exists, include all affected files
+        // so the LLM has multi-file context for bundle-level repairs.
+        let mut file_sections = Vec::new();
+        if let Some(ref footprint) = self.last_repair_footprint {
+            let node_workdir = if let Some(idx) = self.node_indices.get(&footprint.node_id) {
+                self.effective_working_dir(*idx)
+            } else if let Some(ref path) = self.last_written_file {
+                path.parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .to_path_buf()
+            } else {
+                self.context.working_dir.clone()
+            };
+            for file_path in &footprint.affected_files {
+                let full_path = node_workdir.join(file_path);
+                let content = std::fs::read_to_string(&full_path).unwrap_or_default();
+                if !content.is_empty() {
+                    file_sections.push((file_path.clone(), content));
+                }
+            }
+        }
 
-        let file_path = self
-            .last_written_file
-            .as_ref()
-            .map(|p| {
-                p.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
-            })
-            .unwrap_or_else(|| "unknown".to_string());
+        // Fallback to last_written_file if no footprint files were read
+        if file_sections.is_empty() {
+            let current_code = if let Some(ref path) = self.last_written_file {
+                std::fs::read_to_string(path).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let file_path = self
+                .last_written_file
+                .as_ref()
+                .map(|p| {
+                    p.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .unwrap_or_else(|| "unknown".to_string());
+            file_sections.push((file_path, current_code));
+        }
 
-        // Detect language from file extension for code fences and instructions
-        let lang = self
-            .last_written_file
-            .as_ref()
-            .and_then(|p| p.extension())
+        // Detect language from first file extension for code fences
+        let primary_path = &file_sections[0].0;
+        let lang = std::path::Path::new(primary_path)
+            .extension()
             .and_then(|e| e.to_str())
             .map(|ext| match ext {
                 "py" => "python",
@@ -344,29 +373,27 @@ impl SRBNOrchestrator {
             .unwrap_or("text");
 
         let mut prompt = format!(
-            r#"## Code Correction Required
-
-The code you generated has {} error(s) detected by the language toolchain.
-Your task is to fix ALL errors and return the complete corrected file.
-
-### Original Goal
-{}
-
-### Current Code (with errors)
-File: {}
-```{}
-{}
-```
-
-### Detected Errors (V_syn = {:.2})
-"#,
+            "## Code Correction Required\n\n\
+             The code you generated has {} error(s) detected by the language toolchain.\n\
+             Your task is to fix ALL errors and return the complete corrected file(s).\n\n\
+             ### Original Goal\n{}\n\n\
+             ### Current Code (with errors)\n",
             diagnostics.len(),
             goal,
-            file_path,
-            lang,
-            current_code,
-            energy.v_syn
         );
+
+        // Include all affected files
+        for (path, content) in &file_sections {
+            prompt.push_str(&format!(
+                "File: {}\n```{}\n{}\n```\n\n",
+                path, lang, content
+            ));
+        }
+
+        prompt.push_str(&format!(
+            "### Detected Errors (V_syn = {:.2})\n",
+            energy.v_syn
+        ));
 
         // Add each diagnostic with specific fix direction
         for (i, diag) in diagnostics.iter().enumerate() {
@@ -417,6 +444,13 @@ File: {}
             }
         }
 
+        let multi_file = file_sections.len() > 1;
+        let file_instruction = if multi_file {
+            "Return ALL affected files as a JSON artifact bundle"
+        } else {
+            "Return the COMPLETE corrected file, not just snippets"
+        };
+
         prompt.push_str(&format!(
             r#"
 ### Fix Requirements
@@ -424,11 +458,11 @@ File: {}
 2. Maintain the original functionality and goal
 3. Follow {} language conventions and idioms
 4. Import any missing modules or dependencies
-5. Return the COMPLETE corrected file, not just snippets
+5. {}
 6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
 
 ### Output Format
-Provide the complete corrected file followed by any dependency commands needed:
+Provide the complete corrected file(s) followed by any dependency commands needed:
 
 File: [same filename]
 ```{}
@@ -443,7 +477,7 @@ uv add httpx
 uv add --dev pytest
 ```
 "#,
-            lang, lang
+            lang, file_instruction, lang
         ));
 
         Ok(prompt)

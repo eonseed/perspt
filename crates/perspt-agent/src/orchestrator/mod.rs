@@ -100,10 +100,14 @@ pub struct SRBNOrchestrator {
     last_verification_result: Option<perspt_core::types::VerificationResult>,
     /// PSP-5 Phase 9: Last applied artifact bundle (for persistence in step_commit)
     last_applied_bundle: Option<perspt_core::types::ArtifactBundle>,
+    /// Last recorded RepairFootprint (for multi-file correction context)
+    last_repair_footprint: Option<perspt_core::RepairFootprint>,
     /// PSP-5 Phase 6: Blocked dependencies awaiting parent interface seals
     blocked_dependencies: Vec<perspt_core::types::BlockedDependency>,
     /// Session-level budget envelope for step/cost/revision caps.
     budget: perspt_core::types::BudgetEnvelope,
+    /// Adaptive planning policy for agent phase selection.
+    pub planning_policy: perspt_core::PlanningPolicy,
     /// Session-level stability threshold (ε for V(x) < ε convergence)
     pub stability_epsilon: f32,
     /// Energy weight α (syntax/build errors)
@@ -221,8 +225,10 @@ impl SRBNOrchestrator {
             last_formatted_context: String::new(),
             last_verification_result: None,
             last_applied_bundle: None,
+            last_repair_footprint: None,
             blocked_dependencies: Vec::new(),
             budget: perspt_core::types::BudgetEnvelope::new("pending"),
+            planning_policy: perspt_core::PlanningPolicy::default(),
             stability_epsilon: 0.1,
             energy_alpha: 1.0,
             energy_beta: 0.5,
@@ -280,8 +286,10 @@ impl SRBNOrchestrator {
             last_formatted_context: String::new(),
             last_verification_result: None,
             last_applied_bundle: None,
+            last_repair_footprint: None,
             blocked_dependencies: Vec::new(),
             budget: perspt_core::types::BudgetEnvelope::new("test"),
+            planning_policy: perspt_core::PlanningPolicy::default(),
             stability_epsilon: 0.1,
             energy_alpha: 1.0,
             energy_beta: 0.5,
@@ -321,6 +329,12 @@ impl SRBNOrchestrator {
         self.budget.max_steps = max_steps;
         self.budget.max_revisions = max_revisions;
         self.budget.max_cost_usd = max_cost_usd;
+    }
+
+    /// Override the adaptive planning policy before run() selects one
+    /// from workspace classification.
+    pub fn set_planning_policy(&mut self, policy: perspt_core::PlanningPolicy) {
+        self.planning_policy = policy;
     }
 
     // =========================================================================
@@ -869,6 +883,20 @@ impl SRBNOrchestrator {
         }
 
         self.step_sheafify(task).await?;
+
+        // Select planning policy based on workspace state.
+        // Greenfield workspaces use GreenfieldBuild; existing projects
+        // default to FeatureIncrement (callers may override via set_planning_policy).
+        if self.planning_policy == perspt_core::PlanningPolicy::default() {
+            self.planning_policy = match &self.context.workspace_state {
+                WorkspaceState::Greenfield { .. } => perspt_core::PlanningPolicy::GreenfieldBuild,
+                WorkspaceState::ExistingProject { .. } => {
+                    perspt_core::PlanningPolicy::FeatureIncrement
+                }
+                WorkspaceState::Ambiguous => perspt_core::PlanningPolicy::FeatureIncrement,
+            };
+            self.emit_log(format!("📐 Planning policy: {:?}", self.planning_policy));
+        }
 
         // PSP-5: Emit PlanReady event after sheafification
         let node_count = self.graph.node_count();

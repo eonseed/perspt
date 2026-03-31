@@ -24,9 +24,9 @@ pub use types::{
     ContextPackage, ContextProvenance, Criticality, DependencyExpectation, EnergyComponents,
     ErrorType, EscalationCategory, EscalationReport, FeatureCharter, InterfaceSealRecord,
     ModelTier, NodeState, OwnershipManifest, PlanRevision, PlanRevisionStatus, PlannedContract,
-    PlannedTask, PlannedTest, ProvisionalBranch, ProvisionalBranchState, RepairFootprint,
-    RestrictionMap, RetryPolicy, RewriteAction, RewriteRecord, SRBNNode, SensorStatus,
-    SheafValidationResult, SheafValidatorClass, StabilityMonitor, StageOutcome, StructuralDigest,
-    SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget,
+    PlannedTask, PlannedTest, PlanningPolicy, ProvisionalBranch, ProvisionalBranchState,
+    RepairFootprint, RestrictionMap, RetryPolicy, RewriteAction, RewriteRecord, SRBNNode,
+    SensorStatus, SheafValidationResult, SheafValidatorClass, StabilityMonitor, StageOutcome,
+    StructuralDigest, SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget,
     VerificationResult, WeightedTest, WorkspaceState,
 };
