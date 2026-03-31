@@ -1,0 +1,310 @@
+//! Artifact bundle parsing, transactional application, and path filtering.
+
+use super::*;
+
+impl SRBNOrchestrator {
+    /// PSP-5: Parse an artifact bundle from LLM response
+    ///
+    /// Tries structured JSON bundle first, falls back to legacy `File:`/`Diff:` extraction.
+    /// Returns None if no artifacts could be extracted.
+    pub fn parse_artifact_bundle(
+        &self,
+        content: &str,
+    ) -> Option<perspt_core::types::ArtifactBundle> {
+        // Try structured JSON bundle first
+        if let Some(bundle) = self.try_parse_json_bundle(content) {
+            if let Ok(()) = bundle.validate() {
+                log::info!(
+                    "Parsed structured artifact bundle: {} artifacts",
+                    bundle.len()
+                );
+                return Some(bundle);
+            } else {
+                log::warn!("JSON bundle found but failed validation, falling back to legacy");
+            }
+        }
+
+        // Fall back to legacy File:/Diff: extraction — collect ALL blocks
+        let blocks = self.extract_all_code_blocks_from_response(content);
+        if !blocks.is_empty() {
+            let artifacts: Vec<perspt_core::types::ArtifactOperation> = blocks
+                .into_iter()
+                .map(|(filename, code, is_diff)| {
+                    if is_diff {
+                        perspt_core::types::ArtifactOperation::Diff {
+                            path: filename,
+                            patch: code,
+                        }
+                    } else {
+                        perspt_core::types::ArtifactOperation::Write {
+                            path: filename,
+                            content: code,
+                        }
+                    }
+                })
+                .collect();
+            log::info!(
+                "Constructed {}-artifact bundle from legacy extraction",
+                artifacts.len()
+            );
+            let bundle = perspt_core::types::ArtifactBundle {
+                artifacts,
+                commands: vec![],
+            };
+            return Some(bundle);
+        }
+
+        None
+    }
+
+    /// Try to parse a JSON artifact bundle from content
+    ///
+    /// PSP-5 Phase 4: Uses the provider-neutral normalization layer.
+    fn try_parse_json_bundle(&self, content: &str) -> Option<perspt_core::types::ArtifactBundle> {
+        match perspt_core::normalize::extract_and_deserialize::<perspt_core::types::ArtifactBundle>(
+            content,
+        ) {
+            Ok((bundle, method)) => {
+                log::info!("Parsed ArtifactBundle via normalization ({})", method);
+                Some(bundle)
+            }
+            Err(e) => {
+                log::debug!("Normalization could not extract ArtifactBundle: {}", e);
+                None
+            }
+        }
+    }
+
+    /// PSP-5: Apply an artifact bundle transactionally
+    ///
+    /// All file operations are validated first, then applied.
+    /// PSP-5 Phase 2: Validates ownership boundaries before applying.
+    /// If any operation fails, the method returns an error describing which operation
+    /// failed, and previous successful operations are logged for manual review.
+    pub async fn apply_bundle_transactionally(
+        &mut self,
+        bundle: &perspt_core::types::ArtifactBundle,
+        node_id: &str,
+        node_class: perspt_core::types::NodeClass,
+    ) -> Result<()> {
+        let idx =
+            self.node_indices.get(node_id).copied().ok_or_else(|| {
+                anyhow::anyhow!("Unknown node '{}' for bundle application", node_id)
+            })?;
+        let node_workdir = self.effective_working_dir(idx);
+
+        // Validate structural integrity first
+        bundle.validate().map_err(|e| anyhow::anyhow!(e))?;
+
+        // Filter out undeclared paths instead of failing the entire session
+        let filtered = self.filter_bundle_to_declared_paths(bundle, node_id);
+
+        // If filtering removed ALL artifacts, fall back to the original bundle
+        // with a warning — the architect/actuator path mismatch shouldn't kill
+        // the entire session.  Ownership validation below still guards against
+        // true cross-node conflicts.
+        let bundle = if filtered.artifacts.is_empty() && !bundle.artifacts.is_empty() {
+            log::warn!(
+                "All artifacts stripped for node '{}' — falling back to original bundle",
+                node_id
+            );
+            self.emit_log(format!(
+                "⚠️ Path mismatch: all artifacts for '{}' targeted unplanned paths — applying anyway",
+                node_id
+            ));
+            bundle.clone()
+        } else {
+            filtered
+        };
+
+        // PSP-5 Phase 2: Validate ownership boundaries (soft failure)
+        // Instead of crashing the session, log ownership conflicts and
+        // continue — the LLM often generates shared files (e.g. config.json)
+        // from multiple nodes.
+        if let Err(e) = self
+            .context
+            .ownership_manifest
+            .validate_bundle(&bundle, node_id, node_class)
+        {
+            log::warn!("Ownership validation warning for node '{}': {}", node_id, e);
+            self.emit_log(format!("⚠️ Ownership warning: {}", e));
+        }
+
+        // PSP-5 Phase 2: Determine owner_plugin for new path assignment
+        let owner_plugin = self
+            .node_indices
+            .get(node_id)
+            .and_then(|idx| {
+                let plugin = &self.graph[*idx].owner_plugin;
+                if plugin.is_empty() {
+                    None
+                } else {
+                    Some(plugin.clone())
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let mut files_created: Vec<String> = Vec::new();
+        let mut files_modified: Vec<String> = Vec::new();
+
+        for op in &bundle.artifacts {
+            let mut args = HashMap::new();
+            let resolved_path = node_workdir.join(op.path());
+            args.insert(
+                "path".to_string(),
+                resolved_path.to_string_lossy().to_string(),
+            );
+
+            let call = match op {
+                perspt_core::types::ArtifactOperation::Write { content, .. } => {
+                    args.insert("content".to_string(), content.clone());
+                    ToolCall {
+                        name: "write_file".to_string(),
+                        arguments: args,
+                    }
+                }
+                perspt_core::types::ArtifactOperation::Diff { patch, .. } => {
+                    args.insert("diff".to_string(), patch.clone());
+                    ToolCall {
+                        name: "apply_diff".to_string(),
+                        arguments: args,
+                    }
+                }
+                perspt_core::types::ArtifactOperation::Delete { .. } => {
+                    // Delete operations are not yet supported by the tool layer.
+                    // Log and skip for now; Step 10 will add full support.
+                    log::warn!("Skipping unsupported Delete operation for {}", op.path());
+                    continue;
+                }
+                perspt_core::types::ArtifactOperation::Move { to, .. } => {
+                    // Move operations are not yet supported by the tool layer.
+                    // Log and skip for now; Step 10 will add full support.
+                    log::warn!(
+                        "Skipping unsupported Move operation {} -> {}",
+                        op.path(),
+                        to
+                    );
+                    continue;
+                }
+            };
+
+            let result = self.tools.execute(&call).await;
+            if result.success {
+                let full_path = resolved_path.clone();
+
+                if op.is_write() {
+                    files_created.push(op.path().to_string());
+                } else {
+                    files_modified.push(op.path().to_string());
+                }
+
+                // Track for LSP notification
+                self.last_written_file = Some(full_path.clone());
+                self.file_version += 1;
+
+                // Notify LSP of file change
+                let registry = perspt_core::plugin::PluginRegistry::new();
+                for (lang, client) in self.lsp_clients.iter_mut() {
+                    // Only notify if the plugin owns this file
+                    let should_notify = match registry.get(lang) {
+                        Some(plugin) => plugin.owns_file(op.path()),
+                        None => true,
+                    };
+                    if should_notify {
+                        if let Ok(content) = std::fs::read_to_string(&full_path) {
+                            let _ = client
+                                .did_change(&full_path, &content, self.file_version)
+                                .await;
+                        }
+                    }
+                }
+
+                log::info!("✓ Applied: {}", op.path());
+                self.emit_log(format!("✅ Applied: {}", op.path()));
+            } else {
+                log::warn!("Failed to apply {}: {:?}", op.path(), result.error);
+                self.emit_log(format!("❌ Failed: {} - {:?}", op.path(), result.error));
+                self.last_tool_failure = result.error.clone();
+                return Err(anyhow::anyhow!(
+                    "Bundle application failed at {}: {:?}",
+                    op.path(),
+                    result.error
+                ));
+            }
+        }
+
+        // PSP-5 Phase 2: Auto-assign unregistered paths to this node
+        self.context.ownership_manifest.assign_new_paths(
+            &bundle,
+            node_id,
+            &owner_plugin,
+            node_class,
+        );
+
+        // Emit BundleApplied event
+        self.emit_event(perspt_core::AgentEvent::BundleApplied {
+            node_id: node_id.to_string(),
+            files_created,
+            files_modified,
+            writes_count: bundle.writes_count(),
+            diffs_count: bundle.diffs_count(),
+            node_class: node_class.to_string(),
+        });
+
+        self.last_tool_failure = None;
+        Ok(())
+    }
+
+    /// Validate and strip undeclared paths from a bundle.
+    ///
+    /// Instead of failing the entire session, this method removes artifacts
+    /// targeting paths not listed in the node's `output_targets` and logs
+    /// warnings.  Returns the filtered bundle.
+    fn filter_bundle_to_declared_paths(
+        &self,
+        bundle: &perspt_core::types::ArtifactBundle,
+        node_id: &str,
+    ) -> perspt_core::types::ArtifactBundle {
+        let allowed_paths: std::collections::HashSet<String> = self
+            .node_indices
+            .get(node_id)
+            .map(|idx| {
+                self.graph[*idx]
+                    .output_targets
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if allowed_paths.is_empty() {
+            return bundle.clone();
+        }
+
+        let (kept, dropped): (Vec<_>, Vec<_>) = bundle
+            .artifacts
+            .iter()
+            .cloned()
+            .partition(|a| allowed_paths.contains(a.path()));
+
+        if !dropped.is_empty() {
+            let dropped_paths: Vec<String> = dropped.iter().map(|a| a.path().to_string()).collect();
+            log::warn!(
+                "Stripped {} undeclared artifact(s) from node '{}': {}",
+                dropped.len(),
+                node_id,
+                dropped_paths.join(", ")
+            );
+            self.emit_log(format!(
+                "⚠️ Stripped {} undeclared path(s) from bundle: {}",
+                dropped.len(),
+                dropped_paths.join(", ")
+            ));
+        }
+
+        perspt_core::types::ArtifactBundle {
+            artifacts: kept,
+            commands: bundle.commands.clone(),
+        }
+    }
+}
