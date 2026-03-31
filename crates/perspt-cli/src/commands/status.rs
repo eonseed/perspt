@@ -276,6 +276,23 @@ pub async fn run() -> Result<()> {
         }
     }
 
+    // PSP-5 Phase 8: Budget envelope status
+    if let Ok(Some(budget)) = store.get_budget_envelope(&session.session_id) {
+        println!();
+        println!("💰 Budget:");
+        let steps_str = budget
+            .max_steps
+            .map(|m| format!("{}/{}", budget.steps_used, m))
+            .unwrap_or_else(|| format!("{}", budget.steps_used));
+        println!("   Steps:       {}", steps_str);
+        let cost_str = budget
+            .max_cost_usd
+            .map(|m| format!("${:.2}/${:.2}", budget.cost_used_usd, m))
+            .unwrap_or_else(|| format!("${:.2}", budget.cost_used_usd));
+        println!("   Cost:        {}", cost_str);
+        println!("   Revisions:   {}", budget.revisions_used);
+    }
+
     println!();
     println!("{}", "─".repeat(70));
     println!("Commands:");
