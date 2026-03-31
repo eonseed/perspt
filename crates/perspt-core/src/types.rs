@@ -395,6 +395,8 @@ pub struct SRBNNode {
     pub provisional_branch_id: Option<String>,
     /// PSP-5 Phase 6: Interface seal hash once this node's public interface is sealed
     pub interface_seal_hash: Option<[u8; 32]>,
+    /// Declared dependency expectations from the architect plan.
+    pub dependency_expectations: DependencyExpectation,
 }
 
 impl SRBNNode {
@@ -415,6 +417,7 @@ impl SRBNNode {
             owner_plugin: String::new(),
             provisional_branch_id: None,
             interface_seal_hash: None,
+            dependency_expectations: DependencyExpectation::default(),
         }
     }
 }
@@ -856,6 +859,7 @@ impl PlannedTask {
         node.output_targets = self.output_files.iter().map(PathBuf::from).collect();
         node.contract = self.contract.to_behavioral_contract();
         node.node_class = self.node_class;
+        node.dependency_expectations = self.dependency_expectations.clone();
         node
     }
 }
@@ -3831,5 +3835,55 @@ mod psp5_tests {
     fn test_planned_task_has_dependency_expectations() {
         let task = PlannedTask::new("t1", "Build module");
         assert!(task.dependency_expectations.required_packages.is_empty());
+    }
+
+    #[test]
+    fn test_srbn_node_carries_dependency_expectations() {
+        let mut task = PlannedTask::new("t1", "Build module");
+        task.dependency_expectations = DependencyExpectation {
+            required_packages: vec!["serde".to_string(), "tokio".to_string()],
+            setup_commands: vec!["cargo fetch".to_string()],
+            min_toolchain_version: Some("1.75".to_string()),
+        };
+        let node = task.to_srbn_node(ModelTier::Actuator);
+        assert_eq!(node.dependency_expectations.required_packages.len(), 2);
+        assert_eq!(node.dependency_expectations.required_packages[0], "serde");
+        assert_eq!(node.dependency_expectations.setup_commands, ["cargo fetch"]);
+        assert_eq!(
+            node.dependency_expectations
+                .min_toolchain_version
+                .as_deref(),
+            Some("1.75")
+        );
+    }
+
+    #[test]
+    fn test_dependency_expectations_deserialized_from_json() {
+        let json = r#"{
+            "id": "t1",
+            "goal": "Build module",
+            "dependency_expectations": {
+                "required_packages": ["requests", "pydantic"],
+                "setup_commands": [],
+                "min_toolchain_version": "3.11"
+            }
+        }"#;
+        let task: PlannedTask = serde_json::from_str(json).unwrap();
+        assert_eq!(task.dependency_expectations.required_packages.len(), 2);
+        assert_eq!(
+            task.dependency_expectations
+                .min_toolchain_version
+                .as_deref(),
+            Some("3.11")
+        );
+    }
+
+    #[test]
+    fn test_dependency_expectations_default_when_omitted() {
+        let json = r#"{"id": "t1", "goal": "Build module"}"#;
+        let task: PlannedTask = serde_json::from_str(json).unwrap();
+        assert!(task.dependency_expectations.required_packages.is_empty());
+        assert!(task.dependency_expectations.setup_commands.is_empty());
+        assert!(task.dependency_expectations.min_toolchain_version.is_none());
     }
 }
