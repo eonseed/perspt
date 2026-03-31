@@ -2504,6 +2504,45 @@ impl PlanRevision {
     }
 }
 
+/// Adaptive planning policy that selects the agent phase stack
+/// based on task scale and workspace type.
+///
+/// Each variant maps to a different level of orchestration complexity:
+/// - `LocalEdit` — Actuator + Verifier only; no architect needed
+/// - `FeatureIncrement` — Architect + Actuator + Verifier
+/// - `LargeFeature` — Full 4-agent stack with Speculator
+/// - `GreenfieldBuild` — Full stack with workspace-setup node first
+/// - `ArchitecturalRevision` — Architect + Speculator first, then execution
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PlanningPolicy {
+    /// Small, localized change: skip architect planning.
+    LocalEdit,
+    /// Mid-size feature: architect decomposes, actuator implements.
+    #[default]
+    FeatureIncrement,
+    /// Large feature: full SRBN loop with speculative execution.
+    LargeFeature,
+    /// New project: full stack with bootstrap ordering.
+    GreenfieldBuild,
+    /// Cross-cutting redesign: plan-first, execute later.
+    ArchitecturalRevision,
+}
+
+impl PlanningPolicy {
+    /// Whether this policy requires architect planning.
+    pub fn needs_architect(&self) -> bool {
+        !matches!(self, Self::LocalEdit)
+    }
+
+    /// Whether this policy activates the speculator.
+    pub fn needs_speculator(&self) -> bool {
+        matches!(
+            self,
+            Self::LargeFeature | Self::GreenfieldBuild | Self::ArchitecturalRevision
+        )
+    }
+}
+
 /// A scoping document that constrains what the architect may plan.
 ///
 /// The `FeatureCharter` sits above individual task plans and provides
@@ -3713,6 +3752,26 @@ mod psp5_tests {
         assert!(charter.exceeds_module_budget(6));
         assert!(!charter.exceeds_file_budget(20));
         assert!(charter.exceeds_file_budget(21));
+    }
+
+    #[test]
+    fn test_planning_policy_defaults_and_queries() {
+        let policy = PlanningPolicy::default();
+        assert_eq!(policy, PlanningPolicy::FeatureIncrement);
+        assert!(policy.needs_architect());
+        assert!(!policy.needs_speculator());
+
+        assert!(!PlanningPolicy::LocalEdit.needs_architect());
+        assert!(!PlanningPolicy::LocalEdit.needs_speculator());
+
+        assert!(PlanningPolicy::LargeFeature.needs_architect());
+        assert!(PlanningPolicy::LargeFeature.needs_speculator());
+
+        assert!(PlanningPolicy::GreenfieldBuild.needs_architect());
+        assert!(PlanningPolicy::GreenfieldBuild.needs_speculator());
+
+        assert!(PlanningPolicy::ArchitecturalRevision.needs_architect());
+        assert!(PlanningPolicy::ArchitecturalRevision.needs_speculator());
     }
 
     #[test]

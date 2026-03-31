@@ -254,6 +254,11 @@ const CLOSE_BRACE: &str = "}";
 
 /// Render an architect prompt template by replacing named placeholders.
 ///
+/// `active_plugins` is an optional list of detected language plugins (e.g.
+/// `["rust", "python"]`).  When non-empty, the rendered prompt includes a
+/// "Detected Toolchain" section so the architect can plan verification-aware
+/// nodes.
+///
 /// # Panics
 /// Does not panic; missing placeholders are left as-is.
 pub fn render_architect(
@@ -263,11 +268,25 @@ pub fn render_architect(
     project_context: &str,
     error_feedback: &str,
     evidence_section: &str,
+    active_plugins: &[String],
 ) -> String {
+    let plugin_section = if active_plugins.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n## Detected Toolchain\nActive language plugins: {}\nPlan verification-aware nodes that align with these plugins' build/test capabilities.\n",
+            active_plugins.join(", ")
+        )
+    };
+    let enriched_context = if plugin_section.is_empty() {
+        project_context.to_string()
+    } else {
+        format!("{}{}", project_context, plugin_section)
+    };
     template
         .replace("{task}", task)
         .replace("{working_dir}", &working_dir.display().to_string())
-        .replace("{project_context}", project_context)
+        .replace("{project_context}", &enriched_context)
         .replace("{error_feedback}", error_feedback)
         .replace("{evidence_section}", evidence_section)
         .replace("{OPEN_BRACE}", OPEN_BRACE)
@@ -303,6 +322,7 @@ mod tests {
             "has Cargo.toml",
             "",
             "## Evidence\nfound 3 modules",
+            &["rust".to_string()],
         );
         assert!(result.contains("Build a web app"));
         assert!(result.contains("/tmp/project"));
@@ -313,6 +333,9 @@ mod tests {
         assert!(!result.contains("{CLOSE_BRACE}"));
         // JSON example should have real braces
         assert!(result.contains(r#""tasks": ["#));
+        // Plugin info should be included
+        assert!(result.contains("rust"));
+        assert!(result.contains("Detected Toolchain"));
     }
 
     #[test]
@@ -324,8 +347,25 @@ mod tests {
             "empty directory",
             "",
             "", // no evidence for greenfield
+            &["python".to_string()],
         );
         assert!(result.contains("Build a CLI tool"));
         assert!(result.contains("NEW project from scratch"));
+        assert!(result.contains("python"));
+        assert!(result.contains("Detected Toolchain"));
+    }
+
+    #[test]
+    fn test_render_architect_no_plugins() {
+        let result = render_architect(
+            ARCHITECT_EXISTING,
+            "fix a bug",
+            Path::new("/tmp/proj"),
+            "context",
+            "",
+            "",
+            &[],
+        );
+        assert!(!result.contains("Detected Toolchain"));
     }
 }

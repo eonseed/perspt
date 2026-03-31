@@ -176,6 +176,7 @@ impl SRBNOrchestrator {
             &project_context,
             &error_feedback,
             &evidence_section,
+            &self.context.active_plugins,
         ))
     }
 
