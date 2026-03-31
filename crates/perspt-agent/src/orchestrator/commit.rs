@@ -122,11 +122,19 @@ impl SRBNOrchestrator {
         }
 
         // Nodes that touch multiple plugins get cross-language validation.
+        // Skip when either side is "unknown" — that's an ownership detection
+        // gap, not a real cross-language boundary.
         let node_owner = &node.owner_plugin;
         let has_cross_plugin_deps = self
             .graph
             .neighbors_directed(idx, petgraph::Direction::Outgoing)
-            .any(|dep_idx| self.graph[dep_idx].owner_plugin != *node_owner);
+            .any(|dep_idx| {
+                let dep_plugin = &self.graph[dep_idx].owner_plugin;
+                dep_plugin != node_owner
+                    && !dep_plugin.is_empty()
+                    && dep_plugin != "unknown"
+                    && node_owner != "unknown"
+            });
         if has_cross_plugin_deps {
             validators.push(SheafValidatorClass::CrossLanguageBoundary);
         }
@@ -265,6 +273,8 @@ impl SRBNOrchestrator {
             }
             SheafValidatorClass::CrossLanguageBoundary => {
                 // Check that cross-plugin dependencies have matching plugins.
+                // Skip "unknown" plugins — they indicate undetected ownership,
+                // not an actual cross-language boundary issue.
                 let mut boundary_issues = Vec::new();
                 let node_plugin = &node.owner_plugin;
 
@@ -273,7 +283,11 @@ impl SRBNOrchestrator {
                     .neighbors_directed(idx, petgraph::Direction::Outgoing)
                 {
                     let dep = &self.graph[dep_idx];
-                    if dep.owner_plugin != *node_plugin && !dep.owner_plugin.is_empty() {
+                    if dep.owner_plugin != *node_plugin
+                        && !dep.owner_plugin.is_empty()
+                        && dep.owner_plugin != "unknown"
+                        && *node_plugin != "unknown"
+                    {
                         // Cross-plugin edge — check both are active.
                         if !self.context.active_plugins.contains(&dep.owner_plugin) {
                             boundary_issues.push(format!("plugin {} not active", dep.owner_plugin));

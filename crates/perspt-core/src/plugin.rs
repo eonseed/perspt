@@ -488,7 +488,7 @@ impl LanguagePlugin for RustPlugin {
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
-        &["rs"]
+        &["rs", "Cargo.toml"]
     }
 
     fn host_tool_available(&self) -> bool {
@@ -724,7 +724,7 @@ impl LanguagePlugin for PythonPlugin {
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
-        &["py"]
+        &["py", "pyproject.toml", "setup.py", "requirements.txt"]
     }
 
     fn host_tool_available(&self) -> bool {
@@ -913,7 +913,7 @@ impl LanguagePlugin for JsPlugin {
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
-        &["js", "ts", "jsx", "tsx"]
+        &["js", "ts", "jsx", "tsx", "package.json", "tsconfig.json"]
     }
 
     fn host_tool_available(&self) -> bool {
