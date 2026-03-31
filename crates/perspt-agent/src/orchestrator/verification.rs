@@ -9,6 +9,10 @@ impl SRBNOrchestrator {
     pub(super) async fn step_verify(&mut self, idx: NodeIndex) -> Result<EnergyComponents> {
         log::info!("Step 4: Verification - Computing stability energy");
 
+        // Clear stale verification result from previous nodes to prevent
+        // cross-node data leakage into sheaf validators.
+        self.last_verification_result = None;
+
         self.graph[idx].state = NodeState::Verifying;
         self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
             node_id: self.graph[idx].node_id.clone(),
@@ -588,6 +592,8 @@ impl SRBNOrchestrator {
                     });
                 }
             }
+        } else {
+            result.tests_ok = true; // Skip tests when not in allowed stages
         }
 
         // Lint (only when allowed AND in Strict mode)
