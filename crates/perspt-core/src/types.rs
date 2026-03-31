@@ -1135,7 +1135,10 @@ impl OwnershipManifest {
         20
     }
 
-    /// Assign a file to an owning node
+    /// Assign a file to an owning node.
+    ///
+    /// The path is normalized before insertion so that `src/main.rs` and
+    /// `./src/main.rs` resolve to the same key.
     pub fn assign(
         &mut self,
         path: impl Into<String>,
@@ -1143,8 +1146,12 @@ impl OwnershipManifest {
         owner_plugin: impl Into<String>,
         node_class: NodeClass,
     ) {
+        let key = crate::path::normalize_path_key(&path.into()).unwrap_or_default();
+        if key.is_empty() {
+            return; // silently skip invalid paths
+        }
         self.entries.insert(
-            path.into(),
+            key,
             OwnershipEntry {
                 owner_node_id: owner_node_id.into(),
                 owner_plugin: owner_plugin.into(),
@@ -1153,9 +1160,12 @@ impl OwnershipManifest {
         );
     }
 
-    /// Look up the owner of a file path
+    /// Look up the owner of a file path.
+    ///
+    /// The path is normalized before lookup.
     pub fn owner_of(&self, path: &str) -> Option<&OwnershipEntry> {
-        self.entries.get(path)
+        let key = crate::path::normalize_path_key(path)?;
+        self.entries.get(&key)
     }
 
     /// List all files owned by a specific node
@@ -1213,14 +1223,16 @@ impl OwnershipManifest {
 
         // For Interface and Implementation nodes, check ownership
         for op in &bundle.artifacts {
-            let path = op.path();
-            if let Some(entry) = self.entries.get(path) {
+            let raw_path = op.path();
+            let key =
+                crate::path::normalize_path_key(raw_path).unwrap_or_else(|| raw_path.to_string());
+            if let Some(entry) = self.entries.get(&key) {
                 if entry.owner_node_id != node_id {
                     return Err(format!(
                         "Ownership violation: file '{}' is owned by node '{}', \
                          but node '{}' ({}) attempted to modify it. \
                          Only Integration nodes may cross ownership boundaries.",
-                        path, entry.owner_node_id, node_id, node_class
+                        raw_path, entry.owner_node_id, node_id, node_class
                     ));
                 }
             }
@@ -1242,9 +1254,11 @@ impl OwnershipManifest {
         node_class: NodeClass,
     ) {
         for op in &bundle.artifacts {
-            let path = op.path();
-            if !self.entries.contains_key(path) {
-                self.assign(path, node_id, owner_plugin, node_class);
+            let raw_path = op.path();
+            let key =
+                crate::path::normalize_path_key(raw_path).unwrap_or_else(|| raw_path.to_string());
+            if !self.entries.contains_key(&key) {
+                self.assign(raw_path, node_id, owner_plugin, node_class);
             }
         }
     }
@@ -1406,23 +1420,28 @@ impl ArtifactBundle {
     }
 
     /// Validate a single path: reject empty, absolute, and traversal paths.
+    ///
+    /// Uses the canonical `normalize_artifact_path` utility so that all path
+    /// consumers (bundle validation, ownership manifest, policy checks) agree
+    /// on path identity.
     fn validate_path(path: &str, artifact_index: usize) -> Result<(), String> {
-        if path.is_empty() {
-            return Err(format!("Artifact {} has empty path", artifact_index));
-        }
-        if path.starts_with('/') || path.starts_with('\\') {
-            return Err(format!(
+        use crate::path::{normalize_artifact_path, PathError};
+        match normalize_artifact_path(path) {
+            Ok(_) => Ok(()),
+            Err(PathError::Empty) => Err(format!("Artifact {} has empty path", artifact_index)),
+            Err(PathError::Absolute(_)) => Err(format!(
                 "Artifact {} has absolute path '{}', must be relative",
                 artifact_index, path
-            ));
-        }
-        if path.contains("..") {
-            return Err(format!(
+            )),
+            Err(PathError::Escapes(_)) => Err(format!(
                 "Artifact {} has path traversal in '{}'",
                 artifact_index, path
-            ));
+            )),
+            Err(PathError::Invalid(_)) => Err(format!(
+                "Artifact {} has invalid path '{}'",
+                artifact_index, path
+            )),
         }
-        Ok(())
     }
 }
 

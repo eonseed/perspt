@@ -180,7 +180,16 @@ pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path)
                 );
             }
         } else if part.contains("..") {
-            // Relative with '..' — resolve and check
+            // First: logical check that catches traversal even when the
+            // target path doesn't exist on disk yet.
+            if perspt_core::path::normalize_artifact_path(part).is_err() {
+                anyhow::bail!(
+                    "command contains path that escapes workspace root: {} (workspace: {})",
+                    part,
+                    workspace_root.display()
+                );
+            }
+            // Second: filesystem-level check for paths that do exist.
             let resolved = workspace_root.join(candidate);
             if let Ok(canonical) = resolved.canonicalize() {
                 if !canonical.starts_with(workspace_root) {
@@ -192,8 +201,6 @@ pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path)
                     );
                 }
             }
-            // If canonicalize fails (path doesn't exist yet), allow it —
-            // the command may create the path.
         }
     }
 
