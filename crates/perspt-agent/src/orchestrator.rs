@@ -5221,6 +5221,22 @@ uv add --dev pytest
                         arguments: args,
                     }
                 }
+                perspt_core::types::ArtifactOperation::Delete { .. } => {
+                    // Delete operations are not yet supported by the tool layer.
+                    // Log and skip for now; Step 10 will add full support.
+                    log::warn!("Skipping unsupported Delete operation for {}", op.path());
+                    continue;
+                }
+                perspt_core::types::ArtifactOperation::Move { to, .. } => {
+                    // Move operations are not yet supported by the tool layer.
+                    // Log and skip for now; Step 10 will add full support.
+                    log::warn!(
+                        "Skipping unsupported Move operation {} -> {}",
+                        op.path(),
+                        to
+                    );
+                    continue;
+                }
             };
 
             let result = self.tools.execute(&call).await;
@@ -5332,6 +5348,7 @@ uv add --dev pytest
             contract: Default::default(),
             command_contract: None,
             node_class: perspt_core::types::NodeClass::Interface,
+            dependency_expectations: Default::default(),
         };
 
         // Node 2: Core implementation
@@ -5345,6 +5362,7 @@ uv add --dev pytest
             contract: Default::default(),
             command_contract: None,
             node_class: perspt_core::types::NodeClass::Implementation,
+            dependency_expectations: Default::default(),
         };
 
         // Node 3: Tests
@@ -5358,6 +5376,7 @@ uv add --dev pytest
             contract: Default::default(),
             command_contract: None,
             node_class: perspt_core::types::NodeClass::Integration,
+            dependency_expectations: Default::default(),
         };
 
         // Build plan and emit
