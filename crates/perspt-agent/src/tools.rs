@@ -966,11 +966,13 @@ pub fn seed_sandbox_manifests(
                     copy_to_sandbox(working_dir, sandbox_dir, key_file)?;
                     seeded.push(key_file.to_string());
                 }
-                // Also walk one level of subdirectories (e.g. crates/*/Cargo.toml)
+                // Also walk up to two levels of subdirectories
+                // (e.g. crates/*/Cargo.toml, packages/*/package.json)
                 if let Ok(entries) = fs::read_dir(working_dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if path.is_dir() && path.file_name().is_none_or(|n| n != ".perspt") {
+                            // Level 1: e.g. crates/Cargo.toml (unlikely but check)
                             let sub_key = path.join(key_file);
                             if sub_key.exists() {
                                 let rel = sub_key
@@ -980,6 +982,24 @@ pub fn seed_sandbox_manifests(
                                     .to_string();
                                 let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
                                 seeded.push(rel);
+                            }
+                            // Level 2: e.g. crates/cfd-core/Cargo.toml
+                            if let Ok(sub_entries) = fs::read_dir(&path) {
+                                for sub_entry in sub_entries.flatten() {
+                                    let sub_path = sub_entry.path();
+                                    if sub_path.is_dir() {
+                                        let deep_key = sub_path.join(key_file);
+                                        if deep_key.exists() {
+                                            let rel = deep_key
+                                                .strip_prefix(working_dir)
+                                                .unwrap_or(&deep_key)
+                                                .to_string_lossy()
+                                                .to_string();
+                                            let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
+                                            seeded.push(rel);
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
