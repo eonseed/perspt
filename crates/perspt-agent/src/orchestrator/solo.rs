@@ -181,28 +181,7 @@ impl SRBNOrchestrator {
 
     /// Build a minimal prompt for Solo Mode (with dynamic filename instruction)
     fn build_solo_prompt(&self, task: &str) -> String {
-        format!(
-            r#"You are an expert Python developer. Complete this task with a SINGLE, self-contained Python file.
-
-## Task
-{task}
-
-## Requirements
-1. Choose a DESCRIPTIVE filename based on the task (e.g., `fibonacci.py` for a fibonacci script, `prime_checker.py` for checking primes)
-2. Write ONE Python file that accomplishes the task
-3. Include docstrings with doctest examples for all functions
-4. Make the file directly runnable with `if __name__ == "__main__":` block
-5. Use type hints for all function parameters and return values
-
-## Output Format
-File: <your_descriptive_filename.py>
-```python
-# your complete code here
-```
-
-IMPORTANT: Do NOT use generic names like `script.py` or `main.py`. Choose a name that reflects the task."#,
-            task = task
-        )
+        crate::prompts::SOLO_GENERATE.replace("{task}", task)
     }
 
     /// Build a correction prompt for Solo Mode with error feedback
@@ -251,43 +230,14 @@ IMPORTANT: Do NOT use generic names like `script.py` or `main.py`. Choose a name
             errors.join("\n")
         };
 
-        format!(
-            r#"## Code Correction Required
-
-The code you generated has errors. Fix ALL of them.
-
-### Original Task
-{task}
-
-### Current Code ({filename})
-```python
-{current_code}
-```
-
-### Errors Found
-Energy: V_syn={v_syn:.2}, V_log={v_log:.2}, V_boot={v_boot:.2}
-
-{error_list}
-
-### Instructions
-1. Fix ALL errors listed above
-2. Maintain the original functionality
-3. Ensure the script runs without errors
-4. Ensure all doctests pass
-5. Return the COMPLETE corrected file
-
-### Output Format
-File: {filename}
-```python
-[complete corrected code]
-```"#,
-            task = task,
-            filename = filename,
-            current_code = current_code,
-            v_syn = energy.v_syn,
-            v_log = energy.v_log,
-            v_boot = energy.v_boot,
-            error_list = error_list
+        crate::prompts::render_solo_correction(
+            task,
+            filename,
+            current_code,
+            &format!("{:.2}", energy.v_syn),
+            &format!("{:.2}", energy.v_log),
+            &format!("{:.2}", energy.v_boot),
+            &error_list,
         )
     }
 

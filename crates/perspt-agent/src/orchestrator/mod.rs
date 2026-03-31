@@ -1277,18 +1277,10 @@ impl SRBNOrchestrator {
                 .collect();
 
             if !child_goals.is_empty() {
-                let speculator_prompt = format!(
-                    "You are a Speculator agent. Given this task and its downstream dependents, \
-                     produce a brief (3-5 bullet) list of:\n\
-                     1. Interface contracts the current task must satisfy for dependents\n\
-                     2. Common pitfalls (e.g., import paths, missing exports)\n\
-                     3. Edge cases dependents may need\n\n\
-                     Current task: {} — {}\n\
-                     Downstream tasks:\n{}\n\n\
-                     Be concise. No code.",
-                    node.node_id,
-                    node.goal,
-                    child_goals.join("\n")
+                let speculator_prompt = crate::prompts::render_speculator_lookahead(
+                    &node.node_id,
+                    &node.goal,
+                    &child_goals.join("\n"),
                 );
 
                 log::debug!(
@@ -3927,11 +3919,14 @@ def util():
 
     #[test]
     fn test_architect_prompt_includes_dependency_expectations() {
-        let prompt = crate::agent::ArchitectAgent::build_task_decomposition_prompt(
+        let prompt = crate::prompts::render_architect(
+            crate::prompts::ARCHITECT_EXISTING,
             "Build a web server",
             std::path::Path::new("/tmp"),
             "empty project",
-            None,
+            "",
+            "",
+            &[],
         );
         assert!(
             prompt.contains("dependency_expectations"),

@@ -692,19 +692,7 @@ impl SRBNOrchestrator {
         }
 
         // 2. Fallback to LLM for complex tasks
-        let prompt = format!(
-            r#"Extract a short project name from this task description.
-Rules:
-- Use snake_case (lowercase with underscores)
-- Maximum 30 characters
-- Must be a valid folder name (letters, numbers, underscores only)
-- Return ONLY the name, nothing else
-
-Task: "{}"
-
-Project name:"#,
-            task
-        );
+        let prompt = crate::prompts::PROJECT_NAME_SUGGEST.replace("{task}", task);
 
         match self
             .call_llm_with_logging(&self.actuator_model.clone(), &prompt, None)
