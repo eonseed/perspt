@@ -3484,7 +3484,8 @@ Project name:"#,
 
         // Extract and apply diff
         if let Some((filename, new_code, is_diff)) = self.extract_code_from_response(&corrected) {
-            let full_path = self.context.working_dir.join(&filename);
+            let node_workdir = self.effective_working_dir(idx);
+            let full_path = node_workdir.join(&filename);
 
             // Write corrected file
             let mut args = HashMap::new();
@@ -6180,19 +6181,17 @@ uv add --dev pytest
             .neighbors_directed(idx, petgraph::Direction::Incoming)
             .collect();
 
-        if parents.is_empty() {
-            return None; // Root node — no provisional branch needed
-        }
-
         let node = &self.graph[idx];
         let node_id = node.node_id.clone();
         let session_id = self.context.session_id.clone();
 
-        // Use the first parent as the primary dependency.
-        // For multi-parent nodes the branch tracks the first parent;
-        // lineage records capture all parent→child edges.
-        let parent_idx = parents[0];
-        let parent_node_id = self.graph[parent_idx].node_id.clone();
+        // Root nodes and child nodes both get sandboxes.  Root nodes use
+        // "root" as the parent identifier since they have no graph parent.
+        let parent_node_id = if parents.is_empty() {
+            "root".to_string()
+        } else {
+            self.graph[parents[0]].node_id.clone()
+        };
 
         let branch_id = format!("branch_{}_{}", node_id, uuid::Uuid::new_v4());
         let branch = ProvisionalBranch::new(
@@ -6207,7 +6206,7 @@ uv add --dev pytest
             log::warn!("Failed to record provisional branch: {}", e);
         }
 
-        // Record lineage edges for every parent
+        // Record lineage edges for every parent (skipped for root nodes)
         for pidx in &parents {
             let parent_id = self.graph[*pidx].node_id.clone();
             // Determine if this parent is an Interface node (seal dependency)
@@ -6950,16 +6949,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_maybe_create_provisional_branch_root_node() {
-        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("/tmp/test_phase6"));
+        let temp_dir =
+            std::env::temp_dir().join(format!("perspt_root_branch_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
         orch.context.session_id = "test_session".into();
         let node = SRBNNode::new("root".into(), "root goal".into(), ModelTier::Actuator);
         orch.add_node(node);
 
         let idx = orch.node_indices["root"];
-        // Root node has no parents — should not create a branch
+        // Root nodes now also get a provisional branch with sandbox
         let branch = orch.maybe_create_provisional_branch(idx);
-        assert!(branch.is_none());
-        assert!(orch.graph[idx].provisional_branch_id.is_none());
+        assert!(branch.is_some());
+        assert!(orch.graph[idx].provisional_branch_id.is_some());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[tokio::test]
@@ -8173,18 +8178,17 @@ def util():
         orch.add_node(root);
 
         let root_idx = orch.node_indices["root"];
-        // maybe_create_provisional_branch should return None for roots
+        // Root nodes now get a provisional branch with sandbox isolation
         let branch = orch.maybe_create_provisional_branch(root_idx);
         assert!(
-            branch.is_none(),
-            "Root node should not get a provisional branch"
+            branch.is_some(),
+            "Root node should now get a provisional branch for sandbox isolation"
         );
 
-        // effective_working_dir falls back to workspace
-        assert_eq!(orch.effective_working_dir(root_idx), temp_dir);
-
-        // sandbox_dir should also be None
-        assert!(orch.sandbox_dir_for_node(root_idx).is_none());
+        // effective_working_dir should point to the sandbox, not the raw workspace
+        let wd = orch.effective_working_dir(root_idx);
+        assert_ne!(wd, temp_dir, "Root should use sandbox, not raw workspace");
+        assert!(wd.to_string_lossy().contains("sandboxes"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
