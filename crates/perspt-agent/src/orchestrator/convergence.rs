@@ -526,15 +526,7 @@ uv add --dev pytest
     /// the corrected code artifact.
     async fn call_llm_for_correction(&self, prompt: &str) -> Result<String> {
         // Stage 1: Verifier analyzes the failure
-        let verifier_prompt = format!(
-            "You are a Verifier agent. Analyze the following correction request and produce \
-             concise, structured guidance for the code fixer. Identify:\n\
-             1. Root cause of each failure\n\
-             2. Which specific functions/lines need changes\n\
-             3. Constraints that must be preserved\n\
-             Do NOT produce code — only analysis and guidance.\n\n{}",
-            prompt
-        );
+        let verifier_prompt = format!("{}{}", crate::prompts::VERIFIER_ANALYSIS_PREAMBLE, prompt);
 
         log::debug!(
             "Stage 1: Sending analysis to verifier model: {}",
