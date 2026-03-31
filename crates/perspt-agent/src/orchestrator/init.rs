@@ -298,11 +298,32 @@ impl SRBNOrchestrator {
                                             ));
                                         }
                                     }
+
+                                    // Verify that init actually produced the
+                                    // expected project files. If not, the entire
+                                    // downstream pipeline will fail.
+                                    if !plugin.detect(&self.context.working_dir) {
+                                        let expected: Vec<&str> = plugin.key_files().to_vec();
+                                        log::error!(
+                                            "Project init succeeded but no key files detected (expected: {:?})",
+                                            expected
+                                        );
+                                        self.emit_log(format!(
+                                            "❌ Init command ran but project files are missing (expected: {}). \
+                                             Cannot proceed.",
+                                            expected.join(", ")
+                                        ));
+                                        anyhow::bail!(
+                                            "Project initialization did not produce expected files: {:?}",
+                                            expected
+                                        );
+                                    }
                                 } else {
-                                    self.emit_log(format!(
-                                        "❌ Init failed: {:?}",
-                                        exec_result.error
-                                    ));
+                                    let err = exec_result
+                                        .error
+                                        .unwrap_or_else(|| "unknown error".to_string());
+                                    self.emit_log(format!("❌ Init failed: {}", err));
+                                    anyhow::bail!("Project initialization failed: {}", err);
                                 }
                             }
                         }
@@ -409,11 +430,30 @@ impl SRBNOrchestrator {
                                                 self.context.working_dir.display()
                                             ));
                                         }
+
+                                        // Verify that init produced expected project files
+                                        if !plugin.detect(&self.context.working_dir) {
+                                            let expected: Vec<&str> = plugin.key_files().to_vec();
+                                            log::error!(
+                                                "Project init succeeded but no key files detected (expected: {:?})",
+                                                expected
+                                            );
+                                            self.emit_log(format!(
+                                                "❌ Init command ran but project files are missing (expected: {}). \
+                                                 Cannot proceed.",
+                                                expected.join(", ")
+                                            ));
+                                            anyhow::bail!(
+                                                "Project initialization did not produce expected files: {:?}",
+                                                expected
+                                            );
+                                        }
                                     } else {
-                                        self.emit_log(format!(
-                                            "❌ Init failed: {:?}",
-                                            exec_result.error
-                                        ));
+                                        let err = exec_result
+                                            .error
+                                            .unwrap_or_else(|| "unknown error".to_string());
+                                        self.emit_log(format!("❌ Init failed: {}", err));
+                                        anyhow::bail!("Project initialization failed: {}", err);
                                     }
                                 }
                             }

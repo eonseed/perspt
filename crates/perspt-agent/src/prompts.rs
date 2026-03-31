@@ -55,11 +55,20 @@ Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
 - [ ] Include at least one test file per core module
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
-## CRITICAL CONSTRAINTS
-- DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
-- The system handles project initialization separately via CLI tools (uv, npm, cargo)
-- Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
-- If you need to add dependencies, include them in `dependency_expectations.required_packages`
+## CRITICAL CONSTRAINTS — MANIFEST FILES
+- DO NOT create the ROOT project manifest (`Cargo.toml` at workspace root, `pyproject.toml` at project root, `package.json` at project root) — the system manages it automatically.
+- For **multi-crate Rust workspaces** (when you plan `crates/<name>/` sub-directories), you MUST include each sub-crate's `Cargo.toml` in the owning task's `output_files` (e.g., `crates/my-lib/Cargo.toml`). The system will automatically convert the root manifest to a `[workspace]`.
+- For **Python** projects, DO NOT create `pyproject.toml` — the system handles it.
+- For **Node.js** projects, DO NOT create the root `package.json` — the system handles it. Sub-package `package.json` files in `packages/*/` are allowed.
+- If you need to add dependencies, include them in `dependency_expectations.required_packages`.
+
+### WORKSPACE / MULTI-CRATE PROJECTS
+When the task asks for multiple crates, packages, or modules in subdirectories:
+- **Rust**: Put each crate under `crates/<name>/` with its own `Cargo.toml` and `src/lib.rs` (or `src/main.rs` for binaries). The root `Cargo.toml` will be auto-converted to `[workspace]` with `members = ["crates/*"]`.
+- **Python**: Keep all code under `src/<package_name>/` with submodules. Multiple top-level packages are not standard in Python — use submodules instead.
+- **Node.js**: Put each package under `packages/<name>/` with its own `package.json`.
+
+Do NOT place source files directly in the root `src/` directory when planning sub-crates under `crates/` — each crate must be self-contained.
 
 ### DEPENDENCY EXPECTATIONS
 For each task, declare the packages/crates the generated code will import under `dependency_expectations`:
@@ -183,11 +192,20 @@ Since this is a new project, design the file structure from scratch:
 - [ ] Include at least one test file per core module
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
-## CRITICAL CONSTRAINTS
-- DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
-- The system handles project initialization separately via CLI tools (uv, npm, cargo)
-- Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
-- If you need to add dependencies, include them in `dependency_expectations.required_packages`
+## CRITICAL CONSTRAINTS — MANIFEST FILES
+- DO NOT create the ROOT project manifest (`Cargo.toml` at workspace root, `pyproject.toml` at project root, `package.json` at project root) — the system manages it automatically.
+- For **multi-crate Rust workspaces** (when you plan `crates/<name>/` sub-directories), you MUST include each sub-crate's `Cargo.toml` in the owning task's `output_files` (e.g., `crates/my-lib/Cargo.toml`). The system will automatically convert the root manifest to a `[workspace]`.
+- For **Python** projects, DO NOT create `pyproject.toml` — the system handles it.
+- For **Node.js** projects, DO NOT create the root `package.json` — the system handles it. Sub-package `package.json` files in `packages/*/` are allowed.
+- If you need to add dependencies, include them in `dependency_expectations.required_packages`.
+
+### WORKSPACE / MULTI-CRATE PROJECTS
+When the task asks for multiple crates, packages, or modules in subdirectories:
+- **Rust**: Put each crate under `crates/<name>/` with its own `Cargo.toml` and `src/lib.rs` (or `src/main.rs` for binaries). The root `Cargo.toml` will be auto-converted to `[workspace]` with `members = ["crates/*"]`.
+- **Python**: Keep all code under `src/<package_name>/` with submodules. Multiple top-level packages are not standard in Python — use submodules instead.
+- **Node.js**: Put each package under `packages/<name>/` with its own `package.json`.
+
+Do NOT place source files directly in the root `src/` directory when planning sub-crates under `crates/` — each crate must be self-contained.
 
 ### DEPENDENCY EXPECTATIONS
 For each task, declare the packages/crates the generated code will import under `dependency_expectations`:
