@@ -105,9 +105,10 @@ The experimental SRBN orchestrator and its subsystems.
 
 **Modules:**
 
-- ``orchestrator`` — ``SRBNOrchestrator`` with ``petgraph::DiGraph<SRBNNode, Dependency>``
+- ``orchestrator`` — ``SRBNOrchestrator`` with ``petgraph::DiGraph<SRBNNode, Dependency>``.  Split into phase-focused sub-modules: ``mod`` (struct, constructors, run, helpers, tests), ``init`` (workspace bootstrap), ``solo`` (single-file mode), ``planning`` (architect interaction), ``verification`` (energy computation), ``convergence`` (stability loop), ``commit`` (ledger promotion), ``repair`` (correction prompts), ``bundle`` (artifact application).
 - ``agent`` — ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
-- ``tools`` — ``AgentTools`` (read_file, write_file, apply_diff, run_command, search_code, etc.)
+- ``tools`` — ``AgentTools`` (read_file, write_file, apply_diff, delete_file, move_file, run_command, search_code, etc.)
+- ``prompts`` — Externalized prompt templates for architect (existing/greenfield) and actuator roles
 - ``ledger`` — ``MerkleLedger`` atop ``SessionStore``
 - ``lsp`` — ``LspClient`` (JSON-RPC over stdio)
 - ``test_runner`` — ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
@@ -179,6 +180,10 @@ Tables:
 - ``review_outcomes`` — Human review decisions
 - ``verification_results`` — Full verification snapshots
 - ``artifact_bundles`` — Bundle JSON per node
+- ``plan_revisions`` — Plan version history
+- ``feature_charters`` — Scope governance records
+- ``repair_footprints`` — Correction audit trail
+- ``budget_envelopes`` — Session budget caps and usage
 
 
 Crate: ``perspt-tui``
@@ -233,13 +238,14 @@ Utility functions:
 
 - ``sanitize_command(cmd)`` → ``SanitizeResult`` (split, validate, filter)
 - ``validate_workspace_bound(cmd, working_dir)`` — Ensure commands stay in scope
+- ``validate_artifact_mutation(path, workspace_root, operation)`` — Protect root project files from delete/move
 - ``is_safe_for_auto_exec(cmd)`` — Whitelist check for auto-approval
 
 
 Crate: ``perspt-sandbox``
 ---------------------------
 
-Process isolation:
+Process isolation with active timeout enforcement:
 
 .. code-block:: rust
 
@@ -253,7 +259,7 @@ Process isolation:
        program: String,
        args: Vec<String>,
        working_dir: Option<PathBuf>,
-       timeout: Duration,
+       timeout: Duration,  // Active: spawn + poll + kill on deadline
    }
 
 
@@ -330,7 +336,7 @@ All canonical types live in ``perspt_core::types``:
    * - ``ArtifactBundle``
      - artifacts: Vec<ArtifactOperation>, commands: Vec<String>
    * - ``ArtifactOperation``
-     - Write { path, content } | Diff { path, patch }
+     - Write { path, content } | Diff { path, patch } | Delete { path } | Move { from, to }
    * - ``OwnershipManifest``
      - entries: HashMap<String, OwnershipEntry>, fanout_limit
 
@@ -434,6 +440,23 @@ All canonical types live in ``perspt_core::types``:
    * - ``ArtifactKind``
      - Signature, Schema, SymbolInventory, InterfaceSeal
 
+**Planning and Budget:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``BudgetEnvelope``
+     - Session-level budget caps: max_steps, max_revisions, max_cost_usd, usage counters
+   * - ``FeatureCharter``
+     - Scope governance: max_modules, max_files, max_revisions, language_constraint
+   * - ``PlanRevision``
+     - Versioned plan: revision_id, sequence, plan, reason, supersedes, status (Active/Superseded/Cancelled)
+   * - ``RepairFootprint``
+     - Correction audit: affected_files, applied_bundle, diagnosis, resolved flag
+
 
 Events System
 -------------
@@ -448,15 +471,17 @@ The event system uses unbounded tokio channels:
    pub type ActionSender = UnboundedSender<AgentAction>;
    pub type ActionReceiver = UnboundedReceiver<AgentAction>;
 
-``AgentEvent`` has ~30 variants covering the full PSP-5 lifecycle:
+``AgentEvent`` has ~35 variants covering the full PSP-5 lifecycle:
 
-- **Planning**: ``PlanReady``, ``PlanGenerated``
+- **Planning**: ``PlanReady``, ``PlanGenerated``, ``PlanRevised``
 - **Execution**: ``NodeSelected``, ``BundleApplied``, ``NodeCompleted``
 - **Verification**: ``VerificationComplete``, ``DegradedVerification``, ``SensorFallback``
 - **Sheaf**: ``SheafValidationComplete``
 - **Branches**: ``BranchCreated``, ``InterfaceSealed``, ``BranchFlushed``, ``BranchMerged``
 - **Escalation**: ``EscalationClassified``, ``GraphRewriteApplied``
 - **Context**: ``ContextDegraded``, ``ContextBlocked``, ``ProvenanceDrift``
+- **Budget**: ``BudgetUpdated``
+- **File Ops**: ``FileDeleted``, ``FileMoved``
 - **UI**: ``ApprovalRequest``, ``TaskStatusChanged``, ``EnergyUpdated``, ``Log``
 - **Lifecycle**: ``Complete``, ``Error``, ``ModelFallback``, ``ToolReadiness``
 
