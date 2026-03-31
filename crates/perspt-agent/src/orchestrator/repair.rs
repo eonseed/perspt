@@ -404,7 +404,11 @@ impl SRBNOrchestrator {
     ///
     /// Each proposed child string is treated as a sub-goal description.
     /// Returns the list of inserted child node IDs (empty on failure).
-    pub(super) fn split_node(&mut self, idx: NodeIndex, proposed_children: &[String]) -> Vec<String> {
+    pub(super) fn split_node(
+        &mut self,
+        idx: NodeIndex,
+        proposed_children: &[String],
+    ) -> Vec<String> {
         if proposed_children.is_empty() {
             return Vec::new();
         }
@@ -511,7 +515,11 @@ impl SRBNOrchestrator {
     /// and its dependents.  The boundary string describes the interface
     /// contract for the newly created adapter node.
     /// Returns the adapter node ID on success, or None on failure.
-    pub(super) fn insert_interface_node(&mut self, idx: NodeIndex, boundary: &str) -> Option<String> {
+    pub(super) fn insert_interface_node(
+        &mut self,
+        idx: NodeIndex,
+        boundary: &str,
+    ) -> Option<String> {
         let source_id = self.graph[idx].node_id.clone();
         let adapter_id = format!("{}__iface", source_id);
         let source_node = &self.graph[idx];
@@ -576,7 +584,11 @@ impl SRBNOrchestrator {
     /// Reset the specified affected nodes back to `TaskQueued` so they get
     /// re-executed.  The triggering node itself is also reset.  Returns `true`
     /// if at least one node was replanned.
-    pub(super) fn replan_subgraph(&mut self, trigger_idx: NodeIndex, affected_nodes: &[String]) -> bool {
+    pub(super) fn replan_subgraph(
+        &mut self,
+        trigger_idx: NodeIndex,
+        affected_nodes: &[String],
+    ) -> bool {
         let mut replanned = 0;
 
         // Reset the trigger node itself.

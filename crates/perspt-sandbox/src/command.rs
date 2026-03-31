@@ -105,17 +105,53 @@ impl SandboxedCommand for BasicSandbox {
             cmd.current_dir(dir);
         }
 
-        let output = cmd.output()?;
-        let duration = start.elapsed();
+        let mut child = cmd.spawn()?;
 
-        // Check timeout (basic implementation - doesn't actually kill on timeout)
-        let timed_out = self.timeout.is_some_and(|t| duration > t);
+        // Active timeout: poll child with a deadline, kill if exceeded
+        if let Some(timeout) = self.timeout {
+            let deadline = start + timeout;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        // Process exited normally
+                        break;
+                    }
+                    Ok(None) => {
+                        // Still running — check deadline
+                        if std::time::Instant::now() >= deadline {
+                            // Kill the process
+                            let _ = child.kill();
+                            let _ = child.wait(); // reap zombie
+                            let duration = start.elapsed();
+                            return Ok(CommandResult {
+                                stdout: String::new(),
+                                stderr: format!(
+                                    "Process killed after {}s timeout",
+                                    timeout.as_secs()
+                                ),
+                                exit_code: None,
+                                timed_out: true,
+                                duration,
+                            });
+                        }
+                        // Brief sleep to avoid busy-waiting
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+
+        let output = child.wait_with_output()?;
+        let duration = start.elapsed();
 
         Ok(CommandResult {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             exit_code: output.status.code(),
-            timed_out,
+            timed_out: false,
             duration,
         })
     }
@@ -244,9 +280,8 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_sandbox_timeout_is_passive() {
-        // Current implementation: timeout is checked post-execution, not enforced.
-        // A fast command with a short timeout should NOT report timed_out.
+    fn test_basic_sandbox_timeout_fast_command_succeeds() {
+        // A fast command with a generous timeout should complete normally.
         let sandbox = BasicSandbox::new("echo".to_string(), vec!["fast".to_string()])
             .with_timeout(Duration::from_secs(60));
         let result = sandbox.execute().unwrap();
@@ -298,5 +333,23 @@ mod tests {
         let result = sandbox.execute().unwrap();
         // Duration should be non-zero (process was actually spawned)
         assert!(result.duration.as_nanos() > 0);
+    }
+
+    #[test]
+    fn test_active_timeout_kills_process() {
+        // Start a long-running sleep and verify the sandbox kills it
+        let sandbox = BasicSandbox::new("sleep".to_string(), vec!["30".to_string()])
+            .with_timeout(Duration::from_millis(200));
+
+        let result = sandbox.execute().unwrap();
+        assert!(
+            result.timed_out,
+            "Process should have been killed by timeout"
+        );
+        assert!(!result.success());
+        assert!(
+            result.duration < Duration::from_secs(5),
+            "Should return quickly after kill, not wait 30s"
+        );
     }
 }
