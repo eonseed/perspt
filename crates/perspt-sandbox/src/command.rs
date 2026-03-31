@@ -197,4 +197,106 @@ mod tests {
         let sandbox = BasicSandbox::new("rm".to_string(), vec!["file.txt".to_string()]);
         assert!(!sandbox.is_read_only());
     }
+
+    // =========================================================================
+    // Baseline regression tests — freeze pre-refactor behavior
+    // =========================================================================
+
+    #[test]
+    fn test_basic_sandbox_with_working_dir() {
+        let temp = std::env::temp_dir();
+        let sandbox = BasicSandbox::new("pwd".to_string(), vec![])
+            .with_working_dir(temp.to_string_lossy().to_string());
+        let result = sandbox.execute().unwrap();
+        assert!(result.success());
+        // The working_dir setting should be respected; the pwd output
+        // should resolve to the same directory we specified.
+        let output_path = std::path::PathBuf::from(result.stdout.trim());
+        let expected = std::fs::canonicalize(&temp).unwrap();
+        let actual = std::fs::canonicalize(&output_path).unwrap();
+        assert_eq!(
+            actual, expected,
+            "pwd should match the specified working dir"
+        );
+    }
+
+    #[test]
+    fn test_basic_sandbox_captures_stderr() {
+        let sandbox = BasicSandbox::new(
+            "sh".to_string(),
+            vec!["-c".to_string(), "echo err >&2".to_string()],
+        );
+        let result = sandbox.execute().unwrap();
+        assert!(result.success());
+        assert!(
+            result.stderr.contains("err"),
+            "stderr should capture error output"
+        );
+    }
+
+    #[test]
+    fn test_basic_sandbox_nonzero_exit() {
+        let sandbox = BasicSandbox::new("false".to_string(), vec![]);
+        let result = sandbox.execute().unwrap();
+        assert!(!result.success());
+        assert_eq!(result.exit_code, Some(1));
+        assert!(!result.timed_out);
+    }
+
+    #[test]
+    fn test_basic_sandbox_timeout_is_passive() {
+        // Current implementation: timeout is checked post-execution, not enforced.
+        // A fast command with a short timeout should NOT report timed_out.
+        let sandbox = BasicSandbox::new("echo".to_string(), vec!["fast".to_string()])
+            .with_timeout(Duration::from_secs(60));
+        let result = sandbox.execute().unwrap();
+        assert!(!result.timed_out);
+        assert!(result.success());
+    }
+
+    #[test]
+    fn test_from_command_string_empty_rejected() {
+        let result = BasicSandbox::from_command_string("");
+        assert!(result.is_err(), "Empty command should be rejected");
+    }
+
+    #[test]
+    fn test_from_command_string_with_quotes() {
+        let sandbox = BasicSandbox::from_command_string(r#"echo "hello world""#).unwrap();
+        assert_eq!(sandbox.program, "echo");
+        assert_eq!(sandbox.args, vec!["hello world"]);
+    }
+
+    #[test]
+    fn test_display_no_args() {
+        let sandbox = BasicSandbox::new("pwd".to_string(), vec![]);
+        assert_eq!(sandbox.display(), "pwd");
+    }
+
+    #[test]
+    fn test_is_read_only_compound_commands() {
+        // cargo check should be read-only
+        let sandbox = BasicSandbox::new("cargo".to_string(), vec!["check".to_string()]);
+        assert!(sandbox.is_read_only());
+
+        // cargo test should be read-only
+        let sandbox = BasicSandbox::new("cargo".to_string(), vec!["test".to_string()]);
+        assert!(sandbox.is_read_only());
+
+        // git status should be read-only
+        let sandbox = BasicSandbox::new("git".to_string(), vec!["status".to_string()]);
+        assert!(sandbox.is_read_only());
+
+        // git push should NOT be read-only
+        let sandbox = BasicSandbox::new("git".to_string(), vec!["push".to_string()]);
+        assert!(!sandbox.is_read_only());
+    }
+
+    #[test]
+    fn test_command_result_duration_nonzero() {
+        let sandbox = BasicSandbox::new("echo".to_string(), vec!["hi".to_string()]);
+        let result = sandbox.execute().unwrap();
+        // Duration should be non-zero (process was actually spawned)
+        assert!(result.duration.as_nanos() > 0);
+    }
 }

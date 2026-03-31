@@ -7990,4 +7990,279 @@ def util():
         assert_eq!(bundle.artifacts[0].path(), "core.py");
         assert_eq!(bundle.artifacts[1].path(), "utils.py");
     }
+
+    // =========================================================================
+    // Baseline regression tests — freeze pre-refactor behavior
+    // =========================================================================
+
+    #[test]
+    fn test_parse_artifact_bundle_structured_json() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = r#"Here is the output:
+```json
+{
+  "artifacts": [
+    {"operation": "write", "path": "src/main.py", "content": "print('hello')"},
+    {"operation": "diff", "path": "src/lib.py", "patch": "--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new"}
+  ],
+  "commands": ["uv add requests"]
+}
+```"#;
+        let bundle = orch.parse_artifact_bundle(content);
+        assert!(bundle.is_some(), "Should parse structured JSON bundle");
+        let bundle = bundle.unwrap();
+        assert_eq!(bundle.artifacts.len(), 2);
+        assert!(bundle.artifacts[0].is_write());
+        assert_eq!(bundle.artifacts[0].path(), "src/main.py");
+        assert!(bundle.artifacts[1].is_diff());
+        assert_eq!(bundle.artifacts[1].path(), "src/lib.py");
+        assert_eq!(bundle.commands, vec!["uv add requests"]);
+    }
+
+    #[test]
+    fn test_parse_artifact_bundle_json_with_empty_path_falls_through() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        // JSON bundle with empty path fails validation → falls through to legacy.
+        // Legacy parser sees ```json block and maps it to "config.json".
+        // Current behavior: not rejected — the raw JSON becomes config.json content.
+        let content = r#"```json
+{
+  "artifacts": [
+    {"operation": "write", "path": "", "content": "bad"}
+  ],
+  "commands": []
+}
+```"#;
+        let bundle = orch.parse_artifact_bundle(content);
+        assert!(
+            bundle.is_some(),
+            "Legacy fallback produces a config.json artifact"
+        );
+        let bundle = bundle.unwrap();
+        assert_eq!(bundle.artifacts.len(), 1);
+        assert_eq!(bundle.artifacts[0].path(), "config.json");
+    }
+
+    #[test]
+    fn test_parse_artifact_bundle_json_absolute_path_falls_through() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        // Absolute-path JSON bundle fails validation → falls through to legacy.
+        // Legacy parser sees ```json block and maps it to "config.json".
+        // Current behavior: the malicious path is NOT written to, but the
+        // raw JSON is still emitted as config.json content.
+        let content = r#"```json
+{
+  "artifacts": [
+    {"operation": "write", "path": "/etc/passwd", "content": "bad"}
+  ],
+  "commands": []
+}
+```"#;
+        let bundle = orch.parse_artifact_bundle(content);
+        assert!(
+            bundle.is_some(),
+            "Legacy fallback produces a config.json artifact"
+        );
+        let bundle = bundle.unwrap();
+        assert_eq!(bundle.artifacts.len(), 1);
+        assert_eq!(bundle.artifacts[0].path(), "config.json");
+    }
+
+    #[test]
+    fn test_parse_artifact_bundle_returns_none_for_garbage() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = "This is just a plain text response with no code blocks at all.";
+        assert!(orch.parse_artifact_bundle(content).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_effective_working_dir_with_sandbox() {
+        // When a node has a provisional branch AND the sandbox directory exists,
+        // effective_working_dir should return the sandbox path instead of workspace.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_eff_workdir_sandbox_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        orch.context.session_id = "test_session".into();
+
+        let parent = SRBNNode::new("root".into(), "root goal".into(), ModelTier::Actuator);
+        let child = SRBNNode::new("child".into(), "child goal".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+        orch.add_dependency("root", "child", "dep").unwrap();
+
+        let child_idx = orch.node_indices["child"];
+        let branch_id = orch.maybe_create_provisional_branch(child_idx).unwrap();
+
+        let sandbox_path = temp_dir
+            .join(".perspt")
+            .join("sandboxes")
+            .join("test_session")
+            .join(&branch_id);
+        assert!(sandbox_path.exists(), "Sandbox should have been created");
+
+        // effective_working_dir should now return the sandbox
+        let eff = orch.effective_working_dir(child_idx);
+        assert_eq!(eff, sandbox_path);
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_sandbox_dir_for_node_returns_path_when_exists() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_sandbox_dir_exists_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        orch.context.session_id = "sess".into();
+
+        let parent = SRBNNode::new("p".into(), "g".into(), ModelTier::Actuator);
+        let child = SRBNNode::new("c".into(), "g".into(), ModelTier::Actuator);
+        orch.add_node(parent);
+        orch.add_node(child);
+        orch.add_dependency("p", "c", "dep").unwrap();
+
+        let child_idx = orch.node_indices["c"];
+        let branch_id = orch.maybe_create_provisional_branch(child_idx).unwrap();
+
+        let sandbox = orch.sandbox_dir_for_node(child_idx);
+        assert!(sandbox.is_some());
+        let sandbox_path = sandbox.unwrap();
+        assert!(sandbox_path.ends_with(&branch_id));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_root_node_bypasses_sandbox() {
+        // Root nodes (no graph parents) should NOT get provisional branches,
+        // and effective_working_dir should return the live workspace.
+        let temp_dir =
+            std::env::temp_dir().join(format!("perspt_root_bypass_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+
+        let root = SRBNNode::new("root".into(), "root goal".into(), ModelTier::Actuator);
+        orch.add_node(root);
+
+        let root_idx = orch.node_indices["root"];
+        // maybe_create_provisional_branch should return None for roots
+        let branch = orch.maybe_create_provisional_branch(root_idx);
+        assert!(
+            branch.is_none(),
+            "Root node should not get a provisional branch"
+        );
+
+        // effective_working_dir falls back to workspace
+        assert_eq!(orch.effective_working_dir(root_idx), temp_dir);
+
+        // sandbox_dir should also be None
+        assert!(orch.sandbox_dir_for_node(root_idx).is_none());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_step_commit_copies_sandbox_to_workspace() {
+        // Verify the commit path: files written to sandbox should appear in
+        // the workspace after step_commit runs its copy-from-sandbox logic.
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("perspt_commit_copy_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        orch.context.session_id = uuid::Uuid::new_v4().to_string();
+
+        let plan = TaskPlan {
+            tasks: vec![
+                PlannedTask {
+                    id: "parent".into(),
+                    goal: "Parent".into(),
+                    output_files: vec!["src/parent.rs".into()],
+                    ..PlannedTask::new("parent", "Parent")
+                },
+                PlannedTask {
+                    id: "child".into(),
+                    goal: "Child".into(),
+                    output_files: vec!["src/child.rs".into()],
+                    dependencies: vec!["parent".into()],
+                    ..PlannedTask::new("child", "Child")
+                },
+            ],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let child_idx = orch.node_indices["child"];
+        let _branch_id = orch.maybe_create_provisional_branch(child_idx).unwrap();
+
+        // Write a file into sandbox via apply_bundle_transactionally
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "src/child.rs".into(),
+                content: "pub fn child_fn() {}\n".into(),
+            }],
+            commands: vec![],
+        };
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "child",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .unwrap();
+
+        // Before commit: file should be in sandbox, NOT in workspace
+        let sandbox = orch.sandbox_dir_for_node(child_idx).unwrap();
+        assert!(sandbox.join("src/child.rs").exists());
+        assert!(!temp_dir.join("src/child.rs").exists());
+
+        // Now run step_commit to promote
+        let child_idx = orch.node_indices["child"];
+        let _ = orch.step_commit(child_idx).await;
+
+        // After commit: file should now be in workspace
+        assert!(
+            temp_dir.join("src/child.rs").exists(),
+            "step_commit should copy sandbox files to workspace"
+        );
+        let content = std::fs::read_to_string(temp_dir.join("src/child.rs")).unwrap();
+        assert_eq!(content, "pub fn child_fn() {}\n");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_parse_artifact_bundle_json_path_traversal_falls_through() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        // Path-traversal JSON bundle fails validation → falls through to legacy.
+        // Legacy parser sees ```json block and maps it to "config.json".
+        // Current behavior: traversal path is NOT written to, but raw JSON
+        // is emitted as config.json content.
+        let content = r#"```json
+{
+  "artifacts": [
+    {"operation": "write", "path": "../../../etc/shadow", "content": "bad"}
+  ],
+  "commands": []
+}
+```"#;
+        let bundle = orch.parse_artifact_bundle(content);
+        assert!(
+            bundle.is_some(),
+            "Legacy fallback produces a config.json artifact"
+        );
+        let bundle = bundle.unwrap();
+        assert_eq!(bundle.artifacts.len(), 1);
+        assert_eq!(bundle.artifacts[0].path(), "config.json");
+    }
 }
