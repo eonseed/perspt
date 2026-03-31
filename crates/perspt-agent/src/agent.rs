@@ -128,7 +128,14 @@ Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
 - DO NOT create `pyproject.toml`, `requirements.txt`, `package.json`, `Cargo.toml`, or any project configuration files
 - The system handles project initialization separately via CLI tools (uv, npm, cargo)
 - Focus ONLY on source code files (.py, .js, .rs, etc.) and test files
-- If you need to add dependencies, include them in the task goal description (e.g., "Add requests library for HTTP calls")
+- If you need to add dependencies, include them in `dependency_expectations.required_packages`
+
+### DEPENDENCY EXPECTATIONS
+For each task, declare the packages/crates the generated code will import under `dependency_expectations`:
+- `required_packages`: list of third-party packages the task's code imports (e.g., `["requests", "pydantic"]` or `["serde", "tokio"]`)
+- `setup_commands`: commands that must succeed before this task runs (e.g., `["cargo fetch"]`)
+- `min_toolchain_version`: optional minimum toolchain version string (e.g., `"1.75"` for Rust, `"3.11"` for Python)
+Only include EXTERNAL / third-party dependencies, not standard-library modules.
 
 ## Output Format
 Respond with ONLY a JSON object in this exact format:
@@ -142,6 +149,11 @@ Respond with ONLY a JSON object in this exact format:
       "output_files": ["module_a.py"],
       "dependencies": [],
       "task_type": "code",
+      "dependency_expectations": {{
+        "required_packages": [],
+        "setup_commands": [],
+        "min_toolchain_version": null
+      }},
       "contract": {{
         "interface_signature": "def function_name(arg: Type) -> ReturnType",
         "invariants": ["Must handle edge cases"],

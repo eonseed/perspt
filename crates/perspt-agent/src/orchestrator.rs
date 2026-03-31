@@ -803,6 +803,11 @@ impl SRBNOrchestrator {
             self.redetect_plugins_after_init();
         }
 
+        // Gate: verify at least one plugin has build capability before planning.
+        // Without this, the architect may produce a plan whose verification is
+        // fully degraded, leading to false stability.
+        self.check_verifier_readiness_gate();
+
         // Start LSP for detected plugins (after classification + init so we
         // use the authoritative plugin set, not a provisional one).
         {
@@ -1504,6 +1509,40 @@ impl SRBNOrchestrator {
         }
 
         self.emit_plugin_readiness();
+    }
+
+    /// Check that at least one active plugin has a usable build capability.
+    ///
+    /// Emits a warning when verification will be fully degraded.  This gives
+    /// the user early visibility rather than producing a plan whose nodes can
+    /// never be meaningfully verified.
+    fn check_verifier_readiness_gate(&self) {
+        if self.context.active_plugins.is_empty() {
+            self.emit_log(
+                "⚠️ No language plugins active — verification will be fully degraded".to_string(),
+            );
+            return;
+        }
+
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let mut any_build = false;
+        for name in &self.context.active_plugins {
+            if let Some(plugin) = registry.get(name) {
+                let profile = plugin.verifier_profile();
+                if !profile.fully_degraded() {
+                    any_build = true;
+                    break;
+                }
+            }
+        }
+
+        if !any_build {
+            self.emit_log(
+                "⚠️ All active plugins report fully degraded verifier — \
+                 build/test results may be unreliable"
+                    .to_string(),
+            );
+        }
     }
 
     /// Run Solo Mode: A tight loop for single-file tasks
@@ -3159,6 +3198,31 @@ Project name:"#,
                 let stages = verification_stages_for_node(node);
 
                 if !stages.is_empty() && !plugin_name.is_empty() && plugin_name != "unknown" {
+                    // Proactive dependency installation: install packages declared
+                    // in the architect's dependency_expectations before running
+                    // verification so the first build attempt has a better chance
+                    // of succeeding without reactive auto-repair.
+                    let dep_exp = node.dependency_expectations.clone();
+                    if !dep_exp.required_packages.is_empty() {
+                        self.emit_log(format!(
+                            "📦 Pre-installing declared dependencies: {}",
+                            dep_exp.required_packages.join(", ")
+                        ));
+                        let installed = if plugin_name == "python" {
+                            Self::auto_install_python_deps(&dep_exp.required_packages, &verify_dir)
+                                .await
+                        } else {
+                            Self::auto_install_crate_deps(&dep_exp.required_packages, &verify_dir)
+                                .await
+                        };
+                        if installed > 0 {
+                            self.emit_log(format!(
+                                "📦 Pre-installed {} declared package(s)",
+                                installed
+                            ));
+                        }
+                    }
+
                     self.emit_log(format!(
                         "🔬 Running verification ({} stages) for {} node '{}'...",
                         stages.len(),
@@ -8371,5 +8435,66 @@ def util():
         let bundle = bundle.unwrap();
         assert_eq!(bundle.artifacts.len(), 1);
         assert_eq!(bundle.artifacts[0].path(), "config.json");
+    }
+
+    // --- Step 6: Greenfield bootstrap ordering & dependency determinism ---
+
+    #[test]
+    fn test_dependency_expectations_threaded_to_nodes() {
+        use perspt_core::types::{DependencyExpectation, PlannedTask, TaskPlan};
+
+        let mut plan = TaskPlan::new();
+        let mut t1 = PlannedTask::new("t1", "Create server module");
+        t1.output_files = vec!["src/server.py".to_string()];
+        t1.dependency_expectations = DependencyExpectation {
+            required_packages: vec!["flask".to_string(), "pydantic".to_string()],
+            setup_commands: vec![],
+            min_toolchain_version: Some("3.11".to_string()),
+        };
+        plan.tasks.push(t1);
+
+        let mut orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        // Verify the node carries dependency expectations
+        let idx = orch.node_indices["t1"];
+        let node = &orch.graph[idx];
+        assert_eq!(node.dependency_expectations.required_packages.len(), 2);
+        assert_eq!(node.dependency_expectations.required_packages[0], "flask");
+        assert_eq!(
+            node.dependency_expectations
+                .min_toolchain_version
+                .as_deref(),
+            Some("3.11")
+        );
+    }
+
+    #[test]
+    fn test_verifier_readiness_gate_no_plugins() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        // Should not panic with empty plugins
+        orch.check_verifier_readiness_gate();
+    }
+
+    #[test]
+    fn test_architect_prompt_includes_dependency_expectations() {
+        let prompt = crate::agent::ArchitectAgent::build_task_decomposition_prompt(
+            "Build a web server",
+            std::path::Path::new("/tmp"),
+            "empty project",
+            None,
+        );
+        assert!(
+            prompt.contains("dependency_expectations"),
+            "Architect prompt must include dependency_expectations in the JSON schema"
+        );
+        assert!(
+            prompt.contains("required_packages"),
+            "Architect prompt must mention required_packages"
+        );
+        assert!(
+            prompt.contains("min_toolchain_version"),
+            "Architect prompt must mention min_toolchain_version"
+        );
     }
 }
