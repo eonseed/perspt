@@ -4,7 +4,7 @@ Architecture
 ============
 
 Perspt is a Rust workspace with seven crates plus a root integration crate.
-Version 0.5.5 implements the PSP-5 specification for the experimental SRBN agent.
+Version 0.5.6 implements the PSP-5 specification for the experimental SRBN agent.
 
 Workspace Layout
 ----------------
@@ -280,8 +280,8 @@ All canonical types live in ``perspt_core::types``:
      - Description
    * - ``SRBNNode``
      - DAG node: goal, output_targets, contract, tier, monitor, state, node_class, owner_plugin, provisional_branch_id, interface_seal_hash
-   * - ``NodeState`` (11 variants)
-     - TaskQueued → Planning → Coding → Verifying → Retry → SheafCheck → Committing → Completed / Failed / Escalated / Aborted
+   * - ``NodeState`` (12 variants)
+     - TaskQueued → Planning → Coding → Verifying → Retry → SheafCheck → Committing → Completed / Failed / Escalated / Aborted / Superseded
    * - ``NodeClass``
      - Interface, Implementation (default), Integration
    * - ``ModelTier``
@@ -456,6 +456,8 @@ All canonical types live in ``perspt_core::types``:
      - Versioned plan: revision_id, sequence, plan, reason, supersedes, status (Active/Superseded/Cancelled)
    * - ``RepairFootprint``
      - Correction audit: affected_files, applied_bundle, diagnosis, resolved flag
+   * - ``PlanningPolicy`` (5 variants)
+     - Adaptive agent gating: LocalEdit (skip architect), FeatureIncrement (default), LargeFeature, GreenfieldBuild, ArchitecturalRevision. Methods: ``needs_architect()``, ``needs_speculator()``
 
 
 Events System
@@ -530,7 +532,7 @@ Streaming Contract
 Both chat and agent mode use the same streaming protocol:
 
 1. LLM requests stream chunks over ``mpsc::UnboundedSender<String>``
-2. End-of-response signaled by ``EOT_SIGNAL`` (``<<EOT>>``)
+2. End-of-response signaled by ``EOT_SIGNAL`` (``<|EOT|>``)
 3. Provider sends EOT — UI never adds its own
 4. UI batches channel messages, handles first EOT, ignores duplicates
 5. Streaming buffer updates the last assistant message live

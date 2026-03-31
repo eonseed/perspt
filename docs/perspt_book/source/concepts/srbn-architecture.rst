@@ -102,7 +102,11 @@ The SRBN control loop as implemented by PSP-5 executes seven phases for each tas
      - Architect model decomposes the task into a ``TaskPlan`` DAG. Each node has an ID,
        goal, context files, output files, dependencies, task type, and node class
        (Interface, Implementation, or Integration). The **ownership closure** rule
-       ensures each output file appears in exactly one node.
+       ensures each output file appears in exactly one node. Planning is gated by
+       ``PlanningPolicy``: ``LocalEdit`` skips the Architect and creates a single-node
+       graph; all other policies run the full Architect decomposition.
+       A **FeatureCharter** is auto-created with policy-derived limits
+       (``max_modules``, ``max_files``, ``max_revisions``) before planning begins.
    * - 3
      - **Generation**
      - Actuator model generates a multi-artifact bundle per node. The bundle is a JSON
@@ -257,6 +261,60 @@ Configure per-tier models via CLI:
      "Build a REST API"
 
 Each tier also supports a fallback model (``--architect-fallback-model``, etc.).
+
+
+Planning Policy
+---------------
+
+The ``PlanningPolicy`` enum adapts the agent phase stack based on task scale:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 15 45
+
+   * - Policy
+     - Architect
+     - Speculator
+     - Description
+   * - **LocalEdit**
+     - No
+     - No
+     - Small, localized changes. Skips task decomposition; uses a single-node graph.
+   * - **FeatureIncrement** (default)
+     - Yes
+     - No
+     - Mid-size features. Architect decomposes, Actuator implements, Verifier checks.
+   * - **LargeFeature**
+     - Yes
+     - Yes
+     - Full SRBN loop including speculator lookahead for downstream risk hints.
+   * - **GreenfieldBuild**
+     - Yes
+     - Yes
+     - New project. Full stack with workspace bootstrap node first.
+   * - **ArchitecturalRevision**
+     - Yes
+     - Yes
+     - Cross-cutting redesign. Plan-first with speculator risk analysis.
+
+The policy is auto-selected based on workspace state (greenfield vs existing project).
+``needs_architect()`` gates whether the Architect tier runs; ``needs_speculator()``
+gates the speculator lookahead call.
+
+
+Feature Charter
+~~~~~~~~~~~~~~~
+
+Before architect planning begins, the orchestrator creates a ``FeatureCharter``
+with policy-derived defaults:
+
+- **LocalEdit**: max 1 module, 5 files, 3 revisions
+- **FeatureIncrement**: max 10 modules, 30 files, 5 revisions
+- **LargeFeature / GreenfieldBuild / ArchitecturalRevision**: max 25 modules, 80 files, 10 revisions
+
+The charter gates the plan: if the Architect produces a plan exceeding the charter's
+module or file budget, a warning is emitted. Language constraints are derived from
+active plugins.
 
 
 Retry Policy

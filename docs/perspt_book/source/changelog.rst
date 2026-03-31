@@ -3,12 +3,59 @@
 Changelog
 =========
 
-Version 0.5.5 — "ikigai 生き甲斐"
+Version 0.5.6 — "ikigai 生き甲斐"
 -----------------------------------
 
-*PSP-5 and SRBN Experimental Support Release*
+*SRBN Sandbox Revision Flow Release*
 
    "A reason for being — the happiness of always being busy with what you love."
+
+**SRBN Sandbox Revision Flow (PSP-5 Phases 3-12):**
+
+- **PlanningPolicy** — Adaptive agent gating with 5 policies (LocalEdit,
+  FeatureIncrement, LargeFeature, GreenfieldBuild, ArchitecturalRevision).
+  ``needs_architect()`` and ``needs_speculator()`` gate agent tier activation
+- **FeatureCharter auto-creation** — Policy-derived file/module/revision limits
+  created before architect planning so the plan gate has bounds to enforce
+- **Speculator lookahead gating** — Speculator tier only activates for LargeFeature,
+  GreenfieldBuild, and ArchitecturalRevision policies
+- **BudgetEnvelope session restore** — Step/cost/revision caps restored from DB
+  during ``resume`` so interrupted sessions honour the original limits
+- **Bundle path normalization** — ``filter_bundle_to_declared_paths`` uses
+  ``normalize_artifact_path`` for correct comparison of path variants (e.g.
+  ``./src/main.rs`` vs ``src/main.rs``)
+- **NodeState::Superseded** — New terminal state for plan amendment (Phase 14
+  preparation). Updated ``is_terminal()``, ``parse_node_state()``, and
+  ``NodeStatus`` conversion
+- **Orchestrator module extraction** — ``orchestrator.rs`` split into 9 submodules:
+  ``mod.rs``, ``bundle.rs``, ``commit.rs``, ``convergence.rs``, ``init.rs``,
+  ``planning.rs``, ``repair.rs``, ``solo.rs``, ``verification.rs``
+- **Centralized prompts** — All 15 agent prompts consolidated in ``prompts.rs``
+  with constants and ``render_*`` helpers; duplicates removed from ``agent.rs``
+- **RepairFootprint-backed correction** — ``build_correction_prompt`` uses
+  ``RepairFootprint`` for precise, grounded repair context
+- **Greenfield bootstrap ordering** — Plugin-driven project initialization with
+  correct pre-sheafify plugin re-detection
+- **Provisional branch lifecycle** — Sandbox-first execution with branch creation,
+  merge, and flush cascade
+- **Escalation classification** — 5 categories with 9 rewrite actions and
+  graph surgery support
+
+**Documentation:**
+
+- Updated architecture docs with PlanningPolicy, FeatureCharter, and
+  NodeState::Superseded documentation
+- Added Planning Policy and Feature Charter sections to SRBN architecture guide
+- Updated workspace crates docs with orchestrator submodule structure
+- Added speculator lookahead and budget restore documentation to agent mode guide
+- Fixed energy weight default (gamma=2.0) in advanced features guide
+- Refreshed all version references to 0.5.6
+
+
+Version 0.5.5
+-------------
+
+*PSP-5 Cross-Platform and CI Stabilization Release*
 
 **Cross-Platform Fixes:**
 
@@ -35,7 +82,6 @@ Version 0.5.5 — "ikigai 生き甲斐"
 
 - Updated workspace coding instructions to match current multi-crate architecture
 - Refreshed all version references across the Perspt Book and Sphinx configuration
-- Changelog updated for 0.5.5 release
 
 Version 0.5.4
 -------------

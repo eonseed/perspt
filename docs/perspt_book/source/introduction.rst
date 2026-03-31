@@ -39,7 +39,7 @@ to Large Language Models. It serves two complementary purposes:
    framework is mature; the implementation is under active development and has not
    yet been benchmarked.
 
-.. admonition:: Version 0.5.5 "ikigai 生き甲斐" Highlights
+.. admonition:: Version 0.5.6 "ikigai 生き甲斐" Highlights
    :class: tip
 
    **LLM CLI:**
