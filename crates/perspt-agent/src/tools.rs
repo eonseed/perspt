@@ -1019,6 +1019,12 @@ pub fn seed_sandbox_manifests(
         ensure_rust_workspace_members_in_sandbox(working_dir, sandbox_dir);
     }
 
+    // For Python projects: symlink .venv and seed src/<pkg>/ so uv run
+    // commands work immediately in the sandbox.
+    if plugins.contains(&"python") {
+        seed_python_sandbox(working_dir, sandbox_dir);
+    }
+
     Ok(())
 }
 
@@ -1112,6 +1118,107 @@ fn ensure_rust_workspace_members_in_sandbox(working_dir: &Path, sandbox_dir: &Pa
     }
 }
 
+/// Seed a Python project sandbox with the workspace `.venv/` (via symlink)
+/// and the `src/<pkg>/` package directory tree so that `uv run` commands
+/// work immediately without a full re-sync.
+fn seed_python_sandbox(working_dir: &Path, sandbox_dir: &Path) {
+    // Symlink .venv/ so uv run reuses the workspace venv instead of
+    // recreating one per sandbox (saves ~2-3s per node).
+    let workspace_venv = working_dir.join(".venv");
+    let sandbox_venv = sandbox_dir.join(".venv");
+    if workspace_venv.is_dir() && !sandbox_venv.exists() {
+        #[cfg(unix)]
+        {
+            if let Err(e) = std::os::unix::fs::symlink(&workspace_venv, &sandbox_venv) {
+                log::debug!("Could not symlink .venv into sandbox: {}", e);
+            } else {
+                log::debug!("Symlinked .venv into sandbox");
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            // On Windows, symlinks require elevated privileges; skip the
+            // optimisation — uv will auto-create a venv when needed.
+            log::debug!("Skipping .venv symlink on non-Unix platform");
+        }
+    }
+
+    // Seed ancillary files that `uv add` / `uv sync` need when building
+    // the project inside the sandbox.  In particular, `uv init` generates
+    // `readme = "README.md"` in pyproject.toml, so the sandbox build fails
+    // with "failed to open file README.md" if we don't copy it.
+    for ancillary in &["README.md", "README.rst", "README", ".python-version"] {
+        let src = working_dir.join(ancillary);
+        if src.is_file() {
+            let dst = sandbox_dir.join(ancillary);
+            if !dst.exists() {
+                let _ = fs::copy(&src, &dst);
+            }
+        }
+    }
+
+    // Copy the src/<pkg>/ directory tree so imports resolve.  We walk one
+    // level under src/ looking for Python packages (__init__.py present).
+    let workspace_src = working_dir.join("src");
+    if workspace_src.is_dir() {
+        if let Ok(entries) = fs::read_dir(&workspace_src) {
+            for entry in entries.flatten() {
+                let pkg_dir = entry.path();
+                if pkg_dir.is_dir() && pkg_dir.join("__init__.py").exists() {
+                    // Recursively copy all .py files from this package
+                    if let Err(e) = copy_dir_to_sandbox(working_dir, sandbox_dir, &pkg_dir) {
+                        log::debug!(
+                            "Could not seed src/{} into sandbox: {}",
+                            entry.file_name().to_string_lossy(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Also copy conftest.py / tests/ directory if present (needed for pytest)
+    for extra in &["conftest.py", "tests"] {
+        let src = working_dir.join(extra);
+        if src.is_file() {
+            let rel = extra.to_string();
+            let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
+        } else if src.is_dir() {
+            let _ = copy_dir_to_sandbox(working_dir, sandbox_dir, &src);
+        }
+    }
+}
+
+/// Recursively copy a directory from workspace into sandbox, preserving
+/// relative paths.  Skips `.venv`, `__pycache__`, and bytecode files.
+fn copy_dir_to_sandbox(
+    working_dir: &Path,
+    sandbox_dir: &Path,
+    src_dir: &Path,
+) -> std::io::Result<()> {
+    const SKIP: &[&str] = &[".venv", "__pycache__", ".mypy_cache", ".pytest_cache"];
+    for entry in fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if path.is_dir() {
+            if SKIP.iter().any(|s| *s == &*name_str) {
+                continue;
+            }
+            copy_dir_to_sandbox(working_dir, sandbox_dir, &path)?;
+        } else if !name_str.ends_with(".pyc") {
+            if let Ok(rel) = path.strip_prefix(working_dir) {
+                let rel_str = rel.to_string_lossy().to_string();
+                copy_to_sandbox(working_dir, sandbox_dir, &rel_str)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Clean up a specific sandbox workspace.
 pub fn cleanup_sandbox(sandbox_dir: &Path) -> std::io::Result<()> {
     if sandbox_dir.exists() {
@@ -1179,11 +1286,26 @@ pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
     if !sandbox_dir.exists() {
         return Ok(files);
     }
+    /// Directories that should never be exported from sandbox back to
+    /// workspace — virtual-environments, bytecode caches, build artifacts.
+    const SKIP_DIRS: &[&str] = &[
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+    ];
     fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if SKIP_DIRS.iter().any(|s| *s == &*name_str) {
+                    continue;
+                }
                 walk(&path, base, out)?;
             } else if let Ok(rel) = path.strip_prefix(base) {
                 let normalized = rel
@@ -1191,7 +1313,10 @@ pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
                     .map(|component| component.as_os_str().to_string_lossy().into_owned())
                     .collect::<Vec<_>>()
                     .join("/");
-                out.push(normalized);
+                // Skip bytecode / lock artifacts that shouldn't transfer
+                if !normalized.ends_with(".pyc") {
+                    out.push(normalized);
+                }
             }
         }
         Ok(())
