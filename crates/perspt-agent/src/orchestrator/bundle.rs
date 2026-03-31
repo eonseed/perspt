@@ -146,6 +146,7 @@ impl SRBNOrchestrator {
 
         let mut files_created: Vec<String> = Vec::new();
         let mut files_modified: Vec<String> = Vec::new();
+        let mut files_deleted: Vec<String> = Vec::new();
 
         for op in &bundle.artifacts {
             let mut args = HashMap::new();
@@ -170,21 +171,49 @@ impl SRBNOrchestrator {
                         arguments: args,
                     }
                 }
-                perspt_core::types::ArtifactOperation::Delete { .. } => {
-                    // Delete operations are not yet supported by the tool layer.
-                    // Log and skip for now; Step 10 will add full support.
-                    log::warn!("Skipping unsupported Delete operation for {}", op.path());
-                    continue;
+                perspt_core::types::ArtifactOperation::Delete { path } => {
+                    // Validate delete through policy layer
+                    if let Err(e) = perspt_policy::sanitize::validate_artifact_mutation(
+                        path,
+                        &self.context.working_dir,
+                        "Delete",
+                    ) {
+                        log::warn!("Delete blocked by policy: {}", e);
+                        self.emit_log(format!("⚠️ Delete blocked: {}", e));
+                        continue;
+                    }
+                    ToolCall {
+                        name: "delete_file".to_string(),
+                        arguments: args,
+                    }
                 }
-                perspt_core::types::ArtifactOperation::Move { to, .. } => {
-                    // Move operations are not yet supported by the tool layer.
-                    // Log and skip for now; Step 10 will add full support.
-                    log::warn!(
-                        "Skipping unsupported Move operation {} -> {}",
-                        op.path(),
-                        to
-                    );
-                    continue;
+                perspt_core::types::ArtifactOperation::Move { from, to } => {
+                    // Validate both source and destination through policy
+                    if let Err(e) = perspt_policy::sanitize::validate_artifact_mutation(
+                        from,
+                        &self.context.working_dir,
+                        "Move",
+                    ) {
+                        log::warn!("Move source blocked by policy: {}", e);
+                        self.emit_log(format!("⚠️ Move blocked: {}", e));
+                        continue;
+                    }
+                    if let Err(e) = perspt_policy::sanitize::validate_artifact_mutation(
+                        to,
+                        &self.context.working_dir,
+                        "Move",
+                    ) {
+                        log::warn!("Move destination blocked by policy: {}", e);
+                        self.emit_log(format!("⚠️ Move blocked: {}", e));
+                        continue;
+                    }
+                    let resolved_to = node_workdir.join(to);
+                    args.insert("from".to_string(), args["path"].clone());
+                    args.insert("to".to_string(), resolved_to.to_string_lossy().to_string());
+                    ToolCall {
+                        name: "move_file".to_string(),
+                        arguments: args,
+                    }
                 }
             };
 
@@ -194,27 +223,35 @@ impl SRBNOrchestrator {
 
                 if op.is_write() {
                     files_created.push(op.path().to_string());
+                } else if op.is_delete() {
+                    files_deleted.push(op.path().to_string());
+                } else if op.is_move() {
+                    if let perspt_core::types::ArtifactOperation::Move { to, .. } = op {
+                        files_modified.push(format!("{} -> {}", op.path(), to));
+                    }
                 } else {
                     files_modified.push(op.path().to_string());
                 }
 
-                // Track for LSP notification
-                self.last_written_file = Some(full_path.clone());
-                self.file_version += 1;
+                // Track for LSP notification (skip for deleted files)
+                if !op.is_delete() {
+                    self.last_written_file = Some(full_path.clone());
+                    self.file_version += 1;
 
-                // Notify LSP of file change
-                let registry = perspt_core::plugin::PluginRegistry::new();
-                for (lang, client) in self.lsp_clients.iter_mut() {
-                    // Only notify if the plugin owns this file
-                    let should_notify = match registry.get(lang) {
-                        Some(plugin) => plugin.owns_file(op.path()),
-                        None => true,
-                    };
-                    if should_notify {
-                        if let Ok(content) = std::fs::read_to_string(&full_path) {
-                            let _ = client
-                                .did_change(&full_path, &content, self.file_version)
-                                .await;
+                    // Notify LSP of file change
+                    let registry = perspt_core::plugin::PluginRegistry::new();
+                    for (lang, client) in self.lsp_clients.iter_mut() {
+                        // Only notify if the plugin owns this file
+                        let should_notify = match registry.get(lang) {
+                            Some(plugin) => plugin.owns_file(op.path()),
+                            None => true,
+                        };
+                        if should_notify {
+                            if let Ok(content) = std::fs::read_to_string(&full_path) {
+                                let _ = client
+                                    .did_change(&full_path, &content, self.file_version)
+                                    .await;
+                            }
                         }
                     }
                 }

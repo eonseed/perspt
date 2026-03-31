@@ -82,6 +82,8 @@ impl AgentTools {
             "list_files" => self.list_files(call),
             "write_file" => self.write_file(call),
             "apply_diff" => self.apply_diff(call),
+            "delete_file" => self.delete_file(call),
+            "move_file" => self.move_file(call),
             // Power Tools (OS-level)
             "sed_replace" => self.sed_replace(call),
             "awk_filter" => self.awk_filter(call),
@@ -361,6 +363,79 @@ impl AgentTools {
     fn write_file(&self, call: &ToolCall) -> ToolResult {
         // Alias for apply_patch with different semantics
         self.apply_patch(call)
+    }
+
+    /// Delete a file from the workspace
+    fn delete_file(&self, call: &ToolCall) -> ToolResult {
+        let path = match call.arguments.get("path") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("delete_file", "Missing 'path' argument".to_string())
+            }
+        };
+
+        if !path.exists() {
+            return ToolResult::success(
+                "delete_file",
+                format!("Path does not exist, nothing to delete: {:?}", path),
+            );
+        }
+
+        if path.is_dir() {
+            return ToolResult::failure(
+                "delete_file",
+                format!(
+                    "Cannot delete directory {:?}; only files are supported",
+                    path
+                ),
+            );
+        }
+
+        match std::fs::remove_file(&path) {
+            Ok(()) => ToolResult::success("delete_file", format!("Deleted {:?}", path)),
+            Err(e) => {
+                ToolResult::failure("delete_file", format!("Failed to delete {:?}: {}", path, e))
+            }
+        }
+    }
+
+    /// Move/rename a file within the workspace
+    fn move_file(&self, call: &ToolCall) -> ToolResult {
+        let from = match call.arguments.get("from") {
+            Some(p) => self.resolve_path(p),
+            None => return ToolResult::failure("move_file", "Missing 'from' argument".to_string()),
+        };
+        let to = match call.arguments.get("to") {
+            Some(p) => self.resolve_path(p),
+            None => return ToolResult::failure("move_file", "Missing 'to' argument".to_string()),
+        };
+
+        if !from.exists() {
+            return ToolResult::failure(
+                "move_file",
+                format!("Source path does not exist: {:?}", from),
+            );
+        }
+
+        // Ensure destination parent directory exists
+        if let Some(parent) = to.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return ToolResult::failure(
+                        "move_file",
+                        format!("Failed to create destination directory {:?}: {}", parent, e),
+                    );
+                }
+            }
+        }
+
+        match std::fs::rename(&from, &to) {
+            Ok(()) => ToolResult::success("move_file", format!("Moved {:?} -> {:?}", from, to)),
+            Err(e) => ToolResult::failure(
+                "move_file",
+                format!("Failed to move {:?} -> {:?}: {}", from, to, e),
+            ),
+        }
     }
 
     /// Resolve a path relative to working directory
@@ -722,6 +797,115 @@ mod tests {
 
         let content = fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "Hello diffy\nThis is a test\n");
+    }
+
+    #[tokio::test]
+    async fn test_delete_file() {
+        let dir = temp_dir();
+        let test_file = dir.join("test_delete_me.txt");
+        fs::write(&test_file, "temporary").unwrap();
+        assert!(test_file.exists());
+
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert("path".to_string(), test_file.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "delete_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(result.success, "Delete should succeed: {:?}", result.error);
+        assert!(!test_file.exists(), "File should be gone");
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_file_succeeds() {
+        let dir = temp_dir();
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert(
+            "path".to_string(),
+            "/tmp/does_not_exist_xyz.txt".to_string(),
+        );
+        let call = ToolCall {
+            name: "delete_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(result.success);
+    }
+
+    #[tokio::test]
+    async fn test_move_file() {
+        let dir = temp_dir();
+        let src = dir.join("test_move_src.txt");
+        let dst = dir.join("test_move_dst.txt");
+        fs::write(&src, "move me").unwrap();
+
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert("from".to_string(), src.to_string_lossy().to_string());
+        args.insert("to".to_string(), dst.to_string_lossy().to_string());
+        // move_file also needs "path" in args (set by bundle handler)
+        args.insert("path".to_string(), src.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "move_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(result.success, "Move should succeed: {:?}", result.error);
+        assert!(!src.exists(), "Source should be gone");
+        assert!(dst.exists(), "Destination should exist");
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "move me");
+        let _ = fs::remove_file(&dst);
+    }
+
+    #[tokio::test]
+    async fn test_delete_directory_rejected() {
+        let dir = temp_dir().join("test_delete_dir");
+        fs::create_dir_all(&dir).unwrap();
+
+        let tools = AgentTools::new(temp_dir(), false);
+        let mut args = HashMap::new();
+        args.insert("path".to_string(), dir.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "delete_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(!result.success, "Should reject directory deletion");
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_move_file_creates_parent_dirs() {
+        let dir = temp_dir();
+        let src = dir.join("test_move_nested_src.txt");
+        let dst = dir
+            .join("nested")
+            .join("deep")
+            .join("test_move_nested_dst.txt");
+        fs::write(&src, "nested move").unwrap();
+
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert("from".to_string(), src.to_string_lossy().to_string());
+        args.insert("to".to_string(), dst.to_string_lossy().to_string());
+        args.insert("path".to_string(), src.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "move_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(
+            result.success,
+            "Move with nested dirs should succeed: {:?}",
+            result.error
+        );
+        assert!(!src.exists());
+        assert!(dst.exists());
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "nested move");
+        let _ = fs::remove_dir_all(dir.join("nested"));
     }
 }
 

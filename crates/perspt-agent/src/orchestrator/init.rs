@@ -11,7 +11,10 @@ impl SRBNOrchestrator {
     ///
     /// Returns `true` if all critical tools (needed for init) are present.
     /// Optional tools (LSP, linters) emit warnings but don't block.
-    pub(super) fn check_tool_prerequisites(&self, plugin: &dyn perspt_core::plugin::LanguagePlugin) -> bool {
+    pub(super) fn check_tool_prerequisites(
+        &self,
+        plugin: &dyn perspt_core::plugin::LanguagePlugin,
+    ) -> bool {
         // Common OS tools that perspt uses for context retrieval and code manipulation
         let common_tools: &[(&str, &str)] = &[
             (

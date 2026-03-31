@@ -207,6 +207,57 @@ pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path)
     Ok(())
 }
 
+/// Validate that an artifact path is safe for a destructive operation
+/// (delete or move).
+///
+/// Beyond the standard path-traversal and absolute-path checks already
+/// performed by `ArtifactBundle::validate()`, this adds domain-level
+/// guards that prevent accidental loss of critical project files.
+pub fn validate_artifact_mutation(
+    path: &str,
+    workspace_root: &std::path::Path,
+    operation: &str,
+) -> Result<()> {
+    // 1. Canonical path check via perspt_core::path
+    perspt_core::path::normalize_artifact_path(path)
+        .map_err(|e| anyhow::anyhow!("{} rejected for {}: {}", operation, path, e))?;
+
+    // 2. Protect critical project root files
+    let protected: &[&str] = &[
+        "Cargo.toml",
+        "Cargo.lock",
+        "pyproject.toml",
+        "package.json",
+        "package-lock.json",
+        ".gitignore",
+        ".git",
+    ];
+
+    let normalized = path.replace('\\', "/");
+    let basename = normalized.rsplit('/').next().unwrap_or(&normalized);
+
+    // Only protect at root level (not nested e.g. crates/foo/Cargo.toml)
+    if !normalized.contains('/') && protected.contains(&basename) {
+        anyhow::bail!(
+            "{} rejected: '{}' is a protected project root file",
+            operation,
+            path
+        );
+    }
+
+    // 3. Reject entire top-level directories (e.g. "src", "crates")
+    let resolved = workspace_root.join(path);
+    if resolved.is_dir() && !normalized.contains('/') {
+        anyhow::bail!(
+            "{} rejected: '{}' is a top-level directory; specify individual files",
+            operation,
+            path
+        );
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +342,39 @@ mod tests {
     fn test_workspace_bound_flags_ignored() {
         let ws = std::path::PathBuf::from("/home/user/project");
         assert!(validate_workspace_bound("cargo build --release", &ws).is_ok());
+    }
+
+    #[test]
+    fn test_artifact_mutation_normal_file_allowed() {
+        let ws = std::env::temp_dir();
+        assert!(validate_artifact_mutation("src/main.rs", &ws, "Delete").is_ok());
+    }
+
+    #[test]
+    fn test_artifact_mutation_nested_cargo_toml_allowed() {
+        let ws = std::env::temp_dir();
+        assert!(validate_artifact_mutation("crates/foo/Cargo.toml", &ws, "Delete").is_ok());
+    }
+
+    #[test]
+    fn test_artifact_mutation_root_cargo_toml_rejected() {
+        let ws = std::env::temp_dir();
+        let result = validate_artifact_mutation("Cargo.toml", &ws, "Delete");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("protected"));
+    }
+
+    #[test]
+    fn test_artifact_mutation_gitignore_rejected() {
+        let ws = std::env::temp_dir();
+        let result = validate_artifact_mutation(".gitignore", &ws, "Delete");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_artifact_mutation_traversal_rejected() {
+        let ws = std::env::temp_dir();
+        let result = validate_artifact_mutation("../etc/passwd", &ws, "Move");
+        assert!(result.is_err());
     }
 }
