@@ -248,6 +248,49 @@ impl SRBNOrchestrator {
                             }
                         }
                     }
+                    // - Tests were expected but never ran (e.g. test compilation
+                    //   failed or test stage was skipped) → treat as build failure.
+                    //   Without this, nodes with broken test files get V=0 and
+                    //   pass verification erroneously.
+                    if !vr.tests_ok
+                        && vr.tests_failed == 0
+                        && vr.tests_passed == 0
+                        && stages.contains(&perspt_core::plugin::VerifierStage::Test)
+                    {
+                        // Check raw output for compilation errors in test targets
+                        let test_compile_failed = vr
+                            .raw_output
+                            .as_deref()
+                            .or_else(|| {
+                                vr.stage_outcomes
+                                    .iter()
+                                    .find(|so| so.stage == "test")
+                                    .and_then(|so| so.output.as_deref())
+                            })
+                            .is_some_and(|o| {
+                                o.contains("error[E")
+                                    || o.contains("could not compile")
+                                    || o.contains("FAILED")
+                                    || o.contains("ModuleNotFoundError")
+                                    || o.contains("ImportError")
+                            });
+                        if test_compile_failed {
+                            log::warn!(
+                                "Test compilation failed for node '{}' — treating as build failure",
+                                self.graph[idx].node_id
+                            );
+                            if energy.v_syn < 8.0 {
+                                energy.v_syn = 8.0;
+                            }
+                        } else {
+                            // Tests didn't run but no obvious error — moderate penalty
+                            energy.v_log = 5.0;
+                            log::warn!(
+                                "Tests expected but did not produce results for node '{}'",
+                                self.graph[idx].node_id
+                            );
+                        }
+                    }
                     // - Lint fail → V_str penalty
                     if !vr.lint_ok
                         && self.context.verifier_strictness
@@ -1057,7 +1100,8 @@ pub(super) fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -
 /// PSP-5 Phase 9: Determine which verification stages to run based on NodeClass.
 ///
 /// - **Interface**: SyntaxCheck only (signatures/schemas)
-/// - **Implementation**: SyntaxCheck + Build (+ Test if weighted_tests non-empty)
+/// - **Implementation**: SyntaxCheck + Build (+ Test if weighted_tests non-empty
+///   OR output targets include test files)
 /// - **Integration**: Full pipeline (SyntaxCheck + Build + Test + Lint)
 pub(super) fn verification_stages_for_node(
     node: &SRBNNode,
@@ -1069,7 +1113,22 @@ pub(super) fn verification_stages_for_node(
         }
         perspt_core::types::NodeClass::Implementation => {
             let mut stages = vec![VerifierStage::SyntaxCheck, VerifierStage::Build];
-            if !node.contract.weighted_tests.is_empty() {
+            // Include Test stage if the node has weighted tests OR if the
+            // node's output targets include test files.  Without this, nodes
+            // that produce test files (tests/*.rs, test_*.py, *.test.ts, etc.)
+            // only get SyntaxCheck+Build which don't compile/run test targets.
+            let has_test_outputs = node.output_targets.iter().any(|p| {
+                let s = p.to_string_lossy();
+                s.contains("/tests/")
+                    || s.contains("/test_")
+                    || s.contains(".test.")
+                    || s.contains(".spec.")
+                    || s.contains("_test.rs")
+                    || s.contains("_test.py")
+                    || s.contains("_tests.rs")
+                    || s.contains("_tests.py")
+            });
+            if !node.contract.weighted_tests.is_empty() || has_test_outputs {
                 stages.push(VerifierStage::Test);
             }
             stages
