@@ -642,6 +642,38 @@ Project name:"#;
 // Convergence / correction prompts
 // ---------------------------------------------------------------------------
 
+/// Retry prompt when the actuator produces artifacts that all target undeclared
+/// paths (e.g. generates `config.json` instead of `crates/solver/src/lib.rs`).
+///
+/// Placeholders: `{goal}`, `{expected_files}`, `{dropped_files}`,
+/// `{original_prompt}`.
+pub const BUNDLE_RETARGET: &str = r#"Your previous response was REJECTED because every artifact targeted a file path outside this node's declared outputs.
+
+## What went wrong
+You produced files for: {dropped_files}
+But this node's output_files are EXACTLY: {expected_files}
+
+## Requirement
+You MUST produce artifacts for the expected files listed above — nothing else.
+Re-read the original task and generate code for the correct paths.
+
+## Original Task
+{original_prompt}
+
+IMPORTANT: Your response MUST contain ONLY the declared output files. Do NOT produce files outside the list above."#;
+
+/// Render a bundle-retarget prompt for a stripped-bundle retry.
+pub fn render_bundle_retarget(
+    expected_files: &str,
+    dropped_files: &str,
+    original_prompt: &str,
+) -> String {
+    BUNDLE_RETARGET
+        .replace("{expected_files}", expected_files)
+        .replace("{dropped_files}", dropped_files)
+        .replace("{original_prompt}", original_prompt)
+}
+
 /// Preamble for the verifier-guided analysis stage during correction.
 ///
 /// The correction prompt body is appended after this preamble.

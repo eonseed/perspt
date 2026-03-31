@@ -1510,22 +1510,77 @@ impl SRBNOrchestrator {
             }
 
             let node_class = self.graph[idx].node_class;
-            self.apply_bundle_transactionally(&bundle, &node_id, node_class)
-                .await?;
-            self.last_tool_failure = None;
+            match self
+                .apply_bundle_transactionally(&bundle, &node_id, node_class)
+                .await
+            {
+                Ok(()) => {
+                    self.last_tool_failure = None;
+                    self.last_applied_bundle = Some(bundle.clone());
+                }
+                Err(e) if e.to_string().contains("targeted undeclared paths") => {
+                    // All artifacts were stripped — the LLM generated files
+                    // that don't match the node's declared output_targets.
+                    // Retry once with a focused correction prompt.
+                    log::warn!(
+                        "Bundle for '{}' targeted wrong files, retrying with retarget prompt",
+                        node_id
+                    );
+                    self.emit_log(format!(
+                        "🔄 Bundle for '{}' targeted wrong files — retrying...",
+                        node_id
+                    ));
 
-            // PSP-5 Phase 9: Store bundle for persistence in step_commit
-            self.last_applied_bundle = Some(bundle.clone());
+                    let expected: Vec<String> = self.graph[idx]
+                        .output_targets
+                        .iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                    let dropped: Vec<String> = bundle
+                        .artifacts
+                        .iter()
+                        .map(|a| a.path().to_string())
+                        .collect();
+                    let retry_prompt = crate::prompts::render_bundle_retarget(
+                        &expected.join(", "),
+                        &dropped.join(", "),
+                        &prompt,
+                    );
 
-            // PSP-5 Phase 9: Execute post-write commands from the bundle
-            if !bundle.commands.is_empty() {
+                    let retry_response = self
+                        .call_llm_with_logging(&model, &retry_prompt, Some(&node_id))
+                        .await?;
+
+                    if let Some(retry_bundle) = self.parse_artifact_bundle(&retry_response) {
+                        self.apply_bundle_transactionally(&retry_bundle, &node_id, node_class)
+                            .await?;
+                        self.last_tool_failure = None;
+                        self.last_applied_bundle = Some(retry_bundle);
+                    } else {
+                        return Err(anyhow::anyhow!(
+                            "Retry for '{}' did not produce a valid bundle",
+                            node_id
+                        ));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+
+            // PSP-5 Phase 9: Execute post-write commands from the effective bundle
+            // (may be the retry bundle if the original was all-stripped).
+            let effective_commands = self
+                .last_applied_bundle
+                .as_ref()
+                .map(|b| b.commands.clone())
+                .unwrap_or_default();
+            if !effective_commands.is_empty() {
                 self.emit_log(format!(
                     "🔧 Executing {} bundle command(s)...",
-                    bundle.commands.len()
+                    effective_commands.len()
                 ));
                 let work_dir = self.effective_working_dir(idx);
                 let is_python = self.graph[idx].owner_plugin == "python";
-                for raw_command in &bundle.commands {
+                for raw_command in &effective_commands {
                     // Normalize Python install commands to uv equivalents
                     let command = if is_python {
                         Self::normalize_command_to_uv(raw_command)
