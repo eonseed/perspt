@@ -225,9 +225,18 @@ impl SRBNOrchestrator {
                     files_created.push(op.path().to_string());
                 } else if op.is_delete() {
                     files_deleted.push(op.path().to_string());
+                    self.emit_event(perspt_core::AgentEvent::FileDeleted {
+                        node_id: self.graph[idx].node_id.clone(),
+                        path: op.path().to_string(),
+                    });
                 } else if op.is_move() {
                     if let perspt_core::types::ArtifactOperation::Move { to, .. } = op {
                         files_modified.push(format!("{} -> {}", op.path(), to));
+                        self.emit_event(perspt_core::AgentEvent::FileMoved {
+                            node_id: self.graph[idx].node_id.clone(),
+                            from: op.path().to_string(),
+                            to: to.to_string(),
+                        });
                     }
                 } else {
                     files_modified.push(op.path().to_string());

@@ -258,10 +258,10 @@ async fn main() -> Result<()> {
             actuator_model,
             verifier_model,
             speculator_model,
-            energy_weights: _,
-            stability_threshold: _,
-            max_cost: _,
-            max_steps: _,
+            energy_weights,
+            stability_threshold,
+            max_cost,
+            max_steps,
             defer_tests,
             log_llm,
             single_file,
@@ -292,6 +292,10 @@ async fn main() -> Result<()> {
                 verifier_fallback_model,
                 speculator_fallback_model,
                 output_plan,
+                energy_weights,
+                stability_threshold,
+                max_cost,
+                max_steps,
             )
             .await
         }

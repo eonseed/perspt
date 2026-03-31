@@ -104,6 +104,14 @@ pub struct SRBNOrchestrator {
     blocked_dependencies: Vec<perspt_core::types::BlockedDependency>,
     /// Session-level budget envelope for step/cost/revision caps.
     budget: perspt_core::types::BudgetEnvelope,
+    /// Session-level stability threshold (ε for V(x) < ε convergence)
+    pub stability_epsilon: f32,
+    /// Energy weight α (syntax/build errors)
+    pub energy_alpha: f32,
+    /// Energy weight β (structural concerns)
+    pub energy_beta: f32,
+    /// Energy weight γ (test/lint failures)
+    pub energy_gamma: f32,
 }
 
 /// Get current timestamp as epoch seconds.
@@ -215,6 +223,10 @@ impl SRBNOrchestrator {
             last_applied_bundle: None,
             blocked_dependencies: Vec::new(),
             budget: perspt_core::types::BudgetEnvelope::new("pending"),
+            stability_epsilon: 0.1,
+            energy_alpha: 1.0,
+            energy_beta: 0.5,
+            energy_gamma: 2.0,
         }
     }
 
@@ -270,6 +282,10 @@ impl SRBNOrchestrator {
             last_applied_bundle: None,
             blocked_dependencies: Vec::new(),
             budget: perspt_core::types::BudgetEnvelope::new("test"),
+            stability_epsilon: 0.1,
+            energy_alpha: 1.0,
+            energy_beta: 0.5,
+            energy_gamma: 2.0,
         }
     }
 
@@ -924,6 +940,16 @@ impl SRBNOrchestrator {
                 Ok(()) => {
                     // Record step in budget envelope
                     self.budget.record_step();
+
+                    // Emit budget status after each step
+                    self.emit_event(perspt_core::AgentEvent::BudgetUpdated {
+                        steps_used: self.budget.steps_used,
+                        max_steps: self.budget.max_steps,
+                        cost_used_usd: self.budget.cost_used_usd,
+                        max_cost_usd: self.budget.max_cost_usd,
+                        revisions_used: self.budget.revisions_used,
+                        max_revisions: self.budget.max_revisions,
+                    });
 
                     // Emit completed status
                     if let Some(node) = self.graph.node_weight(*idx) {

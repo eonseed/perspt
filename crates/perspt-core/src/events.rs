@@ -226,6 +226,34 @@ pub enum AgentEvent {
         /// Verifier strictness mode in effect
         strictness: String,
     },
+
+    /// PSP-5 Phase 8: Budget envelope updated (step/cost consumed)
+    BudgetUpdated {
+        steps_used: u32,
+        max_steps: Option<u32>,
+        cost_used_usd: f64,
+        max_cost_usd: Option<f64>,
+        revisions_used: u32,
+        max_revisions: Option<u32>,
+    },
+
+    /// PSP-5 Phase 8: Plan revision superseded by a new revision
+    PlanRevised {
+        revision_id: String,
+        sequence: u32,
+        reason: String,
+        node_count: usize,
+    },
+
+    /// PSP-5 Phase 10: File deleted via safe delete operation
+    FileDeleted { node_id: String, path: String },
+
+    /// PSP-5 Phase 10: File moved/renamed via safe move operation
+    FileMoved {
+        node_id: String,
+        from: String,
+        to: String,
+    },
 }
 
 /// Node status for TUI display (mirrors NodeState but simplified)
