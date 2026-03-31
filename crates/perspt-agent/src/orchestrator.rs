@@ -3482,12 +3482,97 @@ Project name:"#,
         // Call LLM for corrected code
         let corrected = self.call_llm_for_correction(&correction_prompt).await?;
 
-        // Extract and apply diff
-        if let Some((filename, new_code, is_diff)) = self.extract_code_from_response(&corrected) {
+        // Attempt bundle-aware correction first, fall back to single-file
+        let node_class = self.graph[idx].node_class;
+        let attempt = self.graph[idx].monitor.attempt_count;
+        let diagnosis = self.context.last_diagnostics.clone();
+
+        if let Some(bundle) = self.parse_artifact_bundle(&corrected) {
+            // Bundle-aware repair: apply using the same transactional path
+            // as speculative generation.
+            log::info!(
+                "Applying correction bundle: {} artifact(s), {} command(s)",
+                bundle.artifacts.len(),
+                bundle.commands.len()
+            );
+            self.emit_log(format!(
+                "🔧 Applying correction bundle ({} artifact(s))",
+                bundle.artifacts.len()
+            ));
+
+            self.apply_bundle_transactionally(&bundle, &node_id, node_class)
+                .await?;
+            self.last_tool_failure = None;
+
+            // Track last written file from the bundle for build_correction_prompt
+            let node_workdir = self.effective_working_dir(idx);
+            if let Some(first_path) = bundle.artifacts.first().map(|a| a.path().to_string()) {
+                self.last_written_file = Some(node_workdir.join(&first_path));
+            }
+            self.file_version += 1;
+            self.last_applied_bundle = Some(bundle.clone());
+
+            // Record repair footprint
+            let diagnosis_str = format!("{:?}", diagnosis);
+            let footprint = perspt_core::RepairFootprint::new(
+                &self.context.session_id,
+                &node_id,
+                "initial", // plan revision tracking added in later steps
+                attempt as u32,
+                &bundle,
+                &diagnosis_str,
+            );
+            if let Err(e) = self.ledger.record_repair_footprint(&footprint) {
+                log::warn!("Failed to record repair footprint: {}", e);
+            }
+
+            // Execute bundle post-write commands
+            if !bundle.commands.is_empty() {
+                self.emit_log(format!(
+                    "🔧 Executing {} bundle command(s)...",
+                    bundle.commands.len()
+                ));
+                let work_dir = self.effective_working_dir(idx);
+                let is_python = self.graph[idx].owner_plugin == "python";
+                for raw_command in &bundle.commands {
+                    let command = if is_python {
+                        Self::normalize_command_to_uv(raw_command)
+                    } else {
+                        raw_command.clone()
+                    };
+                    log::info!("Running correction command: {}", command);
+                    let parts: Vec<&str> = command.split_whitespace().collect();
+                    if parts.is_empty() {
+                        continue;
+                    }
+                    let output = tokio::process::Command::new(parts[0])
+                        .args(&parts[1..])
+                        .current_dir(&work_dir)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output()
+                        .await;
+                    match output {
+                        Ok(o) if o.status.success() => {
+                            self.emit_log(format!("✅ {}", command));
+                        }
+                        Ok(o) => {
+                            let stderr = String::from_utf8_lossy(&o.stderr);
+                            log::warn!("Command failed: {} — {}", command, stderr);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to run command: {} — {}", command, e);
+                        }
+                    }
+                }
+            }
+        } else if let Some((filename, new_code, is_diff)) =
+            self.extract_code_from_response(&corrected)
+        {
+            // Legacy single-file fallback for backward compatibility
             let node_workdir = self.effective_working_dir(idx);
             let full_path = node_workdir.join(&filename);
 
-            // Write corrected file
             let mut args = HashMap::new();
             args.insert("path".to_string(), filename.clone());
 
@@ -3511,7 +3596,6 @@ Project name:"#,
                 self.emit_log(format!("📝 Applied correction to: {}", filename));
                 self.last_tool_failure = None;
 
-                // Update tracking
                 self.last_written_file = Some(full_path.clone());
                 self.file_version += 1;
 
@@ -3529,7 +3613,7 @@ Project name:"#,
             }
         }
 
-        // Extract and execute any dependency commands from the correction response
+        // Extract and execute any standalone dependency commands
         let correction_cmds = Self::extract_commands_from_correction(&corrected);
         if !correction_cmds.is_empty() {
             self.emit_log(format!(
