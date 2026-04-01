@@ -145,6 +145,7 @@ impl PythonTestRunner {
         let result = Command::new("uv")
             .args(["run", "pytest", "--version"])
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
@@ -168,6 +169,7 @@ impl PythonTestRunner {
                 let init_output = Command::new("uv")
                     .args(["init", "--lib"])
                     .current_dir(&self.working_dir)
+                    .env_remove("VIRTUAL_ENV")
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .output()
@@ -190,6 +192,7 @@ impl PythonTestRunner {
         let output = Command::new("uv")
             .args(["sync", "--dev"])
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -211,6 +214,7 @@ impl PythonTestRunner {
             let add_output = Command::new("uv")
                 .args(["add", "--dev", "pytest"])
                 .current_dir(&self.working_dir)
+                .env_remove("VIRTUAL_ENV")
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .output()
@@ -243,6 +247,7 @@ impl PythonTestRunner {
         let output = Command::new("uv")
             .args(["pip", "install", "pytest"])
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -277,6 +282,7 @@ impl PythonTestRunner {
         let output = Command::new("uv")
             .args(&args)
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -295,8 +301,20 @@ impl PythonTestRunner {
 
         let mut results = self.parse_pytest_output(&combined, duration_ms);
         results.run_succeeded = true; // We got output, run worked
-        if !output.status.success() {
-            force_failure_on_nonzero_exit(&mut results, "pytest", output.status.code(), &combined);
+
+        // pytest exit code 5 means "no tests were collected". This is NOT
+        // a failure — it simply means the sandbox has no test files. Treat
+        // it as a vacuous pass so implementation nodes without tests are
+        // not penalized.
+        let exit_code = output.status.code();
+        if exit_code == Some(5) {
+            log::info!("pytest exit code 5 — no tests collected (vacuous pass)");
+            results.passed = 0;
+            results.failed = 0;
+            results.total = 0;
+            results.failures.clear();
+        } else if !output.status.success() {
+            force_failure_on_nonzero_exit(&mut results, "pytest", exit_code, &combined);
         }
 
         // Log summary
@@ -493,10 +511,12 @@ pub trait TestRunnerTrait: Send + Sync {
 #[async_trait::async_trait]
 impl TestRunnerTrait for PythonTestRunner {
     async fn run_syntax_check(&self) -> Result<TestResults> {
-        // Use ty (via uv) for type checking
-        let output = Command::new("uv")
-            .args(["run", "ty", "check", "."])
+        // Use ty via uvx (standalone tool runner) — ty is not a project
+        // dependency, so `uv run ty` would fail with "Failed to spawn".
+        let output = Command::new("uvx")
+            .args(["ty", "check", "."])
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -535,6 +555,7 @@ impl TestRunnerTrait for PythonTestRunner {
         let output = Command::new("uv")
             .args(["run", "ruff", "check", "."])
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
@@ -785,6 +806,7 @@ impl PluginVerifierRunner {
         let output = Command::new(program)
             .args(args)
             .current_dir(&self.working_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output()
