@@ -121,6 +121,13 @@ impl SRBNOrchestrator {
             validators.push(SheafValidatorClass::SchemaContractCompatibility);
         }
 
+        log::debug!(
+            "select_validators for {}: node_class={:?}, owner={}",
+            node.node_id,
+            node.node_class,
+            node.owner_plugin
+        );
+
         // Nodes that touch multiple plugins get cross-language validation.
         // Skip when either side is "unknown" — that's an ownership detection
         // gap, not a real cross-language boundary.
@@ -136,12 +143,21 @@ impl SRBNOrchestrator {
                     && node_owner != "unknown"
             });
         if has_cross_plugin_deps {
+            log::debug!(
+                "select_validators for {}: cross-plugin dependency detected (owner={})",
+                node.node_id,
+                node_owner
+            );
             validators.push(SheafValidatorClass::CrossLanguageBoundary);
         }
 
         // If verification result is available and has build failures, check
         // build graph consistency.
         if let Some(ref vr) = self.last_verification_result {
+            log::debug!(
+                "select_validators for {}: build_ok={}, tests_ok={}, tests_failed={}, tests_passed={}, degraded={}",
+                node.node_id, vr.build_ok, vr.tests_ok, vr.tests_failed, vr.tests_passed, vr.degraded
+            );
             if !vr.build_ok {
                 validators.push(SheafValidatorClass::BuildGraphConsistency);
             }
@@ -152,7 +168,18 @@ impl SRBNOrchestrator {
             if !vr.tests_ok && vr.tests_failed > 0 {
                 validators.push(SheafValidatorClass::TestOwnershipConsistency);
             }
+        } else {
+            log::debug!(
+                "select_validators for {}: last_verification_result is None",
+                node.node_id
+            );
         }
+
+        log::debug!(
+            "select_validators for {}: selected {:?}",
+            node.node_id,
+            validators
+        );
 
         validators
     }

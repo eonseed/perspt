@@ -1777,7 +1777,24 @@ impl SRBNOrchestrator {
                             "javascript" | "js" => "index.js".to_string(),
                             "typescript" | "ts" => "index.ts".to_string(),
                             "toml" => "Cargo.toml".to_string(),
-                            "json" => "config.json".to_string(),
+                            "json" => {
+                                // Skip unnamed JSON blocks that look like artifact
+                                // bundles or action manifests (e.g. [{"action":"UPDATE",...}]
+                                // or {"artifacts":[...]}) — these are structured
+                                // metadata, not standalone files.
+                                let trimmed = code.trim();
+                                if trimmed.starts_with('[')
+                                    || trimmed.contains("\"artifacts\"")
+                                    || trimmed.contains("\"action\"")
+                                {
+                                    log::debug!("Skipping unnamed JSON block that looks like a manifest/bundle");
+                                    code_lines.clear();
+                                    code_lang.clear();
+                                    is_diff_marker = false;
+                                    continue;
+                                }
+                                "config.json".to_string()
+                            }
                             "yaml" | "yml" => "config.yaml".to_string(),
                             other => {
                                 log::warn!(
@@ -3814,8 +3831,8 @@ def util():
     fn test_parse_artifact_bundle_json_with_empty_path_falls_through() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         // JSON bundle with empty path fails validation → falls through to legacy.
-        // Legacy parser sees ```json block and maps it to "config.json".
-        // Current behavior: not rejected — the raw JSON becomes config.json content.
+        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
+        // to avoid the LLM's action manifests being written as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -3826,21 +3843,17 @@ def util():
 ```"#;
         let bundle = orch.parse_artifact_bundle(content);
         assert!(
-            bundle.is_some(),
-            "Legacy fallback produces a config.json artifact"
+            bundle.is_none(),
+            "Invalid bundle with artifacts key should be skipped"
         );
-        let bundle = bundle.unwrap();
-        assert_eq!(bundle.artifacts.len(), 1);
-        assert_eq!(bundle.artifacts[0].path(), "config.json");
     }
 
     #[test]
     fn test_parse_artifact_bundle_json_absolute_path_falls_through() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         // Absolute-path JSON bundle fails validation → falls through to legacy.
-        // Legacy parser sees ```json block and maps it to "config.json".
-        // Current behavior: the malicious path is NOT written to, but the
-        // raw JSON is still emitted as config.json content.
+        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
+        // to avoid writing raw JSON as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -3851,12 +3864,9 @@ def util():
 ```"#;
         let bundle = orch.parse_artifact_bundle(content);
         assert!(
-            bundle.is_some(),
-            "Legacy fallback produces a config.json artifact"
+            bundle.is_none(),
+            "Invalid bundle with artifacts key should be skipped"
         );
-        let bundle = bundle.unwrap();
-        assert_eq!(bundle.artifacts.len(), 1);
-        assert_eq!(bundle.artifacts[0].path(), "config.json");
     }
 
     #[test]
@@ -4035,9 +4045,8 @@ def util():
     fn test_parse_artifact_bundle_json_path_traversal_falls_through() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         // Path-traversal JSON bundle fails validation → falls through to legacy.
-        // Legacy parser sees ```json block and maps it to "config.json".
-        // Current behavior: traversal path is NOT written to, but raw JSON
-        // is emitted as config.json content.
+        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
+        // to avoid writing raw JSON as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -4048,12 +4057,9 @@ def util():
 ```"#;
         let bundle = orch.parse_artifact_bundle(content);
         assert!(
-            bundle.is_some(),
-            "Legacy fallback produces a config.json artifact"
+            bundle.is_none(),
+            "Invalid bundle with artifacts key should be skipped"
         );
-        let bundle = bundle.unwrap();
-        assert_eq!(bundle.artifacts.len(), 1);
-        assert_eq!(bundle.artifacts[0].path(), "config.json");
     }
 
     // --- Step 6: Greenfield bootstrap ordering & dependency determinism ---

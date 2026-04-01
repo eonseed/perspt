@@ -243,6 +243,36 @@ impl SRBNOrchestrator {
             }
         }
 
+        // Detect Python src-layout package name so the architect uses the
+        // correct path prefix (e.g. src/test_spectral/) instead of inventing
+        // its own package name.
+        let src_dir = working_dir.join("src");
+        if src_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&src_dir) {
+                let pkgs: Vec<String> = entries
+                    .flatten()
+                    .filter(|e| {
+                        e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')
+                    })
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect();
+                if !pkgs.is_empty() {
+                    context_parts.push(format!(
+                        "### Source Layout (IMPORTANT — use these exact paths)\n\
+                         The project already has the following package(s) under `src/`:\n\
+                         {}\n\
+                         ALL Python source files MUST be placed under `src/{}/` — \
+                         do NOT invent a different package name.",
+                        pkgs.iter()
+                            .map(|p| format!("- `src/{}/`", p))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        pkgs[0]
+                    ));
+                }
+            }
+        }
+
         if context_parts.is_empty() {
             "Empty directory (greenfield project)".to_string()
         } else {

@@ -12,6 +12,9 @@ impl SRBNOrchestrator {
         // Clear stale verification result from previous nodes to prevent
         // cross-node data leakage into sheaf validators.
         self.last_verification_result = None;
+        // Clear stale test output so the correction prompt doesn't show
+        // results from a previous node's verification run.
+        self.context.last_test_output = None;
 
         self.graph[idx].state = NodeState::Verifying;
         self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
@@ -974,6 +977,7 @@ impl SRBNOrchestrator {
             let result = tokio::process::Command::new("uv")
                 .args(["add", package])
                 .current_dir(working_dir)
+                .env_remove("VIRTUAL_ENV")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .output()
@@ -1000,6 +1004,7 @@ impl SRBNOrchestrator {
             let _ = tokio::process::Command::new("uv")
                 .args(["sync", "--dev"])
                 .current_dir(working_dir)
+                .env_remove("VIRTUAL_ENV")
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .output()
@@ -1125,14 +1130,21 @@ pub(super) fn verification_stages_for_node(
             // only get SyntaxCheck+Build which don't compile/run test targets.
             let has_test_outputs = node.output_targets.iter().any(|p| {
                 let s = p.to_string_lossy();
+                // Check the filename (last component) for test patterns rather
+                // than the full path, to avoid false positives from directory
+                // names like "test_seismic/" matching "/test_".
+                let filename = p
+                    .file_name()
+                    .map(|f| f.to_string_lossy())
+                    .unwrap_or_default();
                 s.contains("/tests/")
-                    || s.contains("/test_")
-                    || s.contains(".test.")
-                    || s.contains(".spec.")
-                    || s.contains("_test.rs")
-                    || s.contains("_test.py")
-                    || s.contains("_tests.rs")
-                    || s.contains("_tests.py")
+                    || filename.starts_with("test_")
+                    || filename.contains(".test.")
+                    || filename.contains(".spec.")
+                    || filename.ends_with("_test.rs")
+                    || filename.ends_with("_test.py")
+                    || filename.ends_with("_tests.rs")
+                    || filename.ends_with("_tests.py")
             });
             if !node.contract.weighted_tests.is_empty() || has_test_outputs {
                 stages.push(VerifierStage::Test);

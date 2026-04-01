@@ -282,6 +282,7 @@ impl AgentTools {
         let mut child = match AsyncCommand::new("sh")
             .args(["-c", cmd_str])
             .current_dir(&effective_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
