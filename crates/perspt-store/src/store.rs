@@ -256,6 +256,60 @@ pub struct ArtifactBundleRow {
     pub touched_files: String,
 }
 
+// =========================================================================
+// Plan Revision, Feature Charter, and Repair Footprint Row Types
+// =========================================================================
+
+/// Row type for feature_charters table
+#[derive(Debug, Clone)]
+pub struct FeatureCharterRow {
+    pub charter_id: String,
+    pub session_id: String,
+    pub scope_description: String,
+    pub max_modules: Option<i32>,
+    pub max_files: Option<i32>,
+    pub max_revisions: Option<i32>,
+    pub language_constraint: Option<String>,
+}
+
+/// Row type for plan_revisions table
+#[derive(Debug, Clone)]
+pub struct PlanRevisionRow {
+    pub revision_id: String,
+    pub session_id: String,
+    pub sequence: i32,
+    pub plan_json: String,
+    pub reason: String,
+    pub supersedes: Option<String>,
+    pub status: String,
+}
+
+/// Row type for repair_footprints table
+#[derive(Debug, Clone)]
+pub struct RepairFootprintRow {
+    pub footprint_id: String,
+    pub session_id: String,
+    pub node_id: String,
+    pub revision_id: String,
+    pub attempt: i32,
+    pub affected_files: String,
+    pub bundle_json: String,
+    pub diagnosis: String,
+    pub resolved: bool,
+}
+
+/// Row type for budget_envelopes table
+#[derive(Debug, Clone)]
+pub struct BudgetEnvelopeRow {
+    pub session_id: String,
+    pub max_steps: Option<i32>,
+    pub steps_used: i32,
+    pub max_revisions: Option<i32>,
+    pub revisions_used: i32,
+    pub max_cost_usd: Option<f64>,
+    pub cost_used_usd: f64,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -1496,6 +1550,237 @@ impl SessionStore {
     }
 }
 
+// =========================================================================
+// Plan Revision, Feature Charter, and Repair Footprint Methods
+// =========================================================================
+
+impl SessionStore {
+    /// Record a feature charter for a session.
+    pub fn record_feature_charter(&self, row: &FeatureCharterRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO feature_charters (charter_id, session_id, scope_description, max_modules, max_files, max_revisions, language_constraint) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            duckdb::params![
+                row.charter_id,
+                row.session_id,
+                row.scope_description,
+                row.max_modules,
+                row.max_files,
+                row.max_revisions,
+                row.language_constraint,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get the feature charter for a session.
+    pub fn get_feature_charter(&self, session_id: &str) -> Result<Option<FeatureCharterRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT charter_id, session_id, scope_description, max_modules, max_files, max_revisions, language_constraint \
+             FROM feature_charters WHERE session_id = ? LIMIT 1",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(FeatureCharterRow {
+                charter_id: row.get(0)?,
+                session_id: row.get(1)?,
+                scope_description: row.get(2)?,
+                max_modules: row.get(3)?,
+                max_files: row.get(4)?,
+                max_revisions: row.get(5)?,
+                language_constraint: row.get(6)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Record a plan revision.
+    pub fn record_plan_revision(&self, row: &PlanRevisionRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO plan_revisions (revision_id, session_id, sequence, plan_json, reason, supersedes, status) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            duckdb::params![
+                row.revision_id,
+                row.session_id,
+                row.sequence,
+                row.plan_json,
+                row.reason,
+                row.supersedes,
+                row.status,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get the active plan revision for a session.
+    pub fn get_active_plan_revision(&self, session_id: &str) -> Result<Option<PlanRevisionRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT revision_id, session_id, sequence, plan_json, reason, supersedes, status \
+             FROM plan_revisions WHERE session_id = ? AND status = 'active' \
+             ORDER BY sequence DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(PlanRevisionRow {
+                revision_id: row.get(0)?,
+                session_id: row.get(1)?,
+                sequence: row.get(2)?,
+                plan_json: row.get(3)?,
+                reason: row.get(4)?,
+                supersedes: row.get(5)?,
+                status: row.get(6)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get all plan revisions for a session, ordered by sequence.
+    pub fn get_plan_revisions(&self, session_id: &str) -> Result<Vec<PlanRevisionRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT revision_id, session_id, sequence, plan_json, reason, supersedes, status \
+             FROM plan_revisions WHERE session_id = ? ORDER BY sequence ASC",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(PlanRevisionRow {
+                revision_id: row.get(0)?,
+                session_id: row.get(1)?,
+                sequence: row.get(2)?,
+                plan_json: row.get(3)?,
+                reason: row.get(4)?,
+                supersedes: row.get(5)?,
+                status: row.get(6)?,
+            });
+        }
+        Ok(results)
+    }
+
+    /// Supersede a plan revision (set status to 'superseded').
+    pub fn supersede_plan_revision(&self, revision_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE plan_revisions SET status = 'superseded' WHERE revision_id = ?",
+            [revision_id],
+        )?;
+        Ok(())
+    }
+
+    /// Record a repair footprint.
+    pub fn record_repair_footprint(&self, row: &RepairFootprintRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO repair_footprints (footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            duckdb::params![
+                row.footprint_id,
+                row.session_id,
+                row.node_id,
+                row.revision_id,
+                row.attempt,
+                row.affected_files,
+                row.bundle_json,
+                row.diagnosis,
+                row.resolved,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get repair footprints for a node, ordered by attempt.
+    pub fn get_repair_footprints(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<RepairFootprintRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved \
+             FROM repair_footprints WHERE session_id = ? AND node_id = ? ORDER BY attempt ASC",
+        )?;
+        let mut rows = stmt.query([session_id, node_id])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(RepairFootprintRow {
+                footprint_id: row.get(0)?,
+                session_id: row.get(1)?,
+                node_id: row.get(2)?,
+                revision_id: row.get(3)?,
+                attempt: row.get(4)?,
+                affected_files: row.get(5)?,
+                bundle_json: row.get(6)?,
+                diagnosis: row.get(7)?,
+                resolved: row.get(8)?,
+            });
+        }
+        Ok(results)
+    }
+
+    /// Mark a repair footprint as resolved.
+    pub fn resolve_repair_footprint(&self, footprint_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE repair_footprints SET resolved = true WHERE footprint_id = ?",
+            [footprint_id],
+        )?;
+        Ok(())
+    }
+
+    /// Record or update a budget envelope for a session.
+    pub fn upsert_budget_envelope(&self, row: &BudgetEnvelopeRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        // Try insert first, update on conflict
+        conn.execute(
+            "INSERT INTO budget_envelopes (session_id, max_steps, steps_used, max_revisions, revisions_used, max_cost_usd, cost_used_usd) \
+             VALUES (?, ?, ?, ?, ?, ?, ?) \
+             ON CONFLICT (session_id) DO UPDATE SET \
+             max_steps = EXCLUDED.max_steps, steps_used = EXCLUDED.steps_used, \
+             max_revisions = EXCLUDED.max_revisions, revisions_used = EXCLUDED.revisions_used, \
+             max_cost_usd = EXCLUDED.max_cost_usd, cost_used_usd = EXCLUDED.cost_used_usd",
+            duckdb::params![
+                row.session_id,
+                row.max_steps,
+                row.steps_used,
+                row.max_revisions,
+                row.revisions_used,
+                row.max_cost_usd,
+                row.cost_used_usd,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get the budget envelope for a session.
+    pub fn get_budget_envelope(&self, session_id: &str) -> Result<Option<BudgetEnvelopeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, max_steps, steps_used, max_revisions, revisions_used, max_cost_usd, cost_used_usd \
+             FROM budget_envelopes WHERE session_id = ?",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(BudgetEnvelopeRow {
+                session_id: row.get(0)?,
+                max_steps: row.get(1)?,
+                steps_used: row.get(2)?,
+                max_revisions: row.get(3)?,
+                revisions_used: row.get(4)?,
+                max_cost_usd: row.get(5)?,
+                cost_used_usd: row.get(6)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1824,5 +2109,230 @@ mod tests {
 
         let all = store.get_all_review_outcomes(sid).unwrap();
         assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_feature_charter_roundtrip() {
+        let store = test_store();
+        let sid = "test-charter";
+        seed_session(&store, sid);
+
+        let row = FeatureCharterRow {
+            charter_id: "ch-1".to_string(),
+            session_id: sid.to_string(),
+            scope_description: "Add authentication module".to_string(),
+            max_modules: Some(3),
+            max_files: Some(10),
+            max_revisions: Some(5),
+            language_constraint: Some("rust".to_string()),
+        };
+        store.record_feature_charter(&row).unwrap();
+
+        let got = store.get_feature_charter(sid).unwrap();
+        assert!(got.is_some());
+        let got = got.unwrap();
+        assert_eq!(got.charter_id, "ch-1");
+        assert_eq!(got.scope_description, "Add authentication module");
+        assert_eq!(got.max_modules, Some(3));
+        assert_eq!(got.language_constraint.as_deref(), Some("rust"));
+    }
+
+    #[test]
+    fn test_feature_charter_returns_none_for_missing() {
+        let store = test_store();
+        let sid = "test-charter-miss";
+        seed_session(&store, sid);
+
+        let got = store.get_feature_charter(sid).unwrap();
+        assert!(got.is_none());
+    }
+
+    #[test]
+    fn test_plan_revision_roundtrip() {
+        let store = test_store();
+        let sid = "test-rev";
+        seed_session(&store, sid);
+
+        let row = PlanRevisionRow {
+            revision_id: "rev-1".to_string(),
+            session_id: sid.to_string(),
+            sequence: 1,
+            plan_json: r#"{"tasks":[]}"#.to_string(),
+            reason: "initial plan".to_string(),
+            supersedes: None,
+            status: "active".to_string(),
+        };
+        store.record_plan_revision(&row).unwrap();
+
+        let active = store.get_active_plan_revision(sid).unwrap();
+        assert!(active.is_some());
+        let active = active.unwrap();
+        assert_eq!(active.revision_id, "rev-1");
+        assert_eq!(active.sequence, 1);
+        assert_eq!(active.status, "active");
+    }
+
+    #[test]
+    fn test_plan_revision_supersede() {
+        let store = test_store();
+        let sid = "test-rev-sup";
+        seed_session(&store, sid);
+
+        let r1 = PlanRevisionRow {
+            revision_id: "rev-1".to_string(),
+            session_id: sid.to_string(),
+            sequence: 1,
+            plan_json: "{}".to_string(),
+            reason: "initial".to_string(),
+            supersedes: None,
+            status: "active".to_string(),
+        };
+        store.record_plan_revision(&r1).unwrap();
+
+        // Supersede rev-1
+        store.supersede_plan_revision("rev-1").unwrap();
+
+        let r2 = PlanRevisionRow {
+            revision_id: "rev-2".to_string(),
+            session_id: sid.to_string(),
+            sequence: 2,
+            plan_json: r#"{"tasks":["a"]}"#.to_string(),
+            reason: "verifier feedback".to_string(),
+            supersedes: Some("rev-1".to_string()),
+            status: "active".to_string(),
+        };
+        store.record_plan_revision(&r2).unwrap();
+
+        // Only rev-2 should be active
+        let active = store.get_active_plan_revision(sid).unwrap().unwrap();
+        assert_eq!(active.revision_id, "rev-2");
+
+        // All revisions returned in order
+        let all = store.get_plan_revisions(sid).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].status, "superseded");
+        assert_eq!(all[1].status, "active");
+    }
+
+    #[test]
+    fn test_repair_footprint_roundtrip() {
+        let store = test_store();
+        let sid = "test-repair";
+        seed_session(&store, sid);
+
+        let row = RepairFootprintRow {
+            footprint_id: "fp-1".to_string(),
+            session_id: sid.to_string(),
+            node_id: "node-a".to_string(),
+            revision_id: "rev-1".to_string(),
+            attempt: 1,
+            affected_files: r#"["src/main.rs"]"#.to_string(),
+            bundle_json: "{}".to_string(),
+            diagnosis: "missing import".to_string(),
+            resolved: false,
+        };
+        store.record_repair_footprint(&row).unwrap();
+
+        let footprints = store.get_repair_footprints(sid, "node-a").unwrap();
+        assert_eq!(footprints.len(), 1);
+        assert_eq!(footprints[0].footprint_id, "fp-1");
+        assert_eq!(footprints[0].diagnosis, "missing import");
+        assert!(!footprints[0].resolved);
+    }
+
+    #[test]
+    fn test_repair_footprint_resolve() {
+        let store = test_store();
+        let sid = "test-repair-res";
+        seed_session(&store, sid);
+
+        let row = RepairFootprintRow {
+            footprint_id: "fp-2".to_string(),
+            session_id: sid.to_string(),
+            node_id: "node-b".to_string(),
+            revision_id: "rev-1".to_string(),
+            attempt: 1,
+            affected_files: "[]".to_string(),
+            bundle_json: "{}".to_string(),
+            diagnosis: "type error".to_string(),
+            resolved: false,
+        };
+        store.record_repair_footprint(&row).unwrap();
+
+        store.resolve_repair_footprint("fp-2").unwrap();
+
+        let footprints = store.get_repair_footprints(sid, "node-b").unwrap();
+        assert_eq!(footprints.len(), 1);
+        assert!(footprints[0].resolved);
+    }
+
+    #[test]
+    fn test_budget_envelope_upsert_and_get() {
+        let store = test_store();
+        let sid = "test-budget";
+        seed_session(&store, sid);
+
+        let row = BudgetEnvelopeRow {
+            session_id: sid.to_string(),
+            max_steps: Some(100),
+            steps_used: 5,
+            max_revisions: Some(10),
+            revisions_used: 1,
+            max_cost_usd: Some(5.0),
+            cost_used_usd: 0.25,
+        };
+        store.upsert_budget_envelope(&row).unwrap();
+
+        let got = store.get_budget_envelope(sid).unwrap();
+        assert!(got.is_some());
+        let got = got.unwrap();
+        assert_eq!(got.max_steps, Some(100));
+        assert_eq!(got.steps_used, 5);
+        assert_eq!(got.cost_used_usd, 0.25);
+    }
+
+    #[test]
+    fn test_budget_envelope_upsert_updates() {
+        let store = test_store();
+        let sid = "test-budget-up";
+        seed_session(&store, sid);
+
+        let row1 = BudgetEnvelopeRow {
+            session_id: sid.to_string(),
+            max_steps: Some(100),
+            steps_used: 0,
+            max_revisions: None,
+            revisions_used: 0,
+            max_cost_usd: None,
+            cost_used_usd: 0.0,
+        };
+        store.upsert_budget_envelope(&row1).unwrap();
+
+        // Update with new values
+        let row2 = BudgetEnvelopeRow {
+            session_id: sid.to_string(),
+            max_steps: Some(100),
+            steps_used: 42,
+            max_revisions: Some(5),
+            revisions_used: 3,
+            max_cost_usd: Some(10.0),
+            cost_used_usd: 4.5,
+        };
+        store.upsert_budget_envelope(&row2).unwrap();
+
+        let got = store.get_budget_envelope(sid).unwrap().unwrap();
+        assert_eq!(got.steps_used, 42);
+        assert_eq!(got.revisions_used, 3);
+        assert_eq!(got.cost_used_usd, 4.5);
+    }
+
+    #[test]
+    fn test_budget_envelope_missing_returns_none() {
+        let store = test_store();
+        let sid = "test-budget-miss";
+        seed_session(&store, sid);
+
+        let got = store.get_budget_envelope(sid).unwrap();
+        assert!(got.is_none());
     }
 }

@@ -47,6 +47,10 @@ pub async fn run(
     verifier_fallback_model: Option<String>,
     speculator_fallback_model: Option<String>,
     output_plan: Option<PathBuf>,
+    energy_weights: String,
+    stability_threshold: f32,
+    max_cost: f32,
+    max_steps: usize,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
@@ -118,6 +122,37 @@ pub async fn run(
         "minimal" => perspt_core::types::VerifierStrictness::Minimal,
         _ => perspt_core::types::VerifierStrictness::Default,
     };
+
+    // PSP-5 Phase 8: Wire budget envelope from CLI flags
+    {
+        let max_s = if max_steps > 0 {
+            Some(max_steps as u32)
+        } else {
+            None
+        };
+        let max_c = if max_cost > 0.0 {
+            Some(max_cost as f64)
+        } else {
+            None
+        };
+        orchestrator.set_budget(max_s, None, max_c);
+    }
+
+    // PSP-5 Phase 8: Wire stability threshold from CLI flag
+    orchestrator.stability_epsilon = stability_threshold;
+
+    // PSP-5 Phase 8: Parse and wire energy weights (format: "alpha,beta,gamma")
+    {
+        let parts: Vec<f32> = energy_weights
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if parts.len() == 3 {
+            orchestrator.energy_alpha = parts[0];
+            orchestrator.energy_beta = parts[1];
+            orchestrator.energy_gamma = parts[2];
+        }
+    }
 
     println!("🚀 SRBN Agent starting...");
     println!("   Session: {}", orchestrator.session_id());
@@ -238,6 +273,21 @@ pub async fn run(
                                 flushed
                             );
                         }
+                    }
+                    // Budget summary
+                    if let Ok(Some(budget)) = store.get_budget_envelope(&sid) {
+                        let steps_str = budget
+                            .max_steps
+                            .map(|m| format!("{}/{}", budget.steps_used, m))
+                            .unwrap_or_else(|| format!("{}", budget.steps_used));
+                        let cost_str = budget
+                            .max_cost_usd
+                            .map(|m| format!("${:.2}/${:.2}", budget.cost_used_usd, m))
+                            .unwrap_or_else(|| format!("${:.2}", budget.cost_used_usd));
+                        println!(
+                            "[BUDGET] steps={} cost={} revisions={}",
+                            steps_str, cost_str, budget.revisions_used
+                        );
                     }
                     println!("[COMMIT] Session {} complete", &sid[..sid.len().min(16)]);
                 }

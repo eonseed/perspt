@@ -133,7 +133,8 @@ Resume an interrupted session.
    perspt resume [--last]
 
 Displays trust context before resuming: escalation count, last energy state,
-total retries.
+total retries. The ``BudgetEnvelope`` (step/cost/revision caps) is restored from
+the database so limits continue from the interrupted session.
 
 
 ``logs``

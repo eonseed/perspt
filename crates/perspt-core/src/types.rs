@@ -395,6 +395,8 @@ pub struct SRBNNode {
     pub provisional_branch_id: Option<String>,
     /// PSP-5 Phase 6: Interface seal hash once this node's public interface is sealed
     pub interface_seal_hash: Option<[u8; 32]>,
+    /// Declared dependency expectations from the architect plan.
+    pub dependency_expectations: DependencyExpectation,
 }
 
 impl SRBNNode {
@@ -415,6 +417,7 @@ impl SRBNNode {
             owner_plugin: String::new(),
             provisional_branch_id: None,
             interface_seal_hash: None,
+            dependency_expectations: DependencyExpectation::default(),
         }
     }
 }
@@ -444,6 +447,8 @@ pub enum NodeState {
     Failed,
     /// Aborted by user
     Aborted,
+    /// Superseded by a plan amendment (Phase 14)
+    Superseded,
 }
 
 impl NodeState {
@@ -451,7 +456,7 @@ impl NodeState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            NodeState::Completed | NodeState::Failed | NodeState::Aborted
+            NodeState::Completed | NodeState::Failed | NodeState::Aborted | NodeState::Superseded
         )
     }
 }
@@ -827,6 +832,9 @@ pub struct PlannedTask {
     /// PSP-5: Node class (Interface / Implementation / Integration)
     #[serde(default)]
     pub node_class: NodeClass,
+    /// Declared dependency expectations (packages, setup, toolchain).
+    #[serde(default)]
+    pub dependency_expectations: DependencyExpectation,
 }
 
 impl PlannedTask {
@@ -842,6 +850,7 @@ impl PlannedTask {
             contract: PlannedContract::default(),
             command_contract: None,
             node_class: NodeClass::default(),
+            dependency_expectations: DependencyExpectation::default(),
         }
     }
 
@@ -852,6 +861,7 @@ impl PlannedTask {
         node.output_targets = self.output_files.iter().map(PathBuf::from).collect();
         node.contract = self.contract.to_behavioral_contract();
         node.node_class = self.node_class;
+        node.dependency_expectations = self.dependency_expectations.clone();
         node
     }
 }
@@ -1131,7 +1141,10 @@ impl OwnershipManifest {
         20
     }
 
-    /// Assign a file to an owning node
+    /// Assign a file to an owning node.
+    ///
+    /// The path is normalized before insertion so that `src/main.rs` and
+    /// `./src/main.rs` resolve to the same key.
     pub fn assign(
         &mut self,
         path: impl Into<String>,
@@ -1139,8 +1152,12 @@ impl OwnershipManifest {
         owner_plugin: impl Into<String>,
         node_class: NodeClass,
     ) {
+        let key = crate::path::normalize_path_key(&path.into()).unwrap_or_default();
+        if key.is_empty() {
+            return; // silently skip invalid paths
+        }
         self.entries.insert(
-            path.into(),
+            key,
             OwnershipEntry {
                 owner_node_id: owner_node_id.into(),
                 owner_plugin: owner_plugin.into(),
@@ -1149,9 +1166,12 @@ impl OwnershipManifest {
         );
     }
 
-    /// Look up the owner of a file path
+    /// Look up the owner of a file path.
+    ///
+    /// The path is normalized before lookup.
     pub fn owner_of(&self, path: &str) -> Option<&OwnershipEntry> {
-        self.entries.get(path)
+        let key = crate::path::normalize_path_key(path)?;
+        self.entries.get(&key)
     }
 
     /// List all files owned by a specific node
@@ -1209,14 +1229,16 @@ impl OwnershipManifest {
 
         // For Interface and Implementation nodes, check ownership
         for op in &bundle.artifacts {
-            let path = op.path();
-            if let Some(entry) = self.entries.get(path) {
+            let raw_path = op.path();
+            let key =
+                crate::path::normalize_path_key(raw_path).unwrap_or_else(|| raw_path.to_string());
+            if let Some(entry) = self.entries.get(&key) {
                 if entry.owner_node_id != node_id {
                     return Err(format!(
                         "Ownership violation: file '{}' is owned by node '{}', \
                          but node '{}' ({}) attempted to modify it. \
                          Only Integration nodes may cross ownership boundaries.",
-                        path, entry.owner_node_id, node_id, node_class
+                        raw_path, entry.owner_node_id, node_id, node_class
                     ));
                 }
             }
@@ -1238,9 +1260,11 @@ impl OwnershipManifest {
         node_class: NodeClass,
     ) {
         for op in &bundle.artifacts {
-            let path = op.path();
-            if !self.entries.contains_key(path) {
-                self.assign(path, node_id, owner_plugin, node_class);
+            let raw_path = op.path();
+            let key =
+                crate::path::normalize_path_key(raw_path).unwrap_or_else(|| raw_path.to_string());
+            if !self.entries.contains_key(&key) {
+                self.assign(raw_path, node_id, owner_plugin, node_class);
             }
         }
     }
@@ -1266,14 +1290,28 @@ pub enum ArtifactOperation {
         /// Unified diff content
         patch: String,
     },
+    /// Delete a file from the workspace
+    Delete {
+        /// Relative path to delete
+        path: String,
+    },
+    /// Move/rename a file within the workspace
+    Move {
+        /// Current relative path
+        from: String,
+        /// New relative path
+        to: String,
+    },
 }
 
 impl ArtifactOperation {
-    /// Get the file path this operation targets
+    /// Get the primary file path this operation targets
     pub fn path(&self) -> &str {
         match self {
             ArtifactOperation::Write { path, .. } => path,
             ArtifactOperation::Diff { path, .. } => path,
+            ArtifactOperation::Delete { path } => path,
+            ArtifactOperation::Move { from, .. } => from,
         }
     }
 
@@ -1285,6 +1323,16 @@ impl ArtifactOperation {
     /// Check if this is a diff (patch) operation
     pub fn is_diff(&self) -> bool {
         matches!(self, ArtifactOperation::Diff { .. })
+    }
+
+    /// Check if this is a delete operation
+    pub fn is_delete(&self) -> bool {
+        matches!(self, ArtifactOperation::Delete { .. })
+    }
+
+    /// Check if this is a move/rename operation
+    pub fn is_move(&self) -> bool {
+        matches!(self, ArtifactOperation::Move { .. })
     }
 }
 
@@ -1324,6 +1372,12 @@ impl ArtifactBundle {
     /// Get all unique file paths affected by this bundle
     pub fn affected_paths(&self) -> Vec<&str> {
         let mut paths: Vec<&str> = self.artifacts.iter().map(|a| a.path()).collect();
+        // For Move operations, also include the destination path
+        for op in &self.artifacts {
+            if let ArtifactOperation::Move { to, .. } = op {
+                paths.push(to.as_str());
+            }
+        }
         paths.sort();
         paths.dedup();
         paths
@@ -1339,6 +1393,16 @@ impl ArtifactBundle {
         self.artifacts.iter().filter(|a| a.is_diff()).count()
     }
 
+    /// Count of file deletes
+    pub fn deletes_count(&self) -> usize {
+        self.artifacts.iter().filter(|a| a.is_delete()).count()
+    }
+
+    /// Count of file moves
+    pub fn moves_count(&self) -> usize {
+        self.artifacts.iter().filter(|a| a.is_move()).count()
+    }
+
     /// Validate the bundle: checks for empty paths and duplicate targets
     pub fn validate(&self) -> Result<(), String> {
         if self.artifacts.is_empty() {
@@ -1346,28 +1410,44 @@ impl ArtifactBundle {
         }
 
         for (i, op) in self.artifacts.iter().enumerate() {
-            if op.path().is_empty() {
-                return Err(format!("Artifact {} has empty path", i));
-            }
-            // Reject absolute paths
-            if op.path().starts_with('/') || op.path().starts_with('\\') {
-                return Err(format!(
-                    "Artifact {} has absolute path '{}', must be relative",
-                    i,
-                    op.path()
-                ));
-            }
-            // Reject path traversal
-            if op.path().contains("..") {
-                return Err(format!(
-                    "Artifact {} has path traversal in '{}'",
-                    i,
-                    op.path()
-                ));
+            // Validate the primary path
+            Self::validate_path(op.path(), i)?;
+
+            // For Move operations, also validate the destination path
+            if let ArtifactOperation::Move { to, .. } = op {
+                if to.is_empty() {
+                    return Err(format!("Artifact {} (move) has empty destination path", i));
+                }
+                Self::validate_path(to, i)?;
             }
         }
 
         Ok(())
+    }
+
+    /// Validate a single path: reject empty, absolute, and traversal paths.
+    ///
+    /// Uses the canonical `normalize_artifact_path` utility so that all path
+    /// consumers (bundle validation, ownership manifest, policy checks) agree
+    /// on path identity.
+    fn validate_path(path: &str, artifact_index: usize) -> Result<(), String> {
+        use crate::path::{normalize_artifact_path, PathError};
+        match normalize_artifact_path(path) {
+            Ok(_) => Ok(()),
+            Err(PathError::Empty) => Err(format!("Artifact {} has empty path", artifact_index)),
+            Err(PathError::Absolute(_)) => Err(format!(
+                "Artifact {} has absolute path '{}', must be relative",
+                artifact_index, path
+            )),
+            Err(PathError::Escapes(_)) => Err(format!(
+                "Artifact {} has path traversal in '{}'",
+                artifact_index, path
+            )),
+            Err(PathError::Invalid(_)) => Err(format!(
+                "Artifact {} has invalid path '{}'",
+                artifact_index, path
+            )),
+        }
     }
 }
 
@@ -2333,6 +2413,343 @@ impl BlockedDependency {
     }
 }
 
+// =========================================================================
+// Plan Revision and Repair Domain Types
+// =========================================================================
+
+/// Status of a plan revision within a session.
+///
+/// Each session may produce multiple plan revisions as the architect responds
+/// to verification failures, scope changes, or governance policies.  Only one
+/// revision is active at any time; previous revisions are superseded.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanRevisionStatus {
+    /// The revision is the current active plan driving execution.
+    #[default]
+    Active,
+    /// A newer revision has replaced this one.
+    Superseded,
+    /// The revision was explicitly abandoned (e.g., user abort).
+    Cancelled,
+}
+
+impl std::fmt::Display for PlanRevisionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active => write!(f, "active"),
+            Self::Superseded => write!(f, "superseded"),
+            Self::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
+/// A single plan revision within a session.
+///
+/// Tracks the evolution of the architect's plan over time.  When the verifier
+/// or governance policy triggers a replan, a new `PlanRevision` is created,
+/// the previous one is marked `Superseded`, and the new revision becomes
+/// the active plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanRevision {
+    /// Unique revision identifier.
+    pub revision_id: String,
+    /// Session this revision belongs to.
+    pub session_id: String,
+    /// Monotonically-increasing sequence number within the session (1-based).
+    pub sequence: u32,
+    /// The plan content.
+    pub plan: TaskPlan,
+    /// Why this revision was created (`"initial"`, `"verification_failure"`,
+    /// `"scope_change"`, `"governance_budget_exceeded"`, …).
+    pub reason: String,
+    /// If this revision supersedes an earlier one, its ID.
+    pub supersedes: Option<String>,
+    /// Current status of this revision.
+    pub status: PlanRevisionStatus,
+    /// Epoch seconds when this revision was created.
+    pub created_at: i64,
+}
+
+impl PlanRevision {
+    /// Create the initial plan revision for a session.
+    pub fn initial(session_id: impl Into<String>, plan: TaskPlan) -> Self {
+        Self {
+            revision_id: uuid_v4(),
+            session_id: session_id.into(),
+            sequence: 1,
+            plan,
+            reason: "initial".to_string(),
+            supersedes: None,
+            status: PlanRevisionStatus::Active,
+            created_at: epoch_secs(),
+        }
+    }
+
+    /// Create a successor revision that supersedes `previous`.
+    pub fn successor(previous: &PlanRevision, plan: TaskPlan, reason: impl Into<String>) -> Self {
+        Self {
+            revision_id: uuid_v4(),
+            session_id: previous.session_id.clone(),
+            sequence: previous.sequence + 1,
+            plan,
+            reason: reason.into(),
+            supersedes: Some(previous.revision_id.clone()),
+            status: PlanRevisionStatus::Active,
+            created_at: epoch_secs(),
+        }
+    }
+
+    /// Whether this is the current active revision.
+    pub fn is_active(&self) -> bool {
+        self.status == PlanRevisionStatus::Active
+    }
+}
+
+/// Adaptive planning policy that selects the agent phase stack
+/// based on task scale and workspace type.
+///
+/// Each variant maps to a different level of orchestration complexity:
+/// - `LocalEdit` — Actuator + Verifier only; no architect needed
+/// - `FeatureIncrement` — Architect + Actuator + Verifier
+/// - `LargeFeature` — Full 4-agent stack with Speculator
+/// - `GreenfieldBuild` — Full stack with workspace-setup node first
+/// - `ArchitecturalRevision` — Architect + Speculator first, then execution
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PlanningPolicy {
+    /// Small, localized change: skip architect planning.
+    LocalEdit,
+    /// Mid-size feature: architect decomposes, actuator implements.
+    #[default]
+    FeatureIncrement,
+    /// Large feature: full SRBN loop with speculative execution.
+    LargeFeature,
+    /// New project: full stack with bootstrap ordering.
+    GreenfieldBuild,
+    /// Cross-cutting redesign: plan-first, execute later.
+    ArchitecturalRevision,
+}
+
+impl PlanningPolicy {
+    /// Whether this policy requires architect planning.
+    pub fn needs_architect(&self) -> bool {
+        !matches!(self, Self::LocalEdit)
+    }
+
+    /// Whether this policy activates the speculator.
+    pub fn needs_speculator(&self) -> bool {
+        matches!(
+            self,
+            Self::LargeFeature | Self::GreenfieldBuild | Self::ArchitecturalRevision
+        )
+    }
+}
+
+/// A scoping document that constrains what the architect may plan.
+///
+/// The `FeatureCharter` sits above individual task plans and provides
+/// boundaries: maximum module count, maximum files, language policy,
+/// and a human-readable description of the intended outcome.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureCharter {
+    /// Unique charter identifier (typically per session).
+    pub charter_id: String,
+    /// Session ID.
+    pub session_id: String,
+    /// Human-readable scope description (the user's original request).
+    pub scope_description: String,
+    /// Maximum number of modules/nodes the architect may produce.
+    pub max_modules: Option<u32>,
+    /// Maximum total files the plan may create.
+    pub max_files: Option<u32>,
+    /// Maximum plan revisions before hard escalation.
+    pub max_revisions: Option<u32>,
+    /// Language or plugin constraint (e.g. `"rust"`, `"python"`).
+    pub language_constraint: Option<String>,
+    /// Epoch seconds when the charter was created.
+    pub created_at: i64,
+}
+
+impl FeatureCharter {
+    /// Create a new charter with just a scope description.
+    pub fn new(session_id: impl Into<String>, scope_description: impl Into<String>) -> Self {
+        Self {
+            charter_id: uuid_v4(),
+            session_id: session_id.into(),
+            scope_description: scope_description.into(),
+            max_modules: None,
+            max_files: None,
+            max_revisions: None,
+            language_constraint: None,
+            created_at: epoch_secs(),
+        }
+    }
+
+    /// Check whether a plan exceeds the charter's module budget.
+    pub fn exceeds_module_budget(&self, task_count: usize) -> bool {
+        self.max_modules
+            .is_some_and(|max| task_count > max as usize)
+    }
+
+    /// Check whether a plan exceeds the charter's file budget.
+    pub fn exceeds_file_budget(&self, file_count: usize) -> bool {
+        self.max_files.is_some_and(|max| file_count > max as usize)
+    }
+}
+
+/// A bounded repair unit that records what was changed during a correction.
+///
+/// Instead of raw `last_written_file` tracking, every correction pass creates
+/// a `RepairFootprint` that records the affected files, applied bundle,
+/// verification result before/after, and the node being repaired.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepairFootprint {
+    /// Unique footprint identifier.
+    pub footprint_id: String,
+    /// Session ID.
+    pub session_id: String,
+    /// Node ID being repaired.
+    pub node_id: String,
+    /// Which plan revision was active when the repair happened.
+    pub revision_id: String,
+    /// Correction attempt number within this node (1-based).
+    pub attempt: u32,
+    /// Files that were modified by the repair bundle.
+    pub affected_files: Vec<String>,
+    /// The artifact bundle applied during this repair.
+    pub applied_bundle: ArtifactBundle,
+    /// Brief summary of what was wrong (from verifier output).
+    pub diagnosis: String,
+    /// Whether the repair resolved the issue.
+    pub resolved: bool,
+    /// Epoch seconds.
+    pub created_at: i64,
+}
+
+impl RepairFootprint {
+    /// Create a new repair footprint.
+    pub fn new(
+        session_id: impl Into<String>,
+        node_id: impl Into<String>,
+        revision_id: impl Into<String>,
+        attempt: u32,
+        bundle: &ArtifactBundle,
+        diagnosis: impl Into<String>,
+    ) -> Self {
+        let affected_files = bundle
+            .affected_paths()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        Self {
+            footprint_id: uuid_v4(),
+            session_id: session_id.into(),
+            node_id: node_id.into(),
+            revision_id: revision_id.into(),
+            attempt,
+            affected_files,
+            applied_bundle: bundle.clone(),
+            diagnosis: diagnosis.into(),
+            resolved: false,
+            created_at: epoch_secs(),
+        }
+    }
+
+    /// Mark this footprint as having resolved the issue.
+    pub fn mark_resolved(&mut self) {
+        self.resolved = true;
+    }
+}
+
+/// Declared dependency expectations for a planned task.
+///
+/// Used during verification to confirm that the environment matches what
+/// the architect assumed when producing the plan (e.g. required packages,
+/// expected setup commands, or required toolchain version).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DependencyExpectation {
+    /// Packages or crates the task expects to be available.
+    pub required_packages: Vec<String>,
+    /// Setup commands that must have succeeded before this task runs.
+    pub setup_commands: Vec<String>,
+    /// Minimum toolchain version string (e.g. `"1.75"` for Rust).
+    pub min_toolchain_version: Option<String>,
+}
+
+/// Budget envelope for plan execution.
+///
+/// Tracks cost, step, and revision budgets for a session.  The governance
+/// layer checks these limits before allowing further execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetEnvelope {
+    /// Session ID.
+    pub session_id: String,
+    /// Maximum number of node execution steps allowed.
+    pub max_steps: Option<u32>,
+    /// Steps consumed so far.
+    pub steps_used: u32,
+    /// Maximum number of plan revisions allowed.
+    pub max_revisions: Option<u32>,
+    /// Revisions consumed so far.
+    pub revisions_used: u32,
+    /// Maximum total cost in USD.
+    pub max_cost_usd: Option<f64>,
+    /// Cost consumed so far.
+    pub cost_used_usd: f64,
+}
+
+impl BudgetEnvelope {
+    /// Create a new budget envelope with no limits.
+    pub fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            max_steps: None,
+            steps_used: 0,
+            max_revisions: None,
+            revisions_used: 0,
+            max_cost_usd: None,
+            cost_used_usd: 0.0,
+        }
+    }
+
+    /// Whether the step budget is exhausted.
+    pub fn steps_exhausted(&self) -> bool {
+        self.max_steps.is_some_and(|max| self.steps_used >= max)
+    }
+
+    /// Whether the revision budget is exhausted.
+    pub fn revisions_exhausted(&self) -> bool {
+        self.max_revisions
+            .is_some_and(|max| self.revisions_used >= max)
+    }
+
+    /// Whether the cost budget is exhausted.
+    pub fn cost_exhausted(&self) -> bool {
+        self.max_cost_usd
+            .is_some_and(|max| self.cost_used_usd >= max)
+    }
+
+    /// Whether any budget limit has been exceeded.
+    pub fn any_exhausted(&self) -> bool {
+        self.steps_exhausted() || self.revisions_exhausted() || self.cost_exhausted()
+    }
+
+    /// Record a step.
+    pub fn record_step(&mut self) {
+        self.steps_used += 1;
+    }
+
+    /// Record a plan revision.
+    pub fn record_revision(&mut self) {
+        self.revisions_used += 1;
+    }
+
+    /// Record cost.
+    pub fn record_cost(&mut self, usd: f64) {
+        self.cost_used_usd += usd;
+    }
+}
+
 /// Helper: current epoch seconds.
 fn epoch_secs() -> i64 {
     std::time::SystemTime::now()
@@ -3281,5 +3698,253 @@ mod psp5_tests {
         let node = SRBNNode::new("n1".into(), "goal".into(), ModelTier::Actuator);
         assert!(node.provisional_branch_id.is_none());
         assert!(node.interface_seal_hash.is_none());
+    }
+
+    // =========================================================================
+    // Plan Revision, Charter, Repair, and Budget Tests
+    // =========================================================================
+
+    #[test]
+    fn test_plan_revision_initial() {
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask::new("t1", "Do something")],
+        };
+        let rev = PlanRevision::initial("session_1", plan);
+        assert_eq!(rev.sequence, 1);
+        assert_eq!(rev.reason, "initial");
+        assert!(rev.supersedes.is_none());
+        assert!(rev.is_active());
+        assert_eq!(rev.status, PlanRevisionStatus::Active);
+    }
+
+    #[test]
+    fn test_plan_revision_successor() {
+        let plan1 = TaskPlan {
+            tasks: vec![PlannedTask::new("t1", "First")],
+        };
+        let rev1 = PlanRevision::initial("s1", plan1);
+
+        let plan2 = TaskPlan {
+            tasks: vec![PlannedTask::new("t2", "Second")],
+        };
+        let rev2 = PlanRevision::successor(&rev1, plan2, "verification_failure");
+
+        assert_eq!(rev2.sequence, 2);
+        assert_eq!(rev2.reason, "verification_failure");
+        assert_eq!(rev2.supersedes, Some(rev1.revision_id.clone()));
+        assert!(rev2.is_active());
+    }
+
+    #[test]
+    fn test_plan_revision_status_display() {
+        assert_eq!(PlanRevisionStatus::Active.to_string(), "active");
+        assert_eq!(PlanRevisionStatus::Superseded.to_string(), "superseded");
+        assert_eq!(PlanRevisionStatus::Cancelled.to_string(), "cancelled");
+    }
+
+    #[test]
+    fn test_feature_charter_budget_checks() {
+        let mut charter = FeatureCharter::new("s1", "Build a CLI tool");
+        assert!(!charter.exceeds_module_budget(10));
+        assert!(!charter.exceeds_file_budget(50));
+
+        charter.max_modules = Some(5);
+        charter.max_files = Some(20);
+        assert!(!charter.exceeds_module_budget(5));
+        assert!(charter.exceeds_module_budget(6));
+        assert!(!charter.exceeds_file_budget(20));
+        assert!(charter.exceeds_file_budget(21));
+    }
+
+    #[test]
+    fn test_planning_policy_defaults_and_queries() {
+        let policy = PlanningPolicy::default();
+        assert_eq!(policy, PlanningPolicy::FeatureIncrement);
+        assert!(policy.needs_architect());
+        assert!(!policy.needs_speculator());
+
+        assert!(!PlanningPolicy::LocalEdit.needs_architect());
+        assert!(!PlanningPolicy::LocalEdit.needs_speculator());
+
+        assert!(PlanningPolicy::LargeFeature.needs_architect());
+        assert!(PlanningPolicy::LargeFeature.needs_speculator());
+
+        assert!(PlanningPolicy::GreenfieldBuild.needs_architect());
+        assert!(PlanningPolicy::GreenfieldBuild.needs_speculator());
+
+        assert!(PlanningPolicy::ArchitecturalRevision.needs_architect());
+        assert!(PlanningPolicy::ArchitecturalRevision.needs_speculator());
+    }
+
+    #[test]
+    fn test_repair_footprint_creation() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Write {
+                path: "src/fix.rs".into(),
+                content: "fixed".into(),
+            }],
+            commands: vec![],
+        };
+        let fp = RepairFootprint::new("s1", "node1", "rev1", 1, &bundle, "Syntax error");
+        assert_eq!(fp.node_id, "node1");
+        assert_eq!(fp.attempt, 1);
+        assert_eq!(fp.affected_files, vec!["src/fix.rs"]);
+        assert!(!fp.resolved);
+
+        let mut fp = fp;
+        fp.mark_resolved();
+        assert!(fp.resolved);
+    }
+
+    #[test]
+    fn test_budget_envelope_tracking() {
+        let mut budget = BudgetEnvelope::new("s1");
+        budget.max_steps = Some(3);
+        budget.max_revisions = Some(2);
+        budget.max_cost_usd = Some(1.0);
+
+        assert!(!budget.any_exhausted());
+
+        budget.record_step();
+        budget.record_step();
+        assert!(!budget.steps_exhausted());
+        budget.record_step();
+        assert!(budget.steps_exhausted());
+        assert!(budget.any_exhausted());
+    }
+
+    #[test]
+    fn test_budget_envelope_cost_tracking() {
+        let mut budget = BudgetEnvelope::new("s1");
+        budget.max_cost_usd = Some(0.50);
+        budget.record_cost(0.25);
+        assert!(!budget.cost_exhausted());
+        budget.record_cost(0.30);
+        assert!(budget.cost_exhausted());
+    }
+
+    #[test]
+    fn test_artifact_operation_delete_and_move() {
+        let del = ArtifactOperation::Delete {
+            path: "src/old.rs".into(),
+        };
+        assert!(del.is_delete());
+        assert!(!del.is_write());
+        assert_eq!(del.path(), "src/old.rs");
+
+        let mv = ArtifactOperation::Move {
+            from: "src/old.rs".into(),
+            to: "src/new.rs".into(),
+        };
+        assert!(mv.is_move());
+        assert!(!mv.is_write());
+        assert_eq!(mv.path(), "src/old.rs");
+    }
+
+    #[test]
+    fn test_artifact_bundle_with_delete_and_move() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/new.rs".into(),
+                    content: "code".into(),
+                },
+                ArtifactOperation::Delete {
+                    path: "src/old.rs".into(),
+                },
+                ArtifactOperation::Move {
+                    from: "src/a.rs".into(),
+                    to: "src/b.rs".into(),
+                },
+            ],
+            commands: vec![],
+        };
+        assert_eq!(bundle.writes_count(), 1);
+        assert_eq!(bundle.deletes_count(), 1);
+        assert_eq!(bundle.moves_count(), 1);
+        assert!(bundle.validate().is_ok());
+
+        let paths = bundle.affected_paths();
+        assert!(paths.contains(&"src/new.rs"));
+        assert!(paths.contains(&"src/old.rs"));
+        assert!(paths.contains(&"src/a.rs"));
+        assert!(paths.contains(&"src/b.rs"));
+    }
+
+    #[test]
+    fn test_artifact_bundle_move_validation() {
+        // Move with traversal in destination should fail
+        let bundle = ArtifactBundle {
+            artifacts: vec![ArtifactOperation::Move {
+                from: "src/a.rs".into(),
+                to: "../outside.rs".into(),
+            }],
+            commands: vec![],
+        };
+        assert!(bundle.validate().is_err());
+    }
+
+    #[test]
+    fn test_dependency_expectation_default() {
+        let de = DependencyExpectation::default();
+        assert!(de.required_packages.is_empty());
+        assert!(de.setup_commands.is_empty());
+        assert!(de.min_toolchain_version.is_none());
+    }
+
+    #[test]
+    fn test_planned_task_has_dependency_expectations() {
+        let task = PlannedTask::new("t1", "Build module");
+        assert!(task.dependency_expectations.required_packages.is_empty());
+    }
+
+    #[test]
+    fn test_srbn_node_carries_dependency_expectations() {
+        let mut task = PlannedTask::new("t1", "Build module");
+        task.dependency_expectations = DependencyExpectation {
+            required_packages: vec!["serde".to_string(), "tokio".to_string()],
+            setup_commands: vec!["cargo fetch".to_string()],
+            min_toolchain_version: Some("1.75".to_string()),
+        };
+        let node = task.to_srbn_node(ModelTier::Actuator);
+        assert_eq!(node.dependency_expectations.required_packages.len(), 2);
+        assert_eq!(node.dependency_expectations.required_packages[0], "serde");
+        assert_eq!(node.dependency_expectations.setup_commands, ["cargo fetch"]);
+        assert_eq!(
+            node.dependency_expectations
+                .min_toolchain_version
+                .as_deref(),
+            Some("1.75")
+        );
+    }
+
+    #[test]
+    fn test_dependency_expectations_deserialized_from_json() {
+        let json = r#"{
+            "id": "t1",
+            "goal": "Build module",
+            "dependency_expectations": {
+                "required_packages": ["requests", "pydantic"],
+                "setup_commands": [],
+                "min_toolchain_version": "3.11"
+            }
+        }"#;
+        let task: PlannedTask = serde_json::from_str(json).unwrap();
+        assert_eq!(task.dependency_expectations.required_packages.len(), 2);
+        assert_eq!(
+            task.dependency_expectations
+                .min_toolchain_version
+                .as_deref(),
+            Some("3.11")
+        );
+    }
+
+    #[test]
+    fn test_dependency_expectations_default_when_omitted() {
+        let json = r#"{"id": "t1", "goal": "Build module"}"#;
+        let task: PlannedTask = serde_json::from_str(json).unwrap();
+        assert!(task.dependency_expectations.required_packages.is_empty());
+        assert!(task.dependency_expectations.setup_commands.is_empty());
+        assert!(task.dependency_expectations.min_toolchain_version.is_none());
     }
 }

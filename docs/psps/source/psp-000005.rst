@@ -6,7 +6,7 @@ Type: Enhancement
 Created: 2026-03-23
 Discussion-To: https://github.com/eonseed/perspt/discussions/97
 Replaces: 000004
-Resolution: Implemented in v0.5.5
+Resolution: Implemented in v0.5.6
 
 ========
 Abstract

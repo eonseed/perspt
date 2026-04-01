@@ -78,7 +78,8 @@ Contains all shared types used across the workspace:
 
 - **Types**: ``SRBNNode``, ``NodeState``, ``NodeClass``, ``ModelTier``, ``TaskPlan``,
   ``BehavioralContract``, ``StabilityMonitor``, ``EnergyComponents``, ``AgentContext``,
-  ``TokenBudget``, ``RetryPolicy``, ``OwnershipManifest``
+  ``TokenBudget``, ``RetryPolicy``, ``OwnershipManifest``, ``PlanningPolicy``,
+  ``FeatureCharter``, ``BudgetEnvelope``, ``RepairFootprint``
 - **Events**: ``AgentEvent`` enum with 40+ lifecycle event variants (PSP-5)
 - **Plugins**: Language plugin registry (Rust, Python, JS, Go) with LSP config,
   test runner, init commands, and required binaries
@@ -92,7 +93,9 @@ perspt-agent
 The heart of SRBN:
 
 - **Orchestrator**: ``SRBNOrchestrator`` manages the DAG (``petgraph``), drives the
-  7-phase control loop, manages LSP clients, and integrates TUI events
+  7-phase control loop, manages LSP clients, and integrates TUI events. Split into
+  submodules: ``mod.rs``, ``bundle.rs``, ``commit.rs``, ``convergence.rs``,
+  ``init.rs``, ``planning.rs``, ``repair.rs``, ``solo.rs``, ``verification.rs``
 - **Agents**: ``Agent`` trait with four implementations — ``ArchitectAgent``,
   ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
 - **Tools**: ``AgentTools`` — ``read_file``, ``write_file``, ``apply_patch``,
@@ -103,6 +106,8 @@ The heart of SRBN:
 - **Test Runner**: ``PythonTestRunner`` (pytest) with V_log calculation
 - **Ledger**: ``MerkleLedger`` backed by ``perspt-store``
 - **Context Retriever**: ``ripgrep``-based code search for context injection
+- **Prompts**: Centralized prompt templates in ``prompts.rs`` with constants and
+  ``render_*`` helper functions for all agent tiers
 
 perspt-tui
 ~~~~~~~~~~

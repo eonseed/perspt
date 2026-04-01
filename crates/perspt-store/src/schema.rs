@@ -526,6 +526,109 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // =========================================================================
+    // Plan Revision, Feature Charter, and Repair Footprint Tables
+    // =========================================================================
+
+    // Feature charters - scope constraints for sessions
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS feature_charters (
+            charter_id VARCHAR PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            scope_description TEXT NOT NULL,
+            max_modules INTEGER,
+            max_files INTEGER,
+            max_revisions INTEGER,
+            language_constraint VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_feature_charters_session ON feature_charters(session_id)",
+        [],
+    )?;
+
+    // Plan revisions - track plan evolution within a session
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS plan_revisions (
+            revision_id VARCHAR PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            sequence INTEGER NOT NULL,
+            plan_json TEXT NOT NULL,
+            reason VARCHAR NOT NULL,
+            supersedes VARCHAR,
+            status VARCHAR NOT NULL DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_plan_revisions_session ON plan_revisions(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_plan_revisions_status ON plan_revisions(status)",
+        [],
+    )?;
+
+    // Repair footprints - bounded repair units during correction
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_repair_footprints_id START 1",
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS repair_footprints (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_repair_footprints_id'),
+            footprint_id VARCHAR NOT NULL UNIQUE,
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            revision_id VARCHAR NOT NULL,
+            attempt INTEGER NOT NULL,
+            affected_files TEXT NOT NULL,
+            bundle_json TEXT NOT NULL,
+            diagnosis TEXT NOT NULL,
+            resolved BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_repair_footprints_session ON repair_footprints(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_repair_footprints_node ON repair_footprints(node_id)",
+        [],
+    )?;
+
+    // Budget envelopes - session-level budget tracking
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS budget_envelopes (
+            session_id VARCHAR PRIMARY KEY,
+            max_steps INTEGER,
+            steps_used INTEGER NOT NULL DEFAULT 0,
+            max_revisions INTEGER,
+            revisions_used INTEGER NOT NULL DEFAULT 0,
+            max_cost_usd DOUBLE,
+            cost_used_usd DOUBLE NOT NULL DEFAULT 0.0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+
     log::info!("DuckDB schema initialized successfully");
     Ok(())
 }

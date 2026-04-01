@@ -35,6 +35,15 @@ pub struct Dashboard {
     pub escalation_count: usize,
     /// PSP-5 Phase 7: Active branch count
     pub active_branches: usize,
+    /// PSP-5 Phase 8: Budget tracking — steps
+    pub budget_steps_used: u32,
+    pub budget_max_steps: Option<u32>,
+    /// PSP-5 Phase 8: Budget tracking — cost
+    pub budget_cost_used: f64,
+    pub budget_max_cost: Option<f64>,
+    /// PSP-5 Phase 8: Budget tracking — revisions
+    pub budget_revisions_used: u32,
+    pub budget_max_revisions: Option<u32>,
 }
 
 impl Default for Dashboard {
@@ -52,6 +61,12 @@ impl Default for Dashboard {
             verifier_stage: None,
             escalation_count: 0,
             active_branches: 0,
+            budget_steps_used: 0,
+            budget_max_steps: None,
+            budget_cost_used: 0.0,
+            budget_max_cost: None,
+            budget_revisions_used: 0,
+            budget_max_revisions: None,
         }
     }
 }
@@ -275,11 +290,31 @@ impl Dashboard {
     }
 
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
-        let help = Paragraph::new(
-            "Press 'q' to quit | 'p' to pause | 'r' to resume | 'a' to approve | 'd' to reject",
-        )
-        .style(Style::default().fg(Color::DarkGray))
-        .block(Block::default().borders(Borders::ALL));
+        let mut parts = vec!["q:quit  p:pause  r:resume  a:approve  d:reject".to_string()];
+
+        // Budget status line
+        let mut budget_parts = Vec::new();
+        let steps_str = self
+            .budget_max_steps
+            .map(|m| format!("{}/{}", self.budget_steps_used, m))
+            .unwrap_or_else(|| format!("{}", self.budget_steps_used));
+        if self.budget_steps_used > 0 || self.budget_max_steps.is_some() {
+            budget_parts.push(format!("steps={}", steps_str));
+        }
+        if self.budget_cost_used > 0.0 || self.budget_max_cost.is_some() {
+            let cost_str = self
+                .budget_max_cost
+                .map(|m| format!("${:.2}/${:.2}", self.budget_cost_used, m))
+                .unwrap_or_else(|| format!("${:.2}", self.budget_cost_used));
+            budget_parts.push(cost_str);
+        }
+        if !budget_parts.is_empty() {
+            parts.push(format!("💰 {}", budget_parts.join("  ")));
+        }
+
+        let help = Paragraph::new(parts.join("  │  "))
+            .style(Style::default().fg(Color::DarkGray))
+            .block(Block::default().borders(Borders::ALL));
         frame.render_widget(help, area);
     }
 }
