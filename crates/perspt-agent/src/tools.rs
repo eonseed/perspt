@@ -82,6 +82,8 @@ impl AgentTools {
             "list_files" => self.list_files(call),
             "write_file" => self.write_file(call),
             "apply_diff" => self.apply_diff(call),
+            "delete_file" => self.delete_file(call),
+            "move_file" => self.move_file(call),
             // Power Tools (OS-level)
             "sed_replace" => self.sed_replace(call),
             "awk_filter" => self.awk_filter(call),
@@ -234,6 +236,15 @@ impl AgentTools {
             }
         };
 
+        // Honor explicit working_dir from the caller (e.g. sandbox path),
+        // falling back to self.working_dir (the main workspace).
+        let effective_dir = call
+            .arguments
+            .get("working_dir")
+            .map(PathBuf::from)
+            .filter(|d| d.is_dir())
+            .unwrap_or_else(|| self.working_dir.clone());
+
         // PSP-5 Phase 4: Sanitize command through policy before execution
         match perspt_policy::sanitize_command(cmd_str) {
             Ok(sr) if sr.rejected => {
@@ -270,7 +281,8 @@ impl AgentTools {
 
         let mut child = match AsyncCommand::new("sh")
             .args(["-c", cmd_str])
-            .current_dir(&self.working_dir)
+            .current_dir(&effective_dir)
+            .env_remove("VIRTUAL_ENV")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -361,6 +373,79 @@ impl AgentTools {
     fn write_file(&self, call: &ToolCall) -> ToolResult {
         // Alias for apply_patch with different semantics
         self.apply_patch(call)
+    }
+
+    /// Delete a file from the workspace
+    fn delete_file(&self, call: &ToolCall) -> ToolResult {
+        let path = match call.arguments.get("path") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("delete_file", "Missing 'path' argument".to_string())
+            }
+        };
+
+        if !path.exists() {
+            return ToolResult::success(
+                "delete_file",
+                format!("Path does not exist, nothing to delete: {:?}", path),
+            );
+        }
+
+        if path.is_dir() {
+            return ToolResult::failure(
+                "delete_file",
+                format!(
+                    "Cannot delete directory {:?}; only files are supported",
+                    path
+                ),
+            );
+        }
+
+        match std::fs::remove_file(&path) {
+            Ok(()) => ToolResult::success("delete_file", format!("Deleted {:?}", path)),
+            Err(e) => {
+                ToolResult::failure("delete_file", format!("Failed to delete {:?}: {}", path, e))
+            }
+        }
+    }
+
+    /// Move/rename a file within the workspace
+    fn move_file(&self, call: &ToolCall) -> ToolResult {
+        let from = match call.arguments.get("from") {
+            Some(p) => self.resolve_path(p),
+            None => return ToolResult::failure("move_file", "Missing 'from' argument".to_string()),
+        };
+        let to = match call.arguments.get("to") {
+            Some(p) => self.resolve_path(p),
+            None => return ToolResult::failure("move_file", "Missing 'to' argument".to_string()),
+        };
+
+        if !from.exists() {
+            return ToolResult::failure(
+                "move_file",
+                format!("Source path does not exist: {:?}", from),
+            );
+        }
+
+        // Ensure destination parent directory exists
+        if let Some(parent) = to.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return ToolResult::failure(
+                        "move_file",
+                        format!("Failed to create destination directory {:?}: {}", parent, e),
+                    );
+                }
+            }
+        }
+
+        match std::fs::rename(&from, &to) {
+            Ok(()) => ToolResult::success("move_file", format!("Moved {:?} -> {:?}", from, to)),
+            Err(e) => ToolResult::failure(
+                "move_file",
+                format!("Failed to move {:?} -> {:?}: {}", from, to, e),
+            ),
+        }
     }
 
     /// Resolve a path relative to working directory
@@ -723,6 +808,115 @@ mod tests {
         let content = fs::read_to_string(&file_path).unwrap();
         assert_eq!(content, "Hello diffy\nThis is a test\n");
     }
+
+    #[tokio::test]
+    async fn test_delete_file() {
+        let dir = temp_dir();
+        let test_file = dir.join("test_delete_me.txt");
+        fs::write(&test_file, "temporary").unwrap();
+        assert!(test_file.exists());
+
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert("path".to_string(), test_file.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "delete_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(result.success, "Delete should succeed: {:?}", result.error);
+        assert!(!test_file.exists(), "File should be gone");
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_file_succeeds() {
+        let dir = temp_dir();
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert(
+            "path".to_string(),
+            "/tmp/does_not_exist_xyz.txt".to_string(),
+        );
+        let call = ToolCall {
+            name: "delete_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(result.success);
+    }
+
+    #[tokio::test]
+    async fn test_move_file() {
+        let dir = temp_dir();
+        let src = dir.join("test_move_src.txt");
+        let dst = dir.join("test_move_dst.txt");
+        fs::write(&src, "move me").unwrap();
+
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert("from".to_string(), src.to_string_lossy().to_string());
+        args.insert("to".to_string(), dst.to_string_lossy().to_string());
+        // move_file also needs "path" in args (set by bundle handler)
+        args.insert("path".to_string(), src.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "move_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(result.success, "Move should succeed: {:?}", result.error);
+        assert!(!src.exists(), "Source should be gone");
+        assert!(dst.exists(), "Destination should exist");
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "move me");
+        let _ = fs::remove_file(&dst);
+    }
+
+    #[tokio::test]
+    async fn test_delete_directory_rejected() {
+        let dir = temp_dir().join("test_delete_dir");
+        fs::create_dir_all(&dir).unwrap();
+
+        let tools = AgentTools::new(temp_dir(), false);
+        let mut args = HashMap::new();
+        args.insert("path".to_string(), dir.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "delete_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(!result.success, "Should reject directory deletion");
+        let _ = fs::remove_dir(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_move_file_creates_parent_dirs() {
+        let dir = temp_dir();
+        let src = dir.join("test_move_nested_src.txt");
+        let dst = dir
+            .join("nested")
+            .join("deep")
+            .join("test_move_nested_dst.txt");
+        fs::write(&src, "nested move").unwrap();
+
+        let tools = AgentTools::new(dir.clone(), false);
+        let mut args = HashMap::new();
+        args.insert("from".to_string(), src.to_string_lossy().to_string());
+        args.insert("to".to_string(), dst.to_string_lossy().to_string());
+        args.insert("path".to_string(), src.to_string_lossy().to_string());
+        let call = ToolCall {
+            name: "move_file".to_string(),
+            arguments: args,
+        };
+        let result = tools.execute(&call).await;
+        assert!(
+            result.success,
+            "Move with nested dirs should succeed: {:?}",
+            result.error
+        );
+        assert!(!src.exists());
+        assert!(dst.exists());
+        assert_eq!(fs::read_to_string(&dst).unwrap(), "nested move");
+        let _ = fs::remove_dir_all(dir.join("nested"));
+    }
 }
 
 // =============================================================================
@@ -750,6 +944,280 @@ pub fn create_sandbox(
     log::debug!("Created sandbox workspace at {}", sandbox_root.display());
 
     Ok(sandbox_root)
+}
+
+/// Seed a sandbox with plugin-identified project manifests (Cargo.toml,
+/// pyproject.toml, etc.) so that build/test commands can find them.
+///
+/// Walks the workspace looking for each plugin's `key_files()` and copies
+/// any that exist into the sandbox at the same relative path.
+pub fn seed_sandbox_manifests(
+    working_dir: &Path,
+    sandbox_dir: &Path,
+    plugins: &[&str],
+) -> std::io::Result<()> {
+    let registry = perspt_core::plugin::PluginRegistry::new();
+    let mut seeded = Vec::new();
+
+    for plugin_name in plugins {
+        if let Some(plugin) = registry.get(plugin_name) {
+            for key_file in plugin.key_files() {
+                // Check workspace root
+                if working_dir.join(key_file).exists() {
+                    copy_to_sandbox(working_dir, sandbox_dir, key_file)?;
+                    seeded.push(key_file.to_string());
+                }
+                // Also walk up to two levels of subdirectories
+                // (e.g. crates/*/Cargo.toml, packages/*/package.json)
+                if let Ok(entries) = fs::read_dir(working_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.is_dir() && path.file_name().is_none_or(|n| n != ".perspt") {
+                            // Level 1: e.g. crates/Cargo.toml (unlikely but check)
+                            let sub_key = path.join(key_file);
+                            if sub_key.exists() {
+                                let rel = sub_key
+                                    .strip_prefix(working_dir)
+                                    .unwrap_or(&sub_key)
+                                    .to_string_lossy()
+                                    .to_string();
+                                let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
+                                seeded.push(rel);
+                            }
+                            // Level 2: e.g. crates/cfd-core/Cargo.toml
+                            if let Ok(sub_entries) = fs::read_dir(&path) {
+                                for sub_entry in sub_entries.flatten() {
+                                    let sub_path = sub_entry.path();
+                                    if sub_path.is_dir() {
+                                        let deep_key = sub_path.join(key_file);
+                                        if deep_key.exists() {
+                                            let rel = deep_key
+                                                .strip_prefix(working_dir)
+                                                .unwrap_or(&deep_key)
+                                                .to_string_lossy()
+                                                .to_string();
+                                            let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
+                                            seeded.push(rel);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !seeded.is_empty() {
+        log::debug!("Seeded sandbox with manifests: {}", seeded.join(", "));
+    }
+
+    // For Rust workspaces: ensure every workspace member in the sandbox has
+    // at minimum a valid Cargo.toml + source target, so commands like
+    // `cargo add -p <crate>` can resolve the workspace graph.
+    if plugins.contains(&"rust") {
+        ensure_rust_workspace_members_in_sandbox(working_dir, sandbox_dir);
+    }
+
+    // For Python projects: symlink .venv and seed src/<pkg>/ so uv run
+    // commands work immediately in the sandbox.
+    if plugins.contains(&"python") {
+        seed_python_sandbox(working_dir, sandbox_dir);
+    }
+
+    Ok(())
+}
+
+/// Ensure all Cargo workspace members in a sandbox have valid Cargo.toml +
+/// source target stubs.  Without this, `cargo add -p X` (or any cargo
+/// command) fails with "failed to load manifest for workspace member Y"
+/// because the sandbox only gets the current node's files but the root
+/// Cargo.toml references ALL members.
+fn ensure_rust_workspace_members_in_sandbox(working_dir: &Path, sandbox_dir: &Path) {
+    let cargo_toml = sandbox_dir.join("Cargo.toml");
+    let content = match fs::read_to_string(&cargo_toml) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    // Quick parse: extract [workspace] members
+    let mut in_workspace = false;
+    let mut members: Vec<String> = Vec::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.starts_with('[') {
+            in_workspace = line == "[workspace]";
+            continue;
+        }
+        if in_workspace && line.starts_with("members") {
+            if let Some((_, value)) = line.split_once('=') {
+                let raw = value.trim();
+                if raw.starts_with('[') {
+                    let inner = raw.trim_start_matches('[').trim_end_matches(']');
+                    for item in inner.split(',') {
+                        let member = item.trim().trim_matches('"').trim_matches('\'');
+                        if !member.is_empty() {
+                            members.push(member.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for member in &members {
+        let member_dir = sandbox_dir.join(member);
+        let member_cargo = member_dir.join("Cargo.toml");
+
+        // Try to copy from main workspace first (preserves any real content)
+        let src_cargo = working_dir.join(member).join("Cargo.toml");
+        if src_cargo.exists() && !member_cargo.exists() {
+            let _ = fs::create_dir_all(&member_dir);
+            let _ = fs::copy(&src_cargo, &member_cargo);
+        }
+
+        // Create a stub Cargo.toml if still missing
+        if !member_cargo.exists() {
+            let _ = fs::create_dir_all(&member_dir);
+            let name = member.rsplit('/').next().unwrap_or(member);
+            let stub = format!(
+                "[package]\nname = \"{}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+                name
+            );
+            let _ = fs::write(&member_cargo, &stub);
+        }
+
+        // Ensure at least one source target exists (src/lib.rs or src/main.rs)
+        let src_dir = member_dir.join("src");
+        let has_lib = src_dir.join("lib.rs").exists();
+        let has_main = src_dir.join("main.rs").exists();
+        if !has_lib && !has_main {
+            let _ = fs::create_dir_all(&src_dir);
+            // Try copying from main workspace
+            let ws_lib = working_dir.join(member).join("src").join("lib.rs");
+            let ws_main = working_dir.join(member).join("src").join("main.rs");
+            if ws_lib.exists() {
+                let _ = fs::copy(&ws_lib, src_dir.join("lib.rs"));
+            } else if ws_main.exists() {
+                let _ = fs::copy(&ws_main, src_dir.join("main.rs"));
+            } else {
+                // Create minimal stub so cargo doesn't complain about missing targets
+                let _ = fs::write(
+                    src_dir.join("lib.rs"),
+                    "// stub — will be replaced by agent\n",
+                );
+            }
+        }
+    }
+
+    if !members.is_empty() {
+        log::debug!(
+            "Ensured {} workspace member(s) have valid stubs in sandbox",
+            members.len()
+        );
+    }
+}
+
+/// Seed a Python project sandbox with the workspace `.venv/` (via symlink)
+/// and the `src/<pkg>/` package directory tree so that `uv run` commands
+/// work immediately without a full re-sync.
+fn seed_python_sandbox(working_dir: &Path, sandbox_dir: &Path) {
+    // Symlink .venv/ so uv run reuses the workspace venv instead of
+    // recreating one per sandbox (saves ~2-3s per node).
+    let workspace_venv = working_dir.join(".venv");
+    let sandbox_venv = sandbox_dir.join(".venv");
+    if workspace_venv.is_dir() && !sandbox_venv.exists() {
+        #[cfg(unix)]
+        {
+            if let Err(e) = std::os::unix::fs::symlink(&workspace_venv, &sandbox_venv) {
+                log::debug!("Could not symlink .venv into sandbox: {}", e);
+            } else {
+                log::debug!("Symlinked .venv into sandbox");
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            // On Windows, symlinks require elevated privileges; skip the
+            // optimisation — uv will auto-create a venv when needed.
+            log::debug!("Skipping .venv symlink on non-Unix platform");
+        }
+    }
+
+    // Seed ancillary files that `uv add` / `uv sync` need when building
+    // the project inside the sandbox.  In particular, `uv init` generates
+    // `readme = "README.md"` in pyproject.toml, so the sandbox build fails
+    // with "failed to open file README.md" if we don't copy it.
+    for ancillary in &["README.md", "README.rst", "README", ".python-version"] {
+        let src = working_dir.join(ancillary);
+        if src.is_file() {
+            let dst = sandbox_dir.join(ancillary);
+            if !dst.exists() {
+                let _ = fs::copy(&src, &dst);
+            }
+        }
+    }
+
+    // Copy the src/<pkg>/ directory tree so imports resolve.  We walk one
+    // level under src/ looking for Python packages (__init__.py present).
+    let workspace_src = working_dir.join("src");
+    if workspace_src.is_dir() {
+        if let Ok(entries) = fs::read_dir(&workspace_src) {
+            for entry in entries.flatten() {
+                let pkg_dir = entry.path();
+                if pkg_dir.is_dir() && pkg_dir.join("__init__.py").exists() {
+                    // Recursively copy all .py files from this package
+                    if let Err(e) = copy_dir_to_sandbox(working_dir, sandbox_dir, &pkg_dir) {
+                        log::debug!(
+                            "Could not seed src/{} into sandbox: {}",
+                            entry.file_name().to_string_lossy(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Also copy conftest.py / tests/ directory if present (needed for pytest)
+    for extra in &["conftest.py", "tests"] {
+        let src = working_dir.join(extra);
+        if src.is_file() {
+            let rel = extra.to_string();
+            let _ = copy_to_sandbox(working_dir, sandbox_dir, &rel);
+        } else if src.is_dir() {
+            let _ = copy_dir_to_sandbox(working_dir, sandbox_dir, &src);
+        }
+    }
+}
+
+/// Recursively copy a directory from workspace into sandbox, preserving
+/// relative paths.  Skips `.venv`, `__pycache__`, and bytecode files.
+fn copy_dir_to_sandbox(
+    working_dir: &Path,
+    sandbox_dir: &Path,
+    src_dir: &Path,
+) -> std::io::Result<()> {
+    const SKIP: &[&str] = &[".venv", "__pycache__", ".mypy_cache", ".pytest_cache"];
+    for entry in fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if path.is_dir() {
+            if SKIP.iter().any(|s| *s == &*name_str) {
+                continue;
+            }
+            copy_dir_to_sandbox(working_dir, sandbox_dir, &path)?;
+        } else if !name_str.ends_with(".pyc") {
+            if let Ok(rel) = path.strip_prefix(working_dir) {
+                let rel_str = rel.to_string_lossy().to_string();
+                copy_to_sandbox(working_dir, sandbox_dir, &rel_str)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Clean up a specific sandbox workspace.
@@ -819,11 +1287,26 @@ pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
     if !sandbox_dir.exists() {
         return Ok(files);
     }
+    /// Directories that should never be exported from sandbox back to
+    /// workspace — virtual-environments, bytecode caches, build artifacts.
+    const SKIP_DIRS: &[&str] = &[
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+    ];
     fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) -> std::io::Result<()> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if SKIP_DIRS.iter().any(|s| *s == &*name_str) {
+                    continue;
+                }
                 walk(&path, base, out)?;
             } else if let Ok(rel) = path.strip_prefix(base) {
                 let normalized = rel
@@ -831,7 +1314,10 @@ pub fn list_sandbox_files(sandbox_dir: &Path) -> std::io::Result<Vec<String>> {
                     .map(|component| component.as_os_str().to_string_lossy().into_owned())
                     .collect::<Vec<_>>()
                     .join("/");
-                out.push(normalized);
+                // Skip bytecode / lock artifacts that shouldn't transfer
+                if !normalized.ends_with(".pyc") {
+                    out.push(normalized);
+                }
             }
         }
         Ok(())

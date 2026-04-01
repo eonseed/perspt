@@ -138,6 +138,19 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
         println!("↻  Total retries: {}", total_retries);
     }
 
+    // PSP-5 Phase 8: Show budget position before resuming
+    if let Ok(Some(budget)) = store.get_budget_envelope(&actual_id) {
+        let steps_str = budget
+            .max_steps
+            .map(|m| format!("{}/{}", budget.steps_used, m))
+            .unwrap_or_else(|| format!("{}", budget.steps_used));
+        let cost_str = budget
+            .max_cost_usd
+            .map(|m| format!("${:.2}/${:.2}", budget.cost_used_usd, m))
+            .unwrap_or_else(|| format!("${:.2}", budget.cost_used_usd));
+        println!("💰 Budget: steps={} cost={}", steps_str, cost_str);
+    }
+
     // Check if session is already completed
     if session.status == "COMPLETED" {
         println!();

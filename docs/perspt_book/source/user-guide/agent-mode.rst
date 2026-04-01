@@ -24,8 +24,13 @@ The SRBN agent follows the PSP-5 lifecycle:
 
 1. **Detection** — Identify workspace state (greenfield/brownfield) and select
    language plugins
-2. **Planning** — Architect model decomposes the task into a DAG of nodes with
-   assigned classes (Interface, Implementation, Integration)
+2. **Planning** — Based on the auto-selected ``PlanningPolicy``, either:
+
+   - **LocalEdit** — Skip Architect, create a single-node graph
+   - **FeatureIncrement / LargeFeature / GreenfieldBuild / ArchitecturalRevision** —
+     Architect decomposes the task into a DAG of nodes with assigned classes.
+   A ``FeatureCharter`` is created with policy-derived limits (max modules, files,
+   and revisions) to constrain plan scope.
 3. **Execution** — For each node in topological order:
 
    a. Actuator generates a multi-artifact bundle (writes, diffs, commands)
@@ -112,5 +117,17 @@ Session Management
 
    # Resume with trust context (shows escalation count, energy, retries)
    perspt resume --last
+
+When resuming, the ``BudgetEnvelope`` (step, cost, and revision caps) is restored
+from the database so limits continue from where the session left off.
+
+Speculator Lookahead
+--------------------
+
+For complex policies (``LargeFeature``, ``GreenfieldBuild``, ``ArchitecturalRevision``),
+the Speculator tier runs a fast lookahead before each node's Actuator generation.
+It examines pending child nodes and produces risk hints that are injected into the
+Actuator's prompt, helping avoid downstream breakage. Simpler policies
+(``LocalEdit``, ``FeatureIncrement``) skip the speculator to reduce latency and cost.
 
 See :doc:`advanced-features` for model tiers, energy tuning, and cost controls.

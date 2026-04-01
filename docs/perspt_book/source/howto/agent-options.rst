@@ -61,7 +61,7 @@ Energy and Convergence
    * - Flag
      - Description
    * - ``--energy-weights <W>``
-     - Comma-separated ``alpha,beta,gamma`` (default: ``1.0,0.5,1.0``)
+     - Comma-separated ``alpha,beta,gamma`` (default: ``1.0,0.5,2.0``)
    * - ``--stability-threshold <E>``
      - Convergence epsilon (default: ``0.10``)
    * - ``--verifier-strictness <S>``

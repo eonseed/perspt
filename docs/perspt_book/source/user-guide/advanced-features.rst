@@ -38,8 +38,8 @@ Customize the Lyapunov energy function:
 
 .. code-block:: bash
 
-   # Default: alpha=1.0, beta=0.5, gamma=1.0
-   perspt agent --energy-weights "1.0,0.5,1.0" -w . "Task"
+   # Default: alpha=1.0, beta=0.5, gamma=2.0
+   perspt agent --energy-weights "1.0,0.5,2.0" -w . "Task"
 
    # Prioritize tests (higher gamma)
    perspt agent --energy-weights "0.5,0.5,3.0" -w . "Add tests"
@@ -181,3 +181,49 @@ Execution Modes
      - Prompt when complexity exceeds threshold K (default)
    * - ``yolo``
      - Auto-approve everything without review
+
+
+Planning Policy
+---------------
+
+The orchestrator automatically selects a ``PlanningPolicy`` based on workspace
+state. The policy controls which agent tiers are activated:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 15 45
+
+   * - Policy
+     - Architect
+     - Speculator
+     - When Selected
+   * - **LocalEdit**
+     - Skipped
+     - Skipped
+     - Small, localized changes (single-node graph)
+   * - **FeatureIncrement**
+     - Active
+     - Skipped
+     - Existing projects (default)
+   * - **LargeFeature**
+     - Active
+     - Active
+     - Complex multi-module tasks
+   * - **GreenfieldBuild**
+     - Active
+     - Active
+     - New project (no existing files)
+   * - **ArchitecturalRevision**
+     - Active
+     - Active
+     - Cross-cutting redesign
+
+When the Speculator is active, it runs a fast lookahead before each node's code
+generation, producing risk hints about downstream impacts. This adds latency
+but improves first-pass correctness for complex DAGs.
+
+A **FeatureCharter** is auto-created with policy-derived limits before planning:
+
+- **LocalEdit**: max 1 module, 5 files, 3 revisions
+- **FeatureIncrement**: max 10 modules, 30 files, 5 revisions
+- **LargeFeature / GreenfieldBuild / ArchitecturalRevision**: max 25 modules, 80 files, 10 revisions

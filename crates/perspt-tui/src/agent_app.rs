@@ -617,6 +617,48 @@ impl AgentApp {
                     node_id, writes_count, diffs_count
                 ));
             }
+            AgentEvent::BudgetUpdated {
+                steps_used,
+                max_steps,
+                cost_used_usd,
+                max_cost_usd,
+                revisions_used,
+                max_revisions,
+            } => {
+                self.dashboard.budget_steps_used = steps_used;
+                self.dashboard.budget_max_steps = max_steps;
+                self.dashboard.budget_cost_used = cost_used_usd;
+                self.dashboard.budget_max_cost = max_cost_usd;
+                self.dashboard.budget_revisions_used = revisions_used;
+                self.dashboard.budget_max_revisions = max_revisions;
+                let steps_str = max_steps
+                    .map(|m| format!("{}/{}", steps_used, m))
+                    .unwrap_or_else(|| format!("{}", steps_used));
+                self.dashboard.log(format!(
+                    "💰 Budget: steps={} cost=${:.2}",
+                    steps_str, cost_used_usd
+                ));
+            }
+            AgentEvent::PlanRevised {
+                revision_id,
+                sequence,
+                reason,
+                node_count,
+            } => {
+                self.dashboard.log(format!(
+                    "🔄 Plan revised (rev.{}, {} nodes): {}",
+                    sequence, node_count, reason
+                ));
+                let _ = (revision_id,);
+            }
+            AgentEvent::FileDeleted { node_id, path } => {
+                self.dashboard
+                    .log(format!("🗑️  Deleted: {} (node {})", path, node_id));
+            }
+            AgentEvent::FileMoved { node_id, from, to } => {
+                self.dashboard
+                    .log(format!("📁 Moved: {} → {} (node {})", from, to, node_id));
+            }
             _ => {}
         }
     }

@@ -26,7 +26,7 @@ pub struct LspConfig {
 /// Verification stage in the plugin-driven pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VerifierStage {
-    /// Syntax / type check (e.g. `cargo check`, `uv run ty check .`)
+    /// Syntax / type check (e.g. `cargo check`, `uvx ty check .`)
     SyntaxCheck,
     /// Build step (e.g. `cargo build`, `npm run build`)
     Build,
@@ -259,7 +259,7 @@ pub trait LanguagePlugin: Send + Sync {
     // PSP-5: Capability-Based Runtime Contract
     // =========================================================================
 
-    /// Get the syntax/type check command (e.g., `cargo check`, `uv run ty check .`)
+    /// Get the syntax/type check command (e.g., `cargo check`, `uvx ty check .`)
     ///
     /// Returns None if the plugin has no syntax check command (uses LSP only).
     fn syntax_check_command(&self) -> Option<String> {
@@ -488,7 +488,7 @@ impl LanguagePlugin for RustPlugin {
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
-        &["rs"]
+        &["rs", "Cargo.toml"]
     }
 
     fn host_tool_available(&self) -> bool {
@@ -716,7 +716,7 @@ impl LanguagePlugin for PythonPlugin {
     // PSP-5 capability methods
 
     fn syntax_check_command(&self) -> Option<String> {
-        Some("uv run ty check .".to_string())
+        Some("uvx ty check .".to_string())
     }
 
     fn lint_command(&self) -> Option<String> {
@@ -724,7 +724,7 @@ impl LanguagePlugin for PythonPlugin {
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
-        &["py"]
+        &["py", "pyproject.toml", "setup.py", "requirements.txt"]
     }
 
     fn host_tool_available(&self) -> bool {
@@ -746,11 +746,20 @@ impl LanguagePlugin for PythonPlugin {
         let capabilities = vec![
             VerifierCapability {
                 stage: VerifierStage::SyntaxCheck,
-                command: Some("uv run ty check .".to_string()),
+                command: Some("uvx ty check .".to_string()),
                 available: uv,
                 // pyright as CLI fallback for syntax checking
                 fallback_command: Some("pyright .".to_string()),
                 fallback_available: pyright,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Build,
+                // Python has no separate build step; declare the capability
+                // so the sensor doesn't appear as Unavailable/degraded.
+                command: None,
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
             },
             VerifierCapability {
                 stage: VerifierStage::Test,
@@ -913,7 +922,7 @@ impl LanguagePlugin for JsPlugin {
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
-        &["js", "ts", "jsx", "tsx"]
+        &["js", "ts", "jsx", "tsx", "package.json", "tsconfig.json"]
     }
 
     fn host_tool_available(&self) -> bool {
@@ -1238,13 +1247,13 @@ mod tests {
         let py = PythonPlugin;
         let profile = py.verifier_profile();
         assert_eq!(profile.plugin_name, "python");
-        // Python: syntax_check, test, lint (no build)
-        assert_eq!(profile.capabilities.len(), 3);
+        // Python: syntax_check, build (no-op), test, lint
+        assert_eq!(profile.capabilities.len(), 4);
         let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
         assert!(stages.contains(&VerifierStage::SyntaxCheck));
+        assert!(stages.contains(&VerifierStage::Build));
         assert!(stages.contains(&VerifierStage::Test));
         assert!(stages.contains(&VerifierStage::Lint));
-        assert!(!stages.contains(&VerifierStage::Build));
         // Python has an LSP fallback declared
         assert!(profile.lsp.fallback.is_some());
     }

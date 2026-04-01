@@ -105,17 +105,53 @@ impl SandboxedCommand for BasicSandbox {
             cmd.current_dir(dir);
         }
 
-        let output = cmd.output()?;
-        let duration = start.elapsed();
+        let mut child = cmd.spawn()?;
 
-        // Check timeout (basic implementation - doesn't actually kill on timeout)
-        let timed_out = self.timeout.is_some_and(|t| duration > t);
+        // Active timeout: poll child with a deadline, kill if exceeded
+        if let Some(timeout) = self.timeout {
+            let deadline = start + timeout;
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_status)) => {
+                        // Process exited normally
+                        break;
+                    }
+                    Ok(None) => {
+                        // Still running — check deadline
+                        if std::time::Instant::now() >= deadline {
+                            // Kill the process
+                            let _ = child.kill();
+                            let _ = child.wait(); // reap zombie
+                            let duration = start.elapsed();
+                            return Ok(CommandResult {
+                                stdout: String::new(),
+                                stderr: format!(
+                                    "Process killed after {}s timeout",
+                                    timeout.as_secs()
+                                ),
+                                exit_code: None,
+                                timed_out: true,
+                                duration,
+                            });
+                        }
+                        // Brief sleep to avoid busy-waiting
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+
+        let output = child.wait_with_output()?;
+        let duration = start.elapsed();
 
         Ok(CommandResult {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
             exit_code: output.status.code(),
-            timed_out,
+            timed_out: false,
             duration,
         })
     }
@@ -196,5 +232,147 @@ mod tests {
 
         let sandbox = BasicSandbox::new("rm".to_string(), vec!["file.txt".to_string()]);
         assert!(!sandbox.is_read_only());
+    }
+
+    // =========================================================================
+    // Baseline regression tests — freeze pre-refactor behavior
+    // =========================================================================
+
+    #[cfg(unix)]
+    #[test]
+    fn test_basic_sandbox_with_working_dir() {
+        let temp = std::env::temp_dir();
+        let sandbox = BasicSandbox::new("pwd".to_string(), vec![])
+            .with_working_dir(temp.to_string_lossy().to_string());
+        let result = sandbox.execute().unwrap();
+        assert!(result.success());
+        // The working_dir setting should be respected; the pwd output
+        // should resolve to the same directory we specified.
+        let output_path = std::path::PathBuf::from(result.stdout.trim());
+        let expected = std::fs::canonicalize(&temp).unwrap();
+        let actual = std::fs::canonicalize(&output_path).unwrap();
+        assert_eq!(
+            actual, expected,
+            "pwd should match the specified working dir"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_basic_sandbox_with_working_dir() {
+        // Use a uniquely-named subdirectory so we can verify the working dir
+        // by name alone, avoiding junction/symlink resolution mismatches
+        // (e.g. C:\Users\...\Temp junction → D:\tmp on CI runners).
+        let unique = format!("perspt_test_{}", std::process::id());
+        let dir = std::env::temp_dir().join(&unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sandbox =
+            BasicSandbox::new("cmd".to_string(), vec!["/C".to_string(), "cd".to_string()])
+                .with_working_dir(dir.to_string_lossy().to_string());
+        let result = sandbox.execute().unwrap();
+        let _ = std::fs::remove_dir(&dir);
+        assert!(result.success(), "cmd /C cd should succeed");
+        let output = result.stdout.trim();
+        assert!(
+            output.ends_with(&unique),
+            "working dir output should end with our unique dir name, got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_basic_sandbox_captures_stderr() {
+        let sandbox = BasicSandbox::new(
+            "sh".to_string(),
+            vec!["-c".to_string(), "echo err >&2".to_string()],
+        );
+        let result = sandbox.execute().unwrap();
+        assert!(result.success());
+        assert!(
+            result.stderr.contains("err"),
+            "stderr should capture error output"
+        );
+    }
+
+    #[test]
+    fn test_basic_sandbox_nonzero_exit() {
+        let sandbox = BasicSandbox::new("false".to_string(), vec![]);
+        let result = sandbox.execute().unwrap();
+        assert!(!result.success());
+        assert_eq!(result.exit_code, Some(1));
+        assert!(!result.timed_out);
+    }
+
+    #[test]
+    fn test_basic_sandbox_timeout_fast_command_succeeds() {
+        // A fast command with a generous timeout should complete normally.
+        let sandbox = BasicSandbox::new("echo".to_string(), vec!["fast".to_string()])
+            .with_timeout(Duration::from_secs(60));
+        let result = sandbox.execute().unwrap();
+        assert!(!result.timed_out);
+        assert!(result.success());
+    }
+
+    #[test]
+    fn test_from_command_string_empty_rejected() {
+        let result = BasicSandbox::from_command_string("");
+        assert!(result.is_err(), "Empty command should be rejected");
+    }
+
+    #[test]
+    fn test_from_command_string_with_quotes() {
+        let sandbox = BasicSandbox::from_command_string(r#"echo "hello world""#).unwrap();
+        assert_eq!(sandbox.program, "echo");
+        assert_eq!(sandbox.args, vec!["hello world"]);
+    }
+
+    #[test]
+    fn test_display_no_args() {
+        let sandbox = BasicSandbox::new("pwd".to_string(), vec![]);
+        assert_eq!(sandbox.display(), "pwd");
+    }
+
+    #[test]
+    fn test_is_read_only_compound_commands() {
+        // cargo check should be read-only
+        let sandbox = BasicSandbox::new("cargo".to_string(), vec!["check".to_string()]);
+        assert!(sandbox.is_read_only());
+
+        // cargo test should be read-only
+        let sandbox = BasicSandbox::new("cargo".to_string(), vec!["test".to_string()]);
+        assert!(sandbox.is_read_only());
+
+        // git status should be read-only
+        let sandbox = BasicSandbox::new("git".to_string(), vec!["status".to_string()]);
+        assert!(sandbox.is_read_only());
+
+        // git push should NOT be read-only
+        let sandbox = BasicSandbox::new("git".to_string(), vec!["push".to_string()]);
+        assert!(!sandbox.is_read_only());
+    }
+
+    #[test]
+    fn test_command_result_duration_nonzero() {
+        let sandbox = BasicSandbox::new("echo".to_string(), vec!["hi".to_string()]);
+        let result = sandbox.execute().unwrap();
+        // Duration should be non-zero (process was actually spawned)
+        assert!(result.duration.as_nanos() > 0);
+    }
+
+    #[test]
+    fn test_active_timeout_kills_process() {
+        // Start a long-running sleep and verify the sandbox kills it
+        let sandbox = BasicSandbox::new("sleep".to_string(), vec!["30".to_string()])
+            .with_timeout(Duration::from_millis(200));
+
+        let result = sandbox.execute().unwrap();
+        assert!(
+            result.timed_out,
+            "Process should have been killed by timeout"
+        );
+        assert!(!result.success());
+        assert!(
+            result.duration < Duration::from_secs(5),
+            "Should return quickly after kill, not wait 30s"
+        );
     }
 }
