@@ -171,51 +171,52 @@ The overview page provides a command-center style dashboard with four main widge
 This is the centerpiece of the dashboard, showing the agent's decision topology at a glance.
 
 * **Graph Rendering:** The task graph is rendered from ``task_graph_edges`` and ``node_states`` tables. Each node is represented as a Daisy UI ``card card-compact`` positioned in a topological grid layout computed server-side. Edges are drawn as SVG ``<path>`` elements with arrowheads overlaid on the card grid.
-* **Node Card Contents:** Each card displays:
-   - **Header:** Node ID (monospace) + node class badge:
-      - ``badge badge-primary`` for Interface nodes
-      - ``badge badge-secondary`` for Implementation nodes
-      - ``badge badge-accent`` for Integration nodes
-   - **Body:** Goal text (first 100 chars, expandable via ``collapse collapse-arrow``)
-   - **State Indicator:** Full-width colored stripe at card bottom:
-      - ``bg-neutral`` for Queued
-      - ``bg-info`` for Coding
-      - ``bg-warning`` for Verifying
-      - ``bg-secondary`` for Retry (with ``animate-pulse`` CSS)
-      - ``bg-accent`` for SheafCheck
-      - ``bg-success`` for Completed
-      - ``bg-error`` for Failed/Escalated
-   - **Metadata Row:** Owner plugin tag + ``v_total`` energy + attempt count
-   - **Verification Badge:** A mini status grid (4 dots for syntax/build/tests/lint) from ``verification_results``, each colored green/red/gray
-* **Provisional Branches:** Active sandboxes are shown as dashed-border child cards (``border-dashed opacity-80``) attached to their parent node with a "sandbox" label.
-* **Edge Styling:** Edges between nodes use different stroke styles:
-   - Solid lines for completed dependencies
-   - Dashed lines for pending dependencies
-   - Red lines for failed/flushed paths
-   - ``interface_seals`` are shown as small lock ([LOCK]) icons on edges that have sealed.
 
-**Page 3: Energy Convergence**
+.. rubric:: Node Card Contents
+
+Each node card shows a header with the node ID and a class badge, using ``badge badge-primary`` for Interface nodes, ``badge badge-secondary`` for Implementation nodes, and ``badge badge-accent`` for Integration nodes. The body shows the goal text, truncated to the first 100 characters and expandable via ``collapse collapse-arrow``. A full-width state stripe appears at the card bottom, using ``bg-neutral`` for Queued, ``bg-info`` for Coding, ``bg-warning`` for Verifying, ``bg-secondary`` with ``animate-pulse`` for Retry, ``bg-accent`` for SheafCheck, ``bg-success`` for Completed, and ``bg-error`` for Failed or Escalated. The metadata row shows the owner plugin tag, the current :math:`V(x)` value, and the attempt count. A verification badge grid shows syntax, build, tests, and lint status from ``verification_results`` with green, red, and gray status dots.
+
+.. rubric:: Provisional Branches
+
+Active sandboxes are shown as dashed-border child cards (``border-dashed opacity-80``) attached to their parent node with a "sandbox" label.
+
+.. rubric:: Edge Styling
+
+Edges between nodes use solid lines for completed dependencies, dashed lines for pending dependencies, and red lines for failed or flushed paths. ``interface_seals`` are shown as small lock ([LOCK]) icons on edges that have sealed.
+
+.. rubric:: Page 3: Energy Convergence
 
 This page reveals whether the agent is converging (energy decreasing) or diverging (energy increasing, needing escalation).
 
+The dashboard should present the SRBN energy model using the same notation as the rest of the documentation:
+
+.. math::
+
+   V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
+
+where :math:`V(x)` is the composite verification energy for a node and stability is reached when :math:`V(x) \leq \varepsilon`.
+
 * **Node Selector:** A ``select`` dropdown to pick which node's energy history to display.
 * **Energy Chart:** An inline SVG chart (rendered server-side by Askama as ``<svg>`` elements -- no JS charting library needed) showing energy over attempt iterations:
+
    - X-axis: attempt number (1, 2, 3, ...)
    - Y-axis: energy value (0.0 to max observed)
    - Six lines, each color-coded:
-      - ``v_syn`` (syntax) -- ``stroke: oklch(var(--p))`` (primary)
-      - ``v_str`` (structural) -- ``stroke: oklch(var(--s))`` (secondary)
-      - ``v_log`` (logic/tests) -- ``stroke: oklch(var(--a))`` (accent)
-      - ``v_boot`` (bootstrap) -- ``stroke: oklch(var(--in))`` (info)
-      - ``v_sheaf`` (sheaf) -- ``stroke: oklch(var(--wa))`` (warning)
-      - ``v_total`` (composite) -- ``stroke: oklch(var(--er))`` (error), thicker line
-   - Horizontal dashed line at ``epsilon = 0.1`` (stability threshold) labeled "Stable below"
-   - Filled area below ``epsilon`` in subtle green to visually indicate the "safe zone"
+      - :math:`V_{syn}` (syntax) -- ``stroke: oklch(var(--p))`` (primary)
+      - :math:`V_{str}` (structural) -- ``stroke: oklch(var(--s))`` (secondary)
+      - :math:`V_{log}` (logic/tests) -- ``stroke: oklch(var(--a))`` (accent)
+      - :math:`V_{boot}` (bootstrap) -- ``stroke: oklch(var(--in))`` (info)
+      - :math:`V_{sheaf}` (sheaf) -- ``stroke: oklch(var(--wa))`` (warning)
+      - :math:`V(x)` (composite) -- ``stroke: oklch(var(--er))`` (error), thicker line
+   - Horizontal dashed line at :math:`\varepsilon = 0.10` (stability threshold) labeled "Stable below"
+   - Filled area below :math:`\varepsilon` in subtle green to visually indicate the stable region
 * **Energy Table:** Below the chart, a ``table table-zebra table-pin-rows`` showing raw ``energy_history`` records with all component values + timestamps.
 * **Convergence Indicator:** A Daisy UI ``alert`` at the top:
-   - ``alert-success`` if energy is monotonically decreasing over last 3 attempts
-   - ``alert-warning`` if energy oscillating
-   - ``alert-error`` if energy increasing (approaching escalation)
+
+   - ``alert-success`` if :math:`V(x)` is monotonically decreasing over the last 3 attempts
+   - ``alert-warning`` if :math:`V(x)` is oscillating
+   - ``alert-error`` if :math:`V(x)` is increasing and approaching escalation
+
 
 **Page 4: LLM Telemetry**
 
@@ -276,42 +277,32 @@ This page reveals the agent's internal decision-making -- **why** it chose speci
    - Evidence summary in a ``mockup-code`` block
    - Affected nodes listed as clickable badges linking to DAG view
    - Attempt count at which escalation occurred
-* **Sheaf Validation Report:** ``table table-zebra`` showing ``sheaf_validations``:
-   - Validator class column with descriptive icons:
-      - [DEP] DependencyGraphConsistency
-      - [EXP] ExportImportConsistency
-      - [SCH] SchemaContractCompatibility
-      - [BLD] BuildGraphConsistency
-      - [TST] TestOwnershipConsistency
-      - [XLN] CrossLanguageBoundary
-   - Pass/fail indicator: ``badge badge-success``/``badge badge-error``
-   - ``v_sheaf`` contribution value
-   - Evidence summary (expandable)
-   - Requeue targets listed as node badges
-* **Graph Rewrite Timeline:** A Daisy UI ``timeline`` component for ``rewrite_records``:
-   - Each entry shows: trigger node -> rewrite action -> nodes affected
-   - Rewrite actions displayed as action verbs: "Split", "Insert Interface", "Replan", "Merge"
-   - Before/after node count comparison
-* **Plan Revision History:** A ``steps`` component (Daisy UI) showing ``plan_revisions``:
-   - Each revision is a step with:
-      - Revision number (sequence)
-      - Reason for revision
-      - Node count change (e.g., "5 -> 8 nodes")
-      - Superseded revision indicator
-* **Repair Footprints:** Expandable ``collapse`` sections for each ``repair_footprints`` record:
-   - Repair type, target node, success/failure
-   - Evidence used in the repair attempt
-   - Duration and cost of repair
-* **Verification Results Grid:** A compact grid showing per-node verification status:
-   - Columns: Node ID, Syntax, Build, Tests, Lint, Degraded
-   - Each cell: [PASS]/[FAIL]/[--] (pass/fail/skipped)
-   - Degraded column shows [WARN] with tooltip listing degraded reasons
-* **Context Provenance Audit:** For advanced debugging, a tree-view of ``context_provenance``:
-   - Which files were included in each node's context
-   - Which were missing or over-budget
-   - Structural digest versions used
 
-**Real-Time Update Architecture (Axum SSE + HTMX):**
+.. rubric:: Sheaf Validation Report
+
+A ``table table-zebra`` view of ``sheaf_validations`` with a validator-class column using descriptive icons for DependencyGraphConsistency, ExportImportConsistency, SchemaContractCompatibility, BuildGraphConsistency, TestOwnershipConsistency, and CrossLanguageBoundary. Each row shows a pass or fail indicator, the :math:`V_{sheaf}` contribution value, expandable evidence, and any requeue targets as node badges.
+
+.. rubric:: Graph Rewrite Timeline
+
+A Daisy UI ``timeline`` component for ``rewrite_records``. Each entry shows the trigger node, the rewrite action, the affected nodes, and the before/after node-count comparison. Rewrite actions are displayed as action verbs such as "Split", "Insert Interface", "Replan", and "Merge".
+
+.. rubric:: Plan Revision History
+
+A Daisy UI ``steps`` component for ``plan_revisions``. Each revision displays its sequence number, the reason for revision, the node-count change (for example, "5 -> 8 nodes"), and whether that revision was later superseded.
+
+.. rubric:: Repair Footprints
+
+Expandable ``collapse`` sections for each ``repair_footprints`` record, showing the repair type, target node, success or failure, the evidence used in the repair attempt, and the repair duration and cost.
+
+.. rubric:: Verification Results Grid
+
+A compact per-node verification grid with columns for Node ID, Syntax, Build, Tests, Lint, and Degraded. Each cell shows [PASS], [FAIL], or [--] for pass, fail, or skipped states, and the Degraded column uses [WARN] with a tooltip listing degraded reasons.
+
+.. rubric:: Context Provenance Audit
+
+For advanced debugging, a tree-view of ``context_provenance`` showing which files were included in each node's context, which files were missing or over budget, and which structural digest versions were used.
+
+.. rubric:: Real-Time Update Architecture (Axum SSE + HTMX)
 
 The dashboard uses **Server-Sent Events (SSE)** for real-time push updates. The Axum server maintains a persistent HTTP connection to the browser and pushes rendered HTML fragments whenever DuckDB data changes. The HTMX SSE extension (``htmx-ext-sse``, 2KB) receives these fragments and swaps them into the DOM automatically. Any bespoke JavaScript is limited to progressive enhancement helpers such as theme persistence or clipboard copy; the data refresh path remains server-rendered and SSE-driven.
 
