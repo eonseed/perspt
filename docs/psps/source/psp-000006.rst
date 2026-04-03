@@ -4,7 +4,7 @@ Author: Vikrant Rathore (@vikrantrathore)
 Status: Discussion
 Type: Feature
 Created: 2026-04-02
-Discussion-To: https://github.com/eonseed/perspt/discussions/104
+Discussion-To: https://github.com/eonseed/perspt/discussions/106
 
 ========
 Abstract
