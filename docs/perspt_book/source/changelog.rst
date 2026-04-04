@@ -3,6 +3,51 @@
 Changelog
 =========
 
+Version 0.5.7 — "navikaran नवीकरण"
+-------------------------------------
+
+*Dashboard UX Polish Release*
+
+   "Bridging the purpose of Ikigai with the momentum of Kaizen — renewal through
+   continuous, intentional refinement."
+
+**Dashboard UX Improvements (PSP-6 continued):**
+
+- **Custom DaisyUI 5 themes** — ``perspt-light`` and ``perspt-dark`` themes with
+  orange/pink oklch palette (WCAG AA compliant), powered by
+  ``@plugin "daisyui/theme"`` blocks
+- **Theme toggle** — Navbar button with sun/moon icons, localStorage persistence,
+  and migration from legacy theme names
+- **Friendly session names** — Deterministic human-readable names (e.g.
+  "bold-hawk") derived from session UUIDs via hash-indexed adjective+noun arrays
+- **Breadcrumb friendly names** — All six session sub-pages show friendly name
+  with UUID-on-hover tooltip
+- **Session card layout** — Stacked vertical cards with ``btn-outline`` sub-page
+  buttons replacing ghost buttons
+- **Task text formatting** — ``whitespace-pre-line`` rendering for readable
+  multi-line task descriptions
+- **Collapse arrow fix** — ``pe-10`` padding on DAG and LLM collapse summaries
+  to prevent arrow overlap with text
+- **Decisions page resilience** — All six store queries use
+  ``unwrap_or_default()`` instead of ``?`` early-return, preventing 503 errors
+  on partial data
+- **Paginated overview** — 20 sessions per page with DaisyUI ``join`` pagination
+  controls, backed by ``list_sessions_paginated()`` and ``count_sessions()``
+  store methods
+- **Login page theme** — Updated to ``perspt-light`` default
+
+**CI & Build:**
+
+- **Node.js in CI** — Added ``actions/setup-node@v4`` (Node 22) to CI test matrix
+  and release workflows so ``npx @tailwindcss/cli`` runs on all runners
+
+**Store:**
+
+- ``list_sessions_paginated(limit, offset)`` — LIMIT/OFFSET SQL for paginated
+  session listing
+- ``count_sessions()`` — Total session count for pagination controls
+
+
 Version 0.5.6 — "ikigai 生き甲斐"
 -----------------------------------
 
