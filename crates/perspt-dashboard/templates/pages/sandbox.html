@@ -1,9 +1,51 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-4">Session: {{ session_id }}</p>
-<div class="alert alert-info">
-    <span>Sandbox file monitoring — data will be wired in Phase 4.</span>
+<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
+<p class="text-sm text-base-content/60 mb-4">Session: <span class="font-mono">{{ session_id }}</span></p>
+
+{% if branches.is_empty() %}
+<div class="alert alert-info"><span>No provisional branches recorded.</span></div>
+{% else %}
+<div class="overflow-x-auto">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr>
+                <th>Branch</th>
+                <th>Node</th>
+                <th>Parent Node</th>
+                <th>State</th>
+                <th>Sandbox Dir</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for b in branches %}
+            <tr>
+                <td class="font-mono text-xs">{{ b.branch_id }}</td>
+                <td class="font-mono text-xs">{{ b.node_id }}</td>
+                <td class="font-mono text-xs">{{ b.parent_node_id }}</td>
+                <td>
+                    {% if b.state == "active" %}
+                    <span class="badge badge-primary badge-sm">{{ b.state }}</span>
+                    {% elif b.state == "merged" %}
+                    <span class="badge badge-success badge-sm">{{ b.state }}</span>
+                    {% elif b.state == "flushed" %}
+                    <span class="badge badge-warning badge-sm">{{ b.state }}</span>
+                    {% else %}
+                    <span class="badge badge-sm">{{ b.state }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-xs">
+                    {% if let Some(dir) = b.sandbox_dir %}
+                    {{ dir }}
+                    {% else %}
+                    <span class="text-base-content/40">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
 </div>
+{% endif %}
 {% endblock %}

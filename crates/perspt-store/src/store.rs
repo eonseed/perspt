@@ -970,6 +970,31 @@ impl SessionStore {
         Ok(records)
     }
 
+    /// Get all sheaf validations for a session (all nodes).
+    pub fn get_all_sheaf_validations(&self, session_id: &str) -> Result<Vec<SheafValidationRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets
+             FROM sheaf_validations WHERE session_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(SheafValidationRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                validator_class: row.get(2)?,
+                plugin_source: row.get::<_, Option<String>>(3)?,
+                passed: row.get::<_, String>(4)?.parse().unwrap_or(false),
+                evidence_summary: row.get(5)?,
+                affected_files: row.get(6)?,
+                v_sheaf_contribution: row.get::<_, f64>(7)? as f32,
+                requeue_targets: row.get(8)?,
+            });
+        }
+        Ok(records)
+    }
+
     // =========================================================================
     // PSP-5 Phase 6: Provisional Branch CRUD
     // =========================================================================
@@ -1745,6 +1770,31 @@ impl SessionStore {
              FROM repair_footprints WHERE session_id = ? AND node_id = ? ORDER BY attempt ASC",
         )?;
         let mut rows = stmt.query([session_id, node_id])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(RepairFootprintRow {
+                footprint_id: row.get(0)?,
+                session_id: row.get(1)?,
+                node_id: row.get(2)?,
+                revision_id: row.get(3)?,
+                attempt: row.get(4)?,
+                affected_files: row.get(5)?,
+                bundle_json: row.get(6)?,
+                diagnosis: row.get(7)?,
+                resolved: row.get(8)?,
+            });
+        }
+        Ok(results)
+    }
+
+    /// Get all repair footprints for a session (all nodes).
+    pub fn get_all_repair_footprints(&self, session_id: &str) -> Result<Vec<RepairFootprintRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved \
+             FROM repair_footprints WHERE session_id = ? ORDER BY attempt ASC",
+        )?;
+        let mut rows = stmt.query([session_id])?;
         let mut results = Vec::new();
         while let Some(row) = rows.next()? {
             results.push(RepairFootprintRow {
