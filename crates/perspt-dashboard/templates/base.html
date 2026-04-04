@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="perspt-light">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,7 +13,17 @@
         <div class="flex-1">
             <a class="btn btn-ghost text-xl" href="/">Perspt Dashboard</a>
         </div>
-        <div class="flex-none">
+        <div class="flex-none flex items-center gap-2">
+            <button onclick="toggleTheme()" class="btn btn-ghost btn-sm btn-circle" aria-label="Toggle theme">
+                <!-- sun icon — shown in dark mode (click to go light) -->
+                <svg id="theme-icon-sun" class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M5.64 17l-.71.71a1 1 0 000 1.42 1 1 0 001.41 0l.71-.71A1 1 0 005.64 17zM5 12a1 1 0 00-1-1H3a1 1 0 000 2h1a1 1 0 001-1zm7-7a1 1 0 001-1V3a1 1 0 00-2 0v1a1 1 0 001 1zm5.66 2.34a1 1 0 00.7-.29l.71-.71a1 1 0 10-1.41-1.41l-.71.71a1 1 0 00.71 1.7zm-12 .29a1 1 0 00.7.29 1 1 0 00.71-.29 1 1 0 000-1.41l-.71-.71a1 1 0 00-1.41 1.41zM21 11h-1a1 1 0 000 2h1a1 1 0 000-2zm-9 8a1 1 0 00-1 1v1a1 1 0 002 0v-1a1 1 0 00-1-1zm6.36-2a1 1 0 00-1.41 1.41l.71.71a1 1 0 001.41 0 1 1 0 000-1.41zM12 6.5A5.5 5.5 0 1017.5 12 5.51 5.51 0 0012 6.5zm0 9A3.5 3.5 0 1115.5 12 3.5 3.5 0 0112 15.5z"/>
+                </svg>
+                <!-- moon icon — shown in light mode (click to go dark) -->
+                <svg id="theme-icon-moon" class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M21.64 13a1 1 0 00-1.05-.14 8.05 8.05 0 01-3.37.73A8.15 8.15 0 019.08 5.49a8.59 8.59 0 01.25-2 1 1 0 00-1.28-1.18A10.18 10.18 0 002 12.05 10.14 10.14 0 0012.2 22a10.19 10.19 0 009.44-9z"/>
+                </svg>
+            </button>
             <ul class="menu menu-horizontal px-1">
                 <li><a href="/">Sessions</a></li>
             </ul>

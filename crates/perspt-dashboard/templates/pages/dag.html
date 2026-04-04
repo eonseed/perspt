@@ -37,7 +37,7 @@
         {% if n.state == "running" %}border-primary{% endif %}
         {% if n.state != "completed" && n.state != "failed" && n.state != "running" %}border-base-300{% endif %}
     ">
-        <summary class="collapse-title p-3 min-h-0">
+        <summary class="collapse-title p-3 pe-10 min-h-0">
             <div class="flex items-center gap-3 text-sm">
                 <span class="font-mono text-xs">{{ n.node_id }}</span>
                 {% if n.state == "completed" %}

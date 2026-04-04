@@ -1,4 +1,4 @@
-use super::normalize_state;
+use super::{friendly_name, normalize_state};
 use perspt_store::{BudgetEnvelopeRow, NodeStateRecord, SessionRecord};
 
 /// View model for the overview/sessions list page
@@ -50,6 +50,7 @@ fn format_duration_ms(ms: i64) -> String {
 /// Summary of a single session for the overview list
 pub struct SessionSummary {
     pub session_id: String,
+    pub display_name: String,
     pub task: String,
     pub working_dir: String,
     pub status: String,
@@ -131,6 +132,7 @@ impl OverviewViewModel {
                     });
 
                 SessionSummary {
+                    display_name: friendly_name(&s.session_id),
                     session_id: s.session_id,
                     task: s.task,
                     working_dir: s.working_dir,

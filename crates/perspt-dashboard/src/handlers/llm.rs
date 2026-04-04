@@ -4,12 +4,14 @@ use axum::response::{Html, IntoResponse};
 
 use crate::error::DashboardError;
 use crate::state::AppState;
+use crate::views::friendly_name;
 use crate::views::llm::{LlmRow, LlmViewModel};
 
 #[derive(Template)]
 #[template(path = "pages/llm.html")]
 struct LlmTemplate {
     session_id: String,
+    display_name: String,
     active_tab: String,
     title: String,
     requests: Vec<LlmRow>,
@@ -30,6 +32,7 @@ pub async fn llm_handler(
     let vm = LlmViewModel::from_records(session_id.clone(), records);
 
     let tmpl = LlmTemplate {
+        display_name: friendly_name(&vm.session_id),
         session_id: vm.session_id,
         active_tab: "llm".to_string(),
         title: "LLM Telemetry".to_string(),

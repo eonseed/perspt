@@ -4,6 +4,7 @@ use axum::response::{Html, IntoResponse};
 
 use crate::error::DashboardError;
 use crate::state::AppState;
+use crate::views::friendly_name;
 use crate::views::overview::BudgetSummary;
 use crate::views::session_detail::{NodeSummaryRow, SessionDetailViewModel, VerifSummaryRow};
 
@@ -11,6 +12,7 @@ use crate::views::session_detail::{NodeSummaryRow, SessionDetailViewModel, Verif
 #[template(path = "pages/session_detail.html")]
 struct SessionDetailTemplate {
     session_id: String,
+    display_name: String,
     active_tab: String,
     task: String,
     working_dir: String,
@@ -76,6 +78,7 @@ pub async fn session_detail_handler(
     );
 
     let tmpl = SessionDetailTemplate {
+        display_name: friendly_name(&vm.session_id),
         session_id: vm.session_id,
         active_tab: "summary".to_string(),
         task: vm.task,

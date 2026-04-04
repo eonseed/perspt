@@ -557,17 +557,25 @@ impl SessionStore {
 
     /// List recent sessions (newest first)
     pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionRecord>> {
+        self.list_sessions_paginated(limit, 0)
+    }
+
+    /// List sessions with pagination (most recent first).
+    pub fn list_sessions_paginated(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<SessionRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status
-             FROM sessions ORDER BY created_at DESC LIMIT ?",
+             FROM sessions ORDER BY created_at DESC LIMIT ? OFFSET ?",
         )?;
 
-        let mut rows = stmt.query([limit.to_string()])?;
+        let mut rows = stmt.query([limit.to_string(), offset.to_string()])?;
         let mut records = Vec::new();
 
         while let Some(row) = rows.next()? {
-            // merkle_root is stored as BLOB, read it directly as Option<Vec<u8>>
             let merkle_root: Option<Vec<u8>> = row.get(3).ok();
 
             records.push(SessionRecord {
@@ -581,6 +589,19 @@ impl SessionStore {
         }
 
         Ok(records)
+    }
+
+    /// Count total number of sessions.
+    pub fn count_sessions(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM sessions")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            let count: i64 = row.get(0)?;
+            Ok(count as usize)
+        } else {
+            Ok(0)
+        }
     }
 
     /// Get all node states for a session
