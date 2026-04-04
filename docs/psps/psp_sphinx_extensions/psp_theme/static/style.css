@@ -241,6 +241,7 @@ ul.breadcrumbs a {
     display: flex;
     min-height: calc(100vh - 4rem);
     gap: 0;
+    align-items: flex-start;
 }
 
 #psp-sidebar {
@@ -260,10 +261,15 @@ ul.breadcrumbs a {
 
 #psp-content {
     flex: 1;
+    min-width: 0;
     padding: 2rem 3rem;
     max-width: calc(100% - 280px);
-    overflow-x: auto;
+    overflow-x: hidden;
     line-height: 1.6;
+}
+
+#psp-content > article {
+    min-width: 0;
 }
 
 /* Improve main content typography */
@@ -438,6 +444,43 @@ pre {
     overflow-x: auto;
     padding: .5rem .75rem;
     white-space: pre;
+    max-width: 100%;
+}
+
+div.highlight,
+div.literal-block-wrapper {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+div.highlight pre {
+    margin: 0;
+}
+
+.graphviz {
+    max-width: 100%;
+    overflow-x: auto;
+    text-align: center;
+}
+
+.graphviz img,
+.graphviz svg,
+.graphviz object {
+    max-width: 100%;
+    height: auto;
+}
+
+figure {
+    max-width: 100%;
+}
+
+figure img {
+    max-width: 100%;
+    height: auto;
+}
+
+table {
+    min-width: 0;
 }
 
 /* Sidebar formatting */
