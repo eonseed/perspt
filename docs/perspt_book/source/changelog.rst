@@ -10,6 +10,25 @@ Version 0.5.6 — "ikigai 生き甲斐"
 
    "A reason for being — the happiness of always being busy with what you love."
 
+**Real-Time Web Dashboard (PSP-6):**
+
+- **perspt-dashboard crate** — Axum 0.8 + Askama 0.15 + HTMX 2 + Tailwind v4/DaisyUI 5
+  web interface for monitoring agent execution
+- **Read-only store access** — ``SessionStore::open_read_only()`` with DuckDB
+  ``AccessMode::ReadOnly`` for safe concurrent reads alongside the agent
+- **Six monitoring pages** — Overview (sessions), DAG (task graph), Energy
+  (Lyapunov components), LLM (request telemetry), Sandbox (provisional branches),
+  Decisions (escalations, sheaf validations, rewrites, plan revisions, repairs,
+  verifications)
+- **SSE live updates** — Server-Sent Events stream node statistics every 2 seconds
+- **Password authentication** — Random token, HttpOnly/SameSite cookie, Secure flag
+  on non-localhost deployments
+- **``perspt dashboard`` CLI command** — Launches the dashboard server on a
+  configurable port
+- **12 integration tests** — Route smoke tests, SSE content-type, auth flow
+- **Store extensions** — ``get_session_energy_history()``,
+  ``get_all_sheaf_validations()``, ``get_all_repair_footprints()``
+
 **SRBN Sandbox Revision Flow (PSP-5 Phases 3-12):**
 
 - **PlanningPolicy** — Adaptive agent gating with 5 policies (LocalEdit,

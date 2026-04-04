@@ -32,11 +32,17 @@ development.
 
          Autonomous multi-file coding with the experimental SRBN engine.
 
+      .. grid-item-card:: Dashboard
+         :link: user-guide/dashboard
+         :link-type: doc
+
+         Monitor agent execution in real-time via browser.
+
       .. grid-item-card:: Architecture
          :link: developer-guide/architecture
          :link-type: doc
 
-         7-crate workspace design.
+         8-crate workspace design.
 
    Key Features
    ------------

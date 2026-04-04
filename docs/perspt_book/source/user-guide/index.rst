@@ -38,6 +38,12 @@ In-depth coverage of every Perspt feature.
 
       Diagnose and fix common issues.
 
+   .. grid-item-card:: Dashboard
+      :link: dashboard
+      :link-type: doc
+
+      Real-time web monitoring of agent sessions.
+
 .. toctree::
    :maxdepth: 2
    :hidden:
@@ -47,3 +53,4 @@ In-depth coverage of every Perspt feature.
    advanced-features
    providers
    troubleshooting
+   dashboard

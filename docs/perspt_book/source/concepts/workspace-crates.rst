@@ -3,7 +3,7 @@
 Workspace Crates
 ================
 
-Perspt is organized as a **7-crate Rust workspace** under the ``crates/`` directory,
+Perspt is organized as an **8-crate Rust workspace** under the ``crates/`` directory,
 plus a meta-crate (``perspt``) that re-exports all libraries.
 
 .. graphviz::
@@ -21,15 +21,19 @@ plus a meta-crate (``perspt``) that re-exports all libraries.
        store [label="perspt-store\nDuckDB", fillcolor="#87CEEB"];
        policy [label="perspt-policy\nStarlark", fillcolor="#DDA0DD"];
        sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
+       dashboard [label="perspt-dashboard\nWeb UI", fillcolor="#FFB6C1"];
 
        cli -> tui;
        cli -> agent;
        cli -> core;
        cli -> store;
+       cli -> dashboard;
        agent -> core;
        agent -> store;
        agent -> policy;
        agent -> sandbox;
+       dashboard -> store;
+       dashboard -> core;
    }
 
 Crate Summary
@@ -63,6 +67,9 @@ Crate Summary
    * - **perspt-sandbox**
      - Sandboxed command execution with resource limits
      - ``SandboxedCommand``, ``CommandResult``
+   * - **perspt-dashboard**
+     - Browser-based agent monitoring (Axum + Askama + HTMX)
+     - ``build_router``, ``AppState``, SSE stream
 
 perspt-cli
 ~~~~~~~~~~
@@ -142,3 +149,12 @@ perspt-sandbox
 
 Sandboxed command execution with resource limits. Used for running build and
 test commands in controlled environments during provisional branch verification.
+
+perspt-dashboard
+~~~~~~~~~~~~~~~~
+
+Browser-based real-time monitoring of agent sessions. Built with Axum 0.8,
+Askama 0.15 templates, HTMX 2 for partial updates, and Tailwind v4 / DaisyUI 5
+for styling. Opens the session store in read-only mode so it never interferes
+with the running agent. Provides Overview, DAG, Energy, LLM, Sandbox, and
+Decisions pages plus an SSE stream for live updates.
