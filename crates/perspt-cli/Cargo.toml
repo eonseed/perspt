@@ -1,6 +1,6 @@
 [package]
 name = "perspt-cli"
-version = "0.5.6"
+version = "0.5.7"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -17,11 +17,11 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-perspt-core = { version = "0.5.6", path = "../perspt-core" }
-perspt-tui = { version = "0.5.6", path = "../perspt-tui" }
-perspt-agent = { version = "0.5.6", path = "../perspt-agent" }
-perspt-store = { version = "0.5.6", path = "../perspt-store" }
-perspt-dashboard = { version = "0.5.6", path = "../perspt-dashboard" }
+perspt-core = { version = "0.5.7", path = "../perspt-core" }
+perspt-tui = { version = "0.5.7", path = "../perspt-tui" }
+perspt-agent = { version = "0.5.7", path = "../perspt-agent" }
+perspt-store = { version = "0.5.7", path = "../perspt-store" }
+perspt-dashboard = { version = "0.5.7", path = "../perspt-dashboard" }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
