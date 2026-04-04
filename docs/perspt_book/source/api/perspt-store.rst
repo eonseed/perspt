@@ -21,8 +21,15 @@ Core Type
    impl SessionStore {
        pub fn new() -> Result<Self>;           // Default path
        pub fn open(path: &Path) -> Result<Self>; // Custom path
+       pub fn open_read_only(path: &Path) -> Result<Self>; // Read-only mode
        pub fn default_db_path() -> PathBuf;    // ~/.local/share/perspt/
    }
+
+.. note::
+
+   ``open_read_only`` uses DuckDB's ``AccessMode::ReadOnly`` and does **not**
+   call ``init_schema()``. This makes it safe for concurrent dashboard reads
+   alongside the agent's write lock. The database file must already exist.
 
 Record Types
 ------------

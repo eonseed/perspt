@@ -121,6 +121,22 @@ Session Management
 When resuming, the ``BudgetEnvelope`` (step, cost, and revision caps) is restored
 from the database so limits continue from where the session left off.
 
+Dashboard Monitoring
+--------------------
+
+While an agent session runs, you can observe it in a browser:
+
+.. code-block:: bash
+
+   # In a separate terminal
+   perspt dashboard
+
+Open ``http://localhost:3000`` to see the Overview, DAG, Energy, LLM, Sandbox,
+and Decisions pages. The dashboard reads the session store in read-only mode so
+it never interferes with the running agent.
+
+See :doc:`dashboard` for full details.
+
 Speculator Lookahead
 --------------------
 

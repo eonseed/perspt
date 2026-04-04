@@ -57,6 +57,22 @@ Launch the plain-text CLI chat.
    perspt simple-chat [--log-file FILE]
 
 
+``dashboard``
+~~~~~~~~~~~~~
+
+Launch the real-time web monitoring dashboard.
+
+.. code-block:: bash
+
+   perspt dashboard [--port PORT] [--bind ADDR] [--db-path PATH]
+
+- ``--port`` — HTTP port (default ``3000``)
+- ``--bind`` — Bind address (default ``127.0.0.1``)
+- ``--db-path`` — Path to DuckDB database file (default: platform data directory)
+
+See :doc:`../howto/dashboard-setup` for configuration details.
+
+
 ``agent``
 ~~~~~~~~~
 

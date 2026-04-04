@@ -3,12 +3,76 @@
 Changelog
 =========
 
+Version 0.5.7 — "navikaran नवीकरण"
+-------------------------------------
+
+*Dashboard UX Polish Release*
+
+   "Bridging the purpose of Ikigai with the momentum of Kaizen — renewal through
+   continuous, intentional refinement."
+
+**Dashboard UX Improvements (PSP-6 continued):**
+
+- **Custom DaisyUI 5 themes** — ``perspt-light`` and ``perspt-dark`` themes with
+  orange/pink oklch palette (WCAG AA compliant), powered by
+  ``@plugin "daisyui/theme"`` blocks
+- **Theme toggle** — Navbar button with sun/moon icons, localStorage persistence,
+  and migration from legacy theme names
+- **Friendly session names** — Deterministic human-readable names (e.g.
+  "bold-hawk") derived from session UUIDs via hash-indexed adjective+noun arrays
+- **Breadcrumb friendly names** — All six session sub-pages show friendly name
+  with UUID-on-hover tooltip
+- **Session card layout** — Stacked vertical cards with ``btn-outline`` sub-page
+  buttons replacing ghost buttons
+- **Task text formatting** — ``whitespace-pre-line`` rendering for readable
+  multi-line task descriptions
+- **Collapse arrow fix** — ``pe-10`` padding on DAG and LLM collapse summaries
+  to prevent arrow overlap with text
+- **Decisions page resilience** — All six store queries use
+  ``unwrap_or_default()`` instead of ``?`` early-return, preventing 503 errors
+  on partial data
+- **Paginated overview** — 20 sessions per page with DaisyUI ``join`` pagination
+  controls, backed by ``list_sessions_paginated()`` and ``count_sessions()``
+  store methods
+- **Login page theme** — Updated to ``perspt-light`` default
+
+**CI & Build:**
+
+- **Node.js in CI** — Added ``actions/setup-node@v4`` (Node 22) to CI test matrix
+  and release workflows so ``npx @tailwindcss/cli`` runs on all runners
+
+**Store:**
+
+- ``list_sessions_paginated(limit, offset)`` — LIMIT/OFFSET SQL for paginated
+  session listing
+- ``count_sessions()`` — Total session count for pagination controls
+
+
 Version 0.5.6 — "ikigai 生き甲斐"
 -----------------------------------
 
 *SRBN Sandbox Revision Flow Release*
 
    "A reason for being — the happiness of always being busy with what you love."
+
+**Real-Time Web Dashboard (PSP-6):**
+
+- **perspt-dashboard crate** — Axum 0.8 + Askama 0.15 + HTMX 2 + Tailwind v4/DaisyUI 5
+  web interface for monitoring agent execution
+- **Read-only store access** — ``SessionStore::open_read_only()`` with DuckDB
+  ``AccessMode::ReadOnly`` for safe concurrent reads alongside the agent
+- **Six monitoring pages** — Overview (sessions), DAG (task graph), Energy
+  (Lyapunov components), LLM (request telemetry), Sandbox (provisional branches),
+  Decisions (escalations, sheaf validations, rewrites, plan revisions, repairs,
+  verifications)
+- **SSE live updates** — Server-Sent Events stream node statistics every 2 seconds
+- **Password authentication** — Random token, HttpOnly/SameSite cookie, Secure flag
+  on non-localhost deployments
+- **``perspt dashboard`` CLI command** — Launches the dashboard server on a
+  configurable port
+- **12 integration tests** — Route smoke tests, SSE content-type, auth flow
+- **Store extensions** — ``get_session_energy_history()``,
+  ``get_all_sheaf_validations()``, ``get_all_repair_footprints()``
 
 **SRBN Sandbox Revision Flow (PSP-5 Phases 3-12):**
 

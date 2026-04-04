@@ -1,0 +1,96 @@
+{% extends "session_base.html" %}
+{% block title %}{{ title }} — Perspt Dashboard{% endblock %}
+{% block session_content %}
+<h2 class="text-xl font-bold mb-4">{{ title }}</h2>
+
+{# ── Node Stats Banner ── #}
+<div class="grid grid-cols-4 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Total Nodes</div>
+        <div class="stat-value text-xl">{{ total_nodes }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Committed</div>
+        <div class="stat-value text-xl text-success">{{ committed_nodes }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Running</div>
+        <div class="stat-value text-xl text-primary">{{ running_nodes }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Failed</div>
+        <div class="stat-value text-xl text-error">{{ failed_nodes }}</div>
+    </div>
+</div>
+
+{% if nodes.is_empty() %}
+<div class="alert alert-info"><span>No nodes recorded yet.</span></div>
+{% else %}
+
+{# ── Expandable Node Cards ── #}
+<h3 class="text-md font-semibold mb-3">Nodes</h3>
+<div class="space-y-2 mb-6">
+    {% for n in nodes %}
+    <details class="collapse collapse-arrow bg-base-100 shadow-sm border-l-4
+        {% if n.state == "completed" %}border-success{% endif %}
+        {% if n.state == "failed" %}border-error{% endif %}
+        {% if n.state == "running" %}border-primary{% endif %}
+        {% if n.state != "completed" && n.state != "failed" && n.state != "running" %}border-base-300{% endif %}
+    ">
+        <summary class="collapse-title p-3 pe-10 min-h-0">
+            <div class="flex items-center gap-3 text-sm">
+                <span class="font-mono text-xs">{{ n.node_id }}</span>
+                {% if n.state == "completed" %}
+                <span class="badge badge-success badge-sm">{{ n.state }}</span>
+                {% elif n.state == "failed" %}
+                <span class="badge badge-error badge-sm">{{ n.state }}</span>
+                {% elif n.state == "running" %}
+                <span class="badge badge-primary badge-sm">{{ n.state }}</span>
+                {% else %}
+                <span class="badge badge-sm">{{ n.state }}</span>
+                {% endif %}
+                {% if !n.node_class.is_empty() %}
+                <span class="badge badge-outline badge-sm">{{ n.node_class }}</span>
+                {% endif %}
+                <span class="text-xs text-base-content/60 ml-auto">V={{ n.v_total|fmt("{:.2}") }} | attempts={{ n.attempt_count }}</span>
+            </div>
+        </summary>
+        <div class="collapse-content px-4 pb-4">
+            {% if !n.goal.is_empty() %}
+            <div class="mb-2">
+                <span class="text-xs text-base-content/60">Goal:</span>
+                <p class="text-sm">{{ n.goal }}</p>
+            </div>
+            {% endif %}
+            <div class="grid grid-cols-3 gap-2 text-xs">
+                <div><span class="text-base-content/60">State:</span> {{ n.state }}</div>
+                <div><span class="text-base-content/60">Class:</span> {{ n.node_class }}</div>
+                <div><span class="text-base-content/60">V_total:</span> {{ n.v_total|fmt("{:.3}") }}</div>
+                <div><span class="text-base-content/60">Attempts:</span> {{ n.attempt_count }}</div>
+            </div>
+        </div>
+    </details>
+    {% endfor %}
+</div>
+
+{# ── Edge Table ── #}
+{% if !edges.is_empty() %}
+<h3 class="text-md font-semibold mb-3">Edges ({{ edges.len() }})</h3>
+<div class="overflow-x-auto">
+    <table class="table table-xs table-zebra">
+        <thead><tr><th>Parent</th><th>→</th><th>Child</th><th>Type</th></tr></thead>
+        <tbody>
+        {% for e in edges %}
+        <tr>
+            <td class="font-mono text-xs">{{ e.parent_id }}</td>
+            <td>→</td>
+            <td class="font-mono text-xs">{{ e.child_id }}</td>
+            <td><span class="badge badge-ghost badge-sm">{{ e.edge_type }}</span></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -3,7 +3,7 @@
 Architecture
 ============
 
-Perspt is a Rust workspace with seven crates plus a root integration crate.
+Perspt is a Rust workspace with eight crates plus a root integration crate.
 Version 0.5.6 implements the PSP-5 specification for the experimental SRBN agent.
 
 Workspace Layout
@@ -20,6 +20,7 @@ Workspace Layout
    |   +-- perspt-store/         # DuckDB session store
    |   +-- perspt-policy/        # Starlark policy engine
    |   +-- perspt-sandbox/       # Command sandboxing
+   |   +-- perspt-dashboard/     # Axum web dashboard
    +-- tests/                    # Integration tests
    +-- docs/                     # Sphinx documentation
 
@@ -46,6 +47,9 @@ Dependency Graph
        "perspt-store" -> "perspt-core";
        "perspt-policy" [label="perspt-policy\n(Starlark)"];
        "perspt-sandbox" [label="perspt-sandbox"];
+       "perspt-dashboard" -> "perspt-store";
+       "perspt-dashboard" -> "perspt-core";
+       "perspt-cli" -> "perspt-dashboard";
    }
 
 

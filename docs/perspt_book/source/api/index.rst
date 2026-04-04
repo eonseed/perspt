@@ -58,6 +58,12 @@ Crate-level API documentation for Perspt's Rust workspace.
 
       Command sandboxing and isolation.
 
+   .. grid-item-card:: perspt-dashboard
+      :link: perspt-dashboard
+      :link-type: doc
+
+      Axum + Askama + HTMX web dashboard.
+
 .. toctree::
    :maxdepth: 2
    :hidden:
@@ -69,3 +75,4 @@ Crate-level API documentation for Perspt's Rust workspace.
    perspt-store
    perspt-policy
    perspt-sandbox
+   perspt-dashboard
