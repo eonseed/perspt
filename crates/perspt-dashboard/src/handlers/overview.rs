@@ -33,9 +33,7 @@ pub async fn overview_handler(
     let total_sessions = state.store.count_sessions().unwrap_or(0);
     let total_pages = (total_sessions + PAGE_SIZE - 1) / PAGE_SIZE.max(1);
 
-    let sessions = state
-        .store
-        .list_sessions_paginated(PAGE_SIZE, offset)?;
+    let sessions = state.store.list_sessions_paginated(PAGE_SIZE, offset)?;
 
     let mut nodes_by_session = Vec::new();
     let mut budgets = Vec::new();

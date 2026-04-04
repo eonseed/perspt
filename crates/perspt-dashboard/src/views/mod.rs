@@ -20,17 +20,15 @@ pub fn normalize_state(s: &str) -> String {
 }
 
 const ADJECTIVES: [&str; 32] = [
-    "swift", "bold", "calm", "keen", "warm", "cool", "bright", "sharp",
-    "quiet", "vivid", "pale", "deep", "light", "dark", "soft", "firm",
-    "quick", "slow", "wild", "tame", "rare", "vast", "slim", "wide",
-    "fair", "pure", "rich", "lean", "raw", "dry", "wet", "old",
+    "swift", "bold", "calm", "keen", "warm", "cool", "bright", "sharp", "quiet", "vivid", "pale",
+    "deep", "light", "dark", "soft", "firm", "quick", "slow", "wild", "tame", "rare", "vast",
+    "slim", "wide", "fair", "pure", "rich", "lean", "raw", "dry", "wet", "old",
 ];
 
 const NOUNS: [&str; 32] = [
-    "oak", "elm", "fox", "owl", "bee", "ant", "ray", "gem",
-    "bay", "ash", "ivy", "fir", "yew", "cod", "eel", "jay",
-    "hawk", "dove", "lark", "wren", "pike", "carp", "wolf", "bear",
-    "hare", "lynx", "crow", "moth", "seal", "swan", "toad", "newt",
+    "oak", "elm", "fox", "owl", "bee", "ant", "ray", "gem", "bay", "ash", "ivy", "fir", "yew",
+    "cod", "eel", "jay", "hawk", "dove", "lark", "wren", "pike", "carp", "wolf", "bear", "hare",
+    "lynx", "crow", "moth", "seal", "swan", "toad", "newt",
 ];
 
 /// Generate a deterministic human-readable name from a session UUID.
