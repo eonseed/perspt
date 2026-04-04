@@ -1,0 +1,1053 @@
+PSP: 000006
+Title: Real-Time Web Dashboard for Agent Monitoring
+Author: Vikrant Rathore (@vikrantrathore)
+Status: Discussion
+Type: Feature
+Created: 2026-04-02
+Discussion-To: https://github.com/eonseed/perspt/discussions/106
+
+========
+Abstract
+========
+
+This PSP proposes the creation of ``perspt-dashboard``, a new workspace crate providing a real-time, browser-based monitoring interface for the ``perspt`` agent. The dashboard reads the existing DuckDB persistence layer (``perspt-store``) in **read-only mode** using ``duckdb::AccessMode::ReadOnly``, enabling transparent observation of agent execution -- including DAG topology, energy convergence, LLM telemetry, decision logic, sandbox file evolution, and budget consumption -- without interfering with the agent's write locks.
+
+The dashboard is implemented as a Rust server-rendered application using **Axum** (HTTP server) and **Askama** (compile-time type-safe HTML templates), with **HTMX** providing a minimal browser-side layer for Server-Sent Events (SSE) DOM swaps. Styling uses **Tailwind CSS** and **Daisy UI 5**. It is exposed through a new ``perspt dashboard`` CLI subcommand and supports optional cookie-based password authentication configured via the platform config directory (``dirs::config_dir()/perspt/config.toml``).
+
+==========
+Motivation
+==========
+
+When ``perspt agent`` executes a complex task, it autonomously orchestrates a multi-node DAG: planning, coding in provisional sandboxes, verifying via LSP/tests, rewriting failed sub-graphs, and committing stable states to a Merkle ledger -- all persisted in DuckDB. Despite this rich data, users currently have **no live window** into the agent's internal state:
+
+* **Opacity during execution:** The TUI shows log lines and approval gates, but not the underlying graph structure, energy trajectories, or which sandbox files are being mutated. Users cannot distinguish a productive retry loop from a diverging one without reading raw logs.
+* **Post-hoc debugging only:** To understand *why* the agent took a particular path, users must manually query DuckDB or sift through ``--verbose`` terminal output after the session completes.
+* **Sandbox blindness:** The agent writes code in ``.perspt/sandboxes/<session_id>/<branch_id>/`` directories (as implemented in ``SRBNOrchestrator::sandbox_dir_for_node``). These files are promoted to the workspace only at commit (``step_commit``). Before that, there is no way to see what the agent is actually writing, testing, or discarding.
+* **No cost/budget visibility:** Budget envelopes (``max_steps``, ``max_cost_usd``) are tracked in DuckDB's ``budget_envelopes`` table but not surfaced in any visual form during execution.
+* **Decision logic is invisible:** Escalation decisions (split, rewrite, replan, yield), sheaf validation outcomes, and non-convergence classification are recorded in DuckDB but never visualized. Users cannot see *why* the agent chose to rewrite a sub-graph versus escalating to the user.
+
+Additional implementation finding uncovered during review:
+
+* **User-global path inconsistency:** The current codebase stores persistent application data in the platform data directory (for example ``dirs::data_local_dir()/perspt/perspt.db``) but still uses legacy ``~/.perspt`` paths for user-global config and policy rules. This mixes two conventions for the same application surface, complicates discovery, and makes the dashboard configuration story harder to explain. The dashboard implementation should therefore align with a workspace-wide path normalization effort: config and policy under ``dirs::config_dir()/perspt/``, persistent data under ``dirs::data_local_dir()/perspt/``, and project-local scratch state under ``<working_dir>/.perspt/``.
+
+A dedicated dashboard resolves all of these by providing a live, read-only projection of the full DuckDB schema.
+
+================
+Proposed Changes
+================
+
+.. rubric:: Functional Specification
+
+**New CLI Subcommand:**
+
+.. code-block:: bash
+
+   # Launch dashboard on default port (3000), localhost only
+   perspt dashboard
+
+   # Launch on custom port
+   perspt dashboard --port 8080
+
+The dashboard process is **independent** of the agent process. A user starts ``perspt agent "task..."`` in one terminal and ``perspt dashboard`` in another (or a browser tab). The dashboard reads from the same ``perspt.db`` file (located at ``dirs::data_local_dir()/perspt/perspt.db``, e.g., ``~/Library/Application Support/perspt/perspt.db`` on macOS, ``~/.local/share/perspt/perspt.db`` on Linux) via a read-only DuckDB handle. Dashboard configuration is read separately from ``dirs::config_dir()/perspt/config.toml`` (e.g., ``~/Library/Application Support/perspt/config.toml`` on macOS, ``~/.config/perspt/config.toml`` on Linux).
+
+**Authentication:**
+
+* **Default:** The dashboard binds to ``127.0.0.1`` only and does **not** require a login prompt when no password is configured.
+* **Optional Password:** If ``[dashboard].password`` is set in ``dirs::config_dir()/perspt/config.toml``, the dashboard presents a login form. Upon correct password entry, an HttpOnly session cookie (``perspt_session``) is set. All subsequent requests validate this cookie via Axum middleware.
+
+.. code-block:: toml
+
+  # ~/.config/perspt/config.toml (Linux)
+  # ~/Library/Application Support/perspt/config.toml (macOS)
+   [dashboard]
+  password = "my-custom-secret"   # optional; if omitted, localhost access is unauthenticated
+   port = 3000                     # default: 3000
+
+**Read-Only DuckDB Connection:**
+
+The dashboard opens the database using the ``duckdb`` crate's ``AccessMode::ReadOnly`` configuration:
+
+.. code-block:: rust
+
+   use duckdb::{Config, Connection, AccessMode};
+
+   let config = Config::default()
+       .access_mode(AccessMode::ReadOnly)?;
+   let conn = Connection::open_with_config(&db_path, config)?;
+
+This is the correct API for the pinned ``duckdb = "=1.10501.0"`` in the workspace. ``AccessMode::ReadOnly`` allows multiple concurrent readers alongside the agent's single writer. The database file **must already exist** (the agent creates it on first run).
+
+**Sandbox Process Monitoring:**
+
+The agent creates sandbox directories at ``<working_dir>/.perspt/sandboxes/<session_id>/<branch_id>/`` (see ``SRBNOrchestrator::maybe_create_provisional_branch`` and ``tools::create_sandbox``). The ``provisional_branches`` table tracks each branch's ``sandbox_dir`` path and ``state`` (active, merged, flushed).
+
+The dashboard will:
+
+1. Query ``provisional_branches`` for active branches and their ``sandbox_dir`` paths.
+2. Read sandbox files via Axum handler functions (``std::fs::read_to_string``).
+3. Read the corresponding workspace file at the same relative path.
+4. Compute and render a unified diff using the ``similar`` crate (already in the ecosystem).
+
+When a branch transitions to ``merged`` (sandbox -> workspace export via ``step_commit``) or ``flushed`` (discarded via ``flush_provisional_branch``), the dashboard reflects this state change on the next poll.
+
+.. rubric:: UI/UX Design
+
+The dashboard is a server-rendered multi-page application built with Axum and Askama templates. All pages are rendered server-side as complete HTML documents. Real-time updates are delivered via **Server-Sent Events (SSE)** using the HTMX SSE extension -- the browser maintains a persistent HTTP connection to the server, and the server pushes HTML fragments as data changes in DuckDB. All styling is **Daisy UI 5** semantic classes over Tailwind CSS. Daisy UI 5 provides its own design system with configurable themes (``light``, ``dark``, ``cyberpunk``, ``synthwave``, etc.), semantic color utilities (``primary``, ``secondary``, ``accent``, ``success``, ``warning``, ``error``), and zero-JS component classes.
+
+**Dashboard Layout:**
+
+The overall layout uses a Daisy UI ``drawer`` with a persistent sidebar navigation and a responsive main content area. A ``navbar`` at the top shows the active session ID, connection status indicator (pulsing ``badge badge-success`` when polling, ``badge badge-error`` when DB unreachable), and a dark/light theme toggle using ``data-theme`` attribute switching.
+
+.. graphviz::
+   :caption: Dashboard Layout Structure
+   :align: center
+
+   digraph layout {
+       rankdir=TB;
+       bgcolor="transparent";
+       node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.15,0.1"];
+       edge [fontname="Arial", fontsize=9];
+
+       navbar [label="Top Navbar\n(Session ID | Status | Theme)", fillcolor="#E8EAF6", color="#3F51B5"];
+       drawer [label="Sidebar Navigation\n(6 Dashboard Tabs)", fillcolor="#E1BEE7", color="#9C27B0"];
+
+       subgraph cluster_main {
+           label="Main Content Area";
+           style="dashed";
+           color="#78909C";
+
+           overview [label="Overview\n(Session + Budget)", fillcolor="#C8E6C9", color="#43A047"];
+           dag [label="DAG View\n(Task Graph)", fillcolor="#BBDEFB", color="#1E88E5"];
+           energy [label="Energy\n(Convergence Charts)", fillcolor="#B2DFDB", color="#00897B"];
+           llm [label="LLM Telemetry\n(Request Logs)", fillcolor="#FFE0B2", color="#FB8C00"];
+           sandbox [label="Sandbox\n(Live Diffs)", fillcolor="#FFCCBC", color="#F4511E"];
+           decisions [label="Decisions\n(Escalation + Validation)", fillcolor="#D1C4E9", color="#7E57C2"];
+       }
+
+       navbar -> drawer [style=invis];
+       drawer -> overview [label="tab 1"];
+       drawer -> dag [label="tab 2"];
+       drawer -> energy [label="tab 3"];
+       drawer -> llm [label="tab 4"];
+       drawer -> sandbox [label="tab 5"];
+       drawer -> decisions [label="tab 6"];
+   }
+
+**Navigation Structure (Daisy UI ``drawer`` sidebar):**
+
+1. **Overview** -- Session list + active session summary + budget gauges
+2. **DAG View** -- Interactive task graph visualization with node states
+3. **Energy** -- Lyapunov energy convergence charts per node
+4. **LLM Telemetry** -- Request/response audit log with token metrics
+5. **Sandbox** -- Live file diffs between sandbox and workspace
+6. **Decisions** -- Escalation reports, sheaf validation, graph rewrites, plan revisions
+
+**Page 1: Session Overview**
+
+The overview page provides a command-center style dashboard with four main widget areas:
+
+* **Session Selector:** Daisy UI ``select select-bordered`` dropdown listing recent sessions from ``list_recent_sessions()``. Changing selection navigates to the session-specific URL, triggering a full page reload with SSE reconnection.
+* **Active Session Hero Card:** Daisy UI ``card bg-base-200 shadow-xl`` showing:
+  - Task description (the original user prompt)
+  - Working directory path
+  - Session ID with copy-to-clipboard button
+  - Start time and elapsed duration (rendered from server timestamps and refreshed on each SSE update)
+  - Current status badge (Running/Completed/Failed/Aborted)
+  - Detected plugins (``badge badge-outline`` per plugin: "rust", "python")
+* **Node State Summary:** A Daisy UI ``stats`` component with 4 stat blocks:
+   - Total nodes count
+   - Completed (``text-success``)
+   - In-progress (``text-info``, counts Coding+Verifying+Retry)
+   - Failed/Escalated (``text-error``)
+* **Budget Dashboard:** Three ``radial-progress`` gauges in a ``flex`` row:
+   - Steps: ``steps_used / max_steps`` with percentage fill color transitioning from ``text-success`` (0-50%) -> ``text-warning`` (50-80%) -> ``text-error`` (80-100%)
+   - Cost: ``cost_used_usd / max_cost_usd`` with dollar formatting
+   - Revisions: ``revisions_used / max_revisions`` 
+   - Below each gauge, a text label: ``"14 / 50 steps"`` etc.
+* **Recent Activity Feed:** A ``timeline`` component (Daisy UI) showing the last 20 events, derived from the most recent ``node_states`` transitions and ``review_outcomes``. Each entry has a timestamp, icon ([PASS]/[WARN]/[FAIL]/[RETRY]), and descriptive text.
+
+**Page 2: DAG Visualization**
+
+This is the centerpiece of the dashboard, showing the agent's decision topology at a glance.
+
+* **Graph Rendering:** The task graph is rendered from ``task_graph_edges`` and ``node_states`` tables. Each node is represented as a Daisy UI ``card card-compact`` positioned in a topological grid layout computed server-side. Edges are drawn as SVG ``<path>`` elements with arrowheads overlaid on the card grid.
+
+.. rubric:: Node Card Contents
+
+Each node card shows a header with the node ID and a class badge, using ``badge badge-primary`` for Interface nodes, ``badge badge-secondary`` for Implementation nodes, and ``badge badge-accent`` for Integration nodes. The body shows the goal text, truncated to the first 100 characters and expandable via ``collapse collapse-arrow``. A full-width state stripe appears at the card bottom, using ``bg-neutral`` for Queued, ``bg-info`` for Coding, ``bg-warning`` for Verifying, ``bg-secondary`` with ``animate-pulse`` for Retry, ``bg-accent`` for SheafCheck, ``bg-success`` for Completed, and ``bg-error`` for Failed or Escalated. The metadata row shows the owner plugin tag, the current :math:`V(x)` value, and the attempt count. A verification badge grid shows syntax, build, tests, and lint status from ``verification_results`` with green, red, and gray status dots.
+
+.. rubric:: Provisional Branches
+
+Active sandboxes are shown as dashed-border child cards (``border-dashed opacity-80``) attached to their parent node with a "sandbox" label.
+
+.. rubric:: Edge Styling
+
+Edges between nodes use solid lines for completed dependencies, dashed lines for pending dependencies, and red lines for failed or flushed paths. ``interface_seals`` are shown as small lock ([LOCK]) icons on edges that have sealed.
+
+.. rubric:: Page 3: Energy Convergence
+
+This page reveals whether the agent is converging (energy decreasing) or diverging (energy increasing, needing escalation).
+
+The dashboard should present the SRBN energy model using the same notation as the rest of the documentation:
+
+.. math::
+
+   V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
+
+where :math:`V(x)` is the composite verification energy for a node and stability is reached when :math:`V(x) \leq \varepsilon`.
+
+* **Node Selector:** A ``select`` dropdown to pick which node's energy history to display.
+* **Energy Chart:** An inline SVG chart (rendered server-side by Askama as ``<svg>`` elements -- no JS charting library needed) showing energy over attempt iterations:
+
+   - X-axis: attempt number (1, 2, 3, ...)
+   - Y-axis: energy value (0.0 to max observed)
+   - Six lines, each color-coded:
+      - :math:`V_{syn}` (syntax) -- ``stroke: oklch(var(--p))`` (primary)
+      - :math:`V_{str}` (structural) -- ``stroke: oklch(var(--s))`` (secondary)
+      - :math:`V_{log}` (logic/tests) -- ``stroke: oklch(var(--a))`` (accent)
+      - :math:`V_{boot}` (bootstrap) -- ``stroke: oklch(var(--in))`` (info)
+      - :math:`V_{sheaf}` (sheaf) -- ``stroke: oklch(var(--wa))`` (warning)
+      - :math:`V(x)` (composite) -- ``stroke: oklch(var(--er))`` (error), thicker line
+   - Horizontal dashed line at :math:`\varepsilon = 0.10` (stability threshold) labeled "Stable below"
+   - Filled area below :math:`\varepsilon` in subtle green to visually indicate the stable region
+* **Energy Table:** Below the chart, a ``table table-zebra table-pin-rows`` showing raw ``energy_history`` records with all component values + timestamps.
+* **Convergence Indicator:** A Daisy UI ``alert`` at the top:
+
+   - ``alert-success`` if :math:`V(x)` is monotonically decreasing over the last 3 attempts
+   - ``alert-warning`` if :math:`V(x)` is oscillating
+   - ``alert-error`` if :math:`V(x)` is increasing and approaching escalation
+
+
+**Page 4: LLM Telemetry**
+
+Full audit log of all LLM interactions, essential for debugging and cost analysis.
+
+* **Summary Stats Bar:** Four ``stat`` blocks across the top:
+   - Total LLM calls
+   - Total tokens (in + out)  
+   - Estimated cost (derived from model pricing)
+   - Average latency (ms)
+* **Request Table:** Daisy UI ``table table-zebra table-pin-rows`` with columns:
+   - Timestamp (relative: "2m ago")
+   - Model name (``badge badge-ghost``)
+   - Node ID (linked to DAG view)
+   - Tokens In / Tokens Out
+   - Latency (ms), color-coded: <500ms=green, 500-2000ms=yellow, >2000ms=red
+* **Expandable Detail Rows:** Using Daisy UI ``collapse collapse-arrow``, clicking a row reveals:
+   - Full prompt text in a ``mockup-code`` block with syntax highlighting
+   - Full response text in a similar block
+   - Cost breakdown for this specific call
+* **Filters:** Model filter dropdown + node_id search input.
+
+**Page 5: Sandbox Diff Viewer**
+
+The live view into the agent's work-in-progress -- seeing code before it reaches the workspace.
+
+* **Branch List Panel (left side):** Shows all ``provisional_branches`` for the active session:
+   - Each branch is a ``card card-compact`` showing:
+      - Branch ID (truncated)
+      - Node ID it belongs to
+      - State badge: ``badge badge-info`` (active), ``badge badge-success`` (merged), ``badge badge-error`` (flushed)
+      - File count in sandbox
+   - Clicking a branch loads its file list
+* **File List Panel (center):** Lists files found in the selected branch's ``sandbox_dir``:
+   - Each file shown with modification icon ([+] new file, [~] modified, [FAIL] deleted)
+   - File extension icons/badges for type identification
+   - Clicking a file loads the diff
+* **Diff Panel (right side):** Split-pane diff display:
+   - Left pane: workspace version (or placeholder "File does not exist yet" in ``text-base-content/50``)
+   - Right pane: sandbox version
+   - Line-by-line comparison using ``similar::TextDiff``:
+      - Added lines: ``bg-success/20 text-success``
+      - Removed lines: ``bg-error/20 text-error``
+      - Unchanged lines: ``text-base-content``
+   - Line numbers on both sides
+   - Unified diff toggle option
+* **Branch Event Timeline:** When a branch is merged/flushed, an ``alert`` banner appears:
+   - ``alert-success``: "Branch merged -- files exported to workspace" with file list
+   - ``alert-warning``: "Branch flushed -- speculative work discarded" with reason
+
+**Page 6: Decisions & Agent Logic**
+
+This page reveals the agent's internal decision-making -- **why** it chose specific repair actions, **what** sheaf validators detected, and **how** the plan evolved.
+
+* **Escalation Reports:** Daisy UI ``card`` components for each ``escalation_reports`` record:
+   - Category header: ``badge badge-lg`` (e.g., "SYNTAX_LOOP", "STRUCTURAL_DRIFT", "TEST_DIVERGENCE")
+   - Chosen action: highlighted text (e.g., "Split node", "Rewrite graph", "Yield to user")
+   - Evidence summary in a ``mockup-code`` block
+   - Affected nodes listed as clickable badges linking to DAG view
+   - Attempt count at which escalation occurred
+
+.. rubric:: Sheaf Validation Report
+
+A ``table table-zebra`` view of ``sheaf_validations`` with a validator-class column using descriptive icons for DependencyGraphConsistency, ExportImportConsistency, SchemaContractCompatibility, BuildGraphConsistency, TestOwnershipConsistency, and CrossLanguageBoundary. Each row shows a pass or fail indicator, the :math:`V_{sheaf}` contribution value, expandable evidence, and any requeue targets as node badges.
+
+.. rubric:: Graph Rewrite Timeline
+
+A Daisy UI ``timeline`` component for ``rewrite_records``. Each entry shows the trigger node, the rewrite action, the affected nodes, and the before/after node-count comparison. Rewrite actions are displayed as action verbs such as "Split", "Insert Interface", "Replan", and "Merge".
+
+.. rubric:: Plan Revision History
+
+A Daisy UI ``steps`` component for ``plan_revisions``. Each revision displays its sequence number, the reason for revision, the node-count change (for example, "5 -> 8 nodes"), and whether that revision was later superseded.
+
+.. rubric:: Repair Footprints
+
+Expandable ``collapse`` sections for each ``repair_footprints`` record, showing the repair type, target node, success or failure, the evidence used in the repair attempt, and the repair duration and cost.
+
+.. rubric:: Verification Results Grid
+
+A compact per-node verification grid with columns for Node ID, Syntax, Build, Tests, Lint, and Degraded. Each cell shows [PASS], [FAIL], or [--] for pass, fail, or skipped states, and the Degraded column uses [WARN] with a tooltip listing degraded reasons.
+
+.. rubric:: Context Provenance Audit
+
+For advanced debugging, a tree-view of ``context_provenance`` showing which files were included in each node's context, which files were missing or over budget, and which structural digest versions were used.
+
+.. rubric:: Real-Time Update Architecture (Axum SSE + HTMX)
+
+The dashboard uses **Server-Sent Events (SSE)** for real-time push updates. The Axum server maintains a persistent HTTP connection to the browser and pushes rendered HTML fragments whenever DuckDB data changes. The HTMX SSE extension (``htmx-ext-sse``, 2KB) receives these fragments and swaps them into the DOM automatically. Any bespoke JavaScript is limited to progressive enhancement helpers such as theme persistence or clipboard copy; the data refresh path remains server-rendered and SSE-driven.
+
+.. code-block:: html
+
+   <!-- Base layout template (Askama): base.html -->
+   <html data-theme="dark">
+   <head>
+     <link href="/static/dashboard.css" rel="stylesheet">
+     <script src="/static/htmx.min.js"></script>
+     <script src="/static/htmx-ext-sse.js"></script>
+     <script src="/static/app.js"></script>
+   </head>
+   <body class="min-h-screen bg-base-200">
+     <div class="drawer lg:drawer-open">
+       {% block sidebar %}{% endblock %}
+       <div class="drawer-content">
+         {% block navbar %}{% endblock %}
+         <!-- SSE connection for real-time updates -->
+         <div hx-ext="sse" sse-connect="/sse/{{ session_id }}">
+           {% block content %}{% endblock %}
+         </div>
+       </div>
+     </div>
+   </body>
+   </html>
+
+.. code-block:: html
+
+   <!-- Node stats partial template: partials/node_stats.html -->
+   <div class="stats shadow">
+     <div class="stat">
+       <div class="stat-title">Total Nodes</div>
+       <div class="stat-value">{{ total }}</div>
+     </div>
+     <div class="stat">
+       <div class="stat-title">Completed</div>
+       <div class="stat-value text-success">{{ completed }}</div>
+     </div>
+     <div class="stat">
+       <div class="stat-title">Failed</div>
+       <div class="stat-value text-error">{{ failed }}</div>
+     </div>
+   </div>
+
+.. code-block:: rust
+
+   use axum::response::sse::{Event, KeepAlive, Sse};
+   use askama::Template;
+   use std::convert::Infallible;
+   use tokio_stream::StreamExt;
+
+   /// SSE endpoint -- pushes HTML fragments every 2 seconds
+   async fn sse_stream(
+       Path(session_id): Path<String>,
+       State(state): State<AppState>,
+   ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+       let stream = tokio_stream::wrappers::IntervalStream::new(
+           tokio::time::interval(Duration::from_secs(2))
+       )
+       .map(move |_| {
+           let store = state.store.lock().unwrap();
+
+           // Push node stats as rendered HTML fragment
+           let nodes = store.get_node_states(&session_id)
+               .unwrap_or_default();
+           let stats_html = NodeStatsPartial {
+               total: nodes.len(),
+               completed: nodes.iter()
+                   .filter(|n| n.state == "Completed").count(),
+               failed: nodes.iter()
+                   .filter(|n| n.state == "Failed").count(),
+           }.render().unwrap();
+
+           Ok(Event::default()
+               .event("node-stats")
+               .data(stats_html))
+       });
+
+       Sse::new(stream).keep_alive(KeepAlive::default())
+   }
+
+The browser-side HTMX receives these events and swaps the HTML into the designated elements:
+
+.. code-block:: html
+
+   <!-- In the overview page template -->
+   <div hx-ext="sse" sse-connect="/sse/{{ session_id }}">
+     <!-- Swapped automatically when server pushes "node-stats" event -->
+     <div sse-swap="node-stats" hx-swap="innerHTML">
+       {% include "partials/node_stats.html" %}
+     </div>
+
+     <!-- Energy indicator updates independently -->
+     <div sse-swap="energy-update" hx-swap="innerHTML">
+       {% include "partials/energy_indicator.html" %}
+     </div>
+
+     <!-- Budget gauges update independently -->
+     <div sse-swap="budget-update" hx-swap="innerHTML">
+       {% include "partials/budget_gauges.html" %}
+     </div>
+   </div>
+
+Key architecture patterns:
+
+* **Axum ``Sse`` response type** -- Uses ``axum::response::sse::Sse`` with ``tokio_stream::wrappers::IntervalStream`` to push events at 2-second intervals. Each event contains a rendered Askama template partial as its ``data`` payload.
+* **HTMX ``sse-swap`` attribute** -- Each widget declares which SSE event name it listens to (e.g., ``sse-swap="node-stats"``). When the server pushes an event with that name, HTMX swaps the new HTML into that element. Multiple widgets update independently from a single SSE connection.
+* **``KeepAlive``** -- Axum's ``KeepAlive::default()`` sends periodic heartbeat comments to prevent proxy/browser timeout on the long-lived connection.
+* **No WASM, no hydration** -- All rendering happens on the server. The browser receives plain HTML fragments. HTMX (14KB) and the SSE extension (2KB) are the only required client-side JavaScript.
+* **Graceful degradation** -- If the SSE connection drops (e.g., dashboard server restarts), HTMX automatically reconnects. During the reconnection window, the last-rendered data remains visible.
+* **Per-widget SSE events** -- The server can push different event types (``node-stats``, ``energy-update``, ``budget-update``, ``dag-update``, etc.) on the same SSE stream. Each widget only re-renders when its specific event fires, avoiding unnecessary DOM updates.
+
+.. rubric:: Technical Specification
+
+**System Architecture:**
+
+.. graphviz::
+   :caption: Dashboard System Architecture
+   :align: center
+
+   digraph architecture {
+       rankdir=LR;
+       bgcolor="transparent";
+       newrank=true;
+       nodesep=1.0;
+       ranksep=1.2;
+
+       node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.2,0.15"];
+       edge [fontname="Arial", fontsize=9];
+
+       subgraph cluster_agent {
+           label="Agent Process";
+           style="rounded,filled";
+           fillcolor="#E8EAF6";
+           color="#3F51B5";
+
+           agent [label="perspt agent\n(SRBNOrchestrator)", fillcolor="#C5CAE9", color="#3F51B5"];
+           sandbox_fs [label=".perspt/sandboxes/\n<session>/<branch>/", shape=folder, fillcolor="#BBDEFB", color="#1E88E5"];
+       }
+
+       subgraph cluster_storage {
+           label="Shared Storage";
+           style="rounded,filled";
+           fillcolor="#FFF3E0";
+           color="#FB8C00";
+
+           duckdb [label="perspt.db\n(DuckDB)", shape=cylinder, fillcolor="#FFE0B2", color="#FB8C00"];
+       }
+
+       subgraph cluster_dashboard {
+           label="Dashboard Process";
+           style="rounded,filled";
+           fillcolor="#E8F5E9";
+           color="#43A047";
+
+           axum [label="Axum Server\n(127.0.0.1:3000)", fillcolor="#C8E6C9", color="#43A047"];
+           askama [label="Askama Templates\n(compile-time HTML)", fillcolor="#A5D6A7", color="#2E7D32"];
+           auth [label="Cookie Auth\nMiddleware", fillcolor="#C8E6C9", color="#43A047"];
+       }
+
+       subgraph cluster_browser {
+           label="Browser";
+           style="rounded,filled";
+           fillcolor="#F3E5F5";
+           color="#9C27B0";
+
+           htmx [label="HTMX + SSE\n(16KB JS)", fillcolor="#E1BEE7", color="#9C27B0"];
+           ui [label="Daisy UI 5\n(Theme Rendering)", fillcolor="#CE93D8", color="#7B1FA2"];
+       }
+
+       agent -> duckdb [label="WRITE\n(Mutex)", color="#E53935", fontcolor="#E53935"];
+       agent -> sandbox_fs [label="create/seed\nsandbox files", color="#1E88E5", fontcolor="#1E88E5", style=dashed];
+
+       duckdb -> askama [label="READ ONLY\n(AccessMode::ReadOnly)", color="#43A047", fontcolor="#43A047"];
+       sandbox_fs -> askama [label="std::fs::read\n(sandbox diffs)", color="#43A047", fontcolor="#43A047", style=dashed];
+
+       axum -> auth [label="middleware", color="#78909C", fontcolor="#78909C"];
+       auth -> askama [label="authenticated", color="#78909C", fontcolor="#78909C"];
+       askama -> axum [label="rendered HTML", color="#78909C", fontcolor="#78909C", dir=back];
+
+         axum -> htmx [label="HTTP\n(HTML + SSE)", color="#9C27B0", fontcolor="#9C27B0"];
+       htmx -> ui [label="DOM swap", color="#7B1FA2", fontcolor="#7B1FA2"];
+   }
+
+**Data Flow -- SSE Push Sequence:**
+
+.. graphviz::
+   :caption: SSE Push Data Flow
+   :align: center
+
+   digraph sse_flow {
+       rankdir=TB;
+       bgcolor="transparent";
+       node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.15,0.1"];
+       edge [fontname="Arial", fontsize=9];
+
+       timer [label="Server Timer\n(2s interval)", fillcolor="#C8E6C9", color="#43A047"];
+       query [label="DuckDB\nReadOnly Query", shape=cylinder, fillcolor="#FFE0B2", color="#FB8C00"];
+       askama [label="Askama Template\nrender partial HTML", fillcolor="#A5D6A7", color="#2E7D32"];
+       sse [label="SSE Event\n(text/event-stream)", fillcolor="#BBDEFB", color="#1E88E5"];
+       htmx [label="HTMX sse-swap\n(browser)", fillcolor="#E1BEE7", color="#9C27B0"];
+       dom [label="Updated DOM\n(Daisy UI widget)", fillcolor="#E8EAF6", color="#3F51B5"];
+
+       timer -> query [label="SELECT ..."];
+       query -> askama [label="Vec<Record>"];
+       askama -> sse [label="HTML fragment"];
+       sse -> htmx [label="persistent\nHTTP stream"];
+       htmx -> dom [label="innerHTML\nswap"];
+   }
+
+**Crate Structure:**
+
+.. code-block:: text
+
+   crates/perspt-dashboard/
+   |-- Cargo.toml          # Standard Rust binary crate
+   |-- src/
+   |   |-- main.rs          # Axum server entry point
+   |   |-- auth.rs          # Cookie auth middleware + login handler
+   |   |-- state.rs         # AppState holding Arc<Mutex<SessionStore>>
+   |   |-- error.rs         # DashboardError with IntoResponse
+   |   |-- handlers/        # Axum route handler modules
+   |   |   |-- mod.rs
+   |   |   |-- overview.rs  # GET /sessions/:id -- overview page
+   |   |   |-- dag.rs       # GET /sessions/:id/dag -- DAG view
+   |   |   |-- energy.rs    # GET /sessions/:id/energy -- energy charts
+   |   |   |-- llm.rs       # GET /sessions/:id/llm -- LLM telemetry
+   |   |   |-- sandbox.rs   # GET /sessions/:id/sandbox -- diff viewer
+   |   |   +-- decisions.rs # GET /sessions/:id/decisions -- decisions
+   |   +-- sse.rs           # SSE stream handler (pushes HTML partials)
+   |-- templates/           # Askama HTML templates (compile-time checked)
+   |   |-- base.html        # Base layout (drawer + navbar + SSE wrapper)
+   |   |-- login.html       # Login form
+   |   |-- pages/
+   |   |   |-- overview.html
+   |   |   |-- dag.html
+   |   |   |-- energy.html
+   |   |   |-- llm.html
+   |   |   |-- sandbox.html
+   |   |   +-- decisions.html
+   |   +-- partials/        # Re-rendered by SSE push events
+   |       |-- node_stats.html
+   |       |-- budget_gauges.html
+   |       |-- energy_chart.html
+   |       |-- energy_indicator.html
+   |       |-- dag_graph.html
+   |       |-- activity_feed.html
+   |       +-- session_hero.html
+  +-- static/              # Pinned CSS/JS assets (dashboard.css, HTMX, SSE extension, helpers)
+
+**Dependencies (Cargo.toml):**
+
+.. code-block:: toml
+
+   [dependencies]
+   axum = { version = "0.8", features = ["macros"] }
+   axum-extra = { version = "0.10", features = ["cookie"] }
+   askama = { version = "0.15", features = ["with-axum"] }
+   tokio = { version = "1.42", features = ["full"] }
+   tokio-stream = { version = "0.1", features = ["time"] }
+   tower = "0.5"
+   tower-http = { version = "0.6", features = ["fs", "cors"] }
+   serde = { version = "1.0", features = ["derive"] }
+   serde_json = "1.0"
+   similar = "2"
+   perspt-store = { workspace = true }
+   perspt-core = { workspace = true }
+
+No feature flags, no WASM dependencies, no dual-target build. Standard ``cargo build`` produces a single server binary.
+
+**Custom Error Type (Axum pattern):**
+
+.. code-block:: rust
+
+   use axum::response::{IntoResponse, Response};
+   use axum::http::StatusCode;
+
+   #[derive(Debug)]
+   pub enum DashboardError {
+       StoreError(String),
+       NotFound(String),
+       TemplateError(askama::Error),
+   }
+
+   impl IntoResponse for DashboardError {
+       fn into_response(self) -> Response {
+           let (status, msg) = match self {
+               Self::StoreError(e) => (StatusCode::INTERNAL_SERVER_ERROR, e),
+               Self::NotFound(e) => (StatusCode::NOT_FOUND, e),
+               Self::TemplateError(e) => (
+                   StatusCode::INTERNAL_SERVER_ERROR,
+                   format!("Template error: {}", e),
+               ),
+           };
+           (status, msg).into_response()
+       }
+   }
+
+**Axum Handler Examples:**
+
+.. code-block:: rust
+
+   use axum::extract::{Path, State};
+   use axum::response::Html;
+   use askama::Template;
+
+   #[derive(Template)]
+   #[template(path = "pages/overview.html")]
+   struct OverviewPage {
+       session: SessionRecord,
+       node_count: usize,
+       completed: usize,
+       in_progress: usize,
+       failed: usize,
+       budget: Option<BudgetEnvelopeRow>,
+   }
+
+   /// GET /sessions/:id -- renders the full overview page
+   async fn overview_page(
+       Path(session_id): Path<String>,
+       State(state): State<AppState>,
+   ) -> Result<Html<String>, DashboardError> {
+       let store = state.store.lock()
+           .map_err(|e| DashboardError::StoreError(e.to_string()))?;
+
+       let session = store.get_session(&session_id)
+           .map_err(|e| DashboardError::StoreError(e.to_string()))?
+           .ok_or_else(|| DashboardError::NotFound(
+               format!("Session {} not found", session_id)
+           ))?;
+
+       let nodes = store.get_node_states(&session_id)
+           .unwrap_or_default();
+
+       let budget = store.get_budget_envelope(&session_id).ok();
+
+       let page = OverviewPage {
+           session,
+           node_count: nodes.len(),
+           completed: nodes.iter()
+               .filter(|n| n.state == "Completed").count(),
+           in_progress: nodes.iter()
+               .filter(|n| ["Coding", "Verifying", "Retry"]
+                   .contains(&n.state.as_str())).count(),
+           failed: nodes.iter()
+               .filter(|n| ["Failed", "Escalated"]
+                   .contains(&n.state.as_str())).count(),
+           budget,
+       };
+
+       Ok(Html(page.render().map_err(DashboardError::TemplateError)?))
+   }
+
+**Read-Only Store Constructor:**
+
+.. code-block:: rust
+
+   impl SessionStore {
+       /// Open a read-only connection to an existing database.
+       /// Suitable for dashboard/monitoring processes that must not
+       /// interfere with the agent's write lock.
+       pub fn open_read_only(path: &PathBuf) -> Result<Self> {
+           let config = duckdb::Config::default()
+               .access_mode(duckdb::AccessMode::ReadOnly)
+               .map_err(|e| anyhow::anyhow!("DuckDB config error: {}", e))?;
+
+           let conn = duckdb::Connection::open_with_config(path, config)
+               .context("Failed to open DuckDB in read-only mode")?;
+
+           // Do NOT call init_schema -- read-only connections cannot
+           // create tables or sequences (CREATE is a write op).
+           Ok(Self {
+               conn: std::sync::Mutex::new(conn),
+           })
+       }
+   }
+
+**Sandbox Diff Handler:**
+
+.. code-block:: rust
+
+   /// GET /api/sessions/:id/sandbox/diff?branch=X&file=Y
+   async fn sandbox_diff_handler(
+       Path(session_id): Path<String>,
+       Query(params): Query<DiffParams>,
+       State(state): State<AppState>,
+   ) -> Result<Html<String>, DashboardError> {
+       use std::path::PathBuf;
+
+       let sandbox_file = PathBuf::from(&params.sandbox_dir)
+           .join(&params.relative_path);
+       let workspace_file = PathBuf::from(&params.workspace_dir)
+           .join(&params.relative_path);
+
+       let sandbox_content = std::fs::read_to_string(&sandbox_file)
+           .unwrap_or_default();
+       let workspace_content = std::fs::read_to_string(&workspace_file)
+           .unwrap_or_default();
+
+       let diff = similar::TextDiff::from_lines(
+           &workspace_content,
+           &sandbox_content,
+       );
+
+       let tmpl = DiffPartial {
+           relative_path: params.relative_path,
+           unified_diff: diff.unified_diff()
+               .header("workspace", "sandbox")
+               .to_string(),
+           workspace_exists: workspace_file.exists(),
+           sandbox_exists: sandbox_file.exists(),
+           additions: diff.ops().iter()
+               .filter(|op| matches!(op, similar::DiffOp::Insert { .. }))
+               .count(),
+           deletions: diff.ops().iter()
+               .filter(|op| matches!(op, similar::DiffOp::Delete { .. }))
+               .count(),
+       };
+
+       Ok(Html(tmpl.render().map_err(DashboardError::TemplateError)?))
+   }
+
+**Cookie-Based Authentication Middleware:**
+
+.. code-block:: rust
+
+   use axum::{extract::State, middleware::Next, response::Response};
+   use axum_extra::extract::CookieJar;
+   use axum::response::Redirect;
+   use http::Request;
+
+   pub async fn auth_middleware(
+       State(state): State<AppState>,
+       jar: CookieJar,
+       request: Request<axum::body::Body>,
+       next: Next,
+   ) -> Response {
+       // Allow login page and static assets without auth
+       let path = request.uri().path();
+       if path == "/login" || path.starts_with("/static/") {
+           return next.run(request).await;
+       }
+
+         // If no password is configured, localhost access is allowed directly.
+         let Some(expected) = &state.dashboard_password else {
+           return next.run(request).await;
+         };
+
+       // Check for valid session cookie
+       if let Some(cookie) = jar.get("perspt_session") {
+           if cookie.value() == expected {
+               return next.run(request).await;
+           }
+       }
+
+       Redirect::to("/login").into_response()
+   }
+
+**Data Exposed per DuckDB Table:**
+
+The dashboard covers the **complete** DuckDB schema established by ``perspt-store::schema::init_schema``:
+
+.. list-table:: Dashboard Coverage of DuckDB Tables
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Table
+     - Dashboard Page
+     - Visualization
+   * - ``sessions``
+     - Overview
+     - Session selector + hero card with metadata
+   * - ``node_states``
+     - Overview, DAG
+     - Node cards with state badges + state summary stats
+   * - ``energy_history``
+     - Energy
+     - SVG line charts (6 components) + raw data table
+   * - ``llm_requests``
+     - LLM Telemetry
+     - Paginated table with expandable prompt/response
+   * - ``task_graph_edges``
+     - DAG
+     - SVG graph edges connecting node cards
+   * - ``provisional_branches``
+     - Sandbox
+     - Active branch list with file counts + sandbox paths
+   * - ``branch_lineage``
+     - DAG
+     - Parent-child annotations on graph edges
+   * - ``interface_seals``
+     - DAG
+     - Lock ([LOCK]) icons on sealed Interface nodes
+   * - ``branch_flushes``
+     - Sandbox, DAG
+     - Alert banners with flush reason + affected nodes
+   * - ``structural_digests``
+     - Decisions
+     - Digest version tracking in context provenance tree
+   * - ``context_provenance``
+     - Decisions
+     - Tree-view of context assembly decisions
+   * - ``escalation_reports``
+     - Decisions
+     - Alert cards with category/action/evidence
+   * - ``rewrite_records``
+     - Decisions
+     - Timeline of graph rewrites
+   * - ``sheaf_validations``
+     - Decisions
+     - Pass/fail table per validator class
+   * - ``review_outcomes``
+     - Overview
+     - Approval/rejection in activity feed
+   * - ``verification_results``
+     - DAG, Decisions
+     - Mini status grid (syntax/build/tests/lint) per node
+   * - ``artifact_bundles``
+     - DAG
+     - Touched files summary badge per node
+   * - ``feature_charters``
+     - Overview
+     - Scope constraint display card
+   * - ``plan_revisions``
+     - Decisions
+     - Steps component showing plan evolution
+   * - ``repair_footprints``
+     - Decisions
+     - Expandable repair attempt history
+   * - ``budget_envelopes``
+     - Overview
+     - Three radial-progress gauges (steps/cost/revisions)
+
+=========
+Rationale
+=========
+
+**Design Decision Rationale:**
+
+* **Axum + Askama + HTMX over JavaScript and WASM frameworks:** Perspt is a Rust workspace. Introducing React/Vue would fragment the build system, requiring Node.js tooling. Conversely, full-stack WASM frameworks (Leptos, Dioxus) introduce dual-target compilation (native + ``wasm32-unknown-unknown``), ``wasm-bindgen`` version sensitivity, hydration bugs, ``usize``/``isize`` WASM-safety traps, and mandatory ``cargo-leptos``/``dx`` tooling. Since the dashboard is a **read-only monitoring tool** where every interaction is "fetch data, render HTML, display it", server-rendered HTML with SSE push is the right-sized architecture. Axum is the community-standard server framework (Tokio team). Askama provides compile-time type-checked templates. HTMX (14KB) + SSE extension (2KB) handles real-time DOM updates without any WASM. The same Rust structs from ``perspt-store`` are used directly in Axum handlers -- no serialization boundary, no API schema drift.
+
+* **Daisy UI 5 over raw Tailwind or Material Design:** Daisy UI 5 is a pure-CSS component library layered on Tailwind. It provides semantic class names (``btn``, ``card``, ``stats``, ``table``, ``badge``, ``alert``, ``collapse``, ``diff``, ``drawer``, ``radial-progress``, ``steps``, ``timeline``, ``mockup-code``) that map directly to our UI needs without JavaScript runtime overhead. Its theme system (configurable via ``data-theme`` attribute) gives users visual customization with only a tiny persistence helper script. Material Design (MUI) requires React and a JS runtime, which is incompatible with a Rust-first server-rendered approach.
+
+* **DuckDB ``AccessMode::ReadOnly``:** DuckDB's architecture allows exactly one writer and unlimited concurrent readers. The agent holds the write lock; the dashboard opens a separate ``Connection`` with ``AccessMode::ReadOnly``. This is explicitly supported by the ``duckdb = "=1.10501.0"`` crate pinned in the workspace. Read-only connections read from the latest checkpoint; there may be a sub-second delay for un-flushed WAL entries.
+
+* **SSE push from dashboard server over WebSocket from agent:** The dashboard server itself pushes SSE events by polling DuckDB on a 2-second interval. This keeps agent and dashboard fully decoupled -- both simply access the shared DuckDB file. WebSocket push from the agent would couple them and prevent monitoring historical/completed sessions. SSE is more efficient than client-side polling because only one persistent HTTP connection is maintained per browser tab, and the server pushes data only when it has new content to render.
+
+* **SVG charts over JS charting libraries:** Energy charts are rendered as inline ``<svg>`` elements in Askama templates. This avoids JavaScript charting dependencies (Chart.js, D3, etc.). The chart data is simple (energy values per attempt, typically <50 points) and maps naturally to SVG ``<polyline>`` and ``<circle>`` elements styled with Daisy UI CSS variables.
+
+* **Standard ``cargo build`` over specialized build tools:** Since there is no WASM target, no dual-target compilation is needed. Standard ``cargo build`` produces a single server binary. No ``cargo-leptos``, no ``dx``, no ``wasm-bindgen-cli``. The dashboard serves pinned CSS/JS assets from ``static/`` so it remains usable on offline or air-gapped machines without introducing a Node-based build pipeline.
+
+* **Standalone ``perspt dashboard`` over ``--dashboard`` flag:** Running the dashboard as a separate process is cleaner than embedding it in the agent's async runtime. It avoids polluting the agent's event loop, allows the dashboard to outlive individual agent sessions, and enables monitoring of historical sessions.
+
+**Alternatives Considered:**
+
+* **Embedded web server with ``rust-embed`` and vanilla JS:** Simpler to implement but would result in a primitive UI. No component library, manual DOM manipulation. The development cost of building a rich dashboard in vanilla JS would exceed the Axum + HTMX + Askama approach.
+* **Grafana/Prometheus export:** Would require running external infrastructure. Violates the "zero-configuration local dashboard" goal. Also cannot display domain-specific views like sandbox diffs or DAG topology.
+* **Extending the existing TUI (``perspt-tui``):** Terminal UIs are fundamentally limited for visualizing graphs, tables with many columns, and code diffs simultaneously. A browser dashboard is the right medium for rich monitoring.
+* **WebSocket live push from agent:** Would couple the dashboard to the agent process, require the agent to embed a WS server, and prevent monitoring historical/completed sessions.
+* **Leptos 0.7 / Dioxus 0.6 (full-stack WASM):** Evaluated and rejected. Both require dual-target compilation (native + WASM), specialized build tools (``cargo-leptos`` / ``dx``), feature flag discipline to gate server-only dependencies, and introduce hydration bugs and ``usize``/``isize`` WASM-safety traps. The dashboard's read-only monitoring interaction model does not benefit from client-side WASM reactivity.
+
+=======================
+Backwards Compatibility
+=======================
+
+**User Impact:**
+
+* This is a purely additive change. Existing ``perspt`` commands (``chat``, ``agent``, ``status``, ``logs``, etc.) are entirely unaffected.
+* Users who never run ``perspt dashboard`` will see no change in behavior, binary size impact notwithstanding.
+
+**Configuration Impact:**
+
+* Two new **optional** fields are added under a ``[dashboard]`` section in the platform config file (``dirs::config_dir()/perspt/config.toml``):
+  - ``password``: ``Option<String>`` (default: unset; no login prompt on localhost)
+  - ``port``: ``Option<u16>`` (default: ``3000``)
+* These fields are ignored by all other ``perspt`` commands. Existing config files without a ``[dashboard]`` section work unchanged.
+
+**Path Convention:**
+
+* Configuration and policy files should live under ``dirs::config_dir()/perspt/``.
+* Persistent application data should live under ``dirs::data_local_dir()/perspt/``.
+* Project-local execution scratch data remains under ``<working_dir>/.perspt/`` because it is intentionally workspace-scoped rather than user-global.
+
+**Migration Impact:**
+
+* The implementation should check the legacy ``~/.perspt/config.toml`` and ``~/.perspt/rules/`` locations during a transition period, warn when they are used, and offer automatic migration into the platform-standard config directory.
+* The dashboard PSP should be implemented against the normalized path layout rather than reintroducing any new ``~/.perspt`` references. The dashboard becomes one of the first consumers of the shared path helper API, rather than a special case.
+
+**Storage Layer:**
+
+* ``perspt-store`` gains a single new constructor (``SessionStore::open_read_only``). All existing methods and schema definitions are unchanged. The ``init_schema()`` function is explicitly **not** called on read-only connections -- it is a write operation.
+
+**Build Impact:**
+
+* The ``perspt-dashboard`` crate builds with standard ``cargo build`` -- no special tooling required. The workspace ``Cargo.toml`` gains one new member, and standard workspace CI commands will compile it automatically once it is added.
+
+========================
+Reference Implementation
+========================
+
+The implementation proceeds in seven phases. Each phase is expected to end with a **compilable workspace state**: ``cargo build --workspace`` must succeed, and any tests added or modified in that phase must pass before the next phase begins.
+
+**Phase 0: Path Normalization Foundation**
+
+* Add a shared path helper module in ``perspt-core`` for:
+  - ``config_dir()`` / ``config_file()``
+  - ``policy_dir()``
+  - ``data_dir()`` / ``database_path()``
+  - legacy ``~/.perspt`` detection for migration
+* Move all user-global config and policy lookups to the shared helper API.
+* Keep project-local runtime scratch paths under ``<working_dir>/.perspt/`` unchanged.
+* Add a migration path from legacy ``~/.perspt/config.toml`` and ``~/.perspt/rules/`` into the platform config directory, including warning messages and explicit conflict resolution behavior.
+* Exit criterion: the existing ``perspt`` workspace still compiles unchanged, with no dashboard crate required yet.
+
+**Phase 1: Store Extension**
+
+* Add ``SessionStore::open_read_only()`` to ``perspt-store/src/store.rs``.
+* Add any missing read query methods needed by the dashboard (most already exist: ``list_recent_sessions``, ``get_node_states``, ``get_energy_history``, ``get_llm_requests``, ``get_provisional_branches``, ``get_sheaf_validations``, ``get_task_graph_edges``, ``get_escalation_reports``, ``get_rewrite_records``, ``get_plan_revisions``, ``get_repair_footprints``, ``get_budget_envelope``, ``get_context_provenance``).
+* Exit criterion: ``perspt-store`` compiles and its existing callers remain unaffected.
+
+**Phase 2: Dashboard Crate Scaffold**
+
+* Create ``crates/perspt-dashboard/`` with Axum + Askama project structure.
+* Configure ``Cargo.toml`` with ``axum``, ``askama``, ``tokio-stream`` dependencies (no feature flags).
+* Create ``templates/`` directory with base layout, page templates, and partial templates.
+* Add vendored static assets under ``static/`` (prebuilt CSS bundle, pinned HTMX, pinned SSE extension, tiny helper JS) and serve them through Axum.
+* Implement ``AppState`` with read-only ``SessionStore`` (``Arc<Mutex<SessionStore>>``) and optional dashboard password from config.
+* Implement ``DashboardError`` with ``IntoResponse``.
+* Implement cookie-based auth middleware that activates only when ``[dashboard].password`` is configured.
+* Implement Axum ``Router`` with routes for all 6 pages + SSE endpoint using placeholder handlers/templates where full data wiring is not yet implemented.
+* Exit criterion: the new ``perspt-dashboard`` crate builds as a workspace member and serves a minimal placeholder application without breaking the rest of the workspace.
+
+**Phase 3: Core Dashboard Pages**
+
+* Replace placeholder content for the Overview page with live session list, budget radial-progress gauges, and activity feed.
+* Replace placeholder content for the DAG view with SVG graph rendering from ``task_graph_edges`` and styled node cards.
+* Replace placeholder content for the Energy page with SVG convergence charts from ``energy_history``.
+* Replace placeholder content for the LLM Telemetry page with paginated ``llm_requests`` tables and expandable rows.
+* Keep Sandbox and Decisions on compile-safe placeholders until their data paths are wired in Phase 4.
+* Exit criterion: the dashboard crate and full workspace compile, and the first four pages render real data while unfinished pages still render valid placeholder responses.
+
+**Phase 4: Sandbox Monitoring & Decisions**
+
+* Replace Sandbox placeholders with a working diff viewer (``provisional_branches`` -> file system reads -> ``similar`` diffs -> split-pane display).
+* Add branch state timeline behavior (active -> merged/flushed).
+* Replace Decisions placeholders with escalation reports, sheaf validations, rewrite timeline, and plan revision views.
+* Add the verification results grid.
+* Exit criterion: all six dashboard pages compile and render valid server responses, even if later polish or documentation remains incomplete.
+
+**Phase 5: CLI Integration**
+
+* Add ``Dashboard`` variant to ``Commands`` enum in ``perspt-cli/src/main.rs``.
+* Add ``commands/dashboard.rs`` to bootstrap the Axum server.
+* Register in workspace ``Cargo.toml``.
+* Exit criterion: ``perspt dashboard`` is available from the main CLI and the workspace still compiles end-to-end.
+
+**Phase 6: Tests and Migration Verification**
+
+* Add unit tests for the shared path helper API covering Linux/macOS path resolution behavior.
+* Add migration tests covering legacy ``~/.perspt`` detection, warnings, and successful config/rules migration.
+* Add command-level tests for ``perspt config`` and ``perspt init --rules`` using the normalized config path.
+* Add store/dashboard integration tests that confirm the dashboard reads the database from the platform data directory while config and policy come from the platform config directory.
+* Add end-to-end tests: start agent session, start dashboard, verify all 6 pages render live data and that dashboard auth reads from normalized config paths.
+* Exit criterion: newly introduced dashboard and path-migration tests pass, and the workspace remains green under normal build/test commands.
+
+**Phase 7: Documentation Updates**
+
+The ``perspt-dashboard`` crate requires updates across 13 existing documentation files and the creation of 4 new pages in the ``perspt_book``. The workspace description changes from "7-crate" to "8-crate" throughout. All changes are in ``docs/perspt_book/source/``.
+The documentation phase should not introduce code changes that leave the workspace uncompilable; it is a finalization phase after code and tests are already green.
+
+*Modified Files:*
+
+.. list-table:: Existing Documentation Files Requiring Updates
+   :header-rows: 1
+   :widths: 35 65
+
+   * - File
+     - Changes Required
+   * - ``introduction.rst``
+     - Update "7-crate" to "8-crate" in description text (2 occurrences). Add ``Dashboard`` row to the Key Features list-table: ``Web Dashboard | Browser-based real-time monitoring of agent execution, energy, and sandbox diffs``. Update the architecture graphviz diagram to include ``perspt-dashboard`` node in a new "Monitoring" subgraph cluster, with edges ``dashboard -> store`` and ``dashboard -> core``. Add ``dashboard`` entry to CLI Commands list-table: ``dashboard | Real-time web monitoring | perspt dashboard``.
+   * - ``index.rst`` (book root)
+     - Add a grid-item-card to the landing page grid: ``Dashboard | :link: user-guide/dashboard | Monitor agent execution in real-time via browser``. Update the ``Key Features`` list-table to include the web dashboard row.
+   * - ``configuration.rst``
+     - Add a new section "Dashboard Configuration" after the "Command-Line Flags" section. Document the ``[dashboard]`` TOML config section with ``password`` (``Option<String>``, default: unset on localhost) and ``port`` (``Option<u16>``, default: 3000). Include example ``config.toml`` snippet. Document the dashboard-specific CLI flags: ``perspt dashboard [--port PORT]``. Add a new subsection explaining the normalized path layout: config and rules under ``dirs::config_dir()/perspt``, persistent DB/session artifacts under ``dirs::data_local_dir()/perspt``, workspace scratch under ``<working_dir>/.perspt``.
+   * - ``reference/cli-reference.rst``
+     - Add ``dashboard`` subcommand between ``config`` and ``ledger``. Document synopsis: ``perspt dashboard [--port PORT]``. Description: "Launch the real-time web dashboard for monitoring agent sessions. Opens an Axum server on ``127.0.0.1:3000`` (default) serving a server-rendered Axum application with Askama templates and HTMX. Reads DuckDB in read-only mode. If ``[dashboard].password`` is set in config, requires cookie-based authentication."
+   * - ``concepts/workspace-crates.rst``
+     - Update "7-crate" to "8-crate" in opening paragraph. Add ``perspt-dashboard`` to the Crate Summary list-table with: Purpose="Axum + Askama + HTMX web dashboard for real-time agent monitoring", Key Types="``AppState``, ``DashboardError``, Axum Handlers, Askama Templates". Update the graphviz dependency diagram to include ``dashboard`` node with edges to ``store`` and ``core``. Add a new ``perspt-dashboard`` subsection describing the crate: Axum server with Askama templates, HTMX SSE for real-time updates, Tailwind/Daisy UI 5, 6 dashboard pages, route handlers querying read-only DuckDB.
+   * - ``developer-guide/architecture.rst``
+     - Update "seven crates" to "eight crates" in opening paragraph. Add ``perspt-dashboard/`` to the Workspace Layout code-block tree. Update the graphviz dependency graph to include ``perspt-dashboard`` node with edges to ``perspt-store`` and ``perspt-core``. Add a new section "Crate: ``perspt-dashboard``" documenting: Axum + Askama + HTMX architecture, ``AppState`` structure, SSE stream handler pattern, Askama template organization, cookie auth middleware. Update the Data Flow ASCII diagram to show the dashboard as a separate process reading DuckDB alongside the agent.
+   * - ``api/index.rst``
+     - Add a grid-item-card for ``perspt-dashboard``: ``perspt-dashboard | :link: perspt-dashboard | Axum + Askama + HTMX web dashboard.``. Add ``perspt-dashboard`` to the hidden toctree.
+   * - ``api/perspt-store.rst``
+     - Add ``open_read_only(path: &Path) -> Result<Self>`` to the Core Type code-block after ``open()``. Add a note explaining that ``open_read_only`` uses ``AccessMode::ReadOnly`` and does not call ``init_schema()``, making it safe for concurrent dashboard reads.
+   * - ``howto/configuration.rst`` or equivalent path/migration how-to
+     - Add a migration section for users moving from legacy ``~/.perspt`` paths into platform-standard config directories. Document warning behavior, automatic migration, and override/conflict handling.
+   * - ``user-guide/agent-mode.rst``
+     - Add a new section "Dashboard Monitoring" after "Session Management" and before "Speculator Lookahead". Content: "While the agent is running, launch ``perspt dashboard`` in a separate terminal to open a browser-based monitoring interface. The dashboard provides real-time visibility into DAG topology, energy convergence, LLM telemetry, sandbox file diffs, and budget consumption. See the dashboard user guide for full details."
+   * - ``user-guide/index.rst``
+     - Add a grid-item-card: ``Dashboard | :link: dashboard | Real-time browser-based monitoring of agent execution.``. Add ``dashboard`` to the hidden toctree after ``agent-mode``.
+   * - ``tutorials/index.rst``
+     - Add a grid-item-card: ``Dashboard Tutorial | :link: dashboard-monitoring | Monitor agent execution in real-time``. Add ``dashboard-monitoring`` to the hidden toctree. Add entry to Learning Path table at position 5: ``Dashboard Tutorial | Observe agent internals in real-time``.
+   * - ``howto/index.rst``
+     - Add a grid-item-card: ``Dashboard Setup | :link: dashboard-setup | Configure and launch the web dashboard.``. Add ``dashboard-setup`` to the hidden toctree.
+   * - ``changelog.rst``
+     - Add a new version entry at the top documenting the dashboard feature. Include: new ``perspt dashboard`` CLI command, ``perspt-dashboard`` crate with Axum + Askama + HTMX, read-only DuckDB monitoring, 6 dashboard pages (Overview, DAG, Energy, LLM Telemetry, Sandbox, Decisions), optional cookie-based auth, ``[dashboard]`` config section, documentation additions (4 new pages, 13 updated pages).
+
+*New Files:*
+
+.. list-table:: New Documentation Files
+   :header-rows: 1
+   :widths: 35 65
+
+   * - File
+     - Content
+   * - ``api/perspt-dashboard.rst`` [NEW]
+     - API reference for the ``perspt-dashboard`` crate. Document: ``AppState`` struct (holds ``Arc<Mutex<SessionStore>>`` opened in read-only mode, optional password, polling interval). ``DashboardError`` enum with ``IntoResponse`` implementation. All handler/SSE endpoint functions: ``get_session_overview``, ``get_node_states``, ``get_energy_history``, ``get_llm_requests``, ``get_task_graph_edges``, ``get_provisional_branches``, ``get_sandbox_diff``, ``get_escalation_reports``, ``get_sheaf_validations``, ``get_rewrite_records``, ``get_plan_revisions``, ``get_repair_footprints``, ``get_budget_envelope``, ``get_context_provenance``. Auth middleware signature. Askama template inventory (pages and partials).
+   * - ``user-guide/dashboard.rst`` [NEW]
+     - User guide for the dashboard. Sections: "Launching the Dashboard" (``perspt dashboard``, ``--port`` flag, opening browser). "Dashboard Pages" (overview description of each of the 6 pages with screenshots/descriptions). "Authentication" (optional password in ``config.toml``, login flow, session cookies). "Theme Selection" (Daisy UI theme switching via data-theme). "Polling and Latency" (2-second SSE push interval, WAL checkpoint behavior). "Using with Headless Agent" (running ``perspt agent -y`` in one terminal and ``perspt dashboard`` in another). "Viewing Historical Sessions" (selecting past sessions from the dropdown).
+   * - ``howto/dashboard-setup.rst`` [NEW]
+     - How-to guide for dashboard configuration. Sections: "Locate the Config File" (platform config dir paths on Linux/macOS). "Configure Dashboard Password" (``[dashboard]`` in config.toml). "Change Default Port" (``--port`` flag and ``port`` config key). "Build Dashboard from Source" (``cargo build -p perspt-dashboard --release``). "Launch Locally" (default localhost binding, browser startup, session selection). "Serve on Network" (future extension only; if added later, it must require explicit password configuration and a non-localhost bind option).
+   * - ``tutorials/dashboard-monitoring.rst`` [NEW]
+     - Tutorial: "Monitoring Agent Execution with the Dashboard". Step-by-step: (1) Start agent session with ``perspt agent -w ./myproject "task"``. (2) In a new terminal, run ``perspt dashboard``. (3) Open ``http://localhost:3000`` in browser. (4) Walk through Overview page -- session status, budget gauges. (5) Switch to DAG view -- observe nodes transitioning through states. (6) Check Energy page -- watch convergence curves. (7) Open Sandbox page -- see live code diffs before commit. (8) Review LLM Telemetry -- audit LLM calls and costs. (9) Explore Decisions page -- understand escalation logic. Includes expected visual descriptions for each step.
+
+============
+Open Issues
+============
+
+* **WAL Checkpoint Lag:** DuckDB's read-only mode reads the latest checkpoint, not un-flushed WAL entries. In practice, the agent's ``perspt-store`` flushes on every discrete write operation (each ``INSERT``/``UPDATE`` call acquires and releases the mutex), so lag should be minimal. However, under heavy write load, there could be sub-second staleness. This is acceptable for a monitoring dashboard.
+
+* **Sandbox Race Conditions:** When the agent flushes or merges a branch (``flush_provisional_branch``, ``merge_provisional_branch``), it calls ``cleanup_sandbox`` which removes the directory. If the dashboard polls the sandbox directory at exactly that moment, the SSE push will render an empty diff or a "directory not found" result. The UI should handle this gracefully with a "Branch completed" message rather than an error.
+
+* **Binary Size:** The Axum + Askama dashboard adds one native workspace crate and no WASM bundle. It increases normal workspace build surface, but avoids the much larger binary and tooling costs associated with a dual-target web stack.
+
+* **Offline Asset Packaging:** The reference implementation serves pinned CSS/JS assets from ``static/`` rather than third-party CDNs so that localhost monitoring works without internet access. Asset version pinning and update cadence should be documented alongside the crate.
+
+* **Path Migration Edge Cases:** Some users may have both legacy ``~/.perspt`` config/rules and new platform-standard config directories populated. The migration logic must define precedence clearly, avoid silent overwrites, and emit actionable warnings when user intervention is required.
+
+* **SSE Interval Tuning:** The default 2-second SSE push interval balances responsiveness with server load. For sessions with many tables and nodes, query load could accumulate. Future optimization could use conditional push (skip if no new data) by tracking a last-modified timestamp or row count.
+
+* **SSE Connection Limits:** Each browser tab opens one SSE connection. Modern browsers allow 6 concurrent connections per domain. If a user opens many tabs, connections may queue. This is acceptable for a local monitoring tool.
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.
