@@ -1,0 +1,14 @@
+{
+  "name": "perspt-dashboard-assets",
+  "private": true,
+  "description": "Asset pipeline for perspt-dashboard (Tailwind CSS + DaisyUI)",
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i input.css -o static/dashboard.css --minify",
+    "watch:css": "npx @tailwindcss/cli -i input.css -o static/dashboard.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4",
+    "@tailwindcss/cli": "^4",
+    "daisyui": "^5"
+  }
+}

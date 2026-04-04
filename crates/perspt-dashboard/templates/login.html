@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Login — Perspt Dashboard</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body class="min-h-screen bg-base-200 flex items-center justify-center">
+    <div class="card w-96 bg-base-100 shadow-xl">
+        <div class="card-body">
+            <h2 class="card-title justify-center">Perspt Dashboard</h2>
+            {% if let Some(msg) = error %}
+            <div class="alert alert-error">
+                <span>{{ msg }}</span>
+            </div>
+            {% endif %}
+            <form method="post" action="/login">
+                <div class="form-control">
+                    <label class="label"><span class="label-text">Password</span></label>
+                    <input type="password" name="password" class="input input-bordered" required autofocus>
+                </div>
+                <div class="form-control mt-4">
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

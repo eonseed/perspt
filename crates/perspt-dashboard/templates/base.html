@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Perspt Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/htmx.min.js"></script>
+    <script src="/static/htmx-ext-sse.js"></script>
+</head>
+<body class="min-h-screen bg-base-200">
+    <nav class="navbar bg-base-100 shadow-sm">
+        <div class="flex-1">
+            <a class="btn btn-ghost text-xl" href="/">Perspt Dashboard</a>
+        </div>
+        <div class="flex-none">
+            <ul class="menu menu-horizontal px-1">
+                <li><a href="/">Sessions</a></li>
+            </ul>
+        </div>
+    </nav>
+    <main class="container mx-auto p-4">
+        {% block content %}{% endblock %}
+    </main>
+    <script src="/static/app.js"></script>
+</body>
+</html>
