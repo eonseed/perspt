@@ -11,14 +11,16 @@ use crate::views::decisions::{
 #[derive(Template)]
 #[template(path = "pages/decisions.html")]
 struct DecisionsTemplate {
-    title: String,
     session_id: String,
+    active_tab: String,
+    title: String,
     escalations: Vec<EscalationRow>,
     sheaf_validations: Vec<SheafRow>,
     rewrites: Vec<RewriteRow>,
     plan_revisions: Vec<PlanRow>,
     repair_footprints: Vec<RepairRow>,
     verifications: Vec<VerificationRow>,
+    total_decisions: usize,
 }
 
 pub async fn decisions_handler(
@@ -42,15 +44,24 @@ pub async fn decisions_handler(
         verifications,
     );
 
+    let total_decisions = vm.escalations.len()
+        + vm.sheaf_validations.len()
+        + vm.rewrites.len()
+        + vm.plan_revisions.len()
+        + vm.repair_footprints.len()
+        + vm.verifications.len();
+
     let tmpl = DecisionsTemplate {
-        title: "Decision Trace".to_string(),
         session_id: vm.session_id,
+        active_tab: "decisions".to_string(),
+        title: "Decision Trace".to_string(),
         escalations: vm.escalations,
         sheaf_validations: vm.sheaf_validations,
         rewrites: vm.rewrites,
         plan_revisions: vm.plan_revisions,
         repair_footprints: vm.repair_footprints,
         verifications: vm.verifications,
+        total_decisions,
     };
     Ok(Html(tmpl.render()?))
 }

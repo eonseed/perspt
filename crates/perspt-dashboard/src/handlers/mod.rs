@@ -4,3 +4,4 @@ pub mod energy;
 pub mod llm;
 pub mod overview;
 pub mod sandbox;
+pub mod session_detail;

@@ -1,74 +1,114 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
+<h1 class="text-2xl font-bold mb-6">{{ title }}</h1>
+
+{# ── Global Analytics Banner ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-8">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Sessions</div>
+        <div class="stat-value text-xl">{{ stats.total_sessions }}</div>
+        <div class="stat-desc">
+            {% if stats.running_sessions > 0 %}<span class="text-primary">{{ stats.running_sessions }} running</span>{% endif %}
+        </div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Nodes</div>
+        <div class="stat-value text-xl">{{ stats.total_completed_nodes }}/{{ stats.total_nodes }}</div>
+        <div class="stat-desc">
+            {% if stats.total_failed_nodes > 0 %}<span class="text-error">{{ stats.total_failed_nodes }} failed</span>{% endif %}
+        </div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">LLM Calls</div>
+        <div class="stat-value text-xl">{{ stats.total_llm_requests }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Tokens In</div>
+        <div class="stat-value text-xl">{{ stats.tokens_in_display }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Tokens Out</div>
+        <div class="stat-value text-xl">{{ stats.tokens_out_display }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Median Latency</div>
+        <div class="stat-value text-xl">{{ stats.median_latency_display }}</div>
+    </div>
+</div>
+
+{# ── Session Status Distribution ── #}
+{% if stats.total_sessions > 0 %}
+<div class="flex gap-2 mb-6 flex-wrap">
+    {% if stats.completed_sessions > 0 %}
+    <div class="badge badge-success gap-1">{{ stats.completed_sessions }} completed</div>
+    {% endif %}
+    {% if stats.running_sessions > 0 %}
+    <div class="badge badge-primary gap-1">{{ stats.running_sessions }} running</div>
+    {% endif %}
+    {% if stats.failed_sessions > 0 %}
+    <div class="badge badge-error gap-1">{{ stats.failed_sessions }} failed</div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── Sessions List ── #}
+<h2 class="text-lg font-semibold mb-3">Recent Sessions</h2>
 
 {% if sessions.is_empty() %}
 <div class="alert alert-info">
     <span>No sessions found. Run <code>perspt agent</code> to create one.</span>
 </div>
 {% else %}
-<div class="overflow-x-auto">
-    <table class="table table-zebra w-full">
-        <thead>
-            <tr>
-                <th>Session</th>
-                <th>Task</th>
-                <th>Status</th>
-                <th>Nodes</th>
-                <th>Budget</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for s in sessions %}
-            <tr>
-                <td class="font-mono text-xs">{{ s.session_id|truncate(12) }}</td>
-                <td class="max-w-xs truncate">{{ s.task }}</td>
-                <td>
-                    {% if s.status == "running" %}
-                    <span class="badge badge-primary">{{ s.status }}</span>
-                    {% elif s.status == "completed" %}
-                    <span class="badge badge-success">{{ s.status }}</span>
-                    {% elif s.status == "failed" %}
-                    <span class="badge badge-error">{{ s.status }}</span>
-                    {% else %}
-                    <span class="badge">{{ s.status }}</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {{ s.completed_count }}/{{ s.node_count }}
-                    {% if s.failed_count > 0 %}
-                    <span class="text-error">({{ s.failed_count }} failed)</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if let Some(b) = s.budget %}
-                        {% if let Some(max) = b.max_steps %}
-                        {{ b.steps_used }}/{{ max }} steps
+<div class="space-y-3">
+    {% for s in sessions %}
+    <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-4">
+            <div class="flex flex-wrap items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 mb-1">
+                        <a href="/sessions/{{ s.session_id }}" class="font-semibold hover:underline truncate">{{ s.task }}</a>
+                        {% if s.status == "running" %}
+                        <span class="badge badge-primary badge-sm">{{ s.status }}</span>
+                        {% elif s.status == "completed" %}
+                        <span class="badge badge-success badge-sm">{{ s.status }}</span>
+                        {% elif s.status == "failed" %}
+                        <span class="badge badge-error badge-sm">{{ s.status }}</span>
                         {% else %}
-                        {{ b.steps_used }} steps
+                        <span class="badge badge-sm">{{ s.status }}</span>
                         {% endif %}
-                        {% if let Some(max_cost) = b.max_cost_usd %}
-                        | ${{ b.cost_used_usd|fmt("{:.2}") }}/${{ max_cost|fmt("{:.2}") }}
-                        {% endif %}
-                    {% else %}
-                    —
-                    {% endif %}
-                </td>
-                <td>
-                    <div class="flex gap-1">
-                        <a href="/sessions/{{ s.session_id }}/dag" class="btn btn-xs">DAG</a>
-                        <a href="/sessions/{{ s.session_id }}/energy" class="btn btn-xs">Energy</a>
-                        <a href="/sessions/{{ s.session_id }}/llm" class="btn btn-xs">LLM</a>
-                        <a href="/sessions/{{ s.session_id }}/sandbox" class="btn btn-xs">Sandbox</a>
-                        <a href="/sessions/{{ s.session_id }}/decisions" class="btn btn-xs">Decisions</a>
                     </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+                    <div class="text-xs text-base-content/50 font-mono">{{ s.session_id }}</div>
+                    <div class="flex gap-4 mt-2 text-xs text-base-content/70">
+                        <span>Nodes: {{ s.completed_count }}/{{ s.node_count }}{% if s.failed_count > 0 %} <span class="text-error">({{ s.failed_count }} failed)</span>{% endif %}</span>
+                        {% if !s.toolchain.is_empty() %}
+                        <span>Toolchain: {{ s.toolchain }}</span>
+                        {% endif %}
+                        {% if let Some(b) = s.budget %}
+                            <span>Steps: {{ b.steps_used }}{% if let Some(max) = b.max_steps %}/{{ max }}{% endif %}</span>
+                            {% if let Some(max_cost) = b.max_cost_usd %}
+                            <span>Cost: ${{ b.cost_used_usd|fmt("{:.3}") }}/${{ max_cost|fmt("{:.2}") }}</span>
+                            {% elif b.cost_used_usd > 0.0 %}
+                            <span>Cost: ${{ b.cost_used_usd|fmt("{:.3}") }}</span>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    {% if s.node_count > 0 %}
+                    <div class="mt-2">
+                        <progress class="progress progress-success w-full h-1.5" value="{{ s.completed_count }}" max="{{ s.node_count }}"></progress>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="flex gap-1 flex-shrink-0">
+                    <a href="/sessions/{{ s.session_id }}" class="btn btn-xs btn-primary">Detail</a>
+                    <a href="/sessions/{{ s.session_id }}/dag" class="btn btn-xs btn-ghost">DAG</a>
+                    <a href="/sessions/{{ s.session_id }}/llm" class="btn btn-xs btn-ghost">LLM</a>
+                    <a href="/sessions/{{ s.session_id }}/energy" class="btn btn-xs btn-ghost">Energy</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
 </div>
 {% endif %}
 {% endblock %}

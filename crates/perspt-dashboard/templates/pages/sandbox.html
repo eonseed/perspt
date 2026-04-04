@@ -1,8 +1,23 @@
-{% extends "base.html" %}
+{% extends "session_base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
-{% block content %}
-<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-4">Session: <span class="font-mono">{{ session_id }}</span></p>
+{% block session_content %}
+<h2 class="text-xl font-bold mb-4">{{ title }}</h2>
+
+{# ── Stats ── #}
+<div class="grid grid-cols-3 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Active</div>
+        <div class="stat-value text-xl text-primary">{{ active_count }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Merged</div>
+        <div class="stat-value text-xl text-success">{{ merged_count }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Flushed</div>
+        <div class="stat-value text-xl text-warning">{{ flushed_count }}</div>
+    </div>
+</div>
 
 {% if branches.is_empty() %}
 <div class="alert alert-info"><span>No provisional branches recorded.</span></div>

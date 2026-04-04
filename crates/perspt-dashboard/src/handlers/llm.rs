@@ -9,13 +9,17 @@ use crate::views::llm::{LlmRow, LlmViewModel};
 #[derive(Template)]
 #[template(path = "pages/llm.html")]
 struct LlmTemplate {
-    title: String,
     session_id: String,
+    active_tab: String,
+    title: String,
     requests: Vec<LlmRow>,
     total_tokens_in: i64,
     total_tokens_out: i64,
-    total_latency_ms: i64,
+    total_latency_secs: f64,
+    avg_latency_secs: f64,
     request_count: usize,
+    models_used: Vec<String>,
+    tokens_estimated: bool,
 }
 
 pub async fn llm_handler(
@@ -26,13 +30,17 @@ pub async fn llm_handler(
     let vm = LlmViewModel::from_records(session_id.clone(), records);
 
     let tmpl = LlmTemplate {
-        title: "LLM Telemetry".to_string(),
         session_id: vm.session_id,
+        active_tab: "llm".to_string(),
+        title: "LLM Telemetry".to_string(),
         requests: vm.requests,
         total_tokens_in: vm.total_tokens_in,
         total_tokens_out: vm.total_tokens_out,
-        total_latency_ms: vm.total_latency_ms,
+        total_latency_secs: vm.total_latency_secs,
+        avg_latency_secs: vm.avg_latency_secs,
         request_count: vm.request_count,
+        models_used: vm.models_used,
+        tokens_estimated: vm.tokens_estimated,
     };
     Ok(Html(tmpl.render()?))
 }

@@ -28,6 +28,10 @@ pub fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/", get(handlers::overview::overview_handler))
         .route(
+            "/sessions/{session_id}",
+            get(handlers::session_detail::session_detail_handler),
+        )
+        .route(
             "/sessions/{session_id}/dag",
             get(handlers::dag::dag_handler),
         )
@@ -108,6 +112,17 @@ mod tests {
     async fn overview_returns_200() {
         let app = build_router(test_state_open());
         let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn session_detail_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session")
+            .body(Body::empty())
+            .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
     }

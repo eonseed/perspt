@@ -5,6 +5,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::StreamExt;
 
 use crate::state::AppState;
+use crate::views::normalize_state;
 
 /// SSE endpoint: pushes named events for a session every 2 seconds.
 ///
@@ -24,10 +25,10 @@ pub async fn sse_handler(
                 let total = nodes.len();
                 let committed = nodes
                     .iter()
-                    .filter(|n| n.state == "committed" || n.state == "verified")
+                    .filter(|n| normalize_state(&n.state) == "completed")
                     .count();
-                let failed = nodes.iter().filter(|n| n.state == "failed").count();
-                let running = nodes.iter().filter(|n| n.state == "running").count();
+                let failed = nodes.iter().filter(|n| normalize_state(&n.state) == "failed").count();
+                let running = nodes.iter().filter(|n| normalize_state(&n.state) == "running").count();
                 format!(
                     r#"<div class="stats shadow"><div class="stat"><div class="stat-title">Total</div><div class="stat-value text-lg">{total}</div></div><div class="stat"><div class="stat-title">Done</div><div class="stat-value text-lg">{committed}</div></div><div class="stat"><div class="stat-title">Running</div><div class="stat-value text-lg">{running}</div></div><div class="stat"><div class="stat-title">Failed</div><div class="stat-value text-lg text-error">{failed}</div></div></div>"#
                 )

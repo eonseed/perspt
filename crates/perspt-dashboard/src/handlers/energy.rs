@@ -4,14 +4,16 @@ use axum::response::{Html, IntoResponse};
 
 use crate::error::DashboardError;
 use crate::state::AppState;
-use crate::views::energy::{EnergyPoint, EnergyViewModel};
+use crate::views::energy::{EnergyPoint, EnergySummary, EnergyViewModel};
 
 #[derive(Template)]
 #[template(path = "pages/energy.html")]
 struct EnergyTemplate {
-    title: String,
     session_id: String,
+    active_tab: String,
+    title: String,
     records: Vec<EnergyPoint>,
+    summary: EnergySummary,
 }
 
 pub async fn energy_handler(
@@ -22,9 +24,11 @@ pub async fn energy_handler(
     let vm = EnergyViewModel::from_records(session_id.clone(), records);
 
     let tmpl = EnergyTemplate {
-        title: "Energy Convergence".to_string(),
         session_id: vm.session_id,
+        active_tab: "energy".to_string(),
+        title: "Energy Convergence".to_string(),
         records: vm.records,
+        summary: vm.summary,
     };
     Ok(Html(tmpl.render()?))
 }
