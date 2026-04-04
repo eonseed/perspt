@@ -5,11 +5,13 @@ use axum::response::{Html, IntoResponse};
 use crate::error::DashboardError;
 use crate::state::AppState;
 use crate::views::dag::{DagEdge, DagNode, DagViewModel};
+use crate::views::friendly_name;
 
 #[derive(Template)]
 #[template(path = "pages/dag.html")]
 struct DagTemplate {
     session_id: String,
+    display_name: String,
     active_tab: String,
     title: String,
     nodes: Vec<DagNode>,
@@ -34,6 +36,7 @@ pub async fn dag_handler(
     let running_nodes = vm.nodes.iter().filter(|n| n.state == "running").count();
 
     let tmpl = DagTemplate {
+        display_name: friendly_name(&vm.session_id),
         session_id: vm.session_id,
         active_tab: "dag".to_string(),
         title: "DAG Topology".to_string(),

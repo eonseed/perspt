@@ -18,3 +18,28 @@ pub fn normalize_state(s: &str) -> String {
         other => other.to_string(),
     }
 }
+
+const ADJECTIVES: [&str; 32] = [
+    "swift", "bold", "calm", "keen", "warm", "cool", "bright", "sharp",
+    "quiet", "vivid", "pale", "deep", "light", "dark", "soft", "firm",
+    "quick", "slow", "wild", "tame", "rare", "vast", "slim", "wide",
+    "fair", "pure", "rich", "lean", "raw", "dry", "wet", "old",
+];
+
+const NOUNS: [&str; 32] = [
+    "oak", "elm", "fox", "owl", "bee", "ant", "ray", "gem",
+    "bay", "ash", "ivy", "fir", "yew", "cod", "eel", "jay",
+    "hawk", "dove", "lark", "wren", "pike", "carp", "wolf", "bear",
+    "hare", "lynx", "crow", "moth", "seal", "swan", "toad", "newt",
+];
+
+/// Generate a deterministic human-readable name from a session UUID.
+/// e.g. "0c241cef-490c-..." -> "bold-hawk"
+pub fn friendly_name(session_id: &str) -> String {
+    let hash = session_id
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let adj = ADJECTIVES[(hash % 32) as usize];
+    let noun = NOUNS[((hash >> 8) % 32) as usize];
+    format!("{}-{}", adj, noun)
+}

@@ -6,8 +6,8 @@
 <div class="card bg-base-100 shadow-sm mb-6">
     <div class="card-body p-4">
         <div class="flex items-start justify-between gap-4">
-            <div>
-                <h2 class="text-lg font-semibold mb-1">{{ task }}</h2>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm leading-relaxed whitespace-pre-line mb-2">{{ task }}</p>
                 <div class="text-xs text-base-content/50">{{ working_dir }}</div>
                 {% if !toolchain.is_empty() %}
                 <div class="text-xs text-base-content/50 mt-1">Toolchain: {{ toolchain }}</div>

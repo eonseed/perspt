@@ -7,11 +7,13 @@ use crate::state::AppState;
 use crate::views::decisions::{
     DecisionsViewModel, EscalationRow, PlanRow, RepairRow, RewriteRow, SheafRow, VerificationRow,
 };
+use crate::views::friendly_name;
 
 #[derive(Template)]
 #[template(path = "pages/decisions.html")]
 struct DecisionsTemplate {
     session_id: String,
+    display_name: String,
     active_tab: String,
     title: String,
     escalations: Vec<EscalationRow>,
@@ -27,12 +29,32 @@ pub async fn decisions_handler(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
 ) -> Result<impl IntoResponse, DashboardError> {
-    let escalations = state.store.get_escalation_reports(&session_id)?;
-    let sheaf_validations = state.store.get_all_sheaf_validations(&session_id)?;
-    let rewrites = state.store.get_rewrite_records(&session_id)?;
-    let plan_revisions = state.store.get_plan_revisions(&session_id)?;
-    let repair_footprints = state.store.get_all_repair_footprints(&session_id)?;
-    let verifications = state.store.get_all_verification_results(&session_id)?;
+    // Each query falls back to empty on failure so a single broken table
+    // doesn't 503 the entire page.
+    let escalations = state
+        .store
+        .get_escalation_reports(&session_id)
+        .unwrap_or_default();
+    let sheaf_validations = state
+        .store
+        .get_all_sheaf_validations(&session_id)
+        .unwrap_or_default();
+    let rewrites = state
+        .store
+        .get_rewrite_records(&session_id)
+        .unwrap_or_default();
+    let plan_revisions = state
+        .store
+        .get_plan_revisions(&session_id)
+        .unwrap_or_default();
+    let repair_footprints = state
+        .store
+        .get_all_repair_footprints(&session_id)
+        .unwrap_or_default();
+    let verifications = state
+        .store
+        .get_all_verification_results(&session_id)
+        .unwrap_or_default();
 
     let vm = DecisionsViewModel::from_store(
         session_id.clone(),
@@ -52,6 +74,7 @@ pub async fn decisions_handler(
         + vm.verifications.len();
 
     let tmpl = DecisionsTemplate {
+        display_name: friendly_name(&vm.session_id),
         session_id: vm.session_id,
         active_tab: "decisions".to_string(),
         title: "Decision Trace".to_string(),

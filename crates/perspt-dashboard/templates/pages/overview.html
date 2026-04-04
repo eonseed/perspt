@@ -62,53 +62,76 @@
 {% else %}
 <div class="space-y-3">
     {% for s in sessions %}
-    <div class="card bg-base-100 shadow-sm">
-        <div class="card-body p-4">
-            <div class="flex flex-wrap items-start justify-between gap-2">
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                        <a href="/sessions/{{ s.session_id }}" class="font-semibold hover:underline truncate">{{ s.task }}</a>
-                        {% if s.status == "running" %}
-                        <span class="badge badge-primary badge-sm">{{ s.status }}</span>
-                        {% elif s.status == "completed" %}
-                        <span class="badge badge-success badge-sm">{{ s.status }}</span>
-                        {% elif s.status == "failed" %}
-                        <span class="badge badge-error badge-sm">{{ s.status }}</span>
-                        {% else %}
-                        <span class="badge badge-sm">{{ s.status }}</span>
-                        {% endif %}
-                    </div>
-                    <div class="text-xs text-base-content/50 font-mono">{{ s.session_id }}</div>
-                    <div class="flex gap-4 mt-2 text-xs text-base-content/70">
-                        <span>Nodes: {{ s.completed_count }}/{{ s.node_count }}{% if s.failed_count > 0 %} <span class="text-error">({{ s.failed_count }} failed)</span>{% endif %}</span>
-                        {% if !s.toolchain.is_empty() %}
-                        <span>Toolchain: {{ s.toolchain }}</span>
-                        {% endif %}
-                        {% if let Some(b) = s.budget %}
-                            <span>Steps: {{ b.steps_used }}{% if let Some(max) = b.max_steps %}/{{ max }}{% endif %}</span>
-                            {% if let Some(max_cost) = b.max_cost_usd %}
-                            <span>Cost: ${{ b.cost_used_usd|fmt("{:.3}") }}/${{ max_cost|fmt("{:.2}") }}</span>
-                            {% elif b.cost_used_usd > 0.0 %}
-                            <span>Cost: ${{ b.cost_used_usd|fmt("{:.3}") }}</span>
-                            {% endif %}
-                        {% endif %}
-                    </div>
-                    {% if s.node_count > 0 %}
-                    <div class="mt-2">
-                        <progress class="progress progress-success w-full h-1.5" value="{{ s.completed_count }}" max="{{ s.node_count }}"></progress>
-                    </div>
+    <a href="/sessions/{{ s.session_id }}" class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow cursor-pointer block">
+        <div class="card-body p-4 gap-2">
+            <div class="flex items-center gap-2">
+                <span class="font-semibold text-sm">{{ s.display_name }}</span>
+                {% if s.status == "running" %}
+                <span class="badge badge-primary badge-sm">{{ s.status }}</span>
+                {% elif s.status == "completed" %}
+                <span class="badge badge-success badge-sm">{{ s.status }}</span>
+                {% elif s.status == "failed" %}
+                <span class="badge badge-error badge-sm">{{ s.status }}</span>
+                {% else %}
+                <span class="badge badge-sm">{{ s.status }}</span>
+                {% endif %}
+            </div>
+            <div class="text-sm opacity-80 truncate" title="{{ s.task }}">{{ s.task|truncate(80) }}</div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-base-content/70">
+                <span>Nodes: {{ s.completed_count }}/{{ s.node_count }}{% if s.failed_count > 0 %} <span class="text-error">({{ s.failed_count }} failed)</span>{% endif %}</span>
+                {% if !s.toolchain.is_empty() %}
+                <span>Toolchain: {{ s.toolchain }}</span>
+                {% endif %}
+                {% if let Some(b) = s.budget %}
+                    <span>Steps: {{ b.steps_used }}{% if let Some(max) = b.max_steps %}/{{ max }}{% endif %}</span>
+                    {% if let Some(max_cost) = b.max_cost_usd %}
+                    <span>Cost: ${{ b.cost_used_usd|fmt("{:.3}") }}/${{ max_cost|fmt("{:.2}") }}</span>
+                    {% elif b.cost_used_usd > 0.0 %}
+                    <span>Cost: ${{ b.cost_used_usd|fmt("{:.3}") }}</span>
                     {% endif %}
-                </div>
-                <div class="flex gap-1 flex-shrink-0">
-                    <a href="/sessions/{{ s.session_id }}" class="btn btn-xs btn-primary">Detail</a>
-                    <a href="/sessions/{{ s.session_id }}/dag" class="btn btn-xs btn-ghost">DAG</a>
-                    <a href="/sessions/{{ s.session_id }}/llm" class="btn btn-xs btn-ghost">LLM</a>
-                    <a href="/sessions/{{ s.session_id }}/energy" class="btn btn-xs btn-ghost">Energy</a>
-                </div>
+                {% endif %}
+            </div>
+            {% if s.node_count > 0 %}
+            <progress class="progress progress-success w-full h-1.5" value="{{ s.completed_count }}" max="{{ s.node_count }}"></progress>
+            {% endif %}
+            <div class="flex gap-1.5 justify-end mt-1" onclick="event.stopPropagation();">
+                <a href="/sessions/{{ s.session_id }}/dag" class="btn btn-outline btn-xs">DAG</a>
+                <a href="/sessions/{{ s.session_id }}/llm" class="btn btn-outline btn-xs">LLM</a>
+                <a href="/sessions/{{ s.session_id }}/energy" class="btn btn-outline btn-xs">Energy</a>
+                <a href="/sessions/{{ s.session_id }}/sandbox" class="btn btn-outline btn-xs">Sandbox</a>
+                <a href="/sessions/{{ s.session_id }}/decisions" class="btn btn-outline btn-xs">Decisions</a>
             </div>
         </div>
-    </div>
+    </a>
     {% endfor %}
 </div>
+
+{# ── Pagination ── #}
+{% if total_pages > 1 %}
+<div class="flex justify-center mt-6">
+    <div class="join">
+        {% if current_page > 1 %}
+        <a href="/?page={{ current_page - 1 }}" class="join-item btn btn-sm">«</a>
+        {% else %}
+        <button class="join-item btn btn-sm btn-disabled">«</button>
+        {% endif %}
+
+        {% for p in 1..=total_pages %}
+            {% if p == current_page %}
+            <button class="join-item btn btn-sm btn-active">{{ p }}</button>
+            {% else %}
+            <a href="/?page={{ p }}" class="join-item btn btn-sm">{{ p }}</a>
+            {% endif %}
+        {% endfor %}
+
+        {% if current_page < total_pages %}
+        <a href="/?page={{ current_page + 1 }}" class="join-item btn btn-sm">»</a>
+        {% else %}
+        <button class="join-item btn btn-sm btn-disabled">»</button>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 {% endif %}
 {% endblock %}
