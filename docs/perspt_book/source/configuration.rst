@@ -166,3 +166,29 @@ Initialize project-level configuration:
 .. code-block:: bash
 
    perspt init --memory --rules
+
+Dashboard Configuration
+-----------------------
+
+The ``perspt dashboard`` subcommand accepts these options:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 60
+
+   * - Flag
+     - Default
+     - Description
+   * - ``--port``
+     - ``3000``
+     - HTTP port for the dashboard server
+   * - ``--bind``
+     - ``127.0.0.1``
+     - Bind address (use ``0.0.0.0`` for remote access)
+   * - ``--db-path``
+     - Platform default
+     - Path to the DuckDB database file
+
+The dashboard opens the database in **read-only** mode and never writes to it.
+When bound to ``127.0.0.1``, cookies are set without the ``Secure`` flag so
+plain HTTP works on localhost.

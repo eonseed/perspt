@@ -61,7 +61,7 @@ to Large Language Models. It serves two complementary purposes:
 Architecture
 ------------
 
-Perspt is built as a **7-crate Rust workspace**:
+Perspt is built as an **8-crate Rust workspace**:
 
 .. graphviz::
    :align: center
@@ -93,12 +93,21 @@ Perspt is built as a **7-crate Rust workspace**:
            sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
        }
 
+       subgraph cluster_monitoring {
+           label="Monitoring";
+           style=dashed;
+           dashboard [label="perspt-dashboard\nWeb Dashboard", fillcolor="#FFB6C1"];
+       }
+
        cli -> tui;
        cli -> agent;
+       cli -> dashboard;
        agent -> core;
        agent -> store;
        agent -> policy;
        agent -> sandbox;
+       dashboard -> store;
+       dashboard -> core;
    }
 
 Key Features
@@ -139,6 +148,10 @@ Key Features
      - **Terminal UI**
      - Ratatui-based with markdown rendering, diff viewer, task tree, dashboard,
        review modal, and logs viewer.
+   * - **Web**
+     - **Dashboard**
+     - Browser-based real-time monitoring of agent execution, energy, LLM
+       telemetry, sandbox branches, and decision traces.
 
 SRBN: Stabilized Recursive Barrier Network
 ------------------------------------------
@@ -237,6 +250,9 @@ CLI Commands
    * - ``logs``
      - View LLM request logs
      - ``perspt logs --tui``
+   * - ``dashboard``
+     - Real-time web monitoring
+     - ``perspt dashboard``
    * - ``simple-chat``
      - CLI chat without TUI
      - ``perspt simple-chat``
@@ -294,7 +310,7 @@ Perspt embodies the belief that AI tools should be:
 - **Fast** — Rust-native performance with async streaming
 - **Stable** — Lyapunov energy guides convergence before commit (SRBN agent, based on paper theory)
 - **Secure** — Policy-controlled execution with workspace bounds
-- **Extensible** — Modular 7-crate architecture
+- **Extensible** — Modular 8-crate architecture
 - **Experimental** — A testbed for control-theoretic approaches to LLM reliability
 
 Next Steps
@@ -319,4 +335,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 7-crate design.
+      Understand the 8-crate design.
