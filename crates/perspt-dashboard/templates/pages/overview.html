@@ -2,7 +2,73 @@
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
 <h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
+
+{% if sessions.is_empty() %}
 <div class="alert alert-info">
-    <span>Sessions overview — data will be wired in Phase 3.</span>
+    <span>No sessions found. Run <code>perspt agent</code> to create one.</span>
 </div>
+{% else %}
+<div class="overflow-x-auto">
+    <table class="table table-zebra w-full">
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Task</th>
+                <th>Status</th>
+                <th>Nodes</th>
+                <th>Budget</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in sessions %}
+            <tr>
+                <td class="font-mono text-xs">{{ s.session_id|truncate(12) }}</td>
+                <td class="max-w-xs truncate">{{ s.task }}</td>
+                <td>
+                    {% if s.status == "running" %}
+                    <span class="badge badge-primary">{{ s.status }}</span>
+                    {% elif s.status == "completed" %}
+                    <span class="badge badge-success">{{ s.status }}</span>
+                    {% elif s.status == "failed" %}
+                    <span class="badge badge-error">{{ s.status }}</span>
+                    {% else %}
+                    <span class="badge">{{ s.status }}</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ s.completed_count }}/{{ s.node_count }}
+                    {% if s.failed_count > 0 %}
+                    <span class="text-error">({{ s.failed_count }} failed)</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if let Some(b) = s.budget %}
+                        {% if let Some(max) = b.max_steps %}
+                        {{ b.steps_used }}/{{ max }} steps
+                        {% else %}
+                        {{ b.steps_used }} steps
+                        {% endif %}
+                        {% if let Some(max_cost) = b.max_cost_usd %}
+                        | ${{ b.cost_used_usd|fmt("{:.2}") }}/${{ max_cost|fmt("{:.2}") }}
+                        {% endif %}
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="flex gap-1">
+                        <a href="/sessions/{{ s.session_id }}/dag" class="btn btn-xs">DAG</a>
+                        <a href="/sessions/{{ s.session_id }}/energy" class="btn btn-xs">Energy</a>
+                        <a href="/sessions/{{ s.session_id }}/llm" class="btn btn-xs">LLM</a>
+                        <a href="/sessions/{{ s.session_id }}/sandbox" class="btn btn-xs">Sandbox</a>
+                        <a href="/sessions/{{ s.session_id }}/decisions" class="btn btn-xs">Decisions</a>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 {% endblock %}

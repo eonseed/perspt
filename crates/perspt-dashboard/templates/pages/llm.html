@@ -1,9 +1,58 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-4">Session: {{ session_id }}</p>
-<div class="alert alert-info">
-    <span>LLM telemetry log — data will be wired in Phase 3.</span>
+<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
+<p class="text-sm text-base-content/60 mb-4">Session: <span class="font-mono">{{ session_id }}</span></p>
+
+<div class="stats shadow mb-6">
+    <div class="stat">
+        <div class="stat-title">Requests</div>
+        <div class="stat-value text-lg">{{ request_count }}</div>
+    </div>
+    <div class="stat">
+        <div class="stat-title">Tokens In</div>
+        <div class="stat-value text-lg">{{ total_tokens_in }}</div>
+    </div>
+    <div class="stat">
+        <div class="stat-title">Tokens Out</div>
+        <div class="stat-value text-lg">{{ total_tokens_out }}</div>
+    </div>
+    <div class="stat">
+        <div class="stat-title">Total Latency</div>
+        <div class="stat-value text-lg">{{ total_latency_ms }}ms</div>
+    </div>
 </div>
+
+{% if requests.is_empty() %}
+<div class="alert alert-info"><span>No LLM requests recorded yet.</span></div>
+{% else %}
+<div class="overflow-x-auto">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr>
+                <th>Model</th>
+                <th>Node</th>
+                <th>Tokens In</th>
+                <th>Tokens Out</th>
+                <th>Latency</th>
+                <th>Prompt</th>
+                <th>Response</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in requests %}
+            <tr>
+                <td class="font-mono text-xs">{{ r.model }}</td>
+                <td class="font-mono text-xs">{{ r.node_id }}</td>
+                <td>{{ r.tokens_in }}</td>
+                <td>{{ r.tokens_out }}</td>
+                <td>{{ r.latency_ms }}ms</td>
+                <td class="max-w-xs truncate text-xs">{{ r.prompt_preview }}</td>
+                <td class="max-w-xs truncate text-xs">{{ r.response_preview }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 {% endblock %}
