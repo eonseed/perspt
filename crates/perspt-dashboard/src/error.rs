@@ -38,11 +38,31 @@ impl From<askama::Error> for DashboardError {
 
 impl IntoResponse for DashboardError {
     fn into_response(self) -> Response {
+        let (status, user_message) = match &self {
+            Self::Store(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Database is currently unavailable. The agent session store may be locked or unreachable.",
+            ),
+            Self::Template(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to render the page template.",
+            ),
+            Self::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.as_str()),
+        };
+        let escaped = html_escape(user_message);
         let body = format!(
-            "<html><body><h1>Error</h1><pre>{}</pre></body></html>",
-            html_escape(&self.to_string())
+            r#"<!DOCTYPE html><html data-theme="dark"><head><meta charset="utf-8"><title>Error — Perspt Dashboard</title>
+<link rel="stylesheet" href="/static/dashboard.css"></head>
+<body class="min-h-screen flex items-center justify-center bg-base-300">
+<div class="card bg-base-100 shadow-xl max-w-lg"><div class="card-body">
+<h2 class="card-title text-error">Error {}</h2>
+<p>{}</p>
+<div class="card-actions justify-end"><a href="/" class="btn btn-primary btn-sm">Back to sessions</a></div>
+</div></div></body></html>"#,
+            status.as_u16(),
+            escaped
         );
-        (StatusCode::INTERNAL_SERVER_ERROR, Html(body)).into_response()
+        (status, Html(body)).into_response()
     }
 }
 

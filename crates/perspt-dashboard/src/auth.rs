@@ -59,7 +59,8 @@ pub async fn login_handler(
     let cookie = Cookie::build((COOKIE_NAME, token))
         .path("/")
         .http_only(true)
-        .same_site(axum_extra::extract::cookie::SameSite::Lax);
+        .same_site(axum_extra::extract::cookie::SameSite::Lax)
+        .secure(!state.is_localhost);
 
     (jar.add(cookie), Redirect::to("/")).into_response()
 }
