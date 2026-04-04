@@ -1,8 +1,8 @@
-{% extends "base.html" %}
+{% extends "session_base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
-{% block content %}
-<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-6">Session: <span class="font-mono">{{ session_id }}</span></p>
+{% block session_content %}
+<h2 class="text-xl font-bold mb-2">{{ title }}</h2>
+<p class="text-sm text-base-content/60 mb-6">{{ total_decisions }} total decision records</p>
 
 {# ── Escalation Reports ── #}
 <details class="collapse collapse-arrow bg-base-200 mb-4" open>

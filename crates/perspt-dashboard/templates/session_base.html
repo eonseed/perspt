@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+{# ── Session breadcrumb ── #}
+<div class="text-sm breadcrumbs mb-2">
+    <ul>
+        <li><a href="/">Dashboard</a></li>
+        <li class="font-mono text-xs">{{ session_id }}</li>
+    </ul>
+</div>
+
+{# ── Session tab navigation ── #}
+<div role="tablist" class="tabs tabs-bordered mb-6">
+    <a role="tab" class="tab{% if active_tab == "summary" %} tab-active{% endif %}" href="/sessions/{{ session_id }}">Summary</a>
+    <a role="tab" class="tab{% if active_tab == "dag" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/dag">DAG</a>
+    <a role="tab" class="tab{% if active_tab == "energy" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/energy">Energy</a>
+    <a role="tab" class="tab{% if active_tab == "llm" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/llm">LLM</a>
+    <a role="tab" class="tab{% if active_tab == "sandbox" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/sandbox">Sandbox</a>
+    <a role="tab" class="tab{% if active_tab == "decisions" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/decisions">Decisions</a>
+</div>
+
+{% block session_content %}{% endblock %}
+{% endblock %}

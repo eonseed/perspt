@@ -689,6 +689,22 @@ impl SessionStore {
         Ok(count)
     }
 
+    /// Aggregate LLM statistics across all sessions: (count, sum_tokens_in, sum_tokens_out, sum_latency_ms)
+    pub fn get_global_llm_summary(&self) -> Result<(i64, i64, i64, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), \
+             COALESCE(SUM(CASE WHEN tokens_in > 0 THEN tokens_in ELSE (LENGTH(prompt) + 3) / 4 END), 0), \
+             COALESCE(SUM(CASE WHEN tokens_out > 0 THEN tokens_out ELSE (LENGTH(response) + 3) / 4 END), 0), \
+             COALESCE(MEDIAN(latency_ms), 0) \
+             FROM llm_requests",
+        )?;
+        let result = stmt.query_row([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        Ok(result)
+    }
+
     /// Get all LLM requests (for debugging)
     pub fn get_all_llm_requests(&self, limit: usize) -> Result<Vec<LlmRequestRecord>> {
         let conn = self.conn.lock().unwrap();

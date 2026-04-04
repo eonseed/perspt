@@ -1,3 +1,4 @@
+use super::normalize_state;
 use perspt_store::{NodeStateRecord, TaskGraphEdgeRow};
 
 /// View model for the DAG topology page
@@ -32,7 +33,7 @@ impl DagViewModel {
             .into_iter()
             .map(|n| DagNode {
                 node_id: n.node_id,
-                state: n.state,
+                state: normalize_state(&n.state),
                 v_total: n.v_total,
                 node_class: n.node_class.unwrap_or_default(),
                 goal: n.goal.unwrap_or_default(),

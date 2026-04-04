@@ -4,13 +4,14 @@ use axum::response::{Html, IntoResponse};
 
 use crate::error::DashboardError;
 use crate::state::AppState;
-use crate::views::overview::{OverviewViewModel, SessionSummary};
+use crate::views::overview::{GlobalStats, OverviewViewModel, SessionSummary};
 
 #[derive(Template)]
 #[template(path = "pages/overview.html")]
 struct OverviewTemplate {
     title: String,
     sessions: Vec<SessionSummary>,
+    stats: GlobalStats,
 }
 
 pub async fn overview_handler(
@@ -35,11 +36,14 @@ pub async fn overview_handler(
         budgets.push((s.session_id.clone(), budget));
     }
 
-    let vm = OverviewViewModel::from_store(sessions, &nodes_by_session, &budgets);
+    let llm_summary = state.store.get_global_llm_summary().unwrap_or((0, 0, 0, 0));
+
+    let vm = OverviewViewModel::from_store(sessions, &nodes_by_session, &budgets, llm_summary);
 
     let tmpl = OverviewTemplate {
-        title: "Sessions".to_string(),
+        title: "Dashboard".to_string(),
         sessions: vm.sessions,
+        stats: vm.global_stats,
     };
     Ok(Html(tmpl.render()?))
 }

@@ -9,9 +9,13 @@ use crate::views::sandbox::{SandboxBranch, SandboxViewModel};
 #[derive(Template)]
 #[template(path = "pages/sandbox.html")]
 struct SandboxTemplate {
-    title: String,
     session_id: String,
+    active_tab: String,
+    title: String,
     branches: Vec<SandboxBranch>,
+    active_count: usize,
+    merged_count: usize,
+    flushed_count: usize,
 }
 
 pub async fn sandbox_handler(
@@ -21,10 +25,18 @@ pub async fn sandbox_handler(
     let rows = state.store.get_provisional_branches(&session_id)?;
     let vm = SandboxViewModel::from_store(session_id.clone(), rows);
 
+    let active_count = vm.branches.iter().filter(|b| b.state == "active").count();
+    let merged_count = vm.branches.iter().filter(|b| b.state == "merged").count();
+    let flushed_count = vm.branches.iter().filter(|b| b.state == "flushed").count();
+
     let tmpl = SandboxTemplate {
-        title: "Sandbox Monitoring".to_string(),
         session_id: vm.session_id,
+        active_tab: "sandbox".to_string(),
+        title: "Sandbox Monitoring".to_string(),
         branches: vm.branches,
+        active_count,
+        merged_count,
+        flushed_count,
     };
     Ok(Html(tmpl.render()?))
 }
