@@ -28,8 +28,9 @@ pub async fn run(show: bool, set: Option<String>, edit: bool) -> Result<()> {
 }
 
 fn get_config_path() -> std::path::PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join(".perspt").join("config.toml"))
+    // Use centralized path resolution with legacy fallback
+    perspt_core::paths::resolve_config_file()
+        .or_else(perspt_core::paths::config_file)
         .unwrap_or_else(|| Path::new(".perspt/config.toml").to_path_buf())
 }
 
