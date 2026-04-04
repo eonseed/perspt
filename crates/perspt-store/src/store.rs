@@ -529,6 +529,32 @@ impl SessionStore {
         Ok(records)
     }
 
+    /// Get all energy history for a session (all nodes)
+    pub fn get_session_energy_history(&self, session_id: &str) -> Result<Vec<EnergyRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM energy_history WHERE session_id = ? ORDER BY timestamp"
+        )?;
+
+        let mut rows = stmt.query([session_id])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            records.push(EnergyRecord {
+                node_id: row.get(0)?,
+                session_id: row.get(1)?,
+                v_syn: row.get::<_, f64>(2)? as f32,
+                v_str: row.get::<_, f64>(3)? as f32,
+                v_log: row.get::<_, f64>(4)? as f32,
+                v_boot: row.get::<_, f64>(5)? as f32,
+                v_sheaf: row.get::<_, f64>(6)? as f32,
+                v_total: row.get::<_, f64>(7)? as f32,
+            });
+        }
+
+        Ok(records)
+    }
+
     /// List recent sessions (newest first)
     pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionRecord>> {
         let conn = self.conn.lock().unwrap();

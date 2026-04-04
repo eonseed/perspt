@@ -1,9 +1,55 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-4">Session: {{ session_id }}</p>
-<div class="alert alert-info">
-    <span>DAG topology view — data will be wired in Phase 3.</span>
+<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
+<p class="text-sm text-base-content/60 mb-4">Session: <span class="font-mono">{{ session_id }}</span></p>
+
+{% if nodes.is_empty() %}
+<div class="alert alert-info"><span>No nodes recorded yet.</span></div>
+{% else %}
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+    {% for n in nodes %}
+    <div class="card bg-base-100 shadow-sm border
+        {% if n.state == "committed" || n.state == "verified" %}border-success{% endif %}
+        {% if n.state == "failed" %}border-error{% endif %}
+        {% if n.state == "running" %}border-primary{% endif %}
+    ">
+        <div class="card-body p-4">
+            <h3 class="card-title text-sm font-mono">{{ n.node_id }}</h3>
+            <div class="flex gap-2 flex-wrap">
+                <span class="badge badge-sm">{{ n.state }}</span>
+                {% if !n.node_class.is_empty() %}
+                <span class="badge badge-sm badge-outline">{{ n.node_class }}</span>
+                {% endif %}
+            </div>
+            {% if !n.goal.is_empty() %}
+            <p class="text-xs text-base-content/70 mt-1">{{ n.goal }}</p>
+            {% endif %}
+            <div class="text-xs mt-1">
+                <span>V={{ n.v_total }}</span>
+                <span class="ml-2">attempts={{ n.attempt_count }}</span>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
 </div>
+
+{% if !edges.is_empty() %}
+<h2 class="text-lg font-semibold mb-2">Edges</h2>
+<div class="overflow-x-auto">
+    <table class="table table-xs">
+        <thead><tr><th>Parent</th><th>Child</th><th>Type</th></tr></thead>
+        <tbody>
+        {% for e in edges %}
+        <tr>
+            <td class="font-mono text-xs">{{ e.parent_id }}</td>
+            <td class="font-mono text-xs">{{ e.child_id }}</td>
+            <td>{{ e.edge_type }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endif %}
 {% endblock %}

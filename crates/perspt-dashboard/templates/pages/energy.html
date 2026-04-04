@@ -1,9 +1,39 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-4">Session: {{ session_id }}</p>
-<div class="alert alert-info">
-    <span>Energy convergence chart — data will be wired in Phase 3.</span>
+<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
+<p class="text-sm text-base-content/60 mb-4">Session: <span class="font-mono">{{ session_id }}</span></p>
+
+{% if records.is_empty() %}
+<div class="alert alert-info"><span>No energy data recorded yet.</span></div>
+{% else %}
+<div class="overflow-x-auto">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr>
+                <th>Node</th>
+                <th>V_syn</th>
+                <th>V_str</th>
+                <th>V_log</th>
+                <th>V_boot</th>
+                <th>V_sheaf</th>
+                <th>V_total</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in records %}
+            <tr>
+                <td class="font-mono text-xs">{{ r.node_id }}</td>
+                <td>{{ r.v_syn }}</td>
+                <td>{{ r.v_str }}</td>
+                <td>{{ r.v_log }}</td>
+                <td>{{ r.v_boot }}</td>
+                <td>{{ r.v_sheaf }}</td>
+                <td class="font-semibold">{{ r.v_total }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
 </div>
+{% endif %}
 {% endblock %}
