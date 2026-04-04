@@ -1,0 +1,80 @@
+{% extends "session_base.html" %}
+{% block title %}{{ title }} — Perspt Dashboard{% endblock %}
+{% block session_content %}
+<h2 class="text-xl font-bold mb-4">{{ title }}</h2>
+
+{# ── Aggregate Stats ── #}
+{% if tokens_estimated %}
+<div class="alert alert-warning mb-4 text-xs"><span>Token counts are estimates (~4 chars/token) — provider did not report actual usage.</span></div>
+{% endif %}
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Requests</div>
+        <div class="stat-value text-xl">{{ request_count }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Tokens In{% if tokens_estimated %} ~{% endif %}</div>
+        <div class="stat-value text-xl">{{ total_tokens_in }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Tokens Out{% if tokens_estimated %} ~{% endif %}</div>
+        <div class="stat-value text-xl">{{ total_tokens_out }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Total Latency</div>
+        <div class="stat-value text-xl">{{ total_latency_secs|fmt("{:.1}") }}s</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Avg Latency</div>
+        <div class="stat-value text-xl">{{ avg_latency_secs|fmt("{:.1}") }}s</div>
+    </div>
+</div>
+
+{# ── Model breakdown ── #}
+{% if !models_used.is_empty() %}
+<div class="mb-4 flex gap-2 flex-wrap">
+    <span class="text-xs text-base-content/60">Models:</span>
+    {% for m in models_used %}
+    <span class="badge badge-outline badge-sm font-mono">{{ m }}</span>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if requests.is_empty() %}
+<div class="alert alert-info"><span>No LLM requests recorded yet.</span></div>
+{% else %}
+{# ── Expandable Request List ── #}
+<div class="space-y-2">
+{% for r in requests %}
+    <details class="collapse collapse-arrow bg-base-100 shadow-sm">
+        <summary class="collapse-title p-3 pe-10 min-h-0">
+            <div class="flex items-center gap-3 text-sm">
+                <span class="badge badge-ghost badge-sm font-mono">#{{ r.index }}</span>
+                <span class="font-mono text-xs">{{ r.model }}</span>
+                <span class="text-xs text-base-content/60">node: {{ r.node_id }}</span>
+                <span class="text-xs">{{ r.tokens_in }}→{{ r.tokens_out }} tok</span>
+                <span class="text-xs text-base-content/60">{{ r.latency_secs|fmt("{:.1}") }}s</span>
+            </div>
+        </summary>
+        <div class="collapse-content px-4 pb-4">
+            <div class="grid grid-cols-4 gap-2 text-xs mb-3">
+                <div><span class="text-base-content/60">Model:</span> <span class="font-mono">{{ r.model }}</span></div>
+                <div><span class="text-base-content/60">Node:</span> <span class="font-mono">{{ r.node_id }}</span></div>
+                <div><span class="text-base-content/60">Tokens:</span> {{ r.tokens_in }} in / {{ r.tokens_out }} out</div>
+                <div><span class="text-base-content/60">Latency:</span> {{ r.latency_secs|fmt("{:.1}") }}s</div>
+            </div>
+            <div class="divider my-1"></div>
+            <h4 class="text-sm font-semibold mb-1">Prompt</h4>
+            <div class="bg-base-200 rounded-box p-3 mb-3 max-h-96 overflow-auto">
+                <pre class="whitespace-pre-wrap text-xs font-mono break-all">{{ r.prompt_full }}</pre>
+            </div>
+            <h4 class="text-sm font-semibold mb-1">Response</h4>
+            <div class="bg-base-200 rounded-box p-3 max-h-96 overflow-auto">
+                <pre class="whitespace-pre-wrap text-xs font-mono break-all">{{ r.response_full }}</pre>
+            </div>
+        </div>
+    </details>
+{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,143 @@
+{% extends "session_base.html" %}
+{% block title %}Session — Perspt Dashboard{% endblock %}
+{% block session_content %}
+
+{# ── Session Info Header ── #}
+<div class="card bg-base-100 shadow-sm mb-6">
+    <div class="card-body p-4">
+        <div class="flex items-start justify-between gap-4">
+            <div class="flex-1 min-w-0">
+                <p class="text-sm leading-relaxed whitespace-pre-line mb-2">{{ task }}</p>
+                <div class="text-xs text-base-content/50">{{ working_dir }}</div>
+                {% if !toolchain.is_empty() %}
+                <div class="text-xs text-base-content/50 mt-1">Toolchain: {{ toolchain }}</div>
+                {% endif %}
+            </div>
+            {% if status == "running" %}
+            <span class="badge badge-primary">{{ status }}</span>
+            {% elif status == "completed" %}
+            <span class="badge badge-success">{{ status }}</span>
+            {% elif status == "failed" %}
+            <span class="badge badge-error">{{ status }}</span>
+            {% else %}
+            <span class="badge">{{ status }}</span>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{# ── Summary Stats Grid ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Nodes</div>
+        <div class="stat-value text-xl">{{ completed_nodes }}/{{ total_nodes }}</div>
+        <div class="stat-desc">
+            {% if failed_nodes > 0 %}<span class="text-error">{{ failed_nodes }} failed</span>{% endif %}
+            {% if running_nodes > 0 %}<span class="text-primary">{{ running_nodes }} running</span>{% endif %}
+        </div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">LLM Calls</div>
+        <div class="stat-value text-xl">{{ llm_request_count }}</div>
+        <div class="stat-desc">{{ llm_tokens_in }}+{{ llm_tokens_out }} tokens</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Budget</div>
+        <div class="stat-value text-xl">
+            {% if let Some(b) = budget %}
+                {% if let Some(max) = b.max_steps %}{{ b.steps_used }}/{{ max }}{% else %}{{ b.steps_used }}{% endif %}
+            {% else %}—{% endif %}
+        </div>
+        <div class="stat-desc">
+            {% if let Some(b) = budget %}
+                {% if b.cost_used_usd > 0.0 %}${{ b.cost_used_usd|fmt("{:.3}") }}{% endif %}
+            {% endif %}
+        </div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Avg Energy</div>
+        <div class="stat-value text-xl">{{ avg_energy|fmt("{:.2}") }}</div>
+        <div class="stat-desc">V_total mean</div>
+    </div>
+</div>
+
+{# ── Node progress bar ── #}
+{% if total_nodes > 0 %}
+<div class="mb-6">
+    <div class="flex justify-between text-xs text-base-content/60 mb-1">
+        <span>Node Progress</span>
+        <span>{{ completed_nodes }}/{{ total_nodes }} completed</span>
+    </div>
+    <progress class="progress progress-success w-full" value="{{ completed_nodes }}" max="{{ total_nodes }}"></progress>
+</div>
+{% endif %}
+
+{# ── Node State Breakdown ── #}
+{% if total_nodes > 0 %}
+<h3 class="text-md font-semibold mb-3">Node States</h3>
+<div class="overflow-x-auto mb-6">
+    <table class="table table-sm table-zebra w-full">
+        <thead>
+            <tr>
+                <th>Node</th>
+                <th>State</th>
+                <th>Class</th>
+                <th>Goal</th>
+                <th>V_total</th>
+                <th>Attempts</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for n in nodes %}
+            <tr>
+                <td class="font-mono text-xs">{{ n.node_id }}</td>
+                <td>
+                    {% if n.state == "completed" %}
+                    <span class="badge badge-success badge-sm">{{ n.state }}</span>
+                    {% elif n.state == "failed" %}
+                    <span class="badge badge-error badge-sm">{{ n.state }}</span>
+                    {% elif n.state == "running" %}
+                    <span class="badge badge-primary badge-sm">{{ n.state }}</span>
+                    {% else %}
+                    <span class="badge badge-sm">{{ n.state }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-xs">{{ n.node_class }}</td>
+                <td class="text-xs max-w-xs truncate">{{ n.goal }}</td>
+                <td>{{ n.v_total|fmt("{:.2}") }}</td>
+                <td>{{ n.attempt_count }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ── Quick Verification Summary ── #}
+{% if !verifications.is_empty() %}
+<h3 class="text-md font-semibold mb-3">Verification Results</h3>
+<div class="overflow-x-auto mb-6">
+    <table class="table table-sm table-zebra w-full">
+        <thead><tr><th>Node</th><th>Syntax</th><th>Build</th><th>Tests</th><th>Lint</th><th>Tests (P/F)</th></tr></thead>
+        <tbody>
+        {% for v in verifications %}
+        <tr>
+            <td class="font-mono text-xs">{{ v.node_id }}</td>
+            <td>{% if v.syntax_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+            <td>{% if v.build_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+            <td>{% if v.tests_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+            <td>{% if v.lint_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+            <td>{{ v.tests_passed }}/{{ v.tests_failed }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ── SSE live stats ── #}
+<div hx-ext="sse" sse-connect="/sse/{{ session_id }}" sse-swap="node-stats" hx-swap="innerHTML">
+    <div id="node-stats"></div>
+</div>
+
+{% endblock %}

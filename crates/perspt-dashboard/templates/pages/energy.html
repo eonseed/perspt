@@ -1,0 +1,125 @@
+{% extends "session_base.html" %}
+{% block title %}{{ title }} — Perspt Dashboard{% endblock %}
+{% block session_content %}
+<h2 class="text-xl font-bold mb-4">{{ title }}</h2>
+
+{% if records.is_empty() %}
+<div class="alert alert-info"><span>No energy data recorded yet.</span></div>
+{% else %}
+
+{# ── Aggregate Stats ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Records</div>
+        <div class="stat-value text-xl">{{ summary.count }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Avg V_total</div>
+        <div class="stat-value text-xl">{{ summary.avg_total|fmt("{:.2}") }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Min V_total</div>
+        <div class="stat-value text-xl">{{ summary.min_total|fmt("{:.2}") }}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Max V_total</div>
+        <div class="stat-value text-xl">{{ summary.max_total|fmt("{:.2}") }}</div>
+    </div>
+</div>
+
+{# ── Component Averages ── #}
+<div class="card bg-base-100 shadow-sm mb-6">
+    <div class="card-body p-4">
+        <h3 class="text-sm font-semibold mb-3">Average Energy Components</h3>
+        <div class="space-y-2">
+            <div class="flex items-center gap-2">
+                <span class="text-xs w-16">V_syn</span>
+                <progress class="progress progress-info flex-1 h-2" value="{{ summary.avg_syn }}" max="{{ summary.max_total }}"></progress>
+                <span class="text-xs w-12 text-right">{{ summary.avg_syn|fmt("{:.2}") }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs w-16">V_str</span>
+                <progress class="progress progress-success flex-1 h-2" value="{{ summary.avg_str }}" max="{{ summary.max_total }}"></progress>
+                <span class="text-xs w-12 text-right">{{ summary.avg_str|fmt("{:.2}") }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs w-16">V_log</span>
+                <progress class="progress progress-warning flex-1 h-2" value="{{ summary.avg_log }}" max="{{ summary.max_total }}"></progress>
+                <span class="text-xs w-12 text-right">{{ summary.avg_log|fmt("{:.2}") }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs w-16">V_boot</span>
+                <progress class="progress progress-error flex-1 h-2" value="{{ summary.avg_boot }}" max="{{ summary.max_total }}"></progress>
+                <span class="text-xs w-12 text-right">{{ summary.avg_boot|fmt("{:.2}") }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs w-16">V_sheaf</span>
+                <progress class="progress progress-secondary flex-1 h-2" value="{{ summary.avg_sheaf }}" max="{{ summary.max_total }}"></progress>
+                <span class="text-xs w-12 text-right">{{ summary.avg_sheaf|fmt("{:.2}") }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Per-Node Energy with Bar Visualization ── #}
+<h3 class="text-md font-semibold mb-3">Per-Node Energy</h3>
+<div class="space-y-2 mb-6">
+{% for r in records %}
+    <div class="card bg-base-100 shadow-sm">
+        <div class="card-body p-3">
+            <div class="flex items-center gap-3 mb-1">
+                <span class="font-mono text-xs min-w-32">{{ r.node_id }}</span>
+                <div class="flex-1">
+                    <progress class="progress progress-primary w-full h-3" value="{{ r.bar_pct }}" max="100"></progress>
+                </div>
+                <span class="text-sm font-semibold min-w-16 text-right">{{ r.v_total|fmt("{:.2}") }}</span>
+            </div>
+            <div class="flex gap-4 text-xs text-base-content/60">
+                <span>syn={{ r.v_syn|fmt("{:.2}") }}</span>
+                <span>str={{ r.v_str|fmt("{:.2}") }}</span>
+                <span>log={{ r.v_log|fmt("{:.2}") }}</span>
+                <span>boot={{ r.v_boot|fmt("{:.2}") }}</span>
+                <span>sheaf={{ r.v_sheaf|fmt("{:.2}") }}</span>
+            </div>
+        </div>
+    </div>
+{% endfor %}
+</div>
+
+{# ── Detailed Table ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-sm font-medium">Detailed Energy Table</summary>
+    <div class="collapse-content">
+        <div class="overflow-x-auto">
+            <table class="table table-zebra table-sm w-full">
+                <thead>
+                    <tr>
+                        <th>Node</th>
+                        <th>V_syn</th>
+                        <th>V_str</th>
+                        <th>V_log</th>
+                        <th>V_boot</th>
+                        <th>V_sheaf</th>
+                        <th>V_total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for r in records %}
+                    <tr>
+                        <td class="font-mono text-xs">{{ r.node_id }}</td>
+                        <td>{{ r.v_syn|fmt("{:.3}") }}</td>
+                        <td>{{ r.v_str|fmt("{:.3}") }}</td>
+                        <td>{{ r.v_log|fmt("{:.3}") }}</td>
+                        <td>{{ r.v_boot|fmt("{:.3}") }}</td>
+                        <td>{{ r.v_sheaf|fmt("{:.3}") }}</td>
+                        <td class="font-semibold">{{ r.v_total|fmt("{:.3}") }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</details>
+
+{% endif %}
+{% endblock %}

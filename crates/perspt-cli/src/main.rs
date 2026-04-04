@@ -220,6 +220,17 @@ enum Commands {
         #[arg(long)]
         log_file: Option<std::path::PathBuf>,
     },
+
+    /// Launch the web monitoring dashboard
+    Dashboard {
+        /// Port to listen on
+        #[arg(short, long, default_value = "3000")]
+        port: u16,
+
+        /// Path to the database file (defaults to platform data dir)
+        #[arg(long)]
+        db_path: Option<std::path::PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -318,6 +329,9 @@ async fn main() -> Result<()> {
         Some(Commands::SimpleChat { model, log_file }) => {
             commands::simple_chat::run(commands::simple_chat::SimpleChatArgs { model, log_file })
                 .await
+        }
+        Some(Commands::Dashboard { port, db_path }) => {
+            commands::dashboard::run(port, db_path).await
         }
     }
 }

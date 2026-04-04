@@ -32,6 +32,12 @@ Task-oriented recipes for common operations.
 
       Starlark policies, sandboxing, and security.
 
+   .. grid-item-card:: Dashboard Setup
+      :link: dashboard-setup
+      :link-type: doc
+
+      Configure and launch the web dashboard.
+
 .. toctree::
    :maxdepth: 2
    :hidden:
@@ -40,3 +46,4 @@ Task-oriented recipes for common operations.
    configuration
    providers
    security-rules
+   dashboard-setup

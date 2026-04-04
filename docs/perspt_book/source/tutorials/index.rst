@@ -56,6 +56,12 @@ Step-by-step guides to master Perspt.
 
       CFD simulation setup and wind tunnel analysis.
 
+   .. grid-item-card:: Dashboard Monitoring
+      :link: dashboard-monitoring
+      :link-type: doc
+
+      Watch agent execution in the browser.
+
 Learning Path
 -------------
 
@@ -90,6 +96,9 @@ Learning Path
    * - 8
      - :doc:`example-scientific`
      - Apply agent mode to scientific computing
+   * - 9
+     - :doc:`dashboard-monitoring`
+     - Monitor agent sessions via the web dashboard
 
 .. toctree::
    :maxdepth: 2
@@ -103,3 +112,4 @@ Learning Path
    example-python-etl
    example-rust-cli
    example-scientific
+   dashboard-monitoring

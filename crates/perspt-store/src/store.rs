@@ -339,12 +339,25 @@ impl SessionStore {
         })
     }
 
+    /// Open a session store in read-only mode for concurrent dashboard reads.
+    ///
+    /// Uses `AccessMode::ReadOnly` so the dashboard can read alongside the
+    /// agent's write lock. Does **not** call `init_schema()` (a write op).
+    /// The database file must already exist.
+    pub fn open_read_only(path: &std::path::Path) -> Result<Self> {
+        let config = duckdb::Config::default()
+            .access_mode(duckdb::AccessMode::ReadOnly)
+            .context("Failed to configure DuckDB read-only mode")?;
+        let conn = Connection::open_with_flags(path, config)
+            .context("Failed to open DuckDB in read-only mode")?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
     /// Get the default database path (~/.local/share/perspt/perspt.db or similar)
     pub fn default_db_path() -> Result<PathBuf> {
-        let data_dir = dirs::data_local_dir()
-            .context("Could not find local data directory")?
-            .join("perspt");
-        Ok(data_dir.join("perspt.db"))
+        perspt_core::paths::database_path().context("Could not determine platform data directory")
     }
 
     /// Create a new session
@@ -516,19 +529,53 @@ impl SessionStore {
         Ok(records)
     }
 
-    /// List recent sessions (newest first)
-    pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionRecord>> {
+    /// Get all energy history for a session (all nodes)
+    pub fn get_session_energy_history(&self, session_id: &str) -> Result<Vec<EnergyRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status
-             FROM sessions ORDER BY created_at DESC LIMIT ?",
+            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM energy_history WHERE session_id = ? ORDER BY timestamp"
         )?;
 
-        let mut rows = stmt.query([limit.to_string()])?;
+        let mut rows = stmt.query([session_id])?;
         let mut records = Vec::new();
 
         while let Some(row) = rows.next()? {
-            // merkle_root is stored as BLOB, read it directly as Option<Vec<u8>>
+            records.push(EnergyRecord {
+                node_id: row.get(0)?,
+                session_id: row.get(1)?,
+                v_syn: row.get::<_, f64>(2)? as f32,
+                v_str: row.get::<_, f64>(3)? as f32,
+                v_log: row.get::<_, f64>(4)? as f32,
+                v_boot: row.get::<_, f64>(5)? as f32,
+                v_sheaf: row.get::<_, f64>(6)? as f32,
+                v_total: row.get::<_, f64>(7)? as f32,
+            });
+        }
+
+        Ok(records)
+    }
+
+    /// List recent sessions (newest first)
+    pub fn list_recent_sessions(&self, limit: usize) -> Result<Vec<SessionRecord>> {
+        self.list_sessions_paginated(limit, 0)
+    }
+
+    /// List sessions with pagination (most recent first).
+    pub fn list_sessions_paginated(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<SessionRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status
+             FROM sessions ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        )?;
+
+        let mut rows = stmt.query([limit.to_string(), offset.to_string()])?;
+        let mut records = Vec::new();
+
+        while let Some(row) = rows.next()? {
             let merkle_root: Option<Vec<u8>> = row.get(3).ok();
 
             records.push(SessionRecord {
@@ -542,6 +589,19 @@ impl SessionStore {
         }
 
         Ok(records)
+    }
+
+    /// Count total number of sessions.
+    pub fn count_sessions(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM sessions")?;
+        let mut rows = stmt.query([])?;
+        if let Some(row) = rows.next()? {
+            let count: i64 = row.get(0)?;
+            Ok(count as usize)
+        } else {
+            Ok(0)
+        }
     }
 
     /// Get all node states for a session
@@ -648,6 +708,22 @@ impl SessionStore {
         let mut stmt = conn.prepare("SELECT COUNT(*) FROM llm_requests")?;
         let count: i64 = stmt.query_row([], |row| row.get(0))?;
         Ok(count)
+    }
+
+    /// Aggregate LLM statistics across all sessions: (count, sum_tokens_in, sum_tokens_out, sum_latency_ms)
+    pub fn get_global_llm_summary(&self) -> Result<(i64, i64, i64, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT COUNT(*), \
+             COALESCE(SUM(CASE WHEN tokens_in > 0 THEN tokens_in ELSE (LENGTH(prompt) + 3) / 4 END), 0), \
+             COALESCE(SUM(CASE WHEN tokens_out > 0 THEN tokens_out ELSE (LENGTH(response) + 3) / 4 END), 0), \
+             COALESCE(MEDIAN(latency_ms), 0) \
+             FROM llm_requests",
+        )?;
+        let result = stmt.query_row([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        Ok(result)
     }
 
     /// Get all LLM requests (for debugging)
@@ -914,6 +990,31 @@ impl SessionStore {
              FROM sheaf_validations WHERE session_id = ? AND node_id = ? ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id, node_id])?;
+        let mut records = Vec::new();
+        while let Some(row) = rows.next()? {
+            records.push(SheafValidationRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                validator_class: row.get(2)?,
+                plugin_source: row.get::<_, Option<String>>(3)?,
+                passed: row.get::<_, String>(4)?.parse().unwrap_or(false),
+                evidence_summary: row.get(5)?,
+                affected_files: row.get(6)?,
+                v_sheaf_contribution: row.get::<_, f64>(7)? as f32,
+                requeue_targets: row.get(8)?,
+            });
+        }
+        Ok(records)
+    }
+
+    /// Get all sheaf validations for a session (all nodes).
+    pub fn get_all_sheaf_validations(&self, session_id: &str) -> Result<Vec<SheafValidationRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets
+             FROM sheaf_validations WHERE session_id = ? ORDER BY created_at",
+        )?;
+        let mut rows = stmt.query([session_id])?;
         let mut records = Vec::new();
         while let Some(row) = rows.next()? {
             records.push(SheafValidationRow {
@@ -1723,6 +1824,31 @@ impl SessionStore {
         Ok(results)
     }
 
+    /// Get all repair footprints for a session (all nodes).
+    pub fn get_all_repair_footprints(&self, session_id: &str) -> Result<Vec<RepairFootprintRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved \
+             FROM repair_footprints WHERE session_id = ? ORDER BY attempt ASC",
+        )?;
+        let mut rows = stmt.query([session_id])?;
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(RepairFootprintRow {
+                footprint_id: row.get(0)?,
+                session_id: row.get(1)?,
+                node_id: row.get(2)?,
+                revision_id: row.get(3)?,
+                attempt: row.get(4)?,
+                affected_files: row.get(5)?,
+                bundle_json: row.get(6)?,
+                diagnosis: row.get(7)?,
+                resolved: row.get(8)?,
+            });
+        }
+        Ok(results)
+    }
+
     /// Mark a repair footprint as resolved.
     pub fn resolve_repair_footprint(&self, footprint_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -2334,5 +2460,46 @@ mod tests {
 
         let got = store.get_budget_envelope(sid).unwrap();
         assert!(got.is_none());
+    }
+
+    #[test]
+    fn test_read_only_store_queries_work() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("perspt_ro_test_{}.db", uuid::Uuid::new_v4()));
+
+        // Create and seed a normal store
+        {
+            let store = SessionStore::open(&db_path).unwrap();
+            seed_session(&store, "ro-test");
+        }
+
+        // Open read-only and verify queries work
+        let ro = SessionStore::open_read_only(&db_path).unwrap();
+        let sessions = ro.list_recent_sessions(10).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "ro-test");
+    }
+
+    #[test]
+    fn test_read_only_store_rejects_writes() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join(format!("perspt_ro_wr_{}.db", uuid::Uuid::new_v4()));
+
+        // Create the DB first
+        {
+            let _store = SessionStore::open(&db_path).unwrap();
+        }
+
+        // Open read-only and verify writes fail
+        let ro = SessionStore::open_read_only(&db_path).unwrap();
+        let record = SessionRecord {
+            session_id: "should-fail".to_string(),
+            task: "test".to_string(),
+            working_dir: "/tmp".to_string(),
+            merkle_root: None,
+            detected_toolchain: None,
+            status: "RUNNING".to_string(),
+        };
+        assert!(ro.create_session(&record).is_err());
     }
 }

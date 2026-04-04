@@ -67,8 +67,7 @@ async fn create_project_memory() -> Result<()> {
 
 /// Create default Starlark rules
 async fn create_default_rules() -> Result<()> {
-    let rules_dir = dirs::home_dir()
-        .map(|h| h.join(".perspt").join("rules"))
+    let rules_dir = perspt_core::paths::policy_dir()
         .unwrap_or_else(|| Path::new(".perspt/rules").to_path_buf());
 
     fs::create_dir_all(&rules_dir)?;

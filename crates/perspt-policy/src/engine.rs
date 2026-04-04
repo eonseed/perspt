@@ -53,12 +53,10 @@ impl PolicyEngine {
 
     /// Get the default policy directory
     pub fn default_policy_dir() -> PathBuf {
-        // Use simple fallback if dirs crate fails
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(".perspt")
-            .join("rules")
+        // Use centralized path resolution with legacy fallback
+        perspt_core::paths::resolve_policy_dir()
+            .or_else(perspt_core::paths::policy_dir)
+            .unwrap_or_else(|| PathBuf::from(".").join(".perspt").join("rules"))
     }
 
     /// Load all .star files from the policy directory
