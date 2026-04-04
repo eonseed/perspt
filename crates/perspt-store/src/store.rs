@@ -339,6 +339,22 @@ impl SessionStore {
         })
     }
 
+    /// Open a session store in read-only mode for concurrent dashboard reads.
+    ///
+    /// Uses `AccessMode::ReadOnly` so the dashboard can read alongside the
+    /// agent's write lock. Does **not** call `init_schema()` (a write op).
+    /// The database file must already exist.
+    pub fn open_read_only(path: &std::path::Path) -> Result<Self> {
+        let config = duckdb::Config::default()
+            .access_mode(duckdb::AccessMode::ReadOnly)
+            .context("Failed to configure DuckDB read-only mode")?;
+        let conn = Connection::open_with_flags(path, config)
+            .context("Failed to open DuckDB in read-only mode")?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
     /// Get the default database path (~/.local/share/perspt/perspt.db or similar)
     pub fn default_db_path() -> Result<PathBuf> {
         perspt_core::paths::database_path().context("Could not determine platform data directory")
