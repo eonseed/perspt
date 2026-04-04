@@ -341,10 +341,7 @@ impl SessionStore {
 
     /// Get the default database path (~/.local/share/perspt/perspt.db or similar)
     pub fn default_db_path() -> Result<PathBuf> {
-        let data_dir = dirs::data_local_dir()
-            .context("Could not find local data directory")?
-            .join("perspt");
-        Ok(data_dir.join("perspt.db"))
+        perspt_core::paths::database_path().context("Could not determine platform data directory")
     }
 
     /// Create a new session
