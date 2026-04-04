@@ -1,0 +1,30 @@
+[package]
+name = "perspt-dashboard"
+version = "0.5.6"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "Real-time web dashboard for Perspt agent monitoring"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-dashboard"
+keywords = ["dashboard", "monitoring", "web", "agent"]
+categories = ["web-programming::http-server", "visualization"]
+
+[dependencies]
+perspt-store = { version = "0.5.6", path = "../perspt-store" }
+perspt-core = { version = "0.5.6", path = "../perspt-core" }
+
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
+askama = "0.15"
+tokio = { version = "1.42", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["time"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+similar = "2"
+log = "0.4"
+anyhow = "1.0"
+rand = "0.8"

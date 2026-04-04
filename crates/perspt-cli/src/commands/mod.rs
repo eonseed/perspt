@@ -4,6 +4,7 @@ pub mod abort;
 pub mod agent;
 pub mod chat;
 pub mod config;
+pub mod dashboard;
 pub mod init;
 pub mod ledger;
 pub mod logs;
