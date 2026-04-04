@@ -1,7 +1,7 @@
 PSP: 000006
 Title: Real-Time Web Dashboard for Agent Monitoring
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Discussion
+Status: Final
 Type: Feature
 Created: 2026-04-02
 Discussion-To: https://github.com/eonseed/perspt/discussions/106
