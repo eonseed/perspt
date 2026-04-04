@@ -104,6 +104,7 @@ target/doc/
 
 # Dashboard asset pipeline
 crates/perspt-dashboard/node_modules/
+crates/perspt-dashboard/static/dashboard.css
 
 # mdBook generated files
 book/
