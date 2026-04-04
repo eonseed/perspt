@@ -1,9 +1,171 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — Perspt Dashboard{% endblock %}
 {% block content %}
-<h1 class="text-2xl font-bold mb-4">{{ title }}</h1>
-<p class="text-sm text-base-content/60 mb-4">Session: {{ session_id }}</p>
-<div class="alert alert-info">
-    <span>Decision trace — data will be wired in Phase 4.</span>
-</div>
+<h1 class="text-2xl font-bold mb-2">{{ title }}</h1>
+<p class="text-sm text-base-content/60 mb-6">Session: <span class="font-mono">{{ session_id }}</span></p>
+
+{# ── Escalation Reports ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4" open>
+    <summary class="collapse-title text-lg font-medium">Escalation Reports ({{ escalations.len() }})</summary>
+    <div class="collapse-content">
+    {% if escalations.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Node</th><th>Category</th><th>Action</th><th>Evidence</th></tr></thead>
+            <tbody>
+            {% for e in escalations %}
+            <tr>
+                <td class="font-mono text-xs">{{ e.node_id }}</td>
+                <td>{{ e.category }}</td>
+                <td>{{ e.action }}</td>
+                <td class="max-w-xs truncate text-xs">{{ e.evidence }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
+
+{# ── Sheaf Validations ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-lg font-medium">Sheaf Validations ({{ sheaf_validations.len() }})</summary>
+    <div class="collapse-content">
+    {% if sheaf_validations.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Node</th><th>Validator</th><th>Passed</th><th>V_sheaf</th><th>Evidence</th></tr></thead>
+            <tbody>
+            {% for s in sheaf_validations %}
+            <tr>
+                <td class="font-mono text-xs">{{ s.node_id }}</td>
+                <td>{{ s.validator_class }}</td>
+                <td>{% if s.passed %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+                <td>{{ s.v_sheaf_contribution }}</td>
+                <td class="max-w-xs truncate text-xs">{{ s.evidence_summary }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
+
+{# ── Rewrites ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-lg font-medium">Rewrites ({{ rewrites.len() }})</summary>
+    <div class="collapse-content">
+    {% if rewrites.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Node</th><th>Action</th><th>Category</th><th>Requeued</th><th>Inserted</th></tr></thead>
+            <tbody>
+            {% for r in rewrites %}
+            <tr>
+                <td class="font-mono text-xs">{{ r.node_id }}</td>
+                <td>{{ r.action }}</td>
+                <td>{{ r.category }}</td>
+                <td class="text-xs">{{ r.requeued_nodes }}</td>
+                <td class="text-xs">{{ r.inserted_nodes }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
+
+{# ── Plan Revisions ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-lg font-medium">Plan Revisions ({{ plan_revisions.len() }})</summary>
+    <div class="collapse-content">
+    {% if plan_revisions.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Revision</th><th>Seq</th><th>Status</th><th>Reason</th></tr></thead>
+            <tbody>
+            {% for p in plan_revisions %}
+            <tr>
+                <td class="font-mono text-xs">{{ p.revision_id }}</td>
+                <td>{{ p.sequence }}</td>
+                <td>
+                    {% if p.status == "active" %}<span class="badge badge-primary badge-sm">{{ p.status }}</span>
+                    {% elif p.status == "superseded" %}<span class="badge badge-ghost badge-sm">{{ p.status }}</span>
+                    {% else %}<span class="badge badge-sm">{{ p.status }}</span>{% endif %}
+                </td>
+                <td class="max-w-xs truncate text-xs">{{ p.reason }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
+
+{# ── Repair Footprints ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-lg font-medium">Repair Footprints ({{ repair_footprints.len() }})</summary>
+    <div class="collapse-content">
+    {% if repair_footprints.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Node</th><th>Attempt</th><th>Resolved</th><th>Diagnosis</th></tr></thead>
+            <tbody>
+            {% for r in repair_footprints %}
+            <tr>
+                <td class="font-mono text-xs">{{ r.node_id }}</td>
+                <td>{{ r.attempt }}</td>
+                <td>{% if r.resolved %}<span class="text-success">✓</span>{% else %}<span class="text-warning">…</span>{% endif %}</td>
+                <td class="max-w-xs truncate text-xs">{{ r.diagnosis }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
+
+{# ── Verification Results ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-lg font-medium">Verification Results ({{ verifications.len() }})</summary>
+    <div class="collapse-content">
+    {% if verifications.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Node</th><th>Syntax</th><th>Build</th><th>Tests</th><th>Lint</th><th>Pass/Fail</th><th>Degraded</th></tr></thead>
+            <tbody>
+            {% for v in verifications %}
+            <tr>
+                <td class="font-mono text-xs">{{ v.node_id }}</td>
+                <td>{% if v.syntax_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+                <td>{% if v.build_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+                <td>{% if v.tests_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+                <td>{% if v.lint_ok %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+                <td>{{ v.tests_passed }}/{{ v.tests_failed }}</td>
+                <td>{% if v.degraded %}<span class="text-warning" title="{{ v.degraded_reason }}">⚠</span>{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
 {% endblock %}
