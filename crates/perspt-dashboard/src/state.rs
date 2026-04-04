@@ -14,4 +14,6 @@ pub struct AppState {
     pub session_token: Arc<Mutex<Option<String>>>,
     /// Working directory the agent is operating in
     pub working_dir: PathBuf,
+    /// Whether the server is bound to a localhost address
+    pub is_localhost: bool,
 }
