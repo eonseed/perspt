@@ -61,3 +61,187 @@ pub fn build_router(state: AppState) -> Router {
         .nest_service("/static", ServeDir::new(static_dir))
         .with_state(state)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use perspt_store::SessionStore;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use tower::ServiceExt;
+
+    fn test_db_path() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("perspt_dash_test_{}.db", rand::random::<u64>()))
+    }
+
+    /// Create a test AppState with a temp store (no password).
+    fn test_state_open() -> AppState {
+        let db = test_db_path();
+        let store = SessionStore::open(&db).expect("temp store");
+        AppState {
+            store: Arc::new(store),
+            password: None,
+            session_token: Arc::new(Mutex::new(None)),
+            working_dir: std::path::PathBuf::from("/tmp"),
+            is_localhost: true,
+        }
+    }
+
+    /// Create a test AppState with a password set.
+    fn test_state_auth(password: &str) -> AppState {
+        let db = test_db_path();
+        let store = SessionStore::open(&db).expect("temp store");
+        AppState {
+            store: Arc::new(store),
+            password: Some(password.to_string()),
+            session_token: Arc::new(Mutex::new(None)),
+            working_dir: std::path::PathBuf::from("/tmp"),
+            is_localhost: true,
+        }
+    }
+
+    // ── Route smoke tests (open access) ──
+
+    #[tokio::test]
+    async fn overview_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn login_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/login")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn dag_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/dag")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn energy_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/energy")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn llm_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/llm")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn sandbox_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/sandbox")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn decisions_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/decisions")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    // ── SSE test ──
+
+    #[tokio::test]
+    async fn sse_returns_event_stream() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sse/test-session")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let ct = res.headers().get("content-type").unwrap().to_str().unwrap();
+        assert!(ct.contains("text/event-stream"));
+    }
+
+    // ── Auth tests ──
+
+    #[tokio::test]
+    async fn unauth_request_redirects_to_login() {
+        let app = build_router(test_state_auth("secret123"));
+        let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        let location = res.headers().get("location").unwrap().to_str().unwrap();
+        assert_eq!(location, "/login");
+    }
+
+    #[tokio::test]
+    async fn invalid_cookie_redirects_to_login() {
+        let app = build_router(test_state_auth("secret123"));
+        let req = Request::builder()
+            .uri("/")
+            .header("cookie", "perspt_session=wrong-token")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    }
+
+    #[tokio::test]
+    async fn valid_cookie_passes_auth() {
+        let state = test_state_auth("secret123");
+        // Pre-set a known token
+        *state.session_token.lock().await = Some("valid-token-123".to_string());
+
+        let app = build_router(state);
+        let req = Request::builder()
+            .uri("/")
+            .header("cookie", "perspt_session=valid-token-123")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn sse_behind_auth() {
+        let app = build_router(test_state_auth("secret123"));
+        let req = Request::builder()
+            .uri("/sse/test-session")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        // Should redirect, not 200
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    }
+}
