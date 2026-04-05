@@ -39,7 +39,7 @@ to Large Language Models. It serves two complementary purposes:
    framework is mature; the implementation is under active development and has not
    yet been benchmarked.
 
-.. admonition:: Version 0.5.6 "ikigai 生き甲斐" Highlights
+.. admonition:: Version 0.5.7 "navikaran नवीकरण" Highlights
    :class: tip
 
    **LLM CLI:**
@@ -50,7 +50,9 @@ to Large Language Models. It serves two complementary purposes:
 
    **SRBN Agent (Experimental):**
 
+   - **Web Dashboard** — Browser-based real-time monitoring (Axum + HTMX + DaisyUI 5)
    - **PSP-5 Runtime** — Project-first multi-file execution with ownership closure
+   - **LLM Token Tracking** — Real provider token usage (prompt/completion) persisted per request
    - **Five-Component Energy** — V(x) = alpha * V_syn + beta * V_str + gamma * V_log + V_boot + V_sheaf
    - **Plugin-Driven Verification** — Language plugins select LSP server, test runner, and init commands
    - **Sheaf Validation** — Cross-node consistency checks after all nodes converge

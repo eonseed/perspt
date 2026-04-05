@@ -59,6 +59,8 @@ Perspt auto-detects whichever provider key you have set. No config file required
 
 **Agent Mode (SRBN) [Experimental]** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold. Based on the SRBN paper's theoretical framework; under active development.
 
+**Web Dashboard** -- A browser-based monitoring interface (`perspt dashboard`) for observing agent execution in real time. Shows DAG topology, energy convergence, LLM telemetry with token usage and latency, sandbox branches, and decision traces. Built with Axum, Askama, HTMX, and DaisyUI 5. Reads the DuckDB store in read-only mode so it never interferes with the running agent.
+
 **Zero-Config Startup** -- Automatic provider detection from environment variables. Set a key and go.
 
 **Local Models via Ollama** -- Full privacy, no API fees, works offline.
@@ -209,6 +211,8 @@ Perspt uses subcommands. Running `perspt` with no arguments defaults to `chat`.
 | `status`       | Show lifecycle counts, energy breakdown, escalation reports |
 | `resume`       | Resume a session with trust context                      |
 | `abort`        | Abort the current agent session                          |
+| `dashboard`    | Launch the web monitoring dashboard                      |
+| `dashboard`    | Launch the web monitoring dashboard                      |
 | `logs`         | View LLM request/response logs                           |
 
 Global options: `-v` (verbose), `-c <FILE>` (config path), `-h` (help), `-V` (version).
@@ -395,7 +399,7 @@ Benefits: full privacy, zero API cost, offline operation.
 
 ## Architecture
 
-Perspt is organized as a Cargo workspace with seven crates:
+Perspt is organized as a Cargo workspace with eight crates:
 
 ```
 perspt/crates/
@@ -405,7 +409,8 @@ perspt/crates/
   perspt-agent     SRBN orchestrator, tools, LSP client, test runner
   perspt-store     Session persistence (DuckDB)
   perspt-policy    Security policy engine (Starlark)
-  perspt-sandbox   Process isolation (future)
+  perspt-sandbox   Process isolation
+  perspt-dashboard Web dashboard (Axum + HTMX + DaisyUI 5)
 ```
 
 Key implementation details:
@@ -414,6 +419,7 @@ Key implementation details:
 - **Ratatui** powers the TUI with a custom markdown-to-lines renderer
 - **Tokio** async runtime for concurrent streaming and non-blocking UI
 - **DuckDB** persists session state, energy history, and the Merkle ledger
+- **Axum + HTMX** powers the real-time web dashboard for agent monitoring
 - **Starlark** evaluates security policies that gate file writes and command execution
 
 The SRBN engine is an experimental implementation of the theoretical framework described in *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). The paper reformulates LLM agency as a sheaf-theoretic control problem, replacing probabilistic search with Lyapunov stability analysis and Input-to-State Stability (ISS) proofs. See the [Theoretical Foundation](#theoretical-foundation) section for details.
