@@ -22,6 +22,12 @@ impl SRBNOrchestrator {
         loop {
             attempt += 1;
 
+            // Check abort flag before each attempt
+            if self.is_abort_requested() {
+                self.emit_log("⚠️ Session aborted — stopping solo execution".to_string());
+                anyhow::bail!("Solo Mode aborted by user");
+            }
+
             if attempt > MAX_ATTEMPTS {
                 self.emit_log(format!(
                     "Solo Mode failed after {} attempts, consider Team Mode",
@@ -31,7 +37,7 @@ impl SRBNOrchestrator {
                     success: false,
                     message: "Solo Mode exhausted retries".to_string(),
                 });
-                return Ok(());
+                anyhow::bail!("Solo Mode failed after {} attempts", MAX_ATTEMPTS);
             }
 
             self.emit_log(format!("Solo Mode attempt {}/{}", attempt, MAX_ATTEMPTS));

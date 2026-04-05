@@ -243,11 +243,9 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
 
     match result {
         Ok(()) => {
-            store.update_session_status(&actual_id, "COMPLETED")?;
             println!("✅ Session completed successfully!");
         }
         Err(e) => {
-            store.update_session_status(&actual_id, "FAILED")?;
             println!("❌ Session failed: {}", e);
             return Err(e);
         }

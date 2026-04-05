@@ -26,6 +26,8 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{EdgeRef, Topo, Walker};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Dependency edge type
@@ -116,6 +118,8 @@ pub struct SRBNOrchestrator {
     pub energy_beta: f32,
     /// Energy weight γ (test/lint failures)
     pub energy_gamma: f32,
+    /// Session abort flag — set by external signal handlers or TUI
+    abort_requested: Arc<AtomicBool>,
 }
 
 /// Get current timestamp as epoch seconds.
@@ -233,6 +237,7 @@ impl SRBNOrchestrator {
             energy_alpha: 1.0,
             energy_beta: 0.5,
             energy_gamma: 2.0,
+            abort_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -294,6 +299,7 @@ impl SRBNOrchestrator {
             energy_alpha: 1.0,
             energy_beta: 0.5,
             energy_gamma: 2.0,
+            abort_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -314,6 +320,30 @@ impl SRBNOrchestrator {
         self.tools.set_event_sender(event_sender.clone());
         self.event_sender = Some(event_sender);
         self.action_receiver = Some(action_receiver);
+    }
+
+    /// Get a handle to the abort flag for external signal handlers.
+    pub fn abort_flag(&self) -> Arc<AtomicBool> {
+        self.abort_requested.clone()
+    }
+
+    /// Check whether an abort has been requested.
+    fn is_abort_requested(&self) -> bool {
+        self.abort_requested.load(Ordering::Relaxed)
+    }
+
+    /// Finalize the session in the ledger based on the execution result.
+    fn finalize_session(&mut self, result: &Result<()>) {
+        let status = if self.is_abort_requested() {
+            "ABORTED"
+        } else if result.is_ok() {
+            "COMPLETED"
+        } else {
+            "FAILED"
+        };
+        if let Err(e) = self.ledger.end_session(status) {
+            log::error!("Failed to finalize session as {}: {}", status, e);
+        }
     }
 
     /// Configure the session-level budget envelope.
@@ -583,6 +613,13 @@ impl SRBNOrchestrator {
     /// Emits a differential resume summary so users can see what will
     /// be replayed vs. skipped.
     pub async fn run_resumed(&mut self) -> Result<()> {
+        let result = self.run_resumed_inner().await;
+        self.finalize_session(&result);
+        result
+    }
+
+    /// Inner resumed execution logic.
+    async fn run_resumed_inner(&mut self) -> Result<()> {
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
@@ -604,6 +641,12 @@ impl SRBNOrchestrator {
         ));
 
         for (i, idx) in indices.iter().enumerate() {
+            // Abort gate
+            if self.is_abort_requested() {
+                self.emit_log("⚠️ Session aborted — stopping resumed execution".to_string());
+                break;
+            }
+
             let node = &self.graph[*idx];
 
             // Skip terminal nodes
@@ -783,6 +826,7 @@ impl SRBNOrchestrator {
                     }
                     perspt_core::AgentAction::Abort => {
                         self.emit_log("⚠️ Session aborted by user");
+                        self.abort_requested.store(true, Ordering::Relaxed);
                         if let Some(nid) = review_node_id {
                             self.persist_review_decision(nid, "aborted", None);
                         }
@@ -845,7 +889,14 @@ impl SRBNOrchestrator {
             &self.context.working_dir.to_string_lossy(),
         )?;
 
-        // Log that LLM request logging is enabled (persistence happens immediately per-request)
+        // Run orchestration and always finalize the session
+        let result = self.run_orchestration(task).await;
+        self.finalize_session(&result);
+        result
+    }
+
+    /// Inner orchestration logic — called by `run()` which handles session lifecycle.
+    async fn run_orchestration(&mut self, task: String) -> Result<()> {
         if self.context.log_llm {
             self.emit_log("📝 LLM request logging enabled".to_string());
         }
@@ -994,6 +1045,12 @@ impl SRBNOrchestrator {
         let total_nodes = indices.len();
 
         for (i, idx) in indices.iter().enumerate() {
+            // Abort gate: stop execution if abort was requested.
+            if self.is_abort_requested() {
+                self.emit_log("⚠️ Session aborted — stopping execution".to_string());
+                break;
+            }
+
             // Budget gate: stop execution if step/cost/revision budget exhausted.
             if self.budget.any_exhausted() {
                 let node_id = self.graph[*idx].node_id.clone();

@@ -27,6 +27,7 @@ pub enum TaskStatus {
     Completed,
     Failed,
     Escalated,
+    Aborted,
 }
 
 impl TaskStatus {
@@ -44,6 +45,7 @@ impl TaskStatus {
             TaskStatus::Completed => "●",
             TaskStatus::Failed => "✗",
             TaskStatus::Escalated => "⚠",
+            TaskStatus::Aborted => "⊘",
         }
     }
 
@@ -61,6 +63,7 @@ impl TaskStatus {
             TaskStatus::Completed => Color::Rgb(102, 187, 106), // Green
             TaskStatus::Failed => Color::Rgb(239, 83, 80),   // Red
             TaskStatus::Escalated => Color::Rgb(186, 104, 200), // Purple
+            TaskStatus::Aborted => Color::Rgb(255, 152, 0),  // Orange
         }
     }
 }
@@ -80,6 +83,7 @@ impl From<perspt_core::NodeStatus> for TaskStatus {
             perspt_core::NodeStatus::Completed => TaskStatus::Completed,
             perspt_core::NodeStatus::Failed => TaskStatus::Failed,
             perspt_core::NodeStatus::Escalated => TaskStatus::Escalated,
+            perspt_core::NodeStatus::Aborted => TaskStatus::Aborted,
         }
     }
 }
@@ -556,6 +560,7 @@ mod tests {
             (NodeStatus::Completed, TaskStatus::Completed),
             (NodeStatus::Failed, TaskStatus::Failed),
             (NodeStatus::Escalated, TaskStatus::Escalated),
+            (NodeStatus::Aborted, TaskStatus::Aborted),
         ];
         for (node_status, expected) in mappings {
             let result: TaskStatus = node_status.into();
