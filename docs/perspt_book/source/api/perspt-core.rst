@@ -22,7 +22,7 @@ Modules
    * - ``events``
      - ``AgentEvent`` (~30 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``, channel types
    * - ``llm_provider``
-     - ``GenAIProvider``, ``EOT_SIGNAL``, streaming support
+     - ``GenAIProvider``, ``LlmResponse``, ``EOT_SIGNAL``, streaming support
    * - ``plugin``
      - ``LanguagePlugin`` trait, ``PythonPlugin``, ``RustPlugin``, ``JsPlugin``, ``PluginRegistry``
    * - ``memory``

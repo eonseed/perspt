@@ -12,7 +12,7 @@ pub mod types;
 
 pub use config::Config;
 pub use events::{ActionType, AgentAction, AgentEvent, NodeStatus};
-pub use llm_provider::{GenAIProvider, EOT_SIGNAL};
+pub use llm_provider::{GenAIProvider, LlmResponse, EOT_SIGNAL};
 pub use memory::ProjectMemory;
 pub use plugin::{
     InitOptions, JsPlugin, LanguagePlugin, LspConfig, PluginRegistry, PythonPlugin, RustPlugin,
