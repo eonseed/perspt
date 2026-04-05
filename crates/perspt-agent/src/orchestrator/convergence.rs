@@ -625,7 +625,7 @@ Commands: [optional, one per line]
     ) -> Result<String> {
         let start = Instant::now();
 
-        let response = self
+        let llm_response = self
             .provider
             .generate_response_simple(model, prompt)
             .await?;
@@ -633,21 +633,30 @@ Commands: [optional, one per line]
         // Immediately persist to database if logging is enabled
         if self.context.log_llm {
             let latency_ms = start.elapsed().as_millis() as i32;
-            if let Err(e) = self
-                .ledger
-                .record_llm_request(model, prompt, &response, node_id, latency_ms)
-            {
+            let tokens_in = llm_response.tokens_in.unwrap_or(0);
+            let tokens_out = llm_response.tokens_out.unwrap_or(0);
+            if let Err(e) = self.ledger.record_llm_request(
+                model,
+                prompt,
+                &llm_response.text,
+                node_id,
+                latency_ms,
+                tokens_in,
+                tokens_out,
+            ) {
                 log::warn!("Failed to persist LLM request: {}", e);
             } else {
                 log::debug!(
-                    "Persisted LLM request: model={}, latency={}ms",
+                    "Persisted LLM request: model={}, latency={}ms, tokens_in={}, tokens_out={}",
                     model,
-                    latency_ms
+                    latency_ms,
+                    tokens_in,
+                    tokens_out,
                 );
             }
         }
 
-        Ok(response)
+        Ok(llm_response.text)
     }
 
     /// PSP-5 Phase 1/4: Call LLM with tier-aware fallback.
