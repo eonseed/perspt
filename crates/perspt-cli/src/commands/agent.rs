@@ -193,6 +193,22 @@ pub async fn run(
         );
         println!();
 
+        // Set up Ctrl+C handler for graceful abort
+        let abort_flag = orchestrator.abort_flag();
+        tokio::spawn(async move {
+            // First Ctrl+C: request graceful abort
+            tokio::signal::ctrl_c().await.ok();
+            eprintln!(
+                "\n⚠️  Interrupt received. Aborting gracefully... (Ctrl+C again to force quit)"
+            );
+            abort_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+
+            // Second Ctrl+C: force exit
+            tokio::signal::ctrl_c().await.ok();
+            eprintln!("\nForce quitting...");
+            std::process::exit(130);
+        });
+
         // Run the SRBN control loop (orchestrator starts LSP internally after classification)
         match orchestrator.run(task.clone()).await {
             Ok(()) => {
