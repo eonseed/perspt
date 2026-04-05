@@ -253,6 +253,9 @@ impl MerkleLedger {
         if let Some(ref mut session) = self.current_session {
             session.ended_at = Some(chrono_timestamp());
             session.status = status.to_string();
+            // Persist status to durable store
+            self.store
+                .update_session_status(&session.session_id, status)?;
             log::info!(
                 "Ended session {} with status: {}",
                 session.session_id,
