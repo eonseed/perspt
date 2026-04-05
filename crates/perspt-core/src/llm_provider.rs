@@ -15,6 +15,14 @@ use tokio::sync::{mpsc, RwLock};
 /// End of transmission signal
 pub const EOT_SIGNAL: &str = "<|EOT|>";
 
+/// Response from a non-streaming LLM call, carrying text and token usage.
+#[derive(Debug, Clone)]
+pub struct LlmResponse {
+    pub text: String,
+    pub tokens_in: Option<i32>,
+    pub tokens_out: Option<i32>,
+}
+
 /// Shared state for rate limiting and token counting
 #[derive(Default)]
 struct SharedState {
@@ -110,7 +118,7 @@ impl GenAIProvider {
 
     /// Generates a simple text response without streaming.
     /// Includes exponential backoff retry for rate limits and transient errors.
-    pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<String> {
+    pub async fn generate_response_simple(&self, model: &str, prompt: &str) -> Result<LlmResponse> {
         self.generate_response_with_retry(model, prompt, 3).await
     }
 
@@ -120,7 +128,7 @@ impl GenAIProvider {
         model: &str,
         prompt: &str,
         max_retries: usize,
-    ) -> Result<String> {
+    ) -> Result<LlmResponse> {
         self.increment_request().await;
 
         let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
@@ -155,16 +163,30 @@ impl GenAIProvider {
 
             match self.client.exec_chat(model, chat_req.clone(), None).await {
                 Ok(chat_res) => {
+                    let tokens_in = chat_res.usage.prompt_tokens;
+                    let tokens_out = chat_res.usage.completion_tokens;
                     let content = chat_res
                         .first_text()
                         .context("No text content in response")?;
                     log::debug!(
-                        "Received response with {} characters in {}ms",
+                        "Received response with {} characters in {}ms (tokens: in={:?}, out={:?})",
                         content.len(),
-                        start_time.elapsed().as_millis()
+                        start_time.elapsed().as_millis(),
+                        tokens_in,
+                        tokens_out,
                     );
 
-                    return Ok(content.to_string());
+                    // Update shared token counter with real values when available
+                    let total = tokens_in.unwrap_or(0) + tokens_out.unwrap_or(0);
+                    if total > 0 {
+                        self.add_tokens(total as usize).await;
+                    }
+
+                    return Ok(LlmResponse {
+                        text: content.to_string(),
+                        tokens_in,
+                        tokens_out,
+                    });
                 }
                 Err(e) => {
                     let err_str = e.to_string();

@@ -282,6 +282,7 @@ impl MerkleLedger {
     }
 
     /// Record an LLM request/response for debugging and cost tracking
+    #[allow(clippy::too_many_arguments)]
     pub fn record_llm_request(
         &self,
         model: &str,
@@ -289,6 +290,8 @@ impl MerkleLedger {
         response: &str,
         node_id: Option<&str>,
         latency_ms: i32,
+        tokens_in: i32,
+        tokens_out: i32,
     ) -> Result<()> {
         let session_id = self
             .current_session
@@ -302,8 +305,8 @@ impl MerkleLedger {
             model: model.to_string(),
             prompt: prompt.to_string(),
             response: response.to_string(),
-            tokens_in: 0, // TODO: Extract from provider response if available
-            tokens_out: 0,
+            tokens_in,
+            tokens_out,
             latency_ms,
         };
 

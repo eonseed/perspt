@@ -78,7 +78,8 @@ impl Agent for ArchitectAgent {
         let response = self
             .provider
             .generate_response_simple(&self.model, &prompt)
-            .await?;
+            .await?
+            .text;
 
         Ok(AgentMessage::new(ModelTier::Architect, response))
     }
@@ -315,7 +316,8 @@ impl Agent for ActuatorAgent {
         let response = self
             .provider
             .generate_response_simple(&self.model, &prompt)
-            .await?;
+            .await?
+            .text;
 
         Ok(AgentMessage::new(ModelTier::Actuator, response))
     }
@@ -384,7 +386,8 @@ impl Agent for VerifierAgent {
         let response = self
             .provider
             .generate_response_simple(&self.model, &prompt)
-            .await?;
+            .await?
+            .text;
 
         Ok(AgentMessage::new(ModelTier::Verifier, response))
     }
@@ -436,7 +439,8 @@ impl Agent for SpeculatorAgent {
         let response = self
             .provider
             .generate_response_simple(&self.model, &prompt)
-            .await?;
+            .await?
+            .text;
 
         Ok(AgentMessage::new(ModelTier::Speculator, response))
     }
