@@ -846,6 +846,9 @@ pub async fn run_agent_tui_with_orchestrator(
     let (event_sender, mut event_receiver) = channel::event_channel();
     let (action_sender, action_receiver) = channel::action_channel();
 
+    // Get abort flag before moving orchestrator into spawned task
+    let abort_flag = orchestrator.abort_flag();
+
     // Connect orchestrator to TUI
     orchestrator.connect_tui(event_sender, action_receiver);
 
@@ -924,6 +927,16 @@ pub async fn run_agent_tui_with_orchestrator(
     }
 
     ratatui::restore();
-    orchestrator_handle.abort();
+
+    // Request graceful abort and give the orchestrator time to finalize
+    abort_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    match tokio::time::timeout(std::time::Duration::from_secs(3), orchestrator_handle).await {
+        Ok(Ok(Ok(()))) => {} // Orchestrator finished cleanly
+        Ok(Ok(Err(e))) => log::warn!("Orchestrator finished with error: {}", e),
+        Ok(Err(e)) => log::warn!("Orchestrator task panicked: {}", e),
+        Err(_) => {
+            log::warn!("Orchestrator did not finish within 3s after abort — forcing shutdown");
+        }
+    }
     Ok(())
 }

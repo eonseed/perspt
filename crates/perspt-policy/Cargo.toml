@@ -13,8 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Core types and path normalization
-perspt-core = { path = "../perspt-core" }
-
+perspt-core = { version = "0.5.7", path = "../perspt-core" }
 # Starlark policy engine
 starlark = "0.13"
 

@@ -277,6 +277,7 @@ pub enum NodeStatus {
     Completed,
     Failed,
     Escalated,
+    Aborted,
 }
 
 impl From<crate::types::NodeState> for NodeStatus {
@@ -293,7 +294,7 @@ impl From<crate::types::NodeState> for NodeStatus {
             NodeState::Escalated => NodeStatus::Escalated,
             NodeState::Completed => NodeStatus::Completed,
             NodeState::Failed => NodeStatus::Failed,
-            NodeState::Aborted => NodeStatus::Failed,
+            NodeState::Aborted => NodeStatus::Aborted,
             NodeState::Superseded => NodeStatus::Completed,
         }
     }
