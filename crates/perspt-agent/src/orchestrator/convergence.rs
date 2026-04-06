@@ -471,6 +471,20 @@ impl SRBNOrchestrator {
             ));
         }
 
+        // Include the sandbox/workspace file tree so corrections target
+        // paths that actually exist on disk.
+        if let Some(idx) = self.node_indices.get(node_id) {
+            let wd = self.effective_working_dir(*idx);
+            if let Ok(tree) = crate::tools::list_sandbox_files(&wd) {
+                if !tree.is_empty() {
+                    prompt.push_str(&format!(
+                        "\n### Current Project Tree\n\n```\n{}\n```\n",
+                        tree.join("\n")
+                    ));
+                }
+            }
+        }
+
         // Include raw build/test output from plugin verification if available.
         // This is crucial because LSP diagnostics may not report missing crate
         // errors that `cargo check` / `cargo build` would catch.

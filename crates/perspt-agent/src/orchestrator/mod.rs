@@ -1273,8 +1273,10 @@ impl SRBNOrchestrator {
     async fn step_speculate(&mut self, idx: NodeIndex) -> Result<()> {
         log::info!("Step 3: Speculation - Generating implementation");
 
-        // PSP-5 Phase 3: Build context package for this node
-        let retriever = ContextRetriever::new(self.context.working_dir.clone())
+        // PSP-5 Phase 3: Build context package for this node.
+        // Use the sandbox directory when available so the LLM sees files
+        // it will actually write to, falling back to the workspace root.
+        let retriever = ContextRetriever::new(self.effective_working_dir(idx))
             .with_max_file_bytes(8 * 1024)
             .with_max_context_bytes(100 * 1024); // 100KB default budget
 
@@ -1473,6 +1475,20 @@ impl SRBNOrchestrator {
                 prompt, speculator_hints
             );
         }
+
+        // Include sandbox/workspace file tree so the LLM has structural
+        // awareness of the actual directory layout it is writing into.
+        let wd = self.effective_working_dir(idx);
+        if let Ok(tree) = crate::tools::list_sandbox_files(&wd) {
+            if !tree.is_empty() {
+                prompt = format!(
+                    "{}\n\n## Current Project Tree\n\n```\n{}\n```",
+                    prompt,
+                    tree.join("\n")
+                );
+            }
+        }
+
         let model = actuator.model().to_string();
 
         let response = self
