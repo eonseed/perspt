@@ -361,12 +361,6 @@ impl SRBNOrchestrator {
         self.budget.max_cost_usd = max_cost_usd;
     }
 
-    /// Override the adaptive planning policy before run() selects one
-    /// from workspace classification.
-    pub fn set_planning_policy(&mut self, policy: perspt_core::PlanningPolicy) {
-        self.planning_policy = policy;
-    }
-
     // =========================================================================
     // PSP-5 Phase 8: Session Rehydration for Resume
     // =========================================================================
@@ -1894,13 +1888,6 @@ impl SRBNOrchestrator {
     /// Get node count
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
-    }
-
-    /// Start Python LSP (ty) for type checking
-    ///
-    /// Legacy entry point — delegates to `start_lsp_for_plugins` with just Python.
-    pub async fn start_python_lsp(&mut self) -> Result<()> {
-        self.start_lsp_for_plugins(&["python"]).await
     }
 
     /// Start LSP clients for the given plugin names.

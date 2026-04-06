@@ -273,40 +273,6 @@ impl TaskTree {
         }
     }
 
-    /// Toggle collapse state for selected node
-    pub fn toggle_collapse(&mut self) {
-        if let Some(selected) = self.state.selected() {
-            if let Some(id) = self.visible_tasks.get(selected).cloned() {
-                if let Some(node) = self.nodes.get(&id) {
-                    if node.has_children {
-                        if self.collapsed.contains(&id) {
-                            self.collapsed.remove(&id);
-                        } else {
-                            self.collapsed.insert(id);
-                        }
-                        self.rebuild_visible();
-                    }
-                }
-            }
-        }
-    }
-
-    /// Expand all nodes
-    pub fn expand_all(&mut self) {
-        self.collapsed.clear();
-        self.rebuild_visible();
-    }
-
-    /// Collapse all nodes
-    pub fn collapse_all(&mut self) {
-        for (id, node) in &self.nodes {
-            if node.has_children {
-                self.collapsed.insert(id.clone());
-            }
-        }
-        self.rebuild_visible();
-    }
-
     /// Rebuild the visible task list based on collapse state
     fn rebuild_visible(&mut self) {
         self.visible_tasks.clear();

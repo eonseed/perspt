@@ -3,7 +3,4 @@
 pub mod engine;
 pub mod sanitize;
 
-pub use engine::{PolicyDecision, PolicyEngine};
-pub use sanitize::{
-    canonicalize, is_safe_for_auto_exec, sanitize_command, validate_workspace_bound, SanitizeResult,
-};
+pub use sanitize::{sanitize_command, validate_workspace_bound, SanitizeResult};
