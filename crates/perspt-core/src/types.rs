@@ -390,6 +390,17 @@ impl SRBNNode {
     }
 }
 
+/// Outcome of a full orchestration session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionOutcome {
+    /// All nodes completed successfully
+    Success,
+    /// Some nodes completed, some escalated or failed
+    PartialSuccess,
+    /// Critical failure or all nodes escalated/failed
+    Failed,
+}
+
 /// Node execution state (from PSP state machine)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeState {
@@ -426,6 +437,66 @@ impl NodeState {
             self,
             NodeState::Completed | NodeState::Failed | NodeState::Aborted | NodeState::Superseded
         )
+    }
+
+    /// Check if the node finished successfully
+    pub fn is_success(&self) -> bool {
+        matches!(self, NodeState::Completed)
+    }
+
+    /// Check if the node is actively running (non-terminal, non-queued)
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self,
+            NodeState::Planning
+                | NodeState::Coding
+                | NodeState::Verifying
+                | NodeState::Retry
+                | NodeState::SheafCheck
+                | NodeState::Committing
+        )
+    }
+
+    /// Parse a state string from the database or display layer.
+    ///
+    /// Handles PascalCase, UPPERCASE, and lowercase variants that appear in
+    /// the store, CLI, and dashboard.  Unknown strings map to `TaskQueued`.
+    pub fn from_display_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "taskqueued" | "queued" | "task_queued" => NodeState::TaskQueued,
+            "planning" => NodeState::Planning,
+            "coding" | "in_progress" | "in-progress" => NodeState::Coding,
+            "verifying" => NodeState::Verifying,
+            "retry" | "retrying" => NodeState::Retry,
+            "sheafcheck" | "sheaf_check" => NodeState::SheafCheck,
+            "committing" | "committed" => NodeState::Committing,
+            "escalated" => NodeState::Escalated,
+            "completed" | "stable" | "verified" => NodeState::Completed,
+            "failed" | "error" => NodeState::Failed,
+            "aborted" => NodeState::Aborted,
+            "superseded" => NodeState::Superseded,
+            _ => NodeState::TaskQueued,
+        }
+    }
+}
+
+impl std::fmt::Display for NodeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            NodeState::TaskQueued => "queued",
+            NodeState::Planning => "planning",
+            NodeState::Coding => "coding",
+            NodeState::Verifying => "verifying",
+            NodeState::Retry => "retrying",
+            NodeState::SheafCheck => "sheaf_check",
+            NodeState::Committing => "committing",
+            NodeState::Escalated => "escalated",
+            NodeState::Completed => "completed",
+            NodeState::Failed => "failed",
+            NodeState::Aborted => "aborted",
+            NodeState::Superseded => "superseded",
+        };
+        f.write_str(label)
     }
 }
 
