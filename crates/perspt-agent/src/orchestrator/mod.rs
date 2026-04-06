@@ -48,6 +48,15 @@ pub enum ApprovalResult {
     Rejected,
 }
 
+/// Outcome of executing a single graph node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeOutcome {
+    /// Node converged and committed successfully.
+    Completed,
+    /// Node failed to converge and was escalated.
+    Escalated,
+}
+
 /// The SRBN Orchestrator - manages the agent workflow
 pub struct SRBNOrchestrator {
     /// Task DAG managed by petgraph
@@ -618,6 +627,7 @@ impl SRBNOrchestrator {
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
         let mut executed = 0;
+        let mut escalated: usize = 0;
 
         // PSP-5 Phase 8: Emit differential resume summary
         let terminal_count = indices
@@ -676,7 +686,7 @@ impl SRBNOrchestrator {
             });
 
             match self.execute_node(*idx).await {
-                Ok(()) => {
+                Ok(NodeOutcome::Completed) => {
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
                             node_id: node.node_id.clone(),
@@ -685,7 +695,12 @@ impl SRBNOrchestrator {
                     }
                     executed += 1;
                 }
+                Ok(NodeOutcome::Escalated) => {
+                    escalated += 1;
+                    continue;
+                }
                 Err(e) => {
+                    escalated += 1;
                     let node_id = self.graph[*idx].node_id.clone();
                     log::error!("Node {} failed on resume: {}", node_id, e);
                     self.emit_log(format!("❌ Node {} failed: {}", node_id, e));
@@ -705,8 +720,11 @@ impl SRBNOrchestrator {
             total_nodes
         );
         self.emit_event(perspt_core::AgentEvent::Complete {
-            success: true,
-            message: format!("Resumed: executed {} of {} nodes", executed, total_nodes),
+            success: escalated == 0,
+            message: format!(
+                "Resumed: {}/{} completed, {} escalated",
+                executed, total_nodes, escalated
+            ),
         });
         Ok(())
     }
@@ -1037,6 +1055,8 @@ impl SRBNOrchestrator {
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
+        let mut completed_count: usize = 0;
+        let mut escalated_count: usize = 0;
 
         for (i, idx) in indices.iter().enumerate() {
             // Abort gate: stop execution if abort was requested.
@@ -1086,7 +1106,9 @@ impl SRBNOrchestrator {
             }
 
             match self.execute_node(*idx).await {
-                Ok(()) => {
+                Ok(NodeOutcome::Completed) => {
+                    completed_count += 1;
+
                     // Record step in budget envelope
                     self.budget.record_step();
 
@@ -1113,7 +1135,21 @@ impl SRBNOrchestrator {
                         });
                     }
                 }
+                Ok(NodeOutcome::Escalated) => {
+                    escalated_count += 1;
+                    self.budget.record_step();
+
+                    // Do NOT emit NodeCompleted — the node was escalated, not completed.
+                    if let Some(node) = self.graph.node_weight(*idx) {
+                        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                            node_id: node.node_id.clone(),
+                            status: perspt_core::NodeStatus::Escalated,
+                        });
+                    }
+                    continue;
+                }
                 Err(e) => {
+                    escalated_count += 1;
                     let node_id = self.graph[*idx].node_id.clone();
                     eprintln!("[SRBN-DIAG] Node {} failed: {:#}", node_id, e);
                     log::error!("Node {} failed: {}", node_id, e);
@@ -1149,15 +1185,26 @@ impl SRBNOrchestrator {
             log::warn!("Failed to clean up session sandboxes: {}", e);
         }
 
+        // Derive session outcome from actual node results.
+        let outcome = if escalated_count == 0 {
+            perspt_core::SessionOutcome::Success
+        } else if completed_count > 0 {
+            perspt_core::SessionOutcome::PartialSuccess
+        } else {
+            perspt_core::SessionOutcome::Failed
+        };
         self.emit_event(perspt_core::AgentEvent::Complete {
-            success: true,
-            message: format!("Completed {} nodes", total_nodes),
+            success: outcome == perspt_core::SessionOutcome::Success,
+            message: format!(
+                "{}/{} nodes completed, {} escalated",
+                completed_count, total_nodes, escalated_count
+            ),
         });
         Ok(())
     }
 
     /// Execute a single node through the control loop
-    async fn execute_node(&mut self, idx: NodeIndex) -> Result<()> {
+    async fn execute_node(&mut self, idx: NodeIndex) -> Result<NodeOutcome> {
         let node = &self.graph[idx];
         log::info!("Executing node: {} ({})", node.node_id, node.goal);
 
@@ -1252,7 +1299,7 @@ impl SRBNOrchestrator {
                 );
             }
 
-            return Ok(());
+            return Ok(NodeOutcome::Escalated);
         }
 
         // Step 6: Sheaf Validation (Post-Subgraph Consistency)
@@ -1266,7 +1313,7 @@ impl SRBNOrchestrator {
             self.merge_provisional_branch(bid, idx);
         }
 
-        Ok(())
+        Ok(NodeOutcome::Completed)
     }
 
     /// Step 3: Speculative Generation
