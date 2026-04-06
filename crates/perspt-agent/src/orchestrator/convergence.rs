@@ -575,7 +575,7 @@ Commands: [optional, one per line]
     ///
     /// Stage 2 (actuator tier): Apply the verifier's guidance to produce
     /// the corrected code artifact.
-    async fn call_llm_for_correction(&self, prompt: &str) -> Result<String> {
+    async fn call_llm_for_correction(&mut self, prompt: &str) -> Result<String> {
         // Stage 1: Verifier analyzes the failure
         let verifier_prompt = format!("{}{}", crate::prompts::VERIFIER_ANALYSIS_PREAMBLE, prompt);
 
@@ -616,9 +616,9 @@ Commands: [optional, one per line]
         Ok(response)
     }
 
-    /// Call LLM and immediately persist the request/response to database if logging is enabled
+    /// Call LLM, always record token usage, and optionally persist full request/response text.
     pub(super) async fn call_llm_with_logging(
-        &self,
+        &mut self,
         model: &str,
         prompt: &str,
         node_id: Option<&str>,
@@ -630,11 +630,25 @@ Commands: [optional, one per line]
             .generate_response_simple(model, prompt)
             .await?;
 
-        // Immediately persist to database if logging is enabled
+        let latency_ms = start.elapsed().as_millis() as i32;
+        let tokens_in = llm_response.tokens_in.unwrap_or(0);
+        let tokens_out = llm_response.tokens_out.unwrap_or(0);
+
+        // Always record lightweight token/latency metrics regardless of --log-llm.
+        if let Err(e) = self
+            .ledger
+            .record_llm_usage(model, node_id, latency_ms, tokens_in, tokens_out)
+        {
+            log::warn!("Failed to persist LLM usage metrics: {}", e);
+        }
+
+        // Always update budget envelope with estimated cost.
+        // Rough estimate: $0.01 per 1K input tokens, $0.03 per 1K output tokens.
+        let estimated_cost = (tokens_in as f64 * 0.00001) + (tokens_out as f64 * 0.00003);
+        self.budget.record_cost(estimated_cost);
+
+        // Optionally persist full prompt/response text when --log-llm is active.
         if self.context.log_llm {
-            let latency_ms = start.elapsed().as_millis() as i32;
-            let tokens_in = llm_response.tokens_in.unwrap_or(0);
-            let tokens_out = llm_response.tokens_out.unwrap_or(0);
             if let Err(e) = self.ledger.record_llm_request(
                 model,
                 prompt,
@@ -644,17 +658,18 @@ Commands: [optional, one per line]
                 tokens_in,
                 tokens_out,
             ) {
-                log::warn!("Failed to persist LLM request: {}", e);
-            } else {
-                log::debug!(
-                    "Persisted LLM request: model={}, latency={}ms, tokens_in={}, tokens_out={}",
-                    model,
-                    latency_ms,
-                    tokens_in,
-                    tokens_out,
-                );
+                log::warn!("Failed to persist full LLM request: {}", e);
             }
         }
+
+        log::debug!(
+            "LLM call: model={}, latency={}ms, tokens_in={}, tokens_out={}, est_cost=${:.4}",
+            model,
+            latency_ms,
+            tokens_in,
+            tokens_out,
+            estimated_cost,
+        );
 
         Ok(llm_response.text)
     }
@@ -666,7 +681,7 @@ Commands: [optional, one per line]
     /// is configured for the given tier, retry with the fallback. Emits a
     /// `ModelFallback` event on switch. Returns the raw response string.
     pub(super) async fn call_llm_with_tier_fallback<F>(
-        &self,
+        &mut self,
         primary_model: &str,
         prompt: &str,
         node_id: Option<&str>,
@@ -694,18 +709,19 @@ Commands: [optional, one per line]
             validation_err
         );
 
-        // Look up fallback model for this tier
-        let fallback = match tier {
-            ModelTier::Architect => self.architect_fallback_model.as_deref(),
-            ModelTier::Actuator => self.actuator_fallback_model.as_deref(),
-            ModelTier::Verifier => self.verifier_fallback_model.as_deref(),
-            ModelTier::Speculator => self.speculator_fallback_model.as_deref(),
+        // Look up fallback model for this tier (clone to avoid borrow conflict).
+        let fallback_model = match tier {
+            ModelTier::Architect => self.architect_fallback_model.clone(),
+            ModelTier::Actuator => self.actuator_fallback_model.clone(),
+            ModelTier::Verifier => self.verifier_fallback_model.clone(),
+            ModelTier::Speculator => self.speculator_fallback_model.clone(),
         };
 
         // If no explicit fallback configured, retry with the same primary model.
-        // This gives the LLM a second chance at structured output without
-        // requiring explicit fallback config for every tier.
-        let fallback_model = fallback.unwrap_or(primary_model);
+        let fallback_model = fallback_model
+            .as_deref()
+            .unwrap_or(primary_model)
+            .to_string();
 
         log::info!(
             "Falling back to model '{}' for {:?} tier",
@@ -720,7 +736,7 @@ Commands: [optional, one per line]
             reason: validation_err,
         });
 
-        self.call_llm_with_logging(fallback_model, prompt, node_id)
+        self.call_llm_with_logging(&fallback_model, prompt, node_id)
             .await
     }
 
