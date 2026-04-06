@@ -1,0 +1,649 @@
+PSP: 000007
+Title: Robust Typed Correction Loops and Plugin-Aware Prompt Contracts
+Author: Vikrant Rathore (@vikrantrathore)
+Status: Draft
+Type: Enhancement
+Created: 2026-04-06
+Discussion-To: TBD
+
+========
+Abstract
+========
+
+This PSP proposes a full hardening of Perspt's SRBN correction and verification loop so that malformed, weakly structured, or provider-specific LLM responses cannot silently degrade into incorrect file mutations, path guessing, or false convergence claims. It extends :psp:`000005` by introducing a typed correction envelope, a multi-stage parse-and-validate pipeline, plugin-defined response semantics, dynamically generated prompt contracts, and ledger-backed observability for every correction attempt.
+
+The proposal is grounded in the SRBN execution model already implemented in Perspt: generation is provisional, convergence is assessed through language servers, project structure checks, language-native build and test tools, and sheaf consistency, and only verified stable states cross the ledger barrier. The objective of PSP 000007 is to make that barrier robust in practice across Rust, Python, JavaScript, and future plugins, even when model output is partially malformed or semantically incomplete.
+
+==========
+Motivation
+==========
+
+PSP 000005 established the runtime contract for project-first planning, multi-artifact execution, plugin-driven verification, and SRBN convergence. The current implementation has made substantial progress on those goals, but recent sessions show that the correction loop still has a weak contract boundary between raw model text and the typed runtime:
+
+* A node may generate a correct initial artifact bundle, but a later verifier-guided correction can return semi-structured markdown that is parsed through legacy heuristics rather than a strict correction contract.
+* The correction parser can fall back to guessed filenames such as ``main.rs`` or ``Cargo.toml`` when headings or wrappers are present, even though the node's declared outputs are narrower.
+* Path strings may arrive quoted, backticked, or otherwise formatted by the LLM, and those wrappers are not normalized consistently before ownership and output-target checks are applied.
+* The plugin system is verifier-aware but not yet correction-contract-aware. Plugins select build, lint, test, and LSP stages, but they do not yet declare path policies, support-file rules, dependency mutation rules, or prompt fragments for correction semantics.
+* Prompt generation is still largely static. The current prompt layer assembles text with ad hoc string substitution, but the response contract is not compiled dynamically from the active plugin set, node class, verification evidence, and ownership restrictions.
+* LLM body logging is intentionally selective via ``--log-llm`` so that routine sessions do not persist every prompt and response. However, correction telemetry and correction-failure provenance are still not captured consistently enough across execution paths, making some postmortem analysis harder than it should be.
+
+These weaknesses matter because SRBN depends on a strict separation between:
+
+* provisional generation,
+* deterministic verification,
+* local correction grounded in verifier evidence,
+* and ledger commit as the hard stability barrier.
+
+If malformed responses can be guessed into plausible-but-wrong file paths, the system stops behaving like a verifier-guided convergence loop and starts behaving like an unstructured imperative agent. That undermines the core SRBN guarantee that stable state should be machine-evidenced, attributable, and bounded by the node's ownership closure.
+
+Currently, users cannot rely on correction loops to behave consistently across provider families and language plugins when the model responds with:
+
+* fenced JSON embedded in prose,
+* markdown headings such as ``### File: src/lib.rs``,
+* quoted or backticked paths,
+* partially valid bundles mixed with undeclared files,
+* dependency fixes that require support files outside the node's declared outputs,
+* or language-specific structural repairs such as adding ``src/lib.rs``, ``__init__.py``, or sub-package manifests.
+
+This PSP addresses that gap by turning the correction loop into a first-class, typed subsystem with explicit grammar, semantic validation, plugin-aware prompt generation, and durable telemetry. The goal is not only to parse more responses, but to ensure that every correction attempt remains aligned with the SRBN paper's convergence discipline:
+
+* the generator is not its own correctness oracle,
+* verification evidence is decomposed into machine-auditable signals,
+* retries are grounded in those signals,
+* and no state crosses the stability barrier without passing deterministic checks.
+
+===============================
+Evidence from Observed Sessions
+===============================
+
+This proposal is grounded in concrete Perspt session data gathered from the current implementation rather than hypothetical parser failure modes.
+
+.. rubric:: Session 24641f27-9241-4ce2-bced-67c3fd191bf6
+
+This session was executed with ``--log-llm`` enabled, which allowed full prompt and response capture in DuckDB. The session demonstrates a critical correction-loop failure mode:
+
+* DuckDB recorded the session as ``RUNNING`` with task text ``Create an app to build personal porfolio application using DCF and other modern ML techniques in rust with axum, aksama``.
+* DuckDB recorded ``16`` rows in ``llm_requests`` for this session: ``8`` telemetry-only rows and ``8`` full prompt/response rows. This paired pattern confirms that lightweight telemetry was recorded for every call and full bodies were additionally recorded because ``--log-llm`` was enabled.
+* DuckDB recorded exactly one persisted node state for this session: ``templates_setup`` with state ``Completed`` and ``attempt_count = 2``.
+* DuckDB recorded exactly one persisted artifact bundle for this session: ``templates_setup`` with ``artifact_count = 5`` and touched files ``Cargo.toml``, ``src/main.rs``, ``templates/base.html``, ``templates/index.html``, and ``templates/portfolio.html``.
+
+* The initial ``portfolio_models`` actuator response was structurally correct and targeted the declared output path ``src/portfolio.rs``.
+* Verification then produced deterministic evidence indicating that the generated Rust module could not be built in the current project structure without additional support files and dependency declarations.
+* The verifier-guided correction response did not return a canonical JSON artifact bundle. Instead, it returned markdown-style sections such as ``### File: src/lib.rs`` and ``### File: Cargo.toml`` followed by fenced code blocks.
+* The legacy fallback parser did not recognize ``### File:`` as a typed file marker. As a result, unnamed Rust code blocks were mapped to ``main.rs`` and the TOML block was mapped to ``Cargo.toml``.
+* The runtime then rejected the resulting bundle because the node ``portfolio_models`` only declared ``src/portfolio.rs`` as an allowed output.
+
+The node-specific ``portfolio_models`` actuator response stored in DuckDB was a valid structured JSON bundle. It contained:
+
+* ``node_id = portfolio_models``
+* ``model = gemini-3.1-flash-lite-preview``
+* ``tokens_in = 1012``
+* ``tokens_out = 379``
+* ``latency_ms = 2514``
+* ``prompt_len = 4030``
+* ``response_len = 1234``
+* a single artifact targeting ``src/portfolio.rs``
+* a single command entry: ``cargo add serde --features derive``
+
+This means the initial actuator output for ``portfolio_models`` was not the malformed step. The malformed step occurred later in the verifier-guided correction path.
+
+The resulting runtime diagnostic from that session was:
+
+.. code-block:: text
+
+   [SRBN-DIAG] All artifacts stripped for 'portfolio_models': ["main.rs", "Cargo.toml", "main.rs", "main.rs"]
+   [SRBN-DIAG] Node portfolio_models failed: All 4 artifact(s) targeted undeclared paths for node 'portfolio_models': [main.rs, Cargo.toml, main.rs, main.rs]. Expected paths: ["src/portfolio.rs"]
+
+The persisted unnamed correction response captured for that same session at ``2026-04-06 08:41:32.520617`` contained content equivalent to:
+
+.. code-block:: text
+
+   ### File: src/lib.rs
+   ```rust
+   pub mod portfolio;
+   ```
+
+   ### File: Cargo.toml
+   ```toml
+   [package]
+   name = "ppm"
+   version = "0.1.0"
+   edition = "2024"
+
+   [dependencies]
+   serde = { version = "1.0", features = ["derive"] }
+   ```
+
+   ### File: src/portfolio.rs
+   ```rust
+   use serde::{Deserialize, Serialize};
+   use std::collections::HashMap;
+   ...
+   ```
+
+This is a strong indicator that the failure was not simply an "LLM produced wrong code" issue. The correction content was semantically interpretable, but the contract boundary between response shape and typed bundle parsing was too weak.
+
+In the same correction window, DuckDB also captured a verifier-analysis response at ``2026-04-06 08:41:28.106035`` that explicitly recommended creating ``src/lib.rs`` and updating ``Cargo.toml`` because Cargo could not parse the project without a root target. That is important because it shows the correction loop was reacting to real deterministic verifier evidence, not hallucinating a random file set.
+
+.. rubric:: Session 5e0507e8-9a78-471d-816c-ad89ce1017a9
+
+This session was executed without full prompt/response logging, so DuckDB stored telemetry but not full bodies. It still provides useful evidence of a second failure mode:
+
+* Multiple LLM requests were recorded for nodes such as ``task_dcf``, ``test_dcf``, ``task_ml``, ``test_ml``, ``task_templates``, and ``task_routes``.
+* The runtime diagnostics showed that some artifact paths arrived wrapped as single-backtick markdown literals, for example ``src/lib.rs`` and ``Cargo.toml``.
+* The normalization and path-validation layer treated these wrapped path strings as different from the canonical relative paths declared by the node outputs.
+
+Representative diagnostics from that session included:
+
+.. code-block:: text
+
+   [SRBN-DIAG] All artifacts stripped for 'task_templates': ["`Cargo.toml`", "`src/lib.rs`", "`src/templates.rs`"]
+   [SRBN-DIAG] Node task_templates failed: All 3 artifact(s) targeted undeclared paths for node 'task_templates': [`Cargo.toml`, `src/lib.rs`, `src/templates.rs`]. Expected paths: ["src/templates.rs", "templates/base.html", "templates/index.html", "templates/dcf.html", "templates/ml.html"]
+
+This session shows that even when the model names the intuitively correct file, cosmetic wrappers added by the model can still cause the runtime to reject otherwise recoverable output.
+
+.. rubric:: Why These Sessions Matter
+
+Taken together, these sessions show that the current failure is not confined to one language, one provider, or one bad prompt. The observed evidence spans:
+
+* typed Rust correction responses that degrade into guessed filenames because markdown headings are not part of the typed parser contract,
+* quoted or backticked path strings that bypass path normalization,
+* nodes whose declared outputs are narrower than the support files suggested by verifier evidence,
+* and intentionally reduced prompt/response observability when ``--log-llm`` is not active, which is a valid product choice but increases the need for structured correction-attempt telemetry.
+
+These are exactly the kinds of boundary failures that PSP 000007 is intended to address: the gap between SRBN's deterministic verification model and the current permissive text-to-bundle correction boundary. The proposal does NOT assume that every session should store full LLM bodies. Instead, it assumes that even when full body logging is disabled by design, the runtime should still persist enough typed correction-attempt metadata to explain what failed, how the response was classified, and why the retry or escalation path was chosen.
+
+================
+Proposed Changes
+================
+
+.. rubric:: Functional Specification
+
+Perspt SHALL treat correction-loop output as a typed protocol rather than a best-effort text scrape.
+
+**Behavioral Changes:**
+
+* All verifier-guided correction responses SHALL target a canonical typed envelope rather than a free-form ``File:`` / ``Diff:`` convention.
+* The correction loop SHALL execute a parse pipeline with three explicit phases: normalization, structural parsing, and semantic validation.
+* Structural parsing SHALL be provider-neutral and SHALL tolerate wrapper prose, fenced blocks, and other formatting quirks, but it SHALL NOT invent fallback filenames during correction handling.
+* Semantic validation SHALL be enforced before bundle application. Validation SHALL include path legality, ownership closure, plugin-specific support-file policy, dependency mutation policy, and node-class constraints.
+* A malformed correction response SHALL produce a typed failure class and a bounded retry prompt targeted to that class. It SHALL NOT silently degrade into guessed file writes.
+* Language plugins SHALL define not only verifier capabilities but also correction semantics: path rules, manifest mutation rules, support-file rules, dependency declaration rules, and prompt fragments.
+* Prompt generation SHALL become request-driven. A prompt compiler SHALL synthesize correction prompts from typed evidence, node scope, active plugin capabilities, project structure, and output restrictions.
+* Correction telemetry SHALL be persisted regardless of success or failure so that users can inspect the raw response, normalized envelope, parse method, semantic rejection reason, and retry class after a session.
+* The correction loop SHALL remain grounded in SRBN convergence. Deterministic evidence from language servers, build tools, test tools, structural checks, and sheaf validators SHALL remain the source of energy, and the LLM SHALL operate only as a repair function over that evidence.
+
+**Correction Envelope Contract:**
+
+The runtime SHALL define a canonical correction response type in ``perspt-core``. The exact Rust type names may vary, but the protocol SHALL include at least:
+
+* ``format_version`` -- response protocol version
+* ``artifacts`` -- typed artifact operations
+* ``commands`` -- dependency or tooling commands explicitly permitted by policy
+* ``declined_changes`` -- files or actions the model intentionally did not perform
+* ``requires_replan`` -- signal that the node's declared scope is insufficient for a correct fix
+* ``notes`` -- short model-supplied explanation, not used as an execution source of truth
+
+The ``artifacts`` field SHALL remain structurally compatible with Perspt's artifact bundle model, but correction envelopes SHALL be distinct from generic actuator output so the runtime can record parse provenance and validation outcomes.
+
+**Correction Parse States:**
+
+Every correction attempt SHALL end in exactly one of these machine-visible states:
+
+1. ``ParsedAndValid`` -- envelope parsed and passed semantic validation
+2. ``ParsedWithRecovery`` -- envelope required non-lossy normalization or tolerant recovery, then passed validation
+3. ``SchemaInvalid`` -- envelope-like content was found but failed typed deserialization
+4. ``SemanticallyInvalid`` -- parsed envelope violated node, plugin, or path constraints
+5. ``NoStructuredPayload`` -- no parseable correction payload was present
+6. ``RequiresReplan`` -- model correctly signaled that the requested fix exceeds node scope
+
+These states SHALL be persisted so status, dashboard views, and postmortem inspection can distinguish malformed output from legitimate scope escalation.
+
+**Correction Execution Flow:**
+
+1. Step 4 verification computes :math:`V_{syn}`, :math:`V_{str}`, :math:`V_{log}`, :math:`V_{boot}`, and :math:`V_{sheaf}` from deterministic evidence.
+2. If :math:`V(x) > \varepsilon`, the orchestrator constructs a typed ``CorrectionPromptRequest``.
+3. The prompt compiler renders a correction prompt using the active plugin set, node class, ownership rules, output targets, verifier evidence, and project structure.
+4. The LLM response is logged and normalized.
+5. The parser attempts strict structured deserialization of the canonical correction envelope.
+6. If strict parse fails, a tolerant recovery layer attempts provider-neutral recovery without inventing filenames or crossing node boundaries.
+7. The recovered envelope is semantically validated against node outputs, plugin rules, project structure rules, and policy checks.
+8. If valid, the bundle is applied transactionally and verification re-runs.
+9. If invalid, the runtime classifies the failure and emits a retry prompt targeted to the exact class.
+10. If the response indicates ``requires_replan`` or the retry budget is exhausted, the node escalates with a typed reason and evidence bundle.
+
+**Grammar and Parsing Discipline:**
+
+The runtime SHALL publish a formal grammar for the structured correction payload. The grammar SHALL be used for documentation, conformance tests, and parser implementation guidance. The runtime parser MAY use JSON deserialization plus a tolerant recovery layer rather than a literal parser-generator for the final implementation, but the grammar SHALL define the contract.
+
+An illustrative grammar sketch:
+
+.. code-block:: text
+
+   correction-envelope = object
+   object              = "{" members "}"
+   members             = pair *( "," pair )
+   pair                = string ":" value
+
+   required-keys       = format-version artifacts commands
+
+   artifacts           = "artifacts" ":" "[" *( artifact [","] ) "]"
+   artifact            = write-artifact / diff-artifact / delete-artifact
+   write-artifact      = { "path": rel-path, "operation": "write", "content": string }
+   diff-artifact       = { "path": rel-path, "operation": "diff",  "patch": string }
+   delete-artifact     = { "path": rel-path, "operation": "delete" }
+   commands            = "commands" ":" "[" *( command [","] ) "]"
+   rel-path            = string ; validated later by semantic path policy
+
+The grammar SHALL describe structure only. Ownership closure, legal support files, plugin-specific path domains, and dependency rules SHALL be enforced by semantic validators, not by grammar alone.
+
+**Plugin-Aware Correction Semantics:**
+
+The ``LanguagePlugin`` contract SHALL be extended so that plugins can participate in correction semantics, not just verification. Plugins SHOULD define:
+
+* file ownership patterns already in use today
+* legal support files for a node class
+* manifest mutation policy
+* dependency declaration policy
+* response-contract examples or prompt fragments
+* path normalization hooks for language-specific conventions
+* verification-evidence rendering hints for prompts
+
+This enables robust cross-language behavior such as:
+
+* Rust module nodes can declare whether ``src/lib.rs`` is an allowed support file or whether it must be owned by another node.
+* Python package nodes can declare whether ``__init__.py`` is implicit, required, or separately owned.
+* JavaScript package nodes can distinguish between root ``package.json`` ownership and sub-package manifest ownership.
+* Future plugins can define language-specific structural repairs without forcing the core correction parser to hard-code language assumptions.
+
+**Dynamic Prompt Generation:**
+
+Prompt generation SHALL stop being a mostly static string substitution layer and SHALL become a typed compiler from runtime evidence into model instructions.
+
+Correction prompts SHALL be generated from:
+
+* node goal and node class
+* declared output targets
+* node ownership closure and active plugin ownership domain
+* current repository structure and relevant local file tree
+* language-server diagnostics
+* build/test/lint outputs
+* structural and sheaf violations
+* previous rejected correction attempts and their parse/validation class
+* plugin-supplied prompt fragments and response examples
+
+The prompt compiler SHALL emit exact allowed paths, exact prohibited paths, exact response schema, and exact retry cause. It SHALL not rely on generic admonitions alone.
+
+**Verification Evidence Model:**
+
+The SRBN convergence loop already computes energy from deterministic evidence. This PSP formalizes a typed evidence model so correction prompts and dashboards consume the same machine representation.
+
+Evidence SHALL include:
+
+* language-server diagnostics
+* syntax/type-check output
+* build output
+* test failures with attribution
+* structural violations such as undeclared paths, missing support files, unresolved imports, or project-layout mismatches
+* sheaf validation failures for cross-node consistency
+* policy violations and blocked mutations
+
+The correction loop SHALL consume typed evidence rather than re-serializing ad hoc strings whenever possible.
+
+**Failure Taxonomy:**
+
+The runtime SHALL classify correction failures into stable categories. At minimum:
+
+* malformed envelope
+* missing payload
+* schema violation
+* illegal path
+* quoted or wrapped path normalization failure
+* ownership violation
+* dependency mutation violation
+* plugin support-file violation
+* verification failure after successful apply
+* degraded validation
+* requires replan
+
+Retry prompts, escalation reports, dashboard views, and future policy tuning SHALL all use this shared taxonomy.
+
+.. graphviz::
+   :caption: PSP 7 Correction Barrier Pipeline
+   :align: center
+
+   digraph psp7_barrier {
+     rankdir=LR;
+     bgcolor="transparent";
+     node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.18,0.1"];
+     edge [fontname="Arial", fontsize=9, color="#546E7A", fontcolor="#546E7A"];
+
+     verify [label="Verification Evidence\nLSP + Build + Tests + Structure + Sheaf", fillcolor="#FCE4EC", color="#D81B60"];
+     prompt [label="Prompt Compiler\nplugin-aware correction contract", fillcolor="#E3F2FD", color="#1E88E5"];
+     llm [label="LLM Response", fillcolor="#FFF3E0", color="#FB8C00"];
+     normalize [label="Normalization\nprovider-neutral extraction", fillcolor="#E8F5E9", color="#43A047"];
+     parse [label="Strict Parse\ntyped envelope", fillcolor="#F3E5F5", color="#8E24AA"];
+     recover [label="Tolerant Recovery\nnon-lossy repair only", fillcolor="#FFF9C4", color="#F9A825"];
+     validate [label="Semantic Validation\npaths + ownership + plugin rules", fillcolor="#E1F5FE", color="#039BE5"];
+     apply [label="Transactional Apply", fillcolor="#E8F5E9", color="#2E7D32"];
+     escalate [label="Typed Retry or Escalation", fillcolor="#FFEBEE", color="#E53935"];
+
+     verify -> prompt;
+     prompt -> llm;
+     llm -> normalize;
+     normalize -> parse;
+     parse -> validate [label="strict success"];
+     parse -> recover [label="strict fail"];
+     recover -> validate [label="recovered"];
+     recover -> escalate [label="no structured payload"];
+     validate -> apply [label="valid"];
+     validate -> escalate [label="invalid"];
+     apply -> verify [label="re-verify"];
+   }
+
+.. rubric:: Technical Specification
+
+**1. New Core Types in ``perspt-core``**
+
+The implementation SHALL introduce typed core structures for correction behavior. Representative types include:
+
+* ``CorrectionEnvelope``
+* ``CorrectionArtifact``
+* ``CorrectionCommand``
+* ``CorrectionParseResult``
+* ``CorrectionFailureClass``
+* ``CorrectionSemanticViolation``
+* ``CorrectionAttemptRecord``
+* ``PromptContext`` and ``PromptContract``
+
+These types SHALL live in ``perspt-core`` so that the orchestrator, dashboard, TUI, CLI status surfaces, and future tooling all share the same contract.
+
+**2. Parser Pipeline**
+
+The correction parser SHALL be implemented as a layered pipeline:
+
+* **Layer A -- Raw Capture:** persist the exact provider output before any normalization.
+* **Layer B -- Normalization:** reuse and extend the existing provider-neutral extraction utilities in ``normalize.rs``.
+* **Layer C -- Strict Structural Parse:** deserialize into ``CorrectionEnvelope``.
+* **Layer D -- Tolerant Recovery:** repair common, lossless defects such as wrapper prose, markdown headings, quoted/backticked paths, singleton command values, or omitted optional fields.
+* **Layer E -- Semantic Validation:** enforce path legality, ownership closure, plugin rules, and node-class scope.
+
+Tolerant recovery SHALL be conservative. It MAY strip cosmetic wrappers from paths and recover structured payloads from markdown wrappers, but it SHALL NOT infer undeclared target filenames or add new artifacts the model did not specify.
+
+**3. Removal of Legacy Guessing in Correction Mode**
+
+The current legacy fallback parser that maps unnamed Rust code blocks to ``main.rs`` and unnamed TOML blocks to ``Cargo.toml`` SHALL NOT be used for verifier-guided correction loops.
+
+Compatibility options:
+
+* The legacy parser MAY remain available for explicitly legacy workflows, tests, or solo mode if needed.
+* Correction loops for project-mode nodes SHALL use the canonical correction envelope contract only.
+* Any compatibility shim for legacy correction responses SHALL still produce a typed envelope and SHALL fail closed rather than guessing file identity.
+
+**4. Plugin Contract Extensions**
+
+``LanguagePlugin`` SHALL gain correction-oriented capabilities. Representative methods include:
+
+* ``correction_contract()`` -- response schema and examples for the language
+* ``path_policy()`` -- owned paths, legal support files, and manifest boundaries
+* ``dependency_policy()`` -- where dependency changes may be expressed and by whom
+* ``prompt_fragments()`` -- language-specific instructions for imports, tests, manifests, and structure
+* ``structural_repair_policy()`` -- whether support files may be synthesized locally or must trigger replan
+
+The plugin registry SHALL continue to detect multiple active plugins, but correction prompts SHALL also be scoped by the owning plugin for the current node and, for integration nodes, by the participating plugin set.
+
+**5. Prompt Compiler**
+
+Perspt SHALL implement its own prompt compiler for SRBN verification and correction behavior. This compiler is a runtime subsystem, not a generic template swap.
+
+The compiler SHALL assemble prompts from:
+
+* runtime evidence
+* ownership context
+* plugin fragments
+* response-contract examples
+* retry cause
+* current file tree and context digests
+* verifier strictness and degraded-sensor state
+
+The compiler SHALL expose typed request and output structures rather than free-form string assembly at the call site. At minimum, it SHALL accept typed inputs for prompt intent, node scope, verifier evidence, plugin policy, retry classification, and project structure, and it SHALL emit a compiled prompt plus prompt-provenance metadata suitable for logging and replay.
+
+The compiler SHALL target the following prompt families:
+
+* architect planning
+* actuator generation
+* verifier analysis
+* correction retry
+* stripped-bundle retarget
+
+The compiler SHALL remain specific to Perspt's SRBN execution model. It SHALL compile prompts to serve verifier-guided correction, bounded node ownership, deterministic evidence replay, and plugin-aware recovery behavior rather than acting as a general-purpose text templating facility.
+
+**6. Verification Evidence and SRBN Energy**
+
+The SRBN energy model from PSP 000005 remains the convergence criterion:
+
+.. math::
+
+   V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log} + V_{boot} + V_{sheaf}
+
+This PSP does not redefine the energy equation. Instead, it strengthens the correction side of the loop so that retries are always grounded in the deterministic evidence behind these terms.
+
+The runtime SHALL preserve the following discipline:
+
+* :math:`V_{syn}` comes from language-server and compiler diagnostics.
+* :math:`V_{str}` comes from ownership, project structure, manifest, and path-boundary violations.
+* :math:`V_{log}` comes from test failures and logical verifier findings.
+* :math:`V_{boot}` captures bootstrap and dependency-tooling failures.
+* :math:`V_{sheaf}` captures cross-node or cross-plugin consistency failures.
+
+The correction prompt SHALL explicitly carry the relevant evidence for the non-zero components rather than a free-form summary alone.
+
+**7. Persistence and Observability**
+
+The persistence layer SHALL capture enough information to reconstruct every correction attempt. At minimum:
+
+* raw prompt and raw response when ``--log-llm`` is enabled
+* telemetry rows for all requests regardless of flag
+* parse method used
+* whether tolerant recovery was needed
+* semantic validation failures
+* rejected artifact bundle snapshot if present
+* retry cause and retry ordinal
+* plugin and node ownership metadata
+
+Where practical, even rejected or stripped bundles SHOULD be persisted in a dedicated table or an extension of the existing artifact-bundle persistence model so that users can inspect what was rejected and why.
+
+**8. Cross-Language Support**
+
+The design SHALL support at least:
+
+* Rust via ``cargo``, ``rust-analyzer``, and repository structure rules
+* Python via src-layout package rules, test layout rules, and Python LSP/tooling
+* JavaScript / TypeScript via package ownership and script-driven verification
+
+For polyglot workspaces:
+
+* ownership closure SHALL remain authoritative per node
+* integration nodes SHALL coordinate cross-plugin outputs
+* correction prompts SHALL mention the active plugin domain explicitly
+* semantic validation SHALL prevent one plugin's correction from mutating another plugin's owned files unless the plan declared that integration boundary
+
+**9. Replan Boundary**
+
+The runtime SHALL distinguish between:
+
+* a fix that is valid but outside the node's allowed outputs,
+* a fix that requires support files from the same ownership domain,
+* and a fix that fundamentally requires graph rewrite or replan.
+
+This distinction is critical for SRBN. Not every path rejection should become a blind retarget retry. Some should escalate to a graph-level repair, especially when the verifier evidence proves the node's declared output set is insufficient.
+
+.. graphviz::
+   :caption: PSP 7 Retry Classification
+   :align: center
+
+   digraph psp7_retry {
+     rankdir=TB;
+     bgcolor="transparent";
+     node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.18,0.1"];
+     edge [fontname="Arial", fontsize=9, color="#5C6BC0", fontcolor="#5C6BC0"];
+
+     start [label="Correction Response", fillcolor="#E3F2FD", color="#1E88E5"];
+     parse [label="Structured?", shape=diamond, fillcolor="#FFF9C4", color="#F9A825"];
+     schema [label="Schema Retry", fillcolor="#FFEBEE", color="#E53935"];
+     valid [label="Semantically Valid?", shape=diamond, fillcolor="#FFF9C4", color="#F9A825"];
+     apply [label="Apply + Reverify", fillcolor="#E8F5E9", color="#43A047"];
+     retarget [label="Retarget Retry", fillcolor="#FFF3E0", color="#FB8C00"];
+     replan [label="Graph Rewrite / Replan", fillcolor="#F3E5F5", color="#8E24AA"];
+     escalate [label="Escalate", fillcolor="#FBE9E7", color="#D84315"];
+
+     start -> parse;
+     parse -> schema [label="no"];
+     parse -> valid [label="yes"];
+     valid -> apply [label="yes"];
+     valid -> retarget [label="wrong files, same scope"];
+     valid -> replan [label="scope insufficient"];
+     schema -> escalate [label="budget exhausted"];
+     retarget -> escalate [label="budget exhausted"];
+     replan -> escalate [label="policy or topology change needed"];
+   }
+
+**10. Implementation Areas by Crate**
+
+The expected implementation surface spans the existing workspace:
+
+* ``perspt-core`` -- correction-envelope types, parse result types, plugin trait extensions, prompt-contract types, tolerant normalization helpers, path wrapper normalization, semantic validator interfaces
+* ``perspt-agent`` -- correction prompt compiler, parser pipeline, retry classification, orchestrator wiring, rejected-bundle persistence, unified LLM call logging, plugin-aware correction flow
+* ``perspt-store`` -- schema support for correction-attempt records, rejected bundle snapshots, parse outcomes, and semantic validation failures
+* ``perspt-tui`` -- richer retry/failure presentation and correction failure classes
+* ``perspt-dashboard`` -- display of correction attempts, parse provenance, rejected bundles, and retry taxonomy
+* ``perspt-cli`` -- status/log surfaces for correction-attempt history and debug inspection
+
+=========
+Rationale
+=========
+
+This proposal chooses a typed correction envelope plus semantic validators because that is the only approach that preserves the SRBN barrier model under imperfect LLM behavior.
+
+**Design Decision Rationale:**
+
+* The correction loop must fail closed. A best-effort parser that guesses file identities is incompatible with ownership closure and verifier-attributed convergence.
+* Grammar alone is not enough. A formal grammar can describe structure, but it cannot decide whether ``src/lib.rs`` is legal for a Rust module node in a given graph. That requires plugin policy and semantic validation.
+* Plugin-aware correction semantics are necessary because repository structure is language-specific. Rust, Python, and JavaScript each have different notions of support files, manifests, imports, and test layout.
+* Prompt generation must become dynamic because correction prompts need to explain not just what failed, but why a particular response shape is legal for this node and illegal for another.
+* Persisting rejected bundles and parse outcomes is necessary because debugging correction loops after the fact is otherwise guesswork.
+
+This design also aligns with Perspt's existing architecture:
+
+* The provider-neutral normalization layer already exists and can be extended rather than replaced.
+* The plugin registry already exists and already owns verifier capability selection.
+* PSP 000005 already established that verifier evidence, not generator self-assessment, governs convergence.
+* The ledger and DuckDB persistence layers already exist and can be extended to record correction-attempt provenance.
+
+**Alternatives Considered:**
+
+* **Alternative 1: Keep the current JSON-first parser and improve prompts only.** This was not chosen because prompt-only fixes do not address malformed but plausible responses, nor do they create durable observability.
+* **Alternative 2: Use only a formal BNF parser and reject everything else.** This was not chosen because provider outputs often wrap valid structured payloads in prose or fences, and a purely rigid parser would reject too many recoverable responses.
+* **Alternative 3: Continue supporting legacy ``File:`` / ``Diff:`` correction responses indefinitely.** This was not chosen because the legacy parser necessarily relies on heuristics and default filenames, which is precisely the failure mode this PSP is trying to eliminate.
+* **Alternative 4: Allow plugins to parse responses independently with no shared core contract.** This was not chosen because it would fragment behavior across languages and make the dashboard, status tools, and persistence layer inconsistent.
+* **Alternative 5: Replace SRBN-style correction with a simpler imperative loop.** This was not chosen because Perspt's differentiator is its verifier-grounded convergence model, not a generator-led edit loop.
+
+The proposed design preserves flexibility where it is useful -- tolerant normalization, plugin-defined semantics, prompt compilation -- while making the critical boundary typed and explicit.
+
+=======================
+Backwards Compatibility
+=======================
+
+This PSP is an enhancement to the existing SRBN workflow rather than a user-facing feature replacement, but it does have important compatibility implications.
+
+**User Impact:**
+
+* Existing ``perspt agent`` workflows SHALL continue to function.
+* Users MAY see more explicit correction failures where the previous runtime would have guessed a filename or silently stripped malformed artifacts.
+* Headless and TUI output SHALL become more explicit about why a correction was rejected: malformed envelope, illegal path, ownership violation, plugin support-file violation, or replan required.
+* Dashboard and status views MAY expose richer correction-attempt history and parse provenance.
+
+**Configuration Impact:**
+
+* No immediate user configuration changes are required.
+* Existing ``--log-llm`` behavior SHALL remain as an explicit debugging control, but the persisted schema for correction-attempt observability may expand.
+* Future optional strictness knobs MAY allow users to choose how aggressively tolerant recovery is applied before escalation.
+
+**Migration Strategy:**
+
+* The canonical correction envelope SHOULD be introduced alongside compatibility shims first.
+* Legacy correction parsing MAY remain behind a compatibility path during transition, but project-mode verifier-guided correction SHOULD move to the new contract first.
+* Existing persisted sessions do not need migration to remain readable, but new schema additions SHOULD be backward-compatible and nullable where possible.
+* Documentation for prompt contracts, correction failure classes, and plugin correction policy SHALL be added as part of the implementation.
+
+========================
+Reference Implementation
+========================
+
+This PSP is intended as an implementation plan for the next hardening phase of Perspt's SRBN runtime.
+
+**Expected Workstreams:**
+
+1. **Core Contract Work**
+
+   * Add canonical correction-envelope types to ``perspt-core``.
+   * Extend normalization utilities with tolerant, non-lossy recovery helpers.
+   * Add typed parse results and failure classes.
+
+2. **Plugin Contract Work**
+
+   * Extend ``LanguagePlugin`` with correction-policy hooks.
+   * Add correction semantics for Rust, Python, and JavaScript plugins.
+   * Define integration-node rules for multi-plugin workspaces.
+
+3. **Prompt Compiler Work**
+
+   * Replace ad hoc correction prompt assembly with typed request rendering.
+   * Add plugin-supplied prompt fragments and response-contract examples.
+   * Unify LLM call logging across agent and orchestrator paths.
+
+4. **Orchestrator Work**
+
+   * Route all correction loops through the typed parser pipeline.
+   * Remove filename guessing from correction mode.
+   * Add retry classification and replan boundaries.
+
+5. **Persistence and UX Work**
+
+   * Persist correction-attempt records and rejected bundles.
+   * Expose parse provenance and retry taxonomy in CLI, TUI, and dashboard.
+   * Add regression tests for malformed responses gathered from real sessions.
+
+**Testing Strategy:**
+
+The implementation SHALL include:
+
+* unit tests for strict and tolerant parsing
+* corpus tests for real malformed responses observed in production sessions
+* plugin-specific semantic validation tests
+* end-to-end correction-loop tests for Rust, Python, and JavaScript fixtures
+* property or fuzz-style tests for wrapper text, quoted paths, and mixed valid/invalid artifacts
+* persistence tests for correction-attempt recording and retrieval
+
+**Documentation Updates Required:**
+
+* Perspt Book architecture and SRBN correction sections
+* workspace crate documentation for plugin responsibilities
+* CLI and dashboard docs for new correction-attempt observability
+* PSP 000005 cross-reference notes, where appropriate, to reflect this follow-on hardening work
+
+============
+Open Issues
+============
+
+* **Schema Evolution:** Should correction-attempt persistence live in a dedicated table or extend the existing ``llm_requests`` and ``artifact_bundles`` tables?
+* **Compatibility Window:** How long should legacy correction parsing remain available, and should it be disabled by default in project mode?
+* **Recovery Policy:** Which malformed response cases are safe to auto-recover, and which must fail immediately to preserve ownership safety?
+* **Graph Rewrite Boundary:** When a correction proves the node scope is insufficient, should the runtime always escalate, or can some cases trigger deterministic local graph rewrite automatically?
+* **Provider-Specific Guidance:** Should some providers receive different response examples while still targeting the same canonical correction envelope?
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.

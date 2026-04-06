@@ -110,6 +110,16 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
      - Active
+   * - :psp:`000006`
+     - Feature
+     - :doc:`Real-Time Web Dashboard for Agent Monitoring <psp-000006>`
+     - Vikrant Rathore
+     - Final
+   * - :psp:`000007`
+     - Enhancement
+     - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
+     - Vikrant Rathore
+     - Draft
 
 ====================
 Index by Category
@@ -164,6 +174,11 @@ Feature PSPs introduce new functionality to Perspt.
      - :doc:`Multi-Agent Coding Workflow and CLI Expansion <psp-000004>`
      - Vikrant Rathore
      - Withdrawn
+   * - :psp:`000006`
+     - Feature
+     - :doc:`Real-Time Web Dashboard for Agent Monitoring <psp-000006>`
+     - Vikrant Rathore
+     - Final
 
 Enhancement PSPs
 ================
@@ -184,6 +199,11 @@ Enhancement PSPs improve existing Perspt functionality.
      - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
      - Active
+   * - :psp:`000007`
+     - Enhancement
+     - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
+     - Vikrant Rathore
+     - Draft
 
 UI/UX PSPs
 ===========
@@ -202,6 +222,11 @@ UI/UX PSPs modify the user interface or user experience.
    * - :psp:`000002`
      - UI/UX
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
+     - Vikrant Rathore
+     - Draft
+   * - :psp:`000007`
+     - Enhancement
+     - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
      - Vikrant Rathore
      - Draft
 
@@ -271,6 +296,11 @@ Final PSPs (implemented and complete)
      - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
      - Vikrant Rathore
      - Active
+   * - :psp:`000006`
+     - Feature
+     - :doc:`Real-Time Web Dashboard for Agent Monitoring <psp-000006>`
+     - Vikrant Rathore
+     - Final
 
 Rejected PSPs (not approved)
 =============================
