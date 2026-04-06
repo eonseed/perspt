@@ -30,7 +30,7 @@ futures = "0.3"
 tui-textarea = "0.7"
 
 # Diff Computation
-similar = "2.6"
+similar = "3.0"
 
 # Syntax Highlighting
 syntect = "5.2"
