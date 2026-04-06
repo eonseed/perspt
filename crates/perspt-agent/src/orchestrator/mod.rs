@@ -4260,4 +4260,34 @@ def util():
         assert_eq!(orch.budget.max_cost_usd, Some(2.50));
         assert!(!orch.budget.any_exhausted());
     }
+
+    #[test]
+    fn test_node_outcome_equality() {
+        assert_eq!(NodeOutcome::Completed, NodeOutcome::Completed);
+        assert_eq!(NodeOutcome::Escalated, NodeOutcome::Escalated);
+        assert_ne!(NodeOutcome::Completed, NodeOutcome::Escalated);
+    }
+
+    #[test]
+    fn test_session_outcome_from_counts() {
+        fn derive_outcome(completed: usize, escalated: usize) -> perspt_core::SessionOutcome {
+            if escalated == 0 {
+                perspt_core::SessionOutcome::Success
+            } else if completed > 0 {
+                perspt_core::SessionOutcome::PartialSuccess
+            } else {
+                perspt_core::SessionOutcome::Failed
+            }
+        }
+
+        // All completed → Success
+        assert_eq!(derive_outcome(3, 0), perspt_core::SessionOutcome::Success,);
+        // Some completed, some escalated → PartialSuccess
+        assert_eq!(
+            derive_outcome(2, 1),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // All escalated → Failed
+        assert_eq!(derive_outcome(0, 3), perspt_core::SessionOutcome::Failed,);
+    }
 }
