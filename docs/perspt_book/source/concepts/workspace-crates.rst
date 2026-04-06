@@ -86,7 +86,8 @@ Contains all shared types used across the workspace:
 - **Types**: ``SRBNNode``, ``NodeState``, ``NodeClass``, ``ModelTier``, ``TaskPlan``,
   ``BehavioralContract``, ``StabilityMonitor``, ``EnergyComponents``, ``AgentContext``,
   ``TokenBudget``, ``RetryPolicy``, ``OwnershipManifest``, ``PlanningPolicy``,
-  ``FeatureCharter``, ``BudgetEnvelope``, ``RepairFootprint``
+  ``FeatureCharter``, ``BudgetEnvelope``, ``RepairFootprint``, ``SessionOutcome``,
+  ``NodeOutcome``
 - **Events**: ``AgentEvent`` enum with 40+ lifecycle event variants (PSP-5)
 - **Plugins**: Language plugin registry (Rust, Python, JS, Go) with LSP config,
   test runner, init commands, and required binaries
@@ -142,7 +143,7 @@ Starlark-based execution policy:
 
 - ``sanitize_command()`` validates commands before execution
 - ``validate_workspace_bound()`` ensures file operations stay within the project
-- ``is_safe_for_auto_exec()`` checks if a command can be auto-approved
+- ``validate_artifact_mutation()`` protects root project files from delete/move
 
 perspt-sandbox
 ~~~~~~~~~~~~~~

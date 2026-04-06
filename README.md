@@ -284,11 +284,15 @@ Each node presents a grouped diff review with verification context:
 
 ### Retry Policy
 
-| Error Type          | Max Retries | On Exhaustion    |
-|---------------------|-------------|------------------|
-| Compilation errors  | 3           | Escalate to user |
-| Tool failures       | 5           | Escalate to user |
-| Review rejections   | 3           | Escalate to user |
+| Error Type          | Max Retries | On Exhaustion      |
+|---------------------|-------------|--------------------|
+| Compilation errors  | 3           | Node escalated     |
+| Tool failures       | 5           | Node escalated     |
+| Review rejections   | 3           | Node escalated     |
+
+Escalated nodes do not block the remaining DAG. After all nodes are processed,
+the session derives a `SessionOutcome`: **Success** (all completed),
+**PartialSuccess** (some escalated), or **Failed** (none completed).
 
 ### Headless Mode
 
@@ -298,6 +302,7 @@ With `--yes`, the agent runs fully autonomously and prints structured progress:
 [VERIFY]   syntax=ok build=ok tests=8/8 lint=ok degraded=false
 [ENERGY]   V(x)=0.05 boot=0.00 sheaf=0.00
 [ESCALATE] 0 escalations
+[OUTCOME]  Success
 [COMMIT]   session abc123 committed
 ```
 
@@ -321,7 +326,7 @@ perspt agent [OPTIONS] <TASK>
       --max-cost <USD>             Cost limit (0 = unlimited)
       --max-steps <N>              Iteration limit (0 = unlimited)
       --defer-tests                Defer tests until sheaf validation
-      --log-llm                    Log all LLM requests to database
+      --log-llm                    Log verbose LLM prompts/responses (token metrics always recorded)
 ```
 
 ---

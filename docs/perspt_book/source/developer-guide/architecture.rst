@@ -151,7 +151,12 @@ The orchestrator drives the PSP-5 lifecycle:
 4. ``verify_node()`` — Compute V(x) via plugin verifier profile
 5. ``sheaf_validate()`` — Cross-node contract checking
 6. ``review_node()`` — Interactive approval (unless ``--yes``)
-7. ``commit_node()`` — Record in Merkle ledger
+7. ``execute_node()`` — Returns ``NodeOutcome::Completed`` when V(x) ≤ ε
+   or ``NodeOutcome::Escalated`` when retries are exhausted
+8. ``commit_node()`` — Record stable node in Merkle ledger
+
+After all nodes are processed, the orchestrator derives ``SessionOutcome``
+from completed/escalated counts and emits a ``Complete`` event.
 
 
 Crate: ``perspt-store``
@@ -243,7 +248,6 @@ Utility functions:
 - ``sanitize_command(cmd)`` → ``SanitizeResult`` (split, validate, filter)
 - ``validate_workspace_bound(cmd, working_dir)`` — Ensure commands stay in scope
 - ``validate_artifact_mutation(path, workspace_root, operation)`` — Protect root project files from delete/move
-- ``is_safe_for_auto_exec(cmd)`` — Whitelist check for auto-approval
 
 
 Crate: ``perspt-sandbox``
@@ -285,7 +289,7 @@ All canonical types live in ``perspt_core::types``:
    * - ``SRBNNode``
      - DAG node: goal, output_targets, contract, tier, monitor, state, node_class, owner_plugin, provisional_branch_id, interface_seal_hash
    * - ``NodeState`` (12 variants)
-     - TaskQueued → Planning → Coding → Verifying → Retry → SheafCheck → Committing → Completed / Failed / Escalated / Aborted / Superseded
+     - TaskQueued → Planning → Coding → Verifying → Retry → SheafCheck → Committing → Completed / Failed / Escalated / Aborted / Superseded. Includes ``from_display_str()`` (case-insensitive canonical parser with legacy aliases), ``is_success()``, ``is_active()``, and ``Display`` impl.
    * - ``NodeClass``
      - Interface, Implementation (default), Integration
    * - ``ModelTier``
@@ -296,6 +300,10 @@ All canonical types live in ``perspt_core::types``:
      - energy_history, attempt_count, stable, stability_epsilon, max_retries, retry_policy
    * - ``RetryPolicy``
      - Per-error-type counters: compilation, tool, review
+   * - ``SessionOutcome``
+     - Success (all nodes completed), PartialSuccess (some escalated), Failed (none completed)
+   * - ``NodeOutcome``
+     - Completed (V(x) ≤ ε) or Escalated (retries exhausted). Returned by ``execute_node()``
 
 **Energy:**
 
@@ -516,6 +524,8 @@ Data Flow
    |       |     +-- verify_node()       -> [LSP, TestRunner, Verifier Agent]
    |       |     +-- sheaf_validate()    -> [Sheaf Validators]
    |       |     +-- commit_node()       -> [MerkleLedger]
+   |       |     +-- derive SessionOutcome from completed/escalated counts
+   |       |     +-- emit Complete event with outcome
    |       |
    |       +-- AgentTools  (filesystem, search, commands)
    |       +-- LspClient   (JSON-RPC stdio)
