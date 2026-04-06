@@ -48,6 +48,15 @@ pub enum ApprovalResult {
     Rejected,
 }
 
+/// Outcome of executing a single graph node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeOutcome {
+    /// Node converged and committed successfully.
+    Completed,
+    /// Node failed to converge and was escalated.
+    Escalated,
+}
+
 /// The SRBN Orchestrator - manages the agent workflow
 pub struct SRBNOrchestrator {
     /// Task DAG managed by petgraph
@@ -361,12 +370,6 @@ impl SRBNOrchestrator {
         self.budget.max_cost_usd = max_cost_usd;
     }
 
-    /// Override the adaptive planning policy before run() selects one
-    /// from workspace classification.
-    pub fn set_planning_policy(&mut self, policy: perspt_core::PlanningPolicy) {
-        self.planning_policy = policy;
-    }
-
     // =========================================================================
     // PSP-5 Phase 8: Session Rehydration for Resume
     // =========================================================================
@@ -624,6 +627,7 @@ impl SRBNOrchestrator {
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
         let mut executed = 0;
+        let mut escalated: usize = 0;
 
         // PSP-5 Phase 8: Emit differential resume summary
         let terminal_count = indices
@@ -682,7 +686,7 @@ impl SRBNOrchestrator {
             });
 
             match self.execute_node(*idx).await {
-                Ok(()) => {
+                Ok(NodeOutcome::Completed) => {
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
                             node_id: node.node_id.clone(),
@@ -691,7 +695,12 @@ impl SRBNOrchestrator {
                     }
                     executed += 1;
                 }
+                Ok(NodeOutcome::Escalated) => {
+                    escalated += 1;
+                    continue;
+                }
                 Err(e) => {
+                    escalated += 1;
                     let node_id = self.graph[*idx].node_id.clone();
                     log::error!("Node {} failed on resume: {}", node_id, e);
                     self.emit_log(format!("❌ Node {} failed: {}", node_id, e));
@@ -711,8 +720,11 @@ impl SRBNOrchestrator {
             total_nodes
         );
         self.emit_event(perspt_core::AgentEvent::Complete {
-            success: true,
-            message: format!("Resumed: executed {} of {} nodes", executed, total_nodes),
+            success: escalated == 0,
+            message: format!(
+                "Resumed: {}/{} completed, {} escalated",
+                executed, total_nodes, escalated
+            ),
         });
         Ok(())
     }
@@ -1043,6 +1055,8 @@ impl SRBNOrchestrator {
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
+        let mut completed_count: usize = 0;
+        let mut escalated_count: usize = 0;
 
         for (i, idx) in indices.iter().enumerate() {
             // Abort gate: stop execution if abort was requested.
@@ -1092,7 +1106,9 @@ impl SRBNOrchestrator {
             }
 
             match self.execute_node(*idx).await {
-                Ok(()) => {
+                Ok(NodeOutcome::Completed) => {
+                    completed_count += 1;
+
                     // Record step in budget envelope
                     self.budget.record_step();
 
@@ -1106,6 +1122,11 @@ impl SRBNOrchestrator {
                         max_revisions: self.budget.max_revisions,
                     });
 
+                    // Persist budget envelope to store for auditability.
+                    if let Err(e) = self.ledger.upsert_budget_envelope(&self.budget) {
+                        log::warn!("Failed to persist budget envelope: {}", e);
+                    }
+
                     // Emit completed status
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
@@ -1114,7 +1135,21 @@ impl SRBNOrchestrator {
                         });
                     }
                 }
+                Ok(NodeOutcome::Escalated) => {
+                    escalated_count += 1;
+                    self.budget.record_step();
+
+                    // Do NOT emit NodeCompleted — the node was escalated, not completed.
+                    if let Some(node) = self.graph.node_weight(*idx) {
+                        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                            node_id: node.node_id.clone(),
+                            status: perspt_core::NodeStatus::Escalated,
+                        });
+                    }
+                    continue;
+                }
                 Err(e) => {
+                    escalated_count += 1;
                     let node_id = self.graph[*idx].node_id.clone();
                     eprintln!("[SRBN-DIAG] Node {} failed: {:#}", node_id, e);
                     log::error!("Node {} failed: {}", node_id, e);
@@ -1150,15 +1185,26 @@ impl SRBNOrchestrator {
             log::warn!("Failed to clean up session sandboxes: {}", e);
         }
 
+        // Derive session outcome from actual node results.
+        let outcome = if escalated_count == 0 {
+            perspt_core::SessionOutcome::Success
+        } else if completed_count > 0 {
+            perspt_core::SessionOutcome::PartialSuccess
+        } else {
+            perspt_core::SessionOutcome::Failed
+        };
         self.emit_event(perspt_core::AgentEvent::Complete {
-            success: true,
-            message: format!("Completed {} nodes", total_nodes),
+            success: outcome == perspt_core::SessionOutcome::Success,
+            message: format!(
+                "{}/{} nodes completed, {} escalated",
+                completed_count, total_nodes, escalated_count
+            ),
         });
         Ok(())
     }
 
     /// Execute a single node through the control loop
-    async fn execute_node(&mut self, idx: NodeIndex) -> Result<()> {
+    async fn execute_node(&mut self, idx: NodeIndex) -> Result<NodeOutcome> {
         let node = &self.graph[idx];
         log::info!("Executing node: {} ({})", node.node_id, node.goal);
 
@@ -1253,7 +1299,7 @@ impl SRBNOrchestrator {
                 );
             }
 
-            return Ok(());
+            return Ok(NodeOutcome::Escalated);
         }
 
         // Step 6: Sheaf Validation (Post-Subgraph Consistency)
@@ -1267,15 +1313,17 @@ impl SRBNOrchestrator {
             self.merge_provisional_branch(bid, idx);
         }
 
-        Ok(())
+        Ok(NodeOutcome::Completed)
     }
 
     /// Step 3: Speculative Generation
     async fn step_speculate(&mut self, idx: NodeIndex) -> Result<()> {
         log::info!("Step 3: Speculation - Generating implementation");
 
-        // PSP-5 Phase 3: Build context package for this node
-        let retriever = ContextRetriever::new(self.context.working_dir.clone())
+        // PSP-5 Phase 3: Build context package for this node.
+        // Use the sandbox directory when available so the LLM sees files
+        // it will actually write to, falling back to the workspace root.
+        let retriever = ContextRetriever::new(self.effective_working_dir(idx))
             .with_max_file_bytes(8 * 1024)
             .with_max_context_bytes(100 * 1024); // 100KB default budget
 
@@ -1406,7 +1454,8 @@ impl SRBNOrchestrator {
         // actuator generates code. Stored as ephemeral context, not committed.
         // Gated by planning policy: only LargeFeature/Greenfield/ArchitecturalRevision activate it.
         let speculator_hints = if self.planning_policy.needs_speculator() {
-            let node = &self.graph[idx];
+            let node_id = self.graph[idx].node_id.clone();
+            let node_goal = self.graph[idx].goal.clone();
             let child_goals: Vec<String> = self
                 .graph
                 .edges(idx)
@@ -1422,20 +1471,20 @@ impl SRBNOrchestrator {
 
             if !child_goals.is_empty() {
                 let speculator_prompt = crate::prompts::render_speculator_lookahead(
-                    &node.node_id,
-                    &node.goal,
+                    &node_id,
+                    &node_goal,
                     &child_goals.join("\n"),
                 );
 
                 log::debug!(
                     "Speculator lookahead for node {} using model {}",
-                    node.node_id,
+                    node_id,
                     self.speculator_model
                 );
                 self.call_llm_with_logging(
                     &self.speculator_model.clone(),
                     &speculator_prompt,
-                    Some(&node.node_id),
+                    Some(&node_id),
                 )
                 .await
                 .unwrap_or_else(|e| {
@@ -1473,6 +1522,20 @@ impl SRBNOrchestrator {
                 prompt, speculator_hints
             );
         }
+
+        // Include sandbox/workspace file tree so the LLM has structural
+        // awareness of the actual directory layout it is writing into.
+        let wd = self.effective_working_dir(idx);
+        if let Ok(tree) = crate::tools::list_sandbox_files(&wd) {
+            if !tree.is_empty() {
+                prompt = format!(
+                    "{}\n\n## Current Project Tree\n\n```\n{}\n```",
+                    prompt,
+                    tree.join("\n")
+                );
+            }
+        }
+
         let model = actuator.model().to_string();
 
         let response = self
@@ -1894,13 +1957,6 @@ impl SRBNOrchestrator {
     /// Get node count
     pub fn node_count(&self) -> usize {
         self.graph.node_count()
-    }
-
-    /// Start Python LSP (ty) for type checking
-    ///
-    /// Legacy entry point — delegates to `start_lsp_for_plugins` with just Python.
-    pub async fn start_python_lsp(&mut self) -> Result<()> {
-        self.start_lsp_for_plugins(&["python"]).await
     }
 
     /// Start LSP clients for the given plugin names.
@@ -2564,21 +2620,7 @@ impl SRBNOrchestrator {
 
 /// Parse a persisted state string back into a NodeState enum
 fn parse_node_state(s: &str) -> NodeState {
-    match s {
-        "TaskQueued" => NodeState::TaskQueued,
-        "Planning" => NodeState::Planning,
-        "Coding" => NodeState::Coding,
-        "Verifying" => NodeState::Verifying,
-        "Retry" => NodeState::Retry,
-        "SheafCheck" => NodeState::SheafCheck,
-        "Committing" => NodeState::Committing,
-        "Escalated" => NodeState::Escalated,
-        "Completed" | "COMPLETED" | "STABLE" => NodeState::Completed,
-        "Failed" | "FAILED" => NodeState::Failed,
-        "Aborted" | "ABORTED" => NodeState::Aborted,
-        "Superseded" | "SUPERSEDED" => NodeState::Superseded,
-        _ => NodeState::TaskQueued, // Default for unknown states
-    }
+    NodeState::from_display_str(s)
 }
 
 /// Parse a persisted node class string back into a NodeClass enum
@@ -4217,5 +4259,35 @@ def util():
         assert_eq!(orch.budget.max_revisions, Some(5));
         assert_eq!(orch.budget.max_cost_usd, Some(2.50));
         assert!(!orch.budget.any_exhausted());
+    }
+
+    #[test]
+    fn test_node_outcome_equality() {
+        assert_eq!(NodeOutcome::Completed, NodeOutcome::Completed);
+        assert_eq!(NodeOutcome::Escalated, NodeOutcome::Escalated);
+        assert_ne!(NodeOutcome::Completed, NodeOutcome::Escalated);
+    }
+
+    #[test]
+    fn test_session_outcome_from_counts() {
+        fn derive_outcome(completed: usize, escalated: usize) -> perspt_core::SessionOutcome {
+            if escalated == 0 {
+                perspt_core::SessionOutcome::Success
+            } else if completed > 0 {
+                perspt_core::SessionOutcome::PartialSuccess
+            } else {
+                perspt_core::SessionOutcome::Failed
+            }
+        }
+
+        // All completed → Success
+        assert_eq!(derive_outcome(3, 0), perspt_core::SessionOutcome::Success,);
+        // Some completed, some escalated → PartialSuccess
+        assert_eq!(
+            derive_outcome(2, 1),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // All escalated → Failed
+        assert_eq!(derive_outcome(0, 3), perspt_core::SessionOutcome::Failed,);
     }
 }

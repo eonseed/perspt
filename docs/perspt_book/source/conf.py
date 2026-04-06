@@ -12,8 +12,8 @@ import sys
 project = 'Perspt'
 copyright = '2025, Ronak Rathore, Vikrant Rathore'
 author = 'Ronak Rathore, Vikrant Rathore'
-release = '0.5.7'
-version = '0.5.7'
+release = '0.5.8'
+version = '0.5.8'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

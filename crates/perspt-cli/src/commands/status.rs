@@ -57,34 +57,31 @@ pub async fn run() -> Result<()> {
     };
 
     if !display_states.is_empty() {
+        use perspt_core::types::NodeState;
+
         let completed = display_states
             .iter()
-            .filter(|n| n.state == "Completed" || n.state == "COMPLETED" || n.state == "STABLE")
+            .filter(|n| NodeState::from_display_str(&n.state).is_success())
             .count();
         let running = display_states
             .iter()
-            .filter(|n| {
-                n.state == "RUNNING"
-                    || n.state == "Coding"
-                    || n.state == "Verifying"
-                    || n.state == "Planning"
-            })
+            .filter(|n| NodeState::from_display_str(&n.state).is_active())
             .count();
         let failed = display_states
             .iter()
-            .filter(|n| n.state == "FAILED" || n.state == "Failed")
+            .filter(|n| NodeState::from_display_str(&n.state) == NodeState::Failed)
             .count();
         let queued = display_states
             .iter()
-            .filter(|n| n.state == "Queued" || n.state == "QUEUED" || n.state == "TaskQueued")
+            .filter(|n| NodeState::from_display_str(&n.state) == NodeState::TaskQueued)
             .count();
         let retrying = display_states
             .iter()
-            .filter(|n| n.state == "Retrying" || n.state == "RETRYING" || n.state == "Retry")
+            .filter(|n| NodeState::from_display_str(&n.state) == NodeState::Retry)
             .count();
         let escalated = display_states
             .iter()
-            .filter(|n| n.state == "Escalated" || n.state == "ESCALATED")
+            .filter(|n| NodeState::from_display_str(&n.state) == NodeState::Escalated)
             .count();
 
         println!();

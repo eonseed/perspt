@@ -212,8 +212,7 @@ Perspt uses subcommands. Running `perspt` with no arguments defaults to `chat`.
 | `resume`       | Resume a session with trust context                      |
 | `abort`        | Abort the current agent session                          |
 | `dashboard`    | Launch the web monitoring dashboard                      |
-| `dashboard`    | Launch the web monitoring dashboard                      |
-| `logs`         | View LLM request/response logs                           |
+| `logs`         | View LLM token metrics and request/response logs         |
 
 Global options: `-v` (verbose), `-c <FILE>` (config path), `-h` (help), `-V` (version).
 
@@ -284,11 +283,15 @@ Each node presents a grouped diff review with verification context:
 
 ### Retry Policy
 
-| Error Type          | Max Retries | On Exhaustion    |
-|---------------------|-------------|------------------|
-| Compilation errors  | 3           | Escalate to user |
-| Tool failures       | 5           | Escalate to user |
-| Review rejections   | 3           | Escalate to user |
+| Error Type          | Max Retries | On Exhaustion      |
+|---------------------|-------------|--------------------|
+| Compilation errors  | 3           | Node escalated     |
+| Tool failures       | 5           | Node escalated     |
+| Review rejections   | 3           | Node escalated     |
+
+Escalated nodes do not block the remaining DAG. After all nodes are processed,
+the session derives a `SessionOutcome`: **Success** (all completed),
+**PartialSuccess** (some escalated), or **Failed** (none completed).
 
 ### Headless Mode
 
@@ -298,6 +301,7 @@ With `--yes`, the agent runs fully autonomously and prints structured progress:
 [VERIFY]   syntax=ok build=ok tests=8/8 lint=ok degraded=false
 [ENERGY]   V(x)=0.05 boot=0.00 sheaf=0.00
 [ESCALATE] 0 escalations
+[OUTCOME]  Success
 [COMMIT]   session abc123 committed
 ```
 
@@ -316,12 +320,19 @@ perspt agent [OPTIONS] <TASK>
       --actuator-model <M>         Model for Actuator tier
       --verifier-model <M>         Model for Verifier tier
       --speculator-model <M>       Model for Speculator tier
+      --architect-fallback-model <M>  Fallback model for Architect tier
+      --actuator-fallback-model <M>   Fallback model for Actuator tier
+      --verifier-fallback-model <M>   Fallback model for Verifier tier
+      --speculator-fallback-model <M> Fallback model for Speculator tier
       --energy-weights <a,b,g>     Lyapunov weights (default: 1.0,0.5,2.0)
       --stability-threshold <e>    Convergence threshold (default: 0.1)
       --max-cost <USD>             Cost limit (0 = unlimited)
       --max-steps <N>              Iteration limit (0 = unlimited)
       --defer-tests                Defer tests until sheaf validation
-      --log-llm                    Log all LLM requests to database
+      --single-file                Force single-file Solo Mode
+      --verifier-strictness <S>    default | strict | minimal (default: default)
+      --log-llm                    Log verbose LLM prompts/responses (token metrics always recorded)
+      --output-plan <FILE>         Export task graph as JSON after planning
 ```
 
 ---
@@ -399,18 +410,19 @@ Benefits: full privacy, zero API cost, offline operation.
 
 ## Architecture
 
-Perspt is organized as a Cargo workspace with eight crates:
+Perspt is organized as a Cargo workspace with nine crates:
 
 ```
 perspt/crates/
   perspt-cli       CLI entry point and subcommand dispatch
-  perspt-core      Configuration, LLM provider adapter (genai), events
+  perspt-core      Configuration, LLM provider adapter (genai), events, types
   perspt-tui       Terminal UI (Ratatui)
   perspt-agent     SRBN orchestrator, tools, LSP client, test runner
   perspt-store     Session persistence (DuckDB)
   perspt-policy    Security policy engine (Starlark)
   perspt-sandbox   Process isolation
   perspt-dashboard Web dashboard (Axum + HTMX + DaisyUI 5)
+  perspt           Meta-crate that re-exports all workspace libraries
 ```
 
 Key implementation details:
@@ -458,9 +470,9 @@ For a comprehensive guide covering installation, configuration, tutorials, the S
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
-cargo test --workspace       # run tests
-cargo clippy -- -D warnings  # lint
-cargo fmt --check            # formatting
+cargo test --all-features -- --test-threads=1  # run tests
+cargo clippy --all-targets --all-features -- -D warnings  # lint
+cargo fmt --all -- --check                     # formatting
 ```
 
 ## License

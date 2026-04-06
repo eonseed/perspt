@@ -244,13 +244,21 @@ pub async fn run(
                 // PSP-5 Phase 7: Structured headless summary
                 let sid = orchestrator.session_id().to_string();
                 if let Ok(store) = perspt_store::SessionStore::new() {
+                    use perspt_core::types::NodeState;
+
                     // VERIFY summary
                     if let Ok(nodes) = store.get_node_states(&sid) {
                         let completed = nodes
                             .iter()
-                            .filter(|n| n.state == "COMPLETED" || n.state == "STABLE")
+                            .filter(|n| NodeState::from_display_str(&n.state).is_success())
                             .count();
-                        let failed = nodes.iter().filter(|n| n.state == "FAILED").count();
+                        let failed = nodes
+                            .iter()
+                            .filter(|n| {
+                                let s = NodeState::from_display_str(&n.state);
+                                s == NodeState::Failed || s == NodeState::Escalated
+                            })
+                            .count();
                         let retries: i32 = nodes.iter().map(|n| n.attempt_count.max(0)).sum();
                         println!();
                         println!(

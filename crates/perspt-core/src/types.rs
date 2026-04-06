@@ -207,24 +207,6 @@ impl RetryPolicy {
         }
     }
 
-    /// Reset failures of a specific type (on success)
-    pub fn reset_failures(&mut self, error_type: ErrorType) {
-        match error_type {
-            ErrorType::Compilation => self.compilation_failures = 0,
-            ErrorType::ToolFailure => self.tool_failures = 0,
-            ErrorType::ReviewRejection => self.review_rejections = 0,
-            ErrorType::Other => self.compilation_failures = 0,
-        }
-    }
-
-    /// Reset all failure counters
-    pub fn reset_all(&mut self) {
-        self.compilation_failures = 0;
-        self.tool_failures = 0;
-        self.review_rejections = 0;
-        self.last_error_type = None;
-    }
-
     /// Check if we should escalate for a specific error type
     pub fn should_escalate(&self, error_type: ErrorType) -> bool {
         match error_type {
@@ -241,15 +223,6 @@ impl RetryPolicy {
         self.compilation_failures >= self.max_compilation_retries
             || self.tool_failures >= self.max_tool_retries
             || self.review_rejections >= self.max_review_rejections
-    }
-
-    /// Get the current failure count for an error type
-    pub fn failure_count(&self, error_type: ErrorType) -> usize {
-        match error_type {
-            ErrorType::Compilation | ErrorType::Other => self.compilation_failures,
-            ErrorType::ToolFailure => self.tool_failures,
-            ErrorType::ReviewRejection => self.review_rejections,
-        }
     }
 
     /// Get remaining attempts for an error type
@@ -325,11 +298,6 @@ impl StabilityMonitor {
     pub fn should_escalate(&self) -> bool {
         // Legacy check or new policy check
         (self.attempt_count >= self.max_retries && !self.stable) || self.retry_policy.any_exceeded()
-    }
-
-    /// Check if we should escalate for a specific error type
-    pub fn should_escalate_for(&self, error_type: ErrorType) -> bool {
-        self.retry_policy.should_escalate(error_type)
     }
 
     /// Get remaining attempts for current error type
@@ -422,6 +390,17 @@ impl SRBNNode {
     }
 }
 
+/// Outcome of a full orchestration session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionOutcome {
+    /// All nodes completed successfully
+    Success,
+    /// Some nodes completed, some escalated or failed
+    PartialSuccess,
+    /// Critical failure or all nodes escalated/failed
+    Failed,
+}
+
 /// Node execution state (from PSP state machine)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeState {
@@ -458,6 +437,66 @@ impl NodeState {
             self,
             NodeState::Completed | NodeState::Failed | NodeState::Aborted | NodeState::Superseded
         )
+    }
+
+    /// Check if the node finished successfully
+    pub fn is_success(&self) -> bool {
+        matches!(self, NodeState::Completed)
+    }
+
+    /// Check if the node is actively running (non-terminal, non-queued)
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self,
+            NodeState::Planning
+                | NodeState::Coding
+                | NodeState::Verifying
+                | NodeState::Retry
+                | NodeState::SheafCheck
+                | NodeState::Committing
+        )
+    }
+
+    /// Parse a state string from the database or display layer.
+    ///
+    /// Handles PascalCase, UPPERCASE, and lowercase variants that appear in
+    /// the store, CLI, and dashboard.  Unknown strings map to `TaskQueued`.
+    pub fn from_display_str(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "taskqueued" | "queued" | "task_queued" => NodeState::TaskQueued,
+            "planning" => NodeState::Planning,
+            "coding" | "in_progress" | "in-progress" | "running" => NodeState::Coding,
+            "verifying" => NodeState::Verifying,
+            "retry" | "retrying" => NodeState::Retry,
+            "sheafcheck" | "sheaf_check" => NodeState::SheafCheck,
+            "committing" | "committed" => NodeState::Committing,
+            "escalated" => NodeState::Escalated,
+            "completed" | "stable" | "verified" => NodeState::Completed,
+            "failed" | "error" => NodeState::Failed,
+            "aborted" => NodeState::Aborted,
+            "superseded" => NodeState::Superseded,
+            _ => NodeState::TaskQueued,
+        }
+    }
+}
+
+impl std::fmt::Display for NodeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            NodeState::TaskQueued => "queued",
+            NodeState::Planning => "planning",
+            NodeState::Coding => "coding",
+            NodeState::Verifying => "verifying",
+            NodeState::Retry => "retrying",
+            NodeState::SheafCheck => "sheaf_check",
+            NodeState::Committing => "committing",
+            NodeState::Escalated => "escalated",
+            NodeState::Completed => "completed",
+            NodeState::Failed => "failed",
+            NodeState::Aborted => "aborted",
+            NodeState::Superseded => "superseded",
+        };
+        f.write_str(label)
     }
 }
 
@@ -2584,17 +2623,6 @@ impl FeatureCharter {
             created_at: epoch_secs(),
         }
     }
-
-    /// Check whether a plan exceeds the charter's module budget.
-    pub fn exceeds_module_budget(&self, task_count: usize) -> bool {
-        self.max_modules
-            .is_some_and(|max| task_count > max as usize)
-    }
-
-    /// Check whether a plan exceeds the charter's file budget.
-    pub fn exceeds_file_budget(&self, file_count: usize) -> bool {
-        self.max_files.is_some_and(|max| file_count > max as usize)
-    }
 }
 
 /// A bounded repair unit that records what was changed during a correction.
@@ -3743,20 +3771,6 @@ mod psp5_tests {
     }
 
     #[test]
-    fn test_feature_charter_budget_checks() {
-        let mut charter = FeatureCharter::new("s1", "Build a CLI tool");
-        assert!(!charter.exceeds_module_budget(10));
-        assert!(!charter.exceeds_file_budget(50));
-
-        charter.max_modules = Some(5);
-        charter.max_files = Some(20);
-        assert!(!charter.exceeds_module_budget(5));
-        assert!(charter.exceeds_module_budget(6));
-        assert!(!charter.exceeds_file_budget(20));
-        assert!(charter.exceeds_file_budget(21));
-    }
-
-    #[test]
     fn test_planning_policy_defaults_and_queries() {
         let policy = PlanningPolicy::default();
         assert_eq!(policy, PlanningPolicy::FeatureIncrement);
@@ -3946,5 +3960,87 @@ mod psp5_tests {
         assert!(task.dependency_expectations.required_packages.is_empty());
         assert!(task.dependency_expectations.setup_commands.is_empty());
         assert!(task.dependency_expectations.min_toolchain_version.is_none());
+    }
+
+    #[test]
+    fn test_node_state_from_display_str_case_insensitive() {
+        assert_eq!(
+            NodeState::from_display_str("Completed"),
+            NodeState::Completed
+        );
+        assert_eq!(
+            NodeState::from_display_str("COMPLETED"),
+            NodeState::Completed
+        );
+        assert_eq!(
+            NodeState::from_display_str("completed"),
+            NodeState::Completed
+        );
+        assert_eq!(
+            NodeState::from_display_str("TaskQueued"),
+            NodeState::TaskQueued
+        );
+        assert_eq!(
+            NodeState::from_display_str("TASKQUEUED"),
+            NodeState::TaskQueued
+        );
+        assert_eq!(NodeState::from_display_str("coding"), NodeState::Coding);
+        assert_eq!(NodeState::from_display_str("STABLE"), NodeState::Completed);
+        assert_eq!(NodeState::from_display_str("RUNNING"), NodeState::Coding);
+        // Unknown strings map to TaskQueued (default)
+        assert_eq!(
+            NodeState::from_display_str("garbage"),
+            NodeState::TaskQueued
+        );
+    }
+
+    #[test]
+    fn test_node_state_display_roundtrip() {
+        let states = [
+            NodeState::TaskQueued,
+            NodeState::Planning,
+            NodeState::Coding,
+            NodeState::Verifying,
+            NodeState::Retry,
+            NodeState::SheafCheck,
+            NodeState::Committing,
+            NodeState::Escalated,
+            NodeState::Completed,
+            NodeState::Failed,
+        ];
+        for state in &states {
+            let display = state.to_string();
+            let parsed = NodeState::from_display_str(&display);
+            assert_eq!(parsed, *state, "Roundtrip failed for {:?}", state);
+        }
+    }
+
+    #[test]
+    fn test_node_state_is_success() {
+        assert!(NodeState::Completed.is_success());
+        assert!(!NodeState::Escalated.is_success());
+        assert!(!NodeState::Failed.is_success());
+        assert!(!NodeState::Coding.is_success());
+    }
+
+    #[test]
+    fn test_node_state_is_active() {
+        assert!(NodeState::Coding.is_active());
+        assert!(NodeState::Verifying.is_active());
+        assert!(NodeState::Planning.is_active());
+        assert!(NodeState::Retry.is_active());
+        assert!(NodeState::SheafCheck.is_active());
+        assert!(NodeState::Committing.is_active());
+        assert!(!NodeState::Completed.is_active());
+        assert!(!NodeState::Escalated.is_active());
+        assert!(!NodeState::TaskQueued.is_active());
+    }
+
+    #[test]
+    fn test_session_outcome_equality() {
+        assert_eq!(SessionOutcome::Success, SessionOutcome::Success);
+        assert_ne!(SessionOutcome::Success, SessionOutcome::PartialSuccess);
+        assert_ne!(SessionOutcome::Success, SessionOutcome::Failed);
+        assert_ne!(SessionOutcome::PartialSuccess, SessionOutcome::Failed);
     }
 }
