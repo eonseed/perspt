@@ -27,7 +27,7 @@ pub use types::{
     ModelTier, NodeState, OwnershipManifest, PlanRevision, PlanRevisionStatus, PlannedContract,
     PlannedTask, PlannedTest, PlanningPolicy, ProvisionalBranch, ProvisionalBranchState,
     RepairFootprint, RestrictionMap, RetryPolicy, RewriteAction, RewriteRecord, SRBNNode,
-    SensorStatus, SheafValidationResult, SheafValidatorClass, StabilityMonitor, StageOutcome,
-    StructuralDigest, SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan, TaskType, TokenBudget,
-    VerificationResult, WeightedTest, WorkspaceState,
+    SensorStatus, SessionOutcome, SheafValidationResult, SheafValidatorClass, StabilityMonitor,
+    StageOutcome, StructuralDigest, SummaryDigest, SummaryKind, TargetedRequeue, TaskPlan,
+    TaskType, TokenBudget, VerificationResult, WeightedTest, WorkspaceState,
 };

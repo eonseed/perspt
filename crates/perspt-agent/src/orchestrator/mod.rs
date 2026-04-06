@@ -2551,21 +2551,7 @@ impl SRBNOrchestrator {
 
 /// Parse a persisted state string back into a NodeState enum
 fn parse_node_state(s: &str) -> NodeState {
-    match s {
-        "TaskQueued" => NodeState::TaskQueued,
-        "Planning" => NodeState::Planning,
-        "Coding" => NodeState::Coding,
-        "Verifying" => NodeState::Verifying,
-        "Retry" => NodeState::Retry,
-        "SheafCheck" => NodeState::SheafCheck,
-        "Committing" => NodeState::Committing,
-        "Escalated" => NodeState::Escalated,
-        "Completed" | "COMPLETED" | "STABLE" => NodeState::Completed,
-        "Failed" | "FAILED" => NodeState::Failed,
-        "Aborted" | "ABORTED" => NodeState::Aborted,
-        "Superseded" | "SUPERSEDED" => NodeState::Superseded,
-        _ => NodeState::TaskQueued, // Default for unknown states
-    }
+    NodeState::from_display_str(s)
 }
 
 /// Parse a persisted node class string back into a NodeClass enum
