@@ -1100,6 +1100,11 @@ impl SRBNOrchestrator {
                         max_revisions: self.budget.max_revisions,
                     });
 
+                    // Persist budget envelope to store for auditability.
+                    if let Err(e) = self.ledger.upsert_budget_envelope(&self.budget) {
+                        log::warn!("Failed to persist budget envelope: {}", e);
+                    }
+
                     // Emit completed status
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
@@ -1400,7 +1405,8 @@ impl SRBNOrchestrator {
         // actuator generates code. Stored as ephemeral context, not committed.
         // Gated by planning policy: only LargeFeature/Greenfield/ArchitecturalRevision activate it.
         let speculator_hints = if self.planning_policy.needs_speculator() {
-            let node = &self.graph[idx];
+            let node_id = self.graph[idx].node_id.clone();
+            let node_goal = self.graph[idx].goal.clone();
             let child_goals: Vec<String> = self
                 .graph
                 .edges(idx)
@@ -1416,20 +1422,20 @@ impl SRBNOrchestrator {
 
             if !child_goals.is_empty() {
                 let speculator_prompt = crate::prompts::render_speculator_lookahead(
-                    &node.node_id,
-                    &node.goal,
+                    &node_id,
+                    &node_goal,
                     &child_goals.join("\n"),
                 );
 
                 log::debug!(
                     "Speculator lookahead for node {} using model {}",
-                    node.node_id,
+                    node_id,
                     self.speculator_model
                 );
                 self.call_llm_with_logging(
                     &self.speculator_model.clone(),
                     &speculator_prompt,
-                    Some(&node.node_id),
+                    Some(&node_id),
                 )
                 .await
                 .unwrap_or_else(|e| {

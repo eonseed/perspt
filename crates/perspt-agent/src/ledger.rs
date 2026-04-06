@@ -323,6 +323,47 @@ impl MerkleLedger {
         Ok(())
     }
 
+    /// Record lightweight LLM usage metrics (no prompt/response text).
+    ///
+    /// This is always called after every LLM invocation regardless of
+    /// the `--log-llm` flag so that token and cost accounting is never lost.
+    pub fn record_llm_usage(
+        &self,
+        model: &str,
+        node_id: Option<&str>,
+        latency_ms: i32,
+        tokens_in: i32,
+        tokens_out: i32,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record LLM usage")?;
+
+        // Re-use existing table with empty prompt/response to avoid schema changes.
+        let record = LlmRequestRecord {
+            session_id,
+            node_id: node_id.map(|s| s.to_string()),
+            model: model.to_string(),
+            prompt: String::new(),
+            response: String::new(),
+            tokens_in,
+            tokens_out,
+            latency_ms,
+        };
+
+        self.store.record_llm_request(&record)?;
+        log::debug!(
+            "Recorded LLM usage: model={}, tokens_in={}, tokens_out={}, latency={}ms",
+            model,
+            tokens_in,
+            tokens_out,
+            latency_ms,
+        );
+        Ok(())
+    }
+
     /// Get access to the underlying store (for direct queries)
     pub fn store(&self) -> &SessionStore {
         &self.store
