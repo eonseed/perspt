@@ -465,7 +465,7 @@ impl NodeState {
         match s.to_ascii_lowercase().as_str() {
             "taskqueued" | "queued" | "task_queued" => NodeState::TaskQueued,
             "planning" => NodeState::Planning,
-            "coding" | "in_progress" | "in-progress" => NodeState::Coding,
+            "coding" | "in_progress" | "in-progress" | "running" => NodeState::Coding,
             "verifying" => NodeState::Verifying,
             "retry" | "retrying" => NodeState::Retry,
             "sheafcheck" | "sheaf_check" => NodeState::SheafCheck,
@@ -3960,5 +3960,87 @@ mod psp5_tests {
         assert!(task.dependency_expectations.required_packages.is_empty());
         assert!(task.dependency_expectations.setup_commands.is_empty());
         assert!(task.dependency_expectations.min_toolchain_version.is_none());
+    }
+
+    #[test]
+    fn test_node_state_from_display_str_case_insensitive() {
+        assert_eq!(
+            NodeState::from_display_str("Completed"),
+            NodeState::Completed
+        );
+        assert_eq!(
+            NodeState::from_display_str("COMPLETED"),
+            NodeState::Completed
+        );
+        assert_eq!(
+            NodeState::from_display_str("completed"),
+            NodeState::Completed
+        );
+        assert_eq!(
+            NodeState::from_display_str("TaskQueued"),
+            NodeState::TaskQueued
+        );
+        assert_eq!(
+            NodeState::from_display_str("TASKQUEUED"),
+            NodeState::TaskQueued
+        );
+        assert_eq!(NodeState::from_display_str("coding"), NodeState::Coding);
+        assert_eq!(NodeState::from_display_str("STABLE"), NodeState::Completed);
+        assert_eq!(NodeState::from_display_str("RUNNING"), NodeState::Coding);
+        // Unknown strings map to TaskQueued (default)
+        assert_eq!(
+            NodeState::from_display_str("garbage"),
+            NodeState::TaskQueued
+        );
+    }
+
+    #[test]
+    fn test_node_state_display_roundtrip() {
+        let states = [
+            NodeState::TaskQueued,
+            NodeState::Planning,
+            NodeState::Coding,
+            NodeState::Verifying,
+            NodeState::Retry,
+            NodeState::SheafCheck,
+            NodeState::Committing,
+            NodeState::Escalated,
+            NodeState::Completed,
+            NodeState::Failed,
+        ];
+        for state in &states {
+            let display = state.to_string();
+            let parsed = NodeState::from_display_str(&display);
+            assert_eq!(parsed, *state, "Roundtrip failed for {:?}", state);
+        }
+    }
+
+    #[test]
+    fn test_node_state_is_success() {
+        assert!(NodeState::Completed.is_success());
+        assert!(!NodeState::Escalated.is_success());
+        assert!(!NodeState::Failed.is_success());
+        assert!(!NodeState::Coding.is_success());
+    }
+
+    #[test]
+    fn test_node_state_is_active() {
+        assert!(NodeState::Coding.is_active());
+        assert!(NodeState::Verifying.is_active());
+        assert!(NodeState::Planning.is_active());
+        assert!(NodeState::Retry.is_active());
+        assert!(NodeState::SheafCheck.is_active());
+        assert!(NodeState::Committing.is_active());
+        assert!(!NodeState::Completed.is_active());
+        assert!(!NodeState::Escalated.is_active());
+        assert!(!NodeState::TaskQueued.is_active());
+    }
+
+    #[test]
+    fn test_session_outcome_equality() {
+        assert_eq!(SessionOutcome::Success, SessionOutcome::Success);
+        assert_ne!(SessionOutcome::Success, SessionOutcome::PartialSuccess);
+        assert_ne!(SessionOutcome::Success, SessionOutcome::Failed);
+        assert_ne!(SessionOutcome::PartialSuccess, SessionOutcome::Failed);
     }
 }
