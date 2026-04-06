@@ -127,22 +127,14 @@ pub fn sanitize_command(command: &str) -> Result<SanitizeResult> {
     Ok(result)
 }
 
+#[cfg(test)]
 /// Canonicalize a command for display
 ///
 /// Normalizes the command to prevent visual obfuscation attacks
-pub fn canonicalize(command: &str) -> Result<String> {
+pub(crate) fn canonicalize(command: &str) -> Result<String> {
     // Parse and rejoin to normalize spacing
     let parts = shell_words::split(command)?;
     Ok(shell_words::join(&parts))
-}
-
-/// Check if a command is safe for auto-execution
-pub fn is_safe_for_auto_exec(command: &str) -> bool {
-    let result = sanitize_command(command);
-    match result {
-        Ok(r) => !r.rejected && r.warnings.is_empty(),
-        Err(_) => false,
-    }
 }
 
 /// Validate that a command is workspace-bound.

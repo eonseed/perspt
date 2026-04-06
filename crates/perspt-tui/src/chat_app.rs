@@ -5,7 +5,7 @@
 
 use crate::app_event::AppEvent;
 use crate::simple_input::SimpleInput;
-use crate::theme::{icons, Theme};
+use crate::theme::icons;
 use anyhow::Result;
 use crossterm::event::{
     Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
@@ -80,9 +80,6 @@ pub struct ChatApp {
     model: String,
     /// Throbber state for loading animation
     throbber_state: ThrobberState,
-    /// Theme for styling
-    #[allow(dead_code)]
-    theme: Theme,
     /// Should quit the application
     should_quit: bool,
     /// Receiver for streaming chunks
@@ -113,7 +110,6 @@ impl ChatApp {
             provider: Arc::new(provider),
             model,
             throbber_state: ThrobberState::default(),
-            theme: Theme::default(),
             should_quit: false,
             stream_rx: None,
             total_visual_lines: 0,

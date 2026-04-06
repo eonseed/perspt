@@ -35,15 +35,6 @@ impl ActiveTab {
             ActiveTab::Diff => 2,
         }
     }
-
-    #[allow(dead_code)]
-    fn from_index(i: usize) -> Self {
-        match i {
-            0 => ActiveTab::Dashboard,
-            1 => ActiveTab::Tasks,
-            _ => ActiveTab::Diff,
-        }
-    }
 }
 
 /// PSP-5 Phase 7: Aggregated review state for the active approval boundary.

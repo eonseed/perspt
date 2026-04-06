@@ -207,24 +207,6 @@ impl RetryPolicy {
         }
     }
 
-    /// Reset failures of a specific type (on success)
-    pub fn reset_failures(&mut self, error_type: ErrorType) {
-        match error_type {
-            ErrorType::Compilation => self.compilation_failures = 0,
-            ErrorType::ToolFailure => self.tool_failures = 0,
-            ErrorType::ReviewRejection => self.review_rejections = 0,
-            ErrorType::Other => self.compilation_failures = 0,
-        }
-    }
-
-    /// Reset all failure counters
-    pub fn reset_all(&mut self) {
-        self.compilation_failures = 0;
-        self.tool_failures = 0;
-        self.review_rejections = 0;
-        self.last_error_type = None;
-    }
-
     /// Check if we should escalate for a specific error type
     pub fn should_escalate(&self, error_type: ErrorType) -> bool {
         match error_type {
@@ -241,15 +223,6 @@ impl RetryPolicy {
         self.compilation_failures >= self.max_compilation_retries
             || self.tool_failures >= self.max_tool_retries
             || self.review_rejections >= self.max_review_rejections
-    }
-
-    /// Get the current failure count for an error type
-    pub fn failure_count(&self, error_type: ErrorType) -> usize {
-        match error_type {
-            ErrorType::Compilation | ErrorType::Other => self.compilation_failures,
-            ErrorType::ToolFailure => self.tool_failures,
-            ErrorType::ReviewRejection => self.review_rejections,
-        }
     }
 
     /// Get remaining attempts for an error type
@@ -325,11 +298,6 @@ impl StabilityMonitor {
     pub fn should_escalate(&self) -> bool {
         // Legacy check or new policy check
         (self.attempt_count >= self.max_retries && !self.stable) || self.retry_policy.any_exceeded()
-    }
-
-    /// Check if we should escalate for a specific error type
-    pub fn should_escalate_for(&self, error_type: ErrorType) -> bool {
-        self.retry_policy.should_escalate(error_type)
     }
 
     /// Get remaining attempts for current error type
@@ -2584,17 +2552,6 @@ impl FeatureCharter {
             created_at: epoch_secs(),
         }
     }
-
-    /// Check whether a plan exceeds the charter's module budget.
-    pub fn exceeds_module_budget(&self, task_count: usize) -> bool {
-        self.max_modules
-            .is_some_and(|max| task_count > max as usize)
-    }
-
-    /// Check whether a plan exceeds the charter's file budget.
-    pub fn exceeds_file_budget(&self, file_count: usize) -> bool {
-        self.max_files.is_some_and(|max| file_count > max as usize)
-    }
 }
 
 /// A bounded repair unit that records what was changed during a correction.
@@ -3740,20 +3697,6 @@ mod psp5_tests {
         assert_eq!(PlanRevisionStatus::Active.to_string(), "active");
         assert_eq!(PlanRevisionStatus::Superseded.to_string(), "superseded");
         assert_eq!(PlanRevisionStatus::Cancelled.to_string(), "cancelled");
-    }
-
-    #[test]
-    fn test_feature_charter_budget_checks() {
-        let mut charter = FeatureCharter::new("s1", "Build a CLI tool");
-        assert!(!charter.exceeds_module_budget(10));
-        assert!(!charter.exceeds_file_budget(50));
-
-        charter.max_modules = Some(5);
-        charter.max_files = Some(20);
-        assert!(!charter.exceeds_module_budget(5));
-        assert!(charter.exceeds_module_budget(6));
-        assert!(!charter.exceeds_file_budget(20));
-        assert!(charter.exceeds_file_budget(21));
     }
 
     #[test]
