@@ -93,7 +93,7 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
     let node_states = store.get_node_states(&actual_id)?;
     let completed_count = node_states
         .iter()
-        .filter(|n| n.state == "COMPLETED" || n.state == "STABLE")
+        .filter(|n| perspt_core::types::NodeState::from_display_str(&n.state).is_success())
         .count();
 
     println!(
