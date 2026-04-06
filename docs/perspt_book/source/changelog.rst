@@ -3,6 +3,86 @@
 Changelog
 =========
 
+Version 0.5.8 — "Qualitätsveredelung"
+----------------------------------------
+
+*Orchestration State Overhaul Release*
+
+   "Qualitätsveredelung — the craft of refining what exists until its quality speaks
+   for itself. Not new features, but the quiet discipline of making every state
+   transition truthful, every metric honest, and every dead path removed."
+
+**Orchestration Correctness (Refs: #112, #113, #114, #116):**
+
+- **SessionOutcome enum** — New ``SessionOutcome`` type (Success, PartialSuccess,
+  Failed) derived from actual completed/escalated node counts. The ``Complete``
+  event now carries truthful outcomes instead of unconditional ``success: true``.
+- **NodeOutcome enum** — ``execute_node()`` returns ``Result<NodeOutcome>`` where
+  ``NodeOutcome`` is ``Completed`` or ``Escalated``, replacing the previous
+  ``Result<()>`` that could not distinguish outcomes.
+- **Correct session outcome derivation** — ``run_orchestration()`` and
+  ``run_resumed_inner()`` track completed/escalated counts per node and derive
+  the final ``SessionOutcome`` accordingly.
+- **Always-on LLM telemetry** — ``call_llm_with_logging()`` now records token
+  usage (in/out), latency, and estimated cost via ``record_llm_usage()`` after
+  every LLM call, regardless of ``--log-llm``. The flag now only controls verbose
+  prompt/response text persistence.
+- **Budget envelope persistence** — ``upsert_budget_envelope()`` called after each
+  ``BudgetUpdated`` event to persist cost/step tracking to the database.
+- **Sandbox-aware context retrieval** — ``ContextRetriever`` in ``step_speculate()``
+  uses ``effective_working_dir(idx)`` (the node's sandbox directory) instead of the
+  workspace root. Sandbox file tree listings included in actuator and correction
+  prompts for better generation grounding.
+
+**Type-Safe State Management (Refs: #114):**
+
+- **NodeState::from_display_str()** — Case-insensitive canonical parser with legacy
+  aliases ("running" → Coding, "stable" → Completed, "retrying" → Retry). Replaces
+  all ad-hoc string parsing across the codebase.
+- **NodeState helpers** — ``is_success()`` (true only for Completed), ``is_active()``
+  (true for Coding, Verifying, Planning, Retry, SheafCheck, Committing), and
+  ``Display`` impl producing lowercase labels.
+- **CLI state cleanup** — All string-based state comparisons in ``status.rs``,
+  ``agent.rs``, and ``resume.rs`` replaced with ``NodeState::from_display_str()``
+  and type-safe helper methods.
+
+**Dead Code Elimination:**
+
+- Removed 16 unused functions across ``perspt-core``, ``perspt-store``,
+  ``perspt-agent``, ``perspt-policy``, ``perspt-tui`` (~234 lines)
+- Downgraded ``canonicalize`` to ``pub(crate)`` in ``perspt-policy``
+- Removed orphaned ``sha2`` dependency from ``perspt-store``
+
+**Bug Fixes (Refs: #107, #111):**
+
+- **Session status stuck at RUNNING** — Status now persisted in ``end_session()``
+  with ``COALESCE``-based finalization guarantee (#111)
+- **LLM token counts always zero** — Real provider token usage (prompt +
+  completion tokens) extracted from ``genai`` ``ChatResponse::usage`` and
+  persisted per request (#107, #110)
+
+**Tests:**
+
+- 7 new tests covering ``NodeState`` parsing round-trips, ``SessionOutcome``
+  equality, ``NodeOutcome`` discriminants, and session outcome derivation from
+  completed/escalated counts
+- Total test count: 359 (up from 352)
+
+**Documentation:**
+
+- Updated README: fixed crate count (8 → 9), deduplicated dashboard command,
+  added missing agent flags (``--single-file``, ``--verifier-strictness``,
+  ``--output-plan``, all ``--*-fallback-model``), aligned contributing commands
+  with CI gates
+- Updated Perspt Book: SRBN architecture (Phase 7 → Commit & Outcome),
+  CLI reference (``logs`` always shows token metrics), developer architecture
+  guide (orchestrator lifecycle, NodeOutcome, SessionOutcome in type inventory
+  and data flow), workspace crates (removed dead ``is_safe_for_auto_exec``)
+- Updated PSP-5: execution flow steps 8–11 with Completed/Escalated paths and
+  SessionOutcome derivation, headless output with ``OUTCOME`` line, added
+  Orchestration State Overhaul implementation appendix
+
+
 Version 0.5.7 — "navikaran नवीकरण"
 -------------------------------------
 

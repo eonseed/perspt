@@ -39,8 +39,21 @@ to Large Language Models. It serves two complementary purposes:
    framework is mature; the implementation is under active development and has not
    yet been benchmarked.
 
-.. admonition:: Version 0.5.7 "navikaran नवीकरण" Highlights
+.. admonition:: Version 0.5.8 "Qualitätsveredelung" Highlights
    :class: tip
+
+   **Orchestration Quality Refinement:**
+
+   - **Accurate Session Outcomes** — ``SessionOutcome`` enum (Success, PartialSuccess, Failed) derived from actual node completion/escalation counts instead of unconditional success
+   - **Always-On LLM Telemetry** — Token usage, latency, and estimated cost recorded after every LLM call regardless of ``--log-llm``; the flag now only gates verbose prompt/response text
+   - **Type-Safe Node States** — ``NodeState::from_display_str()`` with case-insensitive parsing, ``is_success()``, ``is_active()``, and ``Display`` impl replace all stringly-typed comparisons
+   - **Sandbox-Aware Context** — ``ContextRetriever`` uses per-node sandbox paths; file tree listings included in actuator and correction prompts
+   - **Dead Code Cleanup** — 16 unused functions removed across 6 crates (~234 lines)
+
+   **Bug Fixes:**
+
+   - **Session status stuck at RUNNING** — Status now persisted in ``end_session()`` with guaranteed finalization
+   - **LLM token counts always zero** — Real provider token usage extracted and persisted per request
 
    **LLM CLI:**
 
@@ -48,22 +61,10 @@ to Large Language Models. It serves two complementary purposes:
    - **Beautiful TUI** — Markdown rendering, streaming responses, scroll navigation
    - **Simple CLI Mode** — Pipe-friendly ``simple-chat`` for scripting and logging
 
-   **SRBN Agent (Experimental):**
-
-   - **Web Dashboard** — Browser-based real-time monitoring (Axum + HTMX + DaisyUI 5)
-   - **PSP-5 Runtime** — Project-first multi-file execution with ownership closure
-   - **LLM Token Tracking** — Real provider token usage (prompt/completion) persisted per request
-   - **Five-Component Energy** — V(x) = alpha * V_syn + beta * V_str + gamma * V_log + V_boot + V_sheaf
-   - **Plugin-Driven Verification** — Language plugins select LSP server, test runner, and init commands
-   - **Sheaf Validation** — Cross-node consistency checks after all nodes converge
-   - **Provisional Branches** — Speculative child-node execution isolated until parent commits
-   - **Headless Mode** — ``--yes`` flag for fully autonomous CI/CD operation
-   - **Session Resume** — ``perspt resume`` rehydrates energy, retries, and escalation state
-
 Architecture
 ------------
 
-Perspt is built as an **8-crate Rust workspace**:
+Perspt is built as a **9-crate Rust workspace**:
 
 .. graphviz::
    :align: center
