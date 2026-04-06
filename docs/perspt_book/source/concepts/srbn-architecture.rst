@@ -126,10 +126,13 @@ The SRBN control loop as implemented by PSP-5 executes seven phases for each tas
      - After all nodes converge individually, run cross-node consistency checks.
        Validates import paths, shared type signatures, and interface-seal digests.
    * - 7
-     - **Commit**
-     - Record stable node state in the Merkle ledger with cryptographic hashing.
-       Emit ``NodeCompleted`` event. When all nodes are committed, the session is
-       complete.
+     - **Commit & Outcome**
+     - Record each node's terminal state in the Merkle ledger. Nodes that converge
+       (V(x) ≤ ε) are committed as ``Completed``; nodes whose retries are exhausted
+       are recorded as ``Escalated``. After all nodes are processed, the orchestrator
+       derives a ``SessionOutcome`` from completed/escalated counts: ``Success`` (all
+       completed), ``PartialSuccess`` (some escalated), or ``Failed`` (none completed).
+       Emit ``Complete`` event with the derived outcome.
 
 
 Lyapunov Energy
@@ -339,8 +342,13 @@ SRBN implements bounded retries per error type:
      - 3
      - Escalate with diff summary
 
-When retries are exhausted, the node transitions to **Escalated** state. In headless
-mode (``--yes``), escalations are logged and the node is marked **Failed**.
+When retries are exhausted, the node transitions to **Escalated** state.
+Escalated nodes do not block subsequent nodes. The orchestrator tracks
+completed and escalated counts and derives the final ``SessionOutcome``:
+``Success`` if all nodes completed, ``PartialSuccess`` if some escalated,
+or ``Failed`` if none completed. In headless mode (``--yes``), escalations
+are logged and the session exits with a non-zero code when the outcome
+is not ``Success``.
 
 
 Artifact Bundle Protocol

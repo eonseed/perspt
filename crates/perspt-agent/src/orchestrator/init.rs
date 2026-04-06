@@ -724,7 +724,7 @@ impl SRBNOrchestrator {
     }
 
     /// Suggest a meaningful project name from the task description
-    async fn suggest_project_name(&self, task: &str) -> String {
+    async fn suggest_project_name(&mut self, task: &str) -> String {
         // 1. Try heuristic extraction first (fast, no LLM)
         if let Some(name) = self.extract_name_heuristic(task) {
             self.emit_log(format!("📁 Suggested project folder: {}", name));

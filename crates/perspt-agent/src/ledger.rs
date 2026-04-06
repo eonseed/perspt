@@ -323,6 +323,47 @@ impl MerkleLedger {
         Ok(())
     }
 
+    /// Record lightweight LLM usage metrics (no prompt/response text).
+    ///
+    /// This is always called after every LLM invocation regardless of
+    /// the `--log-llm` flag so that token and cost accounting is never lost.
+    pub fn record_llm_usage(
+        &self,
+        model: &str,
+        node_id: Option<&str>,
+        latency_ms: i32,
+        tokens_in: i32,
+        tokens_out: i32,
+    ) -> Result<()> {
+        let session_id = self
+            .current_session
+            .as_ref()
+            .map(|s| s.session_id.clone())
+            .context("No active session to record LLM usage")?;
+
+        // Re-use existing table with empty prompt/response to avoid schema changes.
+        let record = LlmRequestRecord {
+            session_id,
+            node_id: node_id.map(|s| s.to_string()),
+            model: model.to_string(),
+            prompt: String::new(),
+            response: String::new(),
+            tokens_in,
+            tokens_out,
+            latency_ms,
+        };
+
+        self.store.record_llm_request(&record)?;
+        log::debug!(
+            "Recorded LLM usage: model={}, tokens_in={}, tokens_out={}, latency={}ms",
+            model,
+            tokens_in,
+            tokens_out,
+            latency_ms,
+        );
+        Ok(())
+    }
+
     /// Get access to the underlying store (for direct queries)
     pub fn store(&self) -> &SessionStore {
         &self.store
@@ -364,20 +405,6 @@ impl MerkleLedger {
             source_path
         );
         Ok(())
-    }
-
-    /// Get structural digests for a specific node in the current session
-    pub fn get_structural_digests(
-        &self,
-        node_id: &str,
-    ) -> Result<Vec<perspt_store::StructuralDigestRecord>> {
-        let session_id = self
-            .current_session
-            .as_ref()
-            .map(|s| s.session_id.clone())
-            .context("No active session to query structural digests")?;
-
-        self.store.get_structural_digests(&session_id, node_id)
     }
 
     /// Record context provenance for a node
@@ -894,11 +921,6 @@ impl MerkleLedger {
         Ok(())
     }
 
-    /// Get child branch IDs for a parent branch
-    pub fn get_child_branches(&self, parent_branch_id: &str) -> Result<Vec<String>> {
-        self.store.get_child_branches(parent_branch_id)
-    }
-
     /// Record an interface seal for a node
     pub fn record_interface_seal(
         &self,
@@ -931,12 +953,6 @@ impl MerkleLedger {
     ) -> Result<Vec<perspt_store::InterfaceSealRow>> {
         let session_id = self.session_id()?;
         self.store.get_interface_seals(&session_id, node_id)
-    }
-
-    /// Check whether a node has any interface seals
-    pub fn has_interface_seals(&self, node_id: &str) -> Result<bool> {
-        let session_id = self.session_id()?;
-        self.store.has_interface_seals(&session_id, node_id)
     }
 
     /// Record a branch flush decision
@@ -1268,13 +1284,6 @@ impl MerkleLedger {
     ) -> Result<Vec<perspt_store::RepairFootprintRow>> {
         let session_id = self.session_id()?;
         self.store.get_repair_footprints(&session_id, node_id)
-    }
-
-    /// Mark a repair footprint as resolved.
-    pub fn resolve_repair_footprint(&self, footprint_id: &str) -> Result<()> {
-        self.store.resolve_repair_footprint(footprint_id)?;
-        log::debug!("Resolved repair footprint '{}'", footprint_id);
-        Ok(())
     }
 
     /// Record or update the budget envelope for the current session.

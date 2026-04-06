@@ -57,8 +57,10 @@ Perspt SHALL treat project-scale coding as the default SRBN workflow and SHALL s
 5. Apply the bundle transactionally inside the workspace.
 6. Run verifier stages to compute node energy from syntax, structure, logic, execution, and sheaf consistency signals.
 7. If energy remains above threshold, generate a correction prompt grounded in verifier outputs and retry within policy limits.
-8. If stable, show reviewable diffs, accept or reject the node, then commit the stable node to the ledger.
-9. After child nodes converge, run sheaf validation for cross-node consistency before finalizing parent completion.
+8. If stable (V(x) ≤ ε), show reviewable diffs, accept or reject the node, then commit the stable node to the ledger with ``NodeOutcome::Completed``.
+9. If retries are exhausted (V(x) > ε after max retries), transition the node to ``NodeOutcome::Escalated`` and track the escalation count.
+10. After child nodes converge, run sheaf validation for cross-node consistency before finalizing parent completion.
+11. Derive ``SessionOutcome`` from completed/escalated counts: ``Success`` if all completed, ``PartialSuccess`` if any escalated, ``Failed`` if none completed.
 
 .. graphviz::
    :caption: PSP 5 Node State Machine
@@ -139,6 +141,9 @@ Perspt SHALL treat project-scale coding as the default SRBN workflow and SHALL s
 * If project verification tools are unavailable, the session SHALL surface a sensor degradation warning and SHALL not claim verified stability.
 * If a command violates policy or sandbox constraints, the node SHALL be rejected before execution.
 * If retries or budget limits are exceeded, the node SHALL escalate with stored state and actionable diagnostics.
+  The node transitions to ``Escalated`` state; it is NOT converted to ``Failed`` immediately.
+  The orchestrator accumulates escalation counts and derives the final ``SessionOutcome``
+  at the end of the session.
 * If multiple language plugins are active in the same workspace, the verifier SHALL select the relevant plugin set for the current node rather than collapsing to a single global language assumption.
 
 .. rubric:: UI/UX Design
@@ -616,6 +621,7 @@ The implementation SHALL support both interactive TUI sessions and headless CLI 
   * ``VERIFY``: summarized results from LSP, build, and tests
   * ``ENERGY``: component breakdown and threshold comparison
   * ``COMMIT``: node committed and ledger updated
+  * ``OUTCOME``: session outcome (Success, PartialSuccess, or Failed)
   * ``CONTEXT``: summaries, contracts, and dependency hashes used for the current node
 
 The user experience SHALL remain consistent across both surfaces, with the TUI offering richer inspection rather than different semantics.
@@ -807,7 +813,7 @@ The implementation work primarily affects:
   ENERGY  syn=0 str=0 log=0 boot=0 sheaf=0 total=0.00 threshold=0.10
   COMMIT  node=2 merkle=44d0ad2b ledger=updated
 
-  SUMMARY completed=5/5 status=stable active_plugins=rust
+  SUMMARY completed=5/5 escalated=0 outcome=Success active_plugins=rust
 
 **Example TUI Review Transcript:**
 
@@ -974,11 +980,22 @@ This phase establishes uv as the default Python toolchain integration and ensure
 * ``crates/perspt-agent/src/test_runner.rs``: ``PythonTestRunner::setup_environment()`` ensures pytest is declared as a dev dependency via ``uv add --dev pytest`` when not already available.
 * ``crates/perspt-core/src/plugin.rs``: ``run_command_for_dir()`` added to ``LanguagePlugin`` trait with default implementation, ``PythonPlugin::run_command_for_dir()`` inspects src layout and ``[project.scripts]``.
 
+**Orchestration State Overhaul (fix/orchestration-state-overhaul):**
+
+* ``crates/perspt-core/src/types.rs``: ``SessionOutcome`` enum (Success, PartialSuccess, Failed). ``NodeState`` extended with ``from_display_str()`` (case-insensitive canonical parser with legacy aliases), ``is_success()``, ``is_active()``, and ``Display`` impl.
+* ``crates/perspt-agent/src/orchestrator/mod.rs``: ``NodeOutcome`` enum (Completed, Escalated). ``execute_node()`` returns ``Result<NodeOutcome>`` instead of ``Result<()>``. ``run_orchestration()`` tracks completed/escalated counts and derives ``SessionOutcome`` for the ``Complete`` event instead of unconditionally reporting success.
+* ``crates/perspt-agent/src/orchestrator/convergence.rs``: ``call_llm_with_logging()`` always records token usage, latency, and estimated cost via ``record_llm_usage()`` regardless of ``--log-llm``. The ``--log-llm`` flag now only controls verbose prompt/response text persistence.
+* ``crates/perspt-agent/src/orchestrator/convergence.rs``: Sandbox file tree listing included in both actuator and correction prompts. ``ContextRetriever`` in ``step_speculate()`` uses the node's sandbox directory.
+* ``crates/perspt-cli/src/commands/status.rs``, ``agent.rs``, ``resume.rs``: All string-based state comparisons replaced with ``NodeState::from_display_str()`` and type-safe helper methods.
+* ``crates/perspt-store/src/store.rs``, ``crates/perspt-agent/src/ledger.rs``, ``crates/perspt-policy/src/lib.rs``, ``crates/perspt-tui/src/chat_app.rs``, ``crates/perspt-tui/src/agent_app.rs``, ``crates/perspt-tui/src/task_tree.rs``: Dead code elimination — 16 unused functions and redundant exports removed.
+
 **Documentation Updates Required:**
 
-* README agent-mode description
-* Perspt book SRBN architecture page
-* PSP index updates
+* README agent-mode description — updated
+* Perspt book SRBN architecture page — updated
+* Developer architecture guide — updated
+* CLI reference — updated
+* PSP-5 execution flow and headless output — updated
 
 ============
 Open Issues

@@ -5,7 +5,6 @@
 use anyhow::{Context, Result};
 use duckdb::Connection;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 use crate::schema::init_schema;
@@ -451,13 +450,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Calculate Merkle hash for content
-    pub fn calculate_hash(content: &[u8]) -> Vec<u8> {
-        let mut hasher = Sha256::new();
-        hasher.update(content);
-        hasher.finalize().to_vec()
-    }
-
     /// Get session by ID
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionRecord>> {
         let conn = self.conn.lock().unwrap();
@@ -702,14 +694,6 @@ impl SessionStore {
         Ok(records)
     }
 
-    /// Count all LLM requests in the database (for debugging)
-    pub fn count_all_llm_requests(&self) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT COUNT(*) FROM llm_requests")?;
-        let count: i64 = stmt.query_row([], |row| row.get(0))?;
-        Ok(count)
-    }
-
     /// Aggregate LLM statistics across all sessions: (count, sum_tokens_in, sum_tokens_out, sum_latency_ms)
     pub fn get_global_llm_summary(&self) -> Result<(i64, i64, i64, i64)> {
         let conn = self.conn.lock().unwrap();
@@ -724,38 +708,6 @@ impl SessionStore {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
         Ok(result)
-    }
-
-    /// Get all LLM requests (for debugging)
-    pub fn get_all_llm_requests(&self, limit: usize) -> Result<Vec<LlmRequestRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, model, prompt, response, tokens_in, tokens_out, latency_ms
-             FROM llm_requests ORDER BY timestamp DESC LIMIT ?",
-        )?;
-
-        let mut rows = stmt.query([limit as i64])?;
-        let mut records = Vec::new();
-
-        while let Some(row) = rows.next()? {
-            let node_id: Option<String> = row.get(1)?;
-            records.push(LlmRequestRecord {
-                session_id: row.get(0)?,
-                node_id: if node_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                    None
-                } else {
-                    node_id
-                },
-                model: row.get(2)?,
-                prompt: row.get(3)?,
-                response: row.get(4)?,
-                tokens_in: row.get(5)?,
-                tokens_out: row.get(6)?,
-                latency_ms: row.get(7)?,
-            });
-        }
-
-        Ok(records)
     }
 
     // =========================================================================
@@ -1360,25 +1312,6 @@ impl SessionStore {
             });
         }
         Ok(records)
-    }
-
-    /// Get child node IDs for a parent in a session's task graph
-    pub fn get_children_of_node(
-        &self,
-        session_id: &str,
-        parent_node_id: &str,
-    ) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT child_node_id FROM task_graph_edges \
-             WHERE session_id = ? AND parent_node_id = ? ORDER BY created_at",
-        )?;
-        let mut rows = stmt.query([session_id, parent_node_id])?;
-        let mut ids = Vec::new();
-        while let Some(row) = rows.next()? {
-            ids.push(row.get(0)?);
-        }
-        Ok(ids)
     }
 
     /// Record a review outcome (approval, rejection, edit request)

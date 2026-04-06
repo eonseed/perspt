@@ -156,7 +156,9 @@ the database so limits continue from the interrupted session.
 ``logs``
 ~~~~~~~~
 
-View LLM call logs (requires ``--log-llm`` during the session).
+View LLM call logs and token metrics. Full prompt/response text is only
+available when ``--log-llm`` was active during the session; basic token
+usage, latency, and cost data are always recorded.
 
 .. code-block:: bash
 
