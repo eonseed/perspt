@@ -126,7 +126,9 @@ Show current session status.
 
 Displays: per-node lifecycle counts (queued, running, verifying, retrying,
 completed, failed, escalated), latest energy breakdown, total retry count,
-and recent escalation reports.
+recent escalation reports, step timeline summary (per-step-type counts,
+total step time), and correction attempt summaries (accepted/rejected counts
+per node).
 
 
 ``abort``
