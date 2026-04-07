@@ -3775,33 +3775,60 @@ ModuleNotFoundError: No module named 'json'
     }
 
     #[test]
-    fn test_extract_commands_from_correction_includes_uv() {
+    fn test_extract_commands_from_correction_rust_plugin_policy() {
         let response = r#"Here's the fix:
 Commands:
 ```
 uv add httpx
-uv add --dev pytest
 cargo add serde
 pip install numpy
 ```
-File: main.py
-```python
-import httpx
+File: main.rs
+```rust
+use serde;
 ```"#;
-        let commands = SRBNOrchestrator::extract_commands_from_correction(response);
-        assert!(
-            commands.contains(&"uv add httpx".to_string()),
-            "{:?}",
-            commands
-        );
+        // Rust plugin allows cargo commands, denies uv/pip
+        let commands = SRBNOrchestrator::extract_commands_from_correction(response, "rust");
         assert!(
             commands.contains(&"cargo add serde".to_string()),
             "{:?}",
             commands
         );
         assert!(
+            !commands.contains(&"uv add httpx".to_string()),
+            "Rust plugin should deny uv commands: {:?}",
+            commands
+        );
+        assert!(
+            !commands.contains(&"pip install numpy".to_string()),
+            "Rust plugin should deny pip commands: {:?}",
+            commands
+        );
+    }
+
+    #[test]
+    fn test_extract_commands_from_correction_python_plugin_policy() {
+        let response = r#"Commands:
+```
+uv add httpx
+cargo add serde
+pip install numpy
+```"#;
+        // Python plugin allows uv/pip commands, denies cargo
+        let commands = SRBNOrchestrator::extract_commands_from_correction(response, "python");
+        assert!(
+            commands.contains(&"uv add httpx".to_string()),
+            "{:?}",
+            commands
+        );
+        assert!(
             commands.contains(&"pip install numpy".to_string()),
             "{:?}",
+            commands
+        );
+        assert!(
+            !commands.contains(&"cargo add serde".to_string()),
+            "Python plugin should deny cargo commands: {:?}",
             commands
         );
     }
