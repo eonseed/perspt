@@ -741,6 +741,32 @@ impl SRBNOrchestrator {
         self.emit_event(perspt_core::AgentEvent::Log(msg.into()));
     }
 
+    /// PSP-7: Record an orchestration step transition to the store.
+    fn record_step_quietly(
+        &self,
+        node_id: &str,
+        step: &str,
+        outcome: &str,
+        energy: Option<&perspt_core::types::EnergyComponents>,
+        attempt_count: i32,
+        duration_ms: i32,
+    ) {
+        let record = perspt_store::SrbnStepRecord {
+            session_id: self.context.session_id.clone(),
+            node_id: node_id.to_string(),
+            step: step.to_string(),
+            outcome: outcome.to_string(),
+            energy_json: energy.and_then(|e| serde_json::to_string(e).ok()),
+            parse_state: None,
+            retry_classification: None,
+            attempt_count,
+            duration_ms,
+        };
+        if let Err(e) = self.ledger.record_step(&record) {
+            log::warn!("Failed to record step '{}' for {}: {}", step, node_id, e);
+        }
+    }
+
     /// Request approval from user and await response
     /// Returns ApprovalResult with optional edited value.
     /// `review_node_id` is used for persisting the review audit record.
@@ -1219,10 +1245,28 @@ impl SRBNOrchestrator {
         });
 
         // Step 3: Speculative Generation
+        let speculate_start = std::time::Instant::now();
         self.step_speculate(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "speculate",
+            "ok",
+            None,
+            0,
+            speculate_start.elapsed().as_millis() as i32,
+        );
 
         // Step 4: Stability Verification
+        let verify_start = std::time::Instant::now();
         let mut energy = self.step_verify(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "verify",
+            "ok",
+            Some(&energy),
+            0,
+            verify_start.elapsed().as_millis() as i32,
+        );
 
         // PSP-7: Sheaf pre-check retry loop.
         // After convergence succeeds, a lightweight structural check verifies
@@ -1230,9 +1274,19 @@ impl SRBNOrchestrator {
         // validation. If pre-check fails, re-enter convergence with sheaf
         // evidence (max 1 retry to prevent infinite loops).
         let mut sheaf_pre_check_retries = 0u32;
+        let mut converge_start;
         loop {
             // Step 5: Convergence & Self-Correction
+            converge_start = std::time::Instant::now();
             if !self.step_converge(idx, energy.clone()).await? {
+                self.record_step_quietly(
+                    &self.graph[idx].node_id.clone(),
+                    "converge",
+                    "escalated",
+                    Some(&energy),
+                    self.graph[idx].monitor.attempt_count as i32,
+                    converge_start.elapsed().as_millis() as i32,
+                );
                 // PSP-5 Phase 5: Classify non-convergence and choose repair action
                 let category = self.classify_non_convergence(idx);
                 let action = self.choose_repair_action(idx, &category);
@@ -1334,11 +1388,39 @@ impl SRBNOrchestrator {
             break;
         } // end PSP-7 sheaf pre-check loop
 
+        // Record converge success (timing from last converge_start)
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "converge",
+            "ok",
+            Some(&energy),
+            self.graph[idx].monitor.attempt_count as i32,
+            converge_start.elapsed().as_millis() as i32,
+        );
+
         // Step 6: Sheaf Validation (Post-Subgraph Consistency)
+        let sheaf_start = std::time::Instant::now();
         self.step_sheaf_validate(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "sheaf_validate",
+            "ok",
+            None,
+            0,
+            sheaf_start.elapsed().as_millis() as i32,
+        );
 
         // Step 7: Merkle Ledger Commit
+        let commit_start = std::time::Instant::now();
         self.step_commit(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "commit",
+            "ok",
+            None,
+            0,
+            commit_start.elapsed().as_millis() as i32,
+        );
 
         // PSP-5 Phase 6: Merge provisional branch after successful commit
         if let Some(ref bid) = branch_id {
