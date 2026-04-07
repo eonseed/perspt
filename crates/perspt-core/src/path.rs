@@ -69,8 +69,23 @@ pub fn normalize_artifact_path(raw: &str) -> Result<String, PathError> {
         return Err(PathError::Invalid(raw.to_string()));
     }
 
+    // PSP-7: Strip surrounding backticks, quotes, and markdown formatting
+    // that LLMs often wrap around file paths.
+    let stripped = raw
+        .trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_start_matches("**")
+        .trim_end_matches("**")
+        .trim();
+
+    if stripped.is_empty() {
+        return Err(PathError::Empty);
+    }
+
     // Normalize backslashes before parsing
-    let normalized = raw.replace('\\', "/");
+    let normalized = stripped.replace('\\', "/");
     let p = std::path::Path::new(&normalized);
 
     // Reject absolute paths early
@@ -263,5 +278,52 @@ mod tests {
             normalize_path_key("./src/main.rs"),
             Some("src/main.rs".into())
         );
+    }
+
+    // PSP-7 regression tests
+
+    #[test]
+    fn test_backtick_wrapped_path() {
+        assert_eq!(
+            normalize_artifact_path("`src/main.rs`").unwrap(),
+            "src/main.rs"
+        );
+    }
+
+    #[test]
+    fn test_double_quoted_path() {
+        assert_eq!(
+            normalize_artifact_path("\"src/main.rs\"").unwrap(),
+            "src/main.rs"
+        );
+    }
+
+    #[test]
+    fn test_single_quoted_path() {
+        assert_eq!(
+            normalize_artifact_path("'src/main.rs'").unwrap(),
+            "src/main.rs"
+        );
+    }
+
+    #[test]
+    fn test_bold_markdown_path() {
+        assert_eq!(
+            normalize_artifact_path("**src/main.rs**").unwrap(),
+            "src/main.rs"
+        );
+    }
+
+    #[test]
+    fn test_backtick_with_dot_prefix() {
+        assert_eq!(
+            normalize_artifact_path("`./src/lib.rs`").unwrap(),
+            "src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn test_only_backticks_is_empty() {
+        assert_eq!(normalize_artifact_path("``"), Err(PathError::Empty));
     }
 }
