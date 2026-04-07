@@ -388,16 +388,15 @@ impl SRBNOrchestrator {
             .node_indices
             .get(node_id)
             .map(|idx| self.graph[*idx].owner_plugin.as_str())
-            .unwrap_or("");
+            .unwrap_or("")
+            .to_string();
 
         // Collect files to include in the prompt.
         // Priority: node's declared output_targets > repair footprint > last_written_file.
-        // The old approach of falling back to last_written_file could show
-        // the wrong file (e.g., root src/lib.rs from another node).
-        let mut file_sections = Vec::new();
+        let mut file_sections: Vec<(String, String)> = Vec::new();
         let mut seen_paths = std::collections::HashSet::new();
 
-        // 1. Include all of the node's declared output_targets (the files it SHOULD produce)
+        // 1. Include all of the node's declared output_targets
         if let Some(idx) = self.node_indices.get(node_id) {
             let node_workdir = self.effective_working_dir(*idx);
             for target in &self.graph[*idx].output_targets {
@@ -411,7 +410,7 @@ impl SRBNOrchestrator {
             }
         }
 
-        // 2. Supplement with repair footprint files (may include files written by correction)
+        // 2. Supplement with repair footprint files
         if let Some(ref footprint) = self.last_repair_footprint {
             let node_workdir = if let Some(idx) = self.node_indices.get(&footprint.node_id) {
                 self.effective_working_dir(*idx)
@@ -435,7 +434,6 @@ impl SRBNOrchestrator {
         }
 
         // 3. Include the workspace root manifest for structural context
-        //    (helps the LLM understand crate layout for cross-crate imports)
         let root_manifest_names = ["Cargo.toml", "package.json", "pyproject.toml"];
         for manifest_name in &root_manifest_names {
             let manifest_path = self.context.working_dir.join(manifest_name);
@@ -448,7 +446,7 @@ impl SRBNOrchestrator {
                         }
                     }
                 }
-                break; // Only include one root manifest
+                break;
             }
         }
 
@@ -472,53 +470,11 @@ impl SRBNOrchestrator {
             file_sections.push((file_path, current_code));
         }
 
-        // Detect language from first file extension for code fences
-        let primary_path = &file_sections[0].0;
-        let lang = std::path::Path::new(primary_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|ext| match ext {
-                "py" => "python",
-                "rs" => "rust",
-                "ts" | "tsx" => "typescript",
-                "js" | "jsx" => "javascript",
-                "go" => "go",
-                "java" => "java",
-                "rb" => "ruby",
-                "c" | "h" => "c",
-                "cpp" | "cc" | "cxx" | "hpp" => "cpp",
-                "cs" => "csharp",
-                other => other,
-            })
-            .unwrap_or("text");
-
-        let mut prompt = format!(
-            "## Code Correction Required\n\n\
-             The code you generated has {} error(s) detected by the language toolchain.\n\
-             Your task is to fix ALL errors and return the complete corrected file(s).\n\n\
-             ### Original Goal\n{}\n\n\
-             ### Current Code (with errors)\n",
-            diagnostics.len(),
-            goal,
-        );
-
-        // Include all affected files
-        for (path, content) in &file_sections {
-            prompt.push_str(&format!(
-                "File: {}\n```{}\n{}\n```\n\n",
-                path, lang, content
-            ));
-        }
-
-        prompt.push_str(&format!(
-            "### Detected Errors (V_syn = {:.2})\n",
-            energy.v_syn
-        ));
-
-        // Add each diagnostic with specific fix direction
+        // Pre-format structured diagnostics with fix directions
+        let mut diag_text = String::new();
         for (i, diag) in diagnostics.iter().enumerate() {
             let fix_direction = self.get_fix_direction(diag);
-            prompt.push_str(&format!(
+            diag_text.push_str(&format!(
                 r#"
 #### Error {}
 - **Location**: Line {}, Column {}
@@ -535,91 +491,75 @@ impl SRBNOrchestrator {
             ));
         }
 
-        // PSP-5 Phase 3: Include restriction-map context so the LLM can
-        // reference structural dependencies and sealed interfaces during
-        // correction instead of operating blind.
-        if !self.last_formatted_context.is_empty() {
-            prompt.push_str(&format!(
-                "\n### Restriction Map Context\n\n{}\n",
-                self.last_formatted_context
-            ));
-        }
-
-        // Include the sandbox/workspace file tree so corrections target
-        // paths that actually exist on disk.
-        if let Some(idx) = self.node_indices.get(node_id) {
+        // Gather project file tree
+        let project_tree = if let Some(idx) = self.node_indices.get(node_id) {
             let wd = self.effective_working_dir(*idx);
-            if let Ok(tree) = crate::tools::list_sandbox_files(&wd) {
-                if !tree.is_empty() {
-                    prompt.push_str(&format!(
-                        "\n### Current Project Tree\n\n```\n{}\n```\n",
-                        tree.join("\n")
-                    ));
-                }
-            }
-        }
-
-        // Include raw build/test output from plugin verification if available.
-        // This is crucial because LSP diagnostics may not report missing crate
-        // errors that `cargo check` / `cargo build` would catch.
-        if let Some(ref test_output) = self.context.last_test_output {
-            if !test_output.is_empty() {
-                // Truncate to avoid blowing up the prompt
-                let truncated = if test_output.len() > 3000 {
-                    &test_output[..3000]
-                } else {
-                    test_output.as_str()
-                };
-                prompt.push_str(&format!(
-                    "\n### Build / Test Output\nThe following is the raw output from the build toolchain (e.g. `cargo check` / `cargo build`). \
-                     Use this to identify missing dependencies, unresolved imports, or type errors:\n```\n{}\n```\n",
-                    truncated
-                ));
-            }
-        }
-
-        let multi_file = file_sections.len() > 1;
-        let file_instruction = if multi_file {
-            "Return ALL affected files as a JSON artifact bundle"
+            crate::tools::list_sandbox_files(&wd)
+                .ok()
+                .filter(|t| !t.is_empty())
+                .map(|t| t.join("\n"))
         } else {
-            "Return the COMPLETE corrected file, not just snippets"
+            None
         };
 
-        // Generate language-specific dependency command examples
-        let commands_example = match owner_plugin {
-            "rust" => "cargo add thiserror\ncargo add clap --features derive",
-            "python" => "uv add httpx\nuv add --dev pytest",
-            "javascript" => "npm install express\nnpm install --save-dev jest",
-            _ => "cargo add thiserror\nuv add httpx",
+        // Gather build/test output (truncated)
+        let build_output = self
+            .context
+            .last_test_output
+            .as_ref()
+            .filter(|o| !o.is_empty())
+            .map(|o| {
+                if o.len() > 3000 {
+                    o[..3000].to_string()
+                } else {
+                    o.clone()
+                }
+            });
+
+        // Gather previous correction attempts for the node
+        let previous_attempts = self
+            .node_indices
+            .get(node_id)
+            .map(|idx| self.graph[*idx].monitor.attempt_count)
+            .unwrap_or(0);
+
+        let evidence = perspt_core::types::PromptEvidence {
+            node_goal: Some(goal.to_string()),
+            existing_file_contents: file_sections,
+            verifier_diagnostics: if diag_text.is_empty() {
+                None
+            } else {
+                Some(diag_text)
+            },
+            energy_v_syn: Some(energy.v_syn),
+            owner_plugin: Some(owner_plugin),
+            restriction_map_context: if self.last_formatted_context.is_empty() {
+                None
+            } else {
+                Some(self.last_formatted_context.clone())
+            },
+            project_file_tree: project_tree,
+            build_test_output: build_output,
+            previous_attempt_count: previous_attempts.saturating_sub(1),
+            plugin_correction_fragment: {
+                let registry = perspt_core::plugin::PluginRegistry::new();
+                self.node_indices
+                    .get(node_id)
+                    .and_then(|idx| {
+                        let p = self.graph[*idx].owner_plugin.as_str();
+                        registry.get(p)
+                    })
+                    .and_then(|plugin| plugin.correction_prompt_fragment())
+                    .map(|s| s.to_string())
+            },
+            ..Default::default()
         };
 
-        prompt.push_str(&format!(
-            r#"
-### Fix Requirements
-1. Fix ALL errors listed above - do not leave any unfixed
-2. Maintain the original functionality and goal
-3. Follow {} language conventions and idioms
-4. Import any missing modules or dependencies
-5. {}
-6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
-
-### Output Format
-Provide the complete corrected file(s) followed by any dependency commands needed:
-
-File: [same filename]
-```{}
-[complete corrected code]
-```
-
-Commands: [optional, one per line]
-```
-{}
-```
-"#,
-            lang, file_instruction, lang, commands_example
-        ));
-
-        Ok(prompt)
+        let compiled = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::CorrectionRetry,
+            &evidence,
+        );
+        Ok(compiled.text)
     }
 
     /// Map diagnostic message patterns to specific fix directions

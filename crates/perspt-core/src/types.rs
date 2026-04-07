@@ -887,8 +887,116 @@ impl TaskPlan {
             }
         }
 
+        // PSP-7: Test-task dependency inference via plugin test_file_patterns().
+        // If a task produces only test files (matching some plugin's test patterns),
+        // it must depend on any task that produces non-test source files.
+        let registry = crate::plugin::PluginRegistry::new();
+        let all_test_patterns: Vec<&str> = registry
+            .all()
+            .iter()
+            .flat_map(|p| p.test_file_patterns().iter().copied())
+            .collect();
+        if !all_test_patterns.is_empty() {
+            let is_test_file = |path: &str| -> bool {
+                all_test_patterns
+                    .iter()
+                    .any(|pat| glob_matches_simple(pat, path))
+            };
+            // Identify test-only tasks and source tasks
+            let source_task_ids: Vec<&str> = self
+                .tasks
+                .iter()
+                .filter(|t| {
+                    !t.output_files.is_empty() && t.output_files.iter().any(|f| !is_test_file(f))
+                })
+                .map(|t| t.id.as_str())
+                .collect();
+            for task in &self.tasks {
+                if task.output_files.is_empty() {
+                    continue;
+                }
+                let all_tests = task.output_files.iter().all(|f| is_test_file(f));
+                if !all_tests {
+                    continue;
+                }
+                // This is a test-only task — it should depend on at least one source task
+                for &src_id in &source_task_ids {
+                    if src_id != task.id && !task.dependencies.iter().any(|d| d == src_id) {
+                        return Err(format!(
+                            "Test task '{}' produces only test files but does not depend on source task '{}'",
+                            task.id, src_id
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
+}
+
+/// Simple glob matching for test file patterns.
+///
+/// Supports `*` (any within component) and `**` (any path segment).
+/// This is intentionally minimal — only used for plan validation heuristics.
+fn glob_matches_simple(pattern: &str, path: &str) -> bool {
+    let pat_parts: Vec<&str> = pattern.split('/').collect();
+    let path_parts: Vec<&str> = path.split('/').collect();
+    glob_match_parts(&pat_parts, &path_parts)
+}
+
+fn glob_match_parts(pat: &[&str], path: &[&str]) -> bool {
+    if pat.is_empty() {
+        return path.is_empty();
+    }
+    if pat[0] == "**" {
+        // ** matches zero or more path segments
+        for i in 0..=path.len() {
+            if glob_match_parts(&pat[1..], &path[i..]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if path.is_empty() {
+        return false;
+    }
+    if glob_match_component(pat[0], path[0]) {
+        glob_match_parts(&pat[1..], &path[1..])
+    } else {
+        false
+    }
+}
+
+fn glob_match_component(pattern: &str, component: &str) -> bool {
+    // Simple wildcard matching within a single path component
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == component;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(found) = component[pos..].find(part) {
+            if i == 0 && found != 0 {
+                return false; // First part must match at start
+            }
+            pos += found + part.len();
+        } else {
+            return false;
+        }
+    }
+    if let Some(last) = parts.last() {
+        if !last.is_empty() {
+            return component.ends_with(last);
+        }
+    }
+    true
 }
 
 impl Default for TaskPlan {
@@ -3038,6 +3146,8 @@ pub struct PromptEvidence {
     pub verifier_diagnostics: Option<String>,
     /// Previous correction attempt records for retry prompts.
     pub previous_attempts: Vec<CorrectionAttemptRecord>,
+    /// Number of previous correction attempts (used when full records are unavailable).
+    pub previous_attempt_count: usize,
     /// Plugin-contributed correction guidance.
     pub plugin_correction_fragment: Option<String>,
     /// Legal support files declared by the plugin.
@@ -3070,6 +3180,16 @@ pub struct PromptEvidence {
     pub evidence_section: Option<String>,
     /// Error feedback from previous planning attempts.
     pub error_feedback: Option<String>,
+    /// Restriction map context for correction prompts (pre-formatted).
+    pub restriction_map_context: Option<String>,
+    /// Project file tree for correction prompts (pre-formatted lines).
+    pub project_file_tree: Option<String>,
+    /// Raw build/test output for correction prompts (truncated).
+    pub build_test_output: Option<String>,
+    /// Owner plugin name (e.g. "rust", "python") for language-specific guidance.
+    pub owner_plugin: Option<String>,
+    /// Syntactic energy score from the last verification pass.
+    pub energy_v_syn: Option<f32>,
 }
 
 /// Policy decision for a dependency command (PSP-7 §4).
@@ -4436,5 +4556,54 @@ mod psp5_tests {
             tasks: vec![a, b, c],
         };
         assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_task_plan_test_file_dependency_inference() {
+        // Source task produces src/lib.rs, test task produces tests/lib_test.rs
+        // Test task should be required to depend on source task.
+        let mut src = PlannedTask::new("src", "implement lib");
+        src.output_files = vec!["src/lib.rs".to_string()];
+        let mut tst = PlannedTask::new("tst", "test lib");
+        tst.output_files = vec!["tests/lib_test.rs".to_string()];
+
+        let plan = TaskPlan {
+            tasks: vec![src, tst],
+        };
+        let err = plan.validate().unwrap_err();
+        assert!(
+            err.contains("Test task 'tst'") && err.contains("does not depend on source task 'src'"),
+            "Expected test-dep inference error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_task_plan_test_file_dependency_satisfied() {
+        let mut src = PlannedTask::new("src", "implement lib");
+        src.output_files = vec!["src/lib.rs".to_string()];
+        let mut tst = PlannedTask::new("tst", "test lib");
+        tst.output_files = vec!["tests/lib_test.rs".to_string()];
+        tst.dependencies = vec!["src".to_string()];
+
+        let plan = TaskPlan {
+            tasks: vec![src, tst],
+        };
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_glob_matches_simple() {
+        assert!(super::glob_matches_simple("tests/*.rs", "tests/foo.rs"));
+        assert!(!super::glob_matches_simple("tests/*.rs", "src/foo.rs"));
+        assert!(super::glob_matches_simple(
+            "**/*.test.js",
+            "src/utils.test.js"
+        ));
+        assert!(super::glob_matches_simple("test_*.py", "test_auth.py"));
+        assert!(!super::glob_matches_simple("test_*.py", "auth.py"));
+        assert!(super::glob_matches_simple(
+            "tests/**/*.rs",
+            "tests/unit/foo.rs"
+        ));
     }
 }
