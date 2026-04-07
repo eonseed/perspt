@@ -306,6 +306,33 @@ impl SRBNOrchestrator {
                         energy.v_str += 0.3;
                     }
 
+                    // PSP-7: V_boot — bootstrap infrastructure failures.
+                    // Sensor degradation signals toolchain/environment issues
+                    // distinct from code quality captured by V_syn/V_log.
+                    // Only computed from the FINAL verification result (after
+                    // auto-repair has had its chance to fix missing deps).
+                    for so in &vr.stage_outcomes {
+                        match &so.sensor_status {
+                            perspt_core::types::SensorStatus::Unavailable { reason } => {
+                                energy.v_boot += 3.0;
+                                log::warn!(
+                                    "V_boot +3.0: sensor unavailable for stage '{}': {}",
+                                    so.stage,
+                                    reason
+                                );
+                            }
+                            perspt_core::types::SensorStatus::Fallback { reason, .. } => {
+                                energy.v_boot += 1.0;
+                                log::info!(
+                                    "V_boot +1.0: fallback sensor for stage '{}': {}",
+                                    so.stage,
+                                    reason
+                                );
+                            }
+                            perspt_core::types::SensorStatus::Available => {}
+                        }
+                    }
+
                     // D1: Feed raw output into correction context
                     if let Some(ref raw) = vr.raw_output {
                         self.context.last_test_output = Some(raw.clone());

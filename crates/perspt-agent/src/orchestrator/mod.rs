@@ -1222,85 +1222,117 @@ impl SRBNOrchestrator {
         self.step_speculate(idx).await?;
 
         // Step 4: Stability Verification
-        let energy = self.step_verify(idx).await?;
+        let mut energy = self.step_verify(idx).await?;
 
-        // Step 5: Convergence & Self-Correction
-        if !self.step_converge(idx, energy).await? {
-            // PSP-5 Phase 5: Classify non-convergence and choose repair action
-            let category = self.classify_non_convergence(idx);
-            let action = self.choose_repair_action(idx, &category);
+        // PSP-7: Sheaf pre-check retry loop.
+        // After convergence succeeds, a lightweight structural check verifies
+        // output artifacts exist on disk before proceeding to full sheaf
+        // validation. If pre-check fails, re-enter convergence with sheaf
+        // evidence (max 1 retry to prevent infinite loops).
+        let mut sheaf_pre_check_retries = 0u32;
+        loop {
+            // Step 5: Convergence & Self-Correction
+            if !self.step_converge(idx, energy.clone()).await? {
+                // PSP-5 Phase 5: Classify non-convergence and choose repair action
+                let category = self.classify_non_convergence(idx);
+                let action = self.choose_repair_action(idx, &category);
 
-            // Persist the escalation report
-            let node = &self.graph[idx];
-            let report = EscalationReport {
-                node_id: node.node_id.clone(),
-                session_id: self.context.session_id.clone(),
-                category,
-                action: action.clone(),
-                energy_snapshot: EnergyComponents {
-                    v_syn: node.monitor.current_energy(),
-                    ..Default::default()
-                },
-                stage_outcomes: self
-                    .last_verification_result
-                    .as_ref()
-                    .map(|vr| vr.stage_outcomes.clone())
-                    .unwrap_or_default(),
-                evidence: self.build_escalation_evidence(idx),
-                affected_node_ids: self.affected_dependents(idx),
-                timestamp: epoch_seconds(),
-            };
+                // Persist the escalation report
+                let node = &self.graph[idx];
+                let report = EscalationReport {
+                    node_id: node.node_id.clone(),
+                    session_id: self.context.session_id.clone(),
+                    category,
+                    action: action.clone(),
+                    energy_snapshot: EnergyComponents {
+                        v_syn: node.monitor.current_energy(),
+                        ..Default::default()
+                    },
+                    stage_outcomes: self
+                        .last_verification_result
+                        .as_ref()
+                        .map(|vr| vr.stage_outcomes.clone())
+                        .unwrap_or_default(),
+                    evidence: self.build_escalation_evidence(idx),
+                    affected_node_ids: self.affected_dependents(idx),
+                    timestamp: epoch_seconds(),
+                };
 
-            if let Err(e) = self.ledger.record_escalation_report(&report) {
-                log::warn!("Failed to persist escalation report: {}", e);
-            }
+                if let Err(e) = self.ledger.record_escalation_report(&report) {
+                    log::warn!("Failed to persist escalation report: {}", e);
+                }
 
-            // PSP-5 Phase 9: Also persist artifact bundle on escalation path
-            if let Some(bundle) = self.last_applied_bundle.take() {
-                if let Err(e) = self
-                    .ledger
-                    .record_artifact_bundle(&self.graph[idx].node_id, &bundle)
-                {
+                // PSP-5 Phase 9: Also persist artifact bundle on escalation path
+                if let Some(bundle) = self.last_applied_bundle.take() {
+                    if let Err(e) = self
+                        .ledger
+                        .record_artifact_bundle(&self.graph[idx].node_id, &bundle)
+                    {
+                        log::warn!(
+                            "Failed to persist artifact bundle on escalation for {}: {}",
+                            self.graph[idx].node_id,
+                            e
+                        );
+                    }
+                }
+
+                self.emit_event(perspt_core::AgentEvent::EscalationClassified {
+                    node_id: report.node_id.clone(),
+                    category: report.category.to_string(),
+                    action: report.action.to_string(),
+                });
+
+                // PSP-5 Phase 6: Flush this branch and all descendant branches
+                let node_id_for_flush = self.graph[idx].node_id.clone();
+                if let Some(ref bid) = branch_id {
+                    self.flush_provisional_branch(bid, &node_id_for_flush);
+                }
+                self.flush_descendant_branches(idx);
+
+                // Apply the chosen repair action or escalate to user
+                let applied = self.apply_repair_action(idx, &action).await;
+
+                if !applied {
+                    self.graph[idx].state = NodeState::Escalated;
+                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                        node_id: self.graph[idx].node_id.clone(),
+                        status: perspt_core::NodeStatus::Escalated,
+                    });
                     log::warn!(
-                        "Failed to persist artifact bundle on escalation for {}: {}",
+                        "Node {} escalated to user: {} → {}",
                         self.graph[idx].node_id,
-                        e
+                        category,
+                        action
                     );
                 }
+
+                return Ok(NodeOutcome::Escalated);
             }
 
-            self.emit_event(perspt_core::AgentEvent::EscalationClassified {
-                node_id: report.node_id.clone(),
-                category: report.category.to_string(),
-                action: report.action.to_string(),
-            });
-
-            // PSP-5 Phase 6: Flush this branch and all descendant branches
-            let node_id_for_flush = self.graph[idx].node_id.clone();
-            if let Some(ref bid) = branch_id {
-                self.flush_provisional_branch(bid, &node_id_for_flush);
+            // PSP-7: Lightweight sheaf pre-check before full validation.
+            // Verifies output artifacts exist and are non-empty on disk.
+            if sheaf_pre_check_retries < 1 {
+                if let Some(evidence) = self.sheaf_pre_check(idx) {
+                    sheaf_pre_check_retries += 1;
+                    log::warn!(
+                        "Sheaf pre-check failed for {}, retrying convergence: {}",
+                        self.graph[idx].node_id,
+                        evidence
+                    );
+                    self.emit_log(format!("⚠️ Sheaf pre-check: {}", evidence));
+                    // Inject sheaf evidence so the correction LLM sees it
+                    self.context.last_test_output = Some(format!(
+                    "Structural pre-check failure: {}\nEnsure all declared output files are generated correctly.",
+                    evidence
+                ));
+                    // Re-verify and add sheaf penalty to force correction loop entry
+                    energy = self.step_verify(idx).await?;
+                    energy.v_sheaf += 2.0;
+                    continue;
+                }
             }
-            self.flush_descendant_branches(idx);
-
-            // Apply the chosen repair action or escalate to user
-            let applied = self.apply_repair_action(idx, &action).await;
-
-            if !applied {
-                self.graph[idx].state = NodeState::Escalated;
-                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
-                    node_id: self.graph[idx].node_id.clone(),
-                    status: perspt_core::NodeStatus::Escalated,
-                });
-                log::warn!(
-                    "Node {} escalated to user: {} → {}",
-                    self.graph[idx].node_id,
-                    category,
-                    action
-                );
-            }
-
-            return Ok(NodeOutcome::Escalated);
-        }
+            break;
+        } // end PSP-7 sheaf pre-check loop
 
         // Step 6: Sheaf Validation (Post-Subgraph Consistency)
         self.step_sheaf_validate(idx).await?;
@@ -1966,6 +1998,40 @@ impl SRBNOrchestrator {
             Some(sandbox_path)
         } else {
             None
+        }
+    }
+
+    /// PSP-7: Lightweight sheaf pre-check before full sheaf validation.
+    ///
+    /// Verifies that every declared output target actually exists on disk and
+    /// is non-empty. Returns `Some(evidence)` if the pre-check fails, `None`
+    /// if everything looks good.
+    fn sheaf_pre_check(&self, idx: NodeIndex) -> Option<String> {
+        let node = &self.graph[idx];
+        if node.output_targets.is_empty() {
+            return None;
+        }
+
+        let work_dir = self.effective_working_dir(idx);
+        let mut issues = Vec::new();
+
+        for path in &node.output_targets {
+            let full = work_dir.join(path);
+            match std::fs::metadata(&full) {
+                Ok(m) if m.len() == 0 => {
+                    issues.push(format!("empty: {}", path.display()));
+                }
+                Err(_) => {
+                    issues.push(format!("missing: {}", path.display()));
+                }
+                Ok(_) => {}
+            }
+        }
+
+        if issues.is_empty() {
+            None
+        } else {
+            Some(format!("Output target issues: {}", issues.join(", ")))
         }
     }
 
@@ -4243,5 +4309,125 @@ def util():
         );
         // All escalated → Failed
         assert_eq!(derive_outcome(0, 3), perspt_core::SessionOutcome::Failed,);
+    }
+
+    /// Helper: create an orchestrator with a single default node for testing.
+    fn orch_with_node(
+        working_dir: std::path::PathBuf,
+    ) -> (SRBNOrchestrator, petgraph::graph::NodeIndex) {
+        let mut orch = SRBNOrchestrator::new(working_dir, false);
+        let node = SRBNNode::new(
+            "test-node".to_string(),
+            "test goal".to_string(),
+            perspt_core::ModelTier::Actuator,
+        );
+        let idx = orch.add_node(node);
+        (orch, idx)
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_passes_when_no_outputs() {
+        let (orch, idx) = orch_with_node(std::path::PathBuf::from("/tmp/test"));
+        assert!(orch.sheaf_pre_check(idx).is_none());
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_detects_missing_files() {
+        let (mut orch, idx) = orch_with_node(std::path::PathBuf::from("/tmp/test"));
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("nonexistent_file_xyz.rs"));
+        let result = orch.sheaf_pre_check(idx);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("missing"));
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_detects_empty_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::File::create(dir.path().join("empty.rs")).unwrap();
+
+        let (mut orch, idx) = orch_with_node(dir.path().to_path_buf());
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("empty.rs"));
+        let result = orch.sheaf_pre_check(idx);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("empty"));
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_passes_for_valid_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+        let (mut orch, idx) = orch_with_node(dir.path().to_path_buf());
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("main.rs"));
+        assert!(orch.sheaf_pre_check(idx).is_none());
+    }
+
+    #[test]
+    fn test_v_boot_energy_from_degraded_sensors() {
+        use perspt_core::types::{
+            EnergyComponents, SensorStatus, StageOutcome, VerificationResult,
+        };
+
+        // Simulate a verification result with one fallback and one unavailable sensor
+        let vr = VerificationResult {
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: true,
+            lint_ok: true,
+            diagnostics_count: 0,
+            tests_passed: 5,
+            tests_failed: 0,
+            summary: String::new(),
+            raw_output: None,
+            degraded: true,
+            degraded_reason: Some("test sensor fallback".into()),
+            stage_outcomes: vec![
+                StageOutcome {
+                    stage: "syntax_check".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Available,
+                    output: None,
+                },
+                StageOutcome {
+                    stage: "build".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Fallback {
+                        actual: "cargo check".into(),
+                        reason: "primary not found".into(),
+                    },
+                    output: None,
+                },
+                StageOutcome {
+                    stage: "test".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: "no test runner".into(),
+                    },
+                    output: None,
+                },
+            ],
+        };
+
+        // Compute V_boot the same way verification.rs does
+        let mut energy = EnergyComponents::default();
+        for so in &vr.stage_outcomes {
+            match &so.sensor_status {
+                SensorStatus::Unavailable { .. } => energy.v_boot += 3.0,
+                SensorStatus::Fallback { .. } => energy.v_boot += 1.0,
+                SensorStatus::Available => {}
+            }
+        }
+        // 1 fallback (+1.0) + 1 unavailable (+3.0) = 4.0
+        assert!(
+            (energy.v_boot - 4.0).abs() < f32::EPSILON,
+            "Expected V_boot=4.0, got {}",
+            energy.v_boot
+        );
     }
 }
