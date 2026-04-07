@@ -46,7 +46,7 @@ pub async fn login_handler(
 
     // Generate random session token
     let token: String = {
-        use rand::Rng;
+        use rand::RngExt;
         rand::rng()
             .sample_iter(rand::distr::Alphanumeric)
             .take(32)
