@@ -47,11 +47,27 @@ impl SRBNOrchestrator {
                 .call_llm_with_logging(&self.actuator_model.clone(), &current_prompt, Some("solo"))
                 .await?;
 
-            // Step 2: Extract code from response
-            let (filename, code) = match self.extract_code_from_response(&response) {
-                Some((f, c, _)) => (f, c),
-                None => {
-                    self.emit_log("No code block found in LLM response".to_string());
+            // Step 2: Extract code from response via typed parse pipeline
+            let (bundle_opt, parse_state, _) =
+                self.parse_artifact_bundle_typed(&response, "solo", attempt as u32);
+
+            let (filename, code) = match bundle_opt {
+                Some(ref bundle) if !bundle.artifacts.is_empty() => {
+                    let first = &bundle.artifacts[0];
+                    let content = match first {
+                        perspt_core::types::ArtifactOperation::Write { content, .. } => {
+                            content.clone()
+                        }
+                        perspt_core::types::ArtifactOperation::Diff { patch, .. } => patch.clone(),
+                        _ => String::new(),
+                    };
+                    (first.path().to_string(), content)
+                }
+                _ => {
+                    self.emit_log(format!(
+                        "No code block found in LLM response ({})",
+                        parse_state
+                    ));
                     continue;
                 }
             };

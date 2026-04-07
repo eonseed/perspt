@@ -5,60 +5,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 impl SRBNOrchestrator {
-    /// PSP-5: Parse an artifact bundle from LLM response
-    ///
-    /// Tries structured JSON bundle first, falls back to legacy `File:`/`Diff:` extraction.
-    /// Returns None if no artifacts could be extracted.
-    pub fn parse_artifact_bundle(
-        &self,
-        content: &str,
-    ) -> Option<perspt_core::types::ArtifactBundle> {
-        // Try structured JSON bundle first
-        if let Some(bundle) = self.try_parse_json_bundle(content) {
-            if let Ok(()) = bundle.validate() {
-                log::info!(
-                    "Parsed structured artifact bundle: {} artifacts",
-                    bundle.len()
-                );
-                return Some(bundle);
-            } else {
-                log::warn!("JSON bundle found but failed validation, falling back to legacy");
-            }
-        }
-
-        // Fall back to legacy File:/Diff: extraction — collect ALL blocks
-        let blocks = self.extract_all_code_blocks_from_response(content);
-        if !blocks.is_empty() {
-            let artifacts: Vec<perspt_core::types::ArtifactOperation> = blocks
-                .into_iter()
-                .map(|(filename, code, is_diff)| {
-                    if is_diff {
-                        perspt_core::types::ArtifactOperation::Diff {
-                            path: filename,
-                            patch: code,
-                        }
-                    } else {
-                        perspt_core::types::ArtifactOperation::Write {
-                            path: filename,
-                            content: code,
-                        }
-                    }
-                })
-                .collect();
-            log::info!(
-                "Constructed {}-artifact bundle from legacy extraction",
-                artifacts.len()
-            );
-            let bundle = perspt_core::types::ArtifactBundle {
-                artifacts,
-                commands: vec![],
-            };
-            return Some(bundle);
-        }
-
-        None
-    }
-
     /// Try to parse a JSON artifact bundle from content
     ///
     /// PSP-5 Phase 4: Uses the provider-neutral normalization layer.
