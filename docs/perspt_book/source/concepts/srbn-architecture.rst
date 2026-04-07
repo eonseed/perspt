@@ -300,6 +300,93 @@ The ``PlanningPolicy`` enum adapts the agent phase stack based on task scale:
      - Yes
      - Cross-cutting redesign. Plan-first with speculator risk analysis.
 
+
+PSP-7: Robust Correction Loop Contracts
+-----------------------------------------
+
+PSP-7 extends the SRBN runtime with three hardening layers: a typed parse pipeline,
+a prompt compiler with provenance tracking, and structured correction telemetry.
+
+Typed Parse Pipeline (Fail-Closed Parsing)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LLM responses are processed through a five-layer typed pipeline that replaces the
+legacy ``extract_all_code_blocks_from_response()`` fallback. Each layer returns a
+``ParseResultState`` that classifies the outcome:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 85
+
+   * - Layer
+     - Description
+   * - **A (Raw Capture)**
+     - Hash, length, and first-line fingerprint of the raw response.
+   * - **B (Path Normalization)**
+     - Strip backticks, quotes, and markdown formatting from file paths.
+   * - **C (Strict JSON)**
+     - Attempt to parse the response as a structured JSON artifact bundle.
+   * - **D (Tolerant Recovery)**
+     - Recognize ``### File:``, ``File:``, and ``Diff:`` headings to extract
+       structured content. Never invents filenames — unnamed blocks produce ``None``.
+   * - **E (Semantic Validation)**
+     - Plugin-driven ownership closure, ``legal_support_files()`` checks,
+       ``dependency_command_policy()`` enforcement.
+
+``ParseResultState`` has six variants: ``StructuredOk``, ``TolerantRecoveryOk``,
+``NoStructuredPayload``, ``SchemaInvalid``, ``SemanticallyRejected``, ``EmptyResponse``.
+Each variant carries a ``RetryClassification`` that guides the correction loop:
+``Retarget``, ``SupportFiles``, ``Replan``, or ``FatalBudget``.
+
+Active V_boot
+~~~~~~~~~~~~~
+
+PSP-7 separates bootstrap failures from code errors. After auto-repair re-verification,
+if the verifier profile is fully degraded or missing-crate/module failures persist,
+``V_boot`` is set independently rather than being folded into ``V_syn``. This gives
+the correction loop a dedicated signal for infrastructure problems.
+
+Sheaf Pre-Check
+~~~~~~~~~~~~~~~
+
+After a node converges (V(x) ≤ ε) but before the full sheaf validation pass, a fast
+structural pre-check verifies that output artifacts declare consistent imports and
+exports with the ownership manifest. If the pre-check fails, the node re-enters
+``step_converge()`` with sheaf-specific evidence. A retry guard (max 1 sheaf pre-check
+retry) prevents infinite loops.
+
+Prompt Compiler
+~~~~~~~~~~~~~~~
+
+PSP-7 replaces the template-constant approach with a typed prompt compiler:
+
+.. code-block:: text
+
+   compile(intent: PromptIntent, evidence: &PromptEvidence) -> CompiledPrompt
+
+The compiler accepts 13 ``PromptIntent`` variants (architect, actuator, verifier,
+correction, speculator, solo, bundle retarget, project naming) and emits a
+``CompiledPrompt`` with the assembled prompt text plus ``PromptProvenance`` metadata
+(template ID, evidence hashes, compiler version). Plugin ``correction_prompt_fragment()``
+and ``legal_support_files()`` are injected into correction prompts automatically.
+
+Correction Telemetry
+~~~~~~~~~~~~~~~~~~~~
+
+Every correction attempt is recorded as a ``CorrectionAttemptRow`` in the DuckDB store:
+
+- ``parse_state`` — which ``ParseResultState`` was returned
+- ``retry_classification`` — how the failure was classified
+- ``response_fingerprint`` — hash of the raw LLM response
+- ``response_length`` — byte length for detecting degenerate responses
+- ``energy_json`` — energy components snapshot after verification
+- ``accepted`` / ``rejection_reason`` — whether the attempt was committed
+
+Additionally, ``srbn_step_records`` track per-node execution steps (speculate, verify,
+converge, sheaf_validate, commit) with timing, energy snapshots, and attempt counts.
+These records are surfaced by ``perspt status``, the dashboard decisions page, and the
+headless agent summary.
+
 The policy is auto-selected based on workspace state (greenfield vs existing project).
 ``needs_architect()`` gates whether the Architect tier runs; ``needs_speculator()``
 gates the speculator lookahead call.

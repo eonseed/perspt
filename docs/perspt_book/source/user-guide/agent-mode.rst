@@ -109,7 +109,7 @@ Session Management
 
 .. code-block:: bash
 
-   # Check session state (per-node counts, energy, escalations)
+   # Check session state (per-node counts, energy, escalations, correction attempts)
    perspt status
 
    # Abort the current session
@@ -147,3 +147,25 @@ Actuator's prompt, helping avoid downstream breakage. Simpler policies
 (``LocalEdit``, ``FeatureIncrement``) skip the speculator to reduce latency and cost.
 
 See :doc:`advanced-features` for model tiers, energy tuning, and cost controls.
+
+Correction Observability (PSP-7)
+---------------------------------
+
+PSP-7 adds structured telemetry to the correction loop. Every correction attempt is
+persisted with the parse result state, retry classification, and energy snapshot.
+
+The ``perspt status`` command now shows:
+
+- **Step Timeline** — per-step-type counts and total execution time
+- **Correction Attempts** — per-node accepted/rejected attempt counts
+
+The dashboard **Decisions** page includes a dedicated Correction Attempts table with
+node, attempt number, parse state, and rejection reason.
+
+In headless mode, the agent summary emits ``[STEPS]`` and ``[CORRECTIONS]`` lines
+for CI integration:
+
+.. code-block:: text
+
+   [STEPS] 15 records, 42.3s total
+   [CORRECTIONS] 2 node(s) needed correction, 5 total attempts
