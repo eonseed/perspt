@@ -185,47 +185,143 @@ fn compile_correction(ev: &PromptEvidence) -> String {
         .verifier_diagnostics
         .as_deref()
         .unwrap_or("No specific errors captured.");
+    let owner_plugin = ev.owner_plugin.as_deref().unwrap_or("");
+
+    // Detect language from first file extension for code fences
+    let lang = ev
+        .existing_file_contents
+        .first()
+        .map(|(p, _)| p.as_str())
+        .and_then(|p| std::path::Path::new(p).extension())
+        .and_then(|e| e.to_str())
+        .map(|ext| match ext {
+            "py" => "python",
+            "rs" => "rust",
+            "ts" | "tsx" => "typescript",
+            "js" | "jsx" => "javascript",
+            "go" => "go",
+            "java" => "java",
+            "rb" => "ruby",
+            "c" | "h" => "c",
+            "cpp" | "cc" | "cxx" | "hpp" => "cpp",
+            "cs" => "csharp",
+            other => other,
+        })
+        .unwrap_or("text");
 
     let mut prompt = format!(
         "## Code Correction Required\n\n\
+         The code you generated has errors detected by the language toolchain.\n\
          Your task is to fix ALL errors and return the complete corrected file(s).\n\n\
          ### Original Goal\n{}\n\n\
          ### Current Code (with errors)\n",
         goal,
     );
 
+    // Include all affected files
     for (path, content) in &ev.existing_file_contents {
-        let lang = std::path::Path::new(path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|ext| match ext {
-                "py" => "python",
-                "rs" => "rust",
-                "ts" | "tsx" => "typescript",
-                "js" | "jsx" => "javascript",
-                other => other,
-            })
-            .unwrap_or("text");
         prompt.push_str(&format!(
             "File: {}\n```{}\n{}\n```\n\n",
             path, lang, content
         ));
     }
 
-    prompt.push_str(&format!("### Detected Errors\n{}\n", diagnostics));
+    // Diagnostics section (pre-formatted by caller with fix directions if available)
+    if let Some(v_syn) = ev.energy_v_syn {
+        prompt.push_str(&format!(
+            "### Detected Errors (V_syn = {:.2})\n{}\n",
+            v_syn, diagnostics
+        ));
+    } else {
+        prompt.push_str(&format!("### Detected Errors\n{}\n", diagnostics));
+    }
 
     if let Some(ref fragment) = ev.plugin_correction_fragment {
         prompt.push_str(&format!("\n### Plugin Guidance\n{}\n", fragment));
     }
 
-    if !ev.previous_attempts.is_empty() {
+    let attempt_count = if !ev.previous_attempts.is_empty() {
+        ev.previous_attempts.len()
+    } else {
+        ev.previous_attempt_count
+    };
+    if attempt_count > 0 {
         prompt.push_str(&format!(
             "\n### Previous Correction Attempts: {}\n\
              The previous attempts did not fully resolve the errors. \
              Please try a different approach.\n",
-            ev.previous_attempts.len()
+            attempt_count
         ));
     }
+
+    // Restriction map context for structural dependencies
+    if let Some(ref ctx) = ev.restriction_map_context {
+        if !ctx.is_empty() {
+            prompt.push_str(&format!("\n### Restriction Map Context\n\n{}\n", ctx));
+        }
+    }
+
+    // Project file tree for path awareness
+    if let Some(ref tree) = ev.project_file_tree {
+        if !tree.is_empty() {
+            prompt.push_str(&format!(
+                "\n### Current Project Tree\n\n```\n{}\n```\n",
+                tree
+            ));
+        }
+    }
+
+    // Build/test output from plugin verification
+    if let Some(ref output) = ev.build_test_output {
+        if !output.is_empty() {
+            prompt.push_str(&format!(
+                "\n### Build / Test Output\nThe following is the raw output from the build toolchain (e.g. `cargo check` / `cargo build`). \
+                 Use this to identify missing dependencies, unresolved imports, or type errors:\n```\n{}\n```\n",
+                output
+            ));
+        }
+    }
+
+    let multi_file = ev.existing_file_contents.len() > 1;
+    let file_instruction = if multi_file {
+        "Return ALL affected files as a JSON artifact bundle"
+    } else {
+        "Return the COMPLETE corrected file, not just snippets"
+    };
+
+    // Generate language-specific dependency command examples
+    let commands_example = match owner_plugin {
+        "rust" => "cargo add thiserror\ncargo add clap --features derive",
+        "python" => "uv add httpx\nuv add --dev pytest",
+        "javascript" => "npm install express\nnpm install --save-dev jest",
+        _ => "cargo add thiserror\nuv add httpx",
+    };
+
+    prompt.push_str(&format!(
+        r#"
+### Fix Requirements
+1. Fix ALL errors listed above - do not leave any unfixed
+2. Maintain the original functionality and goal
+3. Follow {} language conventions and idioms
+4. Import any missing modules or dependencies
+5. {}
+6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
+
+### Output Format
+Provide the complete corrected file(s) followed by any dependency commands needed:
+
+File: [same filename]
+```{}
+[complete corrected code]
+```
+
+Commands: [optional, one per line]
+```
+{}
+```
+"#,
+        lang, file_instruction, lang, commands_example
+    ));
 
     prompt
 }

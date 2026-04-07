@@ -311,6 +311,14 @@ impl SRBNOrchestrator {
                     // distinct from code quality captured by V_syn/V_log.
                     // Only computed from the FINAL verification result (after
                     // auto-repair has had its chance to fix missing deps).
+                    if vr.degraded && vr.stage_outcomes.is_empty() {
+                        // Fully degraded toolchain: no stages ran at all.
+                        energy.v_boot = 10.0;
+                        log::warn!(
+                            "V_boot = 10.0: toolchain fully degraded ({})",
+                            vr.degraded_reason.as_deref().unwrap_or("unknown")
+                        );
+                    }
                     for so in &vr.stage_outcomes {
                         match &so.sensor_status {
                             perspt_core::types::SensorStatus::Unavailable { reason } => {

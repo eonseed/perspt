@@ -703,3 +703,162 @@ impl SRBNOrchestrator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use perspt_core::types::{ArtifactBundle, ArtifactOperation, ParseResultState};
+
+    #[test]
+    fn test_parse_result_state_is_ok() {
+        assert!(ParseResultState::StrictJsonOk.is_ok());
+        assert!(ParseResultState::TolerantRecoveryOk.is_ok());
+        assert!(!ParseResultState::NoStructuredPayload.is_ok());
+        assert!(!ParseResultState::SchemaInvalid.is_ok());
+        assert!(!ParseResultState::SemanticallyRejected.is_ok());
+        assert!(!ParseResultState::EmptyBundle.is_ok());
+    }
+
+    #[test]
+    fn test_strict_json_layer_c_valid_bundle() {
+        // Layer C: strict JSON parse succeeds for a well-formed bundle
+        let json = r#"{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],"commands":[]}"#;
+        let result = perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(json);
+        assert!(result.is_ok());
+        let (bundle, _method) = result.unwrap();
+        assert_eq!(bundle.artifacts.len(), 1);
+        assert!(bundle.validate().is_ok());
+    }
+
+    #[test]
+    fn test_strict_json_layer_c_invalid_schema() {
+        // Layer C: JSON parses but doesn't match ArtifactBundle schema
+        let json = r#"{"foo": "bar"}"#;
+        let result = perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(json);
+        // extract_and_deserialize may fail at deserialization
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tolerant_recovery_layer_d_file_markers() {
+        // Layer D: extract_file_markers recovers artifacts from markdown
+        let response = r#"
+Here is the implementation:
+
+### File: src/main.rs
+```rust
+fn main() {
+    println!("Hello");
+}
+```
+
+### File: src/lib.rs
+```rust
+pub fn greet() -> &'static str { "Hello" }
+```
+"#;
+        let markers = perspt_core::normalize::extract_file_markers(response);
+        assert_eq!(markers.len(), 2);
+        assert_eq!(markers[0].path, Some("src/main.rs".to_string()));
+        assert_eq!(markers[1].path, Some("src/lib.rs".to_string()));
+        assert!(!markers[0].is_diff);
+    }
+
+    #[test]
+    fn test_tolerant_recovery_layer_d_no_named_blocks() {
+        // Layer D: unnamed code blocks produce None path (never invented)
+        let response = "Here is some code:\n```rust\nfn foo() {}\n```\n";
+        let markers = perspt_core::normalize::extract_file_markers(response);
+        // Unnamed blocks don't produce markers with paths
+        let named = markers.iter().filter(|m| m.path.is_some()).count();
+        assert_eq!(named, 0);
+    }
+
+    #[test]
+    fn test_path_normalization_layer_b() {
+        // Layer B: path normalization strips backticks, quotes, markdown
+        let normalized = perspt_core::path::normalize_artifact_path("`src/main.rs`").unwrap();
+        assert_eq!(normalized, "src/main.rs");
+
+        let normalized = perspt_core::path::normalize_artifact_path("'src/lib.rs'").unwrap();
+        assert_eq!(normalized, "src/lib.rs");
+
+        let normalized = perspt_core::path::normalize_artifact_path("**src/utils.rs**").unwrap();
+        assert_eq!(normalized, "src/utils.rs");
+    }
+
+    #[test]
+    fn test_empty_bundle_detection() {
+        let bundle = ArtifactBundle {
+            artifacts: vec![],
+            commands: vec![],
+        };
+        assert!(bundle.artifacts.is_empty());
+    }
+
+    #[test]
+    fn test_bundle_with_commands() {
+        let json = r#"{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],"commands":["cargo add serde"]}"#;
+        let result = perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(json);
+        assert!(result.is_ok());
+        let (bundle, _) = result.unwrap();
+        assert_eq!(bundle.commands.len(), 1);
+        assert_eq!(bundle.commands[0], "cargo add serde");
+    }
+
+    #[test]
+    fn test_layer_d_diff_markers() {
+        let response = r#"
+### Diff: src/main.rs
+```diff
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1 +1 @@
+-fn main() {}
++fn main() { println!("hello"); }
+```
+"#;
+        let markers = perspt_core::normalize::extract_file_markers(response);
+        assert!(!markers.is_empty());
+        let first = &markers[0];
+        assert_eq!(first.path, Some("src/main.rs".to_string()));
+        assert!(first.is_diff);
+    }
+
+    #[test]
+    fn test_no_structured_payload() {
+        // A response with no JSON and no file markers
+        let response = "I'm sorry, I can't help with that. Please try again.";
+        let json_result =
+            perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(response);
+        assert!(json_result.is_err());
+        let markers = perspt_core::normalize::extract_file_markers(response);
+        assert!(markers.is_empty());
+    }
+
+    #[test]
+    fn test_fenced_json_bundle_extraction() {
+        // JSON bundle wrapped in markdown code fence
+        let response = r#"Here is the bundle:
+```json
+{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],"commands":[]}
+```
+"#;
+        let result = perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(response);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_artifact_operation_paths() {
+        let write = ArtifactOperation::Write {
+            path: "src/main.rs".to_string(),
+            content: "fn main() {}".to_string(),
+        };
+        assert_eq!(write.path(), "src/main.rs");
+
+        let diff = ArtifactOperation::Diff {
+            path: "src/lib.rs".to_string(),
+            patch: "...".to_string(),
+        };
+        assert_eq!(diff.path(), "src/lib.rs");
+    }
+}
