@@ -1,6 +1,8 @@
 //! Artifact bundle parsing, transactional application, and path filtering.
 
 use super::*;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 impl SRBNOrchestrator {
     /// PSP-5: Parse an artifact bundle from LLM response
@@ -73,6 +75,372 @@ impl SRBNOrchestrator {
                 None
             }
         }
+    }
+
+    /// PSP-7: Typed parse pipeline returning structured state for every LLM response.
+    ///
+    /// Replaces the Option-based `parse_artifact_bundle` with a pipeline that
+    /// classifies every response through Layers A→E and returns a typed result.
+    ///
+    /// - **Layer A**: Raw capture — fingerprints the response (hash + length).
+    /// - **Layer B**: Path normalization via the hardened `normalize_artifact_path`.
+    /// - **Layer C**: Strict JSON parse via `extract_and_deserialize`.
+    /// - **Layer D**: Tolerant file-marker recovery via `extract_file_markers`.
+    /// - **Layer E**: Semantic validation — declared paths, plugin support files, command policy.
+    ///
+    /// Returns `(Option<ArtifactBundle>, ParseResultState, Option<CorrectionAttemptRecord>)`.
+    pub fn parse_artifact_bundle_typed(
+        &self,
+        content: &str,
+        node_id: &str,
+        attempt: u32,
+    ) -> (
+        Option<perspt_core::types::ArtifactBundle>,
+        perspt_core::types::ParseResultState,
+        Option<perspt_core::types::CorrectionAttemptRecord>,
+    ) {
+        use perspt_core::types::{
+            ArtifactBundle, ArtifactOperation, CorrectionAttemptRecord, ParseResultState,
+        };
+
+        // Layer A: raw capture — fingerprint the response
+        let response_fingerprint = {
+            let mut hasher = DefaultHasher::new();
+            content.hash(&mut hasher);
+            format!("{:016x}", hasher.finish())
+        };
+        let response_length = content.len();
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        let build_record = |state: ParseResultState, accepted: bool, rejection: Option<String>| {
+            CorrectionAttemptRecord {
+                attempt,
+                parse_state: state,
+                retry_classification: None,
+                response_fingerprint: response_fingerprint.clone(),
+                response_length,
+                energy_after: None,
+                accepted,
+                rejection_reason: rejection,
+                created_at,
+            }
+        };
+
+        // Layer C: Strict JSON parse
+        if let Some(bundle) = self.try_parse_json_bundle(content) {
+            if bundle.validate().is_ok() {
+                // Layer B: normalize all paths in the bundle
+                let bundle = self.normalize_bundle_paths(bundle);
+
+                if bundle.artifacts.is_empty() {
+                    let record = build_record(
+                        ParseResultState::EmptyBundle,
+                        false,
+                        Some("Bundle is empty after path normalization".to_string()),
+                    );
+                    return (None, ParseResultState::EmptyBundle, Some(record));
+                }
+
+                // Layer E: semantic validation
+                match self.semantic_validate_bundle(&bundle, node_id) {
+                    Ok(filtered) => {
+                        if filtered.artifacts.is_empty() {
+                            let record = build_record(
+                                ParseResultState::SemanticallyRejected,
+                                false,
+                                Some("All artifacts rejected by semantic validation".to_string()),
+                            );
+                            return (None, ParseResultState::SemanticallyRejected, Some(record));
+                        }
+                        let record = build_record(ParseResultState::StrictJsonOk, true, None);
+                        return (Some(filtered), ParseResultState::StrictJsonOk, Some(record));
+                    }
+                    Err(reason) => {
+                        let record = build_record(
+                            ParseResultState::SemanticallyRejected,
+                            false,
+                            Some(reason),
+                        );
+                        return (None, ParseResultState::SemanticallyRejected, Some(record));
+                    }
+                }
+            } else {
+                log::warn!("JSON bundle found but failed schema validation");
+                let record = build_record(
+                    ParseResultState::SchemaInvalid,
+                    false,
+                    Some("JSON parsed but bundle schema validation failed".to_string()),
+                );
+                return (None, ParseResultState::SchemaInvalid, Some(record));
+            }
+        }
+
+        // Layer D: Tolerant file-marker recovery
+        let markers = perspt_core::normalize::extract_file_markers(content);
+        if !markers.is_empty() {
+            let artifacts: Vec<ArtifactOperation> = markers
+                .into_iter()
+                .filter_map(|m| {
+                    let path = m.path?;
+                    if m.content.is_empty() {
+                        return None;
+                    }
+                    if m.is_diff {
+                        Some(ArtifactOperation::Diff {
+                            path,
+                            patch: m.content,
+                        })
+                    } else {
+                        Some(ArtifactOperation::Write {
+                            path,
+                            content: m.content,
+                        })
+                    }
+                })
+                .collect();
+
+            if artifacts.is_empty() {
+                let record = build_record(
+                    ParseResultState::NoStructuredPayload,
+                    false,
+                    Some("File markers found but no named artifacts extracted".to_string()),
+                );
+                return (None, ParseResultState::NoStructuredPayload, Some(record));
+            }
+
+            let bundle = ArtifactBundle {
+                artifacts,
+                commands: vec![],
+            };
+            let bundle = self.normalize_bundle_paths(bundle);
+
+            log::info!(
+                "Tolerant recovery extracted {}-artifact bundle via file markers",
+                bundle.len()
+            );
+
+            // Layer E: semantic validation
+            match self.semantic_validate_bundle(&bundle, node_id) {
+                Ok(filtered) => {
+                    if filtered.artifacts.is_empty() {
+                        let record = build_record(
+                            ParseResultState::SemanticallyRejected,
+                            false,
+                            Some("All artifacts rejected by semantic validation".to_string()),
+                        );
+                        return (None, ParseResultState::SemanticallyRejected, Some(record));
+                    }
+                    let record = build_record(ParseResultState::TolerantRecoveryOk, true, None);
+                    return (
+                        Some(filtered),
+                        ParseResultState::TolerantRecoveryOk,
+                        Some(record),
+                    );
+                }
+                Err(reason) => {
+                    let record =
+                        build_record(ParseResultState::SemanticallyRejected, false, Some(reason));
+                    return (None, ParseResultState::SemanticallyRejected, Some(record));
+                }
+            }
+        }
+
+        // No structured payload at all
+        let record = build_record(
+            ParseResultState::NoStructuredPayload,
+            false,
+            Some("No JSON bundle or file markers found in response".to_string()),
+        );
+        (None, ParseResultState::NoStructuredPayload, Some(record))
+    }
+
+    /// Normalize all paths in a bundle through the hardened path normalizer.
+    fn normalize_bundle_paths(
+        &self,
+        mut bundle: perspt_core::types::ArtifactBundle,
+    ) -> perspt_core::types::ArtifactBundle {
+        bundle.artifacts = bundle
+            .artifacts
+            .into_iter()
+            .filter_map(|op| match op {
+                perspt_core::types::ArtifactOperation::Write { path, content } => {
+                    match perspt_core::path::normalize_artifact_path(&path) {
+                        Ok(normalized) => Some(perspt_core::types::ArtifactOperation::Write {
+                            path: normalized,
+                            content,
+                        }),
+                        Err(e) => {
+                            log::warn!("Dropping write artifact with bad path '{}': {}", path, e);
+                            None
+                        }
+                    }
+                }
+                perspt_core::types::ArtifactOperation::Diff { path, patch } => {
+                    match perspt_core::path::normalize_artifact_path(&path) {
+                        Ok(normalized) => Some(perspt_core::types::ArtifactOperation::Diff {
+                            path: normalized,
+                            patch,
+                        }),
+                        Err(e) => {
+                            log::warn!("Dropping diff artifact with bad path '{}': {}", path, e);
+                            None
+                        }
+                    }
+                }
+                perspt_core::types::ArtifactOperation::Delete { path } => {
+                    match perspt_core::path::normalize_artifact_path(&path) {
+                        Ok(normalized) => {
+                            Some(perspt_core::types::ArtifactOperation::Delete { path: normalized })
+                        }
+                        Err(e) => {
+                            log::warn!("Dropping delete artifact with bad path '{}': {}", path, e);
+                            None
+                        }
+                    }
+                }
+                perspt_core::types::ArtifactOperation::Move { from, to } => {
+                    let from_norm = perspt_core::path::normalize_artifact_path(&from);
+                    let to_norm = perspt_core::path::normalize_artifact_path(&to);
+                    match (from_norm, to_norm) {
+                        (Ok(f), Ok(t)) => {
+                            Some(perspt_core::types::ArtifactOperation::Move { from: f, to: t })
+                        }
+                        _ => {
+                            log::warn!("Dropping move artifact with bad paths '{}'→'{}'", from, to);
+                            None
+                        }
+                    }
+                }
+            })
+            .collect();
+        bundle
+    }
+
+    /// PSP-7 Layer E: Semantic validation of a parsed bundle.
+    ///
+    /// Extends `filter_bundle_to_declared_paths` with plugin-driven checks:
+    /// - Legal support files (from plugin `legal_support_files()`)
+    /// - Dependency command policy (from plugin `dependency_command_policy()`)
+    ///
+    /// Returns `Ok(filtered_bundle)` or `Err(reason)` if validation fails hard.
+    fn semantic_validate_bundle(
+        &self,
+        bundle: &perspt_core::types::ArtifactBundle,
+        node_id: &str,
+    ) -> Result<perspt_core::types::ArtifactBundle, String> {
+        let allowed_paths: std::collections::HashSet<String> = self
+            .node_indices
+            .get(node_id)
+            .map(|idx| {
+                self.graph[*idx]
+                    .output_targets
+                    .iter()
+                    .map(|p| {
+                        let raw = p.to_string_lossy();
+                        perspt_core::path::normalize_artifact_path(&raw)
+                            .unwrap_or_else(|_| raw.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // If no output targets declared, pass everything through
+        if allowed_paths.is_empty() {
+            return Ok(bundle.clone());
+        }
+
+        // Get legal support files from the plugin
+        let legal_support: std::collections::HashSet<String> = self
+            .node_indices
+            .get(node_id)
+            .map(|idx| {
+                let plugin_name = &self.graph[*idx].owner_plugin;
+                let registry = perspt_core::plugin::PluginRegistry::new();
+                registry
+                    .get(plugin_name)
+                    .map(|p| {
+                        p.legal_support_files()
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        let (kept, dropped): (Vec<_>, Vec<_>) = bundle.artifacts.iter().cloned().partition(|a| {
+            let normalized = perspt_core::path::normalize_artifact_path(a.path())
+                .unwrap_or_else(|_| a.path().to_string());
+
+            // Accept if in declared output targets
+            if allowed_paths.contains(&normalized) {
+                return true;
+            }
+
+            // Accept if it's a legal support file
+            let filename = std::path::Path::new(&normalized)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if legal_support.contains(&filename) {
+                log::info!(
+                    "Accepting support file '{}' via plugin legal_support_files",
+                    normalized
+                );
+                return true;
+            }
+
+            false
+        });
+
+        if !dropped.is_empty() {
+            let dropped_paths: Vec<String> = dropped.iter().map(|a| a.path().to_string()).collect();
+            log::warn!(
+                "Semantic validation stripped {} artifact(s) from node '{}': {}",
+                dropped.len(),
+                node_id,
+                dropped_paths.join(", ")
+            );
+        }
+
+        // Validate commands via plugin dependency_command_policy
+        let mut validated_commands = Vec::new();
+        for cmd in &bundle.commands {
+            let decision = self
+                .node_indices
+                .get(node_id)
+                .and_then(|idx| {
+                    let plugin_name = &self.graph[*idx].owner_plugin;
+                    let registry = perspt_core::plugin::PluginRegistry::new();
+                    registry
+                        .get(plugin_name)
+                        .map(|p| p.dependency_command_policy(cmd))
+                })
+                .unwrap_or(perspt_core::types::CommandPolicyDecision::Allow);
+
+            match decision {
+                perspt_core::types::CommandPolicyDecision::Allow => {
+                    validated_commands.push(cmd.clone());
+                }
+                perspt_core::types::CommandPolicyDecision::RequireApproval => {
+                    log::info!("Command '{}' requires approval — including with flag", cmd);
+                    validated_commands.push(cmd.clone());
+                }
+                perspt_core::types::CommandPolicyDecision::Deny => {
+                    log::warn!("Command '{}' denied by plugin policy", cmd);
+                }
+            }
+        }
+
+        Ok(perspt_core::types::ArtifactBundle {
+            artifacts: kept,
+            commands: validated_commands,
+        })
     }
 
     /// PSP-5: Apply an artifact bundle transactionally
