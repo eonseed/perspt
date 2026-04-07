@@ -176,9 +176,7 @@ impl SRBNOrchestrator {
 
                 // Track last written file from the bundle for build_correction_prompt
                 let node_workdir = self.effective_working_dir(idx);
-                if let Some(first_path) =
-                    bundle.artifacts.first().map(|a| a.path().to_string())
-                {
+                if let Some(first_path) = bundle.artifacts.first().map(|a| a.path().to_string()) {
                     self.last_written_file = Some(node_workdir.join(&first_path));
                 }
                 self.file_version += 1;
@@ -248,14 +246,13 @@ impl SRBNOrchestrator {
                     .and_then(|r| r.rejection_reason.clone())
                     .unwrap_or_default();
 
-                let classification =
-                    if rejection_reason.contains("All artifacts rejected") {
-                        perspt_core::types::RetryClassification::Retarget
-                    } else if rejection_reason.contains("support") {
-                        perspt_core::types::RetryClassification::SupportFileViolation
-                    } else {
-                        perspt_core::types::RetryClassification::Replan
-                    };
+                let classification = if rejection_reason.contains("All artifacts rejected") {
+                    perspt_core::types::RetryClassification::Retarget
+                } else if rejection_reason.contains("support") {
+                    perspt_core::types::RetryClassification::SupportFileViolation
+                } else {
+                    perspt_core::types::RetryClassification::Replan
+                };
 
                 log::warn!(
                     "Correction bundle semantically rejected ({:?}): {}",
@@ -305,8 +302,7 @@ impl SRBNOrchestrator {
         }
 
         // PSP-7: Extract and execute standalone dependency commands via plugin policy
-        let correction_cmds =
-            Self::extract_commands_from_correction(&corrected, &owner_plugin);
+        let correction_cmds = Self::extract_commands_from_correction(&corrected, &owner_plugin);
         if !correction_cmds.is_empty() {
             self.emit_log(format!(
                 "📦 Running {} dependency command(s) from correction...",

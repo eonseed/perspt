@@ -1590,60 +1590,179 @@ impl SRBNOrchestrator {
                 self.emit_log(format!("❌ Command failed: {:?}", result.error));
             }
         }
-        // Then check for PSP-5 artifact bundles (with legacy single-file fallback inside)
-        else if let Some(bundle) = self.parse_artifact_bundle(content) {
-            let affected_files: Vec<String> = bundle
-                .affected_paths()
-                .into_iter()
-                .map(ToString::to_string)
-                .collect();
-            log::info!(
-                "Parsed artifact bundle for node {}: {} artifacts, {} commands",
-                node_id,
-                bundle.artifacts.len(),
-                bundle.commands.len()
-            );
-            self.emit_log(format!(
-                "📝 Bundle proposed: {} artifact(s) across {} file(s)",
-                bundle.artifacts.len(),
-                affected_files.len()
-            ));
+        // PSP-7: Typed parse pipeline for initial generation
+        else {
+            let (bundle_opt, parse_state, record_opt) =
+                self.parse_artifact_bundle_typed(content, &node_id, 0);
 
-            let approval_result = self
-                .await_approval_for_node(
-                    perspt_core::ActionType::BundleWrite {
-                        node_id: node_id.clone(),
-                        files: affected_files.clone(),
-                    },
-                    format!("Apply bundle touching: {}", affected_files.join(", ")),
-                    serde_json::to_string_pretty(&bundle).ok(),
-                    Some(&node_id),
-                )
-                .await;
-
-            if !matches!(
-                approval_result,
-                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
-            ) {
-                self.emit_log("⏭️ Bundle application skipped (not approved)");
-                return Ok(());
+            if let Some(ref record) = record_opt {
+                log::info!(
+                    "PSP-7 initial gen: parse_state={}, accepted={}",
+                    record.parse_state,
+                    record.accepted
+                );
             }
 
-            let node_class = self.graph[idx].node_class;
-            match self
-                .apply_bundle_transactionally(&bundle, &node_id, node_class)
-                .await
-            {
-                Ok(()) => {
-                    self.last_tool_failure = None;
-                    self.last_applied_bundle = Some(bundle.clone());
+            match parse_state {
+                perspt_core::types::ParseResultState::StrictJsonOk
+                | perspt_core::types::ParseResultState::TolerantRecoveryOk => {
+                    let bundle = bundle_opt.expect("Accepted parse must yield a bundle");
+                    let affected_files: Vec<String> = bundle
+                        .affected_paths()
+                        .into_iter()
+                        .map(ToString::to_string)
+                        .collect();
+                    log::info!(
+                        "Parsed artifact bundle for node {} ({}): {} artifacts, {} commands",
+                        node_id,
+                        parse_state,
+                        bundle.artifacts.len(),
+                        bundle.commands.len()
+                    );
+                    self.emit_log(format!(
+                        "📝 Bundle proposed: {} artifact(s) across {} file(s)",
+                        bundle.artifacts.len(),
+                        affected_files.len()
+                    ));
+
+                    let approval_result = self
+                        .await_approval_for_node(
+                            perspt_core::ActionType::BundleWrite {
+                                node_id: node_id.clone(),
+                                files: affected_files.clone(),
+                            },
+                            format!("Apply bundle touching: {}", affected_files.join(", ")),
+                            serde_json::to_string_pretty(&bundle).ok(),
+                            Some(&node_id),
+                        )
+                        .await;
+
+                    if !matches!(
+                        approval_result,
+                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                    ) {
+                        self.emit_log("⏭️ Bundle application skipped (not approved)");
+                        return Ok(());
+                    }
+
+                    let node_class = self.graph[idx].node_class;
+                    match self
+                        .apply_bundle_transactionally(&bundle, &node_id, node_class)
+                        .await
+                    {
+                        Ok(()) => {
+                            self.last_tool_failure = None;
+                            self.last_applied_bundle = Some(bundle.clone());
+                        }
+                        Err(e) => return Err(e),
+                    }
+
+                    // PSP-5 Phase 9: Execute post-write commands from the effective bundle
+                    let effective_commands = self
+                        .last_applied_bundle
+                        .as_ref()
+                        .map(|b| b.commands.clone())
+                        .unwrap_or_default();
+                    if !effective_commands.is_empty() {
+                        self.emit_log(format!(
+                            "🔧 Executing {} bundle command(s)...",
+                            effective_commands.len()
+                        ));
+                        let work_dir = self.effective_working_dir(idx);
+                        let is_python = self.graph[idx].owner_plugin == "python";
+                        for raw_command in &effective_commands {
+                            let command = if is_python {
+                                Self::normalize_command_to_uv(raw_command)
+                            } else {
+                                raw_command.clone()
+                            };
+
+                            let cmd_approval = self
+                                .await_approval_for_node(
+                                    perspt_core::ActionType::Command {
+                                        command: command.clone(),
+                                    },
+                                    format!("Execute bundle command: {}", command),
+                                    None,
+                                    Some(&node_id),
+                                )
+                                .await;
+
+                            if !matches!(
+                                cmd_approval,
+                                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                            ) {
+                                self.emit_log(format!(
+                                    "⏭️ Bundle command skipped (not approved): {}",
+                                    command
+                                ));
+                                continue;
+                            }
+
+                            let mut args = HashMap::new();
+                            args.insert("command".to_string(), command.clone());
+                            args.insert(
+                                "working_dir".to_string(),
+                                work_dir.to_string_lossy().to_string(),
+                            );
+
+                            let call = ToolCall {
+                                name: "run_command".to_string(),
+                                arguments: args,
+                            };
+
+                            let result = self.tools.execute(&call).await;
+                            if result.success {
+                                log::info!("✓ Bundle command succeeded: {}", command);
+                                self.emit_log(format!("✅ {}", command));
+                                if !result.output.is_empty() {
+                                    let truncated: String =
+                                        result.output.chars().take(500).collect();
+                                    self.emit_log(truncated);
+                                }
+                            } else {
+                                let err_msg = result.error.unwrap_or_else(|| result.output.clone());
+                                log::warn!("Bundle command failed: {} — {}", command, err_msg);
+                                self.emit_log(format!(
+                                    "❌ Command failed: {} — {}",
+                                    command, err_msg
+                                ));
+                                self.last_tool_failure = Some(format!(
+                                    "Bundle command '{}' failed: {}",
+                                    command, err_msg
+                                ));
+                            }
+                        }
+
+                        if is_python {
+                            log::info!("Running uv sync --dev after bundle commands...");
+                            let sync_result = tokio::process::Command::new("uv")
+                                .args(["sync", "--dev"])
+                                .current_dir(&work_dir)
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .output()
+                                .await;
+                            match sync_result {
+                                Ok(output) if output.status.success() => {
+                                    self.emit_log("🐍 uv sync --dev completed".to_string());
+                                }
+                                Ok(output) => {
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    log::warn!("uv sync --dev failed: {}", stderr);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to run uv sync --dev: {}", e);
+                                }
+                            }
+                        }
+                    }
                 }
-                Err(e) if e.to_string().contains("targeted undeclared paths") => {
-                    // All artifacts were stripped — the LLM generated files
-                    // that don't match the node's declared output_targets.
-                    // Retry once with a focused correction prompt.
+
+                perspt_core::types::ParseResultState::SemanticallyRejected => {
+                    // PSP-7: Retarget — extract raw paths and retry with focused prompt
                     log::warn!(
-                        "Bundle for '{}' targeted wrong files, retrying with retarget prompt",
+                        "Bundle for '{}' semantically rejected, retrying with retarget prompt",
                         node_id
                     );
                     self.emit_log(format!(
@@ -1651,19 +1770,19 @@ impl SRBNOrchestrator {
                         node_id
                     ));
 
+                    let raw_paths: Vec<String> =
+                        perspt_core::normalize::extract_file_markers(content)
+                            .iter()
+                            .filter_map(|m| m.path.clone())
+                            .collect();
                     let expected: Vec<String> = self.graph[idx]
                         .output_targets
                         .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect();
-                    let dropped: Vec<String> = bundle
-                        .artifacts
-                        .iter()
-                        .map(|a| a.path().to_string())
-                        .collect();
                     let retry_prompt = crate::prompts::render_bundle_retarget(
                         &expected.join(", "),
-                        &dropped.join(", "),
+                        &raw_paths.join(", "),
                         &prompt,
                     );
 
@@ -1671,127 +1790,34 @@ impl SRBNOrchestrator {
                         .call_llm_with_logging(&model, &retry_prompt, Some(&node_id))
                         .await?;
 
-                    if let Some(retry_bundle) = self.parse_artifact_bundle(&retry_response) {
+                    let (retry_bundle_opt, retry_state, _) =
+                        self.parse_artifact_bundle_typed(&retry_response, &node_id, 1);
+
+                    if let Some(retry_bundle) = retry_bundle_opt {
+                        let node_class = self.graph[idx].node_class;
                         self.apply_bundle_transactionally(&retry_bundle, &node_id, node_class)
                             .await?;
                         self.last_tool_failure = None;
                         self.last_applied_bundle = Some(retry_bundle);
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Retry for '{}' did not produce a valid bundle",
-                            node_id
+                            "Retry for '{}' did not produce a valid bundle ({})",
+                            node_id,
+                            retry_state
                         ));
                     }
                 }
-                Err(e) => return Err(e),
-            }
 
-            // PSP-5 Phase 9: Execute post-write commands from the effective bundle
-            // (may be the retry bundle if the original was all-stripped).
-            let effective_commands = self
-                .last_applied_bundle
-                .as_ref()
-                .map(|b| b.commands.clone())
-                .unwrap_or_default();
-            if !effective_commands.is_empty() {
-                self.emit_log(format!(
-                    "🔧 Executing {} bundle command(s)...",
-                    effective_commands.len()
-                ));
-                let work_dir = self.effective_working_dir(idx);
-                let is_python = self.graph[idx].owner_plugin == "python";
-                for raw_command in &effective_commands {
-                    // Normalize Python install commands to uv equivalents
-                    let command = if is_python {
-                        Self::normalize_command_to_uv(raw_command)
-                    } else {
-                        raw_command.clone()
-                    };
-
-                    // Request approval for each command (respects --yes auto-approve)
-                    let cmd_approval = self
-                        .await_approval_for_node(
-                            perspt_core::ActionType::Command {
-                                command: command.clone(),
-                            },
-                            format!("Execute bundle command: {}", command),
-                            None,
-                            Some(&node_id),
-                        )
-                        .await;
-
-                    if !matches!(
-                        cmd_approval,
-                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
-                    ) {
-                        self.emit_log(format!(
-                            "⏭️ Bundle command skipped (not approved): {}",
-                            command
-                        ));
-                        continue;
-                    }
-
-                    let mut args = HashMap::new();
-                    args.insert("command".to_string(), command.clone());
-                    args.insert(
-                        "working_dir".to_string(),
-                        work_dir.to_string_lossy().to_string(),
+                _ => {
+                    // NoStructuredPayload, SchemaInvalid, EmptyBundle
+                    log::debug!(
+                        "No artifact bundle found in response ({}), response length: {}",
+                        parse_state,
+                        content.len()
                     );
-
-                    let call = ToolCall {
-                        name: "run_command".to_string(),
-                        arguments: args,
-                    };
-
-                    let result = self.tools.execute(&call).await;
-                    if result.success {
-                        log::info!("✓ Bundle command succeeded: {}", command);
-                        self.emit_log(format!("✅ {}", command));
-                        if !result.output.is_empty() {
-                            // Truncate verbose output for log
-                            let truncated: String = result.output.chars().take(500).collect();
-                            self.emit_log(truncated);
-                        }
-                    } else {
-                        let err_msg = result.error.unwrap_or_else(|| result.output.clone());
-                        log::warn!("Bundle command failed: {} — {}", command, err_msg);
-                        self.emit_log(format!("❌ Command failed: {} — {}", command, err_msg));
-                        // Record as tool failure so step_verify picks it up via V_syn
-                        self.last_tool_failure =
-                            Some(format!("Bundle command '{}' failed: {}", command, err_msg));
-                    }
-                }
-
-                // After all bundle commands, sync Python venv so new deps are available
-                if is_python {
-                    log::info!("Running uv sync --dev after bundle commands...");
-                    let sync_result = tokio::process::Command::new("uv")
-                        .args(["sync", "--dev"])
-                        .current_dir(&work_dir)
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .output()
-                        .await;
-                    match sync_result {
-                        Ok(output) if output.status.success() => {
-                            self.emit_log("🐍 uv sync --dev completed".to_string());
-                        }
-                        Ok(output) => {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            log::warn!("uv sync --dev failed: {}", stderr);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to run uv sync --dev: {}", e);
-                        }
-                    }
+                    self.emit_log("ℹ️ No file changes detected in response".to_string());
                 }
             }
-        } else {
-            log::debug!(
-                "No code block or command found in response, response length: {}",
-                content.len()
-            );
-            self.emit_log("ℹ️ No file changes detected in response".to_string());
         }
 
         self.context.history.push(message);
@@ -1818,131 +1844,6 @@ impl SRBNOrchestrator {
             }
         }
         None
-    }
-
-    /// Extract code from LLM response
-    /// Returns (filename, code_content) if found
-    /// Extract code from LLM response
-    /// Returns (filename, code_content, is_diff) if found
-    fn extract_code_from_response(&self, content: &str) -> Option<(String, String, bool)> {
-        // Return only the first block for backward compatibility
-        self.extract_all_code_blocks_from_response(content)
-            .into_iter()
-            .next()
-    }
-
-    /// Extract ALL File:/Diff: code blocks from an LLM response.
-    ///
-    /// Unlike `extract_code_from_response` which returns only the first block,
-    /// this collects every named code block so multi-file legacy responses are
-    /// not silently truncated to a single artifact.
-    fn extract_all_code_blocks_from_response(&self, content: &str) -> Vec<(String, String, bool)> {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut results: Vec<(String, String, bool)> = Vec::new();
-        let mut file_path: Option<String> = None;
-        let mut is_diff_marker = false;
-        let mut in_code_block = false;
-        let mut code_lines: Vec<&str> = Vec::new();
-        let mut code_lang = String::new();
-
-        for line in &lines {
-            // Look for file path patterns
-            if line.starts_with("File:") || line.starts_with("**File:") || line.starts_with("file:")
-            {
-                let path = line
-                    .trim_start_matches("File:")
-                    .trim_start_matches("**File:")
-                    .trim_start_matches("file:")
-                    .trim_start_matches("**")
-                    .trim_end_matches("**")
-                    .trim();
-                if !path.is_empty() {
-                    file_path = Some(path.to_string());
-                    is_diff_marker = false;
-                }
-            }
-
-            // Look for Diff patterns
-            if line.starts_with("Diff:") || line.starts_with("**Diff:") || line.starts_with("diff:")
-            {
-                let path = line
-                    .trim_start_matches("Diff:")
-                    .trim_start_matches("**Diff:")
-                    .trim_start_matches("diff:")
-                    .trim_start_matches("**")
-                    .trim_end_matches("**")
-                    .trim();
-                if !path.is_empty() {
-                    file_path = Some(path.to_string());
-                    is_diff_marker = true;
-                }
-            }
-
-            // Parse code blocks
-            if line.starts_with("```") && !in_code_block {
-                in_code_block = true;
-                code_lang = line.trim_start_matches('`').to_string();
-                continue;
-            }
-
-            if line.starts_with("```") && in_code_block {
-                in_code_block = false;
-                if !code_lines.is_empty() {
-                    let code = code_lines.join("\n");
-                    let filename = match file_path.take() {
-                        Some(p) => p,
-                        None => match code_lang.as_str() {
-                            "python" | "py" => "main.py".to_string(),
-                            "rust" | "rs" => "main.rs".to_string(),
-                            "javascript" | "js" => "index.js".to_string(),
-                            "typescript" | "ts" => "index.ts".to_string(),
-                            "toml" => "Cargo.toml".to_string(),
-                            "json" => {
-                                // Skip unnamed JSON blocks that look like artifact
-                                // bundles or action manifests (e.g. [{"action":"UPDATE",...}]
-                                // or {"artifacts":[...]}) — these are structured
-                                // metadata, not standalone files.
-                                let trimmed = code.trim();
-                                if trimmed.starts_with('[')
-                                    || trimmed.contains("\"artifacts\"")
-                                    || trimmed.contains("\"action\"")
-                                {
-                                    log::debug!("Skipping unnamed JSON block that looks like a manifest/bundle");
-                                    code_lines.clear();
-                                    code_lang.clear();
-                                    is_diff_marker = false;
-                                    continue;
-                                }
-                                "config.json".to_string()
-                            }
-                            "yaml" | "yml" => "config.yaml".to_string(),
-                            other => {
-                                log::warn!(
-                                    "Skipping unnamed code block with unrecognized language tag '{}'",
-                                    other
-                                );
-                                code_lines.clear();
-                                code_lang.clear();
-                                is_diff_marker = false;
-                                continue;
-                            }
-                        },
-                    };
-                    let is_diff = is_diff_marker || code_lang == "diff" || code.starts_with("---");
-                    results.push((filename, code, is_diff));
-                }
-                code_lines.clear();
-                code_lang.clear();
-                is_diff_marker = false;
-                continue;
-            }
-
-            if in_code_block {
-                code_lines.push(line);
-            }
-        }
-
-        results
     }
 
     // =========================================================================
@@ -3834,7 +3735,7 @@ pip install numpy
     }
 
     #[test]
-    fn test_extract_all_code_blocks_multiple_files() {
+    fn test_typed_parse_pipeline_multiple_files() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"Here are the files:
 
@@ -3858,28 +3759,31 @@ def test_run():
     run_pipeline()
 ```
 "#;
-        let blocks = orch.extract_all_code_blocks_from_response(content);
-        assert_eq!(blocks.len(), 3, "Expected 3 blocks, got {:?}", blocks);
-        assert_eq!(blocks[0].0, "src/etl_pipeline/core.py");
-        assert_eq!(blocks[1].0, "src/etl_pipeline/validator.py");
-        assert_eq!(blocks[2].0, "tests/test_core.py");
-        assert!(!blocks[0].2, "core.py should not be a diff");
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok(), "Expected successful parse, got {}", state);
+        let bundle = bundle_opt.unwrap();
+        assert_eq!(bundle.artifacts.len(), 3, "Expected 3 artifacts");
+        assert_eq!(bundle.artifacts[0].path(), "src/etl_pipeline/core.py");
+        assert_eq!(bundle.artifacts[1].path(), "src/etl_pipeline/validator.py");
+        assert_eq!(bundle.artifacts[2].path(), "tests/test_core.py");
     }
 
     #[test]
-    fn test_extract_all_code_blocks_single_file() {
+    fn test_typed_parse_pipeline_single_file() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"File: main.py
 ```python
 print("hello")
 ```"#;
-        let blocks = orch.extract_all_code_blocks_from_response(content);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].0, "main.py");
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok());
+        let bundle = bundle_opt.unwrap();
+        assert_eq!(bundle.artifacts.len(), 1);
+        assert_eq!(bundle.artifacts[0].path(), "main.py");
     }
 
     #[test]
-    fn test_extract_all_code_blocks_mixed_file_and_diff() {
+    fn test_typed_parse_pipeline_mixed_file_and_diff() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"File: new_module.py
 ```python
@@ -3895,16 +3799,24 @@ Diff: existing.py
 +import new_module
  def old_fn():
 ```"#;
-        let blocks = orch.extract_all_code_blocks_from_response(content);
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].0, "new_module.py");
-        assert!(!blocks[0].2, "new_module.py should be a write");
-        assert_eq!(blocks[1].0, "existing.py");
-        assert!(blocks[1].2, "existing.py should be a diff");
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok());
+        let bundle = bundle_opt.unwrap();
+        assert_eq!(bundle.artifacts.len(), 2);
+        assert_eq!(bundle.artifacts[0].path(), "new_module.py");
+        assert!(
+            bundle.artifacts[0].is_write(),
+            "new_module.py should be a write"
+        );
+        assert_eq!(bundle.artifacts[1].path(), "existing.py");
+        assert!(
+            bundle.artifacts[1].is_diff(),
+            "existing.py should be a diff"
+        );
     }
 
     #[test]
-    fn test_parse_artifact_bundle_legacy_multi_file() {
+    fn test_typed_parse_pipeline_legacy_multi_file() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"File: core.py
 ```python
@@ -3917,9 +3829,9 @@ File: utils.py
 def util():
     pass
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
-        assert!(bundle.is_some(), "Should parse multi-file legacy response");
-        let bundle = bundle.unwrap();
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok(), "Should parse multi-file response");
+        let bundle = bundle_opt.unwrap();
         assert_eq!(bundle.artifacts.len(), 2, "Should have 2 artifacts");
         assert_eq!(bundle.artifacts[0].path(), "core.py");
         assert_eq!(bundle.artifacts[1].path(), "utils.py");
@@ -3930,7 +3842,7 @@ def util():
     // =========================================================================
 
     #[test]
-    fn test_parse_artifact_bundle_structured_json() {
+    fn test_typed_parse_pipeline_structured_json() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"Here is the output:
 ```json
@@ -3942,9 +3854,9 @@ def util():
   "commands": ["uv add requests"]
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
-        assert!(bundle.is_some(), "Should parse structured JSON bundle");
-        let bundle = bundle.unwrap();
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok(), "Should parse structured JSON bundle");
+        let bundle = bundle_opt.unwrap();
         assert_eq!(bundle.artifacts.len(), 2);
         assert!(bundle.artifacts[0].is_write());
         assert_eq!(bundle.artifacts[0].path(), "src/main.py");
@@ -3954,11 +3866,8 @@ def util():
     }
 
     #[test]
-    fn test_parse_artifact_bundle_json_with_empty_path_falls_through() {
+    fn test_typed_parse_pipeline_json_empty_path_rejected() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
-        // JSON bundle with empty path fails validation → falls through to legacy.
-        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
-        // to avoid the LLM's action manifests being written as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -3967,19 +3876,21 @@ def util():
   "commands": []
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
         assert!(
-            bundle.is_none(),
-            "Invalid bundle with artifacts key should be skipped"
+            bundle_opt.is_none(),
+            "Invalid bundle with empty path should be rejected"
+        );
+        assert!(
+            !state.is_ok(),
+            "Parse state should not be Ok for invalid bundle: {}",
+            state
         );
     }
 
     #[test]
-    fn test_parse_artifact_bundle_json_absolute_path_falls_through() {
+    fn test_typed_parse_pipeline_json_absolute_path_rejected() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
-        // Absolute-path JSON bundle fails validation → falls through to legacy.
-        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
-        // to avoid writing raw JSON as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -3988,18 +3899,32 @@ def util():
   "commands": []
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
         assert!(
-            bundle.is_none(),
-            "Invalid bundle with artifacts key should be skipped"
+            bundle_opt.is_none(),
+            "Invalid bundle with absolute path should be rejected"
+        );
+        assert!(
+            !state.is_ok(),
+            "Parse state should not be Ok for path traversal: {}",
+            state
         );
     }
 
     #[test]
-    fn test_parse_artifact_bundle_returns_none_for_garbage() {
+    fn test_typed_parse_pipeline_returns_no_payload_for_garbage() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = "This is just a plain text response with no code blocks at all.";
-        assert!(orch.parse_artifact_bundle(content).is_none());
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(bundle_opt.is_none());
+        assert!(
+            matches!(
+                state,
+                perspt_core::types::ParseResultState::NoStructuredPayload
+            ),
+            "Expected NoStructuredPayload, got {}",
+            state
+        );
     }
 
     #[tokio::test]
@@ -4168,11 +4093,8 @@ def util():
     }
 
     #[test]
-    fn test_parse_artifact_bundle_json_path_traversal_falls_through() {
+    fn test_typed_parse_pipeline_json_path_traversal_rejected() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
-        // Path-traversal JSON bundle fails validation → falls through to legacy.
-        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
-        // to avoid writing raw JSON as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -4181,10 +4103,15 @@ def util():
   "commands": []
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
         assert!(
-            bundle.is_none(),
-            "Invalid bundle with artifacts key should be skipped"
+            bundle_opt.is_none(),
+            "Invalid bundle with path traversal should be rejected"
+        );
+        assert!(
+            !state.is_ok(),
+            "Parse state should not be Ok for path traversal: {}",
+            state
         );
     }
 
