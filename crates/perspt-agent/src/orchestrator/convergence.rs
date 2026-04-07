@@ -152,6 +152,30 @@ impl SRBNOrchestrator {
                 record.accepted,
                 record.rejection_reason
             );
+
+            // PSP-7: Persist correction attempt to store
+            let row = perspt_store::CorrectionAttemptRow {
+                session_id: self.context.session_id.clone(),
+                node_id: node_id.clone(),
+                attempt: record.attempt as i32,
+                parse_state: format!("{}", record.parse_state),
+                retry_classification: record
+                    .retry_classification
+                    .as_ref()
+                    .map(|c| format!("{}", c)),
+                response_fingerprint: record.response_fingerprint.clone(),
+                response_length: record.response_length as i32,
+                energy_json: record
+                    .energy_after
+                    .as_ref()
+                    .and_then(|e| serde_json::to_string(e).ok()),
+                accepted: record.accepted,
+                rejection_reason: record.rejection_reason.clone(),
+                created_at: record.created_at,
+            };
+            if let Err(e) = self.ledger.record_correction_attempt(&row) {
+                log::warn!("Failed to persist correction attempt: {}", e);
+            }
         }
 
         match parse_state {
