@@ -299,6 +299,178 @@ fn extract_embedded_json(input: &str) -> Option<String> {
     Some(body.to_string())
 }
 
+// =============================================================================
+// PSP-7: Tolerant File-Marker Recovery
+// =============================================================================
+
+/// A single file marker extracted from an LLM response.
+///
+/// Represents a `File: path` or `### File: path` heading followed by content,
+/// optionally within a fenced code block. The parser never invents filenames —
+/// unnamed code blocks produce a `None` path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMarker {
+    /// The file path extracted from the heading (None for unnamed code blocks).
+    pub path: Option<String>,
+    /// The content associated with this marker.
+    pub content: String,
+    /// Whether this marker was preceded by a `Diff:` heading (patch format).
+    pub is_diff: bool,
+}
+
+/// Extract file markers from a raw LLM response.
+///
+/// Recognizes these heading patterns:
+/// - `### File: path/to/file.rs`
+/// - `## File: path/to/file.rs`
+/// - `File: path/to/file.rs`
+/// - `### Diff: path/to/file.rs`
+/// - `Diff: path/to/file.rs`
+///
+/// Content between headings (or between a heading and the next heading / end of
+/// input) is captured. Fenced code blocks (```` ``` ````) within a section are
+/// unwrapped. Unnamed code blocks (no heading before them) get `path: None`.
+///
+/// This is the tolerant recovery layer (PSP-7 Layer D) that replaces the legacy
+/// language-tag-to-filename guessing in `extract_all_code_blocks_from_response`.
+pub fn extract_file_markers(raw: &str) -> Vec<FileMarker> {
+    use crate::path::normalize_artifact_path;
+
+    let mut markers = Vec::new();
+    let mut current_path: Option<String> = None;
+    let mut current_is_diff = false;
+    let mut current_content = String::new();
+    let mut in_fence = false;
+    let mut fence_content = String::new();
+    let mut had_heading = false;
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+
+        // Check for file/diff heading
+        if let Some(heading) = parse_file_heading(trimmed) {
+            // Flush previous section
+            if had_heading || !current_content.trim().is_empty() {
+                flush_marker(
+                    &mut markers,
+                    &current_path,
+                    &current_content,
+                    current_is_diff,
+                );
+            }
+
+            let (path_raw, is_diff) = heading;
+            current_path = normalize_artifact_path(&path_raw)
+                .ok()
+                .or(Some(path_raw));
+            current_is_diff = is_diff;
+            current_content.clear();
+            had_heading = true;
+            continue;
+        }
+
+        // Track fenced code blocks
+        if trimmed.starts_with("```") {
+            if in_fence {
+                // Closing fence — add fence content
+                in_fence = false;
+                if !fence_content.trim().is_empty() {
+                    if !current_content.is_empty() {
+                        current_content.push('\n');
+                    }
+                    current_content.push_str(fence_content.trim());
+                }
+                fence_content.clear();
+            } else {
+                // Opening fence
+                in_fence = true;
+                fence_content.clear();
+            }
+            continue;
+        }
+
+        if in_fence {
+            if !fence_content.is_empty() {
+                fence_content.push('\n');
+            }
+            fence_content.push_str(line);
+        } else if had_heading {
+            // Non-fence content under a heading
+            if !current_content.is_empty() {
+                current_content.push('\n');
+            }
+            current_content.push_str(line);
+        }
+    }
+
+    // Handle unclosed fence
+    if in_fence && !fence_content.trim().is_empty() {
+        if !current_content.is_empty() {
+            current_content.push('\n');
+        }
+        current_content.push_str(fence_content.trim());
+    }
+
+    // Flush final section
+    if had_heading || !current_content.trim().is_empty() {
+        flush_marker(
+            &mut markers,
+            &current_path,
+            &current_content,
+            current_is_diff,
+        );
+    }
+
+    markers
+}
+
+/// Parse a line as a file/diff heading, returning `(path, is_diff)`.
+fn parse_file_heading(line: &str) -> Option<(String, bool)> {
+    // Strip leading markdown heading markers
+    let stripped = line
+        .trim_start_matches('#')
+        .trim();
+
+    // Check for "File:" or "Diff:" prefix
+    let (rest, is_diff) = if let Some(rest) = stripped.strip_prefix("File:") {
+        (rest, false)
+    } else if let Some(rest) = stripped.strip_prefix("Diff:") {
+        (rest, true)
+    } else {
+        return None;
+    };
+
+    let path = rest
+        .trim()
+        .trim_matches('`')
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string();
+
+    if path.is_empty() {
+        return None;
+    }
+
+    Some((path, is_diff))
+}
+
+fn flush_marker(
+    markers: &mut Vec<FileMarker>,
+    path: &Option<String>,
+    content: &str,
+    is_diff: bool,
+) {
+    let trimmed = content.trim();
+    if trimmed.is_empty() && path.is_none() {
+        return;
+    }
+    markers.push(FileMarker {
+        path: path.clone(),
+        content: trimmed.to_string(),
+        is_diff,
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,5 +666,110 @@ Let me know if you'd like any changes.
         assert_eq!(plan.steps.len(), 2);
         assert_eq!(plan.steps[0].action, "lint");
         assert_eq!(plan.steps[1].action, "test");
+    }
+
+    // -- extract_file_markers ------------------------------------------------
+
+    #[test]
+    fn test_file_markers_basic() {
+        let raw = "\
+### File: src/main.rs
+```rust
+fn main() {}
+```
+### File: src/lib.rs
+```rust
+pub fn hello() {}
+```
+";
+        let markers = extract_file_markers(raw);
+        assert_eq!(markers.len(), 2);
+        assert_eq!(markers[0].path.as_deref(), Some("src/main.rs"));
+        assert_eq!(markers[0].content, "fn main() {}");
+        assert!(!markers[0].is_diff);
+        assert_eq!(markers[1].path.as_deref(), Some("src/lib.rs"));
+        assert_eq!(markers[1].content, "pub fn hello() {}");
+    }
+
+    #[test]
+    fn test_file_markers_with_diff() {
+        let raw = "\
+### Diff: src/lib.rs
+```diff
+- old line
++ new line
+```
+";
+        let markers = extract_file_markers(raw);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].path.as_deref(), Some("src/lib.rs"));
+        assert!(markers[0].is_diff);
+        assert!(markers[0].content.contains("- old line"));
+    }
+
+    #[test]
+    fn test_file_markers_no_heading_prefix() {
+        let raw = "\
+File: src/main.rs
+```
+fn main() {}
+```
+";
+        let markers = extract_file_markers(raw);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].path.as_deref(), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn test_file_markers_backtick_wrapped_path() {
+        let raw = "\
+### File: `src/main.rs`
+```rust
+fn main() {}
+```
+";
+        let markers = extract_file_markers(raw);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].path.as_deref(), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn test_file_markers_empty_input() {
+        let markers = extract_file_markers("");
+        assert!(markers.is_empty());
+    }
+
+    #[test]
+    fn test_file_markers_no_headings_returns_empty() {
+        let raw = "Just some text with no file markers.";
+        let markers = extract_file_markers(raw);
+        assert!(markers.is_empty());
+    }
+
+    #[test]
+    fn test_file_markers_multiple_heading_levels() {
+        let raw = "\
+## File: src/a.rs
+content a
+### File: src/b.rs
+content b
+";
+        let markers = extract_file_markers(raw);
+        assert_eq!(markers.len(), 2);
+        assert_eq!(markers[0].path.as_deref(), Some("src/a.rs"));
+        assert_eq!(markers[1].path.as_deref(), Some("src/b.rs"));
+    }
+
+    #[test]
+    fn test_file_markers_path_normalization() {
+        let raw = "\
+### File: ./src/../src/main.rs
+```
+fn main() {}
+```
+";
+        let markers = extract_file_markers(raw);
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].path.as_deref(), Some("src/main.rs"));
     }
 }
