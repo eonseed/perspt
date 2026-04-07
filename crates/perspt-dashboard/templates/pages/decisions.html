@@ -168,4 +168,31 @@
     {% endif %}
     </div>
 </details>
+
+{# ── Correction Attempts ── #}
+<details class="collapse collapse-arrow bg-base-200 mb-4">
+    <summary class="collapse-title text-lg font-medium">Correction Attempts ({{ correction_attempts.len() }})</summary>
+    <div class="collapse-content">
+    {% if correction_attempts.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto">
+        <table class="table table-xs">
+            <thead><tr><th>Node</th><th>Attempt</th><th>Parse State</th><th>Accepted</th><th>Rejection Reason</th></tr></thead>
+            <tbody>
+            {% for c in correction_attempts %}
+            <tr>
+                <td class="font-mono text-xs">{{ c.node_id }}</td>
+                <td>{{ c.attempt }}</td>
+                <td>{{ c.parse_state }}</td>
+                <td>{% if c.accepted %}<span class="text-success">✓</span>{% else %}<span class="text-error">✗</span>{% endif %}</td>
+                <td class="max-w-xs truncate text-xs">{{ c.rejection_reason }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
 {% endblock %}

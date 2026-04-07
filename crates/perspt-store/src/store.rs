@@ -2037,6 +2037,42 @@ impl SessionStore {
         }
         Ok(results)
     }
+
+    /// Retrieve all correction attempts for a session, ordered by node then attempt.
+    pub fn get_session_correction_attempts(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<CorrectionAttemptRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"SELECT session_id, node_id, attempt, parse_state, retry_classification,
+                      response_fingerprint, response_length, energy_json,
+                      accepted, rejection_reason, created_at
+               FROM correction_attempts
+               WHERE session_id = ?
+               ORDER BY node_id ASC, attempt ASC"#,
+        )?;
+        let rows = stmt.query_map(duckdb::params![session_id], |row| {
+            Ok(CorrectionAttemptRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                attempt: row.get(2)?,
+                parse_state: row.get(3)?,
+                retry_classification: row.get(4)?,
+                response_fingerprint: row.get(5)?,
+                response_length: row.get(6)?,
+                energy_json: row.get(7)?,
+                accepted: row.get(8)?,
+                rejection_reason: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
