@@ -732,7 +732,15 @@ impl SRBNOrchestrator {
         }
 
         // 2. Fallback to LLM for complex tasks
-        let prompt = crate::prompts::PROJECT_NAME_SUGGEST.replace("{task}", task);
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some(task.to_string()),
+            ..Default::default()
+        };
+        let prompt = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::ProjectNameSuggest,
+            &ev,
+        )
+        .text;
 
         match self
             .call_llm_with_logging(&self.actuator_model.clone(), &prompt, None)

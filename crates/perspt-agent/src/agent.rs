@@ -7,6 +7,7 @@ use crate::types::{AgentContext, AgentMessage, ModelTier, SRBNNode};
 use anyhow::Result;
 use async_trait::async_trait;
 use perspt_core::llm_provider::GenAIProvider;
+use perspt_core::types::{PromptEvidence, PromptIntent};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -52,15 +53,14 @@ impl ArchitectAgent {
             "Context Files: {:?}\nOutput Targets: {:?}",
             node.context_files, node.output_targets
         );
-        crate::prompts::render_architect(
-            crate::prompts::ARCHITECT_EXISTING,
-            &node.goal,
-            &ctx.working_dir,
-            &project_context,
-            "",
-            "",
-            &ctx.active_plugins,
-        )
+        let ev = PromptEvidence {
+            user_goal: Some(node.goal.clone()),
+            project_summary: Some(project_context),
+            working_dir: Some(ctx.working_dir.display().to_string()),
+            active_plugins: ctx.active_plugins.clone(),
+            ..Default::default()
+        };
+        crate::prompt_compiler::compile(PromptIntent::ArchitectExisting, &ev).text
     }
 }
 
@@ -125,7 +125,7 @@ impl ActuatorAgent {
         let workspace_import_hints = Self::workspace_import_hints(&ctx.working_dir);
 
         // Determine target file from output_targets or generate default
-        let target_file = node
+        let _target_file = node
             .output_targets
             .first()
             .map(|p| p.to_string_lossy().to_string())
@@ -135,18 +135,27 @@ impl ActuatorAgent {
         let is_project_mode = ctx.execution_mode == perspt_core::types::ExecutionMode::Project;
         let has_multiple_outputs = node.output_targets.len() > 1;
 
-        crate::prompts::render_actuator(
-            &node.goal,
-            &contract.interface_signature,
-            &format!("{:?}", contract.invariants),
-            &format!("{:?}", contract.forbidden_patterns),
-            &format!("{:?}", ctx.working_dir),
-            &format!("{:?}", node.context_files),
-            &target_file,
-            &format!("{:?}", allowed_output_paths),
-            &format!("{:?}", workspace_import_hints),
-            is_project_mode || has_multiple_outputs,
-        )
+        let ev = PromptEvidence {
+            node_goal: Some(node.goal.clone()),
+            output_files: allowed_output_paths.clone(),
+            context_files: node
+                .context_files
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+            interface_signature: Some(contract.interface_signature.clone()),
+            invariants: Some(format!("{:?}", contract.invariants)),
+            forbidden_patterns: Some(format!("{:?}", contract.forbidden_patterns)),
+            working_dir: Some(format!("{:?}", ctx.working_dir)),
+            workspace_import_hints: Some(format!("{:?}", workspace_import_hints)),
+            ..Default::default()
+        };
+        let intent = if is_project_mode || has_multiple_outputs {
+            PromptIntent::ActuatorMultiOutput
+        } else {
+            PromptIntent::ActuatorSingleOutput
+        };
+        crate::prompt_compiler::compile(intent, &ev).text
     }
 
     fn workspace_import_hints(working_dir: &Path) -> Vec<String> {
@@ -355,13 +364,15 @@ impl VerifierAgent {
 
     pub fn build_verification_prompt(&self, node: &SRBNNode, implementation: &str) -> String {
         let contract = &node.contract;
-        crate::prompts::render_verifier(
-            &contract.interface_signature,
-            &format!("{:?}", contract.invariants),
-            &format!("{:?}", contract.forbidden_patterns),
-            &format!("{:?}", contract.weighted_tests),
-            implementation,
-        )
+        let ev = PromptEvidence {
+            interface_signature: Some(contract.interface_signature.clone()),
+            invariants: Some(format!("{:?}", contract.invariants)),
+            forbidden_patterns: Some(format!("{:?}", contract.forbidden_patterns)),
+            weighted_tests: Some(format!("{:?}", contract.weighted_tests)),
+            existing_file_contents: vec![(String::new(), implementation.to_string())],
+            ..Default::default()
+        };
+        crate::prompt_compiler::compile(PromptIntent::VerifierAnalysis, &ev).text
     }
 }
 
@@ -458,7 +469,11 @@ impl Agent for SpeculatorAgent {
     }
 
     fn build_prompt(&self, node: &SRBNNode, _ctx: &AgentContext) -> String {
-        crate::prompts::SPECULATOR_BASIC.replace("{goal}", &node.goal)
+        let ev = PromptEvidence {
+            node_goal: Some(node.goal.clone()),
+            ..Default::default()
+        };
+        crate::prompt_compiler::compile(PromptIntent::SpeculatorBasic, &ev).text
     }
 }
 

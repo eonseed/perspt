@@ -641,7 +641,11 @@ Commands: [optional, one per line]
     /// the corrected code artifact.
     async fn call_llm_for_correction(&mut self, prompt: &str) -> Result<String> {
         // Stage 1: Verifier analyzes the failure
-        let verifier_prompt = format!("{}{}", crate::prompts::VERIFIER_ANALYSIS_PREAMBLE, prompt);
+        let verifier_prompt = format!(
+            "{}{}",
+            crate::prompt_compiler::VERIFIER_ANALYSIS_PREAMBLE,
+            prompt
+        );
 
         log::debug!(
             "Stage 1: Sending analysis to verifier model: {}",

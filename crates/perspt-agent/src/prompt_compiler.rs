@@ -1,11 +1,20 @@
 //! PSP-7 §5: Typed prompt compiler.
 //!
 //! Maps `(PromptIntent, PromptEvidence) → CompiledPrompt` with full provenance
-//! tracking. Each prompt family delegates to the template constants in
-//! `crate::prompts` but wraps the result in a `CompiledPrompt` that records
-//! which intent, plugin fragments, and evidence sources contributed.
+//! tracking.  This module is the single entry-point for all prompt assembly;
+//! callers build a [`PromptEvidence`] and select a [`PromptIntent`], and the
+//! compiler returns a [`CompiledPrompt`] with the final text and provenance.
 
 use perspt_core::types::{CompiledPrompt, PromptEvidence, PromptIntent, PromptProvenance};
+
+/// Verifier analysis preamble used in the two-stage correction flow.
+pub(crate) const VERIFIER_ANALYSIS_PREAMBLE: &str = "\
+You are a Verifier agent. Analyze the following correction request and produce \
+concise, structured guidance for the code fixer. Identify:\n\
+1. Root cause of each failure\n\
+2. Which specific functions/lines need changes\n\
+3. Constraints that must be preserved\n\
+Do NOT produce code — only analysis and guidance.\n\n";
 
 /// Compile a prompt from a typed intent and gathered evidence.
 ///
@@ -106,26 +115,18 @@ pub fn compile(intent: PromptIntent, evidence: &PromptEvidence) -> CompiledPromp
 fn compile_architect(template: &str, ev: &PromptEvidence) -> String {
     let task = ev.user_goal.as_deref().unwrap_or("");
     let project_context = ev.project_summary.as_deref().unwrap_or("");
-    let error_feedback = ev.verifier_diagnostics.as_deref().unwrap_or("");
+    let error_feedback = ev.error_feedback.as_deref().unwrap_or("");
+    let evidence_section = ev.evidence_section.as_deref().unwrap_or("");
+    let working_dir = ev.working_dir.as_deref().unwrap_or(".");
 
-    // Evidence section is empty for greenfield, populated for existing.
-    let evidence_section = ev
-        .existing_file_contents
-        .iter()
-        .map(|(path, _)| path.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let active_plugins: Vec<String> = ev.legal_support_files.clone();
-
-    crate::prompts::render_architect(
+    render_architect(
         template,
         task,
-        std::path::Path::new(ev.context_files.first().map(|s| s.as_str()).unwrap_or(".")),
+        std::path::Path::new(working_dir),
         project_context,
         error_feedback,
-        &evidence_section,
-        &active_plugins,
+        evidence_section,
+        &ev.active_plugins,
     )
 }
 
@@ -138,17 +139,22 @@ fn compile_actuator(ev: &PromptEvidence, is_multi: bool) -> String {
         .unwrap_or("main.py");
     let allowed_output_paths = format!("{:?}", ev.output_files);
     let context_files = format!("{:?}", ev.context_files);
+    let interface = ev.interface_signature.as_deref().unwrap_or("");
+    let invariants = ev.invariants.as_deref().unwrap_or("");
+    let forbidden = ev.forbidden_patterns.as_deref().unwrap_or("");
+    let working_dir = ev.working_dir.as_deref().unwrap_or(".");
+    let hints = ev.workspace_import_hints.as_deref().unwrap_or("");
 
-    crate::prompts::render_actuator(
+    render_actuator(
         goal,
-        "",  // interface — caller should set via contract
-        "",  // invariants
-        "",  // forbidden
-        ".", // working_dir
+        interface,
+        invariants,
+        forbidden,
+        working_dir,
         &context_files,
         target_file,
         &allowed_output_paths,
-        "", // workspace_import_hints
+        hints,
         is_multi,
     )
 }
@@ -159,8 +165,18 @@ fn compile_verifier(ev: &PromptEvidence) -> String {
         .first()
         .map(|(_, content)| content.as_str())
         .unwrap_or("");
+    let interface = ev.interface_signature.as_deref().unwrap_or("");
+    let invariants = ev.invariants.as_deref().unwrap_or("");
+    let forbidden = ev.forbidden_patterns.as_deref().unwrap_or("");
+    let weighted_tests = ev.weighted_tests.as_deref().unwrap_or("");
 
-    crate::prompts::render_verifier("", "", "", "", implementation)
+    render_verifier(
+        interface,
+        invariants,
+        forbidden,
+        weighted_tests,
+        implementation,
+    )
 }
 
 fn compile_correction(ev: &PromptEvidence) -> String {
@@ -219,7 +235,7 @@ fn compile_bundle_retarget(ev: &PromptEvidence) -> String {
     let dropped = ev.rejected_bundle_summary.as_deref().unwrap_or("(unknown)");
     let original_prompt = ev.node_goal.as_deref().unwrap_or("");
 
-    crate::prompts::render_bundle_retarget(&expected, dropped, original_prompt)
+    render_bundle_retarget(&expected, dropped, original_prompt)
 }
 
 fn compile_speculator_lookahead(ev: &PromptEvidence) -> String {
@@ -236,7 +252,7 @@ fn compile_speculator_lookahead(ev: &PromptEvidence) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    crate::prompts::render_speculator_lookahead(node_id, goal, &downstream)
+    render_speculator_lookahead(node_id, goal, &downstream)
 }
 
 fn compile_solo_correction(ev: &PromptEvidence) -> String {
@@ -252,7 +268,7 @@ fn compile_solo_correction(ev: &PromptEvidence) -> String {
         .as_deref()
         .unwrap_or("No specific errors captured, but energy is still too high.");
 
-    crate::prompts::render_solo_correction(
+    render_solo_correction(
         task,
         filename,
         current_code,
@@ -261,6 +277,133 @@ fn compile_solo_correction(ev: &PromptEvidence) -> String {
         "0.00", // v_boot
         error_list,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Render helpers (moved from prompts.rs — private to the compiler)
+// ---------------------------------------------------------------------------
+
+/// JSON brace escapes for templates that contain `{OPEN_BRACE}` / `{CLOSE_BRACE}`.
+const OPEN_BRACE: &str = "{";
+const CLOSE_BRACE: &str = "}";
+
+fn render_architect(
+    template: &str,
+    task: &str,
+    working_dir: &std::path::Path,
+    project_context: &str,
+    error_feedback: &str,
+    evidence_section: &str,
+    active_plugins: &[String],
+) -> String {
+    let plugin_section = if active_plugins.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n## Detected Toolchain\nActive language plugins: {}\nPlan verification-aware nodes that align with these plugins' build/test capabilities.\n",
+            active_plugins.join(", ")
+        )
+    };
+    let enriched_context = if plugin_section.is_empty() {
+        project_context.to_string()
+    } else {
+        format!("{}{}", project_context, plugin_section)
+    };
+    template
+        .replace("{task}", task)
+        .replace("{working_dir}", &working_dir.display().to_string())
+        .replace("{project_context}", &enriched_context)
+        .replace("{error_feedback}", error_feedback)
+        .replace("{evidence_section}", evidence_section)
+        .replace("{OPEN_BRACE}", OPEN_BRACE)
+        .replace("{CLOSE_BRACE}", CLOSE_BRACE)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_actuator(
+    goal: &str,
+    interface: &str,
+    invariants: &str,
+    forbidden: &str,
+    working_dir: &str,
+    context_files: &str,
+    target_file: &str,
+    allowed_output_paths: &str,
+    workspace_import_hints: &str,
+    is_multi_output: bool,
+) -> String {
+    let output_format = if is_multi_output {
+        crate::prompts::ACTUATOR_MULTI_OUTPUT
+            .replace("{target_file}", target_file)
+            .replace("{OPEN_BRACE}", OPEN_BRACE)
+            .replace("{CLOSE_BRACE}", CLOSE_BRACE)
+    } else {
+        crate::prompts::ACTUATOR_SINGLE_OUTPUT.replace("{target_file}", target_file)
+    };
+
+    crate::prompts::ACTUATOR_CODING
+        .replace("{goal}", goal)
+        .replace("{interface}", interface)
+        .replace("{invariants}", invariants)
+        .replace("{forbidden}", forbidden)
+        .replace("{working_dir}", working_dir)
+        .replace("{context_files}", context_files)
+        .replace("{target_file}", target_file)
+        .replace("{allowed_output_paths}", allowed_output_paths)
+        .replace("{workspace_import_hints}", workspace_import_hints)
+        .replace("{output_format}", &output_format)
+}
+
+fn render_verifier(
+    interface: &str,
+    invariants: &str,
+    forbidden: &str,
+    weighted_tests: &str,
+    implementation: &str,
+) -> String {
+    crate::prompts::VERIFIER_CHECK
+        .replace("{interface}", interface)
+        .replace("{invariants}", invariants)
+        .replace("{forbidden}", forbidden)
+        .replace("{weighted_tests}", weighted_tests)
+        .replace("{implementation}", implementation)
+}
+
+fn render_speculator_lookahead(node_id: &str, goal: &str, downstream: &str) -> String {
+    crate::prompts::SPECULATOR_LOOKAHEAD
+        .replace("{node_id}", node_id)
+        .replace("{goal}", goal)
+        .replace("{downstream}", downstream)
+}
+
+fn render_solo_correction(
+    task: &str,
+    filename: &str,
+    current_code: &str,
+    v_syn: &str,
+    v_log: &str,
+    v_boot: &str,
+    error_list: &str,
+) -> String {
+    crate::prompts::SOLO_CORRECTION
+        .replace("{task}", task)
+        .replace("{filename}", filename)
+        .replace("{current_code}", current_code)
+        .replace("{v_syn}", v_syn)
+        .replace("{v_log}", v_log)
+        .replace("{v_boot}", v_boot)
+        .replace("{error_list}", error_list)
+}
+
+fn render_bundle_retarget(
+    expected_files: &str,
+    dropped_files: &str,
+    original_prompt: &str,
+) -> String {
+    crate::prompts::BUNDLE_RETARGET
+        .replace("{expected_files}", expected_files)
+        .replace("{dropped_files}", dropped_files)
+        .replace("{original_prompt}", original_prompt)
 }
 
 fn epoch_seconds() -> i64 {
@@ -356,7 +499,8 @@ mod tests {
         let ev = PromptEvidence {
             user_goal: Some("Add logging module".into()),
             project_summary: Some("Rust workspace with 3 crates".into()),
-            context_files: vec!["/tmp/project".into()],
+            working_dir: Some("/tmp/project".into()),
+            active_plugins: vec!["rust".into()],
             ..Default::default()
         };
         let compiled = compile(PromptIntent::ArchitectExisting, &ev);
