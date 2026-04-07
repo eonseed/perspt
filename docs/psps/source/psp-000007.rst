@@ -18,7 +18,8 @@ It extends :psp:`000005` by:
 * extending the ``LanguagePlugin`` trait with correction-contract semantics,
 * replacing ad hoc correction-prompt assembly with a Perspt-owned prompt compiler that synthesizes prompts from typed runtime evidence,
 * covering both actuator-generation and verifier-guided-correction prompt families,
-* and persisting correction-attempt provenance so that every retry and escalation is machine-attributable.
+* persisting correction-attempt provenance so that every retry and escalation is machine-attributable,
+* and requiring coordinated updates to Perspt's user, reference, and architecture documentation so the published runtime contract matches the implemented one.
 
 ==========
 Motivation
@@ -281,6 +282,28 @@ This classification SHALL be persisted and used by retry prompts, escalation rep
 * ``perspt-dashboard`` -- correction-attempt history, parse provenance, rejected bundles
 * ``perspt-cli`` -- correction-attempt inspection in ``perspt status`` and ``perspt logs``
 
+.. rubric:: 10. Documentation Surface Updates
+
+The implementation SHALL update Perspt's published documentation in the same release as the runtime changes. PSP 7 is not complete if the code changes land while the public docs still describe the pre-PSP-7 behavior.
+
+At minimum, the following documentation surfaces SHALL be revised:
+
+* ``README.md`` -- update the high-level SRBN loop, correction behavior, and CLI summaries so the project overview no longer describes heuristic retry behavior or stale energy timing.
+* ``docs/perspt_book/source/concepts/srbn-architecture.rst`` -- update the architecture narrative and diagrams to reflect the typed correction barrier, plugin-owned correction contracts, prompt compiler, :math:`V_{boot}` activation in project mode, and the lightweight sheaf pre-check that now surfaces before full sheaf validation.
+* ``docs/perspt_book/source/user-guide/agent-mode.rst`` -- update the user-facing execution flow to describe fail-closed bundle parsing, correction-failure classes, budget-bounded schema retries, and how support-file expansion or replan boundaries affect agent behavior.
+* ``docs/perspt_book/source/reference/cli-reference.rst`` -- update ``perspt status`` and ``perspt logs`` to document correction-attempt provenance, parse-result states, retry classifications, and budget-exhaustion reporting.
+* related PSP and book references that summarize PSP 5 behavior SHALL be amended where they would otherwise contradict PSP 7's runtime contract.
+
+These updates SHALL preserve the distinction between theory and implementation. Where the SRBN paper states the mathematical model and PSP 7 adds implementation-specific correction machinery, the documentation SHALL label that machinery as Perspt runtime behavior rather than paper-proven theory.
+
+The documentation update SHALL also make the user-visible behavior changes explicit:
+
+* correction now fails closed instead of guessing filenames,
+* malformed responses re-enter the bounded correction loop with schema feedback,
+* ``V_{boot}`` is an active project-mode verification signal rather than a dead component,
+* sheaf validation remains a commit-time check but obvious cross-reference failures are surfaced earlier via a pre-check,
+* and status/log views expose correction provenance rather than only raw request logs.
+
 =========
 Rationale
 =========
@@ -312,6 +335,7 @@ This release prioritizes correctness over compatibility. There is no backward-co
 * The current fragmented DuckDB persistence layout is not a migration target. This release introduces a new storage engine with the schema required by PSP 7.
 * Existing session databases are not expected to be forward-compatible. Users start fresh sessions on the new engine.
 * Documentation for prompt contracts, correction failure classes, storage records, and plugin policy SHALL be added as part of the implementation.
+* Documentation that still describes PSP-5-era retry behavior, passive ``V_{boot}``, or sheaf-only post-convergence detection SHALL be treated as incorrect until updated in the same release.
 
 ========================
 Reference Implementation
@@ -327,6 +351,7 @@ Reference Implementation
 6. **Budget enforcement** -- add budget-ceiling check to ``step_converge`` recursive loop.
 7. **V_boot activation** -- compute :math:`V_{boot}` from degraded-verification and missing-dependency signals that persist after ``step_verify``'s auto-dependency repair pass; remove folding into :math:`V_{syn}`; preserve solo-mode ``run_script_check`` computation.
 8. **Plan validation** -- extend ``TaskPlan::validate()`` with test-dependency inference, cycle detection, and implicit-dependency enforcement. Add sheaf pre-check before ``step_sheaf_validate``.
+9. **Documentation alignment** -- update ``README.md``, the Perspt Book architecture and agent-mode chapters, and the CLI reference so the published explanation of SRBN, correction retries, and observability matches PSP 7.
 
 **Testing strategy:**
 
@@ -339,6 +364,7 @@ Reference Implementation
 * V_boot unit tests: degraded profile --> non-zero V_boot, missing-crate --> non-zero V_boot
 * malformed-response correction tests: schema-retry within budget, escalation on budget exhaustion
 * sheaf pre-check tests: fast pre-filter catches obvious cross-reference failures
+* documentation validation: build the Perspt Book and confirm README / CLI wording matches the new correction states and observability surface
 
 ================================
 Requirement-To-Code Trace Matrix
@@ -359,6 +385,7 @@ The following matrix maps each PSP requirement to the current implementation sur
    "7", "Enforce budget before each correction LLM call", "``step_converge()`` checks retry exhaustion but not session budget before ``call_llm_for_correction()``", "Missing", "Add pre-call budget gate and escalate with ``BudgetExhausted`` when ceiling is exceeded"
    "8", "Classify correction failures and route malformed responses through the same bounded correction loop", "Correction loop has retry recursion and bundle parsing, but no typed failure classification or malformed-response state model", "Partial", "Add typed failure classification, unify malformed retries with normal correction policy, and persist the classification"
    "9", "Plan validation and sheaf-aware pre-check before commit", "``TaskPlan::validate()`` checks duplicates and unknown deps only; no cycle detection, test-dependency enforcement, or pre-commit sheaf pre-check exists", "Missing", "Extend plan validation and add lightweight sheaf pre-check before full sheaf validation"
+   "10", "Update README and Perspt Book / CLI docs to match the PSP 7 runtime contract", "README and book chapters describe the SRBN loop, bundle protocol, energy components, and CLI observability, but they do not yet encode PSP 7's fail-closed correction barrier or provenance surface", "Missing", "Revise the affected documentation pages in the same release so user-visible behavior and architecture docs stay aligned with the implementation"
 
 ============
 Open Issues
