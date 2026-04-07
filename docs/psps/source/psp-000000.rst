@@ -224,11 +224,6 @@ UI/UX PSPs modify the user interface or user experience.
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
      - Vikrant Rathore
      - Draft
-   * - :psp:`000007`
-     - Enhancement
-     - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
-     - Vikrant Rathore
-     - Draft
 
 API Change PSPs
 ===============
@@ -259,6 +254,11 @@ Draft PSPs (under development)
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
      - Vikrant Rathore
      - Draft
+   * - :psp:`000007`
+     - Enhancement
+     - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
+     - Vikrant Rathore
+     - Draft
 
 Discussion PSPs (under review)
 ===============================
@@ -286,16 +286,6 @@ Final PSPs (implemented and complete)
      - Title
      - Author(s)
      - Status
-   * - :psp:`000003`
-     - Feature
-     - :doc:`Simple CLI Mode for Direct Q&A <psp-000003>`
-     - Vikrant Rathore
-     - Active
-   * - :psp:`000005`
-     - Enhancement
-     - :doc:`SRBN Implementation Continuation: Multi-File Coding UX and Repo-Native Verification <psp-000005>`
-     - Vikrant Rathore
-     - Active
    * - :psp:`000006`
      - Feature
      - :doc:`Real-Time Web Dashboard for Agent Monitoring <psp-000006>`

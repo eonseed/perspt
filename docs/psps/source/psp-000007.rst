@@ -30,7 +30,7 @@ The current implementation has made substantial progress. Correction prompts in 
 
 However, the boundary between raw model text and the typed runtime has gaps that let the system violate its own convergence discipline:
 
-1. **Legacy filename guessing.** When structured JSON parsing fails, the correction path falls back to ``extract_all_code_blocks_from_response`` which assigns unnamed Rust blocks to ``main.rs``, unnamed TOML blocks to ``Cargo.toml``, Python blocks to ``main.py``, etc. This heuristic is used during correction, not just initial generation.
+1. **Legacy filename guessing.** When structured JSON parsing fails, the correction path falls back to ``extract_all_code_blocks_from_response`` which assigns unnamed Rust blocks to ``main.rs``, unnamed TOML blocks to ``Cargo.toml``, Python blocks to ``main.py``, etc. A second fallback in ``step_converge`` calls ``extract_code_from_response`` (returning only the first code block) when ``parse_artifact_bundle`` fails entirely. Both functions use language-tag-to-filename defaults. These heuristics are used during correction, not just initial generation.
 
 2. **Path wrappers bypass normalization.** ``normalize_artifact_path`` handles backslashes, ``./`` prefixes, ``../`` resolution, null bytes, and absolute paths -- but it does not strip backticks, quotes, or markdown formatting. Paths arriving as backtick-wrapped or quoted strings are treated as different from their canonical forms.
 
@@ -42,7 +42,7 @@ However, the boundary between raw model text and the typed runtime has gaps that
 
 6. **Correction-attempt provenance is incomplete.** ``RepairFootprint`` records affected files per attempt, but there is no persisted record of which parse method was used, whether tolerant recovery was needed, what semantic validation rejected, or which failure class drove the retry. The ``llm_requests`` table stores raw text but not parse outcomes.
 
-7. **V_boot is uncomputed; V_sheaf is computed at commit, not verify.** ``step_verify`` computes :math:`V_{syn}`, :math:`V_{str}`, and :math:`V_{log}`. :math:`V_{boot}` is always 0.0. :math:`V_{sheaf}` is computed in ``step_commit``, which runs after convergence. The correction loop therefore never retries based on sheaf or bootstrap failures.
+7. **V_boot is uncomputed in project mode; V_sheaf is computed at sheaf-validation, not verify.** In multi-node project mode, ``step_verify`` computes :math:`V_{syn}`, :math:`V_{str}`, and :math:`V_{log}`. :math:`V_{boot}` is always 0.0 -- bootstrap and dependency failures are folded into :math:`V_{syn}`. (Solo mode separately computes :math:`V_{boot}` from ``run_script_check()`` in ``orchestrator/solo.rs``, but that verification path is orthogonal to the SRBN correction loop.) :math:`V_{sheaf}` is computed in ``step_sheaf_validate`` (Step 6 in ``commit.rs``), which runs after convergence but before the Merkle ledger commit (Step 7, ``step_commit``). The correction loop therefore never retries based on sheaf or bootstrap failures.
 
 8. **Budget is not enforced inside the correction loop.** ``budget_envelopes`` exist in the store, and ``call_llm_with_logging`` records costs, but the recursive ``step_converge`` loop does not check the budget ceiling between attempts.
 
@@ -142,7 +142,7 @@ These states SHALL be persisted per correction attempt.
 
 .. rubric:: 2. Removal of Legacy Guessing in Correction Mode
 
-``extract_all_code_blocks_from_response`` SHALL be removed from the correction path entirely. The language-tag-to-filename defaults (``rs`` to ``main.rs``, ``toml`` to ``Cargo.toml``, ``py`` to ``main.py``, etc.) are the root cause of the observed failures.
+``extract_all_code_blocks_from_response`` and its single-file sibling ``extract_code_from_response`` SHALL both be removed from the correction path entirely. The language-tag-to-filename defaults (``rs`` to ``main.rs``, ``toml`` to ``Cargo.toml``, ``py`` to ``main.py``, etc.) are the root cause of the observed failures. The secondary fallback in ``step_converge`` that calls ``extract_code_from_response`` when ``parse_artifact_bundle`` returns ``None`` SHALL also be replaced by the typed parse pipeline.
 
 All modes -- project, solo, and single-file -- SHALL use the new typed parse pipeline. The legacy guessing logic SHALL be deleted, not gated behind a compatibility flag.
 
@@ -158,6 +158,8 @@ All modes -- project, solo, and single-file -- SHALL use the new typed parse pip
 
 Plugins already participate in verification via ``verifier_profile()``. These methods make them participate in correction equally.
 
+None of these correction-contract methods exist in the current codebase. They are greenfield functionality for this release and SHALL be designed directly into the new runtime contract rather than introduced as compatibility shims.
+
 .. rubric:: 4. Prompt Compiler
 
 Perspt SHALL implement its own prompt compiler for SRBN agent behavior. This compiler is a Perspt runtime subsystem, not a general-purpose template engine.
@@ -166,12 +168,14 @@ Perspt SHALL implement its own prompt compiler for SRBN agent behavior. This com
 
 * architect planning (currently ``render_architect`` + ``ARCHITECT_EXISTING``/``ARCHITECT_GREENFIELD``)
 * actuator generation (currently ``render_actuator`` + ``ACTUATOR_CODING``/``ACTUATOR_MULTI_OUTPUT``/``ACTUATOR_SINGLE_OUTPUT``)
-* verifier analysis (currently ``VERIFIER_ANALYSIS_PREAMBLE`` + ``render_verifier``)
+* verifier analysis (currently ``VERIFIER_ANALYSIS_PREAMBLE`` + ``render_verifier`` + ``VERIFIER_CHECK``)
 * correction retry (currently ``build_correction_prompt`` in ``convergence.rs``)
 * stripped-bundle retarget (currently ``render_bundle_retarget``)
-* speculator lookahead (currently ``render_speculator_lookahead``)
+* speculator (currently ``render_speculator_lookahead`` + ``SPECULATOR_BASIC`` + ``SPECULATOR_LOOKAHEAD``)
+* solo-mode generation and correction (currently ``SOLO_GENERATE`` + ``SOLO_CORRECTION`` + ``render_solo_correction``)
+* project naming (currently ``PROJECT_NAME_SUGGEST``)
 
-The current ``render_*`` functions and ``pub const`` template strings in ``prompts.rs`` SHALL be replaced by a compiler that accepts typed inputs and emits compiled prompts with provenance metadata.
+The current 6 ``render_*`` functions and 13 ``pub const`` template strings in ``prompts.rs`` SHALL be replaced by a compiler that accepts typed inputs and emits compiled prompts with provenance metadata.
 
 **Typed inputs.** The compiler SHALL accept at minimum:
 
@@ -187,7 +191,7 @@ The current ``render_*`` functions and ``pub const`` template strings in ``promp
 * the compiled prompt text
 * prompt-provenance metadata (which evidence was included, which plugin fragments, which retry class, prompt byte length) suitable for logging and postmortem replay
 
-**Existing infrastructure to preserve.** The two-stage correction flow (verifier-tier analysis, then actuator-tier generation) SHALL be preserved and made explicit in the compiler's correction-retry family. The ``BUNDLE_RETARGET`` flow SHALL become a distinct compiler target rather than a standalone template.
+**Existing infrastructure to preserve.** The two-stage correction flow (verifier-tier analysis, then actuator-tier generation) SHALL be preserved and made explicit in the compiler's correction-retry family. The ``BUNDLE_RETARGET`` flow SHALL become a distinct compiler target rather than a standalone template. The ``call_llm_with_tier_fallback`` mechanism (PSP-5 Phase 1/4), which retries with a fallback model when structured-output contract validation fails, SHALL be preserved and integrated with the compiler's output validation.
 
 .. rubric:: 5. Verification Evidence Model
 
@@ -199,14 +203,16 @@ The SRBN energy model from PSP 000005 remains:
 
 This PSP does not redefine the equation. It addresses two current implementation gaps:
 
-* :math:`V_{boot}` is currently always 0.0. The implementation SHOULD compute :math:`V_{boot}` from bootstrap and dependency-tooling failures that ``step_verify`` already detects via plugin verification (missing crates, ``cargo fetch`` failures, missing Python modules). These failures are currently folded into :math:`V_{syn}`.
-* :math:`V_{sheaf}` is currently computed in ``step_commit``, not ``step_verify``. This means the correction loop cannot retry based on sheaf failures. The implementation SHOULD evaluate whether sheaf-related signals can be surfaced earlier, or whether sheaf failures should be a commit-time escalation reason distinct from correction-loop failures.
+* :math:`V_{boot}` is currently always 0.0 in project mode's ``step_verify``. (Solo mode computes :math:`V_{boot}` from ``run_script_check()``, but this signal is not available in the multi-node orchestrator.) The implementation SHALL compute :math:`V_{boot}` from bootstrap and dependency-tooling failures that ``step_verify`` already detects via plugin verification (missing crates, ``cargo fetch`` failures, missing Python modules). These failures are currently folded into :math:`V_{syn}`.
+* :math:`V_{sheaf}` is currently computed in ``step_sheaf_validate`` (Step 6 in ``commit.rs``), not ``step_verify``. This means the correction loop cannot retry based on sheaf failures. A lightweight sheaf pre-check SHALL be added before ``step_sheaf_validate`` so that obvious cross-reference failures can re-enter the correction loop rather than triggering a full sheaf-validate + escalate cycle (see D3).
 
 The correction prompt SHALL carry typed evidence for each non-zero energy component rather than embedding it as ad hoc prose.
 
 .. rubric:: 6. Correction Telemetry and Persistence
 
-The persistence layer SHALL extend the existing DuckDB schema to capture correction-attempt provenance. At minimum, each correction attempt SHALL record:
+This release does not preserve the current persistence model for compatibility. The storage engine SHALL be rebuilt around SRBN step records and correction provenance so that the runtime has one coherent execution timeline rather than a fragmented set of legacy tables.
+
+At minimum, each correction attempt SHALL record:
 
 * raw response hash and length (unconditionally)
 * raw prompt and response text (when ``--log-llm`` is enabled)
@@ -217,9 +223,7 @@ The persistence layer SHALL extend the existing DuckDB schema to capture correct
 * retry ordinal within the convergence loop
 * owning plugin and node metadata
 
-This extends the existing ``RepairFootprint`` (which records affected files per attempt) and the existing ``llm_requests`` table (which records raw bodies and telemetry). It does NOT replace ``--log-llm`` semantics; body logging remains an explicit debugging control.
-
-Where practical, rejected or stripped bundles SHOULD be persisted so users can inspect what was rejected and why.
+Rejected or stripped bundles SHALL be persisted as first-class records so users can inspect what was rejected, why it was rejected, and what retry or escalation followed.
 
 .. rubric:: 7. Budget Enforcement in Correction Loop
 
@@ -270,8 +274,9 @@ This classification SHALL be persisted and used by retry prompts, escalation rep
 .. rubric:: 9. Implementation Surface by Crate
 
 * ``perspt-core`` -- path normalization (backtick/quote stripping), plugin trait extensions (including ``test_file_patterns()``), parse-result types, prompt-compiler input/output types, failure classification enum, ``TaskPlan::validate()`` extensions (cycle detection, plugin-driven test-dependency inference, implicit-dependency enforcement)
-* ``perspt-agent`` -- prompt compiler implementation, parser pipeline (Layers A-E), retry classification, orchestrator wiring to replace legacy fallback, budget check integration, unified LLM call logging, :math:`V_{boot}` computation in ``step_verify``, sheaf pre-check before ``step_commit``, malformed-response schema-retry loop
-* ``perspt-store`` -- ``srbn_step_records`` table, correction-attempt records schema, rejected-bundle snapshots, parse-outcome columns
+* ``perspt-agent`` -- prompt compiler implementation, parser pipeline (Layers A-E), retry classification, orchestrator wiring to replace legacy fallback, budget check integration, unified LLM call logging, :math:`V_{boot}` computation in ``step_verify``, sheaf pre-check before ``step_sheaf_validate``, malformed-response schema-retry loop
+* ``perspt-store`` -- new storage-engine schema centered on ``srbn_step_records``, correction-attempt records, rejected-bundle snapshots, parse-outcome columns, and first-class step timelines
+* ``perspt-sandbox`` -- sandbox environment changes needed for V_boot activation (detecting degraded toolchains, missing dependency signals) and for correction parse-pipeline testing
 * ``perspt-tui`` -- correction failure class display, retry/escalation reason in node status
 * ``perspt-dashboard`` -- correction-attempt history, parse provenance, rejected bundles
 * ``perspt-cli`` -- correction-attempt inspection in ``perspt status`` and ``perspt logs``
@@ -295,18 +300,18 @@ Rationale
 3. *Keep legacy File/Diff parsing behind a compatibility flag.* Rejected: the legacy parser relies on filename guessing, which is the root failure mode. Gating it preserves the wrong default; delete it.
 4. *Let plugins parse independently with no shared contract.* Rejected: fragments behavior across languages and makes dashboard/persistence inconsistent.
 
-=======================
-Backwards Compatibility
-=======================
+=========================
+Compatibility And Storage
+=========================
 
 This release prioritizes correctness over compatibility. There is no backward-compatibility constraint.
 
-* The legacy guessing parser (``extract_all_code_blocks_from_response``) SHALL be removed, not gated.
+* The legacy guessing parsers (``extract_all_code_blocks_from_response`` and ``extract_code_from_response``) SHALL be removed, not gated.
 * Users WILL see correction failures where the runtime previously guessed a filename. This is the intended behavior: false convergence is worse than visible failure.
-* The existing ``--log-llm`` behavior, transactional bundle apply, two-stage correction flow, ``RepairFootprint``, degraded-verification handling, and ``review_outcomes`` remain unchanged because they are already correct.
-* New DuckDB schema changes are additive. Existing session databases that predate this release are not expected to be forward-compatible; users start fresh sessions.
-* The ``render_*`` functions and ``pub const`` prompt templates in ``prompts.rs`` SHALL be replaced wholesale by the prompt compiler. No deprecation shim.
-* Documentation for prompt contracts, correction failure classes, and plugin policy SHALL be added as part of the implementation.
+* The 6 ``render_*`` functions and 13 ``pub const`` prompt templates in ``prompts.rs`` SHALL be replaced wholesale by the prompt compiler. No deprecation shim.
+* The current fragmented DuckDB persistence layout is not a migration target. This release introduces a new storage engine with the schema required by PSP 7.
+* Existing session databases are not expected to be forward-compatible. Users start fresh sessions on the new engine.
+* Documentation for prompt contracts, correction failure classes, storage records, and plugin policy SHALL be added as part of the implementation.
 
 ========================
 Reference Implementation
@@ -315,13 +320,13 @@ Reference Implementation
 **Workstreams:**
 
 1. **Path normalization** -- add backtick/quote stripping to ``normalize_artifact_path``; extend ``normalize.rs`` to recognize ``### File:`` markers. *Smallest change with highest immediate impact on observed failures.*
-2. **Parser pipeline** -- implement Layers A-E; delete legacy guessing logic; add parse-result types.
-3. **Plugin contract** -- add ``legal_support_files``, ``manifest_mutation_policy``, ``dependency_command_policy``, ``correction_prompt_fragment``, ``test_file_patterns`` to ``LanguagePlugin``; implement for Rust, Python, JavaScript plugins.
-4. **Prompt compiler** -- replace ``prompts.rs`` constants and ``render_*`` functions with typed compiler; replace ``build_correction_prompt`` in ``convergence.rs``; preserve two-stage correction flow.
-5. **Persistence** -- add ``srbn_step_records`` table; add correction-attempt columns; persist parse outcomes and retry classifications per step.
+2. **Parser pipeline** -- implement Layers A-E; delete legacy guessing logic (``extract_all_code_blocks_from_response`` and ``extract_code_from_response``); remove secondary single-file fallback from ``step_converge``; add parse-result types.
+3. **Plugin contract** -- add ``legal_support_files``, ``manifest_mutation_policy``, ``dependency_command_policy``, ``correction_prompt_fragment``, ``test_file_patterns`` to ``LanguagePlugin``; implement these new correction-contract methods for Rust, Python, and JavaScript plugins.
+4. **Prompt compiler** -- replace ``prompts.rs`` constants and ``render_*`` functions with typed compiler; replace ``build_correction_prompt`` in ``convergence.rs``; preserve two-stage correction flow and ``call_llm_with_tier_fallback`` mechanism.
+5. **Storage engine** -- replace the current fragmented persistence layout with a new engine centered on ``srbn_step_records``; persist parse outcomes, retry classifications, rejected bundles, and per-step timelines as first-class records.
 6. **Budget enforcement** -- add budget-ceiling check to ``step_converge`` recursive loop.
-7. **V_boot activation** -- compute :math:`V_{boot}` from degraded-verification and missing-dependency signals; remove folding into :math:`V_{syn}`.
-8. **Plan validation** -- extend ``TaskPlan::validate()`` with test-dependency inference, cycle detection, and implicit-dependency enforcement. Add sheaf pre-check before ``step_commit``.
+7. **V_boot activation** -- compute :math:`V_{boot}` from degraded-verification and missing-dependency signals that persist after ``step_verify``'s auto-dependency repair pass; remove folding into :math:`V_{syn}`; preserve solo-mode ``run_script_check`` computation.
+8. **Plan validation** -- extend ``TaskPlan::validate()`` with test-dependency inference, cycle detection, and implicit-dependency enforcement. Add sheaf pre-check before ``step_sheaf_validate``.
 
 **Testing strategy:**
 
@@ -329,17 +334,37 @@ Reference Implementation
 * plugin-specific semantic validation tests per language
 * end-to-end correction-loop tests for Rust, Python, and JavaScript fixtures
 * property tests for path-wrapper stripping (backticks, quotes, mixed)
-* persistence round-trip tests for ``srbn_step_records`` and correction-attempt records
+* storage-engine round-trip tests for ``srbn_step_records``, correction-attempt records, rejected-bundle snapshots, and per-step timelines
 * plan validation tests: cycle detection, test-before-code rejection via plugin test patterns, implicit dependency enforcement
-* V_boot unit tests: degraded profile → non-zero V_boot, missing-crate → non-zero V_boot
+* V_boot unit tests: degraded profile --> non-zero V_boot, missing-crate --> non-zero V_boot
 * malformed-response correction tests: schema-retry within budget, escalation on budget exhaustion
 * sheaf pre-check tests: fast pre-filter catches obvious cross-reference failures
+
+================================
+Requirement-To-Code Trace Matrix
+================================
+
+The following matrix maps each PSP requirement to the current implementation surface and the required change. It is intentionally aligned with the Specification sections so implementation status can be audited directly against the PSP.
+
+.. csv-table:: PSP 7 Requirement Trace
+   :header: "Spec", "Requirement", "Current code", "Status", "Required change"
+   :widths: 8, 28, 28, 12, 24
+
+   "1", "Typed correction parse pipeline with strict parse, tolerant recovery, semantic validation, and persisted parse states", "``parse_artifact_bundle()`` in ``orchestrator/bundle.rs`` does JSON parse then falls back to legacy extraction; no typed parse-state model exists", "Missing", "Replace binary parse success/failure with typed parse states, remove legacy guessing fallback, and persist parse outcomes"
+   "2", "Remove legacy guessing parser from correction path entirely", "``extract_all_code_blocks_from_response()`` and ``extract_code_from_response()`` in ``orchestrator/mod.rs`` assign default filenames such as ``main.rs`` and ``Cargo.toml``; ``step_converge`` falls back to the single-file variant when bundle parsing fails", "Missing", "Delete both guessing-based fallbacks from all correction flows"
+   "3", "Plugin-owned correction contract and test-file detection", "``LanguagePlugin`` in ``perspt-core/src/plugin.rs`` has verification/runtime methods only; no correction or test-pattern methods exist", "Missing", "Add new plugin methods and implement them for first-party plugins as greenfield functionality"
+   "4", "Perspt-owned prompt compiler with typed inputs/outputs and provenance", "``prompts.rs`` has 13 ``pub const`` templates and 6 ``render_*`` functions; correction prompt built ad hoc in ``build_correction_prompt()``", "Missing", "Replace all prompt templates with typed compiler outputs and provenance metadata"
+   "5", "Activate :math:`V_{boot}` and carry typed energy evidence into correction", "``step_verify()`` computes :math:`V_{syn}`, :math:`V_{str}`, and :math:`V_{log}`; :math:`V_{boot}` remains 0.0 in project mode (solo mode computes it via ``run_script_check``)", "Partial", "Reclassify degraded-tooling and missing-dependency signals into :math:`V_{boot}` and emit distinct correction guidance; preserve solo-mode computation"
+   "6", "New storage engine with first-class correction telemetry and SRBN step records", "``perspt-store`` uses fragmented tables such as ``llm_requests``, ``energy_history``, ``sheaf_validations``, and ``repair_footprints``; no unified step timeline exists", "Missing", "Replace current persistence layout with a new engine centered on ``srbn_step_records`` and correction provenance"
+   "7", "Enforce budget before each correction LLM call", "``step_converge()`` checks retry exhaustion but not session budget before ``call_llm_for_correction()``", "Missing", "Add pre-call budget gate and escalate with ``BudgetExhausted`` when ceiling is exceeded"
+   "8", "Classify correction failures and route malformed responses through the same bounded correction loop", "Correction loop has retry recursion and bundle parsing, but no typed failure classification or malformed-response state model", "Partial", "Add typed failure classification, unify malformed retries with normal correction policy, and persist the classification"
+   "9", "Plan validation and sheaf-aware pre-check before commit", "``TaskPlan::validate()`` checks duplicates and unknown deps only; no cycle detection, test-dependency enforcement, or pre-commit sheaf pre-check exists", "Missing", "Extend plan validation and add lightweight sheaf pre-check before full sheaf validation"
 
 ============
 Open Issues
 ============
 
-* **Architect re-planning on structural failure.** The infrastructure for plan revision exists (``SubgraphReplan``, ``replan_subgraph()``, ``reset_for_replan()``, ``add_node()``, ``split_node()``, ``insert_interface_node()``), but no repair classification currently triggers ``SubgraphReplan``, the main execution loop is single-pass, and there is no mechanism to re-invoke the architect with failure evidence to produce a revised plan. Making this pathway functional -- local scope expansion first, then architect re-invocation with accumulated failure evidence -- is the architectural gap most likely to surface in practice. This is a candidate for a follow-up PSP.
+* **Architect re-planning on structural failure.** The infrastructure for plan revision is partially plumbed: ``apply_repair_action`` has a ``SubgraphReplan`` handler that calls ``replan_subgraph()``, resets affected nodes via ``reset_for_replan()``, emits events, and persists rewrite records. Other graph-rewrite actions (``NodeSplit`` via ``split_node()``, ``InterfaceInsertion`` via ``insert_interface_node()``, ``add_node()``) are implemented. However, ``classify_non_convergence()`` to ``choose_repair_action()`` never produces a ``SubgraphReplan`` variant -- no escalation category maps to it. Even if it did, the single-pass ``for`` loop in ``run()`` collects topo-ordered indices before iteration and would not re-execute reset nodes. Additionally, there is no mechanism to re-invoke the architect with failure evidence to produce a revised plan. Making this pathway functional requires: (1) a classification trigger that produces ``SubgraphReplan``, (2) a loop structure that can revisit reset nodes, and (3) architect re-invocation with accumulated failure evidence. Local scope expansion first, then architect re-invocation, is the intended approach. This is a candidate for a follow-up PSP.
 * **Plan expansion for growing scope.** The orchestrator can structurally modify the graph mid-execution via ``NodeSplit`` and ``InterfaceInsertion`` repair actions, but cannot add fundamentally new tasks to the plan based on emerging requirements discovered during execution. If the initial plan underestimates scope (e.g., the architect omits a needed migration module), there is no way to call the architect to extend the plan mid-execution. ``add_node()`` exists as a public method on the orchestrator but nothing invokes it for scope expansion. This is a design decision for a future PSP: should the orchestrator support incremental plan growth, or should scope expansion always require a fresh session?
 
 ==================
@@ -348,7 +373,7 @@ Resolved Decisions
 
 .. rubric:: D1. Schema Placement -- Per-Stage Step Records
 
-The DuckDB schema SHALL gain a unified ``srbn_step_records`` table that captures an atomic record for every SRBN stage a node passes through. Currently, step execution is inferred by joining ``verification_results``, ``repair_footprints``, ``escalation_reports``, ``energy_history``, ``sheaf_validations``, and ``review_outcomes`` -- there is no single place to query "what happened to this node, in order."
+The new storage engine SHALL gain a unified ``srbn_step_records`` table that captures an atomic record for every SRBN stage a node passes through. Currently, step execution is inferred by joining ``verification_results``, ``repair_footprints``, ``escalation_reports``, ``energy_history``, ``sheaf_validations``, and ``review_outcomes`` -- there is no single place to query "what happened to this node, in order."
 
 The new table SHALL record, per step execution:
 
@@ -361,13 +386,11 @@ The new table SHALL record, per step execution:
 * ``outcome`` (``success``, ``retry``, ``escalate``, ``budget_exhausted``)
 * ``detail_json`` (optional: parse violations, semantic rejections, or escalation evidence)
 
-Existing per-domain tables (``verification_results``, ``repair_footprints``, ``sheaf_validations``, ``escalation_reports``, ``review_outcomes``) SHALL remain as-is for domain-specific queries. ``srbn_step_records`` is the unified timeline, not a replacement.
-
-Correction-attempt provenance (parse method, result state, semantic violations) SHALL be recorded as columns in ``srbn_step_records`` for ``correct`` steps. The existing ``llm_requests`` table continues to capture raw prompt/response bodies when ``--log-llm`` is enabled; ``srbn_step_records`` links to ``llm_requests`` via ``(session_id, node_id, attempt_ordinal)`` but does not duplicate body storage.
+This replaces the current fragmented persistence model rather than extending it. Correction-attempt provenance (parse method, result state, semantic violations) SHALL be recorded as columns in ``srbn_step_records`` for ``correct`` steps. Raw prompt/response bodies remain controlled by ``--log-llm``, but when enabled they SHALL be linked cleanly into the new step-record model.
 
 .. rubric:: D2. V_boot Activation -- Yes, Activate
 
-:math:`V_{boot}` SHALL be computed from real signals. It is currently always 0.0, which means the energy model has a dead component and bootstrap failures are incorrectly folded into :math:`V_{syn}`.
+:math:`V_{boot}` SHALL be computed from real signals. It is currently always 0.0 in project mode (solo mode computes it via ``run_script_check``), which means the energy model has a dead component in the multi-node orchestrator and bootstrap failures are incorrectly folded into :math:`V_{syn}`.
 
 ``step_verify`` already detects the signals that should feed :math:`V_{boot}`:
 
@@ -378,7 +401,7 @@ Correction-attempt provenance (parse method, result state, semantic violations) 
 The implementation SHALL:
 
 * Set :math:`V_{boot} > 0` when ``verifier_profile().fully_degraded()`` is true (environment bootstrap failure).
-* Set :math:`V_{boot} > 0` when ``extract_missing_crates()`` or ``extract_missing_python_modules()`` return non-empty results (dependency bootstrap failure).
+* Set :math:`V_{boot} > 0` when dependency bootstrap failures persist after auto-repair. Currently, ``step_verify`` runs ``extract_missing_crates()`` and ``extract_missing_python_modules()``, auto-installs the missing packages via ``auto_install_crate_deps`` / ``auto_install_python_deps``, and re-runs verification. :math:`V_{boot}` SHALL be set from remaining missing-dependency signals after the auto-repair pass, not before, so that recoverable dependency issues are resolved silently while only persistent bootstrap failures contribute to :math:`V_{boot}`.
 * Stop folding these signals into :math:`V_{syn}`. :math:`V_{syn}` SHALL represent syntax and build errors that are the LLM's fault, not environment failures.
 * The correction prompt compiler (Section 4) SHALL emit distinct guidance for :math:`V_{boot}` failures (e.g., "add missing dependency" vs "fix syntax error"), because the corrective action is different.
 
@@ -386,7 +409,7 @@ The implementation SHALL:
 
 :math:`V_{sheaf}` SHALL remain computed at sheaf-validation time (after correction converges, before commit). Moving it into ``step_verify`` would require validating cross-node structural consistency on every correction attempt, which is expensive and would break the current design where the correction loop is scoped to a single node's :math:`V_{syn}` + :math:`V_{str}` + :math:`V_{log}`.
 
-However, the correction loop SHOULD surface a **lightweight sheaf pre-check** before step_commit:
+However, the correction loop SHOULD surface a **lightweight sheaf pre-check** before ``step_sheaf_validate``:
 
 * After convergence succeeds (energy below threshold), but before sheaf validation, run a fast structural check: do the node's output artifacts declare imports/exports consistent with the ownership manifest?
 * If the pre-check fails, re-enter the correction loop with sheaf-specific evidence rather than proceeding to full sheaf validation and escalation.
@@ -423,7 +446,7 @@ The lightweight sheaf pre-check (described in D3) is a performance optimization:
 
 **Escalate if local fails.** If local scope expansion is insufficient (the fix requires new nodes, changed dependencies, or cross-node ownership changes), the runtime SHALL escalate to the architect with a ``RequiresReplan`` classification. The architect keeps the overall graph and can rewrite topology. The correction loop SHALL NOT attempt graph rewrites autonomously.
 
-**Current gap: architect is never re-invoked.** ``step_sheafify()`` calls the architect exactly once (with up to 3 retries for JSON parse failures). The main execution loop in ``execute_plan()`` is single-pass: it iterates topo-ordered nodes, and when a node escalates, it increments ``escalated_count`` and continues. After all nodes are processed, escalated nodes are reported but the architect is never called again. The infrastructure for re-planning exists (``SubgraphReplan``, ``replan_subgraph()``, ``reset_for_replan()``), but no repair classification currently triggers ``SubgraphReplan``, and even if it did, the single-pass loop would not re-execute reset nodes. Making this pathway functional is a follow-up concern (see Open Issues).
+**Current gap: architect is never re-invoked.** ``step_sheafify()`` calls the architect exactly once (with up to 3 retries for JSON parse failures). The main execution loop in ``run()`` (``orchestrator/mod.rs``) is single-pass: it iterates topo-ordered nodes via ``execute_node()``, and when a node escalates, it increments ``escalated_count`` and continues. After all nodes are processed, escalated nodes are reported but the architect is never called again. The infrastructure for re-planning is partially plumbed: ``apply_repair_action`` has a ``SubgraphReplan`` handler that calls ``replan_subgraph()``, emits events, and persists rewrite records. However, ``classify_non_convergence()`` to ``choose_repair_action()`` never produces a ``SubgraphReplan`` variant -- no escalation category maps to it. Even if it did, the single-pass ``for`` loop collects ``indices`` before iteration and would not re-execute reset nodes. Making this pathway functional requires both a classification trigger and a loop structure that can revisit reset nodes. This is a follow-up concern (see Open Issues).
 
 **Plan validation gate.** ``TaskPlan::validate()`` currently checks for empty plans, duplicate IDs, unknown dependencies, and duplicate ``output_files`` across tasks. It does NOT validate topological consistency of test nodes, cycle detection, or implicit dependency enforcement.
 
