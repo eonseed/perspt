@@ -428,10 +428,7 @@ pub trait LanguagePlugin: Send + Sync {
     /// Replaces the hardcoded command allowlist in the correction pipeline.
     /// Each command string (e.g., `"cargo add serde"`) is checked against
     /// this policy before execution.
-    fn dependency_command_policy(
-        &self,
-        _command: &str,
-    ) -> crate::types::CommandPolicyDecision {
+    fn dependency_command_policy(&self, _command: &str) -> crate::types::CommandPolicyDecision {
         crate::types::CommandPolicyDecision::Allow
     }
 
@@ -620,10 +617,7 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    fn dependency_command_policy(
-        &self,
-        command: &str,
-    ) -> crate::types::CommandPolicyDecision {
+    fn dependency_command_policy(&self, command: &str) -> crate::types::CommandPolicyDecision {
         let trimmed = command.trim();
         if trimmed.starts_with("cargo add ")
             || trimmed.starts_with("cargo install ")
@@ -909,13 +903,16 @@ impl LanguagePlugin for PythonPlugin {
     // PSP-7 correction contract
 
     fn legal_support_files(&self) -> &[&str] {
-        &["pyproject.toml", "setup.py", "setup.cfg", "__init__.py", "conftest.py"]
+        &[
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "__init__.py",
+            "conftest.py",
+        ]
     }
 
-    fn dependency_command_policy(
-        &self,
-        command: &str,
-    ) -> crate::types::CommandPolicyDecision {
+    fn dependency_command_policy(&self, command: &str) -> crate::types::CommandPolicyDecision {
         let trimmed = command.trim();
         if trimmed.starts_with("uv add ")
             || trimmed.starts_with("uv pip install ")
@@ -1128,10 +1125,7 @@ impl LanguagePlugin for JsPlugin {
         &["package.json", "tsconfig.json", "package-lock.json"]
     }
 
-    fn dependency_command_policy(
-        &self,
-        command: &str,
-    ) -> crate::types::CommandPolicyDecision {
+    fn dependency_command_policy(&self, command: &str) -> crate::types::CommandPolicyDecision {
         let trimmed = command.trim();
         if trimmed.starts_with("npm install ")
             || trimmed.starts_with("npm i ")
@@ -1160,8 +1154,14 @@ impl LanguagePlugin for JsPlugin {
 
     fn test_file_patterns(&self) -> &[&str] {
         &[
-            "**/*.test.js", "**/*.test.ts", "**/*.spec.js", "**/*.spec.ts",
-            "**/*.test.jsx", "**/*.test.tsx", "**/*.spec.jsx", "**/*.spec.tsx",
+            "**/*.test.js",
+            "**/*.test.ts",
+            "**/*.spec.js",
+            "**/*.spec.ts",
+            "**/*.test.jsx",
+            "**/*.test.tsx",
+            "**/*.spec.jsx",
+            "**/*.spec.tsx",
         ]
     }
 }

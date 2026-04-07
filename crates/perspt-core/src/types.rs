@@ -852,12 +852,11 @@ impl TaskPlan {
                     }
                 }
             }
-            let mut queue: std::collections::VecDeque<usize> =
-                in_degree
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, &d)| if d == 0 { Some(i) } else { None })
-                    .collect();
+            let mut queue: std::collections::VecDeque<usize> = in_degree
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &d)| if d == 0 { Some(i) } else { None })
+                .collect();
             let mut visited = 0usize;
             while let Some(node) = queue.pop_front() {
                 visited += 1;
@@ -878,9 +877,7 @@ impl TaskPlan {
         for task in &self.tasks {
             for ctx_file in &task.context_files {
                 if let Some(&owner) = file_owners.get(ctx_file.as_str()) {
-                    if owner != task.id
-                        && !task.dependencies.iter().any(|d| d == owner)
-                    {
+                    if owner != task.id && !task.dependencies.iter().any(|d| d == owner) {
                         return Err(format!(
                             "Task '{}' reads '{}' produced by '{}' but does not declare it as a dependency",
                             task.id, ctx_file, owner
@@ -4348,7 +4345,10 @@ mod psp5_tests {
 
     #[test]
     fn test_retry_classification_display() {
-        assert_eq!(RetryClassification::MalformedRetry.to_string(), "malformed_retry");
+        assert_eq!(
+            RetryClassification::MalformedRetry.to_string(),
+            "malformed_retry"
+        );
         assert_eq!(RetryClassification::Retarget.to_string(), "retarget");
         assert_eq!(RetryClassification::Replan.to_string(), "replan");
         assert_eq!(
@@ -4380,7 +4380,9 @@ mod psp5_tests {
         b.dependencies = vec!["c".to_string()];
         let mut c = PlannedTask::new("c", "goal c");
         c.dependencies = vec!["a".to_string()];
-        let plan = TaskPlan { tasks: vec![a, b, c] };
+        let plan = TaskPlan {
+            tasks: vec![a, b, c],
+        };
         let err = plan.validate().unwrap_err();
         assert!(err.contains("cycle"), "Expected cycle error, got: {err}");
     }
@@ -4394,9 +4396,7 @@ mod psp5_tests {
         let mut b = PlannedTask::new("b", "create lib");
         b.output_files = vec!["src/lib.rs".to_string()];
 
-        let mut plan = TaskPlan {
-            tasks: vec![a, b],
-        };
+        let mut plan = TaskPlan { tasks: vec![a, b] };
         let err = plan.validate().unwrap_err();
         assert!(
             err.contains("does not declare it as a dependency"),
@@ -4414,7 +4414,9 @@ mod psp5_tests {
         b.dependencies = vec!["a".to_string()];
         let mut c = PlannedTask::new("c", "goal c");
         c.dependencies = vec!["a".to_string(), "b".to_string()];
-        let plan = TaskPlan { tasks: vec![a, b, c] };
+        let plan = TaskPlan {
+            tasks: vec![a, b, c],
+        };
         assert!(plan.validate().is_ok());
     }
 }

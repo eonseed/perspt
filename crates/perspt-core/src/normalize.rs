@@ -360,9 +360,7 @@ pub fn extract_file_markers(raw: &str) -> Vec<FileMarker> {
             }
 
             let (path_raw, is_diff) = heading;
-            current_path = normalize_artifact_path(&path_raw)
-                .ok()
-                .or(Some(path_raw));
+            current_path = normalize_artifact_path(&path_raw).ok().or(Some(path_raw));
             current_is_diff = is_diff;
             current_content.clear();
             had_heading = true;
@@ -427,9 +425,7 @@ pub fn extract_file_markers(raw: &str) -> Vec<FileMarker> {
 /// Parse a line as a file/diff heading, returning `(path, is_diff)`.
 fn parse_file_heading(line: &str) -> Option<(String, bool)> {
     // Strip leading markdown heading markers
-    let stripped = line
-        .trim_start_matches('#')
-        .trim();
+    let stripped = line.trim_start_matches('#').trim();
 
     // Check for "File:" or "Diff:" prefix
     let (rest, is_diff) = if let Some(rest) = stripped.strip_prefix("File:") {
