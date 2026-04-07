@@ -1,6 +1,6 @@
 use perspt_store::{
-    EscalationReportRecord, PlanRevisionRow, RepairFootprintRow, RewriteRecordRow,
-    SheafValidationRow, VerificationResultRow,
+    CorrectionAttemptRow, EscalationReportRecord, PlanRevisionRow, RepairFootprintRow,
+    RewriteRecordRow, SheafValidationRow, VerificationResultRow,
 };
 
 /// View model for the decisions trace page
@@ -12,6 +12,7 @@ pub struct DecisionsViewModel {
     pub plan_revisions: Vec<PlanRow>,
     pub repair_footprints: Vec<RepairRow>,
     pub verifications: Vec<VerificationRow>,
+    pub correction_attempts: Vec<CorrectionRow>,
 }
 
 pub struct EscalationRow {
@@ -63,7 +64,16 @@ pub struct VerificationRow {
     pub degraded_reason: String,
 }
 
+pub struct CorrectionRow {
+    pub node_id: String,
+    pub attempt: i32,
+    pub parse_state: String,
+    pub accepted: bool,
+    pub rejection_reason: String,
+}
+
 impl DecisionsViewModel {
+    #[allow(clippy::too_many_arguments)]
     pub fn from_store(
         session_id: String,
         escalations: Vec<EscalationReportRecord>,
@@ -72,6 +82,7 @@ impl DecisionsViewModel {
         plan_revisions: Vec<PlanRevisionRow>,
         repair_footprints: Vec<RepairFootprintRow>,
         verifications: Vec<VerificationResultRow>,
+        correction_attempts: Vec<CorrectionAttemptRow>,
     ) -> Self {
         Self {
             session_id,
@@ -134,6 +145,16 @@ impl DecisionsViewModel {
                     tests_failed: v.tests_failed,
                     degraded: v.degraded,
                     degraded_reason: v.degraded_reason.unwrap_or_default(),
+                })
+                .collect(),
+            correction_attempts: correction_attempts
+                .into_iter()
+                .map(|c| CorrectionRow {
+                    node_id: c.node_id,
+                    attempt: c.attempt,
+                    parse_state: c.parse_state,
+                    accepted: c.accepted,
+                    rejection_reason: c.rejection_reason.unwrap_or_default(),
                 })
                 .collect(),
         }

@@ -313,6 +313,30 @@ pub async fn run(
                             steps_str, cost_str, budget.revisions_used
                         );
                     }
+                    // Step timeline summary
+                    if let Ok(steps) = store.get_session_steps(&sid) {
+                        if !steps.is_empty() {
+                            let total_ms: i64 = steps.iter().map(|s| s.duration_ms as i64).sum();
+                            let corrections: Vec<_> = steps
+                                .iter()
+                                .filter(|s| s.step == "converge" && s.attempt_count > 0)
+                                .collect();
+                            println!(
+                                "[STEPS] {} records, {:.1}s total",
+                                steps.len(),
+                                total_ms as f64 / 1000.0
+                            );
+                            if !corrections.is_empty() {
+                                let total_attempts: i32 =
+                                    corrections.iter().map(|s| s.attempt_count).sum();
+                                println!(
+                                    "[CORRECTIONS] {} node(s) needed correction, {} total attempts",
+                                    corrections.len(),
+                                    total_attempts
+                                );
+                            }
+                        }
+                    }
                     println!("[COMMIT] Session {} complete", &sid[..sid.len().min(16)]);
                 }
             }

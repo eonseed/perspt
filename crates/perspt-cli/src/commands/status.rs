@@ -273,6 +273,58 @@ pub async fn run() -> Result<()> {
         }
     }
 
+    // PSP-7: Step timeline and correction attempt summaries
+    if let Ok(steps) = store.get_session_steps(&session.session_id) {
+        if !steps.is_empty() {
+            println!();
+            println!("📊 Step Timeline ({} records):", steps.len());
+            // Show per-step-type summary
+            let mut step_counts = std::collections::HashMap::new();
+            let mut total_duration_ms: i64 = 0;
+            for s in &steps {
+                *step_counts.entry(s.step.as_str()).or_insert(0u32) += 1;
+                total_duration_ms += s.duration_ms as i64;
+            }
+            for (step, count) in &step_counts {
+                println!("   {:<18} {}", step, count);
+            }
+            if total_duration_ms > 0 {
+                println!(
+                    "   Total step time:  {:.1}s",
+                    total_duration_ms as f64 / 1000.0
+                );
+            }
+
+            // Show correction attempts for nodes that had them
+            let nodes_with_retries: Vec<_> = steps
+                .iter()
+                .filter(|s| s.step == "converge" && s.attempt_count > 0)
+                .collect();
+            if !nodes_with_retries.is_empty() {
+                println!();
+                println!("🔄 Correction Attempts:");
+                let mut shown = std::collections::HashSet::new();
+                for s in &nodes_with_retries {
+                    if shown.insert(&s.node_id) {
+                        if let Ok(attempts) =
+                            store.get_correction_attempts(&session.session_id, &s.node_id)
+                        {
+                            let accepted = attempts.iter().filter(|a| a.accepted).count();
+                            let rejected = attempts.len() - accepted;
+                            println!(
+                                "   {}: {} attempt(s) ({} accepted, {} rejected)",
+                                s.node_id,
+                                attempts.len(),
+                                accepted,
+                                rejected
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // PSP-5 Phase 8: Budget envelope status
     if let Ok(Some(budget)) = store.get_budget_envelope(&session.session_id) {
         println!();

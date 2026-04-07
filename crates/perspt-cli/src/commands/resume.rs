@@ -151,6 +151,24 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
         println!("💰 Budget: steps={} cost={}", steps_str, cost_str);
     }
 
+    // PSP-7: Show step timeline and correction summary before resuming
+    if let Ok(steps) = store.get_session_steps(&actual_id) {
+        if !steps.is_empty() {
+            let corrections: Vec<_> = steps
+                .iter()
+                .filter(|s| s.step == "converge" && s.attempt_count > 0)
+                .collect();
+            if !corrections.is_empty() {
+                let total_attempts: i32 = corrections.iter().map(|s| s.attempt_count).sum();
+                println!(
+                    "🔄 Corrections: {} node(s), {} attempts",
+                    corrections.len(),
+                    total_attempts
+                );
+            }
+        }
+    }
+
     // Check if session is already completed
     if session.status == "COMPLETED" {
         println!();
