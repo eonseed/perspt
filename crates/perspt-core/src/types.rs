@@ -3052,6 +3052,24 @@ pub struct PromptEvidence {
     pub solo_file_path: Option<String>,
     /// Solo mode language hint.
     pub solo_language: Option<String>,
+    /// Working directory path for context-aware prompts.
+    pub working_dir: Option<String>,
+    /// Active language plugins (e.g. `["rust", "python"]`).
+    pub active_plugins: Vec<String>,
+    /// Contract interface signature for actuator/verifier prompts.
+    pub interface_signature: Option<String>,
+    /// Contract invariants for actuator/verifier prompts.
+    pub invariants: Option<String>,
+    /// Contract forbidden patterns for actuator/verifier prompts.
+    pub forbidden_patterns: Option<String>,
+    /// Contract weighted tests for verifier prompts.
+    pub weighted_tests: Option<String>,
+    /// Workspace import hints for cross-module references.
+    pub workspace_import_hints: Option<String>,
+    /// Pre-formatted evidence section for architect prompts.
+    pub evidence_section: Option<String>,
+    /// Error feedback from previous planning attempts.
+    pub error_feedback: Option<String>,
 }
 
 /// Policy decision for a dependency command (PSP-7 §4).

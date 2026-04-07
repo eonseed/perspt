@@ -203,7 +203,11 @@ impl SRBNOrchestrator {
 
     /// Build a minimal prompt for Solo Mode (with dynamic filename instruction)
     fn build_solo_prompt(&self, task: &str) -> String {
-        crate::prompts::SOLO_GENERATE.replace("{task}", task)
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some(task.to_string()),
+            ..Default::default()
+        };
+        crate::prompt_compiler::compile(perspt_core::types::PromptIntent::SoloGenerate, &ev).text
     }
 
     /// Build a correction prompt for Solo Mode with error feedback
@@ -252,15 +256,17 @@ impl SRBNOrchestrator {
             errors.join("\n")
         };
 
-        crate::prompts::render_solo_correction(
-            task,
-            filename,
-            current_code,
-            &format!("{:.2}", energy.v_syn),
-            &format!("{:.2}", energy.v_log),
-            &format!("{:.2}", energy.v_boot),
-            &error_list,
-        )
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some(task.to_string()),
+            solo_file_path: Some(filename.to_string()),
+            existing_file_contents: vec![(filename.to_string(), current_code.to_string())],
+            verifier_diagnostics: Some(format!(
+                "Energy: V_syn={:.2}, V_log={:.2}, V_boot={:.2}\n\n{}",
+                energy.v_syn, energy.v_log, energy.v_boot, error_list
+            )),
+            ..Default::default()
+        };
+        crate::prompt_compiler::compile(perspt_core::types::PromptIntent::SoloCorrect, &ev).text
     }
 
     /// Run Python doctest on a file and return V_log energy

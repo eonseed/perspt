@@ -1502,11 +1502,17 @@ impl SRBNOrchestrator {
                 .collect();
 
             if !child_goals.is_empty() {
-                let speculator_prompt = crate::prompts::render_speculator_lookahead(
-                    &node_id,
-                    &node_goal,
-                    &child_goals.join("\n"),
-                );
+                let ev = perspt_core::types::PromptEvidence {
+                    node_goal: Some(node_goal.clone()),
+                    context_files: vec![node_id.clone()],
+                    output_files: child_goals.clone(),
+                    ..Default::default()
+                };
+                let speculator_prompt = crate::prompt_compiler::compile(
+                    perspt_core::types::PromptIntent::SpeculatorLookahead,
+                    &ev,
+                )
+                .text;
 
                 log::debug!(
                     "Speculator lookahead for node {} using model {}",
@@ -1812,11 +1818,16 @@ impl SRBNOrchestrator {
                         .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect();
-                    let retry_prompt = crate::prompts::render_bundle_retarget(
-                        &expected.join(", "),
-                        &raw_paths.join(", "),
-                        &prompt,
-                    );
+                    let ev = perspt_core::types::PromptEvidence {
+                        output_files: expected.clone(),
+                        existing_file_contents: vec![(raw_paths.join(", "), prompt.clone())],
+                        ..Default::default()
+                    };
+                    let retry_prompt = crate::prompt_compiler::compile(
+                        perspt_core::types::PromptIntent::BundleRetarget,
+                        &ev,
+                    )
+                    .text;
 
                     let retry_response = self
                         .call_llm_with_logging(&model, &retry_prompt, Some(&node_id))
@@ -4222,15 +4233,17 @@ def util():
 
     #[test]
     fn test_architect_prompt_includes_dependency_expectations() {
-        let prompt = crate::prompts::render_architect(
-            crate::prompts::ARCHITECT_EXISTING,
-            "Build a web server",
-            std::path::Path::new("/tmp"),
-            "empty project",
-            "",
-            "",
-            &[],
-        );
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some("Build a web server".to_string()),
+            project_summary: Some("empty project".to_string()),
+            working_dir: Some("/tmp".to_string()),
+            ..Default::default()
+        };
+        let prompt = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::ArchitectExisting,
+            &ev,
+        )
+        .text;
         assert!(
             prompt.contains("dependency_expectations"),
             "Architect prompt must include dependency_expectations in the JSON schema"

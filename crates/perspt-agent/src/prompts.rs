@@ -1,14 +1,14 @@
-//! Externalized prompt templates for agent roles.
+//! Externalized prompt template constants for agent roles.
 //!
-//! Each public constant holds a prompt template with `{placeholder}` markers.
-//! Typed `render_*` helpers substitute them via `.replace()` — this can be
-//! upgraded to MiniJinja later if conditional blocks or loops become necessary.
+//! These constants are consumed exclusively by `crate::prompt_compiler`.
+//! External callers should use `prompt_compiler::compile()` instead of
+//! referencing these constants directly.
 
 /// Architect prompt for *existing-project* task decomposition.
 ///
 /// Placeholders: `{task}`, `{working_dir}`, `{project_context}`,
 /// `{error_feedback}`, `{evidence_section}`.
-pub const ARCHITECT_EXISTING: &str = r#"You are an Architect agent in a multi-agent coding system.
+pub(crate) const ARCHITECT_EXISTING: &str = r#"You are an Architect agent in a multi-agent coding system.
 
 ## Task
 {task}
@@ -150,7 +150,7 @@ IMPORTANT: Output ONLY the JSON, no other text."#;
 /// section and adjusts framing for empty-workspace contexts.
 /// Placeholders: `{task}`, `{working_dir}`, `{project_context}`,
 /// `{error_feedback}`.
-pub const ARCHITECT_GREENFIELD: &str = r#"You are an Architect agent in a multi-agent coding system planning a NEW project from scratch.
+pub(crate) const ARCHITECT_GREENFIELD: &str = r#"You are an Architect agent in a multi-agent coding system planning a NEW project from scratch.
 
 ## Task
 {task}
@@ -265,51 +265,6 @@ Valid criticality values: "Critical", "High", "Low"
 
 IMPORTANT: Output ONLY the JSON, no other text."#;
 
-// Brace constants used inside raw strings where `{{` / `}}` are not legal.
-const OPEN_BRACE: &str = "{";
-const CLOSE_BRACE: &str = "}";
-
-/// Render an architect prompt template by replacing named placeholders.
-///
-/// `active_plugins` is an optional list of detected language plugins (e.g.
-/// `["rust", "python"]`).  When non-empty, the rendered prompt includes a
-/// "Detected Toolchain" section so the architect can plan verification-aware
-/// nodes.
-///
-/// # Panics
-/// Does not panic; missing placeholders are left as-is.
-pub fn render_architect(
-    template: &str,
-    task: &str,
-    working_dir: &std::path::Path,
-    project_context: &str,
-    error_feedback: &str,
-    evidence_section: &str,
-    active_plugins: &[String],
-) -> String {
-    let plugin_section = if active_plugins.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n## Detected Toolchain\nActive language plugins: {}\nPlan verification-aware nodes that align with these plugins' build/test capabilities.\n",
-            active_plugins.join(", ")
-        )
-    };
-    let enriched_context = if plugin_section.is_empty() {
-        project_context.to_string()
-    } else {
-        format!("{}{}", project_context, plugin_section)
-    };
-    template
-        .replace("{task}", task)
-        .replace("{working_dir}", &working_dir.display().to_string())
-        .replace("{project_context}", &enriched_context)
-        .replace("{error_feedback}", error_feedback)
-        .replace("{evidence_section}", evidence_section)
-        .replace("{OPEN_BRACE}", OPEN_BRACE)
-        .replace("{CLOSE_BRACE}", CLOSE_BRACE)
-}
-
 // ---------------------------------------------------------------------------
 // Actuator prompts
 // ---------------------------------------------------------------------------
@@ -319,7 +274,7 @@ pub fn render_architect(
 /// Placeholders: `{goal}`, `{interface}`, `{invariants}`, `{forbidden}`,
 /// `{working_dir}`, `{context_files}`, `{target_file}`,
 /// `{allowed_output_paths}`, `{workspace_import_hints}`, `{output_format}`.
-pub const ACTUATOR_CODING: &str = r#"You are an Actuator agent responsible for implementing code.
+pub(crate) const ACTUATOR_CODING: &str = r#"You are an Actuator agent responsible for implementing code.
 
 ## Task
 Goal: {goal}
@@ -364,7 +319,7 @@ Workspace Import Hints: {workspace_import_hints}
 /// Actuator output format section for multi-artifact bundle mode.
 ///
 /// Placeholders: `{target_file}`, `{OPEN_BRACE}`, `{CLOSE_BRACE}`.
-pub const ACTUATOR_MULTI_OUTPUT: &str = r#"## Output Format (Multi-Artifact Bundle)
+pub(crate) const ACTUATOR_MULTI_OUTPUT: &str = r#"## Output Format (Multi-Artifact Bundle)
 When producing multi-file output, use this JSON format wrapped in a ```json code block:
 
 ```json
@@ -395,7 +350,7 @@ RULES:
 /// Actuator output format section for single-file mode.
 ///
 /// Placeholders: `{target_file}`.
-pub const ACTUATOR_SINGLE_OUTPUT: &str = r#"## Output Format
+pub(crate) const ACTUATOR_SINGLE_OUTPUT: &str = r#"## Output Format
 Use one of these formats:
 
 ### Creating a New File
@@ -419,45 +374,6 @@ IMPORTANT:
 - Use 'Diff:' for existing files to save tokens
 - Use 'File:' ONLY for new files or full rewrites"#;
 
-/// Render an actuator coding prompt, selecting the appropriate output format.
-///
-/// All value arguments are pre-formatted strings. The caller is responsible
-/// for Debug-formatting slices/paths before passing them here.
-#[allow(clippy::too_many_arguments)]
-pub fn render_actuator(
-    goal: &str,
-    interface: &str,
-    invariants: &str,
-    forbidden: &str,
-    working_dir: &str,
-    context_files: &str,
-    target_file: &str,
-    allowed_output_paths: &str,
-    workspace_import_hints: &str,
-    is_multi_output: bool,
-) -> String {
-    let output_format = if is_multi_output {
-        ACTUATOR_MULTI_OUTPUT
-            .replace("{target_file}", target_file)
-            .replace("{OPEN_BRACE}", OPEN_BRACE)
-            .replace("{CLOSE_BRACE}", CLOSE_BRACE)
-    } else {
-        ACTUATOR_SINGLE_OUTPUT.replace("{target_file}", target_file)
-    };
-
-    ACTUATOR_CODING
-        .replace("{goal}", goal)
-        .replace("{interface}", interface)
-        .replace("{invariants}", invariants)
-        .replace("{forbidden}", forbidden)
-        .replace("{working_dir}", working_dir)
-        .replace("{context_files}", context_files)
-        .replace("{target_file}", target_file)
-        .replace("{allowed_output_paths}", allowed_output_paths)
-        .replace("{workspace_import_hints}", workspace_import_hints)
-        .replace("{output_format}", &output_format)
-}
-
 // ---------------------------------------------------------------------------
 // Verifier prompts
 // ---------------------------------------------------------------------------
@@ -466,7 +382,7 @@ pub fn render_actuator(
 ///
 /// Placeholders: `{interface}`, `{invariants}`, `{forbidden}`,
 /// `{weighted_tests}`, `{implementation}`.
-pub const VERIFIER_CHECK: &str = r#"You are a Verifier agent responsible for checking code correctness.
+pub(crate) const VERIFIER_CHECK: &str = r#"You are a Verifier agent responsible for checking code correctness.
 
 ## Task
 Verify the implementation satisfies the behavioral contract.
@@ -493,22 +409,6 @@ Provide:
 - List of violations if any
 - Suggested fixes for each violation"#;
 
-/// Render a verifier prompt with pre-formatted values.
-pub fn render_verifier(
-    interface: &str,
-    invariants: &str,
-    forbidden: &str,
-    weighted_tests: &str,
-    implementation: &str,
-) -> String {
-    VERIFIER_CHECK
-        .replace("{interface}", interface)
-        .replace("{invariants}", invariants)
-        .replace("{forbidden}", forbidden)
-        .replace("{weighted_tests}", weighted_tests)
-        .replace("{implementation}", implementation)
-}
-
 // ---------------------------------------------------------------------------
 // Speculator prompts
 // ---------------------------------------------------------------------------
@@ -516,12 +416,12 @@ pub fn render_verifier(
 /// Minimal speculator prompt for quick issue analysis.
 ///
 /// Placeholder: `{goal}`.
-pub const SPECULATOR_BASIC: &str = "Briefly analyze potential issues for: {goal}";
+pub(crate) const SPECULATOR_BASIC: &str = "Briefly analyze potential issues for: {goal}";
 
 /// Speculator lookahead prompt for interface contract prediction.
 ///
 /// Placeholders: `{node_id}`, `{goal}`, `{downstream}`.
-pub const SPECULATOR_LOOKAHEAD: &str =
+pub(crate) const SPECULATOR_LOOKAHEAD: &str =
     "You are a Speculator agent. Given this task and its downstream dependents, \
 produce a brief (3-5 bullet) list of:\n\
 1. Interface contracts the current task must satisfy for dependents\n\
@@ -531,14 +431,6 @@ Current task: {node_id} — {goal}\n\
 Downstream tasks:\n{downstream}\n\n\
 Be concise. No code.";
 
-/// Render a speculator lookahead prompt.
-pub fn render_speculator_lookahead(node_id: &str, goal: &str, downstream: &str) -> String {
-    SPECULATOR_LOOKAHEAD
-        .replace("{node_id}", node_id)
-        .replace("{goal}", goal)
-        .replace("{downstream}", downstream)
-}
-
 // ---------------------------------------------------------------------------
 // Solo-mode prompts
 // ---------------------------------------------------------------------------
@@ -546,7 +438,7 @@ pub fn render_speculator_lookahead(node_id: &str, goal: &str, downstream: &str) 
 /// Solo-mode prompt for single-file Python generation.
 ///
 /// Placeholder: `{task}`.
-pub const SOLO_GENERATE: &str = r#"You are an expert Python developer. Complete this task with a SINGLE, self-contained Python file.
+pub(crate) const SOLO_GENERATE: &str = r#"You are an expert Python developer. Complete this task with a SINGLE, self-contained Python file.
 
 ## Task
 {task}
@@ -570,7 +462,7 @@ IMPORTANT: Do NOT use generic names like `script.py` or `main.py`. Choose a name
 ///
 /// Placeholders: `{task}`, `{filename}`, `{current_code}`, `{v_syn}`,
 /// `{v_log}`, `{v_boot}`, `{error_list}`.
-pub const SOLO_CORRECTION: &str = r#"## Code Correction Required
+pub(crate) const SOLO_CORRECTION: &str = r#"## Code Correction Required
 
 The code you generated has errors. Fix ALL of them.
 
@@ -600,26 +492,6 @@ File: {filename}
 [complete corrected code]
 ```"#;
 
-/// Render a solo correction prompt with pre-formatted energy values.
-pub fn render_solo_correction(
-    task: &str,
-    filename: &str,
-    current_code: &str,
-    v_syn: &str,
-    v_log: &str,
-    v_boot: &str,
-    error_list: &str,
-) -> String {
-    SOLO_CORRECTION
-        .replace("{task}", task)
-        .replace("{filename}", filename)
-        .replace("{current_code}", current_code)
-        .replace("{v_syn}", v_syn)
-        .replace("{v_log}", v_log)
-        .replace("{v_boot}", v_boot)
-        .replace("{error_list}", error_list)
-}
-
 // ---------------------------------------------------------------------------
 // Initialization prompts
 // ---------------------------------------------------------------------------
@@ -627,7 +499,7 @@ pub fn render_solo_correction(
 /// Prompt for LLM-based project name suggestion.
 ///
 /// Placeholder: `{task}`.
-pub const PROJECT_NAME_SUGGEST: &str = r#"Extract a short project name from this task description.
+pub(crate) const PROJECT_NAME_SUGGEST: &str = r#"Extract a short project name from this task description.
 Rules:
 - Use snake_case (lowercase with underscores)
 - Maximum 30 characters
@@ -647,7 +519,7 @@ Project name:"#;
 ///
 /// Placeholders: `{goal}`, `{expected_files}`, `{dropped_files}`,
 /// `{original_prompt}`.
-pub const BUNDLE_RETARGET: &str = r#"Your previous response was REJECTED because every artifact targeted a file path outside this node's declared outputs.
+pub(crate) const BUNDLE_RETARGET: &str = r#"Your previous response was REJECTED because every artifact targeted a file path outside this node's declared outputs.
 
 ## What went wrong
 You produced files for: {dropped_files}
@@ -661,211 +533,3 @@ Re-read the original task and generate code for the correct paths.
 {original_prompt}
 
 IMPORTANT: Your response MUST contain ONLY the declared output files. Do NOT produce files outside the list above."#;
-
-/// Render a bundle-retarget prompt for a stripped-bundle retry.
-pub fn render_bundle_retarget(
-    expected_files: &str,
-    dropped_files: &str,
-    original_prompt: &str,
-) -> String {
-    BUNDLE_RETARGET
-        .replace("{expected_files}", expected_files)
-        .replace("{dropped_files}", dropped_files)
-        .replace("{original_prompt}", original_prompt)
-}
-
-/// Preamble for the verifier-guided analysis stage during correction.
-///
-/// The correction prompt body is appended after this preamble.
-pub const VERIFIER_ANALYSIS_PREAMBLE: &str = "\
-You are a Verifier agent. Analyze the following correction request and produce \
-concise, structured guidance for the code fixer. Identify:\n\
-1. Root cause of each failure\n\
-2. Which specific functions/lines need changes\n\
-3. Constraints that must be preserved\n\
-Do NOT produce code — only analysis and guidance.\n\n";
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn test_architect_existing_contains_placeholders() {
-        assert!(ARCHITECT_EXISTING.contains("{task}"));
-        assert!(ARCHITECT_EXISTING.contains("{working_dir}"));
-        assert!(ARCHITECT_EXISTING.contains("{project_context}"));
-        assert!(ARCHITECT_EXISTING.contains("{evidence_section}"));
-        assert!(ARCHITECT_EXISTING.contains("dependency_expectations"));
-    }
-
-    #[test]
-    fn test_architect_greenfield_omits_evidence() {
-        assert!(!ARCHITECT_GREENFIELD.contains("{evidence_section}"));
-        assert!(ARCHITECT_GREENFIELD.contains("GREENFIELD"));
-    }
-
-    #[test]
-    fn test_render_architect_substitutes_placeholders() {
-        let result = render_architect(
-            ARCHITECT_EXISTING,
-            "Build a web app",
-            Path::new("/tmp/project"),
-            "has Cargo.toml",
-            "",
-            "## Evidence\nfound 3 modules",
-            &["rust".to_string()],
-        );
-        assert!(result.contains("Build a web app"));
-        assert!(result.contains("/tmp/project"));
-        assert!(result.contains("has Cargo.toml"));
-        assert!(result.contains("## Evidence\nfound 3 modules"));
-        // Braces should be resolved
-        assert!(!result.contains("{OPEN_BRACE}"));
-        assert!(!result.contains("{CLOSE_BRACE}"));
-        // JSON example should have real braces
-        assert!(result.contains(r#""tasks": ["#));
-        // Plugin info should be included
-        assert!(result.contains("rust"));
-        assert!(result.contains("Detected Toolchain"));
-    }
-
-    #[test]
-    fn test_render_architect_greenfield() {
-        let result = render_architect(
-            ARCHITECT_GREENFIELD,
-            "Build a CLI tool",
-            Path::new("/tmp/new"),
-            "empty directory",
-            "",
-            "", // no evidence for greenfield
-            &["python".to_string()],
-        );
-        assert!(result.contains("Build a CLI tool"));
-        assert!(result.contains("NEW project from scratch"));
-        assert!(result.contains("python"));
-        assert!(result.contains("Detected Toolchain"));
-    }
-
-    #[test]
-    fn test_render_architect_no_plugins() {
-        let result = render_architect(
-            ARCHITECT_EXISTING,
-            "fix a bug",
-            Path::new("/tmp/proj"),
-            "context",
-            "",
-            "",
-            &[],
-        );
-        assert!(!result.contains("Detected Toolchain"));
-    }
-
-    #[test]
-    fn test_actuator_contains_placeholders() {
-        assert!(ACTUATOR_CODING.contains("{goal}"));
-        assert!(ACTUATOR_CODING.contains("{interface}"));
-        assert!(ACTUATOR_CODING.contains("{output_format}"));
-    }
-
-    #[test]
-    fn test_render_actuator_multi_output() {
-        let result = render_actuator(
-            "Implement parser",
-            "fn parse(input: &str) -> AST",
-            r#"["valid input"]"#,
-            r#"["no panics"]"#,
-            "/tmp/proj",
-            r#"["lib.rs"]"#,
-            "src/parser.rs",
-            r#"["src/parser.rs"]"#,
-            r#"["Rust crate: my_crate"]"#,
-            true,
-        );
-        assert!(result.contains("Implement parser"));
-        assert!(result.contains("Multi-Artifact Bundle"));
-        assert!(result.contains("src/parser.rs"));
-        // JSON braces should be resolved
-        assert!(!result.contains("{OPEN_BRACE}"));
-    }
-
-    #[test]
-    fn test_render_actuator_single_output() {
-        let result = render_actuator(
-            "Fix bug",
-            "fn fix() -> bool",
-            "[]",
-            "[]",
-            "/tmp",
-            "[]",
-            "main.py",
-            r#"["main.py"]"#,
-            "[]",
-            false,
-        );
-        assert!(result.contains("Fix bug"));
-        assert!(!result.contains("Multi-Artifact Bundle"));
-        assert!(result.contains("File: main.py"));
-    }
-
-    #[test]
-    fn test_render_verifier() {
-        let result = render_verifier(
-            "fn compute() -> i32",
-            r#"["returns positive"]"#,
-            r#"["no unwrap"]"#,
-            r#"[WeightedTest { name: "test_compute", criticality: Critical }]"#,
-            "fn compute() -> i32 { 42 }",
-        );
-        assert!(result.contains("fn compute() -> i32"));
-        assert!(result.contains("returns positive"));
-        assert!(result.contains("fn compute() -> i32 { 42 }"));
-    }
-
-    #[test]
-    fn test_speculator_lookahead() {
-        let result = render_speculator_lookahead(
-            "task_1",
-            "Build core module",
-            "- task_2: Build tests\n- task_3: Build CLI",
-        );
-        assert!(result.contains("task_1"));
-        assert!(result.contains("Build core module"));
-        assert!(result.contains("task_2: Build tests"));
-    }
-
-    #[test]
-    fn test_solo_generate_placeholder() {
-        assert!(SOLO_GENERATE.contains("{task}"));
-        assert!(SOLO_GENERATE.contains("SINGLE, self-contained Python file"));
-    }
-
-    #[test]
-    fn test_render_solo_correction() {
-        let result = render_solo_correction(
-            "Build calculator",
-            "calc.py",
-            "def add(a, b): return a + b",
-            "0.50",
-            "0.00",
-            "0.00",
-            "- Line 1: missing type hints [WARNING]",
-        );
-        assert!(result.contains("Build calculator"));
-        assert!(result.contains("calc.py"));
-        assert!(result.contains("V_syn=0.50"));
-        assert!(result.contains("missing type hints"));
-    }
-
-    #[test]
-    fn test_project_name_placeholder() {
-        assert!(PROJECT_NAME_SUGGEST.contains("{task}"));
-        assert!(PROJECT_NAME_SUGGEST.contains("snake_case"));
-    }
-
-    #[test]
-    fn test_verifier_analysis_preamble() {
-        assert!(VERIFIER_ANALYSIS_PREAMBLE.contains("Verifier agent"));
-        assert!(VERIFIER_ANALYSIS_PREAMBLE.contains("Root cause"));
-    }
-}
