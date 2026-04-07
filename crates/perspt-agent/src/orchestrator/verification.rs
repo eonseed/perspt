@@ -710,21 +710,19 @@ impl SRBNOrchestrator {
     }
 
     /// Extract dependency commands from a correction LLM response.
-    pub(super) fn extract_commands_from_correction(response: &str) -> Vec<String> {
+    /// PSP-7: Extract dependency commands from correction response, validated by plugin policy.
+    ///
+    /// Replaces the legacy hardcoded allowlist with plugin `dependency_command_policy()`.
+    pub(super) fn extract_commands_from_correction(
+        response: &str,
+        owner_plugin: &str,
+    ) -> Vec<String> {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let plugin = registry.get(owner_plugin);
+
         let mut commands = Vec::new();
         let mut in_commands_section = false;
         let mut in_code_block = false;
-
-        let allowed_prefixes = [
-            "cargo add",
-            "pip install",
-            "pip3 install",
-            "uv add",
-            "uv pip install",
-            "npm install",
-            "yarn add",
-            "pnpm add",
-        ];
 
         for line in response.lines() {
             let trimmed = line.trim();
@@ -758,8 +756,24 @@ impl SRBNOrchestrator {
                     .trim_start_matches("$ ")
                     .trim();
 
-                if !cmd.is_empty() && allowed_prefixes.iter().any(|p| cmd.starts_with(p)) {
-                    commands.push(cmd.to_string());
+                if !cmd.is_empty() {
+                    let decision = plugin
+                        .map(|p| p.dependency_command_policy(cmd))
+                        .unwrap_or(perspt_core::types::CommandPolicyDecision::Allow);
+
+                    match decision {
+                        perspt_core::types::CommandPolicyDecision::Allow
+                        | perspt_core::types::CommandPolicyDecision::RequireApproval => {
+                            commands.push(cmd.to_string());
+                        }
+                        perspt_core::types::CommandPolicyDecision::Deny => {
+                            log::warn!(
+                                "Command '{}' denied by plugin policy for '{}'",
+                                cmd,
+                                owner_plugin
+                            );
+                        }
+                    }
                 }
             }
         }

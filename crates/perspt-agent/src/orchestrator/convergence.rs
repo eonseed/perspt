@@ -106,6 +106,21 @@ impl SRBNOrchestrator {
             total, epsilon, attempt_count
         ));
 
+        // PSP-7: Budget ceiling check before LLM call
+        if self.budget.cost_exhausted() {
+            log::warn!(
+                "Budget exhausted (${:.2} / ${:.2}) — escalating node '{}'",
+                self.budget.cost_used_usd,
+                self.budget.max_cost_usd.unwrap_or(f64::INFINITY),
+                node_id
+            );
+            self.emit_log(format!(
+                "💰 Budget exhausted (${:.2}) — escalating",
+                self.budget.cost_used_usd
+            ));
+            return Ok(false);
+        }
+
         // Build correction prompt with diagnostics
         let correction_prompt = self.build_correction_prompt(&node_id, &goal, &energy)?;
 
@@ -119,140 +134,179 @@ impl SRBNOrchestrator {
         // Call LLM for corrected code
         let corrected = self.call_llm_for_correction(&correction_prompt).await?;
 
-        // Attempt bundle-aware correction first, fall back to single-file
+        // PSP-7: Typed parse pipeline replaces legacy Option-based parsing
         let node_class = self.graph[idx].node_class;
         let attempt = self.graph[idx].monitor.attempt_count;
         let diagnosis = self.context.last_diagnostics.clone();
+        let owner_plugin = self.graph[idx].owner_plugin.clone();
 
-        if let Some(bundle) = self.parse_artifact_bundle(&corrected) {
-            // Bundle-aware repair: apply using the same transactional path
-            // as speculative generation.
+        let (bundle_opt, parse_state, record_opt) =
+            self.parse_artifact_bundle_typed(&corrected, &node_id, attempt as u32);
+
+        // Log structured correction attempt record
+        if let Some(ref record) = record_opt {
             log::info!(
-                "Applying correction bundle: {} artifact(s), {} command(s)",
-                bundle.artifacts.len(),
-                bundle.commands.len()
+                "PSP-7 correction attempt {}: parse_state={}, accepted={}, rejection={:?}",
+                record.attempt,
+                record.parse_state,
+                record.accepted,
+                record.rejection_reason
             );
-            self.emit_log(format!(
-                "🔧 Applying correction bundle ({} artifact(s))",
-                bundle.artifacts.len()
-            ));
+        }
 
-            self.apply_bundle_transactionally(&bundle, &node_id, node_class)
-                .await?;
-            self.last_tool_failure = None;
+        match parse_state {
+            perspt_core::types::ParseResultState::StrictJsonOk
+            | perspt_core::types::ParseResultState::TolerantRecoveryOk => {
+                let bundle = bundle_opt.expect("Accepted parse must yield a bundle");
 
-            // Track last written file from the bundle for build_correction_prompt
-            let node_workdir = self.effective_working_dir(idx);
-            if let Some(first_path) = bundle.artifacts.first().map(|a| a.path().to_string()) {
-                self.last_written_file = Some(node_workdir.join(&first_path));
-            }
-            self.file_version += 1;
-            self.last_applied_bundle = Some(bundle.clone());
-
-            // Record repair footprint
-            let diagnosis_str = format!("{:?}", diagnosis);
-            let footprint = perspt_core::RepairFootprint::new(
-                &self.context.session_id,
-                &node_id,
-                "initial", // plan revision tracking added in later steps
-                attempt as u32,
-                &bundle,
-                &diagnosis_str,
-            );
-            self.last_repair_footprint = Some(footprint.clone());
-            if let Err(e) = self.ledger.record_repair_footprint(&footprint) {
-                log::warn!("Failed to record repair footprint: {}", e);
-            }
-
-            // Execute bundle post-write commands
-            if !bundle.commands.is_empty() {
-                self.emit_log(format!(
-                    "🔧 Executing {} bundle command(s)...",
+                log::info!(
+                    "Applying correction bundle ({}): {} artifact(s), {} command(s)",
+                    parse_state,
+                    bundle.artifacts.len(),
                     bundle.commands.len()
+                );
+                self.emit_log(format!(
+                    "🔧 Applying correction bundle ({} artifact(s))",
+                    bundle.artifacts.len()
                 ));
-                let work_dir = self.effective_working_dir(idx);
-                let is_python = self.graph[idx].owner_plugin == "python";
-                for raw_command in &bundle.commands {
-                    let command = if is_python {
-                        Self::normalize_command_to_uv(raw_command)
-                    } else {
-                        raw_command.clone()
-                    };
-                    log::info!("Running correction command: {}", command);
-                    let parts: Vec<&str> = command.split_whitespace().collect();
-                    if parts.is_empty() {
-                        continue;
-                    }
-                    let output = tokio::process::Command::new(parts[0])
-                        .args(&parts[1..])
-                        .current_dir(&work_dir)
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .output()
-                        .await;
-                    match output {
-                        Ok(o) if o.status.success() => {
-                            self.emit_log(format!("✅ {}", command));
-                        }
-                        Ok(o) => {
-                            let stderr = String::from_utf8_lossy(&o.stderr);
-                            log::warn!("Command failed: {} — {}", command, stderr);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to run command: {} — {}", command, e);
-                        }
-                    }
-                }
-            }
-        } else if let Some((filename, new_code, is_diff)) =
-            self.extract_code_from_response(&corrected)
-        {
-            // Legacy single-file fallback for backward compatibility
-            let node_workdir = self.effective_working_dir(idx);
-            let full_path = node_workdir.join(&filename);
 
-            let mut args = HashMap::new();
-            args.insert("path".to_string(), filename.clone());
-
-            let call = if is_diff {
-                args.insert("diff".to_string(), new_code.clone());
-                ToolCall {
-                    name: "apply_diff".to_string(),
-                    arguments: args,
-                }
-            } else {
-                args.insert("content".to_string(), new_code.clone());
-                ToolCall {
-                    name: "write_file".to_string(),
-                    arguments: args,
-                }
-            };
-
-            let result = self.tools.execute(&call).await;
-            if result.success {
-                log::info!("✓ Applied correction to: {}", filename);
-                self.emit_log(format!("📝 Applied correction to: {}", filename));
+                self.apply_bundle_transactionally(&bundle, &node_id, node_class)
+                    .await?;
                 self.last_tool_failure = None;
 
-                self.last_written_file = Some(full_path.clone());
+                // Track last written file from the bundle for build_correction_prompt
+                let node_workdir = self.effective_working_dir(idx);
+                if let Some(first_path) =
+                    bundle.artifacts.first().map(|a| a.path().to_string())
+                {
+                    self.last_written_file = Some(node_workdir.join(&first_path));
+                }
                 self.file_version += 1;
+                self.last_applied_bundle = Some(bundle.clone());
 
-                // Notify LSP of file change
-                let lsp_key = self.lsp_key_for_file(&full_path.to_string_lossy());
-                if let Some(client) = lsp_key.and_then(|k| self.lsp_clients.get_mut(&k)) {
-                    if let Ok(content) = std::fs::read_to_string(&full_path) {
-                        let _ = client
-                            .did_change(&full_path, &content, self.file_version)
+                // Record repair footprint
+                let diagnosis_str = format!("{:?}", diagnosis);
+                let footprint = perspt_core::RepairFootprint::new(
+                    &self.context.session_id,
+                    &node_id,
+                    "initial",
+                    attempt as u32,
+                    &bundle,
+                    &diagnosis_str,
+                );
+                self.last_repair_footprint = Some(footprint.clone());
+                if let Err(e) = self.ledger.record_repair_footprint(&footprint) {
+                    log::warn!("Failed to record repair footprint: {}", e);
+                }
+
+                // Execute bundle post-write commands
+                if !bundle.commands.is_empty() {
+                    self.emit_log(format!(
+                        "🔧 Executing {} bundle command(s)...",
+                        bundle.commands.len()
+                    ));
+                    let work_dir = self.effective_working_dir(idx);
+                    let is_python = self.graph[idx].owner_plugin == "python";
+                    for raw_command in &bundle.commands {
+                        let command = if is_python {
+                            Self::normalize_command_to_uv(raw_command)
+                        } else {
+                            raw_command.clone()
+                        };
+                        log::info!("Running correction command: {}", command);
+                        let parts: Vec<&str> = command.split_whitespace().collect();
+                        if parts.is_empty() {
+                            continue;
+                        }
+                        let output = tokio::process::Command::new(parts[0])
+                            .args(&parts[1..])
+                            .current_dir(&work_dir)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .output()
                             .await;
+                        match output {
+                            Ok(o) if o.status.success() => {
+                                self.emit_log(format!("✅ {}", command));
+                            }
+                            Ok(o) => {
+                                let stderr = String::from_utf8_lossy(&o.stderr);
+                                log::warn!("Command failed: {} — {}", command, stderr);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to run command: {} — {}", command, e);
+                            }
+                        }
                     }
                 }
-            } else {
-                self.last_tool_failure = result.error;
+            }
+
+            perspt_core::types::ParseResultState::SemanticallyRejected => {
+                // PSP-7: Classify the rejection for appropriate handling
+                let rejection_reason = record_opt
+                    .as_ref()
+                    .and_then(|r| r.rejection_reason.clone())
+                    .unwrap_or_default();
+
+                let classification =
+                    if rejection_reason.contains("All artifacts rejected") {
+                        perspt_core::types::RetryClassification::Retarget
+                    } else if rejection_reason.contains("support") {
+                        perspt_core::types::RetryClassification::SupportFileViolation
+                    } else {
+                        perspt_core::types::RetryClassification::Replan
+                    };
+
+                log::warn!(
+                    "Correction bundle semantically rejected ({:?}): {}",
+                    classification,
+                    rejection_reason
+                );
+                self.emit_log(format!(
+                    "⚠️ Correction rejected ({:?}) — will retry",
+                    classification
+                ));
+
+                // For Retarget: log expected vs dropped for diagnostics
+                if matches!(
+                    classification,
+                    perspt_core::types::RetryClassification::Retarget
+                ) {
+                    if let Some(idx) = self.node_indices.get(&node_id) {
+                        let expected: Vec<String> = self.graph[*idx]
+                            .output_targets
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        log::warn!(
+                            "Expected targets: {}, but response targeted wrong files",
+                            expected.join(", ")
+                        );
+                    }
+                }
+            }
+
+            perspt_core::types::ParseResultState::NoStructuredPayload
+            | perspt_core::types::ParseResultState::SchemaInvalid => {
+                log::warn!(
+                    "Correction response parse failed ({}), will retry with schema guidance",
+                    parse_state
+                );
+                self.emit_log(format!(
+                    "⚠️ Response parse failed ({}) — will retry",
+                    parse_state
+                ));
+            }
+
+            perspt_core::types::ParseResultState::EmptyBundle => {
+                log::warn!("Correction produced empty bundle, will retry");
+                self.emit_log("⚠️ Empty correction bundle — will retry".to_string());
             }
         }
 
-        // Extract and execute any standalone dependency commands
-        let correction_cmds = Self::extract_commands_from_correction(&corrected);
+        // PSP-7: Extract and execute standalone dependency commands via plugin policy
+        let correction_cmds =
+            Self::extract_commands_from_correction(&corrected, &owner_plugin);
         if !correction_cmds.is_empty() {
             self.emit_log(format!(
                 "📦 Running {} dependency command(s) from correction...",
