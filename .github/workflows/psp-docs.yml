@@ -118,7 +118,7 @@ jobs:
         fi
 
     - name: Setup Pages
-      uses: actions/configure-pages@v4
+      uses: actions/configure-pages@v6
 
     - name: Prepare PSP documentation for Pages
       run: |
@@ -144,4 +144,4 @@ jobs:
     steps:
     - name: Deploy to GitHub Pages
       id: deployment
-      uses: actions/deploy-pages@v4
+      uses: actions/deploy-pages@v5
