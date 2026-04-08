@@ -1,6 +1,6 @@
 //! Agent command - SRBN agent execution mode
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
@@ -51,6 +51,8 @@ pub async fn run(
     stability_threshold: f32,
     max_cost: f32,
     max_steps: usize,
+    dashboard: bool,
+    dashboard_port: u16,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
@@ -173,6 +175,44 @@ pub async fn run(
     }
 
     println!();
+
+    // Start embedded dashboard server if --dashboard flag was provided
+    if dashboard {
+        let db_path = perspt_store::SessionStore::default_db_path()
+            .context("Could not determine database path for dashboard")?;
+
+        // The agent's SessionStore (created inside the orchestrator) opens the DB
+        // in read-write mode. The dashboard opens a separate read-only connection
+        // to the same file — DuckDB supports one writer + concurrent readers.
+        let dash_store = perspt_store::SessionStore::open_read_only(&db_path)
+            .context("Failed to open read-only database for dashboard")?;
+
+        let dash_state = perspt_dashboard::state::AppState {
+            store: std::sync::Arc::new(dash_store),
+            password: None,
+            session_token: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            working_dir: working_dir.clone(),
+            is_localhost: true,
+        };
+
+        let app = perspt_dashboard::build_router(dash_state);
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], dashboard_port));
+
+        let listener = tokio::net::TcpListener::bind(addr)
+            .await
+            .context(format!("Failed to bind dashboard to port {dashboard_port}"))?;
+
+        println!("📊 Dashboard listening on http://{addr}");
+        println!();
+
+        // Spawn dashboard as a background task — it will be dropped when the
+        // agent process exits.
+        tokio::spawn(async move {
+            if let Err(e) = axum::serve(listener, app).await {
+                eprintln!("⚠️  Dashboard server error: {e}");
+            }
+        });
+    }
 
     // Check if we should run in TUI mode or headless mode
     let is_tty = std::io::stdout().is_terminal();
