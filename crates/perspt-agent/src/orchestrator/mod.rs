@@ -791,14 +791,12 @@ impl SRBNOrchestrator {
     /// be replayed vs. skipped.
     pub async fn run_resumed(&mut self) -> Result<()> {
         let result = self.run_resumed_inner().await;
-        // Map inner result to a SessionOutcome for finalize_session.
-        let outcome_result = result.map(|()| perspt_core::SessionOutcome::Success);
-        self.finalize_session(&outcome_result);
-        outcome_result.map(|_| ())
+        self.finalize_session(&result);
+        result.map(|_| ())
     }
 
     /// Inner resumed execution logic.
-    async fn run_resumed_inner(&mut self) -> Result<()> {
+    async fn run_resumed_inner(&mut self) -> Result<perspt_core::SessionOutcome> {
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
@@ -824,6 +822,20 @@ impl SRBNOrchestrator {
             // Abort gate
             if self.is_abort_requested() {
                 self.emit_log("⚠️ Session aborted — stopping resumed execution".to_string());
+                break;
+            }
+
+            // Budget gate: stop execution if step/cost/revision budget exhausted.
+            if self.budget.any_exhausted() {
+                let node_id = self.graph[*idx].node_id.clone();
+                self.emit_log(format!(
+                    "⛔ Budget exhausted — skipping node '{}' and remaining nodes",
+                    node_id
+                ));
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id,
+                    status: perspt_core::NodeStatus::Escalated,
+                });
                 break;
             }
 
@@ -863,16 +875,24 @@ impl SRBNOrchestrator {
 
             match self.execute_node(*idx).await {
                 Ok(NodeOutcome::Completed) => {
+                    executed += 1;
+                    self.budget.record_step();
+
+                    // Persist budget envelope for auditability.
+                    if let Err(e) = self.ledger.upsert_budget_envelope(&self.budget) {
+                        log::warn!("Failed to persist budget envelope: {}", e);
+                    }
+
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
                             node_id: node.node_id.clone(),
                             goal: node.goal.clone(),
                         });
                     }
-                    executed += 1;
                 }
                 Ok(NodeOutcome::Escalated) => {
                     escalated += 1;
+                    self.budget.record_step();
                     continue;
                 }
                 Err(e) => {
@@ -895,14 +915,24 @@ impl SRBNOrchestrator {
             executed,
             total_nodes
         );
+
+        // Derive session outcome from actual node results, same logic as
+        // run_orchestration: unattempted nodes count as incomplete.
+        let outcome = if escalated == 0 && executed + terminal_count >= total_nodes {
+            perspt_core::SessionOutcome::Success
+        } else if executed > 0 {
+            perspt_core::SessionOutcome::PartialSuccess
+        } else {
+            perspt_core::SessionOutcome::Failed
+        };
         self.emit_event(perspt_core::AgentEvent::Complete {
-            success: escalated == 0,
+            success: outcome == perspt_core::SessionOutcome::Success,
             message: format!(
                 "Resumed: {}/{} completed, {} escalated",
                 executed, total_nodes, escalated
             ),
         });
-        Ok(())
+        Ok(outcome)
     }
 
     /// Emit an event to the TUI (if connected)
@@ -1391,7 +1421,9 @@ impl SRBNOrchestrator {
         }
 
         // Derive session outcome from actual node results.
-        let outcome = if escalated_count == 0 {
+        // If not all nodes were attempted (due to budget/abort), only Success
+        // when every node in the plan completed.
+        let outcome = if escalated_count == 0 && completed_count >= total_nodes {
             perspt_core::SessionOutcome::Success
         } else if completed_count > 0 {
             perspt_core::SessionOutcome::PartialSuccess
@@ -1566,6 +1598,35 @@ impl SRBNOrchestrator {
             }
             break;
         } // end PSP-7 sheaf pre-check loop
+
+        // Final sheaf pre-check guard: after the retry loop, verify once more.
+        // If the retry still produced stub/missing artifacts, escalate the node
+        // instead of proceeding to commit.
+        if sheaf_pre_check_retries > 0 {
+            if let Some(evidence) = self.sheaf_pre_check(idx) {
+                log::warn!(
+                    "Sheaf pre-check still failing for {} after retry, escalating: {}",
+                    self.graph[idx].node_id,
+                    evidence
+                );
+                self.emit_log(format!(
+                    "❌ Sheaf pre-check failed after retry: {}",
+                    evidence
+                ));
+                self.graph[idx].state = NodeState::Escalated;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Escalated,
+                });
+                // Flush provisional branch on escalation
+                let node_id_for_flush = self.graph[idx].node_id.clone();
+                if let Some(ref bid) = branch_id {
+                    self.flush_provisional_branch(bid, &node_id_for_flush);
+                }
+                self.flush_descendant_branches(idx);
+                return Ok(NodeOutcome::Escalated);
+            }
+        }
 
         // Record converge success (timing from last converge_start)
         self.record_step_quietly(
@@ -4570,8 +4631,14 @@ def util():
 
     #[test]
     fn test_session_outcome_from_counts() {
-        fn derive_outcome(completed: usize, escalated: usize) -> perspt_core::SessionOutcome {
-            if escalated == 0 {
+        // The outcome derivation must account for total_nodes so that
+        // unattempted nodes (budget/abort stop) are never counted as success.
+        fn derive_outcome(
+            completed: usize,
+            escalated: usize,
+            total: usize,
+        ) -> perspt_core::SessionOutcome {
+            if escalated == 0 && completed >= total {
                 perspt_core::SessionOutcome::Success
             } else if completed > 0 {
                 perspt_core::SessionOutcome::PartialSuccess
@@ -4581,14 +4648,98 @@ def util():
         }
 
         // All completed → Success
-        assert_eq!(derive_outcome(3, 0), perspt_core::SessionOutcome::Success,);
+        assert_eq!(
+            derive_outcome(3, 0, 3),
+            perspt_core::SessionOutcome::Success,
+        );
         // Some completed, some escalated → PartialSuccess
         assert_eq!(
-            derive_outcome(2, 1),
+            derive_outcome(2, 1, 3),
             perspt_core::SessionOutcome::PartialSuccess,
         );
         // All escalated → Failed
-        assert_eq!(derive_outcome(0, 3), perspt_core::SessionOutcome::Failed,);
+        assert_eq!(derive_outcome(0, 3, 3), perspt_core::SessionOutcome::Failed,);
+        // Budget-stopped: 5 of 20 completed, 0 escalated → PartialSuccess (not Success!)
+        assert_eq!(
+            derive_outcome(5, 0, 20),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // Budget-stopped: 0 of 20 completed, 0 escalated → Failed
+        assert_eq!(
+            derive_outcome(0, 0, 20),
+            perspt_core::SessionOutcome::Failed,
+        );
+    }
+
+    #[test]
+    fn test_resumed_outcome_from_counts() {
+        // Resumed sessions derive outcome the same way: unattempted nodes
+        // prevent Success, and terminal_count offsets the total.
+        fn derive_resumed_outcome(
+            executed: usize,
+            escalated: usize,
+            terminal_count: usize,
+            total: usize,
+        ) -> perspt_core::SessionOutcome {
+            if escalated == 0 && executed + terminal_count >= total {
+                perspt_core::SessionOutcome::Success
+            } else if executed > 0 {
+                perspt_core::SessionOutcome::PartialSuccess
+            } else {
+                perspt_core::SessionOutcome::Failed
+            }
+        }
+
+        // All resumable nodes completed, 2 already terminal
+        assert_eq!(
+            derive_resumed_outcome(3, 0, 2, 5),
+            perspt_core::SessionOutcome::Success,
+        );
+        // Some escalated on resume
+        assert_eq!(
+            derive_resumed_outcome(2, 1, 2, 5),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // Budget stopped mid-resume: 2 of 5 completed, 2 terminal, 1 not attempted
+        assert_eq!(
+            derive_resumed_outcome(1, 0, 2, 5),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // Nothing executed on resume (all blocked/seal-gated)
+        assert_eq!(
+            derive_resumed_outcome(0, 0, 5, 5),
+            perspt_core::SessionOutcome::Success,
+        );
+        // Nothing executed, not all terminal → Failed
+        assert_eq!(
+            derive_resumed_outcome(0, 0, 2, 5),
+            perspt_core::SessionOutcome::Failed,
+        );
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_stub_escalates_after_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub_path = dir.path().join("stub.rs");
+        std::fs::write(&stub_path, "fn main() {\n    todo!()\n}\n").unwrap();
+
+        let (mut orch, idx) = orch_with_node(dir.path().to_path_buf());
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("stub.rs"));
+        orch.graph[idx].owner_plugin = "rust".to_string();
+
+        // First call detects stub
+        let first = orch.sheaf_pre_check(idx);
+        assert!(first.is_some(), "First pre-check should detect stub");
+
+        // Simulate: after retry, the file is still a stub.
+        // The final guard should also detect it.
+        let second = orch.sheaf_pre_check(idx);
+        assert!(
+            second.is_some(),
+            "Final guard should still detect stub after retry"
+        );
     }
 
     /// Helper: create an orchestrator with a single default node for testing.
