@@ -12,6 +12,10 @@ description = "Your Terminal's Window to the AI World - A high-performance CLI f
 keywords = ["llm", "ai", "terminal", "chat", "agent"]
 categories = ["command-line-utilities", "development-tools"]
 
+[features]
+default = []
+bundled = ["perspt-store/bundled", "perspt-agent/bundled"]
+
 [dependencies]
 perspt-core = { workspace = true }
 perspt-agent = { workspace = true }
