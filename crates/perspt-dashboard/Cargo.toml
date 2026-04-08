@@ -11,6 +11,10 @@ documentation = "https://docs.rs/perspt-dashboard"
 keywords = ["dashboard", "monitoring", "web", "agent"]
 categories = ["web-programming::http-server", "visualization"]
 
+[features]
+default = []
+bundled = ["perspt-store/bundled"]
+
 [dependencies]
 perspt-store = { version = "0.5.8", path = "../perspt-store" }
 perspt-core = { version = "0.5.8", path = "../perspt-core" }

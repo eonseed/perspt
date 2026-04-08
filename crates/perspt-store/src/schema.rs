@@ -629,6 +629,78 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // =========================================================================
+    // PSP-7: SRBN step records and correction attempt telemetry
+    // =========================================================================
+
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_srbn_step_records_id START 1",
+        [],
+    )?;
+    conn.execute(
+        "CREATE SEQUENCE IF NOT EXISTS seq_correction_attempts_id START 1",
+        [],
+    )?;
+
+    // SRBN step records — one row per orchestration step transition per node.
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS srbn_step_records (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_srbn_step_records_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            step VARCHAR NOT NULL,
+            outcome VARCHAR NOT NULL,
+            energy_json TEXT,
+            parse_state VARCHAR,
+            retry_classification VARCHAR,
+            attempt_count INTEGER DEFAULT 0,
+            duration_ms INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_srbn_step_records_session ON srbn_step_records(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_srbn_step_records_node ON srbn_step_records(session_id, node_id)",
+        [],
+    )?;
+
+    // Correction attempts — one row per correction round-trip within convergence.
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS correction_attempts (
+            id INTEGER PRIMARY KEY DEFAULT nextval('seq_correction_attempts_id'),
+            session_id VARCHAR NOT NULL,
+            node_id VARCHAR NOT NULL,
+            attempt INTEGER NOT NULL,
+            parse_state VARCHAR NOT NULL,
+            retry_classification VARCHAR,
+            response_fingerprint VARCHAR NOT NULL,
+            response_length INTEGER NOT NULL,
+            energy_json TEXT,
+            accepted BOOLEAN NOT NULL,
+            rejection_reason TEXT,
+            created_at BIGINT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_correction_attempts_session ON correction_attempts(session_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_correction_attempts_node ON correction_attempts(session_id, node_id)",
+        [],
+    )?;
+
     log::info!("DuckDB schema initialized successfully");
     Ok(())
 }

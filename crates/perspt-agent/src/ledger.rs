@@ -1308,6 +1308,44 @@ impl MerkleLedger {
         let session_id = self.session_id()?;
         self.store.get_budget_envelope(&session_id)
     }
+
+    // =====================================================================
+    // PSP-7: SRBN step records and correction attempt wrappers
+    // =====================================================================
+
+    /// Record an orchestration step transition for the current session.
+    pub fn record_step(&self, record: &perspt_store::SrbnStepRecord) -> Result<()> {
+        self.store.record_step(record)
+    }
+
+    /// Retrieve the step timeline for a node in the current session.
+    pub fn get_step_timeline(&self, node_id: &str) -> Result<Vec<perspt_store::SrbnStepRecord>> {
+        let session_id = self.session_id()?;
+        self.store.get_step_timeline(&session_id, node_id)
+    }
+
+    /// Retrieve all step records for the current session.
+    pub fn get_session_steps(&self) -> Result<Vec<perspt_store::SrbnStepRecord>> {
+        let session_id = self.session_id()?;
+        self.store.get_session_steps(&session_id)
+    }
+
+    /// Record a correction attempt for the current session.
+    pub fn record_correction_attempt(
+        &self,
+        record: &perspt_store::CorrectionAttemptRow,
+    ) -> Result<()> {
+        self.store.record_correction_attempt(record)
+    }
+
+    /// Retrieve all correction attempts for a node in the current session.
+    pub fn get_correction_attempts(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<perspt_store::CorrectionAttemptRow>> {
+        let session_id = self.session_id()?;
+        self.store.get_correction_attempts(&session_id, node_id)
+    }
 }
 
 /// PSP-5 Phase 7: Aggregated review summary for a single node.

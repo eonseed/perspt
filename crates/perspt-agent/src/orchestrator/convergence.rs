@@ -106,6 +106,21 @@ impl SRBNOrchestrator {
             total, epsilon, attempt_count
         ));
 
+        // PSP-7: Budget ceiling check before LLM call
+        if self.budget.cost_exhausted() {
+            log::warn!(
+                "Budget exhausted (${:.2} / ${:.2}) — escalating node '{}'",
+                self.budget.cost_used_usd,
+                self.budget.max_cost_usd.unwrap_or(f64::INFINITY),
+                node_id
+            );
+            self.emit_log(format!(
+                "💰 Budget exhausted (${:.2}) — escalating",
+                self.budget.cost_used_usd
+            ));
+            return Ok(false);
+        }
+
         // Build correction prompt with diagnostics
         let correction_prompt = self.build_correction_prompt(&node_id, &goal, &energy)?;
 
@@ -119,140 +134,199 @@ impl SRBNOrchestrator {
         // Call LLM for corrected code
         let corrected = self.call_llm_for_correction(&correction_prompt).await?;
 
-        // Attempt bundle-aware correction first, fall back to single-file
+        // PSP-7: Typed parse pipeline replaces legacy Option-based parsing
         let node_class = self.graph[idx].node_class;
         let attempt = self.graph[idx].monitor.attempt_count;
         let diagnosis = self.context.last_diagnostics.clone();
+        let owner_plugin = self.graph[idx].owner_plugin.clone();
 
-        if let Some(bundle) = self.parse_artifact_bundle(&corrected) {
-            // Bundle-aware repair: apply using the same transactional path
-            // as speculative generation.
+        let (bundle_opt, parse_state, record_opt) =
+            self.parse_artifact_bundle_typed(&corrected, &node_id, attempt as u32);
+
+        // Log structured correction attempt record
+        if let Some(ref record) = record_opt {
             log::info!(
-                "Applying correction bundle: {} artifact(s), {} command(s)",
-                bundle.artifacts.len(),
-                bundle.commands.len()
+                "PSP-7 correction attempt {}: parse_state={}, accepted={}, rejection={:?}",
+                record.attempt,
+                record.parse_state,
+                record.accepted,
+                record.rejection_reason
             );
-            self.emit_log(format!(
-                "🔧 Applying correction bundle ({} artifact(s))",
-                bundle.artifacts.len()
-            ));
 
-            self.apply_bundle_transactionally(&bundle, &node_id, node_class)
-                .await?;
-            self.last_tool_failure = None;
-
-            // Track last written file from the bundle for build_correction_prompt
-            let node_workdir = self.effective_working_dir(idx);
-            if let Some(first_path) = bundle.artifacts.first().map(|a| a.path().to_string()) {
-                self.last_written_file = Some(node_workdir.join(&first_path));
-            }
-            self.file_version += 1;
-            self.last_applied_bundle = Some(bundle.clone());
-
-            // Record repair footprint
-            let diagnosis_str = format!("{:?}", diagnosis);
-            let footprint = perspt_core::RepairFootprint::new(
-                &self.context.session_id,
-                &node_id,
-                "initial", // plan revision tracking added in later steps
-                attempt as u32,
-                &bundle,
-                &diagnosis_str,
-            );
-            self.last_repair_footprint = Some(footprint.clone());
-            if let Err(e) = self.ledger.record_repair_footprint(&footprint) {
-                log::warn!("Failed to record repair footprint: {}", e);
-            }
-
-            // Execute bundle post-write commands
-            if !bundle.commands.is_empty() {
-                self.emit_log(format!(
-                    "🔧 Executing {} bundle command(s)...",
-                    bundle.commands.len()
-                ));
-                let work_dir = self.effective_working_dir(idx);
-                let is_python = self.graph[idx].owner_plugin == "python";
-                for raw_command in &bundle.commands {
-                    let command = if is_python {
-                        Self::normalize_command_to_uv(raw_command)
-                    } else {
-                        raw_command.clone()
-                    };
-                    log::info!("Running correction command: {}", command);
-                    let parts: Vec<&str> = command.split_whitespace().collect();
-                    if parts.is_empty() {
-                        continue;
-                    }
-                    let output = tokio::process::Command::new(parts[0])
-                        .args(&parts[1..])
-                        .current_dir(&work_dir)
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .output()
-                        .await;
-                    match output {
-                        Ok(o) if o.status.success() => {
-                            self.emit_log(format!("✅ {}", command));
-                        }
-                        Ok(o) => {
-                            let stderr = String::from_utf8_lossy(&o.stderr);
-                            log::warn!("Command failed: {} — {}", command, stderr);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to run command: {} — {}", command, e);
-                        }
-                    }
-                }
-            }
-        } else if let Some((filename, new_code, is_diff)) =
-            self.extract_code_from_response(&corrected)
-        {
-            // Legacy single-file fallback for backward compatibility
-            let node_workdir = self.effective_working_dir(idx);
-            let full_path = node_workdir.join(&filename);
-
-            let mut args = HashMap::new();
-            args.insert("path".to_string(), filename.clone());
-
-            let call = if is_diff {
-                args.insert("diff".to_string(), new_code.clone());
-                ToolCall {
-                    name: "apply_diff".to_string(),
-                    arguments: args,
-                }
-            } else {
-                args.insert("content".to_string(), new_code.clone());
-                ToolCall {
-                    name: "write_file".to_string(),
-                    arguments: args,
-                }
+            // PSP-7: Persist correction attempt to store
+            let row = perspt_store::CorrectionAttemptRow {
+                session_id: self.context.session_id.clone(),
+                node_id: node_id.clone(),
+                attempt: record.attempt as i32,
+                parse_state: format!("{}", record.parse_state),
+                retry_classification: record
+                    .retry_classification
+                    .as_ref()
+                    .map(|c| format!("{}", c)),
+                response_fingerprint: record.response_fingerprint.clone(),
+                response_length: record.response_length as i32,
+                energy_json: record
+                    .energy_after
+                    .as_ref()
+                    .and_then(|e| serde_json::to_string(e).ok()),
+                accepted: record.accepted,
+                rejection_reason: record.rejection_reason.clone(),
+                created_at: record.created_at,
             };
-
-            let result = self.tools.execute(&call).await;
-            if result.success {
-                log::info!("✓ Applied correction to: {}", filename);
-                self.emit_log(format!("📝 Applied correction to: {}", filename));
-                self.last_tool_failure = None;
-
-                self.last_written_file = Some(full_path.clone());
-                self.file_version += 1;
-
-                // Notify LSP of file change
-                let lsp_key = self.lsp_key_for_file(&full_path.to_string_lossy());
-                if let Some(client) = lsp_key.and_then(|k| self.lsp_clients.get_mut(&k)) {
-                    if let Ok(content) = std::fs::read_to_string(&full_path) {
-                        let _ = client
-                            .did_change(&full_path, &content, self.file_version)
-                            .await;
-                    }
-                }
-            } else {
-                self.last_tool_failure = result.error;
+            if let Err(e) = self.ledger.record_correction_attempt(&row) {
+                log::warn!("Failed to persist correction attempt: {}", e);
             }
         }
 
-        // Extract and execute any standalone dependency commands
-        let correction_cmds = Self::extract_commands_from_correction(&corrected);
+        match parse_state {
+            perspt_core::types::ParseResultState::StrictJsonOk
+            | perspt_core::types::ParseResultState::TolerantRecoveryOk => {
+                let bundle = bundle_opt.expect("Accepted parse must yield a bundle");
+
+                log::info!(
+                    "Applying correction bundle ({}): {} artifact(s), {} command(s)",
+                    parse_state,
+                    bundle.artifacts.len(),
+                    bundle.commands.len()
+                );
+                self.emit_log(format!(
+                    "🔧 Applying correction bundle ({} artifact(s))",
+                    bundle.artifacts.len()
+                ));
+
+                self.apply_bundle_transactionally(&bundle, &node_id, node_class)
+                    .await?;
+                self.last_tool_failure = None;
+
+                // Track last written file from the bundle for build_correction_prompt
+                let node_workdir = self.effective_working_dir(idx);
+                if let Some(first_path) = bundle.artifacts.first().map(|a| a.path().to_string()) {
+                    self.last_written_file = Some(node_workdir.join(&first_path));
+                }
+                self.file_version += 1;
+                self.last_applied_bundle = Some(bundle.clone());
+
+                // Record repair footprint
+                let diagnosis_str = format!("{:?}", diagnosis);
+                let footprint = perspt_core::RepairFootprint::new(
+                    &self.context.session_id,
+                    &node_id,
+                    "initial",
+                    attempt as u32,
+                    &bundle,
+                    &diagnosis_str,
+                );
+                self.last_repair_footprint = Some(footprint.clone());
+                if let Err(e) = self.ledger.record_repair_footprint(&footprint) {
+                    log::warn!("Failed to record repair footprint: {}", e);
+                }
+
+                // Execute bundle post-write commands
+                if !bundle.commands.is_empty() {
+                    self.emit_log(format!(
+                        "🔧 Executing {} bundle command(s)...",
+                        bundle.commands.len()
+                    ));
+                    let work_dir = self.effective_working_dir(idx);
+                    let is_python = self.graph[idx].owner_plugin == "python";
+                    for raw_command in &bundle.commands {
+                        let command = if is_python {
+                            Self::normalize_command_to_uv(raw_command)
+                        } else {
+                            raw_command.clone()
+                        };
+                        log::info!("Running correction command: {}", command);
+                        let parts: Vec<&str> = command.split_whitespace().collect();
+                        if parts.is_empty() {
+                            continue;
+                        }
+                        let output = tokio::process::Command::new(parts[0])
+                            .args(&parts[1..])
+                            .current_dir(&work_dir)
+                            .stdout(std::process::Stdio::piped())
+                            .stderr(std::process::Stdio::piped())
+                            .output()
+                            .await;
+                        match output {
+                            Ok(o) if o.status.success() => {
+                                self.emit_log(format!("✅ {}", command));
+                            }
+                            Ok(o) => {
+                                let stderr = String::from_utf8_lossy(&o.stderr);
+                                log::warn!("Command failed: {} — {}", command, stderr);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to run command: {} — {}", command, e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            perspt_core::types::ParseResultState::SemanticallyRejected => {
+                // PSP-7: Classify the rejection for appropriate handling
+                let rejection_reason = record_opt
+                    .as_ref()
+                    .and_then(|r| r.rejection_reason.clone())
+                    .unwrap_or_default();
+
+                let classification = if rejection_reason.contains("All artifacts rejected") {
+                    perspt_core::types::RetryClassification::Retarget
+                } else if rejection_reason.contains("support") {
+                    perspt_core::types::RetryClassification::SupportFileViolation
+                } else {
+                    perspt_core::types::RetryClassification::Replan
+                };
+
+                log::warn!(
+                    "Correction bundle semantically rejected ({:?}): {}",
+                    classification,
+                    rejection_reason
+                );
+                self.emit_log(format!(
+                    "⚠️ Correction rejected ({:?}) — will retry",
+                    classification
+                ));
+
+                // For Retarget: log expected vs dropped for diagnostics
+                if matches!(
+                    classification,
+                    perspt_core::types::RetryClassification::Retarget
+                ) {
+                    if let Some(idx) = self.node_indices.get(&node_id) {
+                        let expected: Vec<String> = self.graph[*idx]
+                            .output_targets
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect();
+                        log::warn!(
+                            "Expected targets: {}, but response targeted wrong files",
+                            expected.join(", ")
+                        );
+                    }
+                }
+            }
+
+            perspt_core::types::ParseResultState::NoStructuredPayload
+            | perspt_core::types::ParseResultState::SchemaInvalid => {
+                log::warn!(
+                    "Correction response parse failed ({}), will retry with schema guidance",
+                    parse_state
+                );
+                self.emit_log(format!(
+                    "⚠️ Response parse failed ({}) — will retry",
+                    parse_state
+                ));
+            }
+
+            perspt_core::types::ParseResultState::EmptyBundle => {
+                log::warn!("Correction produced empty bundle, will retry");
+                self.emit_log("⚠️ Empty correction bundle — will retry".to_string());
+            }
+        }
+
+        // PSP-7: Extract and execute standalone dependency commands via plugin policy
+        let correction_cmds = Self::extract_commands_from_correction(&corrected, &owner_plugin);
         if !correction_cmds.is_empty() {
             self.emit_log(format!(
                 "📦 Running {} dependency command(s) from correction...",
@@ -314,16 +388,15 @@ impl SRBNOrchestrator {
             .node_indices
             .get(node_id)
             .map(|idx| self.graph[*idx].owner_plugin.as_str())
-            .unwrap_or("");
+            .unwrap_or("")
+            .to_string();
 
         // Collect files to include in the prompt.
         // Priority: node's declared output_targets > repair footprint > last_written_file.
-        // The old approach of falling back to last_written_file could show
-        // the wrong file (e.g., root src/lib.rs from another node).
-        let mut file_sections = Vec::new();
+        let mut file_sections: Vec<(String, String)> = Vec::new();
         let mut seen_paths = std::collections::HashSet::new();
 
-        // 1. Include all of the node's declared output_targets (the files it SHOULD produce)
+        // 1. Include all of the node's declared output_targets
         if let Some(idx) = self.node_indices.get(node_id) {
             let node_workdir = self.effective_working_dir(*idx);
             for target in &self.graph[*idx].output_targets {
@@ -337,7 +410,7 @@ impl SRBNOrchestrator {
             }
         }
 
-        // 2. Supplement with repair footprint files (may include files written by correction)
+        // 2. Supplement with repair footprint files
         if let Some(ref footprint) = self.last_repair_footprint {
             let node_workdir = if let Some(idx) = self.node_indices.get(&footprint.node_id) {
                 self.effective_working_dir(*idx)
@@ -361,7 +434,6 @@ impl SRBNOrchestrator {
         }
 
         // 3. Include the workspace root manifest for structural context
-        //    (helps the LLM understand crate layout for cross-crate imports)
         let root_manifest_names = ["Cargo.toml", "package.json", "pyproject.toml"];
         for manifest_name in &root_manifest_names {
             let manifest_path = self.context.working_dir.join(manifest_name);
@@ -374,7 +446,7 @@ impl SRBNOrchestrator {
                         }
                     }
                 }
-                break; // Only include one root manifest
+                break;
             }
         }
 
@@ -398,53 +470,11 @@ impl SRBNOrchestrator {
             file_sections.push((file_path, current_code));
         }
 
-        // Detect language from first file extension for code fences
-        let primary_path = &file_sections[0].0;
-        let lang = std::path::Path::new(primary_path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|ext| match ext {
-                "py" => "python",
-                "rs" => "rust",
-                "ts" | "tsx" => "typescript",
-                "js" | "jsx" => "javascript",
-                "go" => "go",
-                "java" => "java",
-                "rb" => "ruby",
-                "c" | "h" => "c",
-                "cpp" | "cc" | "cxx" | "hpp" => "cpp",
-                "cs" => "csharp",
-                other => other,
-            })
-            .unwrap_or("text");
-
-        let mut prompt = format!(
-            "## Code Correction Required\n\n\
-             The code you generated has {} error(s) detected by the language toolchain.\n\
-             Your task is to fix ALL errors and return the complete corrected file(s).\n\n\
-             ### Original Goal\n{}\n\n\
-             ### Current Code (with errors)\n",
-            diagnostics.len(),
-            goal,
-        );
-
-        // Include all affected files
-        for (path, content) in &file_sections {
-            prompt.push_str(&format!(
-                "File: {}\n```{}\n{}\n```\n\n",
-                path, lang, content
-            ));
-        }
-
-        prompt.push_str(&format!(
-            "### Detected Errors (V_syn = {:.2})\n",
-            energy.v_syn
-        ));
-
-        // Add each diagnostic with specific fix direction
+        // Pre-format structured diagnostics with fix directions
+        let mut diag_text = String::new();
         for (i, diag) in diagnostics.iter().enumerate() {
             let fix_direction = self.get_fix_direction(diag);
-            prompt.push_str(&format!(
+            diag_text.push_str(&format!(
                 r#"
 #### Error {}
 - **Location**: Line {}, Column {}
@@ -461,91 +491,75 @@ impl SRBNOrchestrator {
             ));
         }
 
-        // PSP-5 Phase 3: Include restriction-map context so the LLM can
-        // reference structural dependencies and sealed interfaces during
-        // correction instead of operating blind.
-        if !self.last_formatted_context.is_empty() {
-            prompt.push_str(&format!(
-                "\n### Restriction Map Context\n\n{}\n",
-                self.last_formatted_context
-            ));
-        }
-
-        // Include the sandbox/workspace file tree so corrections target
-        // paths that actually exist on disk.
-        if let Some(idx) = self.node_indices.get(node_id) {
+        // Gather project file tree
+        let project_tree = if let Some(idx) = self.node_indices.get(node_id) {
             let wd = self.effective_working_dir(*idx);
-            if let Ok(tree) = crate::tools::list_sandbox_files(&wd) {
-                if !tree.is_empty() {
-                    prompt.push_str(&format!(
-                        "\n### Current Project Tree\n\n```\n{}\n```\n",
-                        tree.join("\n")
-                    ));
-                }
-            }
-        }
-
-        // Include raw build/test output from plugin verification if available.
-        // This is crucial because LSP diagnostics may not report missing crate
-        // errors that `cargo check` / `cargo build` would catch.
-        if let Some(ref test_output) = self.context.last_test_output {
-            if !test_output.is_empty() {
-                // Truncate to avoid blowing up the prompt
-                let truncated = if test_output.len() > 3000 {
-                    &test_output[..3000]
-                } else {
-                    test_output.as_str()
-                };
-                prompt.push_str(&format!(
-                    "\n### Build / Test Output\nThe following is the raw output from the build toolchain (e.g. `cargo check` / `cargo build`). \
-                     Use this to identify missing dependencies, unresolved imports, or type errors:\n```\n{}\n```\n",
-                    truncated
-                ));
-            }
-        }
-
-        let multi_file = file_sections.len() > 1;
-        let file_instruction = if multi_file {
-            "Return ALL affected files as a JSON artifact bundle"
+            crate::tools::list_sandbox_files(&wd)
+                .ok()
+                .filter(|t| !t.is_empty())
+                .map(|t| t.join("\n"))
         } else {
-            "Return the COMPLETE corrected file, not just snippets"
+            None
         };
 
-        // Generate language-specific dependency command examples
-        let commands_example = match owner_plugin {
-            "rust" => "cargo add thiserror\ncargo add clap --features derive",
-            "python" => "uv add httpx\nuv add --dev pytest",
-            "javascript" => "npm install express\nnpm install --save-dev jest",
-            _ => "cargo add thiserror\nuv add httpx",
+        // Gather build/test output (truncated)
+        let build_output = self
+            .context
+            .last_test_output
+            .as_ref()
+            .filter(|o| !o.is_empty())
+            .map(|o| {
+                if o.len() > 3000 {
+                    o[..3000].to_string()
+                } else {
+                    o.clone()
+                }
+            });
+
+        // Gather previous correction attempts for the node
+        let previous_attempts = self
+            .node_indices
+            .get(node_id)
+            .map(|idx| self.graph[*idx].monitor.attempt_count)
+            .unwrap_or(0);
+
+        let evidence = perspt_core::types::PromptEvidence {
+            node_goal: Some(goal.to_string()),
+            existing_file_contents: file_sections,
+            verifier_diagnostics: if diag_text.is_empty() {
+                None
+            } else {
+                Some(diag_text)
+            },
+            energy_v_syn: Some(energy.v_syn),
+            owner_plugin: Some(owner_plugin),
+            restriction_map_context: if self.last_formatted_context.is_empty() {
+                None
+            } else {
+                Some(self.last_formatted_context.clone())
+            },
+            project_file_tree: project_tree,
+            build_test_output: build_output,
+            previous_attempt_count: previous_attempts.saturating_sub(1),
+            plugin_correction_fragment: {
+                let registry = perspt_core::plugin::PluginRegistry::new();
+                self.node_indices
+                    .get(node_id)
+                    .and_then(|idx| {
+                        let p = self.graph[*idx].owner_plugin.as_str();
+                        registry.get(p)
+                    })
+                    .and_then(|plugin| plugin.correction_prompt_fragment())
+                    .map(|s| s.to_string())
+            },
+            ..Default::default()
         };
 
-        prompt.push_str(&format!(
-            r#"
-### Fix Requirements
-1. Fix ALL errors listed above - do not leave any unfixed
-2. Maintain the original functionality and goal
-3. Follow {} language conventions and idioms
-4. Import any missing modules or dependencies
-5. {}
-6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
-
-### Output Format
-Provide the complete corrected file(s) followed by any dependency commands needed:
-
-File: [same filename]
-```{}
-[complete corrected code]
-```
-
-Commands: [optional, one per line]
-```
-{}
-```
-"#,
-            lang, file_instruction, lang, commands_example
-        ));
-
-        Ok(prompt)
+        let compiled = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::CorrectionRetry,
+            &evidence,
+        );
+        Ok(compiled.text)
     }
 
     /// Map diagnostic message patterns to specific fix directions
@@ -591,7 +605,11 @@ Commands: [optional, one per line]
     /// the corrected code artifact.
     async fn call_llm_for_correction(&mut self, prompt: &str) -> Result<String> {
         // Stage 1: Verifier analyzes the failure
-        let verifier_prompt = format!("{}{}", crate::prompts::VERIFIER_ANALYSIS_PREAMBLE, prompt);
+        let verifier_prompt = format!(
+            "{}{}",
+            crate::prompt_compiler::VERIFIER_ANALYSIS_PREAMBLE,
+            prompt
+        );
 
         log::debug!(
             "Stage 1: Sending analysis to verifier model: {}",
@@ -648,12 +666,17 @@ Commands: [optional, one per line]
         let tokens_in = llm_response.tokens_in.unwrap_or(0);
         let tokens_out = llm_response.tokens_out.unwrap_or(0);
 
-        // Always record lightweight token/latency metrics regardless of --log-llm.
-        if let Err(e) = self
-            .ledger
-            .record_llm_usage(model, node_id, latency_ms, tokens_in, tokens_out)
-        {
-            log::warn!("Failed to persist LLM usage metrics: {}", e);
+        // Record lightweight token/latency metrics only when full logging is off.
+        // When --log-llm is active, record_llm_request below writes a single row
+        // with tokens, latency, AND full text — so we skip the usage-only row to
+        // avoid double-counting.
+        if !self.context.log_llm {
+            if let Err(e) = self
+                .ledger
+                .record_llm_usage(model, node_id, latency_ms, tokens_in, tokens_out)
+            {
+                log::warn!("Failed to persist LLM usage metrics: {}", e);
+            }
         }
 
         // Always update budget envelope with estimated cost.

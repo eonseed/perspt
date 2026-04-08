@@ -11,6 +11,10 @@ documentation = "https://docs.rs/perspt-store"
 keywords = ["persistence", "duckdb", "srbn", "session"]
 categories = ["database"]
 
+[features]
+default = []
+bundled = ["duckdb/bundled"]
+
 [dependencies]
 perspt-core = { version = "0.5.8", path = "../perspt-core" }
 
