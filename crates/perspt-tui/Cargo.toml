@@ -11,6 +11,10 @@ documentation = "https://docs.rs/perspt-tui"
 keywords = ["tui", "terminal", "ui", "ratatui"]
 categories = ["command-line-utilities", "development-tools"]
 
+[features]
+default = []
+bundled = ["perspt-store/bundled", "perspt-agent/bundled"]
+
 [dependencies]
 perspt-core = { version = "0.5.8", path = "../perspt-core" }
 perspt-agent = { version = "0.5.8", path = "../perspt-agent" }

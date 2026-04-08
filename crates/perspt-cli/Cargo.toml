@@ -16,6 +16,15 @@ name = "perspt"
 path = "src/main.rs"
 doc = false
 
+[features]
+default = []
+bundled = [
+    "perspt-store/bundled",
+    "perspt-agent/bundled",
+    "perspt-tui/bundled",
+    "perspt-dashboard/bundled",
+]
+
 [dependencies]
 perspt-core = { version = "0.5.8", path = "../perspt-core" }
 perspt-tui = { version = "0.5.8", path = "../perspt-tui" }
