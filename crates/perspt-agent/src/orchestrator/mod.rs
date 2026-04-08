@@ -140,6 +140,178 @@ fn epoch_seconds() -> i64 {
         .as_secs() as i64
 }
 
+/// Detect stub/placeholder content in a generated source file.
+///
+/// Returns `Some(reason)` if the file is predominantly stub content (i.e. it
+/// contains a known stub pattern AND has fewer than 5 lines of real code).
+/// Returns `None` for files that contain a real implementation.
+///
+/// Language detection uses `plugin_hint` ("rust", "python", "javascript") with
+/// a fallback to file extension so this works for any project type.
+fn detect_stub_content(path: &std::path::Path, plugin_hint: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+
+    // Determine language from plugin hint or file extension.
+    let lang = if !plugin_hint.is_empty() && plugin_hint != "unknown" {
+        plugin_hint.to_ascii_lowercase()
+    } else {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| match e {
+                "rs" => "rust",
+                "py" => "python",
+                "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => "javascript",
+                _ => "",
+            })
+            .unwrap_or("")
+            .to_string()
+    };
+
+    // Universal stub markers (case-insensitive substring match).
+    let universal_patterns = [
+        "// stub",
+        "# stub",
+        "// placeholder",
+        "# placeholder",
+        "// will be replaced",
+        "# will be replaced",
+        "/* todo */",
+    ];
+
+    // Language-specific stub patterns.
+    let lang_patterns: &[&str] = match lang.as_str() {
+        "rust" => &["todo!()", "unimplemented!()"],
+        "python" => &["raise NotImplementedError", "raise NotImplementedError()"],
+        "javascript" | "typescript" => &[
+            "throw new Error(\"not implemented\")",
+            "throw new Error('not implemented')",
+            "throw new Error(\"TODO\")",
+            "throw new Error('TODO')",
+        ],
+        _ => &[],
+    };
+
+    let content_lower = content.to_ascii_lowercase();
+
+    // Check for any matching stub pattern.
+    let mut matched_pattern = None;
+    for pat in &universal_patterns {
+        if content_lower.contains(pat) {
+            matched_pattern = Some(*pat);
+            break;
+        }
+    }
+    if matched_pattern.is_none() {
+        for pat in lang_patterns {
+            if content.contains(pat) {
+                matched_pattern = Some(*pat);
+                break;
+            }
+        }
+    }
+
+    // Python-specific: detect `pass` or `...` as sole function/class body.
+    if matched_pattern.is_none() && lang == "python" {
+        let trimmed_lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
+        let body_only: Vec<&&str> = trimmed_lines
+            .iter()
+            .filter(|l| {
+                !l.starts_with("def ")
+                    && !l.starts_with("class ")
+                    && !l.starts_with("import ")
+                    && !l.starts_with("from ")
+            })
+            .collect();
+        if body_only.len() <= 2 && body_only.iter().all(|l| **l == "pass" || **l == "...") {
+            matched_pattern = Some("only pass/... body");
+        }
+    }
+
+    let pattern = matched_pattern?;
+
+    // Count real code lines: non-blank, non-comment, non-import.
+    let real_lines = count_real_code_lines(&content, &lang);
+    if real_lines >= 5 {
+        // File has enough real code — a single stub marker inside a large
+        // implementation is acceptable (e.g. a todo!() in one branch).
+        return None;
+    }
+
+    Some(format!(
+        "found '{}' with only {} line(s) of real code",
+        pattern, real_lines
+    ))
+}
+
+/// Count non-blank, non-comment, non-import lines of code.
+fn count_real_code_lines(content: &str, lang: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            // Skip comments.
+            match lang {
+                "rust" => {
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with("/*")
+                        || trimmed.starts_with('*')
+                    {
+                        return false;
+                    }
+                    // Skip use/extern/mod declarations (imports).
+                    if trimmed.starts_with("use ")
+                        || trimmed.starts_with("extern ")
+                        || trimmed.starts_with("mod ")
+                    {
+                        return false;
+                    }
+                }
+                "python" => {
+                    if trimmed.starts_with('#')
+                        || trimmed.starts_with("\"\"\"")
+                        || trimmed.starts_with("'''")
+                    {
+                        return false;
+                    }
+                    if trimmed.starts_with("import ") || trimmed.starts_with("from ") {
+                        return false;
+                    }
+                }
+                "javascript" | "typescript" => {
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with("/*")
+                        || trimmed.starts_with('*')
+                    {
+                        return false;
+                    }
+                    if trimmed.starts_with("import ")
+                        || trimmed.starts_with("require(")
+                        || trimmed.starts_with("const ") && trimmed.contains("require(")
+                    {
+                        return false;
+                    }
+                }
+                _ => {
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with('#')
+                        || trimmed.starts_with("/*")
+                    {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .count()
+}
+
 impl SRBNOrchestrator {
     /// Create a new orchestrator with default models
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
@@ -342,13 +514,15 @@ impl SRBNOrchestrator {
     }
 
     /// Finalize the session in the ledger based on the execution result.
-    fn finalize_session(&mut self, result: &Result<()>) {
+    fn finalize_session(&mut self, result: &Result<perspt_core::SessionOutcome>) {
         let status = if self.is_abort_requested() {
             "ABORTED"
-        } else if result.is_ok() {
-            "COMPLETED"
         } else {
-            "FAILED"
+            match result {
+                Ok(perspt_core::SessionOutcome::Success) => "COMPLETED",
+                Ok(perspt_core::SessionOutcome::PartialSuccess) => "PARTIAL",
+                Ok(perspt_core::SessionOutcome::Failed) | Err(_) => "FAILED",
+            }
         };
         if let Err(e) = self.ledger.end_session(status) {
             log::error!("Failed to finalize session as {}: {}", status, e);
@@ -617,8 +791,10 @@ impl SRBNOrchestrator {
     /// be replayed vs. skipped.
     pub async fn run_resumed(&mut self) -> Result<()> {
         let result = self.run_resumed_inner().await;
-        self.finalize_session(&result);
-        result
+        // Map inner result to a SessionOutcome for finalize_session.
+        let outcome_result = result.map(|()| perspt_core::SessionOutcome::Success);
+        self.finalize_session(&outcome_result);
+        outcome_result.map(|_| ())
     }
 
     /// Inner resumed execution logic.
@@ -930,11 +1106,11 @@ impl SRBNOrchestrator {
         // Run orchestration and always finalize the session
         let result = self.run_orchestration(task).await;
         self.finalize_session(&result);
-        result
+        result.map(|_| ())
     }
 
     /// Inner orchestration logic — called by `run()` which handles session lifecycle.
-    async fn run_orchestration(&mut self, task: String) -> Result<()> {
+    async fn run_orchestration(&mut self, task: String) -> Result<perspt_core::SessionOutcome> {
         if self.context.log_llm {
             self.emit_log("📝 LLM request logging enabled".to_string());
         }
@@ -948,7 +1124,10 @@ impl SRBNOrchestrator {
             // Solo Mode: Single-file execution without DAG
             log::info!("Using Solo Mode for explicit single-file task");
             self.emit_log("⚡ Solo Mode: Single-file execution".to_string());
-            return self.run_solo_mode(task).await;
+            return self
+                .run_solo_mode(task)
+                .await
+                .map(|()| perspt_core::SessionOutcome::Success);
         }
 
         // PSP-5: Classify workspace state before deciding plugin/init strategy
@@ -1226,7 +1405,7 @@ impl SRBNOrchestrator {
                 completed_count, total_nodes, escalated_count
             ),
         });
-        Ok(())
+        Ok(outcome)
     }
 
     /// Execute a single node through the control loop
@@ -2097,8 +2276,9 @@ impl SRBNOrchestrator {
     /// PSP-7: Lightweight sheaf pre-check before full sheaf validation.
     ///
     /// Verifies that every declared output target actually exists on disk and
-    /// is non-empty. Returns `Some(evidence)` if the pre-check fails, `None`
-    /// if everything looks good.
+    /// is non-empty, and that files contain real implementations rather than
+    /// stub/placeholder content. Returns `Some(evidence)` if the pre-check
+    /// fails, `None` if everything looks good.
     fn sheaf_pre_check(&self, idx: NodeIndex) -> Option<String> {
         let node = &self.graph[idx];
         if node.output_targets.is_empty() {
@@ -2117,7 +2297,12 @@ impl SRBNOrchestrator {
                 Err(_) => {
                     issues.push(format!("missing: {}", path.display()));
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    // Check for stub/placeholder content in existing non-empty files.
+                    if let Some(reason) = detect_stub_content(&full, &node.owner_plugin) {
+                        issues.push(format!("stub content in {}: {}", path.display(), reason));
+                    }
+                }
             }
         }
 
@@ -4524,5 +4709,172 @@ def util():
             "Expected V_boot=4.0, got {}",
             energy.v_boot
         );
+    }
+
+    // ── Stub detection tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_detect_stub_rust_todo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "fn main() {\n    todo!()\n}\n").unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_some(), "Should detect todo!() stub");
+        assert!(result.unwrap().contains("todo!()"));
+    }
+
+    #[test]
+    fn test_detect_stub_rust_unimplemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "fn run() {\n    unimplemented!()\n}\n").unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_some(), "Should detect unimplemented!() stub");
+    }
+
+    #[test]
+    fn test_detect_stub_rust_real_code_not_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        let real_code = r#"
+use std::collections::HashMap;
+
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+
+fn compute(data: &[i32]) -> i32 {
+    data.iter().sum()
+}
+
+fn transform(input: &str) -> String {
+    input.to_uppercase()
+}
+
+fn process() {
+    let x = add(1, 2);
+    let y = multiply(x, 3);
+    println!("{}", y);
+    // todo!() in a comment should not trigger
+}
+"#;
+        std::fs::write(&path, real_code).unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(
+            result.is_none(),
+            "Real code with comment-only todo should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_rust_real_code_with_one_todo_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        let code = r#"
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn sub(a: i32, b: i32) -> i32 { a - b }
+fn mul(a: i32, b: i32) -> i32 { a * b }
+fn div(a: i32, b: i32) -> i32 { a / b }
+fn modulo(a: i32, b: i32) -> i32 { todo!() }
+"#;
+        std::fs::write(&path, code).unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(
+            result.is_none(),
+            "File with 5+ real lines and one todo!() should NOT be flagged"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_python_pass_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "def run():\n    pass\n").unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(result.is_some(), "Should detect pass-only Python function");
+    }
+
+    #[test]
+    fn test_detect_stub_python_not_implemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "def run():\n    raise NotImplementedError()\n").unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(result.is_some(), "Should detect NotImplementedError stub");
+    }
+
+    #[test]
+    fn test_detect_stub_python_ellipsis_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "def run():\n    ...\n").unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(
+            result.is_some(),
+            "Should detect ellipsis-only Python function"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_python_real_code_not_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        let code = "import os\n\ndef run():\n    data = os.listdir('.')\n    filtered = [f for f in data if f.endswith('.py')]\n    for f in filtered:\n        print(f)\n    return filtered\n";
+        std::fs::write(&path, code).unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(result.is_none(), "Real Python code should not be flagged");
+    }
+
+    #[test]
+    fn test_detect_stub_js_throw_not_implemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.js");
+        std::fs::write(
+            &path,
+            "function run() {\n  throw new Error(\"not implemented\");\n}\n",
+        )
+        .unwrap();
+        let result = detect_stub_content(&path, "javascript");
+        assert!(
+            result.is_some(),
+            "Should detect JS throw not-implemented stub"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_universal_comment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "// stub — will be replaced by agent\n").unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_some(), "Should detect universal stub comment");
+    }
+
+    #[test]
+    fn test_detect_stub_extension_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "# placeholder\ndef run():\n    pass\n").unwrap();
+        // Use "unknown" plugin hint — should fall back to .py extension
+        let result = detect_stub_content(&path, "unknown");
+        assert!(
+            result.is_some(),
+            "Should detect stub via extension fallback"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_empty_file_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.rs");
+        std::fs::write(&path, "").unwrap();
+        // detect_stub_content focuses on stub patterns, not emptiness
+        // (emptiness is handled by the metadata check in sheaf_pre_check)
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_none(), "Empty file has no stub pattern to match");
     }
 }

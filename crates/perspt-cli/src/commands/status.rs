@@ -30,6 +30,7 @@ pub async fn run() -> Result<()> {
 
     let status_display = match session.status.as_str() {
         "COMPLETED" => "✅ Completed",
+        "PARTIAL" => "⚠️ Partial (some nodes escalated)",
         "RUNNING" => "🔄 Running",
         "PAUSED" => "⏸️ Paused",
         "FAILED" => "❌ Failed",

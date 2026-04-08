@@ -17,6 +17,8 @@
             <span class="badge badge-primary">{{ status }}</span>
             {% elif status == "completed" %}
             <span class="badge badge-success">{{ status }}</span>
+            {% elif status == "partial" %}
+            <span class="badge badge-warning">{{ status }}</span>
             {% elif status == "failed" %}
             <span class="badge badge-error">{{ status }}</span>
             {% else %}
