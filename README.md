@@ -59,7 +59,7 @@ Perspt auto-detects whichever provider key you have set. No config file required
 
 **Agent Mode (SRBN) [Experimental]** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold. Based on the SRBN paper's theoretical framework; under active development.
 
-**Web Dashboard** -- A browser-based monitoring interface (`perspt dashboard`) for observing agent execution in real time. Shows DAG topology, energy convergence, LLM telemetry with token usage and latency, sandbox branches, and decision traces. Built with Axum, Askama, HTMX, and DaisyUI 5. Reads the DuckDB store in read-only mode so it never interferes with the running agent.
+**Web Dashboard** -- A browser-based monitoring interface for observing agent execution in real time. Shows DAG topology, energy convergence, LLM telemetry with token usage and latency, sandbox branches, and decision traces. Built with Axum, Askama, HTMX, and DaisyUI 5. Can be launched standalone (`perspt dashboard`) or embedded in the agent process (`perspt agent --dashboard`) for live monitoring during execution. The embedded mode opens a read-only DuckDB connection alongside the agent's writer, so it never interferes with the running session.
 
 **Zero-Config Startup** -- Automatic provider detection from environment variables. Set a key and go.
 
@@ -335,6 +335,8 @@ perspt agent [OPTIONS] <TASK>
       --verifier-strictness <S>    default | strict | minimal (default: default)
       --log-llm                    Log verbose LLM prompts/responses (token metrics always recorded)
       --output-plan <FILE>         Export task graph as JSON after planning
+      --dashboard                  Start web dashboard alongside the agent
+      --dashboard-port <PORT>      Dashboard port (default: 3000)
 ```
 
 ---

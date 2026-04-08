@@ -169,3 +169,18 @@ for CI integration:
 
    [STEPS] 15 records, 42.3s total
    [CORRECTIONS] 2 node(s) needed correction, 5 total attempts
+
+Live Dashboard Monitoring
+--------------------------
+
+Use ``--dashboard`` to start the web monitoring dashboard alongside the agent:
+
+.. code-block:: bash
+
+   perspt agent --dashboard "Build a REST server"
+   # Open http://127.0.0.1:3000 in a browser
+
+The embedded dashboard opens a read-only DuckDB connection to the same
+database the agent writes to, providing real-time views of DAG topology,
+energy convergence, LLM telemetry, and correction-attempt history. Use
+``--dashboard-port`` to change the port. The server stops when the agent exits.
