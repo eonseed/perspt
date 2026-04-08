@@ -194,7 +194,7 @@ flowchart TD
 
 Each retry is not blind re-prompting. The flow matching barrier is designed to project the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
 
-For the complete theoretical treatment, proofs, and design rationale, see the [Perspt Book](docs/perspt_book/build/html/index.html).
+For the complete theoretical treatment, proofs, and design rationale, see the [Perspt Book](https://eonseed.github.io/perspt/book/index.html).
 
 ---
 
@@ -465,7 +465,7 @@ curl http://localhost:11434/api/tags      # verify connectivity
 
 ## Documentation
 
-For a comprehensive guide covering installation, configuration, tutorials, the SRBN architecture, developer internals, and the API reference, read the **[Perspt Book](docs/perspt_book/build/html/index.html)** (also available as [PDF](docs/perspt_book/build/latex/perspt.pdf)).
+For a comprehensive guide covering installation, configuration, tutorials, the SRBN architecture, developer internals, and the API reference, read the **[Perspt Book](https://eonseed.github.io/perspt/book/index.html)** (also available as [PDF](docs/perspt_book/build/latex/perspt.pdf)).
 
 ---
 
