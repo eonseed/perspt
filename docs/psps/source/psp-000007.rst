@@ -1,7 +1,7 @@
 PSP: 000007
 Title: Robust Typed Correction Loops and Plugin-Aware Prompt Contracts
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Discussion
+Status: Accepted
 Type: Enhancement
 Created: 2026-04-06
 Discussion-To: https://github.com/eonseed/perspt/discussions/123
