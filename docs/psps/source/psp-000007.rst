@@ -280,9 +280,27 @@ This classification SHALL be persisted and used by retry prompts, escalation rep
 * ``perspt-sandbox`` -- sandbox environment changes needed for V_boot activation (detecting degraded toolchains, missing dependency signals) and for correction parse-pipeline testing
 * ``perspt-tui`` -- correction failure class display, retry/escalation reason in node status
 * ``perspt-dashboard`` -- correction-attempt history, parse provenance, rejected bundles
-* ``perspt-cli`` -- correction-attempt inspection in ``perspt status`` and ``perspt logs``
+* ``perspt-cli`` -- correction-attempt inspection in ``perspt status`` and ``perspt logs``; embedded dashboard server via ``--dashboard`` flag in agent mode
 
-.. rubric:: 10. Documentation Surface Updates
+.. rubric:: 10. Embedded Dashboard in Agent Mode
+
+The ``perspt agent`` subcommand SHALL support a ``--dashboard`` flag that starts the
+web monitoring dashboard as a background task within the same agent process. This
+eliminates the current limitation where the dashboard must be launched as a separate
+process after the agent finishes, because DuckDB allows only one writer at a time.
+
+When ``--dashboard`` is provided:
+
+* The agent opens the DuckDB store in read-write mode as usual.
+* A second ``SessionStore`` is opened in read-only mode (``open_read_only()``) targeting the same database file. DuckDB natively supports one writer plus concurrent readers.
+* The Axum dashboard router is built with the read-only store and spawned as a background ``tokio::spawn`` task.
+* The default port is ``3000``; a ``--dashboard-port <PORT>`` flag allows override.
+* The dashboard server is automatically dropped when the agent process exits.
+
+This enables real-time browser-based monitoring of DAG topology, energy convergence,
+LLM telemetry, and correction-attempt provenance while the agent is running.
+
+.. rubric:: 11. Documentation Surface Updates
 
 The implementation SHALL update Perspt's published documentation in the same release as the runtime changes. PSP 7 is not complete if the code changes land while the public docs still describe the pre-PSP-7 behavior.
 
@@ -352,6 +370,7 @@ Reference Implementation
 7. **V_boot activation** -- compute :math:`V_{boot}` from degraded-verification and missing-dependency signals that persist after ``step_verify``'s auto-dependency repair pass; remove folding into :math:`V_{syn}`; preserve solo-mode ``run_script_check`` computation.
 8. **Plan validation** -- extend ``TaskPlan::validate()`` with test-dependency inference, cycle detection, and implicit-dependency enforcement. Add sheaf pre-check before ``step_sheaf_validate``.
 9. **Documentation alignment** -- update ``README.md``, the Perspt Book architecture and agent-mode chapters, and the CLI reference so the published explanation of SRBN, correction retries, and observability matches PSP 7.
+10. **Embedded dashboard** -- add ``--dashboard`` and ``--dashboard-port`` flags to ``perspt agent``; spawn an Axum server as a background tokio task using a read-only ``SessionStore`` for live monitoring during agent execution.
 
 **Testing strategy:**
 
@@ -385,7 +404,8 @@ The following matrix maps each PSP requirement to the current implementation sur
    "7", "Enforce budget before each correction LLM call", "``step_converge()`` checks retry exhaustion but not session budget before ``call_llm_for_correction()``", "Missing", "Add pre-call budget gate and escalate with ``BudgetExhausted`` when ceiling is exceeded"
    "8", "Classify correction failures and route malformed responses through the same bounded correction loop", "Correction loop has retry recursion and bundle parsing, but no typed failure classification or malformed-response state model", "Partial", "Add typed failure classification, unify malformed retries with normal correction policy, and persist the classification"
    "9", "Plan validation and sheaf-aware pre-check before commit", "``TaskPlan::validate()`` checks duplicates and unknown deps only; no cycle detection, test-dependency enforcement, or pre-commit sheaf pre-check exists", "Missing", "Extend plan validation and add lightweight sheaf pre-check before full sheaf validation"
-   "10", "Update README and Perspt Book / CLI docs to match the PSP 7 runtime contract", "README and book chapters describe the SRBN loop, bundle protocol, energy components, and CLI observability, but they do not yet encode PSP 7's fail-closed correction barrier or provenance surface", "Missing", "Revise the affected documentation pages in the same release so user-visible behavior and architecture docs stay aligned with the implementation"
+   "10", "Embedded dashboard in agent mode via ``--dashboard`` flag", "Dashboard runs as a separate ``perspt dashboard`` process that opens the database read-only; cannot run concurrently with the agent's write connection in all environments", "Missing", "Add ``--dashboard`` and ``--dashboard-port`` flags to agent subcommand; spawn Axum server as a background tokio task using a read-only ``SessionStore``"
+   "11", "Update README and Perspt Book / CLI docs to match the PSP 7 runtime contract", "README and book chapters describe the SRBN loop, bundle protocol, energy components, and CLI observability, but they do not yet encode PSP 7's fail-closed correction barrier or provenance surface", "Missing", "Revise the affected documentation pages in the same release so user-visible behavior and architecture docs stay aligned with the implementation"
 
 ============
 Open Issues
