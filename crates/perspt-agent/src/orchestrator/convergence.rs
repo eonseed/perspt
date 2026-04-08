@@ -666,12 +666,17 @@ impl SRBNOrchestrator {
         let tokens_in = llm_response.tokens_in.unwrap_or(0);
         let tokens_out = llm_response.tokens_out.unwrap_or(0);
 
-        // Always record lightweight token/latency metrics regardless of --log-llm.
-        if let Err(e) = self
-            .ledger
-            .record_llm_usage(model, node_id, latency_ms, tokens_in, tokens_out)
-        {
-            log::warn!("Failed to persist LLM usage metrics: {}", e);
+        // Record lightweight token/latency metrics only when full logging is off.
+        // When --log-llm is active, record_llm_request below writes a single row
+        // with tokens, latency, AND full text — so we skip the usage-only row to
+        // avoid double-counting.
+        if !self.context.log_llm {
+            if let Err(e) = self
+                .ledger
+                .record_llm_usage(model, node_id, latency_ms, tokens_in, tokens_out)
+            {
+                log::warn!("Failed to persist LLM usage metrics: {}", e);
+            }
         }
 
         // Always update budget envelope with estimated cost.

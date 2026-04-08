@@ -9,7 +9,14 @@ pub mod session_detail;
 /// Normalize a node/session state string for consistent display comparisons.
 /// Uses `NodeState::from_display_str` for canonical parsing, then maps
 /// active states to `"running"` for the dashboard UI.
+/// Session-level statuses ("PARTIAL", "ABORTED") are handled before node-state parsing.
 pub fn normalize_state(s: &str) -> String {
+    // Handle session-level statuses that are not node states.
+    match s.to_ascii_lowercase().as_str() {
+        "partial" => return "partial".to_string(),
+        "aborted" => return "aborted".to_string(),
+        _ => {}
+    }
     let state = perspt_core::NodeState::from_display_str(s);
     if state.is_active() {
         "running".to_string()
