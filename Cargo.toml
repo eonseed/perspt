@@ -34,4 +34,4 @@ perspt = { version = "0.5.8", path = "crates/perspt" }
 
 # Exact-pinned to avoid libduckdb-sys recompilation on `cargo update`.
 # Only changes when you explicitly bump the version here.
-duckdb = { version = "=1.10501.0", features = ["bundled"] }
+duckdb = { version = "=1.10502.0", features = ["bundled"] }
