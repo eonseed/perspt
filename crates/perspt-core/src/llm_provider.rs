@@ -335,8 +335,6 @@ impl GenAIProvider {
         Ok(())
     }
 
-
-
     /// Get a list of supported providers
     pub fn get_supported_providers() -> Vec<&'static str> {
         vec![
