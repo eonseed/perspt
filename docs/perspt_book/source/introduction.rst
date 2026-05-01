@@ -172,7 +172,7 @@ contributions include:
 - **Adaptive Flow Speculation** for latency reduction via branch prediction
 - Theoretical reliability scaling from exponential decay to logarithmic: :math:`O(\log N)` (paper prediction)
 
-Perspt implements this theory as an experimental coding agent, governed by PSP-5.
+Perspt implements this theory as an experimental coding agent, governed by PSP-7.
 The mathematical framework is mature; empirical benchmarks on this implementation
 have not yet been published.
 
@@ -312,7 +312,7 @@ Perspt embodies the belief that AI tools should be:
 - **Fast** — Rust-native performance with async streaming
 - **Stable** — Lyapunov energy guides convergence before commit (SRBN agent, based on paper theory)
 - **Secure** — Policy-controlled execution with workspace bounds
-- **Extensible** — Modular 8-crate architecture
+- **Extensible** — Modular 9-crate architecture
 - **Experimental** — A testbed for control-theoretic approaches to LLM reliability
 
 Next Steps
@@ -337,4 +337,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 8-crate design.
+      Understand the 9-crate design.

@@ -3,7 +3,7 @@
 Workspace Crates
 ================
 
-Perspt is organized as an **8-crate Rust workspace** under the ``crates/`` directory,
+Perspt is organized as a **9-crate Rust workspace** under the ``crates/`` directory,
 plus a meta-crate (``perspt``) that re-exports all libraries.
 
 .. graphviz::
