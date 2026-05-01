@@ -282,12 +282,12 @@ fn compile_correction(ev: &PromptEvidence) -> String {
         }
     }
 
-    let multi_file = ev.existing_file_contents.len() > 1;
-    let file_instruction = if multi_file {
-        "Return ALL affected files as a JSON artifact bundle"
-    } else {
-        "Return the COMPLETE corrected file, not just snippets"
-    };
+    let target_paths = ev
+        .existing_file_contents
+        .iter()
+        .map(|(path, _)| path.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
 
     // Generate language-specific dependency command examples
     let commands_example = match owner_plugin {
@@ -304,23 +304,32 @@ fn compile_correction(ev: &PromptEvidence) -> String {
 2. Maintain the original functionality and goal
 3. Follow {} language conventions and idioms
 4. Import any missing modules or dependencies
-5. {}
+5. Return a JSON artifact bundle targeting these exact path(s): {}
 6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
 
 ### Output Format
-Provide the complete corrected file(s) followed by any dependency commands needed:
+Return only this JSON object shape. Do not wrap it in markdown unless the provider requires a fenced json block.
 
-File: [same filename]
-```{}
-[complete corrected code]
+```json
+{{
+    "artifacts": [
+        {{
+            "operation": "write",
+            "path": "path/from/list/above",
+            "content": "complete corrected file contents"
+        }}
+    ],
+    "commands": [
+        "optional dependency command, for example: {}"
+    ]
+}}
 ```
 
-Commands: [optional, one per line]
-```
-{}
-```
+Use an empty commands array when no dependency command is needed.
 "#,
-        lang, file_instruction, lang, commands_example
+                lang,
+                if target_paths.is_empty() { "the original file(s)" } else { &target_paths },
+                commands_example.lines().next().unwrap_or("")
     ));
 
     prompt
