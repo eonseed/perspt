@@ -3628,6 +3628,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_apply_bundle_keeps_legal_support_file() {
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_bundle_support_file_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "main_module".into(),
+                goal: "Create Rust main".into(),
+                output_files: vec!["src/main.rs".into()],
+                ..PlannedTask::new("main_module", "Create Rust main")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".into(),
+                    content: "fn main() {}".into(),
+                },
+                ArtifactOperation::Write {
+                    path: "build.rs".into(),
+                    content: "fn main() {}".into(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "main_module",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .expect("legal support files should survive semantic filtering");
+
+        assert!(temp_dir.join("src/main.rs").exists());
+        assert!(temp_dir.join("build.rs").exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_apply_bundle_denies_root_manifest_mutation() {
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_bundle_manifest_policy_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "main_module".into(),
+                goal: "Create Rust main".into(),
+                output_files: vec!["src/main.rs".into()],
+                ..PlannedTask::new("main_module", "Create Rust main")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".into(),
+                    content: "fn main() {}".into(),
+                },
+                ArtifactOperation::Write {
+                    path: "Cargo.toml".into(),
+                    content: "[package]\nname = \"bad\"\n".into(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "main_module",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .expect("declared artifact should still apply after denied manifest is stripped");
+
+        assert!(temp_dir.join("src/main.rs").exists());
+        assert!(!temp_dir.join("Cargo.toml").exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_apply_bundle_writes_into_branch_sandbox() {
         use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
 
@@ -4268,6 +4364,62 @@ def util():
         assert!(bundle.artifacts[1].is_diff());
         assert_eq!(bundle.artifacts[1].path(), "src/lib.py");
         assert_eq!(bundle.commands, vec!["uv add requests"]);
+    }
+
+    #[test]
+    fn test_typed_parse_pipeline_schema_invalid_classified() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
+        let content = r#"```json
+{"foo":"bar"}
+```"#;
+        let (bundle_opt, state, record_opt) = orch.parse_artifact_bundle_typed(content, "test", 1);
+        assert!(bundle_opt.is_none());
+        assert!(matches!(
+            state,
+            perspt_core::types::ParseResultState::SchemaInvalid
+        ));
+        let record = record_opt.expect("schema failure should be recorded");
+        assert!(matches!(
+            record.retry_classification,
+            Some(perspt_core::types::RetryClassification::MalformedRetry)
+        ));
+    }
+
+    #[test]
+    fn test_typed_parse_pipeline_semantic_rejection_classified() {
+        use perspt_core::types::PlannedTask;
+
+        let mut orch = SRBNOrchestrator::new_for_testing(std::path::PathBuf::from("/tmp/test"));
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "parser".into(),
+                goal: "Create parser".into(),
+                output_files: vec!["src/parser.rs".into()],
+                ..PlannedTask::new("parser", "Create parser")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let content = r#"```json
+{
+  "artifacts": [
+    {"operation": "write", "path": "src/wrong.rs", "content": "pub fn wrong() {}"}
+  ],
+  "commands": []
+}
+```"#;
+        let (bundle_opt, state, record_opt) =
+            orch.parse_artifact_bundle_typed(content, "parser", 1);
+        assert!(bundle_opt.is_none());
+        assert!(matches!(
+            state,
+            perspt_core::types::ParseResultState::SemanticallyRejected
+        ));
+        let record = record_opt.expect("semantic rejection should be recorded");
+        assert!(matches!(
+            record.retry_classification,
+            Some(perspt_core::types::RetryClassification::Retarget)
+        ));
     }
 
     #[test]
