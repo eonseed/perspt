@@ -1,5 +1,5 @@
 # Perspt
-
+**v0.5.9 "心砺光华"** — *Perfecting the essence until the work needs no words to shine.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
