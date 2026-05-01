@@ -107,15 +107,19 @@ impl SRBNOrchestrator {
         ));
 
         // PSP-7: Budget ceiling check before LLM call
-        if self.budget.cost_exhausted() {
+        if self.budget.any_exhausted() {
             log::warn!(
-                "Budget exhausted (${:.2} / ${:.2}) — escalating node '{}'",
+                "Budget exhausted before correction (steps {}/{:?}, revisions {}/{:?}, cost ${:.2} / {:?}) — escalating node '{}'",
+                self.budget.steps_used,
+                self.budget.max_steps,
+                self.budget.revisions_used,
+                self.budget.max_revisions,
                 self.budget.cost_used_usd,
-                self.budget.max_cost_usd.unwrap_or(f64::INFINITY),
+                self.budget.max_cost_usd,
                 node_id
             );
             self.emit_log(format!(
-                "💰 Budget exhausted (${:.2}) — escalating",
+                "💰 Budget exhausted before correction (${:.2}) — escalating",
                 self.budget.cost_used_usd
             ));
             return Ok(false);
@@ -235,30 +239,14 @@ impl SRBNOrchestrator {
                         } else {
                             raw_command.clone()
                         };
-                        log::info!("Running correction command: {}", command);
-                        let parts: Vec<&str> = command.split_whitespace().collect();
-                        if parts.is_empty() {
-                            continue;
-                        }
-                        let output = tokio::process::Command::new(parts[0])
-                            .args(&parts[1..])
-                            .current_dir(&work_dir)
-                            .stdout(std::process::Stdio::piped())
-                            .stderr(std::process::Stdio::piped())
-                            .output()
-                            .await;
-                        match output {
-                            Ok(o) if o.status.success() => {
-                                self.emit_log(format!("✅ {}", command));
-                            }
-                            Ok(o) => {
-                                let stderr = String::from_utf8_lossy(&o.stderr);
-                                log::warn!("Command failed: {} — {}", command, stderr);
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to run command: {} — {}", command, e);
-                            }
-                        }
+                        self.execute_correction_command(
+                            idx,
+                            &node_id,
+                            &command,
+                            &owner_plugin,
+                            &work_dir,
+                        )
+                        .await?;
                     }
                 }
             }
@@ -334,30 +322,8 @@ impl SRBNOrchestrator {
             ));
             let work_dir = self.effective_working_dir(idx);
             for cmd in &correction_cmds {
-                log::info!("Running correction command: {}", cmd);
-                let parts: Vec<&str> = cmd.split_whitespace().collect();
-                if parts.is_empty() {
-                    continue;
-                }
-                let output = tokio::process::Command::new(parts[0])
-                    .args(&parts[1..])
-                    .current_dir(&work_dir)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .output()
-                    .await;
-                match output {
-                    Ok(o) if o.status.success() => {
-                        self.emit_log(format!("✅ {}", cmd));
-                    }
-                    Ok(o) => {
-                        let stderr = String::from_utf8_lossy(&o.stderr);
-                        log::warn!("Command failed: {} — {}", cmd, stderr);
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to run command: {} — {}", cmd, e);
-                    }
-                }
+                self.execute_correction_command(idx, &node_id, cmd, &owner_plugin, &work_dir)
+                    .await?;
             }
         }
 
@@ -626,6 +592,15 @@ impl SRBNOrchestrator {
                 String::new()
             });
 
+        if self.budget.any_exhausted() {
+            log::warn!("Budget exhausted after verifier analysis; skipping actuator correction");
+            self.emit_log(
+                "💰 Budget exhausted after verifier analysis — skipping correction generation"
+                    .to_string(),
+            );
+            return Ok(String::new());
+        }
+
         // Stage 2: Actuator applies the guidance
         let actuator_prompt = if guidance.is_empty() {
             prompt.to_string()
@@ -655,6 +630,18 @@ impl SRBNOrchestrator {
         prompt: &str,
         node_id: Option<&str>,
     ) -> Result<String> {
+        if self.budget.any_exhausted() {
+            anyhow::bail!(
+                "Budget exhausted before LLM call (steps {}/{:?}, revisions {}/{:?}, cost ${:.2} / {:?})",
+                self.budget.steps_used,
+                self.budget.max_steps,
+                self.budget.revisions_used,
+                self.budget.max_revisions,
+                self.budget.cost_used_usd,
+                self.budget.max_cost_usd
+            );
+        }
+
         let start = Instant::now();
 
         let llm_response = self
@@ -709,6 +696,82 @@ impl SRBNOrchestrator {
         );
 
         Ok(llm_response.text)
+    }
+
+    async fn execute_correction_command(
+        &mut self,
+        idx: NodeIndex,
+        node_id: &str,
+        command: &str,
+        owner_plugin: &str,
+        work_dir: &std::path::Path,
+    ) -> Result<()> {
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let decision = registry
+            .get(owner_plugin)
+            .map(|plugin| plugin.dependency_command_policy(command))
+            .unwrap_or(perspt_core::types::CommandPolicyDecision::Allow);
+
+        if decision == perspt_core::types::CommandPolicyDecision::Deny {
+            log::warn!(
+                "Correction command '{}' denied by plugin policy for '{}'",
+                command,
+                owner_plugin
+            );
+            self.emit_log(format!("⏭️ Command denied by plugin policy: {}", command));
+            return Ok(());
+        }
+
+        let approval_result = self
+            .await_approval_for_node(
+                perspt_core::ActionType::Command {
+                    command: command.to_string(),
+                },
+                format!("Execute correction command: {}", command),
+                None,
+                Some(node_id),
+            )
+            .await;
+
+        if !matches!(
+            approval_result,
+            ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+        ) {
+            self.emit_log(format!("⏭️ Correction command skipped: {}", command));
+            return Ok(());
+        }
+
+        let mut args = HashMap::new();
+        args.insert("command".to_string(), command.to_string());
+        args.insert(
+            "working_dir".to_string(),
+            work_dir.to_string_lossy().to_string(),
+        );
+
+        let result = self
+            .tools
+            .execute(&ToolCall {
+                name: "run_command".to_string(),
+                arguments: args,
+            })
+            .await;
+
+        if result.success {
+            self.emit_log(format!("✅ {}", command));
+            return Ok(());
+        }
+
+        let error = result.error.unwrap_or_else(|| result.output.clone());
+        log::warn!("Correction command failed: {} — {}", command, error);
+        self.last_tool_failure = Some(format!(
+            "Correction command '{}' failed: {}",
+            command, error
+        ));
+        self.emit_log(format!("❌ Command failed: {} — {}", command, error));
+        self.graph[idx]
+            .monitor
+            .record_failure(perspt_core::types::ErrorType::ToolFailure);
+        Ok(())
     }
 
     /// PSP-5 Phase 1/4: Call LLM with tier-aware fallback.
