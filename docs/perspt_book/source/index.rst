@@ -42,7 +42,7 @@ development.
          :link: developer-guide/architecture
          :link-type: doc
 
-         8-crate workspace design.
+         9-crate workspace design.
 
    Key Features
    ------------

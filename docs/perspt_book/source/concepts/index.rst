@@ -18,7 +18,7 @@ Understanding the foundations of Perspt.
       :link: workspace-crates
       :link-type: doc
 
-      The 7-crate modular architecture.
+      The 9-crate modular architecture.
 
    .. grid-item-card:: PSP Process
       :link: psp-process

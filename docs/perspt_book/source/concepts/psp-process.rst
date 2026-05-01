@@ -58,10 +58,16 @@ Key PSPs
      - Superseded by PSP-5
    * - **PSP-5**
      - **Multi-File Coding UX and Repo-Native Verification**
+     - **Final**
+   * - PSP-6
+     - Web Dashboard and Real-Time Monitoring
+     - Final
+   * - **PSP-7**
+     - **Robust Typed Correction Loops and Plugin-Aware Prompt Contracts**
      - **Active**
 
-PSP-5: The Current Runtime
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+PSP-5: The Core Lifecycle
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 PSP-5 is the operative specification that governs the current SRBN agent runtime. It
 supersedes PSP-4 and introduces:
@@ -78,6 +84,25 @@ supersedes PSP-4 and introduces:
 - **Ledger-based resume** — trustworthy session continuation from any interruption point
 
 See the full specification at ``docs/psps/source/psp-000005.rst``.
+
+PSP-7: The Current Runtime
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PSP-7 is the operative specification that governs the current SRBN agent runtime. It
+builds on PSP-5's foundation and introduces:
+
+- **Typed parse pipeline** — 5-layer fail-closed parsing (raw capture → strict JSON → tolerant recovery → schema validation → semantic filtering) replacing Option-based extraction
+- **Retry classification** — ``RetryClassification`` enum (MalformedRetry, Retarget, SupportFileViolation, Replan) enabling intelligent convergence loop decisions
+- **Prompt compiler with provenance** — Structured ``PromptEvidence`` replaces ad-hoc template constants; exact target paths from evidence included in correction prompts
+- **Structured JSON artifact format** — ``{ artifacts: [], commands: [] }`` schema replaces free-form ``File: ...`` output instructions
+- **Manifest policy enforcement** — Semantic validation prevents implicit mutation of root manifests unless explicitly listed as output targets
+- **Strict budget exhaustion** — ``any_exhausted()`` checks all budget dimensions (steps, revisions, cost) before LLM calls
+- **Correction attempt records** — Every correction attempt persisted with parse state, retry classification, energy snapshot, and response fingerprint for full observability
+
+PSP-5 remains the foundation for the core SRBN lifecycle. See the full specification at
+``docs/psps/source/psp-000005.rst``.
+
+See the PSP-7 specification at ``docs/psps/source/psp-000007.rst``.
 
 Writing a PSP
 -------------
