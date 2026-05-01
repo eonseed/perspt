@@ -39,21 +39,20 @@ to Large Language Models. It serves two complementary purposes:
    framework is mature; the implementation is under active development and has not
    yet been benchmarked.
 
-.. admonition:: Version 0.5.8 "Qualitätsveredelung" Highlights
+.. admonition:: Version 0.5.9 "心砺光华" Highlights
    :class: tip
 
-   **Orchestration Quality Refinement:**
+   **Robust Correction Loop Contracts (PSP-7):**
 
-   - **Accurate Session Outcomes** — ``SessionOutcome`` enum (Success, PartialSuccess, Failed) derived from actual node completion/escalation counts instead of unconditional success
-   - **Always-On LLM Telemetry** — Token usage, latency, and estimated cost recorded after every LLM call regardless of ``--log-llm``; the flag now only gates verbose prompt/response text
-   - **Type-Safe Node States** — ``NodeState::from_display_str()`` with case-insensitive parsing, ``is_success()``, ``is_active()``, and ``Display`` impl replace all stringly-typed comparisons
-   - **Sandbox-Aware Context** — ``ContextRetriever`` uses per-node sandbox paths; file tree listings included in actuator and correction prompts
-   - **Dead Code Cleanup** — 16 unused functions removed across 6 crates (~234 lines)
+   - **Structured Artifact Bundle Format** — Switched correction prompt from free-form output to a strict JSON schema, ensuring the LLM explicitly declares target paths and artifacts.
+   - **Typed Parse Pipeline** — Replaced Option-based extraction with a 5-layer fail-closed parse pipeline that classifies retries (Retarget, MalformedRetry, SupportFileViolation, Replan) for intelligent convergence.
+   - **Manifest Policy Enforcement** — Added semantic validation to prevent implicit mutation of root manifests unless explicitly requested.
+   - **Strict Budget Exhaustion** — Upgraded budget checks to respect step and revision caps alongside cost, preventing runaway loops.
 
-   **Bug Fixes:**
+   **LLM & Ecosystem Maintenance:**
 
-   - **Session status stuck at RUNNING** — Status now persisted in ``end_session()`` with guaranteed finalization
-   - **LLM token counts always zero** — Real provider token usage extracted and persisted per request
+   - **GenAI Upgrade** — Bumped ``genai`` provider dependency to 0.5.3 (stable bug fixes) and removed dead code leaking provider types.
+   - **Rust 1.95 Readiness** — Fully resolved all Clippy linting errors, including ``unnecessary-sort-by`` and ``collapsible-match``.
 
    **LLM CLI:**
 
@@ -173,7 +172,7 @@ contributions include:
 - **Adaptive Flow Speculation** for latency reduction via branch prediction
 - Theoretical reliability scaling from exponential decay to logarithmic: :math:`O(\log N)` (paper prediction)
 
-Perspt implements this theory as an experimental coding agent, governed by PSP-5.
+Perspt implements this theory as an experimental coding agent, governed by PSP-7.
 The mathematical framework is mature; empirical benchmarks on this implementation
 have not yet been published.
 
@@ -313,7 +312,7 @@ Perspt embodies the belief that AI tools should be:
 - **Fast** — Rust-native performance with async streaming
 - **Stable** — Lyapunov energy guides convergence before commit (SRBN agent, based on paper theory)
 - **Secure** — Policy-controlled execution with workspace bounds
-- **Extensible** — Modular 8-crate architecture
+- **Extensible** — Modular 9-crate architecture
 - **Experimental** — A testbed for control-theoretic approaches to LLM reliability
 
 Next Steps
@@ -338,4 +337,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 8-crate design.
+      Understand the 9-crate design.

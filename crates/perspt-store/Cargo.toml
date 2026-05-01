@@ -1,6 +1,6 @@
 [package]
 name = "perspt-store"
-version = "0.5.8"
+version = "0.5.9"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -11,8 +11,12 @@ documentation = "https://docs.rs/perspt-store"
 keywords = ["persistence", "duckdb", "srbn", "session"]
 categories = ["database"]
 
+[features]
+default = []
+bundled = ["duckdb/bundled"]
+
 [dependencies]
-perspt-core = { version = "0.5.8", path = "../perspt-core" }
+perspt-core = { version = "0.5.9", path = "../perspt-core" }
 
 # DuckDB for persistence
 duckdb = { workspace = true }

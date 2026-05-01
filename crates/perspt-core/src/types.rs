@@ -833,8 +833,170 @@ impl TaskPlan {
             }
         }
 
+        // PSP-7: Cycle detection via topological sort (Kahn's algorithm)
+        {
+            let id_to_idx: std::collections::HashMap<&str, usize> = self
+                .tasks
+                .iter()
+                .enumerate()
+                .map(|(i, t)| (t.id.as_str(), i))
+                .collect();
+            let n = self.tasks.len();
+            let mut in_degree = vec![0usize; n];
+            let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+            for (i, task) in self.tasks.iter().enumerate() {
+                for dep in &task.dependencies {
+                    if let Some(&dep_idx) = id_to_idx.get(dep.as_str()) {
+                        adj[dep_idx].push(i);
+                        in_degree[i] += 1;
+                    }
+                }
+            }
+            let mut queue: std::collections::VecDeque<usize> = in_degree
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &d)| if d == 0 { Some(i) } else { None })
+                .collect();
+            let mut visited = 0usize;
+            while let Some(node) = queue.pop_front() {
+                visited += 1;
+                for &next in &adj[node] {
+                    in_degree[next] -= 1;
+                    if in_degree[next] == 0 {
+                        queue.push_back(next);
+                    }
+                }
+            }
+            if visited != n {
+                return Err("Plan contains a dependency cycle".to_string());
+            }
+        }
+
+        // PSP-7: Implicit dependency enforcement — if task A reads a file that
+        // task B produces (context_files ∩ output_files), A must depend on B.
+        for task in &self.tasks {
+            for ctx_file in &task.context_files {
+                if let Some(&owner) = file_owners.get(ctx_file.as_str()) {
+                    if owner != task.id && !task.dependencies.iter().any(|d| d == owner) {
+                        return Err(format!(
+                            "Task '{}' reads '{}' produced by '{}' but does not declare it as a dependency",
+                            task.id, ctx_file, owner
+                        ));
+                    }
+                }
+            }
+        }
+
+        // PSP-7: Test-task dependency inference via plugin test_file_patterns().
+        // If a task produces only test files (matching some plugin's test patterns),
+        // it must depend on any task that produces non-test source files.
+        let registry = crate::plugin::PluginRegistry::new();
+        let all_test_patterns: Vec<&str> = registry
+            .all()
+            .iter()
+            .flat_map(|p| p.test_file_patterns().iter().copied())
+            .collect();
+        if !all_test_patterns.is_empty() {
+            let is_test_file = |path: &str| -> bool {
+                all_test_patterns
+                    .iter()
+                    .any(|pat| glob_matches_simple(pat, path))
+            };
+            // Identify test-only tasks and source tasks
+            let source_task_ids: Vec<&str> = self
+                .tasks
+                .iter()
+                .filter(|t| {
+                    !t.output_files.is_empty() && t.output_files.iter().any(|f| !is_test_file(f))
+                })
+                .map(|t| t.id.as_str())
+                .collect();
+            for task in &self.tasks {
+                if task.output_files.is_empty() {
+                    continue;
+                }
+                let all_tests = task.output_files.iter().all(|f| is_test_file(f));
+                if !all_tests {
+                    continue;
+                }
+                // This is a test-only task — it should depend on at least one source task
+                for &src_id in &source_task_ids {
+                    if src_id != task.id && !task.dependencies.iter().any(|d| d == src_id) {
+                        return Err(format!(
+                            "Test task '{}' produces only test files but does not depend on source task '{}'",
+                            task.id, src_id
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
+}
+
+/// Simple glob matching for test file patterns.
+///
+/// Supports `*` (any within component) and `**` (any path segment).
+/// This is intentionally minimal — only used for plan validation heuristics.
+fn glob_matches_simple(pattern: &str, path: &str) -> bool {
+    let pat_parts: Vec<&str> = pattern.split('/').collect();
+    let path_parts: Vec<&str> = path.split('/').collect();
+    glob_match_parts(&pat_parts, &path_parts)
+}
+
+fn glob_match_parts(pat: &[&str], path: &[&str]) -> bool {
+    if pat.is_empty() {
+        return path.is_empty();
+    }
+    if pat[0] == "**" {
+        // ** matches zero or more path segments
+        for i in 0..=path.len() {
+            if glob_match_parts(&pat[1..], &path[i..]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if path.is_empty() {
+        return false;
+    }
+    if glob_match_component(pat[0], path[0]) {
+        glob_match_parts(&pat[1..], &path[1..])
+    } else {
+        false
+    }
+}
+
+fn glob_match_component(pattern: &str, component: &str) -> bool {
+    // Simple wildcard matching within a single path component
+    if pattern == "*" {
+        return true;
+    }
+    if !pattern.contains('*') {
+        return pattern == component;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut pos = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(found) = component[pos..].find(part) {
+            if i == 0 && found != 0 {
+                return false; // First part must match at start
+            }
+            pos += found + part.len();
+        } else {
+            return false;
+        }
+    }
+    if let Some(last) = parts.last() {
+        if !last.is_empty() {
+            return component.ends_with(last);
+        }
+    }
+    true
 }
 
 impl Default for TaskPlan {
@@ -2800,6 +2962,256 @@ fn uuid_v4() -> String {
     format!("{:016x}", hasher.finish())
 }
 
+// =============================================================================
+// PSP-7: Runtime Barrier Types
+// =============================================================================
+
+/// Result state from the typed parse pipeline (PSP-7 Layers A-E).
+///
+/// Every LLM response is classified into one of these states. The correction
+/// loop and telemetry both key off this enum instead of ad-hoc Option checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParseResultState {
+    /// Layer C: strict JSON parse succeeded and semantic validation passed.
+    StrictJsonOk,
+    /// Layer D: tolerant file-marker recovery produced a valid bundle.
+    TolerantRecoveryOk,
+    /// No structured payload could be extracted from the response at all.
+    NoStructuredPayload,
+    /// JSON parsed but failed schema validation (missing required fields, wrong types).
+    SchemaInvalid,
+    /// Parsed and schema-valid but rejected by semantic validation (Layer E):
+    /// unknown output files, disallowed commands, ownership violations, etc.
+    SemanticallyRejected,
+    /// Bundle is empty — parsed successfully but contained zero artifacts.
+    EmptyBundle,
+}
+
+impl ParseResultState {
+    /// Whether this state represents a usable bundle.
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Self::StrictJsonOk | Self::TolerantRecoveryOk)
+    }
+}
+
+impl std::fmt::Display for ParseResultState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StrictJsonOk => write!(f, "strict_json_ok"),
+            Self::TolerantRecoveryOk => write!(f, "tolerant_recovery_ok"),
+            Self::NoStructuredPayload => write!(f, "no_structured_payload"),
+            Self::SchemaInvalid => write!(f, "schema_invalid"),
+            Self::SemanticallyRejected => write!(f, "semantically_rejected"),
+            Self::EmptyBundle => write!(f, "empty_bundle"),
+        }
+    }
+}
+
+/// Retry classification for correction-loop failures (PSP-7 §3.3).
+///
+/// When a parse or semantic check fails, the correction loop classifies the
+/// failure to decide between retrying, retargeting, or escalating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryClassification {
+    /// Response was malformed — retry with schema-clarification feedback.
+    MalformedRetry,
+    /// Artifacts targeted wrong files — retarget with ownership guidance.
+    Retarget,
+    /// LLM added unrequested support files — retry with legal-files guidance.
+    SupportFileViolation,
+    /// Failure is structural enough that replanning is needed.
+    Replan,
+    /// Budget is exhausted — cannot retry further.
+    BudgetExhausted,
+}
+
+impl std::fmt::Display for RetryClassification {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MalformedRetry => write!(f, "malformed_retry"),
+            Self::Retarget => write!(f, "retarget"),
+            Self::SupportFileViolation => write!(f, "support_file_violation"),
+            Self::Replan => write!(f, "replan"),
+            Self::BudgetExhausted => write!(f, "budget_exhausted"),
+        }
+    }
+}
+
+/// Telemetry record for a single correction attempt (PSP-7 §6).
+///
+/// Captures the full pipeline state for each correction round-trip so the
+/// store can reconstruct exactly what happened during convergence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrectionAttemptRecord {
+    /// Which correction attempt within this node (1-based).
+    pub attempt: u32,
+    /// Parse result state from the typed pipeline.
+    pub parse_state: ParseResultState,
+    /// Retry classification (None if parse succeeded).
+    pub retry_classification: Option<RetryClassification>,
+    /// Raw response fingerprint (hash of the LLM response).
+    pub response_fingerprint: String,
+    /// Raw response byte length.
+    pub response_length: usize,
+    /// Energy snapshot after this attempt's verification.
+    pub energy_after: Option<EnergyComponents>,
+    /// Whether the correction was accepted and applied.
+    pub accepted: bool,
+    /// Human-readable rejection reason (if not accepted).
+    pub rejection_reason: Option<String>,
+    /// Epoch seconds when this attempt was recorded.
+    pub created_at: i64,
+}
+
+/// Intent tag for the prompt compiler (PSP-7 §5).
+///
+/// Each prompt emitted by the system carries an intent that determines which
+/// template family and evidence inputs the compiler selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptIntent {
+    /// Architect planning for an existing project.
+    ArchitectExisting,
+    /// Architect planning for a greenfield project.
+    ArchitectGreenfield,
+    /// Actuator coding (multi-output node).
+    ActuatorMultiOutput,
+    /// Actuator coding (single-output node).
+    ActuatorSingleOutput,
+    /// Verifier analysis.
+    VerifierAnalysis,
+    /// Correction retry after verification failure.
+    CorrectionRetry,
+    /// Bundle retarget after ownership/path rejection.
+    BundleRetarget,
+    /// Speculator basic lookahead.
+    SpeculatorBasic,
+    /// Speculator extended lookahead.
+    SpeculatorLookahead,
+    /// Solo mode generation.
+    SoloGenerate,
+    /// Solo mode correction.
+    SoloCorrect,
+    /// Project name suggestion.
+    ProjectNameSuggest,
+}
+
+/// Provenance metadata for a compiled prompt (PSP-7 §5).
+///
+/// Records which template, evidence sources, and plugin fragments contributed
+/// to a final prompt so that observers can trace prompt lineage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptProvenance {
+    /// The intent that selected the template family.
+    pub intent: PromptIntent,
+    /// Which plugin contributed correction fragments (if any).
+    pub plugin_fragment_source: Option<String>,
+    /// Brief names of evidence sources folded into the prompt.
+    pub evidence_sources: Vec<String>,
+    /// Epoch seconds when the prompt was compiled.
+    pub compiled_at: i64,
+}
+
+/// A compiled prompt ready for submission to the LLM (PSP-7 §5).
+///
+/// Replaces raw string concatenation with a typed container that carries
+/// the prompt text alongside its provenance metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledPrompt {
+    /// The final prompt text to send to the LLM.
+    pub text: String,
+    /// Provenance metadata for observability.
+    pub provenance: PromptProvenance,
+}
+
+/// Evidence inputs for the prompt compiler (PSP-7 §5).
+///
+/// Each prompt family draws from a different subset of these fields.
+/// The compiler ignores fields that are irrelevant for the selected intent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PromptEvidence {
+    /// The user's high-level goal or request.
+    pub user_goal: Option<String>,
+    /// Project structure summary (file tree, detected languages, etc.).
+    pub project_summary: Option<String>,
+    /// Node-scoped goal for actuator/verifier prompts.
+    pub node_goal: Option<String>,
+    /// Output files this node is expected to produce.
+    pub output_files: Vec<String>,
+    /// Context files the node should read.
+    pub context_files: Vec<String>,
+    /// Verifier diagnostics from the last verification pass.
+    pub verifier_diagnostics: Option<String>,
+    /// Previous correction attempt records for retry prompts.
+    pub previous_attempts: Vec<CorrectionAttemptRecord>,
+    /// Number of previous correction attempts (used when full records are unavailable).
+    pub previous_attempt_count: usize,
+    /// Plugin-contributed correction guidance.
+    pub plugin_correction_fragment: Option<String>,
+    /// Legal support files declared by the plugin.
+    pub legal_support_files: Vec<String>,
+    /// Existing file contents for context injection.
+    pub existing_file_contents: Vec<(String, String)>,
+    /// Dependency expectations for the current task.
+    pub dependency_expectations: Option<DependencyExpectation>,
+    /// Bundle that was rejected (for retarget prompts).
+    pub rejected_bundle_summary: Option<String>,
+    /// Solo mode file path.
+    pub solo_file_path: Option<String>,
+    /// Solo mode language hint.
+    pub solo_language: Option<String>,
+    /// Working directory path for context-aware prompts.
+    pub working_dir: Option<String>,
+    /// Active language plugins (e.g. `["rust", "python"]`).
+    pub active_plugins: Vec<String>,
+    /// Contract interface signature for actuator/verifier prompts.
+    pub interface_signature: Option<String>,
+    /// Contract invariants for actuator/verifier prompts.
+    pub invariants: Option<String>,
+    /// Contract forbidden patterns for actuator/verifier prompts.
+    pub forbidden_patterns: Option<String>,
+    /// Contract weighted tests for verifier prompts.
+    pub weighted_tests: Option<String>,
+    /// Workspace import hints for cross-module references.
+    pub workspace_import_hints: Option<String>,
+    /// Pre-formatted evidence section for architect prompts.
+    pub evidence_section: Option<String>,
+    /// Error feedback from previous planning attempts.
+    pub error_feedback: Option<String>,
+    /// Restriction map context for correction prompts (pre-formatted).
+    pub restriction_map_context: Option<String>,
+    /// Project file tree for correction prompts (pre-formatted lines).
+    pub project_file_tree: Option<String>,
+    /// Raw build/test output for correction prompts (truncated).
+    pub build_test_output: Option<String>,
+    /// Owner plugin name (e.g. "rust", "python") for language-specific guidance.
+    pub owner_plugin: Option<String>,
+    /// Syntactic energy score from the last verification pass.
+    pub energy_v_syn: Option<f32>,
+}
+
+/// Policy decision for a dependency command (PSP-7 §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CommandPolicyDecision {
+    /// Command is allowed.
+    Allow,
+    /// Command is denied.
+    Deny,
+    /// Command requires user approval before execution.
+    RequireApproval,
+}
+
+/// Policy decision for a manifest mutation (PSP-7 §4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ManifestMutationPolicy {
+    /// Mutation is allowed.
+    Allow,
+    /// Mutation is denied.
+    Deny,
+}
+
 #[cfg(test)]
 mod psp5_tests {
     use super::*;
@@ -4042,5 +4454,156 @@ mod psp5_tests {
         assert_ne!(SessionOutcome::Success, SessionOutcome::PartialSuccess);
         assert_ne!(SessionOutcome::Success, SessionOutcome::Failed);
         assert_ne!(SessionOutcome::PartialSuccess, SessionOutcome::Failed);
+    }
+
+    // PSP-7 type tests
+
+    #[test]
+    fn test_parse_result_state_is_ok() {
+        assert!(ParseResultState::StrictJsonOk.is_ok());
+        assert!(ParseResultState::TolerantRecoveryOk.is_ok());
+        assert!(!ParseResultState::NoStructuredPayload.is_ok());
+        assert!(!ParseResultState::SchemaInvalid.is_ok());
+        assert!(!ParseResultState::SemanticallyRejected.is_ok());
+        assert!(!ParseResultState::EmptyBundle.is_ok());
+    }
+
+    #[test]
+    fn test_parse_result_state_display() {
+        assert_eq!(ParseResultState::StrictJsonOk.to_string(), "strict_json_ok");
+        assert_eq!(
+            ParseResultState::NoStructuredPayload.to_string(),
+            "no_structured_payload"
+        );
+        assert_eq!(
+            ParseResultState::SemanticallyRejected.to_string(),
+            "semantically_rejected"
+        );
+    }
+
+    #[test]
+    fn test_retry_classification_display() {
+        assert_eq!(
+            RetryClassification::MalformedRetry.to_string(),
+            "malformed_retry"
+        );
+        assert_eq!(RetryClassification::Retarget.to_string(), "retarget");
+        assert_eq!(RetryClassification::Replan.to_string(), "replan");
+        assert_eq!(
+            RetryClassification::BudgetExhausted.to_string(),
+            "budget_exhausted"
+        );
+    }
+
+    #[test]
+    fn test_prompt_intent_serde_roundtrip() {
+        let intents = [
+            PromptIntent::ArchitectExisting,
+            PromptIntent::ActuatorMultiOutput,
+            PromptIntent::CorrectionRetry,
+            PromptIntent::SoloGenerate,
+        ];
+        for intent in &intents {
+            let json = serde_json::to_string(intent).unwrap();
+            let back: PromptIntent = serde_json::from_str(&json).unwrap();
+            assert_eq!(*intent, back);
+        }
+    }
+
+    #[test]
+    fn test_task_plan_cycle_detection() {
+        let mut a = PlannedTask::new("a", "goal a");
+        a.dependencies = vec!["b".to_string()];
+        let mut b = PlannedTask::new("b", "goal b");
+        b.dependencies = vec!["c".to_string()];
+        let mut c = PlannedTask::new("c", "goal c");
+        c.dependencies = vec!["a".to_string()];
+        let plan = TaskPlan {
+            tasks: vec![a, b, c],
+        };
+        let err = plan.validate().unwrap_err();
+        assert!(err.contains("cycle"), "Expected cycle error, got: {err}");
+    }
+
+    #[test]
+    fn test_task_plan_implicit_dependency_enforcement() {
+        // Task B produces "src/lib.rs", Task A reads it but doesn't depend on B
+        let mut a = PlannedTask::new("a", "use lib");
+        a.context_files = vec!["src/lib.rs".to_string()];
+        a.output_files = vec!["src/main.rs".to_string()];
+        let mut b = PlannedTask::new("b", "create lib");
+        b.output_files = vec!["src/lib.rs".to_string()];
+
+        let mut plan = TaskPlan { tasks: vec![a, b] };
+        let err = plan.validate().unwrap_err();
+        assert!(
+            err.contains("does not declare it as a dependency"),
+            "Expected implicit dep error, got: {err}"
+        );
+        // Fix: add the dependency
+        plan.tasks[0].dependencies.push("b".to_string());
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_task_plan_valid_acyclic() {
+        let a = PlannedTask::new("a", "goal a");
+        let mut b = PlannedTask::new("b", "goal b");
+        b.dependencies = vec!["a".to_string()];
+        let mut c = PlannedTask::new("c", "goal c");
+        c.dependencies = vec!["a".to_string(), "b".to_string()];
+        let plan = TaskPlan {
+            tasks: vec![a, b, c],
+        };
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_task_plan_test_file_dependency_inference() {
+        // Source task produces src/lib.rs, test task produces tests/lib_test.rs
+        // Test task should be required to depend on source task.
+        let mut src = PlannedTask::new("src", "implement lib");
+        src.output_files = vec!["src/lib.rs".to_string()];
+        let mut tst = PlannedTask::new("tst", "test lib");
+        tst.output_files = vec!["tests/lib_test.rs".to_string()];
+
+        let plan = TaskPlan {
+            tasks: vec![src, tst],
+        };
+        let err = plan.validate().unwrap_err();
+        assert!(
+            err.contains("Test task 'tst'") && err.contains("does not depend on source task 'src'"),
+            "Expected test-dep inference error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_task_plan_test_file_dependency_satisfied() {
+        let mut src = PlannedTask::new("src", "implement lib");
+        src.output_files = vec!["src/lib.rs".to_string()];
+        let mut tst = PlannedTask::new("tst", "test lib");
+        tst.output_files = vec!["tests/lib_test.rs".to_string()];
+        tst.dependencies = vec!["src".to_string()];
+
+        let plan = TaskPlan {
+            tasks: vec![src, tst],
+        };
+        assert!(plan.validate().is_ok());
+    }
+
+    #[test]
+    fn test_glob_matches_simple() {
+        assert!(super::glob_matches_simple("tests/*.rs", "tests/foo.rs"));
+        assert!(!super::glob_matches_simple("tests/*.rs", "src/foo.rs"));
+        assert!(super::glob_matches_simple(
+            "**/*.test.js",
+            "src/utils.test.js"
+        ));
+        assert!(super::glob_matches_simple("test_*.py", "test_auth.py"));
+        assert!(!super::glob_matches_simple("test_*.py", "auth.py"));
+        assert!(super::glob_matches_simple(
+            "tests/**/*.rs",
+            "tests/unit/foo.rs"
+        ));
     }
 }

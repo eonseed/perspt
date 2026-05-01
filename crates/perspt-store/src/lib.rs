@@ -9,8 +9,9 @@ mod store;
 pub use schema::init_schema;
 pub use store::{
     ArtifactBundleRow, BranchFlushRow, BranchLineageRow, BudgetEnvelopeRow,
-    ContextProvenanceRecord, EnergyRecord, EscalationReportRecord, FeatureCharterRow,
-    InterfaceSealRow, LlmRequestRecord, NodeStateRecord, PlanRevisionRow, ProvisionalBranchRow,
-    RepairFootprintRow, ReviewOutcomeRow, RewriteRecordRow, SessionRecord, SessionStore,
-    SheafValidationRow, StructuralDigestRecord, TaskGraphEdgeRow, VerificationResultRow,
+    ContextProvenanceRecord, CorrectionAttemptRow, EnergyRecord, EscalationReportRecord,
+    FeatureCharterRow, InterfaceSealRow, LlmRequestRecord, NodeStateRecord, PlanRevisionRow,
+    ProvisionalBranchRow, RepairFootprintRow, ReviewOutcomeRow, RewriteRecordRow, SessionRecord,
+    SessionStore, SheafValidationRow, SrbnStepRecord, StructuralDigestRecord, TaskGraphEdgeRow,
+    VerificationResultRow,
 };

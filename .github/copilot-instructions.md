@@ -52,6 +52,13 @@ Concise, repo-specific guidance for the current multi-crate workspace.
 - CI also runs a separate `cargo audit` job and a Sphinx documentation build stage. If you change dependencies or docs, validate the relevant parts locally when practical.
 - Clippy warnings are CI failures. Keep Rust test modules at the end of files, and prefer arrays/slices over unnecessary `vec![]` allocations in tests.
 
+## DuckDB build: bundled vs system
+- DuckDB is pinned in the workspace root `Cargo.toml` (`duckdb = "=1.10501.0"`) **without** the `bundled` feature by default.
+- Each crate that (transitively) depends on DuckDB exposes a `bundled` cargo feature that activates `duckdb/bundled` through `perspt-store/bundled`. The chain: `perspt-store → perspt-agent, perspt-tui, perspt-dashboard, perspt-cli, perspt`.
+- **Local dev** (default features): links against a system-installed DuckDB library. On macOS with Homebrew: `brew install duckdb`. The `.cargo/config.toml` sets `DUCKDB_LIB_DIR` and `DUCKDB_INCLUDE_DIR` to Homebrew paths (override via env vars if needed).
+- **CI / release** (`--all-features` or `--features bundled`): compiles DuckDB from C source for a fully self-contained binary.
+- For fast iteration use `cargo clippy --all-targets`, `cargo test`, or `cargo test -p <crate>` (no `--all-features`). Only add `--all-features` when validating the full CI gate.
+
 ## Docs and local workflows
 - Rust API docs: `cargo doc --open --no-deps --all-features`.
 - Sphinx book: `cd docs/perspt_book && uv run make html`.

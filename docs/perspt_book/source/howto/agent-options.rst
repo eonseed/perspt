@@ -115,6 +115,29 @@ Logging and Output
    * - ``--output-plan <FILE>``
      - Export task plan as JSON before execution
 
+Embedded Dashboard
+------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Flag
+     - Description
+   * - ``--dashboard``
+     - Start the web monitoring dashboard alongside the agent
+   * - ``--dashboard-port <PORT>``
+     - Port for the embedded dashboard server (default: ``3000``)
+
+When ``--dashboard`` is provided, an Axum web server is spawned as a background
+task within the agent process. It opens a separate read-only DuckDB connection
+to the same database file the agent writes to—DuckDB supports one writer plus
+concurrent readers—so the dashboard can display live progress without
+interfering with the agent.
+
+The dashboard server is automatically stopped when the agent process exits.
+See :doc:`dashboard-setup` for dashboard configuration details.
+
 Examples
 --------
 
@@ -135,3 +158,9 @@ Examples
      --log-llm \
      --mode balanced \
      -w ./project "Build a web server"
+
+   # Run agent with live dashboard
+   perspt agent --dashboard "Refactor the auth module"
+
+   # Agent with dashboard on custom port
+   perspt agent --dashboard --dashboard-port 8080 -w ./myapp "Add unit tests"

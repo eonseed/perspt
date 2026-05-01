@@ -5,7 +5,8 @@ use axum::response::{Html, IntoResponse};
 use crate::error::DashboardError;
 use crate::state::AppState;
 use crate::views::decisions::{
-    DecisionsViewModel, EscalationRow, PlanRow, RepairRow, RewriteRow, SheafRow, VerificationRow,
+    CorrectionRow, DecisionsViewModel, EscalationRow, PlanRow, RepairRow, RewriteRow, SheafRow,
+    VerificationRow,
 };
 use crate::views::friendly_name;
 
@@ -22,6 +23,7 @@ struct DecisionsTemplate {
     plan_revisions: Vec<PlanRow>,
     repair_footprints: Vec<RepairRow>,
     verifications: Vec<VerificationRow>,
+    correction_attempts: Vec<CorrectionRow>,
     total_decisions: usize,
 }
 
@@ -55,6 +57,10 @@ pub async fn decisions_handler(
         .store
         .get_all_verification_results(&session_id)
         .unwrap_or_default();
+    let correction_attempts = state
+        .store
+        .get_session_correction_attempts(&session_id)
+        .unwrap_or_default();
 
     let vm = DecisionsViewModel::from_store(
         session_id.clone(),
@@ -64,6 +70,7 @@ pub async fn decisions_handler(
         plan_revisions,
         repair_footprints,
         verifications,
+        correction_attempts,
     );
 
     let total_decisions = vm.escalations.len()
@@ -71,7 +78,8 @@ pub async fn decisions_handler(
         + vm.rewrites.len()
         + vm.plan_revisions.len()
         + vm.repair_footprints.len()
-        + vm.verifications.len();
+        + vm.verifications.len()
+        + vm.correction_attempts.len();
 
     let tmpl = DecisionsTemplate {
         display_name: friendly_name(&vm.session_id),
@@ -84,6 +92,7 @@ pub async fn decisions_handler(
         plan_revisions: vm.plan_revisions,
         repair_footprints: vm.repair_footprints,
         verifications: vm.verifications,
+        correction_attempts: vm.correction_attempts,
         total_decisions,
     };
     Ok(Html(tmpl.render()?))
