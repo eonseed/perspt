@@ -180,7 +180,7 @@ jobs:
     
     steps:
     - name: Add PSP guidance comment
-      uses: actions/github-script@v8
+      uses: actions/github-script@v9
       with:
         script: |
           const pspNumber = '${{ needs.detect-psp-pr.outputs.psp_number }}';
@@ -289,7 +289,7 @@ jobs:
     
     steps:
     - name: Add existing PSP update comment
-      uses: actions/github-script@v8
+      uses: actions/github-script@v9
       with:
         script: |
           const pspNumber = '${{ needs.detect-psp-pr.outputs.psp_number }}';
@@ -539,7 +539,7 @@ jobs:
     steps:
     - name: Create discussion issue
       id: create
-      uses: actions/github-script@v8
+      uses: actions/github-script@v9
       with:
         script: |
           const pspNumber = '${{ needs.update-psp-status.outputs.psp_number }}';
@@ -660,7 +660,7 @@ jobs:
     
     steps:
     - name: Add helpful comment
-      uses: actions/github-script@v8
+      uses: actions/github-script@v9
       with:
         script: |
           const comment = `👋 **Thank you for proposing a PSP!**
@@ -810,7 +810,7 @@ jobs:
         
     - name: Comment on PSP validation results
       if: steps.validate.outputs.has_errors == 'true' || steps.validate.outputs.has_warnings == 'true'
-      uses: actions/github-script@v8
+      uses: actions/github-script@v9
       with:
         script: |
           const hasErrors = '${{ steps.validate.outputs.has_errors }}' === 'true';
@@ -860,7 +860,7 @@ jobs:
     
     steps:
     - name: Workflow Summary
-      uses: actions/github-script@v8
+      uses: actions/github-script@v9
       with:
         script: |
           const assignResult = '${{ needs.assign-psp-number.result }}';
