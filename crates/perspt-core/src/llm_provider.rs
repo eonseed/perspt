@@ -6,7 +6,7 @@
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent};
+use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
 use genai::Client;
 use std::sync::Arc;
 use std::time::Instant;
@@ -335,58 +335,7 @@ impl GenAIProvider {
         Ok(())
     }
 
-    /// Generate response with conversation history
-    pub async fn generate_response_with_history(
-        &self,
-        model: &str,
-        messages: Vec<ChatMessage>,
-    ) -> Result<String> {
-        self.increment_request().await;
 
-        let chat_req = ChatRequest::new(messages);
-
-        log::debug!("Sending chat request to model: {model} with conversation history");
-
-        let chat_res = self
-            .client
-            .exec_chat(model, chat_req, None)
-            .await
-            .context(format!("Failed to execute chat request for model: {model}"))?;
-
-        let content = chat_res
-            .first_text()
-            .context("No text content in response")?;
-
-        log::debug!("Received response with {} characters", content.len());
-        Ok(content.to_string())
-    }
-
-    /// Generate response with custom chat options
-    pub async fn generate_response_with_options(
-        &self,
-        model: &str,
-        prompt: &str,
-        options: ChatOptions,
-    ) -> Result<String> {
-        self.increment_request().await;
-
-        let chat_req = ChatRequest::default().append_message(ChatMessage::user(prompt));
-
-        log::debug!("Sending chat request to model: {model} with custom options");
-
-        let chat_res = self
-            .client
-            .exec_chat(model, chat_req, Some(&options))
-            .await
-            .context(format!("Failed to execute chat request for model: {model}"))?;
-
-        let content = chat_res
-            .first_text()
-            .context("No text content in response")?;
-
-        log::debug!("Received response with {} characters", content.len());
-        Ok(content.to_string())
-    }
 
     /// Get a list of supported providers
     pub fn get_supported_providers() -> Vec<&'static str> {
