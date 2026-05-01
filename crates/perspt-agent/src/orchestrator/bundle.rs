@@ -5,24 +5,6 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 impl SRBNOrchestrator {
-    /// Try to parse a JSON artifact bundle from content
-    ///
-    /// PSP-5 Phase 4: Uses the provider-neutral normalization layer.
-    fn try_parse_json_bundle(&self, content: &str) -> Option<perspt_core::types::ArtifactBundle> {
-        match perspt_core::normalize::extract_and_deserialize::<perspt_core::types::ArtifactBundle>(
-            content,
-        ) {
-            Ok((bundle, method)) => {
-                log::info!("Parsed ArtifactBundle via normalization ({})", method);
-                Some(bundle)
-            }
-            Err(e) => {
-                log::debug!("Normalization could not extract ArtifactBundle: {}", e);
-                None
-            }
-        }
-    }
-
     /// PSP-7: Typed parse pipeline returning structured state for every LLM response.
     ///
     /// Replaces the Option-based `parse_artifact_bundle` with a pipeline that
@@ -47,6 +29,7 @@ impl SRBNOrchestrator {
     ) {
         use perspt_core::types::{
             ArtifactBundle, ArtifactOperation, CorrectionAttemptRecord, ParseResultState,
+            RetryClassification,
         };
 
         // Layer A: raw capture — fingerprint the response
@@ -61,11 +44,32 @@ impl SRBNOrchestrator {
             .unwrap_or_default()
             .as_secs() as i64;
 
+        let classify_retry = |state: ParseResultState, rejection: Option<&str>| match state {
+            ParseResultState::StrictJsonOk | ParseResultState::TolerantRecoveryOk => None,
+            ParseResultState::NoStructuredPayload
+            | ParseResultState::SchemaInvalid
+            | ParseResultState::EmptyBundle => Some(RetryClassification::MalformedRetry),
+            ParseResultState::SemanticallyRejected => {
+                let reason = rejection.unwrap_or_default().to_ascii_lowercase();
+                if reason.contains("all artifacts rejected")
+                    || reason.contains("undeclared")
+                    || reason.contains("target")
+                {
+                    Some(RetryClassification::Retarget)
+                } else if reason.contains("support") {
+                    Some(RetryClassification::SupportFileViolation)
+                } else {
+                    Some(RetryClassification::Replan)
+                }
+            }
+        };
+
         let build_record = |state: ParseResultState, accepted: bool, rejection: Option<String>| {
+            let retry_classification = classify_retry(state, rejection.as_deref());
             CorrectionAttemptRecord {
                 attempt,
                 parse_state: state,
-                retry_classification: None,
+                retry_classification,
                 response_fingerprint: response_fingerprint.clone(),
                 response_length,
                 energy_after: None,
@@ -75,52 +79,86 @@ impl SRBNOrchestrator {
             }
         };
 
-        // Layer C: Strict JSON parse
-        if let Some(bundle) = self.try_parse_json_bundle(content) {
-            if bundle.validate().is_ok() {
-                // Layer B: normalize all paths in the bundle
-                let bundle = self.normalize_bundle_paths(bundle);
+        // Layer C: Strict JSON parse. Keep JSON extraction and schema
+        // deserialization separate so malformed bundles are classified as
+        // SchemaInvalid rather than collapsing to NoStructuredPayload.
+        match perspt_core::normalize::extract_json(content) {
+            Ok(output) => {
+                let bundle = match serde_json::from_str::<ArtifactBundle>(&output.json_body) {
+                    Ok(bundle) => {
+                        log::info!(
+                            "Parsed ArtifactBundle via normalization ({})",
+                            output.method
+                        );
+                        bundle
+                    }
+                    Err(e) => {
+                        let record = build_record(
+                            ParseResultState::SchemaInvalid,
+                            false,
+                            Some(format!(
+                                "JSON extracted via {} but bundle schema deserialization failed: {}",
+                                output.method, e
+                            )),
+                        );
+                        return (None, ParseResultState::SchemaInvalid, Some(record));
+                    }
+                };
 
-                if bundle.artifacts.is_empty() {
-                    let record = build_record(
-                        ParseResultState::EmptyBundle,
-                        false,
-                        Some("Bundle is empty after path normalization".to_string()),
-                    );
-                    return (None, ParseResultState::EmptyBundle, Some(record));
-                }
+                if bundle.validate().is_ok() {
+                    // Layer B: normalize all paths in the bundle
+                    let bundle = self.normalize_bundle_paths(bundle);
 
-                // Layer E: semantic validation
-                match self.semantic_validate_bundle(&bundle, node_id) {
-                    Ok(filtered) => {
-                        if filtered.artifacts.is_empty() {
+                    if bundle.artifacts.is_empty() {
+                        let record = build_record(
+                            ParseResultState::EmptyBundle,
+                            false,
+                            Some("Bundle is empty after path normalization".to_string()),
+                        );
+                        return (None, ParseResultState::EmptyBundle, Some(record));
+                    }
+
+                    // Layer E: semantic validation
+                    match self.semantic_validate_bundle(&bundle, node_id) {
+                        Ok(filtered) => {
+                            if filtered.artifacts.is_empty() {
+                                let record = build_record(
+                                    ParseResultState::SemanticallyRejected,
+                                    false,
+                                    Some(
+                                        "All artifacts rejected by semantic validation".to_string(),
+                                    ),
+                                );
+                                return (
+                                    None,
+                                    ParseResultState::SemanticallyRejected,
+                                    Some(record),
+                                );
+                            }
+                            let record = build_record(ParseResultState::StrictJsonOk, true, None);
+                            return (Some(filtered), ParseResultState::StrictJsonOk, Some(record));
+                        }
+                        Err(reason) => {
                             let record = build_record(
                                 ParseResultState::SemanticallyRejected,
                                 false,
-                                Some("All artifacts rejected by semantic validation".to_string()),
+                                Some(reason),
                             );
                             return (None, ParseResultState::SemanticallyRejected, Some(record));
                         }
-                        let record = build_record(ParseResultState::StrictJsonOk, true, None);
-                        return (Some(filtered), ParseResultState::StrictJsonOk, Some(record));
                     }
-                    Err(reason) => {
-                        let record = build_record(
-                            ParseResultState::SemanticallyRejected,
-                            false,
-                            Some(reason),
-                        );
-                        return (None, ParseResultState::SemanticallyRejected, Some(record));
-                    }
+                } else {
+                    log::warn!("JSON bundle found but failed schema validation");
+                    let record = build_record(
+                        ParseResultState::SchemaInvalid,
+                        false,
+                        Some("JSON parsed but bundle schema validation failed".to_string()),
+                    );
+                    return (None, ParseResultState::SchemaInvalid, Some(record));
                 }
-            } else {
-                log::warn!("JSON bundle found but failed schema validation");
-                let record = build_record(
-                    ParseResultState::SchemaInvalid,
-                    false,
-                    Some("JSON parsed but bundle schema validation failed".to_string()),
-                );
-                return (None, ParseResultState::SchemaInvalid, Some(record));
+            }
+            Err(e) => {
+                log::debug!("Normalization could not extract ArtifactBundle JSON: {}", e);
             }
         }
 
@@ -277,21 +315,7 @@ impl SRBNOrchestrator {
         bundle: &perspt_core::types::ArtifactBundle,
         node_id: &str,
     ) -> Result<perspt_core::types::ArtifactBundle, String> {
-        let allowed_paths: std::collections::HashSet<String> = self
-            .node_indices
-            .get(node_id)
-            .map(|idx| {
-                self.graph[*idx]
-                    .output_targets
-                    .iter()
-                    .map(|p| {
-                        let raw = p.to_string_lossy();
-                        perspt_core::path::normalize_artifact_path(&raw)
-                            .unwrap_or_else(|_| raw.to_string())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let allowed_paths = self.allowed_bundle_paths(node_id);
 
         // If no output targets declared, pass everything through
         if allowed_paths.is_empty() {
@@ -299,29 +323,39 @@ impl SRBNOrchestrator {
         }
 
         // Get legal support files from the plugin
-        let legal_support: std::collections::HashSet<String> = self
+        let registry = perspt_core::plugin::PluginRegistry::new();
+        let plugin_name = self
             .node_indices
             .get(node_id)
-            .map(|idx| {
-                let plugin_name = &self.graph[*idx].owner_plugin;
-                let registry = perspt_core::plugin::PluginRegistry::new();
-                registry
-                    .get(plugin_name)
-                    .map(|p| {
-                        p.legal_support_files()
-                            .iter()
-                            .map(|s| s.to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default()
+            .map(|idx| self.graph[*idx].owner_plugin.as_str())
+            .unwrap_or("");
+        let plugin = registry.get(plugin_name);
+        let legal_support: std::collections::HashSet<String> = plugin
+            .map(|p| {
+                p.legal_support_files()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
             })
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+            .unwrap_or_default();
 
         let (kept, dropped): (Vec<_>, Vec<_>) = bundle.artifacts.iter().cloned().partition(|a| {
             let normalized = perspt_core::path::normalize_artifact_path(a.path())
                 .unwrap_or_else(|_| a.path().to_string());
+
+            if let Some(plugin) = plugin {
+                if Self::is_manifest_path(&normalized)
+                    && plugin.manifest_mutation_policy(&normalized)
+                        == perspt_core::types::ManifestMutationPolicy::Deny
+                {
+                    log::warn!(
+                        "Rejecting manifest mutation '{}' by plugin policy for '{}'",
+                        normalized,
+                        plugin_name
+                    );
+                    return false;
+                }
+            }
 
             // Accept if in declared output targets
             if allowed_paths.contains(&normalized) {
@@ -417,7 +451,15 @@ impl SRBNOrchestrator {
         })?;
 
         // Filter out undeclared paths instead of failing the entire session
-        let filtered = self.filter_bundle_to_declared_paths(bundle, node_id);
+        let filtered = self
+            .semantic_validate_bundle(bundle, node_id)
+            .map_err(|reason| {
+                anyhow::anyhow!(
+                    "Bundle semantic validation failed for '{}': {}",
+                    node_id,
+                    reason
+                )
+            })?;
 
         // If filtering removed ALL artifacts, fail so the correction loop can
         // retry with proper paths.  The old fallback applied the *unfiltered*
@@ -646,18 +688,8 @@ impl SRBNOrchestrator {
         Ok(())
     }
 
-    /// Validate and strip undeclared paths from a bundle.
-    ///
-    /// Instead of failing the entire session, this method removes artifacts
-    /// targeting paths not listed in the node's `output_targets` and logs
-    /// warnings.  Returns the filtered bundle.
-    fn filter_bundle_to_declared_paths(
-        &self,
-        bundle: &perspt_core::types::ArtifactBundle,
-        node_id: &str,
-    ) -> perspt_core::types::ArtifactBundle {
-        let allowed_paths: std::collections::HashSet<String> = self
-            .node_indices
+    fn allowed_bundle_paths(&self, node_id: &str) -> std::collections::HashSet<String> {
+        self.node_indices
             .get(node_id)
             .map(|idx| {
                 self.graph[*idx]
@@ -670,37 +702,16 @@ impl SRBNOrchestrator {
                     })
                     .collect()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
-        if allowed_paths.is_empty() {
-            return bundle.clone();
-        }
-
-        let (kept, dropped): (Vec<_>, Vec<_>) = bundle.artifacts.iter().cloned().partition(|a| {
-            let normalized = perspt_core::path::normalize_artifact_path(a.path())
-                .unwrap_or_else(|_| a.path().to_string());
-            allowed_paths.contains(&normalized)
-        });
-
-        if !dropped.is_empty() {
-            let dropped_paths: Vec<String> = dropped.iter().map(|a| a.path().to_string()).collect();
-            log::warn!(
-                "Stripped {} undeclared artifact(s) from node '{}': {}",
-                dropped.len(),
-                node_id,
-                dropped_paths.join(", ")
-            );
-            self.emit_log(format!(
-                "⚠️ Stripped {} undeclared path(s) from bundle: {}",
-                dropped.len(),
-                dropped_paths.join(", ")
-            ));
-        }
-
-        perspt_core::types::ArtifactBundle {
-            artifacts: kept,
-            commands: bundle.commands.clone(),
-        }
+    fn is_manifest_path(path: &str) -> bool {
+        matches!(
+            std::path::Path::new(path)
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("Cargo.toml" | "package.json" | "pyproject.toml" | "setup.py" | "setup.cfg")
+        )
     }
 }
 
