@@ -111,7 +111,7 @@ jobs:
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} -p perspt-cli
+        run: cargo build --release --all-features --target ${{ matrix.target }} -p perspt-cli
 
       - name: Strip binary (Linux and macOS)
         if: matrix.os != 'windows-latest'
