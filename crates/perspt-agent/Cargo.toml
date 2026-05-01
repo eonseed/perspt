@@ -1,6 +1,6 @@
 [package]
 name = "perspt-agent"
-version = "0.5.8"
+version = "0.5.9"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -16,10 +16,10 @@ default = []
 bundled = ["perspt-store/bundled"]
 
 [dependencies]
-perspt-core = { version = "0.5.8", path = "../perspt-core" }
-perspt-policy = { version = "0.5.8", path = "../perspt-policy" }
-perspt-sandbox = { version = "0.5.8", path = "../perspt-sandbox" }
-perspt-store = { version = "0.5.8", path = "../perspt-store" }
+perspt-core = { version = "0.5.9", path = "../perspt-core" }
+perspt-policy = { version = "0.5.9", path = "../perspt-policy" }
+perspt-sandbox = { version = "0.5.9", path = "../perspt-sandbox" }
+perspt-store = { version = "0.5.9", path = "../perspt-store" }
 
 # Graph management
 petgraph = "0.8"

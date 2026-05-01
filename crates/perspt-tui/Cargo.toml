@@ -1,6 +1,6 @@
 [package]
 name = "perspt-tui"
-version = "0.5.8"
+version = "0.5.9"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -16,9 +16,9 @@ default = []
 bundled = ["perspt-store/bundled", "perspt-agent/bundled"]
 
 [dependencies]
-perspt-core = { version = "0.5.8", path = "../perspt-core" }
-perspt-agent = { version = "0.5.8", path = "../perspt-agent" }
-perspt-store = { version = "0.5.8", path = "../perspt-store" }
+perspt-core = { version = "0.5.9", path = "../perspt-core" }
+perspt-agent = { version = "0.5.9", path = "../perspt-agent" }
+perspt-store = { version = "0.5.9", path = "../perspt-store" }
 
 # UI components
 ratatui = "0.30"

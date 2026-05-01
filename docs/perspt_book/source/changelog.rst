@@ -3,6 +3,25 @@
 Changelog
 =========
 
+Version 0.5.9 — "心砺光华"
+--------------------------
+
+*Perfecting the essence until the work needs no words to shine.*
+
+**PSP-7: Robust Correction Loop Contracts:**
+
+- **Structured Artifact Bundle Format** — Switched correction prompt from free-form ``File: ...`` output to a strict JSON ``{ artifacts: [], commands: [] }`` schema. Includes exact target paths from evidence so the LLM targets the correct files, reducing parse failures.
+- **AgentTools Integration** — Routed correction commands through ``execute_correction_command()`` to integrate with plugin policy, user approval gates, and tool failure tracking.
+- **Typed Parse Pipeline** — Replaced Option-based bundle extraction with a 5-layer fail-closed typed parse pipeline. Added ``RetryClassification`` (Retarget, MalformedRetry, SupportFileViolation, Replan) population in ``CorrectionAttemptRecord``.
+- **Manifest Policy Enforcement** — Added semantic validation to prevent implicit mutation of root manifests (Cargo.toml, package.json) unless explicitly listed as output targets, while preserving legal support files.
+- **Strict Budget Exhaustion** — Widened budget exhaustion checks from cost-only to ``any_exhausted()`` to properly respect step and revision caps before attempting LLM calls.
+
+**LLM Provider Maintenance:**
+
+- **genai Upgrade** — Bumped ``genai`` dependency from 0.5.1 to 0.5.3 (stable patch release with bug fixes).
+- **Dead Code Cleanup** — Removed ``generate_response_with_history()`` and ``generate_response_with_options()`` which had zero callers across the workspace and were the only methods leaking ``genai::ChatOptions`` into the public API surface.
+- **Clippy Fixes** — Fixed `clippy::unnecessary-sort-by` and applied `clippy::collapsible-match` auto-fixes for Rust 1.95 compatibility.
+
 Version 0.5.8 — "Qualitätsveredelung"
 ----------------------------------------
 

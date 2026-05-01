@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.8"
+version = "0.5.9"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -22,15 +22,15 @@ repository = "https://github.com/eonseed/perspt"
 homepage = "https://eonseed.github.io/perspt/"
 
 [workspace.dependencies]
-perspt-core = { version = "0.5.8", path = "crates/perspt-core" }
-perspt-agent = { version = "0.5.8", path = "crates/perspt-agent" }
-perspt-tui = { version = "0.5.8", path = "crates/perspt-tui" }
-perspt-policy = { version = "0.5.8", path = "crates/perspt-policy" }
-perspt-sandbox = { version = "0.5.8", path = "crates/perspt-sandbox" }
-perspt-store = { version = "0.5.8", path = "crates/perspt-store" }
-perspt-cli = { version = "0.5.8", path = "crates/perspt-cli" }
-perspt-dashboard = { version = "0.5.8", path = "crates/perspt-dashboard" }
-perspt = { version = "0.5.8", path = "crates/perspt" }
+perspt-core = { version = "0.5.9", path = "crates/perspt-core" }
+perspt-agent = { version = "0.5.9", path = "crates/perspt-agent" }
+perspt-tui = { version = "0.5.9", path = "crates/perspt-tui" }
+perspt-policy = { version = "0.5.9", path = "crates/perspt-policy" }
+perspt-sandbox = { version = "0.5.9", path = "crates/perspt-sandbox" }
+perspt-store = { version = "0.5.9", path = "crates/perspt-store" }
+perspt-cli = { version = "0.5.9", path = "crates/perspt-cli" }
+perspt-dashboard = { version = "0.5.9", path = "crates/perspt-dashboard" }
+perspt = { version = "0.5.9", path = "crates/perspt" }
 
 # Exact-pinned to avoid libduckdb-sys recompilation on `cargo update`.
 # Only changes when you explicitly bump the version here.
