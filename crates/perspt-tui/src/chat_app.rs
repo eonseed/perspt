@@ -178,22 +178,22 @@ impl ChatApp {
                                 self.should_quit = true;
                             }
                             // Send message on Enter
-                            KeyCode::Enter if !self.is_streaming => {
-                                if !self.input.is_empty() {
-                                    self.send_message().await?;
-                                }
+                            KeyCode::Enter if !self.is_streaming && !self.input.is_empty() => {
+                                self.send_message().await?;
                             }
                             // Newline with Ctrl+J (reliable across terminals)
-                            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                if !self.is_streaming {
-                                    self.input.insert_newline();
-                                }
+                            KeyCode::Char('j')
+                                if key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && !self.is_streaming =>
+                            {
+                                self.input.insert_newline();
                             }
                             // Also support Ctrl+Enter for newline
-                            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                                if !self.is_streaming {
-                                    self.input.insert_newline();
-                                }
+                            KeyCode::Enter
+                                if key.modifiers.contains(KeyModifiers::CONTROL)
+                                    && !self.is_streaming =>
+                            {
+                                self.input.insert_newline();
                             }
                             // Scroll
                             KeyCode::PageUp => self.scroll_up(10),
@@ -214,10 +214,8 @@ impl ChatApp {
                             // Text editing
                             KeyCode::Backspace => self.input.backspace(),
                             KeyCode::Delete => self.input.delete(),
-                            KeyCode::Char(c) => {
-                                if !self.is_streaming {
-                                    self.input.insert_char(c);
-                                }
+                            KeyCode::Char(c) if !self.is_streaming => {
+                                self.input.insert_char(c);
                             }
                             _ => {}
                         }
@@ -292,22 +290,20 @@ impl ChatApp {
                         return false;
                     }
                     // Send message on Enter (needs special handling - sets pending_send flag)
-                    KeyCode::Enter if !self.is_streaming => {
-                        if !self.input.is_empty() {
-                            self.pending_send = true;
-                        }
+                    KeyCode::Enter if !self.is_streaming && !self.input.is_empty() => {
+                        self.pending_send = true;
                     }
                     // Newline with Ctrl+J
-                    KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if !self.is_streaming {
-                            self.input.insert_newline();
-                        }
+                    KeyCode::Char('j')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && !self.is_streaming =>
+                    {
+                        self.input.insert_newline();
                     }
                     // Ctrl+Enter for newline
-                    KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        if !self.is_streaming {
-                            self.input.insert_newline();
-                        }
+                    KeyCode::Enter
+                        if key.modifiers.contains(KeyModifiers::CONTROL) && !self.is_streaming =>
+                    {
+                        self.input.insert_newline();
                     }
                     // Scroll
                     KeyCode::PageUp => self.scroll_up(10),
@@ -328,10 +324,8 @@ impl ChatApp {
                     // Text editing
                     KeyCode::Backspace => self.input.backspace(),
                     KeyCode::Delete => self.input.delete(),
-                    KeyCode::Char(c) => {
-                        if !self.is_streaming {
-                            self.input.insert_char(c);
-                        }
+                    KeyCode::Char(c) if !self.is_streaming => {
+                        self.input.insert_char(c);
                     }
                     _ => {}
                 }

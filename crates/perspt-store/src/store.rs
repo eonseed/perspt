@@ -309,6 +309,49 @@ pub struct BudgetEnvelopeRow {
     pub cost_used_usd: f64,
 }
 
+// =========================================================================
+// PSP-7: SRBN Step Records and Correction Attempt Row Types
+// =========================================================================
+
+/// PSP-7: Record for a single orchestration step transition.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SrbnStepRecord {
+    pub session_id: String,
+    pub node_id: String,
+    /// Pipeline stage name (e.g. "speculate", "verify", "converge", "commit").
+    pub step: String,
+    /// Outcome of the step (e.g. "ok", "retry", "escalated", "failed").
+    pub outcome: String,
+    /// JSON-serialized EnergyComponents snapshot (if available).
+    pub energy_json: Option<String>,
+    /// ParseResultState as string (if this step involved parsing).
+    pub parse_state: Option<String>,
+    /// RetryClassification as string (if this step triggered a retry).
+    pub retry_classification: Option<String>,
+    /// Attempt count at the time of recording.
+    pub attempt_count: i32,
+    /// Wall-clock duration of the step in milliseconds.
+    pub duration_ms: i32,
+}
+
+/// PSP-7: Record for a single correction attempt within a convergence loop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorrectionAttemptRow {
+    pub session_id: String,
+    pub node_id: String,
+    pub attempt: i32,
+    pub parse_state: String,
+    pub retry_classification: Option<String>,
+    pub response_fingerprint: String,
+    pub response_length: i32,
+    /// JSON-serialized EnergyComponents snapshot (if available).
+    pub energy_json: Option<String>,
+    pub accepted: bool,
+    pub rejection_reason: Option<String>,
+    /// Epoch seconds.
+    pub created_at: i64,
+}
+
 use std::sync::Mutex;
 
 /// Session store for SRBN persistence
@@ -1840,6 +1883,198 @@ impl SessionStore {
     }
 }
 
+// =========================================================================
+// PSP-7: SRBN Step Records and Correction Attempts
+// =========================================================================
+
+impl SessionStore {
+    /// Record an orchestration step transition.
+    pub fn record_step(&self, record: &SrbnStepRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"INSERT INTO srbn_step_records
+               (session_id, node_id, step, outcome, energy_json,
+                parse_state, retry_classification, attempt_count, duration_ms)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            duckdb::params![
+                record.session_id,
+                record.node_id,
+                record.step,
+                record.outcome,
+                record.energy_json,
+                record.parse_state,
+                record.retry_classification,
+                record.attempt_count,
+                record.duration_ms,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieve the step timeline for a given node in chronological order.
+    pub fn get_step_timeline(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<SrbnStepRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"SELECT session_id, node_id, step, outcome, energy_json,
+                      parse_state, retry_classification, attempt_count, duration_ms
+               FROM srbn_step_records
+               WHERE session_id = ? AND node_id = ?
+               ORDER BY id ASC"#,
+        )?;
+        let rows = stmt.query_map(duckdb::params![session_id, node_id], |row| {
+            Ok(SrbnStepRecord {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                step: row.get(2)?,
+                outcome: row.get(3)?,
+                energy_json: row.get(4)?,
+                parse_state: row.get(5)?,
+                retry_classification: row.get(6)?,
+                attempt_count: row.get(7)?,
+                duration_ms: row.get(8)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Retrieve all step records for a session, ordered by id.
+    pub fn get_session_steps(&self, session_id: &str) -> Result<Vec<SrbnStepRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"SELECT session_id, node_id, step, outcome, energy_json,
+                      parse_state, retry_classification, attempt_count, duration_ms
+               FROM srbn_step_records
+               WHERE session_id = ?
+               ORDER BY id ASC"#,
+        )?;
+        let rows = stmt.query_map(duckdb::params![session_id], |row| {
+            Ok(SrbnStepRecord {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                step: row.get(2)?,
+                outcome: row.get(3)?,
+                energy_json: row.get(4)?,
+                parse_state: row.get(5)?,
+                retry_classification: row.get(6)?,
+                attempt_count: row.get(7)?,
+                duration_ms: row.get(8)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Record a correction attempt within a convergence loop.
+    pub fn record_correction_attempt(&self, record: &CorrectionAttemptRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"INSERT INTO correction_attempts
+               (session_id, node_id, attempt, parse_state, retry_classification,
+                response_fingerprint, response_length, energy_json,
+                accepted, rejection_reason, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+            duckdb::params![
+                record.session_id,
+                record.node_id,
+                record.attempt,
+                record.parse_state,
+                record.retry_classification,
+                record.response_fingerprint,
+                record.response_length,
+                record.energy_json,
+                record.accepted,
+                record.rejection_reason,
+                record.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieve all correction attempts for a node, ordered by attempt number.
+    pub fn get_correction_attempts(
+        &self,
+        session_id: &str,
+        node_id: &str,
+    ) -> Result<Vec<CorrectionAttemptRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"SELECT session_id, node_id, attempt, parse_state, retry_classification,
+                      response_fingerprint, response_length, energy_json,
+                      accepted, rejection_reason, created_at
+               FROM correction_attempts
+               WHERE session_id = ? AND node_id = ?
+               ORDER BY attempt ASC"#,
+        )?;
+        let rows = stmt.query_map(duckdb::params![session_id, node_id], |row| {
+            Ok(CorrectionAttemptRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                attempt: row.get(2)?,
+                parse_state: row.get(3)?,
+                retry_classification: row.get(4)?,
+                response_fingerprint: row.get(5)?,
+                response_length: row.get(6)?,
+                energy_json: row.get(7)?,
+                accepted: row.get(8)?,
+                rejection_reason: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Retrieve all correction attempts for a session, ordered by node then attempt.
+    pub fn get_session_correction_attempts(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<CorrectionAttemptRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"SELECT session_id, node_id, attempt, parse_state, retry_classification,
+                      response_fingerprint, response_length, energy_json,
+                      accepted, rejection_reason, created_at
+               FROM correction_attempts
+               WHERE session_id = ?
+               ORDER BY node_id ASC, attempt ASC"#,
+        )?;
+        let rows = stmt.query_map(duckdb::params![session_id], |row| {
+            Ok(CorrectionAttemptRow {
+                session_id: row.get(0)?,
+                node_id: row.get(1)?,
+                attempt: row.get(2)?,
+                parse_state: row.get(3)?,
+                retry_classification: row.get(4)?,
+                response_fingerprint: row.get(5)?,
+                response_length: row.get(6)?,
+                energy_json: row.get(7)?,
+                accepted: row.get(8)?,
+                rejection_reason: row.get(9)?,
+                created_at: row.get(10)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2434,5 +2669,132 @@ mod tests {
             status: "RUNNING".to_string(),
         };
         assert!(ro.create_session(&record).is_err());
+    }
+
+    // =================================================================
+    // PSP-7: SRBN step records and correction attempts round-trip tests
+    // =================================================================
+
+    #[test]
+    fn test_srbn_step_record_roundtrip() {
+        let store = test_store();
+        let sid = "step-sess";
+        seed_session(&store, sid);
+
+        let r1 = SrbnStepRecord {
+            session_id: sid.to_string(),
+            node_id: "n1".to_string(),
+            step: "speculate".to_string(),
+            outcome: "ok".to_string(),
+            energy_json: Some(r#"{"v_syn":0.0}"#.to_string()),
+            parse_state: Some("FullyParsed".to_string()),
+            retry_classification: None,
+            attempt_count: 0,
+            duration_ms: 120,
+        };
+        let r2 = SrbnStepRecord {
+            session_id: sid.to_string(),
+            node_id: "n1".to_string(),
+            step: "verify".to_string(),
+            outcome: "retry".to_string(),
+            energy_json: Some(r#"{"v_syn":5.0}"#.to_string()),
+            parse_state: None,
+            retry_classification: Some("MalformedResponse".to_string()),
+            attempt_count: 1,
+            duration_ms: 300,
+        };
+
+        store.record_step(&r1).unwrap();
+        store.record_step(&r2).unwrap();
+
+        let timeline = store.get_step_timeline(sid, "n1").unwrap();
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0].step, "speculate");
+        assert_eq!(timeline[0].outcome, "ok");
+        assert_eq!(timeline[0].duration_ms, 120);
+        assert_eq!(timeline[1].step, "verify");
+        assert_eq!(
+            timeline[1].retry_classification.as_deref(),
+            Some("MalformedResponse")
+        );
+
+        let all = store.get_session_steps(sid).unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_correction_attempt_roundtrip() {
+        let store = test_store();
+        let sid = "corr-sess";
+        seed_session(&store, sid);
+
+        let a1 = CorrectionAttemptRow {
+            session_id: sid.to_string(),
+            node_id: "n1".to_string(),
+            attempt: 1,
+            parse_state: "FullyParsed".to_string(),
+            retry_classification: None,
+            response_fingerprint: "abc123".to_string(),
+            response_length: 4096,
+            energy_json: Some(r#"{"v_syn":2.0}"#.to_string()),
+            accepted: false,
+            rejection_reason: Some("v_syn too high".to_string()),
+            created_at: 1700000000,
+        };
+        let a2 = CorrectionAttemptRow {
+            session_id: sid.to_string(),
+            node_id: "n1".to_string(),
+            attempt: 2,
+            parse_state: "FullyParsed".to_string(),
+            retry_classification: None,
+            response_fingerprint: "def456".to_string(),
+            response_length: 3800,
+            energy_json: Some(r#"{"v_syn":0.0}"#.to_string()),
+            accepted: true,
+            rejection_reason: None,
+            created_at: 1700000010,
+        };
+
+        store.record_correction_attempt(&a1).unwrap();
+        store.record_correction_attempt(&a2).unwrap();
+
+        let attempts = store.get_correction_attempts(sid, "n1").unwrap();
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].attempt, 1);
+        assert!(!attempts[0].accepted);
+        assert_eq!(
+            attempts[0].rejection_reason.as_deref(),
+            Some("v_syn too high")
+        );
+        assert_eq!(attempts[1].attempt, 2);
+        assert!(attempts[1].accepted);
+        assert!(attempts[1].rejection_reason.is_none());
+    }
+
+    #[test]
+    fn test_step_timeline_filters_by_node() {
+        let store = test_store();
+        let sid = "filter-sess";
+        seed_session(&store, sid);
+
+        for (node, step) in [("n1", "speculate"), ("n2", "speculate"), ("n1", "verify")] {
+            store
+                .record_step(&SrbnStepRecord {
+                    session_id: sid.to_string(),
+                    node_id: node.to_string(),
+                    step: step.to_string(),
+                    outcome: "ok".to_string(),
+                    energy_json: None,
+                    parse_state: None,
+                    retry_classification: None,
+                    attempt_count: 0,
+                    duration_ms: 0,
+                })
+                .unwrap();
+        }
+
+        assert_eq!(store.get_step_timeline(sid, "n1").unwrap().len(), 2);
+        assert_eq!(store.get_step_timeline(sid, "n2").unwrap().len(), 1);
+        assert_eq!(store.get_session_steps(sid).unwrap().len(), 3);
     }
 }

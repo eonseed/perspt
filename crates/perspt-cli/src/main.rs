@@ -133,6 +133,14 @@ enum Commands {
         /// Export the task graph as JSON to a file after planning (before execution)
         #[arg(long)]
         output_plan: Option<PathBuf>,
+
+        /// Start the web monitoring dashboard alongside the agent
+        #[arg(long)]
+        dashboard: bool,
+
+        /// Port for the embedded dashboard server (default: 3000)
+        #[arg(long, default_value = "3000")]
+        dashboard_port: u16,
     },
 
     /// Initialize project configuration
@@ -282,6 +290,8 @@ async fn main() -> Result<()> {
             verifier_fallback_model,
             speculator_fallback_model,
             output_plan,
+            dashboard,
+            dashboard_port,
         }) => {
             commands::agent::run(
                 task,
@@ -307,6 +317,8 @@ async fn main() -> Result<()> {
                 stability_threshold,
                 max_cost,
                 max_steps,
+                dashboard,
+                dashboard_port,
             )
             .await
         }

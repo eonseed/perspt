@@ -140,6 +140,178 @@ fn epoch_seconds() -> i64 {
         .as_secs() as i64
 }
 
+/// Detect stub/placeholder content in a generated source file.
+///
+/// Returns `Some(reason)` if the file is predominantly stub content (i.e. it
+/// contains a known stub pattern AND has fewer than 5 lines of real code).
+/// Returns `None` for files that contain a real implementation.
+///
+/// Language detection uses `plugin_hint` ("rust", "python", "javascript") with
+/// a fallback to file extension so this works for any project type.
+fn detect_stub_content(path: &std::path::Path, plugin_hint: &str) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+
+    // Determine language from plugin hint or file extension.
+    let lang = if !plugin_hint.is_empty() && plugin_hint != "unknown" {
+        plugin_hint.to_ascii_lowercase()
+    } else {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| match e {
+                "rs" => "rust",
+                "py" => "python",
+                "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => "javascript",
+                _ => "",
+            })
+            .unwrap_or("")
+            .to_string()
+    };
+
+    // Universal stub markers (case-insensitive substring match).
+    let universal_patterns = [
+        "// stub",
+        "# stub",
+        "// placeholder",
+        "# placeholder",
+        "// will be replaced",
+        "# will be replaced",
+        "/* todo */",
+    ];
+
+    // Language-specific stub patterns.
+    let lang_patterns: &[&str] = match lang.as_str() {
+        "rust" => &["todo!()", "unimplemented!()"],
+        "python" => &["raise NotImplementedError", "raise NotImplementedError()"],
+        "javascript" | "typescript" => &[
+            "throw new Error(\"not implemented\")",
+            "throw new Error('not implemented')",
+            "throw new Error(\"TODO\")",
+            "throw new Error('TODO')",
+        ],
+        _ => &[],
+    };
+
+    let content_lower = content.to_ascii_lowercase();
+
+    // Check for any matching stub pattern.
+    let mut matched_pattern = None;
+    for pat in &universal_patterns {
+        if content_lower.contains(pat) {
+            matched_pattern = Some(*pat);
+            break;
+        }
+    }
+    if matched_pattern.is_none() {
+        for pat in lang_patterns {
+            if content.contains(pat) {
+                matched_pattern = Some(*pat);
+                break;
+            }
+        }
+    }
+
+    // Python-specific: detect `pass` or `...` as sole function/class body.
+    if matched_pattern.is_none() && lang == "python" {
+        let trimmed_lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
+        let body_only: Vec<&&str> = trimmed_lines
+            .iter()
+            .filter(|l| {
+                !l.starts_with("def ")
+                    && !l.starts_with("class ")
+                    && !l.starts_with("import ")
+                    && !l.starts_with("from ")
+            })
+            .collect();
+        if body_only.len() <= 2 && body_only.iter().all(|l| **l == "pass" || **l == "...") {
+            matched_pattern = Some("only pass/... body");
+        }
+    }
+
+    let pattern = matched_pattern?;
+
+    // Count real code lines: non-blank, non-comment, non-import.
+    let real_lines = count_real_code_lines(&content, &lang);
+    if real_lines >= 5 {
+        // File has enough real code — a single stub marker inside a large
+        // implementation is acceptable (e.g. a todo!() in one branch).
+        return None;
+    }
+
+    Some(format!(
+        "found '{}' with only {} line(s) of real code",
+        pattern, real_lines
+    ))
+}
+
+/// Count non-blank, non-comment, non-import lines of code.
+fn count_real_code_lines(content: &str, lang: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return false;
+            }
+            // Skip comments.
+            match lang {
+                "rust" => {
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with("/*")
+                        || trimmed.starts_with('*')
+                    {
+                        return false;
+                    }
+                    // Skip use/extern/mod declarations (imports).
+                    if trimmed.starts_with("use ")
+                        || trimmed.starts_with("extern ")
+                        || trimmed.starts_with("mod ")
+                    {
+                        return false;
+                    }
+                }
+                "python" => {
+                    if trimmed.starts_with('#')
+                        || trimmed.starts_with("\"\"\"")
+                        || trimmed.starts_with("'''")
+                    {
+                        return false;
+                    }
+                    if trimmed.starts_with("import ") || trimmed.starts_with("from ") {
+                        return false;
+                    }
+                }
+                "javascript" | "typescript" => {
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with("/*")
+                        || trimmed.starts_with('*')
+                    {
+                        return false;
+                    }
+                    if trimmed.starts_with("import ")
+                        || trimmed.starts_with("require(")
+                        || trimmed.starts_with("const ") && trimmed.contains("require(")
+                    {
+                        return false;
+                    }
+                }
+                _ => {
+                    if trimmed.starts_with("//")
+                        || trimmed.starts_with('#')
+                        || trimmed.starts_with("/*")
+                    {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .count()
+}
+
 impl SRBNOrchestrator {
     /// Create a new orchestrator with default models
     pub fn new(working_dir: PathBuf, auto_approve: bool) -> Self {
@@ -342,13 +514,15 @@ impl SRBNOrchestrator {
     }
 
     /// Finalize the session in the ledger based on the execution result.
-    fn finalize_session(&mut self, result: &Result<()>) {
+    fn finalize_session(&mut self, result: &Result<perspt_core::SessionOutcome>) {
         let status = if self.is_abort_requested() {
             "ABORTED"
-        } else if result.is_ok() {
-            "COMPLETED"
         } else {
-            "FAILED"
+            match result {
+                Ok(perspt_core::SessionOutcome::Success) => "COMPLETED",
+                Ok(perspt_core::SessionOutcome::PartialSuccess) => "PARTIAL",
+                Ok(perspt_core::SessionOutcome::Failed) | Err(_) => "FAILED",
+            }
         };
         if let Err(e) = self.ledger.end_session(status) {
             log::error!("Failed to finalize session as {}: {}", status, e);
@@ -618,11 +792,11 @@ impl SRBNOrchestrator {
     pub async fn run_resumed(&mut self) -> Result<()> {
         let result = self.run_resumed_inner().await;
         self.finalize_session(&result);
-        result
+        result.map(|_| ())
     }
 
     /// Inner resumed execution logic.
-    async fn run_resumed_inner(&mut self) -> Result<()> {
+    async fn run_resumed_inner(&mut self) -> Result<perspt_core::SessionOutcome> {
         let topo = Topo::new(&self.graph);
         let indices: Vec<_> = topo.iter(&self.graph).collect();
         let total_nodes = indices.len();
@@ -648,6 +822,20 @@ impl SRBNOrchestrator {
             // Abort gate
             if self.is_abort_requested() {
                 self.emit_log("⚠️ Session aborted — stopping resumed execution".to_string());
+                break;
+            }
+
+            // Budget gate: stop execution if step/cost/revision budget exhausted.
+            if self.budget.any_exhausted() {
+                let node_id = self.graph[*idx].node_id.clone();
+                self.emit_log(format!(
+                    "⛔ Budget exhausted — skipping node '{}' and remaining nodes",
+                    node_id
+                ));
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id,
+                    status: perspt_core::NodeStatus::Escalated,
+                });
                 break;
             }
 
@@ -687,16 +875,24 @@ impl SRBNOrchestrator {
 
             match self.execute_node(*idx).await {
                 Ok(NodeOutcome::Completed) => {
+                    executed += 1;
+                    self.budget.record_step();
+
+                    // Persist budget envelope for auditability.
+                    if let Err(e) = self.ledger.upsert_budget_envelope(&self.budget) {
+                        log::warn!("Failed to persist budget envelope: {}", e);
+                    }
+
                     if let Some(node) = self.graph.node_weight(*idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
                             node_id: node.node_id.clone(),
                             goal: node.goal.clone(),
                         });
                     }
-                    executed += 1;
                 }
                 Ok(NodeOutcome::Escalated) => {
                     escalated += 1;
+                    self.budget.record_step();
                     continue;
                 }
                 Err(e) => {
@@ -719,14 +915,24 @@ impl SRBNOrchestrator {
             executed,
             total_nodes
         );
+
+        // Derive session outcome from actual node results, same logic as
+        // run_orchestration: unattempted nodes count as incomplete.
+        let outcome = if escalated == 0 && executed + terminal_count >= total_nodes {
+            perspt_core::SessionOutcome::Success
+        } else if executed > 0 {
+            perspt_core::SessionOutcome::PartialSuccess
+        } else {
+            perspt_core::SessionOutcome::Failed
+        };
         self.emit_event(perspt_core::AgentEvent::Complete {
-            success: escalated == 0,
+            success: outcome == perspt_core::SessionOutcome::Success,
             message: format!(
                 "Resumed: {}/{} completed, {} escalated",
                 executed, total_nodes, escalated
             ),
         });
-        Ok(())
+        Ok(outcome)
     }
 
     /// Emit an event to the TUI (if connected)
@@ -739,6 +945,32 @@ impl SRBNOrchestrator {
     /// Emit a log message to TUI
     fn emit_log(&self, msg: impl Into<String>) {
         self.emit_event(perspt_core::AgentEvent::Log(msg.into()));
+    }
+
+    /// PSP-7: Record an orchestration step transition to the store.
+    fn record_step_quietly(
+        &self,
+        node_id: &str,
+        step: &str,
+        outcome: &str,
+        energy: Option<&perspt_core::types::EnergyComponents>,
+        attempt_count: i32,
+        duration_ms: i32,
+    ) {
+        let record = perspt_store::SrbnStepRecord {
+            session_id: self.context.session_id.clone(),
+            node_id: node_id.to_string(),
+            step: step.to_string(),
+            outcome: outcome.to_string(),
+            energy_json: energy.and_then(|e| serde_json::to_string(e).ok()),
+            parse_state: None,
+            retry_classification: None,
+            attempt_count,
+            duration_ms,
+        };
+        if let Err(e) = self.ledger.record_step(&record) {
+            log::warn!("Failed to record step '{}' for {}: {}", step, node_id, e);
+        }
     }
 
     /// Request approval from user and await response
@@ -904,11 +1136,11 @@ impl SRBNOrchestrator {
         // Run orchestration and always finalize the session
         let result = self.run_orchestration(task).await;
         self.finalize_session(&result);
-        result
+        result.map(|_| ())
     }
 
     /// Inner orchestration logic — called by `run()` which handles session lifecycle.
-    async fn run_orchestration(&mut self, task: String) -> Result<()> {
+    async fn run_orchestration(&mut self, task: String) -> Result<perspt_core::SessionOutcome> {
         if self.context.log_llm {
             self.emit_log("📝 LLM request logging enabled".to_string());
         }
@@ -922,7 +1154,10 @@ impl SRBNOrchestrator {
             // Solo Mode: Single-file execution without DAG
             log::info!("Using Solo Mode for explicit single-file task");
             self.emit_log("⚡ Solo Mode: Single-file execution".to_string());
-            return self.run_solo_mode(task).await;
+            return self
+                .run_solo_mode(task)
+                .await
+                .map(|()| perspt_core::SessionOutcome::Success);
         }
 
         // PSP-5: Classify workspace state before deciding plugin/init strategy
@@ -1186,7 +1421,9 @@ impl SRBNOrchestrator {
         }
 
         // Derive session outcome from actual node results.
-        let outcome = if escalated_count == 0 {
+        // If not all nodes were attempted (due to budget/abort), only Success
+        // when every node in the plan completed.
+        let outcome = if escalated_count == 0 && completed_count >= total_nodes {
             perspt_core::SessionOutcome::Success
         } else if completed_count > 0 {
             perspt_core::SessionOutcome::PartialSuccess
@@ -1200,7 +1437,7 @@ impl SRBNOrchestrator {
                 completed_count, total_nodes, escalated_count
             ),
         });
-        Ok(())
+        Ok(outcome)
     }
 
     /// Execute a single node through the control loop
@@ -1219,94 +1456,211 @@ impl SRBNOrchestrator {
         });
 
         // Step 3: Speculative Generation
+        let speculate_start = std::time::Instant::now();
         self.step_speculate(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "speculate",
+            "ok",
+            None,
+            0,
+            speculate_start.elapsed().as_millis() as i32,
+        );
 
         // Step 4: Stability Verification
-        let energy = self.step_verify(idx).await?;
+        let verify_start = std::time::Instant::now();
+        let mut energy = self.step_verify(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "verify",
+            "ok",
+            Some(&energy),
+            0,
+            verify_start.elapsed().as_millis() as i32,
+        );
 
-        // Step 5: Convergence & Self-Correction
-        if !self.step_converge(idx, energy).await? {
-            // PSP-5 Phase 5: Classify non-convergence and choose repair action
-            let category = self.classify_non_convergence(idx);
-            let action = self.choose_repair_action(idx, &category);
+        // PSP-7: Sheaf pre-check retry loop.
+        // After convergence succeeds, a lightweight structural check verifies
+        // output artifacts exist on disk before proceeding to full sheaf
+        // validation. If pre-check fails, re-enter convergence with sheaf
+        // evidence (max 1 retry to prevent infinite loops).
+        let mut sheaf_pre_check_retries = 0u32;
+        let mut converge_start;
+        loop {
+            // Step 5: Convergence & Self-Correction
+            converge_start = std::time::Instant::now();
+            if !self.step_converge(idx, energy.clone()).await? {
+                self.record_step_quietly(
+                    &self.graph[idx].node_id.clone(),
+                    "converge",
+                    "escalated",
+                    Some(&energy),
+                    self.graph[idx].monitor.attempt_count as i32,
+                    converge_start.elapsed().as_millis() as i32,
+                );
+                // PSP-5 Phase 5: Classify non-convergence and choose repair action
+                let category = self.classify_non_convergence(idx);
+                let action = self.choose_repair_action(idx, &category);
 
-            // Persist the escalation report
-            let node = &self.graph[idx];
-            let report = EscalationReport {
-                node_id: node.node_id.clone(),
-                session_id: self.context.session_id.clone(),
-                category,
-                action: action.clone(),
-                energy_snapshot: EnergyComponents {
-                    v_syn: node.monitor.current_energy(),
-                    ..Default::default()
-                },
-                stage_outcomes: self
-                    .last_verification_result
-                    .as_ref()
-                    .map(|vr| vr.stage_outcomes.clone())
-                    .unwrap_or_default(),
-                evidence: self.build_escalation_evidence(idx),
-                affected_node_ids: self.affected_dependents(idx),
-                timestamp: epoch_seconds(),
-            };
+                // Persist the escalation report
+                let node = &self.graph[idx];
+                let report = EscalationReport {
+                    node_id: node.node_id.clone(),
+                    session_id: self.context.session_id.clone(),
+                    category,
+                    action: action.clone(),
+                    energy_snapshot: EnergyComponents {
+                        v_syn: node.monitor.current_energy(),
+                        ..Default::default()
+                    },
+                    stage_outcomes: self
+                        .last_verification_result
+                        .as_ref()
+                        .map(|vr| vr.stage_outcomes.clone())
+                        .unwrap_or_default(),
+                    evidence: self.build_escalation_evidence(idx),
+                    affected_node_ids: self.affected_dependents(idx),
+                    timestamp: epoch_seconds(),
+                };
 
-            if let Err(e) = self.ledger.record_escalation_report(&report) {
-                log::warn!("Failed to persist escalation report: {}", e);
-            }
+                if let Err(e) = self.ledger.record_escalation_report(&report) {
+                    log::warn!("Failed to persist escalation report: {}", e);
+                }
 
-            // PSP-5 Phase 9: Also persist artifact bundle on escalation path
-            if let Some(bundle) = self.last_applied_bundle.take() {
-                if let Err(e) = self
-                    .ledger
-                    .record_artifact_bundle(&self.graph[idx].node_id, &bundle)
-                {
+                // PSP-5 Phase 9: Also persist artifact bundle on escalation path
+                if let Some(bundle) = self.last_applied_bundle.take() {
+                    if let Err(e) = self
+                        .ledger
+                        .record_artifact_bundle(&self.graph[idx].node_id, &bundle)
+                    {
+                        log::warn!(
+                            "Failed to persist artifact bundle on escalation for {}: {}",
+                            self.graph[idx].node_id,
+                            e
+                        );
+                    }
+                }
+
+                self.emit_event(perspt_core::AgentEvent::EscalationClassified {
+                    node_id: report.node_id.clone(),
+                    category: report.category.to_string(),
+                    action: report.action.to_string(),
+                });
+
+                // PSP-5 Phase 6: Flush this branch and all descendant branches
+                let node_id_for_flush = self.graph[idx].node_id.clone();
+                if let Some(ref bid) = branch_id {
+                    self.flush_provisional_branch(bid, &node_id_for_flush);
+                }
+                self.flush_descendant_branches(idx);
+
+                // Apply the chosen repair action or escalate to user
+                let applied = self.apply_repair_action(idx, &action).await;
+
+                if !applied {
+                    self.graph[idx].state = NodeState::Escalated;
+                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                        node_id: self.graph[idx].node_id.clone(),
+                        status: perspt_core::NodeStatus::Escalated,
+                    });
                     log::warn!(
-                        "Failed to persist artifact bundle on escalation for {}: {}",
+                        "Node {} escalated to user: {} → {}",
                         self.graph[idx].node_id,
-                        e
+                        category,
+                        action
                     );
                 }
+
+                return Ok(NodeOutcome::Escalated);
             }
 
-            self.emit_event(perspt_core::AgentEvent::EscalationClassified {
-                node_id: report.node_id.clone(),
-                category: report.category.to_string(),
-                action: report.action.to_string(),
-            });
-
-            // PSP-5 Phase 6: Flush this branch and all descendant branches
-            let node_id_for_flush = self.graph[idx].node_id.clone();
-            if let Some(ref bid) = branch_id {
-                self.flush_provisional_branch(bid, &node_id_for_flush);
+            // PSP-7: Lightweight sheaf pre-check before full validation.
+            // Verifies output artifacts exist and are non-empty on disk.
+            if sheaf_pre_check_retries < 1 {
+                if let Some(evidence) = self.sheaf_pre_check(idx) {
+                    sheaf_pre_check_retries += 1;
+                    log::warn!(
+                        "Sheaf pre-check failed for {}, retrying convergence: {}",
+                        self.graph[idx].node_id,
+                        evidence
+                    );
+                    self.emit_log(format!("⚠️ Sheaf pre-check: {}", evidence));
+                    // Inject sheaf evidence so the correction LLM sees it
+                    self.context.last_test_output = Some(format!(
+                    "Structural pre-check failure: {}\nEnsure all declared output files are generated correctly.",
+                    evidence
+                ));
+                    // Re-verify and add sheaf penalty to force correction loop entry
+                    energy = self.step_verify(idx).await?;
+                    energy.v_sheaf += 2.0;
+                    continue;
+                }
             }
-            self.flush_descendant_branches(idx);
+            break;
+        } // end PSP-7 sheaf pre-check loop
 
-            // Apply the chosen repair action or escalate to user
-            let applied = self.apply_repair_action(idx, &action).await;
-
-            if !applied {
+        // Final sheaf pre-check guard: after the retry loop, verify once more.
+        // If the retry still produced stub/missing artifacts, escalate the node
+        // instead of proceeding to commit.
+        if sheaf_pre_check_retries > 0 {
+            if let Some(evidence) = self.sheaf_pre_check(idx) {
+                log::warn!(
+                    "Sheaf pre-check still failing for {} after retry, escalating: {}",
+                    self.graph[idx].node_id,
+                    evidence
+                );
+                self.emit_log(format!(
+                    "❌ Sheaf pre-check failed after retry: {}",
+                    evidence
+                ));
                 self.graph[idx].state = NodeState::Escalated;
                 self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                     node_id: self.graph[idx].node_id.clone(),
                     status: perspt_core::NodeStatus::Escalated,
                 });
-                log::warn!(
-                    "Node {} escalated to user: {} → {}",
-                    self.graph[idx].node_id,
-                    category,
-                    action
-                );
+                // Flush provisional branch on escalation
+                let node_id_for_flush = self.graph[idx].node_id.clone();
+                if let Some(ref bid) = branch_id {
+                    self.flush_provisional_branch(bid, &node_id_for_flush);
+                }
+                self.flush_descendant_branches(idx);
+                return Ok(NodeOutcome::Escalated);
             }
-
-            return Ok(NodeOutcome::Escalated);
         }
 
+        // Record converge success (timing from last converge_start)
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "converge",
+            "ok",
+            Some(&energy),
+            self.graph[idx].monitor.attempt_count as i32,
+            converge_start.elapsed().as_millis() as i32,
+        );
+
         // Step 6: Sheaf Validation (Post-Subgraph Consistency)
+        let sheaf_start = std::time::Instant::now();
         self.step_sheaf_validate(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "sheaf_validate",
+            "ok",
+            None,
+            0,
+            sheaf_start.elapsed().as_millis() as i32,
+        );
 
         // Step 7: Merkle Ledger Commit
+        let commit_start = std::time::Instant::now();
         self.step_commit(idx).await?;
+        self.record_step_quietly(
+            &self.graph[idx].node_id.clone(),
+            "commit",
+            "ok",
+            None,
+            0,
+            commit_start.elapsed().as_millis() as i32,
+        );
 
         // PSP-5 Phase 6: Merge provisional branch after successful commit
         if let Some(ref bid) = branch_id {
@@ -1470,11 +1824,17 @@ impl SRBNOrchestrator {
                 .collect();
 
             if !child_goals.is_empty() {
-                let speculator_prompt = crate::prompts::render_speculator_lookahead(
-                    &node_id,
-                    &node_goal,
-                    &child_goals.join("\n"),
-                );
+                let ev = perspt_core::types::PromptEvidence {
+                    node_goal: Some(node_goal.clone()),
+                    context_files: vec![node_id.clone()],
+                    output_files: child_goals.clone(),
+                    ..Default::default()
+                };
+                let speculator_prompt = crate::prompt_compiler::compile(
+                    perspt_core::types::PromptIntent::SpeculatorLookahead,
+                    &ev,
+                )
+                .text;
 
                 log::debug!(
                     "Speculator lookahead for node {} using model {}",
@@ -1590,60 +1950,179 @@ impl SRBNOrchestrator {
                 self.emit_log(format!("❌ Command failed: {:?}", result.error));
             }
         }
-        // Then check for PSP-5 artifact bundles (with legacy single-file fallback inside)
-        else if let Some(bundle) = self.parse_artifact_bundle(content) {
-            let affected_files: Vec<String> = bundle
-                .affected_paths()
-                .into_iter()
-                .map(ToString::to_string)
-                .collect();
-            log::info!(
-                "Parsed artifact bundle for node {}: {} artifacts, {} commands",
-                node_id,
-                bundle.artifacts.len(),
-                bundle.commands.len()
-            );
-            self.emit_log(format!(
-                "📝 Bundle proposed: {} artifact(s) across {} file(s)",
-                bundle.artifacts.len(),
-                affected_files.len()
-            ));
+        // PSP-7: Typed parse pipeline for initial generation
+        else {
+            let (bundle_opt, parse_state, record_opt) =
+                self.parse_artifact_bundle_typed(content, &node_id, 0);
 
-            let approval_result = self
-                .await_approval_for_node(
-                    perspt_core::ActionType::BundleWrite {
-                        node_id: node_id.clone(),
-                        files: affected_files.clone(),
-                    },
-                    format!("Apply bundle touching: {}", affected_files.join(", ")),
-                    serde_json::to_string_pretty(&bundle).ok(),
-                    Some(&node_id),
-                )
-                .await;
-
-            if !matches!(
-                approval_result,
-                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
-            ) {
-                self.emit_log("⏭️ Bundle application skipped (not approved)");
-                return Ok(());
+            if let Some(ref record) = record_opt {
+                log::info!(
+                    "PSP-7 initial gen: parse_state={}, accepted={}",
+                    record.parse_state,
+                    record.accepted
+                );
             }
 
-            let node_class = self.graph[idx].node_class;
-            match self
-                .apply_bundle_transactionally(&bundle, &node_id, node_class)
-                .await
-            {
-                Ok(()) => {
-                    self.last_tool_failure = None;
-                    self.last_applied_bundle = Some(bundle.clone());
+            match parse_state {
+                perspt_core::types::ParseResultState::StrictJsonOk
+                | perspt_core::types::ParseResultState::TolerantRecoveryOk => {
+                    let bundle = bundle_opt.expect("Accepted parse must yield a bundle");
+                    let affected_files: Vec<String> = bundle
+                        .affected_paths()
+                        .into_iter()
+                        .map(ToString::to_string)
+                        .collect();
+                    log::info!(
+                        "Parsed artifact bundle for node {} ({}): {} artifacts, {} commands",
+                        node_id,
+                        parse_state,
+                        bundle.artifacts.len(),
+                        bundle.commands.len()
+                    );
+                    self.emit_log(format!(
+                        "📝 Bundle proposed: {} artifact(s) across {} file(s)",
+                        bundle.artifacts.len(),
+                        affected_files.len()
+                    ));
+
+                    let approval_result = self
+                        .await_approval_for_node(
+                            perspt_core::ActionType::BundleWrite {
+                                node_id: node_id.clone(),
+                                files: affected_files.clone(),
+                            },
+                            format!("Apply bundle touching: {}", affected_files.join(", ")),
+                            serde_json::to_string_pretty(&bundle).ok(),
+                            Some(&node_id),
+                        )
+                        .await;
+
+                    if !matches!(
+                        approval_result,
+                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                    ) {
+                        self.emit_log("⏭️ Bundle application skipped (not approved)");
+                        return Ok(());
+                    }
+
+                    let node_class = self.graph[idx].node_class;
+                    match self
+                        .apply_bundle_transactionally(&bundle, &node_id, node_class)
+                        .await
+                    {
+                        Ok(()) => {
+                            self.last_tool_failure = None;
+                            self.last_applied_bundle = Some(bundle.clone());
+                        }
+                        Err(e) => return Err(e),
+                    }
+
+                    // PSP-5 Phase 9: Execute post-write commands from the effective bundle
+                    let effective_commands = self
+                        .last_applied_bundle
+                        .as_ref()
+                        .map(|b| b.commands.clone())
+                        .unwrap_or_default();
+                    if !effective_commands.is_empty() {
+                        self.emit_log(format!(
+                            "🔧 Executing {} bundle command(s)...",
+                            effective_commands.len()
+                        ));
+                        let work_dir = self.effective_working_dir(idx);
+                        let is_python = self.graph[idx].owner_plugin == "python";
+                        for raw_command in &effective_commands {
+                            let command = if is_python {
+                                Self::normalize_command_to_uv(raw_command)
+                            } else {
+                                raw_command.clone()
+                            };
+
+                            let cmd_approval = self
+                                .await_approval_for_node(
+                                    perspt_core::ActionType::Command {
+                                        command: command.clone(),
+                                    },
+                                    format!("Execute bundle command: {}", command),
+                                    None,
+                                    Some(&node_id),
+                                )
+                                .await;
+
+                            if !matches!(
+                                cmd_approval,
+                                ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
+                            ) {
+                                self.emit_log(format!(
+                                    "⏭️ Bundle command skipped (not approved): {}",
+                                    command
+                                ));
+                                continue;
+                            }
+
+                            let mut args = HashMap::new();
+                            args.insert("command".to_string(), command.clone());
+                            args.insert(
+                                "working_dir".to_string(),
+                                work_dir.to_string_lossy().to_string(),
+                            );
+
+                            let call = ToolCall {
+                                name: "run_command".to_string(),
+                                arguments: args,
+                            };
+
+                            let result = self.tools.execute(&call).await;
+                            if result.success {
+                                log::info!("✓ Bundle command succeeded: {}", command);
+                                self.emit_log(format!("✅ {}", command));
+                                if !result.output.is_empty() {
+                                    let truncated: String =
+                                        result.output.chars().take(500).collect();
+                                    self.emit_log(truncated);
+                                }
+                            } else {
+                                let err_msg = result.error.unwrap_or_else(|| result.output.clone());
+                                log::warn!("Bundle command failed: {} — {}", command, err_msg);
+                                self.emit_log(format!(
+                                    "❌ Command failed: {} — {}",
+                                    command, err_msg
+                                ));
+                                self.last_tool_failure = Some(format!(
+                                    "Bundle command '{}' failed: {}",
+                                    command, err_msg
+                                ));
+                            }
+                        }
+
+                        if is_python {
+                            log::info!("Running uv sync --dev after bundle commands...");
+                            let sync_result = tokio::process::Command::new("uv")
+                                .args(["sync", "--dev"])
+                                .current_dir(&work_dir)
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .output()
+                                .await;
+                            match sync_result {
+                                Ok(output) if output.status.success() => {
+                                    self.emit_log("🐍 uv sync --dev completed".to_string());
+                                }
+                                Ok(output) => {
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    log::warn!("uv sync --dev failed: {}", stderr);
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to run uv sync --dev: {}", e);
+                                }
+                            }
+                        }
+                    }
                 }
-                Err(e) if e.to_string().contains("targeted undeclared paths") => {
-                    // All artifacts were stripped — the LLM generated files
-                    // that don't match the node's declared output_targets.
-                    // Retry once with a focused correction prompt.
+
+                perspt_core::types::ParseResultState::SemanticallyRejected => {
+                    // PSP-7: Retarget — extract raw paths and retry with focused prompt
                     log::warn!(
-                        "Bundle for '{}' targeted wrong files, retrying with retarget prompt",
+                        "Bundle for '{}' semantically rejected, retrying with retarget prompt",
                         node_id
                     );
                     self.emit_log(format!(
@@ -1651,147 +2130,59 @@ impl SRBNOrchestrator {
                         node_id
                     ));
 
+                    let raw_paths: Vec<String> =
+                        perspt_core::normalize::extract_file_markers(content)
+                            .iter()
+                            .filter_map(|m| m.path.clone())
+                            .collect();
                     let expected: Vec<String> = self.graph[idx]
                         .output_targets
                         .iter()
                         .map(|p| p.to_string_lossy().to_string())
                         .collect();
-                    let dropped: Vec<String> = bundle
-                        .artifacts
-                        .iter()
-                        .map(|a| a.path().to_string())
-                        .collect();
-                    let retry_prompt = crate::prompts::render_bundle_retarget(
-                        &expected.join(", "),
-                        &dropped.join(", "),
-                        &prompt,
-                    );
+                    let ev = perspt_core::types::PromptEvidence {
+                        output_files: expected.clone(),
+                        existing_file_contents: vec![(raw_paths.join(", "), prompt.clone())],
+                        ..Default::default()
+                    };
+                    let retry_prompt = crate::prompt_compiler::compile(
+                        perspt_core::types::PromptIntent::BundleRetarget,
+                        &ev,
+                    )
+                    .text;
 
                     let retry_response = self
                         .call_llm_with_logging(&model, &retry_prompt, Some(&node_id))
                         .await?;
 
-                    if let Some(retry_bundle) = self.parse_artifact_bundle(&retry_response) {
+                    let (retry_bundle_opt, retry_state, _) =
+                        self.parse_artifact_bundle_typed(&retry_response, &node_id, 1);
+
+                    if let Some(retry_bundle) = retry_bundle_opt {
+                        let node_class = self.graph[idx].node_class;
                         self.apply_bundle_transactionally(&retry_bundle, &node_id, node_class)
                             .await?;
                         self.last_tool_failure = None;
                         self.last_applied_bundle = Some(retry_bundle);
                     } else {
                         return Err(anyhow::anyhow!(
-                            "Retry for '{}' did not produce a valid bundle",
-                            node_id
+                            "Retry for '{}' did not produce a valid bundle ({})",
+                            node_id,
+                            retry_state
                         ));
                     }
                 }
-                Err(e) => return Err(e),
-            }
 
-            // PSP-5 Phase 9: Execute post-write commands from the effective bundle
-            // (may be the retry bundle if the original was all-stripped).
-            let effective_commands = self
-                .last_applied_bundle
-                .as_ref()
-                .map(|b| b.commands.clone())
-                .unwrap_or_default();
-            if !effective_commands.is_empty() {
-                self.emit_log(format!(
-                    "🔧 Executing {} bundle command(s)...",
-                    effective_commands.len()
-                ));
-                let work_dir = self.effective_working_dir(idx);
-                let is_python = self.graph[idx].owner_plugin == "python";
-                for raw_command in &effective_commands {
-                    // Normalize Python install commands to uv equivalents
-                    let command = if is_python {
-                        Self::normalize_command_to_uv(raw_command)
-                    } else {
-                        raw_command.clone()
-                    };
-
-                    // Request approval for each command (respects --yes auto-approve)
-                    let cmd_approval = self
-                        .await_approval_for_node(
-                            perspt_core::ActionType::Command {
-                                command: command.clone(),
-                            },
-                            format!("Execute bundle command: {}", command),
-                            None,
-                            Some(&node_id),
-                        )
-                        .await;
-
-                    if !matches!(
-                        cmd_approval,
-                        ApprovalResult::Approved | ApprovalResult::ApprovedWithEdit(_)
-                    ) {
-                        self.emit_log(format!(
-                            "⏭️ Bundle command skipped (not approved): {}",
-                            command
-                        ));
-                        continue;
-                    }
-
-                    let mut args = HashMap::new();
-                    args.insert("command".to_string(), command.clone());
-                    args.insert(
-                        "working_dir".to_string(),
-                        work_dir.to_string_lossy().to_string(),
+                _ => {
+                    // NoStructuredPayload, SchemaInvalid, EmptyBundle
+                    log::debug!(
+                        "No artifact bundle found in response ({}), response length: {}",
+                        parse_state,
+                        content.len()
                     );
-
-                    let call = ToolCall {
-                        name: "run_command".to_string(),
-                        arguments: args,
-                    };
-
-                    let result = self.tools.execute(&call).await;
-                    if result.success {
-                        log::info!("✓ Bundle command succeeded: {}", command);
-                        self.emit_log(format!("✅ {}", command));
-                        if !result.output.is_empty() {
-                            // Truncate verbose output for log
-                            let truncated: String = result.output.chars().take(500).collect();
-                            self.emit_log(truncated);
-                        }
-                    } else {
-                        let err_msg = result.error.unwrap_or_else(|| result.output.clone());
-                        log::warn!("Bundle command failed: {} — {}", command, err_msg);
-                        self.emit_log(format!("❌ Command failed: {} — {}", command, err_msg));
-                        // Record as tool failure so step_verify picks it up via V_syn
-                        self.last_tool_failure =
-                            Some(format!("Bundle command '{}' failed: {}", command, err_msg));
-                    }
-                }
-
-                // After all bundle commands, sync Python venv so new deps are available
-                if is_python {
-                    log::info!("Running uv sync --dev after bundle commands...");
-                    let sync_result = tokio::process::Command::new("uv")
-                        .args(["sync", "--dev"])
-                        .current_dir(&work_dir)
-                        .stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped())
-                        .output()
-                        .await;
-                    match sync_result {
-                        Ok(output) if output.status.success() => {
-                            self.emit_log("🐍 uv sync --dev completed".to_string());
-                        }
-                        Ok(output) => {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            log::warn!("uv sync --dev failed: {}", stderr);
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to run uv sync --dev: {}", e);
-                        }
-                    }
+                    self.emit_log("ℹ️ No file changes detected in response".to_string());
                 }
             }
-        } else {
-            log::debug!(
-                "No code block or command found in response, response length: {}",
-                content.len()
-            );
-            self.emit_log("ℹ️ No file changes detected in response".to_string());
         }
 
         self.context.history.push(message);
@@ -1818,131 +2209,6 @@ impl SRBNOrchestrator {
             }
         }
         None
-    }
-
-    /// Extract code from LLM response
-    /// Returns (filename, code_content) if found
-    /// Extract code from LLM response
-    /// Returns (filename, code_content, is_diff) if found
-    fn extract_code_from_response(&self, content: &str) -> Option<(String, String, bool)> {
-        // Return only the first block for backward compatibility
-        self.extract_all_code_blocks_from_response(content)
-            .into_iter()
-            .next()
-    }
-
-    /// Extract ALL File:/Diff: code blocks from an LLM response.
-    ///
-    /// Unlike `extract_code_from_response` which returns only the first block,
-    /// this collects every named code block so multi-file legacy responses are
-    /// not silently truncated to a single artifact.
-    fn extract_all_code_blocks_from_response(&self, content: &str) -> Vec<(String, String, bool)> {
-        let lines: Vec<&str> = content.lines().collect();
-        let mut results: Vec<(String, String, bool)> = Vec::new();
-        let mut file_path: Option<String> = None;
-        let mut is_diff_marker = false;
-        let mut in_code_block = false;
-        let mut code_lines: Vec<&str> = Vec::new();
-        let mut code_lang = String::new();
-
-        for line in &lines {
-            // Look for file path patterns
-            if line.starts_with("File:") || line.starts_with("**File:") || line.starts_with("file:")
-            {
-                let path = line
-                    .trim_start_matches("File:")
-                    .trim_start_matches("**File:")
-                    .trim_start_matches("file:")
-                    .trim_start_matches("**")
-                    .trim_end_matches("**")
-                    .trim();
-                if !path.is_empty() {
-                    file_path = Some(path.to_string());
-                    is_diff_marker = false;
-                }
-            }
-
-            // Look for Diff patterns
-            if line.starts_with("Diff:") || line.starts_with("**Diff:") || line.starts_with("diff:")
-            {
-                let path = line
-                    .trim_start_matches("Diff:")
-                    .trim_start_matches("**Diff:")
-                    .trim_start_matches("diff:")
-                    .trim_start_matches("**")
-                    .trim_end_matches("**")
-                    .trim();
-                if !path.is_empty() {
-                    file_path = Some(path.to_string());
-                    is_diff_marker = true;
-                }
-            }
-
-            // Parse code blocks
-            if line.starts_with("```") && !in_code_block {
-                in_code_block = true;
-                code_lang = line.trim_start_matches('`').to_string();
-                continue;
-            }
-
-            if line.starts_with("```") && in_code_block {
-                in_code_block = false;
-                if !code_lines.is_empty() {
-                    let code = code_lines.join("\n");
-                    let filename = match file_path.take() {
-                        Some(p) => p,
-                        None => match code_lang.as_str() {
-                            "python" | "py" => "main.py".to_string(),
-                            "rust" | "rs" => "main.rs".to_string(),
-                            "javascript" | "js" => "index.js".to_string(),
-                            "typescript" | "ts" => "index.ts".to_string(),
-                            "toml" => "Cargo.toml".to_string(),
-                            "json" => {
-                                // Skip unnamed JSON blocks that look like artifact
-                                // bundles or action manifests (e.g. [{"action":"UPDATE",...}]
-                                // or {"artifacts":[...]}) — these are structured
-                                // metadata, not standalone files.
-                                let trimmed = code.trim();
-                                if trimmed.starts_with('[')
-                                    || trimmed.contains("\"artifacts\"")
-                                    || trimmed.contains("\"action\"")
-                                {
-                                    log::debug!("Skipping unnamed JSON block that looks like a manifest/bundle");
-                                    code_lines.clear();
-                                    code_lang.clear();
-                                    is_diff_marker = false;
-                                    continue;
-                                }
-                                "config.json".to_string()
-                            }
-                            "yaml" | "yml" => "config.yaml".to_string(),
-                            other => {
-                                log::warn!(
-                                    "Skipping unnamed code block with unrecognized language tag '{}'",
-                                    other
-                                );
-                                code_lines.clear();
-                                code_lang.clear();
-                                is_diff_marker = false;
-                                continue;
-                            }
-                        },
-                    };
-                    let is_diff = is_diff_marker || code_lang == "diff" || code.starts_with("---");
-                    results.push((filename, code, is_diff));
-                }
-                code_lines.clear();
-                code_lang.clear();
-                is_diff_marker = false;
-                continue;
-            }
-
-            if in_code_block {
-                code_lines.push(line);
-            }
-        }
-
-        results
     }
 
     // =========================================================================
@@ -2065,6 +2331,46 @@ impl SRBNOrchestrator {
             Some(sandbox_path)
         } else {
             None
+        }
+    }
+
+    /// PSP-7: Lightweight sheaf pre-check before full sheaf validation.
+    ///
+    /// Verifies that every declared output target actually exists on disk and
+    /// is non-empty, and that files contain real implementations rather than
+    /// stub/placeholder content. Returns `Some(evidence)` if the pre-check
+    /// fails, `None` if everything looks good.
+    fn sheaf_pre_check(&self, idx: NodeIndex) -> Option<String> {
+        let node = &self.graph[idx];
+        if node.output_targets.is_empty() {
+            return None;
+        }
+
+        let work_dir = self.effective_working_dir(idx);
+        let mut issues = Vec::new();
+
+        for path in &node.output_targets {
+            let full = work_dir.join(path);
+            match std::fs::metadata(&full) {
+                Ok(m) if m.len() == 0 => {
+                    issues.push(format!("empty: {}", path.display()));
+                }
+                Err(_) => {
+                    issues.push(format!("missing: {}", path.display()));
+                }
+                Ok(_) => {
+                    // Check for stub/placeholder content in existing non-empty files.
+                    if let Some(reason) = detect_stub_content(&full, &node.owner_plugin) {
+                        issues.push(format!("stub content in {}: {}", path.display(), reason));
+                    }
+                }
+            }
+        }
+
+        if issues.is_empty() {
+            None
+        } else {
+            Some(format!("Output target issues: {}", issues.join(", ")))
         }
     }
 
@@ -3322,6 +3628,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_apply_bundle_keeps_legal_support_file() {
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_bundle_support_file_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "main_module".into(),
+                goal: "Create Rust main".into(),
+                output_files: vec!["src/main.rs".into()],
+                ..PlannedTask::new("main_module", "Create Rust main")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".into(),
+                    content: "fn main() {}".into(),
+                },
+                ArtifactOperation::Write {
+                    path: "build.rs".into(),
+                    content: "fn main() {}".into(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "main_module",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .expect("legal support files should survive semantic filtering");
+
+        assert!(temp_dir.join("src/main.rs").exists());
+        assert!(temp_dir.join("build.rs").exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_apply_bundle_denies_root_manifest_mutation() {
+        use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "perspt_bundle_manifest_policy_{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(temp_dir.clone());
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "main_module".into(),
+                goal: "Create Rust main".into(),
+                output_files: vec!["src/main.rs".into()],
+                ..PlannedTask::new("main_module", "Create Rust main")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let bundle = ArtifactBundle {
+            artifacts: vec![
+                ArtifactOperation::Write {
+                    path: "src/main.rs".into(),
+                    content: "fn main() {}".into(),
+                },
+                ArtifactOperation::Write {
+                    path: "Cargo.toml".into(),
+                    content: "[package]\nname = \"bad\"\n".into(),
+                },
+            ],
+            commands: vec![],
+        };
+
+        orch.apply_bundle_transactionally(
+            &bundle,
+            "main_module",
+            perspt_core::types::NodeClass::Implementation,
+        )
+        .await
+        .expect("declared artifact should still apply after denied manifest is stripped");
+
+        assert!(temp_dir.join("src/main.rs").exists());
+        assert!(!temp_dir.join("Cargo.toml").exists());
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_apply_bundle_writes_into_branch_sandbox() {
         use perspt_core::types::{ArtifactBundle, ArtifactOperation, PlannedTask};
 
@@ -3775,27 +4177,49 @@ ModuleNotFoundError: No module named 'json'
     }
 
     #[test]
-    fn test_extract_commands_from_correction_includes_uv() {
+    fn test_extract_commands_from_correction_rust_plugin_policy() {
         let response = r#"Here's the fix:
 Commands:
 ```
 uv add httpx
-uv add --dev pytest
 cargo add serde
 pip install numpy
 ```
-File: main.py
-```python
-import httpx
+File: main.rs
+```rust
+use serde;
 ```"#;
-        let commands = SRBNOrchestrator::extract_commands_from_correction(response);
+        // Rust plugin allows cargo commands, denies uv/pip
+        let commands = SRBNOrchestrator::extract_commands_from_correction(response, "rust");
         assert!(
-            commands.contains(&"uv add httpx".to_string()),
+            commands.contains(&"cargo add serde".to_string()),
             "{:?}",
             commands
         );
         assert!(
-            commands.contains(&"cargo add serde".to_string()),
+            !commands.contains(&"uv add httpx".to_string()),
+            "Rust plugin should deny uv commands: {:?}",
+            commands
+        );
+        assert!(
+            !commands.contains(&"pip install numpy".to_string()),
+            "Rust plugin should deny pip commands: {:?}",
+            commands
+        );
+    }
+
+    #[test]
+    fn test_extract_commands_from_correction_python_plugin_policy() {
+        let response = r#"Commands:
+```
+uv add httpx
+cargo add serde
+pip install numpy
+```"#;
+        // Python plugin allows uv/pip commands, denies cargo
+        let commands = SRBNOrchestrator::extract_commands_from_correction(response, "python");
+        assert!(
+            commands.contains(&"uv add httpx".to_string()),
             "{:?}",
             commands
         );
@@ -3804,10 +4228,15 @@ import httpx
             "{:?}",
             commands
         );
+        assert!(
+            !commands.contains(&"cargo add serde".to_string()),
+            "Python plugin should deny cargo commands: {:?}",
+            commands
+        );
     }
 
     #[test]
-    fn test_extract_all_code_blocks_multiple_files() {
+    fn test_typed_parse_pipeline_multiple_files() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"Here are the files:
 
@@ -3831,28 +4260,31 @@ def test_run():
     run_pipeline()
 ```
 "#;
-        let blocks = orch.extract_all_code_blocks_from_response(content);
-        assert_eq!(blocks.len(), 3, "Expected 3 blocks, got {:?}", blocks);
-        assert_eq!(blocks[0].0, "src/etl_pipeline/core.py");
-        assert_eq!(blocks[1].0, "src/etl_pipeline/validator.py");
-        assert_eq!(blocks[2].0, "tests/test_core.py");
-        assert!(!blocks[0].2, "core.py should not be a diff");
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok(), "Expected successful parse, got {}", state);
+        let bundle = bundle_opt.unwrap();
+        assert_eq!(bundle.artifacts.len(), 3, "Expected 3 artifacts");
+        assert_eq!(bundle.artifacts[0].path(), "src/etl_pipeline/core.py");
+        assert_eq!(bundle.artifacts[1].path(), "src/etl_pipeline/validator.py");
+        assert_eq!(bundle.artifacts[2].path(), "tests/test_core.py");
     }
 
     #[test]
-    fn test_extract_all_code_blocks_single_file() {
+    fn test_typed_parse_pipeline_single_file() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"File: main.py
 ```python
 print("hello")
 ```"#;
-        let blocks = orch.extract_all_code_blocks_from_response(content);
-        assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].0, "main.py");
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok());
+        let bundle = bundle_opt.unwrap();
+        assert_eq!(bundle.artifacts.len(), 1);
+        assert_eq!(bundle.artifacts[0].path(), "main.py");
     }
 
     #[test]
-    fn test_extract_all_code_blocks_mixed_file_and_diff() {
+    fn test_typed_parse_pipeline_mixed_file_and_diff() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"File: new_module.py
 ```python
@@ -3868,16 +4300,24 @@ Diff: existing.py
 +import new_module
  def old_fn():
 ```"#;
-        let blocks = orch.extract_all_code_blocks_from_response(content);
-        assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].0, "new_module.py");
-        assert!(!blocks[0].2, "new_module.py should be a write");
-        assert_eq!(blocks[1].0, "existing.py");
-        assert!(blocks[1].2, "existing.py should be a diff");
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok());
+        let bundle = bundle_opt.unwrap();
+        assert_eq!(bundle.artifacts.len(), 2);
+        assert_eq!(bundle.artifacts[0].path(), "new_module.py");
+        assert!(
+            bundle.artifacts[0].is_write(),
+            "new_module.py should be a write"
+        );
+        assert_eq!(bundle.artifacts[1].path(), "existing.py");
+        assert!(
+            bundle.artifacts[1].is_diff(),
+            "existing.py should be a diff"
+        );
     }
 
     #[test]
-    fn test_parse_artifact_bundle_legacy_multi_file() {
+    fn test_typed_parse_pipeline_legacy_multi_file() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"File: core.py
 ```python
@@ -3890,9 +4330,9 @@ File: utils.py
 def util():
     pass
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
-        assert!(bundle.is_some(), "Should parse multi-file legacy response");
-        let bundle = bundle.unwrap();
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok(), "Should parse multi-file response");
+        let bundle = bundle_opt.unwrap();
         assert_eq!(bundle.artifacts.len(), 2, "Should have 2 artifacts");
         assert_eq!(bundle.artifacts[0].path(), "core.py");
         assert_eq!(bundle.artifacts[1].path(), "utils.py");
@@ -3903,7 +4343,7 @@ def util():
     // =========================================================================
 
     #[test]
-    fn test_parse_artifact_bundle_structured_json() {
+    fn test_typed_parse_pipeline_structured_json() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"Here is the output:
 ```json
@@ -3915,9 +4355,9 @@ def util():
   "commands": ["uv add requests"]
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
-        assert!(bundle.is_some(), "Should parse structured JSON bundle");
-        let bundle = bundle.unwrap();
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(state.is_ok(), "Should parse structured JSON bundle");
+        let bundle = bundle_opt.unwrap();
         assert_eq!(bundle.artifacts.len(), 2);
         assert!(bundle.artifacts[0].is_write());
         assert_eq!(bundle.artifacts[0].path(), "src/main.py");
@@ -3927,11 +4367,64 @@ def util():
     }
 
     #[test]
-    fn test_parse_artifact_bundle_json_with_empty_path_falls_through() {
+    fn test_typed_parse_pipeline_schema_invalid_classified() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
-        // JSON bundle with empty path fails validation → falls through to legacy.
-        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
-        // to avoid the LLM's action manifests being written as config.json.
+        let content = r#"```json
+{"foo":"bar"}
+```"#;
+        let (bundle_opt, state, record_opt) = orch.parse_artifact_bundle_typed(content, "test", 1);
+        assert!(bundle_opt.is_none());
+        assert!(matches!(
+            state,
+            perspt_core::types::ParseResultState::SchemaInvalid
+        ));
+        let record = record_opt.expect("schema failure should be recorded");
+        assert!(matches!(
+            record.retry_classification,
+            Some(perspt_core::types::RetryClassification::MalformedRetry)
+        ));
+    }
+
+    #[test]
+    fn test_typed_parse_pipeline_semantic_rejection_classified() {
+        use perspt_core::types::PlannedTask;
+
+        let mut orch = SRBNOrchestrator::new_for_testing(std::path::PathBuf::from("/tmp/test"));
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "parser".into(),
+                goal: "Create parser".into(),
+                output_files: vec!["src/parser.rs".into()],
+                ..PlannedTask::new("parser", "Create parser")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+
+        let content = r#"```json
+{
+  "artifacts": [
+    {"operation": "write", "path": "src/wrong.rs", "content": "pub fn wrong() {}"}
+  ],
+  "commands": []
+}
+```"#;
+        let (bundle_opt, state, record_opt) =
+            orch.parse_artifact_bundle_typed(content, "parser", 1);
+        assert!(bundle_opt.is_none());
+        assert!(matches!(
+            state,
+            perspt_core::types::ParseResultState::SemanticallyRejected
+        ));
+        let record = record_opt.expect("semantic rejection should be recorded");
+        assert!(matches!(
+            record.retry_classification,
+            Some(perspt_core::types::RetryClassification::Retarget)
+        ));
+    }
+
+    #[test]
+    fn test_typed_parse_pipeline_json_empty_path_rejected() {
+        let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = r#"```json
 {
   "artifacts": [
@@ -3940,19 +4433,21 @@ def util():
   "commands": []
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
         assert!(
-            bundle.is_none(),
-            "Invalid bundle with artifacts key should be skipped"
+            bundle_opt.is_none(),
+            "Invalid bundle with empty path should be rejected"
+        );
+        assert!(
+            !state.is_ok(),
+            "Parse state should not be Ok for invalid bundle: {}",
+            state
         );
     }
 
     #[test]
-    fn test_parse_artifact_bundle_json_absolute_path_falls_through() {
+    fn test_typed_parse_pipeline_json_absolute_path_rejected() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
-        // Absolute-path JSON bundle fails validation → falls through to legacy.
-        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
-        // to avoid writing raw JSON as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -3961,18 +4456,32 @@ def util():
   "commands": []
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
         assert!(
-            bundle.is_none(),
-            "Invalid bundle with artifacts key should be skipped"
+            bundle_opt.is_none(),
+            "Invalid bundle with absolute path should be rejected"
+        );
+        assert!(
+            !state.is_ok(),
+            "Parse state should not be Ok for path traversal: {}",
+            state
         );
     }
 
     #[test]
-    fn test_parse_artifact_bundle_returns_none_for_garbage() {
+    fn test_typed_parse_pipeline_returns_no_payload_for_garbage() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
         let content = "This is just a plain text response with no code blocks at all.";
-        assert!(orch.parse_artifact_bundle(content).is_none());
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
+        assert!(bundle_opt.is_none());
+        assert!(
+            matches!(
+                state,
+                perspt_core::types::ParseResultState::NoStructuredPayload
+            ),
+            "Expected NoStructuredPayload, got {}",
+            state
+        );
     }
 
     #[tokio::test]
@@ -4141,11 +4650,8 @@ def util():
     }
 
     #[test]
-    fn test_parse_artifact_bundle_json_path_traversal_falls_through() {
+    fn test_typed_parse_pipeline_json_path_traversal_rejected() {
         let orch = SRBNOrchestrator::new(std::path::PathBuf::from("/tmp/test"), false);
-        // Path-traversal JSON bundle fails validation → falls through to legacy.
-        // Legacy parser now skips unnamed JSON blocks that contain "artifacts"
-        // to avoid writing raw JSON as config.json.
         let content = r#"```json
 {
   "artifacts": [
@@ -4154,10 +4660,15 @@ def util():
   "commands": []
 }
 ```"#;
-        let bundle = orch.parse_artifact_bundle(content);
+        let (bundle_opt, state, _) = orch.parse_artifact_bundle_typed(content, "test", 0);
         assert!(
-            bundle.is_none(),
-            "Invalid bundle with artifacts key should be skipped"
+            bundle_opt.is_none(),
+            "Invalid bundle with path traversal should be rejected"
+        );
+        assert!(
+            !state.is_ok(),
+            "Parse state should not be Ok for path traversal: {}",
+            state
         );
     }
 
@@ -4202,15 +4713,17 @@ def util():
 
     #[test]
     fn test_architect_prompt_includes_dependency_expectations() {
-        let prompt = crate::prompts::render_architect(
-            crate::prompts::ARCHITECT_EXISTING,
-            "Build a web server",
-            std::path::Path::new("/tmp"),
-            "empty project",
-            "",
-            "",
-            &[],
-        );
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some("Build a web server".to_string()),
+            project_summary: Some("empty project".to_string()),
+            working_dir: Some("/tmp".to_string()),
+            ..Default::default()
+        };
+        let prompt = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::ArchitectExisting,
+            &ev,
+        )
+        .text;
         assert!(
             prompt.contains("dependency_expectations"),
             "Architect prompt must include dependency_expectations in the JSON schema"
@@ -4270,8 +4783,14 @@ def util():
 
     #[test]
     fn test_session_outcome_from_counts() {
-        fn derive_outcome(completed: usize, escalated: usize) -> perspt_core::SessionOutcome {
-            if escalated == 0 {
+        // The outcome derivation must account for total_nodes so that
+        // unattempted nodes (budget/abort stop) are never counted as success.
+        fn derive_outcome(
+            completed: usize,
+            escalated: usize,
+            total: usize,
+        ) -> perspt_core::SessionOutcome {
+            if escalated == 0 && completed >= total {
                 perspt_core::SessionOutcome::Success
             } else if completed > 0 {
                 perspt_core::SessionOutcome::PartialSuccess
@@ -4281,13 +4800,384 @@ def util():
         }
 
         // All completed → Success
-        assert_eq!(derive_outcome(3, 0), perspt_core::SessionOutcome::Success,);
+        assert_eq!(
+            derive_outcome(3, 0, 3),
+            perspt_core::SessionOutcome::Success,
+        );
         // Some completed, some escalated → PartialSuccess
         assert_eq!(
-            derive_outcome(2, 1),
+            derive_outcome(2, 1, 3),
             perspt_core::SessionOutcome::PartialSuccess,
         );
         // All escalated → Failed
-        assert_eq!(derive_outcome(0, 3), perspt_core::SessionOutcome::Failed,);
+        assert_eq!(derive_outcome(0, 3, 3), perspt_core::SessionOutcome::Failed,);
+        // Budget-stopped: 5 of 20 completed, 0 escalated → PartialSuccess (not Success!)
+        assert_eq!(
+            derive_outcome(5, 0, 20),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // Budget-stopped: 0 of 20 completed, 0 escalated → Failed
+        assert_eq!(
+            derive_outcome(0, 0, 20),
+            perspt_core::SessionOutcome::Failed,
+        );
+    }
+
+    #[test]
+    fn test_resumed_outcome_from_counts() {
+        // Resumed sessions derive outcome the same way: unattempted nodes
+        // prevent Success, and terminal_count offsets the total.
+        fn derive_resumed_outcome(
+            executed: usize,
+            escalated: usize,
+            terminal_count: usize,
+            total: usize,
+        ) -> perspt_core::SessionOutcome {
+            if escalated == 0 && executed + terminal_count >= total {
+                perspt_core::SessionOutcome::Success
+            } else if executed > 0 {
+                perspt_core::SessionOutcome::PartialSuccess
+            } else {
+                perspt_core::SessionOutcome::Failed
+            }
+        }
+
+        // All resumable nodes completed, 2 already terminal
+        assert_eq!(
+            derive_resumed_outcome(3, 0, 2, 5),
+            perspt_core::SessionOutcome::Success,
+        );
+        // Some escalated on resume
+        assert_eq!(
+            derive_resumed_outcome(2, 1, 2, 5),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // Budget stopped mid-resume: 2 of 5 completed, 2 terminal, 1 not attempted
+        assert_eq!(
+            derive_resumed_outcome(1, 0, 2, 5),
+            perspt_core::SessionOutcome::PartialSuccess,
+        );
+        // Nothing executed on resume (all blocked/seal-gated)
+        assert_eq!(
+            derive_resumed_outcome(0, 0, 5, 5),
+            perspt_core::SessionOutcome::Success,
+        );
+        // Nothing executed, not all terminal → Failed
+        assert_eq!(
+            derive_resumed_outcome(0, 0, 2, 5),
+            perspt_core::SessionOutcome::Failed,
+        );
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_stub_escalates_after_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub_path = dir.path().join("stub.rs");
+        std::fs::write(&stub_path, "fn main() {\n    todo!()\n}\n").unwrap();
+
+        let (mut orch, idx) = orch_with_node(dir.path().to_path_buf());
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("stub.rs"));
+        orch.graph[idx].owner_plugin = "rust".to_string();
+
+        // First call detects stub
+        let first = orch.sheaf_pre_check(idx);
+        assert!(first.is_some(), "First pre-check should detect stub");
+
+        // Simulate: after retry, the file is still a stub.
+        // The final guard should also detect it.
+        let second = orch.sheaf_pre_check(idx);
+        assert!(
+            second.is_some(),
+            "Final guard should still detect stub after retry"
+        );
+    }
+
+    /// Helper: create an orchestrator with a single default node for testing.
+    fn orch_with_node(
+        working_dir: std::path::PathBuf,
+    ) -> (SRBNOrchestrator, petgraph::graph::NodeIndex) {
+        let mut orch = SRBNOrchestrator::new(working_dir, false);
+        let node = SRBNNode::new(
+            "test-node".to_string(),
+            "test goal".to_string(),
+            perspt_core::ModelTier::Actuator,
+        );
+        let idx = orch.add_node(node);
+        (orch, idx)
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_passes_when_no_outputs() {
+        let (orch, idx) = orch_with_node(std::path::PathBuf::from("/tmp/test"));
+        assert!(orch.sheaf_pre_check(idx).is_none());
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_detects_missing_files() {
+        let (mut orch, idx) = orch_with_node(std::path::PathBuf::from("/tmp/test"));
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("nonexistent_file_xyz.rs"));
+        let result = orch.sheaf_pre_check(idx);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("missing"));
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_detects_empty_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::File::create(dir.path().join("empty.rs")).unwrap();
+
+        let (mut orch, idx) = orch_with_node(dir.path().to_path_buf());
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("empty.rs"));
+        let result = orch.sheaf_pre_check(idx);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("empty"));
+    }
+
+    #[test]
+    fn test_sheaf_pre_check_passes_for_valid_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+        let (mut orch, idx) = orch_with_node(dir.path().to_path_buf());
+        orch.graph[idx]
+            .output_targets
+            .push(std::path::PathBuf::from("main.rs"));
+        assert!(orch.sheaf_pre_check(idx).is_none());
+    }
+
+    #[test]
+    fn test_v_boot_energy_from_degraded_sensors() {
+        use perspt_core::types::{
+            EnergyComponents, SensorStatus, StageOutcome, VerificationResult,
+        };
+
+        // Simulate a verification result with one fallback and one unavailable sensor
+        let vr = VerificationResult {
+            syntax_ok: true,
+            build_ok: true,
+            tests_ok: true,
+            lint_ok: true,
+            diagnostics_count: 0,
+            tests_passed: 5,
+            tests_failed: 0,
+            summary: String::new(),
+            raw_output: None,
+            degraded: true,
+            degraded_reason: Some("test sensor fallback".into()),
+            stage_outcomes: vec![
+                StageOutcome {
+                    stage: "syntax_check".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Available,
+                    output: None,
+                },
+                StageOutcome {
+                    stage: "build".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Fallback {
+                        actual: "cargo check".into(),
+                        reason: "primary not found".into(),
+                    },
+                    output: None,
+                },
+                StageOutcome {
+                    stage: "test".into(),
+                    passed: true,
+                    sensor_status: SensorStatus::Unavailable {
+                        reason: "no test runner".into(),
+                    },
+                    output: None,
+                },
+            ],
+        };
+
+        // Compute V_boot the same way verification.rs does
+        let mut energy = EnergyComponents::default();
+        for so in &vr.stage_outcomes {
+            match &so.sensor_status {
+                SensorStatus::Unavailable { .. } => energy.v_boot += 3.0,
+                SensorStatus::Fallback { .. } => energy.v_boot += 1.0,
+                SensorStatus::Available => {}
+            }
+        }
+        // 1 fallback (+1.0) + 1 unavailable (+3.0) = 4.0
+        assert!(
+            (energy.v_boot - 4.0).abs() < f32::EPSILON,
+            "Expected V_boot=4.0, got {}",
+            energy.v_boot
+        );
+    }
+
+    // ── Stub detection tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_detect_stub_rust_todo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "fn main() {\n    todo!()\n}\n").unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_some(), "Should detect todo!() stub");
+        assert!(result.unwrap().contains("todo!()"));
+    }
+
+    #[test]
+    fn test_detect_stub_rust_unimplemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "fn run() {\n    unimplemented!()\n}\n").unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_some(), "Should detect unimplemented!() stub");
+    }
+
+    #[test]
+    fn test_detect_stub_rust_real_code_not_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        let real_code = r#"
+use std::collections::HashMap;
+
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn multiply(a: i32, b: i32) -> i32 {
+    a * b
+}
+
+fn compute(data: &[i32]) -> i32 {
+    data.iter().sum()
+}
+
+fn transform(input: &str) -> String {
+    input.to_uppercase()
+}
+
+fn process() {
+    let x = add(1, 2);
+    let y = multiply(x, 3);
+    println!("{}", y);
+    // todo!() in a comment should not trigger
+}
+"#;
+        std::fs::write(&path, real_code).unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(
+            result.is_none(),
+            "Real code with comment-only todo should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_rust_real_code_with_one_todo_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        let code = r#"
+fn add(a: i32, b: i32) -> i32 { a + b }
+fn sub(a: i32, b: i32) -> i32 { a - b }
+fn mul(a: i32, b: i32) -> i32 { a * b }
+fn div(a: i32, b: i32) -> i32 { a / b }
+fn modulo(a: i32, b: i32) -> i32 { todo!() }
+"#;
+        std::fs::write(&path, code).unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(
+            result.is_none(),
+            "File with 5+ real lines and one todo!() should NOT be flagged"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_python_pass_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "def run():\n    pass\n").unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(result.is_some(), "Should detect pass-only Python function");
+    }
+
+    #[test]
+    fn test_detect_stub_python_not_implemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "def run():\n    raise NotImplementedError()\n").unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(result.is_some(), "Should detect NotImplementedError stub");
+    }
+
+    #[test]
+    fn test_detect_stub_python_ellipsis_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "def run():\n    ...\n").unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(
+            result.is_some(),
+            "Should detect ellipsis-only Python function"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_python_real_code_not_flagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        let code = "import os\n\ndef run():\n    data = os.listdir('.')\n    filtered = [f for f in data if f.endswith('.py')]\n    for f in filtered:\n        print(f)\n    return filtered\n";
+        std::fs::write(&path, code).unwrap();
+        let result = detect_stub_content(&path, "python");
+        assert!(result.is_none(), "Real Python code should not be flagged");
+    }
+
+    #[test]
+    fn test_detect_stub_js_throw_not_implemented() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.js");
+        std::fs::write(
+            &path,
+            "function run() {\n  throw new Error(\"not implemented\");\n}\n",
+        )
+        .unwrap();
+        let result = detect_stub_content(&path, "javascript");
+        assert!(
+            result.is_some(),
+            "Should detect JS throw not-implemented stub"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_universal_comment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lib.rs");
+        std::fs::write(&path, "// stub — will be replaced by agent\n").unwrap();
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_some(), "Should detect universal stub comment");
+    }
+
+    #[test]
+    fn test_detect_stub_extension_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, "# placeholder\ndef run():\n    pass\n").unwrap();
+        // Use "unknown" plugin hint — should fall back to .py extension
+        let result = detect_stub_content(&path, "unknown");
+        assert!(
+            result.is_some(),
+            "Should detect stub via extension fallback"
+        );
+    }
+
+    #[test]
+    fn test_detect_stub_empty_file_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.rs");
+        std::fs::write(&path, "").unwrap();
+        // detect_stub_content focuses on stub patterns, not emptiness
+        // (emptiness is handled by the metadata check in sheaf_pre_check)
+        let result = detect_stub_content(&path, "rust");
+        assert!(result.is_none(), "Empty file has no stub pattern to match");
     }
 }

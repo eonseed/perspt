@@ -1,5 +1,5 @@
 # Perspt
-
+**v0.5.9 "心砺光华"** — *Perfecting the essence until the work needs no words to shine.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
@@ -59,7 +59,7 @@ Perspt auto-detects whichever provider key you have set. No config file required
 
 **Agent Mode (SRBN) [Experimental]** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold. Based on the SRBN paper's theoretical framework; under active development.
 
-**Web Dashboard** -- A browser-based monitoring interface (`perspt dashboard`) for observing agent execution in real time. Shows DAG topology, energy convergence, LLM telemetry with token usage and latency, sandbox branches, and decision traces. Built with Axum, Askama, HTMX, and DaisyUI 5. Reads the DuckDB store in read-only mode so it never interferes with the running agent.
+**Web Dashboard** -- A browser-based monitoring interface for observing agent execution in real time. Shows DAG topology, energy convergence, LLM telemetry with token usage and latency, sandbox branches, and decision traces. Built with Axum, Askama, HTMX, and DaisyUI 5. Can be launched standalone (`perspt dashboard`) or embedded in the agent process (`perspt agent --dashboard`) for live monitoring during execution. The embedded mode opens a read-only DuckDB connection alongside the agent's writer, so it never interferes with the running session.
 
 **Zero-Config Startup** -- Automatic provider detection from environment variables. Set a key and go.
 
@@ -92,6 +92,8 @@ SRBN takes a different approach. Instead of hoping each step is correct, it **me
 The theoretical result: instead of reliability decaying exponentially with project size, the paper predicts that retry cost grows logarithmically. A hundred-node project should cost only modestly more than a ten-node one.
 
 This approach is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.** and **Ronak R.** (pre-publication), which formalizes this intuition using control theory and proves it mathematically. Perspt's agent mode is an experimental implementation of this theory -- the mathematical framework is mature, but repository-level benchmarks have not yet been published. The next section covers the theory for those interested.
+
+**PSP-7 hardening.** The correction loop uses a fail-closed typed parse pipeline (five layers from raw capture to semantic validation) so malformed LLM output is classified rather than silently dropped. A prompt compiler with provenance tracking replaces ad-hoc template constants. Every correction attempt is recorded with its parse state, retry classification, and energy snapshot for full observability via `perspt status` and the web dashboard.
 
 ---
 
@@ -192,7 +194,7 @@ flowchart TD
 
 Each retry is not blind re-prompting. The flow matching barrier is designed to project the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
 
-For the complete theoretical treatment, proofs, and design rationale, see the [Perspt Book](docs/perspt_book/build/html/index.html).
+For the complete theoretical treatment, proofs, and design rationale, see the [Perspt Book](https://eonseed.github.io/perspt/book/index.html).
 
 ---
 
@@ -333,6 +335,8 @@ perspt agent [OPTIONS] <TASK>
       --verifier-strictness <S>    default | strict | minimal (default: default)
       --log-llm                    Log verbose LLM prompts/responses (token metrics always recorded)
       --output-plan <FILE>         Export task graph as JSON after planning
+      --dashboard                  Start web dashboard alongside the agent
+      --dashboard-port <PORT>      Dashboard port (default: 3000)
 ```
 
 ---
@@ -461,7 +465,7 @@ curl http://localhost:11434/api/tags      # verify connectivity
 
 ## Documentation
 
-For a comprehensive guide covering installation, configuration, tutorials, the SRBN architecture, developer internals, and the API reference, read the **[Perspt Book](docs/perspt_book/build/html/index.html)** (also available as [PDF](docs/perspt_book/build/latex/perspt.pdf)).
+For a comprehensive guide covering installation, configuration, tutorials, the SRBN architecture, developer internals, and the API reference, read the **[Perspt Book](https://eonseed.github.io/perspt/book/index.html)** (also available as [PDF](docs/perspt_book/build/latex/perspt.pdf)).
 
 ---
 

@@ -159,7 +159,7 @@ impl SRBNOrchestrator {
 
         // PSP-5: For existing projects, prepend a structured project summary
         // and gather evidence (API seams, module boundaries, test layout).
-        let (template, evidence_section) = if matches!(
+        let (intent, evidence_section) = if matches!(
             self.context.workspace_state,
             WorkspaceState::ExistingProject { .. }
         ) {
@@ -169,20 +169,27 @@ impl SRBNOrchestrator {
                 project_context = format!("{}\n\n{}", summary, project_context);
             }
             let evidence = retriever.gather_architect_evidence();
-            (crate::prompts::ARCHITECT_EXISTING, evidence)
+            (
+                perspt_core::types::PromptIntent::ArchitectExisting,
+                evidence,
+            )
         } else {
-            (crate::prompts::ARCHITECT_GREENFIELD, String::new())
+            (
+                perspt_core::types::PromptIntent::ArchitectGreenfield,
+                String::new(),
+            )
         };
 
-        Ok(crate::prompts::render_architect(
-            template,
-            task,
-            &self.context.working_dir,
-            &project_context,
-            &error_feedback,
-            &evidence_section,
-            &self.context.active_plugins,
-        ))
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some(task.to_string()),
+            project_summary: Some(project_context),
+            working_dir: Some(self.context.working_dir.display().to_string()),
+            error_feedback: Some(error_feedback),
+            evidence_section: Some(evidence_section),
+            active_plugins: self.context.active_plugins.clone(),
+            ..Default::default()
+        };
+        Ok(crate::prompt_compiler::compile(intent, &ev).text)
     }
 
     /// Gather existing project context for the Architect prompt
