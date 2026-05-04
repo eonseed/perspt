@@ -21,7 +21,7 @@ perspt-core = { version = "0.5.9", path = "../perspt-core" }
 
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.12", features = ["cookie"] }
-askama = "0.15"
+askama = "0.16"
 tokio = { version = "1.42", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["time"] }
 tower = "0.5"
