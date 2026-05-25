@@ -109,7 +109,7 @@ impl GenAIProvider {
 
         let models = self
             .client
-            .all_model_names(adapter_kind)
+            .all_model_names(adapter_kind, ())
             .await
             .context(format!("Failed to get models for provider: {provider}"))?;
 
