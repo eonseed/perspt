@@ -95,15 +95,16 @@ impl PolicyEngine {
             .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
         let globals = Self::create_globals();
-        let module = Module::new();
 
-        {
-            let mut eval = Evaluator::new(&module);
-            eval.eval_module(ast, &globals)
-                .map_err(|e| anyhow::anyhow!("Eval error: {}", e))?;
-        }
+        Module::with_temp_heap(|module| {
+            {
+                let mut eval = Evaluator::new(&module);
+                eval.eval_module(ast, &globals)
+                    .map_err(|e| anyhow::anyhow!("Eval error: {}", e))?;
+            }
 
-        Ok(module.freeze()?)
+            Ok(module.freeze()?)
+        })
     }
 
     /// Create the globals for Starlark evaluation
