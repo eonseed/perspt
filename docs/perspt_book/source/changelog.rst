@@ -3,6 +3,28 @@
 Changelog
 =========
 
+Version 0.6.0 — "kukuza"
+------------------------
+
+*Nurturing the foundation, empowering the core.*
+
+**Workspace-Wide Dependency Upgrades:**
+
+- **duckdb Upgrade** — Bumped ``duckdb`` requirement to ``=1.10503.1`` in the workspace root.
+- **askama Upgrade** — Bumped ``askama`` requirement to ``0.16`` in ``perspt-dashboard``.
+- **diffy Upgrade** — Bumped ``diffy`` requirement to ``0.5`` in ``perspt-agent``.
+- **genai Upgrade** — Bumped ``genai`` requirement to ``0.6.1`` in ``perspt-core``.
+- **starlark Upgrade** — Bumped ``starlark`` requirement to ``0.14`` in ``perspt-policy``.
+
+**API Alignments & Adaptations:**
+
+- **genai API Alignment** — Updated ``all_model_names`` inside ``llm_provider.rs`` to pass ``()`` for the new ``ProviderConfig`` parameter.
+- **starlark API Alignment** — Adapted policy loading in ``engine.rs`` to use ``Module::with_temp_heap`` since ``Module::new`` was deprecated and made private in ``0.14``.
+
+**Specification & Ecosystem Maintenance:**
+
+- **PSP-7 Finalization** — Formally transitioned the PSP-7 specification to ``Final`` status under the PSP-000001 process.
+
 Version 0.5.9 — "心砺光华"
 --------------------------
 

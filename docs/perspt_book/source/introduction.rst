@@ -39,8 +39,17 @@ to Large Language Models. It serves two complementary purposes:
    framework is mature; the implementation is under active development and has not
    yet been benchmarked.
 
-.. admonition:: Version 0.5.9 "心砺光华" Highlights
+.. admonition:: Version 0.6.0 "kukuza" Highlights
    :class: tip
+
+   **Ecosystem & Dependency Modernization:**
+
+   - **Major Upgrades** — Bumped core dependencies to their latest major versions including ``duckdb (=1.10503.1)``, ``starlark (0.14)``, ``genai (0.6.1)``, ``askama (0.16)``, and ``diffy (0.5)``.
+   - **Enterprise AI Providers** — Integrated native support for **AWS Bedrock** and **Google Agent Platform** (formerly Vertex AI) with advanced IAM credentials and OAuth2 token authorization.
+   - **State-of-the-Art Models** — Added full, out-of-the-box support for the newest generation of models, including ``gpt-5.5`` and ``claude-sonnet-4.7``.
+
+.. admonition:: Version 0.5.9 "心砺光华" Highlights
+   :class: note
 
    **Robust Correction Loop Contracts (PSP-7):**
 
@@ -48,17 +57,6 @@ to Large Language Models. It serves two complementary purposes:
    - **Typed Parse Pipeline** — Replaced Option-based extraction with a 5-layer fail-closed parse pipeline that classifies retries (Retarget, MalformedRetry, SupportFileViolation, Replan) for intelligent convergence.
    - **Manifest Policy Enforcement** — Added semantic validation to prevent implicit mutation of root manifests unless explicitly requested.
    - **Strict Budget Exhaustion** — Upgraded budget checks to respect step and revision caps alongside cost, preventing runaway loops.
-
-   **LLM & Ecosystem Maintenance:**
-
-   - **GenAI Upgrade** — Bumped ``genai`` provider dependency to 0.5.3 (stable bug fixes) and removed dead code leaking provider types.
-   - **Rust 1.95 Readiness** — Fully resolved all Clippy linting errors, including ``unnecessary-sort-by`` and ``collapsible-match``.
-
-   **LLM CLI:**
-
-   - **Multi-Provider Chat** — 8 providers with zero-config auto-detection
-   - **Beautiful TUI** — Markdown rendering, streaming responses, scroll navigation
-   - **Simple CLI Mode** — Pipe-friendly ``simple-chat`` for scripting and logging
 
 Architecture
 ------------

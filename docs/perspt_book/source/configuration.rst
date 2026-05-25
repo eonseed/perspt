@@ -52,6 +52,14 @@ Set any supported API key environment variable and run ``perspt`` with no argume
      - ``DEEPSEEK_API_KEY``
      - ``deepseek-chat``
    * - 8
+     - AWS Bedrock
+     - ``AWS_ACCESS_KEY_ID`` (and region/creds)
+     - ``us.amazon.nova-pro-v1:0``
+   * - 9
+     - Google Agent Platform
+     - ``VERTEX_API_KEY`` (and project/region)
+     - ``gemini-2.5-flash``
+   * - 10
      - Ollama
      - *(none — auto-detected)*
      - ``llama3.2``
@@ -62,6 +70,114 @@ Set any supported API key environment variable and run ``perspt`` with no argume
    export GEMINI_API_KEY="your-key"
    perspt                # auto-detects Gemini, uses gemini-3.1-flash-lite-preview
    perspt chat --model gemini-pro-latest   # override model
+
+Advanced Enterprise Provider Configurations
+-------------------------------------------
+
+Unlike standard API-key based providers, enterprise platforms like **AWS Bedrock** and **Google Agent Platform (formerly Vertex AI)** require multi-part configurations and secure credentials to function.
+
+AWS Bedrock (SigV4 Authentication)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Perspt integrates natively with AWS Bedrock via the AWS Signature Version 4 (SigV4) protocol. It automatically detects your AWS configuration from standard AWS environment variables or your local AWS config files.
+
+**Required Environment Variables:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Variable
+     - Description
+   * - ``AWS_ACCESS_KEY_ID``
+     - Your AWS Access Key ID.
+   * - ``AWS_SECRET_ACCESS_KEY``
+     - Your AWS Secret Access Key.
+   * - ``AWS_REGION``
+     - The AWS region hosting Bedrock (e.g., ``us-east-1`` or ``us-west-2``).
+   * - ``AWS_SESSION_TOKEN``
+     - *(Optional)* Required if using temporary AWS IAM credentials.
+
+**Local Profile Configuration:**
+
+If environment variables are not set, Perspt will automatically read credentials from your local profile (e.g., ``~/.aws/credentials`` and ``~/.aws/config``) using the standard AWS resolution chain:
+
+.. code-block:: ini
+
+   # ~/.aws/config
+   [default]
+   region = us-east-1
+
+   # ~/.aws/credentials
+   [default]
+   aws_access_key_id = AKIAIOSFODNN7EXAMPLE
+   aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+Google Agent Platform (formerly Vertex AI)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Google Agent Platform/Vertex AI uses secure OAuth2 Bearer Tokens rather than standard static API keys. You must supply your Google Cloud Project ID and regional location alongside the access token.
+
+**Required Environment Variables:**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Variable
+     - Description
+   * - ``VERTEX_API_KEY``
+     - Your OAuth2 Bearer access token (generate dynamically via gcloud CLI).
+   * - ``VERTEX_PROJECT_ID``
+     - Your Google Cloud Platform (GCP) Project ID.
+   * - ``VERTEX_LOCATION``
+     - The GCP region hosting Vertex AI resources (e.g., ``us-central1`` or ``europe-west3``).
+
+**Token Generation Quickstart:**
+
+Since OAuth2 access tokens are short-lived (usually expiring in 1 hour), you can export the token dynamically in your shell before running Perspt:
+
+.. code-block:: bash
+
+   # 1. Authenticate with Google Cloud CLI
+   gcloud auth login
+
+   # 2. Configure variables and inject your access token
+   export VERTEX_PROJECT_ID="your-gcp-project-123"
+   export VERTEX_LOCATION="us-central1"
+   export VERTEX_API_KEY=$(gcloud auth print-access-token)
+
+   # 3. Launch Perspt using a Vertex AI model
+   perspt chat --model gemini-2.5-flash
+
+Supported Models & Naming Conventions
+-------------------------------------
+
+Perspt features an intelligent router that resolves your target provider from the model name prefix. In version 0.6.0, we support the latest generation of models across all providers:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 35 40
+
+   * - Provider
+     - Model Prefix / Name
+     - Target Model ID
+   * - **OpenAI**
+     - ``gpt-5.5-*`` / ``gpt-4o-*``
+     - ``gpt-5.5-preview``, ``gpt-4o-mini``
+   * - **Anthropic**
+     - ``claude-4.7-*`` / ``claude-3-5-*``
+     - ``claude-sonnet-4.7``, ``claude-3-5-sonnet-20241022``
+   * - **Google Gemini**
+     - ``gemini-3.1-*`` / ``gemini-3.0-*``
+     - ``gemini-3.1-flash``, ``gemini-3.1-pro``
+   * - **AWS Bedrock**
+     - ``aws.*`` / ``bedrock.*``
+     - ``us.amazon.nova-pro-v1:0``, ``us.anthropic.claude-3-5-sonnet-v2:0``
+   * - **Google Agent Platform**
+     - ``vertex.*``
+     - ``vertex::gemini-2.5-pro``, ``vertex::claude-sonnet-4-6``
+
 
 Configuration File
 ------------------
