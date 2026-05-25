@@ -1,6 +1,6 @@
 [package]
 name = "perspt-policy"
-version = "0.5.9"
+version = "0.6.0"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -13,9 +13,9 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Core types and path normalization
-perspt-core = { version = "0.5.9", path = "../perspt-core" }
+perspt-core = { version = "0.6.0", path = "../perspt-core" }
 # Starlark policy engine
-starlark = "0.13"
+starlark = "0.14"
 
 # Shell parsing
 shell-words = "1.1"
