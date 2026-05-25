@@ -1,5 +1,5 @@
 # Perspt
-**v0.5.9 "心砺光华"** — *Perfecting the essence until the work needs no words to shine.*
+**v0.6.0 "kukuza"** — *Nurturing the foundation, empowering the core.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
@@ -11,7 +11,7 @@
 
 Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertaining **T**houghts) is a terminal-based interface to Large Language Models, built in Rust. It does two things:
 
-1. **Chat with any LLM from your terminal.** Set an API key, run `perspt`, and start talking. Supports OpenAI, Anthropic, Google Gemini, Groq, Cohere, xAI, DeepSeek, and Ollama out of the box.
+1. **Chat with any LLM from your terminal.** Set an API key, run `perspt`, and start talking. Supports OpenAI, Anthropic, Google Gemini, Groq, Cohere, xAI, DeepSeek, AWS Bedrock, Google Agent Platform (Vertex AI), and Ollama out of the box.
 
 2. **Run an experimental autonomous coding agent.** The SRBN (Stabilized Recursive Barrier Network) engine decomposes coding tasks into a DAG of nodes, generates code, verifies each node with real LSP diagnostics and tests, and commits only when Lyapunov energy converges. SRBN is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). Agent mode is under active development; the theoretical framework is mature, but the implementation has not yet been benchmarked.
 
@@ -19,17 +19,18 @@ Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertainin
 
 ---
 
-## Try It in 60 Seconds
+## Quickstart
 
 ```bash
-# Install
+# Clone the repository
 git clone https://github.com/eonseed/perspt.git
-cd perspt && cargo build --release
+cd perspt
 
-# Set any supported API key
-export OPENAI_API_KEY="sk-..."
+# Build the release binary
+cargo build --release
 
-# Chat (TUI mode)
+# Set an API key and launch the TUI chat
+export GEMINI_API_KEY="your-api-key"
 ./target/release/perspt
 
 # Or use simple CLI mode for scripting
@@ -47,6 +48,8 @@ Perspt auto-detects whichever provider key you have set. No config file required
 | Cohere     | `COHERE_API_KEY`        | Yes              |
 | xAI        | `XAI_API_KEY`           | Yes              |
 | DeepSeek   | `DEEPSEEK_API_KEY`      | Yes              |
+| AWS Bedrock| `AWS_ACCESS_KEY_ID` (and region/creds) | Yes              |
+| Google Agent Platform | `VERTEX_API_KEY` (and project/region) | Yes              |
 | Ollama     | *(none)*                | No               |
 
 ---
