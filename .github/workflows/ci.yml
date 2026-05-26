@@ -21,7 +21,7 @@ jobs:
       CMAKE_CXX_FLAGS: ${{ matrix.os == 'windows-latest' && '/std:c++17 /EHsc' || '' }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-2022, macos-latest]
         rust: [stable, beta]
         exclude:
           # Only test on stable for Windows and macOS to reduce CI time
