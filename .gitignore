@@ -123,6 +123,7 @@ docs/custom.css.bak
 
 # Generated evaluation artifacts
 .perspt-eval/
+.perspt
 
 # Temporary documentation files
 docs/temp/
