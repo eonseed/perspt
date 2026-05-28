@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
+use genai::resolver::{Endpoint, ProviderConfig, ServiceTargetResolver};
 use genai::Client;
+use genai::ServiceTarget;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
@@ -46,39 +48,44 @@ impl GenAIProvider {
     /// Creates a new GenAI provider with automatic configuration.
     pub fn new() -> Result<Self> {
         let client = Client::default();
-        Ok(Self {
-            client: Arc::new(client),
-            shared: Arc::new(RwLock::new(SharedState::default())),
-        })
+        Ok(Self::from_client(client))
     }
 
     /// Creates a new GenAI provider with explicit configuration.
     pub fn new_with_config(provider_type: Option<&str>, api_key: Option<&str>) -> Result<Self> {
+        let adapter_kind = provider_type.and_then(|provider| match str_to_adapter_kind(provider) {
+            Ok(adapter_kind) => Some(adapter_kind),
+            Err(_) => {
+                log::warn!("Unknown provider type for genai client: {provider}");
+                None
+            }
+        });
+
         // Set environment variable if API key is provided
         if let (Some(provider), Some(key)) = (provider_type, api_key) {
-            let env_var = match provider {
-                "openai" => "OPENAI_API_KEY",
-                "anthropic" => "ANTHROPIC_API_KEY",
-                "gemini" => "GEMINI_API_KEY",
-                "groq" => "GROQ_API_KEY",
-                "cohere" => "COHERE_API_KEY",
-                "xai" => "XAI_API_KEY",
-                "deepseek" => "DEEPSEEK_API_KEY",
-                "ollama" => {
-                    log::info!("Ollama provider detected - no API key required for local setup");
-                    return Self::new();
-                }
-                _ => {
-                    log::warn!("Unknown provider type for API key: {provider}");
-                    return Self::new();
-                }
-            };
-
-            log::info!("Setting {env_var} environment variable for genai client");
-            std::env::set_var(env_var, key);
+            if let Some(env_var) = provider_api_key_env_var(provider) {
+                log::info!("Setting {env_var} environment variable for genai client");
+                std::env::set_var(env_var, key);
+            } else if provider.eq_ignore_ascii_case("ollama") {
+                log::info!("Ollama provider detected - no API key required for local setup");
+            } else {
+                log::warn!("Unknown provider type for API key: {provider}");
+            }
         }
 
-        Self::new()
+        let client = match adapter_kind {
+            Some(adapter_kind) => build_bound_client(adapter_kind, provider_type),
+            None => Client::default(),
+        };
+
+        Ok(Self::from_client(client))
+    }
+
+    fn from_client(client: Client) -> Self {
+        Self {
+            client: Arc::new(client),
+            shared: Arc::new(RwLock::new(SharedState::default())),
+        }
     }
 
     /// Get total tokens used across all requests
@@ -106,10 +113,15 @@ impl GenAIProvider {
     /// Retrieves all available models for a specific provider.
     pub async fn get_available_models(&self, provider: &str) -> Result<Vec<String>> {
         let adapter_kind = str_to_adapter_kind(provider)?;
+        let provider_config = provider_base_url_from_env(provider)
+            .map(|base_url| {
+                ProviderConfig::from_endpoint(Endpoint::from_owned(normalize_base_url(&base_url)))
+            })
+            .unwrap_or_default();
 
         let models = self
             .client
-            .all_model_names(adapter_kind, ())
+            .all_model_names(adapter_kind, provider_config)
             .await
             .context(format!("Failed to get models for provider: {provider}"))?;
 
@@ -391,6 +403,65 @@ impl GenAIProvider {
     }
 }
 
+fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) -> Client {
+    let mut builder = Client::builder().with_adapter_kind(adapter_kind);
+
+    if let Some(base_url) = provider_type.and_then(provider_base_url_from_env) {
+        let endpoint = normalize_base_url(&base_url);
+        let target_resolver = ServiceTargetResolver::from_resolver_fn(
+            move |mut service_target: ServiceTarget| -> genai::resolver::Result<ServiceTarget> {
+                if service_target.model.adapter_kind == adapter_kind {
+                    service_target.endpoint = Endpoint::from_owned(endpoint.clone());
+                }
+                Ok(service_target)
+            },
+        );
+        builder = builder.with_service_target_resolver(target_resolver);
+    }
+
+    builder.build()
+}
+
+fn provider_base_url_from_env(provider: &str) -> Option<String> {
+    let env_var = match provider.to_lowercase().as_str() {
+        "openai" => "OPENAI_BASE_URL",
+        "anthropic" => "ANTHROPIC_BASE_URL",
+        "gemini" | "google" => "GEMINI_BASE_URL",
+        "groq" => "GROQ_BASE_URL",
+        "cohere" => "COHERE_BASE_URL",
+        "ollama" => "OLLAMA_BASE_URL",
+        "xai" => "XAI_BASE_URL",
+        "deepseek" => "DEEPSEEK_BASE_URL",
+        _ => return None,
+    };
+
+    std::env::var(env_var)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn provider_api_key_env_var(provider: &str) -> Option<&'static str> {
+    match provider.to_lowercase().as_str() {
+        "openai" => Some("OPENAI_API_KEY"),
+        "anthropic" => Some("ANTHROPIC_API_KEY"),
+        "gemini" | "google" => Some("GEMINI_API_KEY"),
+        "groq" => Some("GROQ_API_KEY"),
+        "cohere" => Some("COHERE_API_KEY"),
+        "xai" => Some("XAI_API_KEY"),
+        "deepseek" => Some("DEEPSEEK_API_KEY"),
+        _ => None,
+    }
+}
+
+fn normalize_base_url(base_url: &str) -> String {
+    if base_url.ends_with('/') {
+        base_url.to_string()
+    } else {
+        format!("{base_url}/")
+    }
+}
+
 /// Convert a provider string to genai AdapterKind
 fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
     match provider.to_lowercase().as_str() {
@@ -428,6 +499,50 @@ mod tests {
     async fn test_provider_creation() {
         let provider = GenAIProvider::new();
         assert!(provider.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_configured_provider_binds_adapter_for_custom_model_names() {
+        let provider = GenAIProvider::new_with_config(Some("openai"), None).unwrap();
+        let target = provider
+            .client
+            .resolve_service_target("gemma4-32b-it")
+            .await
+            .unwrap();
+
+        assert_eq!(target.model.adapter_kind, AdapterKind::OpenAI);
+    }
+
+    #[tokio::test]
+    async fn test_openai_base_url_overrides_bound_provider_endpoint() {
+        let previous = std::env::var("OPENAI_BASE_URL").ok();
+        std::env::set_var("OPENAI_BASE_URL", "https://custom.example/v1");
+
+        let provider = GenAIProvider::new_with_config(Some("openai"), None).unwrap();
+        let target = provider
+            .client
+            .resolve_service_target("gemma4-32b-it")
+            .await
+            .unwrap();
+
+        assert_eq!(target.endpoint.base_url(), "https://custom.example/v1/");
+
+        match previous {
+            Some(value) => std::env::set_var("OPENAI_BASE_URL", value),
+            None => std::env::remove_var("OPENAI_BASE_URL"),
+        }
+    }
+
+    #[test]
+    fn test_normalize_base_url() {
+        assert_eq!(
+            normalize_base_url("https://custom.example/v1"),
+            "https://custom.example/v1/"
+        );
+        assert_eq!(
+            normalize_base_url("https://custom.example/v1/"),
+            "https://custom.example/v1/"
+        );
     }
 
     #[tokio::test]
