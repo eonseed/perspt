@@ -13,8 +13,11 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # LLM unified interface
-genai = "0.6.1"
+genai = "0.6"
 futures = "0.3"
+
+# TOML configuration parsing/serialization
+toml = "0.8"
 
 # Core async and traits
 async-trait = "0.1.88"
