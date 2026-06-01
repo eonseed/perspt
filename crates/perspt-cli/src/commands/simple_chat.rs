@@ -36,7 +36,11 @@ fn prune_messages(messages: &mut Vec<SimpleChatMessage>) {
         }
 
         // Retain System prompt if it is the first element
-        let remove_idx = if messages.first().map(|m| m.role == "System").unwrap_or(false) {
+        let remove_idx = if messages
+            .first()
+            .map(|m| m.role == "System")
+            .unwrap_or(false)
+        {
             if messages.len() > 1 {
                 1
             } else {
@@ -184,7 +188,10 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
                 println!("  /help             - Show this help menu");
                 continue;
             } else {
-                println!("Unknown command: {}. Type /help for available commands.", trimmed_input);
+                println!(
+                    "Unknown command: {}. Type /help for available commands.",
+                    trimmed_input
+                );
                 continue;
             }
         }
