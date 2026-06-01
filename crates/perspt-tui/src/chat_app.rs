@@ -1680,7 +1680,9 @@ impl ChatApp {
                                 self.finalize_streaming();
                                 just_finalized = true;
                                 break;
-                            } else if let Some(content) = chunk.strip_prefix("__PERSPT_REASONING__:") {
+                            } else if let Some(content) =
+                                chunk.strip_prefix("__PERSPT_REASONING__:")
+                            {
                                 self.streaming_reasoning.push_str(content);
                             } else {
                                 self.streaming_buffer.push_str(&chunk);
@@ -1788,11 +1790,12 @@ impl ChatApp {
                                             let filepath = parts[1..].join(" ");
                                             match self.save_conversation_to_file(&filepath) {
                                                 Ok(_) => {
-                                                    self
-                                                        .push_message(ChatMessage::system(format!(
+                                                    self.push_message(ChatMessage::system(
+                                                        format!(
                                                         "Conversation saved successfully to: {}",
                                                         filepath
-                                                    )));
+                                                    ),
+                                                    ));
                                                 }
                                                 Err(e) => {
                                                     self.push_message(ChatMessage::system(
