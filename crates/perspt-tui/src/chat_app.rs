@@ -802,9 +802,8 @@ impl ChatMessage {
             result.push_str(&remaining[..start_idx]);
             let after_start = &remaining[start_idx + 1..];
 
-            if after_start.starts_with('$') {
+            if let Some(after_double) = after_start.strip_prefix('$') {
                 // Block math $$...$$
-                let after_double = &after_start[1..];
                 if let Some(end_idx) = after_double.find("$$") {
                     let math_content = &after_double[..end_idx];
                     let transpiled = Self::transpile_latex_to_unicode(math_content);
@@ -822,7 +821,7 @@ impl ChatMessage {
                     result.push_str(&format!("${}$", transpiled));
                     remaining = &after_start[end_idx + 1..];
                 } else {
-                    result.push_str("$");
+                    result.push('$');
                     remaining = after_start;
                 }
             }
@@ -847,8 +846,7 @@ impl ChatMessage {
             }
 
             let after_start = &remaining[start_idx + 1..];
-            if after_start.starts_with('$') {
-                let after_double = &after_start[1..];
+            if let Some(after_double) = after_start.strip_prefix('$') {
                 if let Some(end_idx) = after_double.find("$$") {
                     let math_content = &after_double[..end_idx];
                     spans.push(Span::styled(format!("  {}  ", math_content), math_style));
@@ -1682,8 +1680,7 @@ impl ChatApp {
                                 self.finalize_streaming();
                                 just_finalized = true;
                                 break;
-                            } else if chunk.starts_with("__PERSPT_REASONING__:") {
-                                let content = &chunk["__PERSPT_REASONING__:".len()..];
+                            } else if let Some(content) = chunk.strip_prefix("__PERSPT_REASONING__:") {
                                 self.streaming_reasoning.push_str(content);
                             } else {
                                 self.streaming_buffer.push_str(&chunk);
@@ -2201,8 +2198,7 @@ impl ChatApp {
                         if chunk == EOT_SIGNAL {
                             self.finalize_streaming();
                             break;
-                        } else if chunk.starts_with("__PERSPT_REASONING__:") {
-                            let content = &chunk["__PERSPT_REASONING__:".len()..];
+                        } else if let Some(content) = chunk.strip_prefix("__PERSPT_REASONING__:") {
                             self.streaming_reasoning.push_str(content);
                         } else {
                             self.streaming_buffer.push_str(&chunk);
