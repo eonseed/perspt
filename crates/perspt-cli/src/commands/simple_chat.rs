@@ -4,7 +4,7 @@
 //! without the TUI overlay. Designed for scripting, piping, and accessibility.
 
 use anyhow::{Context, Result};
-use perspt_core::{GenAIProvider, EOT_SIGNAL};
+use perspt_core::{Config, GenAIProvider, EOT_SIGNAL};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,20 +15,26 @@ use tokio::sync::mpsc;
 pub struct SimpleChatArgs {
     pub model: Option<String>,
     pub log_file: Option<PathBuf>,
+    pub config_override: Option<PathBuf>,
 }
 
 /// Run the simple CLI chat mode
 pub async fn run(args: SimpleChatArgs) -> Result<()> {
-    // Auto-detect provider from environment
-    let (provider_type, default_model) = detect_provider_from_env();
+    let config_path = args
+        .config_override
+        .or_else(perspt_core::paths::resolve_config_file)
+        .or_else(perspt_core::paths::config_file);
+    let config = match config_path {
+        Some(ref path) => Config::load_from_path(path)?,
+        None => Config::default(),
+    };
 
-    let model_name = args.model.unwrap_or_else(|| default_model.to_string());
-
-    // Create provider
-    let provider = Arc::new(
-        GenAIProvider::new_with_config(Some(provider_type), None)
-            .context("Failed to create LLM provider. Ensure an API key is set.")?,
-    );
+    // Build a bound provider from config + env, with CLI --model taking precedence.
+    let (provider, resolved) = GenAIProvider::from_config(&config, args.model.as_deref())
+        .context("Failed to create LLM provider. Ensure an API key or config is set.")?;
+    let provider = Arc::new(provider);
+    let provider_type = resolved.provider;
+    let model_name = resolved.model;
 
     // Open log file if specified
     let mut log_handle = if let Some(ref path) = args.log_file {
@@ -166,28 +172,6 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
 
     println!("Goodbye!");
     Ok(())
-}
-
-/// Detect provider and default model from environment variables
-fn detect_provider_from_env() -> (&'static str, &'static str) {
-    if std::env::var("GEMINI_API_KEY").is_ok() {
-        ("gemini", "gemini-3.1-flash-lite-preview")
-    } else if std::env::var("OPENAI_API_KEY").is_ok() {
-        ("openai", "gpt-4o-mini")
-    } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-        ("anthropic", "claude-3-5-sonnet-20241022")
-    } else if std::env::var("GROQ_API_KEY").is_ok() {
-        ("groq", "llama-3.1-8b-instant")
-    } else if std::env::var("COHERE_API_KEY").is_ok() {
-        ("cohere", "command-r-plus")
-    } else if std::env::var("XAI_API_KEY").is_ok() {
-        ("xai", "grok-beta")
-    } else if std::env::var("DEEPSEEK_API_KEY").is_ok() {
-        ("deepseek", "deepseek-chat")
-    } else {
-        // Default to Ollama for local usage
-        ("ollama", "llama3.2")
-    }
 }
 
 /// Check for the Easter egg sequence
