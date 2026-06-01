@@ -141,9 +141,14 @@ impl GenAIProvider {
             .clone()
             .unwrap_or_else(|| env_provider.to_string());
 
+        let env_model_override = std::env::var("OPENAI_MODEL")
+            .or_else(|_| std::env::var("MODEL"))
+            .ok();
+
         let model = cli_model
             .map(str::to_string)
             .or_else(|| config.model.clone())
+            .or(env_model_override)
             .unwrap_or_else(|| env_model.to_string());
 
         // Propagate a configured base URL into the env var that build_bound_client
@@ -382,6 +387,9 @@ impl GenAIProvider {
                         chunk.content.len(),
                         elapsed
                     );
+                    if !chunk.content.is_empty() {
+                        let _ = tx.send(format!("__PERSPT_REASONING__:{}", chunk.content));
+                    }
                 }
                 Ok(ChatStreamEvent::End(_)) => {
                     log::info!(">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, {total_content_length} chars, {elapsed:?} elapsed");
