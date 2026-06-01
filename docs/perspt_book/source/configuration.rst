@@ -153,7 +153,7 @@ Since OAuth2 access tokens are short-lived (usually expiring in 1 hour), you can
 Supported Models & Naming Conventions
 -------------------------------------
 
-Perspt features an intelligent router that resolves your target provider from the model name prefix. In version 0.6.0, we support the latest generation of models across all providers:
+Perspt features an intelligent router that resolves your target provider from the model name prefix. In version 0.6.1, we support the latest generation of models across all providers:
 
 .. list-table::
    :header-rows: 1
