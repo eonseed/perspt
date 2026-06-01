@@ -23,9 +23,11 @@ Launching the TUI
 The TUI provides:
 
 - Markdown rendering (code blocks, headers, lists, bold, italic)
+- Premium ASCII table rendering with multi-line cell wrapping
+- Inline LaTeX math transpilation to styled Unicode equations (bold and cyan)
 - Real-time response streaming
 - Scroll navigation
-- Status bar (provider, model, streaming indicator)
+- Status bar (provider, model, streaming indicator, and reasoning toggles)
 
 Keyboard Shortcuts
 ------------------
@@ -42,17 +44,33 @@ Keyboard Shortcuts
      - Insert newline in input
    * - **Page Up / Down**
      - Scroll chat history
+   * - **Shift+Up / Down**
+     - Scroll chat history by 1 line
    * - **Ctrl+Up / Down**
-     - Scroll by one line
+     - Scroll chat history by 1 line
    * - **Home / End**
      - Jump to top / bottom
    * - **Esc** or **Ctrl+Q**
      - Quit
    * - **Ctrl+C**
      - Cancel current stream
+   * - **Ctrl+R**
+     - Toggle inner reasoning process display
+   * - **Ctrl+A** / **Ctrl+E**
+     - Go to start / end of input line
+   * - **Ctrl+B** / **Ctrl+F**
+     - Move cursor left / right
+   * - **Ctrl+D** / **Ctrl+H**
+     - Delete / Backspace character
+   * - **Ctrl+K** / **Ctrl+U**
+     - Kill to end / start of line
+   * - **Ctrl+W**
+     - Delete word before cursor
 
-Chat Commands
--------------
+Slash Commands (Directives)
+---------------------------
+
+Both CLI and TUI modes support slash commands typed directly in the input box:
 
 .. list-table::
    :header-rows: 1
@@ -60,10 +78,16 @@ Chat Commands
 
    * - Command
      - Description
-   * - ``/save``
-     - Save conversation to a timestamped text file
-   * - ``exit`` or ``quit``
-     - Exit the application
+   * - ``/exit`` or ``/quit``
+     - Exit the application session
+   * - ``/clear``
+     - Reset the active conversation history
+   * - ``/model <name>``
+     - Switch the active LLM model on the fly
+   * - ``/save <path>`` (TUI only)
+     - Export full conversation history to a markdown file
+   * - ``/help``
+     - Print the menu of available slash commands
 
 Simple CLI Mode
 ---------------
