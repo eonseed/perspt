@@ -1,5 +1,5 @@
 # Perspt
-**v0.6.0 "kukuza"** — *Nurturing the foundation, empowering the core.*
+**v0.6.1 "AKŪ"** — *AKŪ - sharp fixes from sharp ears.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\

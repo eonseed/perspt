@@ -3,6 +3,36 @@
 Changelog
 =========
 
+Version 0.6.1 — "AKŪ"
+---------------------
+
+*AKŪ - sharp fixes from sharp ears.*
+
+**Config Coherency & Schema-Driven Settings:**
+
+- **TOML Config Schema & Resolution** — Added a robust TOML configuration schema with smart config-driven provider resolution.
+- **Unified Provider Binding** — Bound the configured provider cohesively across all modes including ``chat`` (TUI), ``simple-chat`` (CLI), and the autonomous ``agent`` mode.
+- **Refined Config Commands** — Redesigned `perspt config` command to be fully structured, interactive, and improved key initialization/init prompts.
+
+**TUI & CLI Slash Commands:**
+
+- **CLI Simple-Chat Enhancements** — Integrated ``rustyline`` file-based history and introduced interactive slash commands inside simple-chat.
+- **TUI Input Navigation & Persistence** — Added persistent history paths and implemented fully UTF-8 safe input navigation in TUI inputs.
+- **Conversation Persistence** — Added new conversation save commands to easily export dialogues to local files.
+
+**Advanced Terminal UI Rendering:**
+
+- **LaTeX Math Transpilation** — Integrated real-time LaTeX mathematical transpilation into the markdown rendering pipeline.
+- **Intelligent ASCII Table Wrapping** — Implemented self-wrapping logic for ASCII tables in the chat UI to ensure readable presentation on narrow views.
+
+**Documentation:**
+
+- **Comprehensive Feature Guides** — Fully documented TUI/CLI slash commands, config schemas, and keyboard shortcut matrices in the user guides.
+
+**Workspace Maintenance:**
+
+- **Crate Version Alignment** — Bumped version of all workspace crates to ``0.6.1``.
+
 Version 0.6.0 — "kukuza"
 ------------------------
 

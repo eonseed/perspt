@@ -4,7 +4,7 @@ Architecture
 ============
 
 Perspt is a Rust workspace with nine crates including a root integration crate.
-Version 0.6.0 implements the PSP-7 specification for the experimental SRBN agent.
+Version 0.6.1 implements the PSP-7 specification for the experimental SRBN agent.
 
 Workspace Layout
 ----------------
