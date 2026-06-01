@@ -14,11 +14,11 @@ Launching the TUI
    # Auto-detect provider from env keys
    perspt
 
-   # Explicit provider + model
-   perspt chat --provider-type anthropic --model claude-sonnet-4-20250514
+   # Explicit model (provider comes from config or env detection)
+   perspt chat --model claude-sonnet-4-20250514
 
-   # Override API key
-   perspt chat --api-key sk-xxx --model gpt-4.1
+   # Use a specific config file
+   perspt --config ./config.toml chat --model gpt-4.1
 
 The TUI provides:
 

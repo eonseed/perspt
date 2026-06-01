@@ -30,15 +30,16 @@ Common Error Patterns
 ``ErrorType::ApiKeyMissing``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-No API key found for the selected provider. Set the environment variable or
-pass ``--api-key``.
+No API key found for the selected provider. Set the provider environment
+variable or store it with ``perspt config --set api_key=<KEY>``.
 
 
 ``ErrorType::ModelNotFound``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The model identifier is not recognized by the provider. Use ``perspt --list-models``
-to see available models.
+The model identifier is not recognized by the provider. For a custom or local
+model, set ``provider`` and ``base_url`` in the config, or use namespacing
+(``openai::<model>``).
 
 
 ``ErrorType::ConnectionFailed``

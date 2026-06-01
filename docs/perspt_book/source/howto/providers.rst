@@ -12,7 +12,7 @@ OpenAI
    perspt chat --model gpt-4.1
 
 Supported models: ``gpt-4.1``, ``gpt-4.1-mini``, ``gpt-4.1-nano``, ``o4-mini``,
-``o3``, and others listed by ``perspt --list-models``.
+``o3``, and any other model your provider account exposes.
 
 
 Anthropic

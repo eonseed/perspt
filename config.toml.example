@@ -1,0 +1,30 @@
+# Perspt configuration (TOML)
+#
+# Copy this file to your platform config directory:
+#   Linux:   ~/.config/perspt/config.toml
+#   macOS:   ~/Library/Application Support/perspt/config.toml
+#   Windows: %APPDATA%\perspt\config.toml
+#
+# Or point at it explicitly: `perspt --config ./config.toml chat`
+# All fields are optional; missing values fall back to environment detection.
+
+# Provider id: openai, anthropic, gemini, groq, cohere, ollama, xai, deepseek
+provider = "openai"
+
+# Default model for chat / simple-chat. Custom OpenAI-compatible names
+# (e.g. "phi-4-npu-ov") are routed to the provider above.
+model = "gpt-4o-mini"
+
+# API key for the provider. May also be supplied via the provider's env var
+# (OPENAI_API_KEY, ANTHROPIC_API_KEY, ...).
+# api_key = "sk-..."
+
+# Optional endpoint override for OpenAI-compatible or local servers.
+# You can also set OPENAI_BASE_URL / OLLAMA_BASE_URL etc. in the environment.
+# base_url = "http://localhost:8000/v1"
+
+# Optional per-tier model overrides for `perspt agent`.
+# architect_model = "gpt-4o"
+# actuator_model = "gpt-4o-mini"
+# verifier_model = "gpt-4o-mini"
+# speculator_model = "gpt-4o-mini"
