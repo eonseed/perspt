@@ -46,7 +46,11 @@ impl SimpleInput {
         if self.cursor_line < self.lines.len() {
             let line = &mut self.lines[self.cursor_line];
             let char_idx = self.cursor_col.min(line.chars().count());
-            let byte_idx = line.char_indices().map(|(b, _)| b).nth(char_idx).unwrap_or(line.len());
+            let byte_idx = line
+                .char_indices()
+                .map(|(b, _)| b)
+                .nth(char_idx)
+                .unwrap_or(line.len());
             line.insert(byte_idx, c);
             self.cursor_col += 1;
         }
@@ -57,7 +61,11 @@ impl SimpleInput {
         if self.cursor_line < self.lines.len() {
             let line = &mut self.lines[self.cursor_line];
             let char_idx = self.cursor_col.min(line.chars().count());
-            let byte_idx = line.char_indices().map(|(b, _)| b).nth(char_idx).unwrap_or(line.len());
+            let byte_idx = line
+                .char_indices()
+                .map(|(b, _)| b)
+                .nth(char_idx)
+                .unwrap_or(line.len());
 
             // Split the current line at cursor
             let remainder = line[byte_idx..].to_string();
@@ -76,7 +84,11 @@ impl SimpleInput {
             // Delete within line
             let line = &mut self.lines[self.cursor_line];
             let char_idx = (self.cursor_col - 1).min(line.chars().count() - 1);
-            let byte_idx = line.char_indices().map(|(b, _)| b).nth(char_idx).unwrap_or(0);
+            let byte_idx = line
+                .char_indices()
+                .map(|(b, _)| b)
+                .nth(char_idx)
+                .unwrap_or(0);
             line.remove(byte_idx);
             self.cursor_col -= 1;
         } else if self.cursor_line > 0 {
@@ -93,7 +105,11 @@ impl SimpleInput {
         let line = &mut self.lines[self.cursor_line];
         let char_count = line.chars().count();
         if self.cursor_col < char_count {
-            let byte_idx = line.char_indices().map(|(b, _)| b).nth(self.cursor_col).unwrap_or(0);
+            let byte_idx = line
+                .char_indices()
+                .map(|(b, _)| b)
+                .nth(self.cursor_col)
+                .unwrap_or(0);
             line.remove(byte_idx);
         } else if self.cursor_line + 1 < self.lines.len() {
             // Merge next line into current
@@ -127,7 +143,9 @@ impl SimpleInput {
     pub fn move_up(&mut self) {
         if self.cursor_line > 0 {
             self.cursor_line -= 1;
-            self.cursor_col = self.cursor_col.min(self.lines[self.cursor_line].chars().count());
+            self.cursor_col = self
+                .cursor_col
+                .min(self.lines[self.cursor_line].chars().count());
         }
     }
 
@@ -135,7 +153,9 @@ impl SimpleInput {
     pub fn move_down(&mut self) {
         if self.cursor_line + 1 < self.lines.len() {
             self.cursor_line += 1;
-            self.cursor_col = self.cursor_col.min(self.lines[self.cursor_line].chars().count());
+            self.cursor_col = self
+                .cursor_col
+                .min(self.lines[self.cursor_line].chars().count());
         }
     }
 
@@ -210,7 +230,11 @@ impl SimpleInput {
             let line = &mut self.lines[self.cursor_line];
             let char_count = line.chars().count();
             let char_idx = self.cursor_col.min(char_count);
-            let byte_idx = line.char_indices().map(|(b, _)| b).nth(char_idx).unwrap_or(line.len());
+            let byte_idx = line
+                .char_indices()
+                .map(|(b, _)| b)
+                .nth(char_idx)
+                .unwrap_or(line.len());
             line.truncate(byte_idx);
             self.cursor_col = line.chars().count();
         }
@@ -222,7 +246,11 @@ impl SimpleInput {
             let line = &mut self.lines[self.cursor_line];
             let char_count = line.chars().count();
             let char_idx = self.cursor_col.min(char_count);
-            let byte_idx = line.char_indices().map(|(b, _)| b).nth(char_idx).unwrap_or(line.len());
+            let byte_idx = line
+                .char_indices()
+                .map(|(b, _)| b)
+                .nth(char_idx)
+                .unwrap_or(line.len());
             let remainder = line[byte_idx..].to_string();
             *line = remainder;
             self.cursor_col = 0;
@@ -296,7 +324,7 @@ impl SimpleInput {
                 // Line with cursor using character-based slicing
                 let char_count = line.chars().count();
                 let cursor_idx = self.cursor_col.min(char_count);
-                
+
                 let before: String = line.chars().take(cursor_idx).collect();
                 let cursor_char = line.chars().nth(cursor_idx).unwrap_or(' ');
                 let after: String = line.chars().skip(cursor_idx + 1).collect();

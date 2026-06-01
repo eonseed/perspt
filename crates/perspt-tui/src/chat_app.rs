@@ -131,10 +131,25 @@ impl ChatMessage {
                     continue;
                 }
                 let super_c = match next_c {
-                    '0' => '⁰', '1' => '¹', '2' => '²', '3' => '³', '4' => '⁴',
-                    '5' => '⁵', '6' => '⁶', '7' => '⁷', '8' => '⁸', '9' => '⁹',
-                    '+' => '⁺', '-' => '⁻', '=' => '⁼', '(' => '⁽', ')' => '⁾',
-                    'n' => 'ⁿ', 'i' => 'ⁱ', 'x' => 'ˣ', 'y' => 'ʸ',
+                    '0' => '⁰',
+                    '1' => '¹',
+                    '2' => '²',
+                    '3' => '³',
+                    '4' => '⁴',
+                    '5' => '⁵',
+                    '6' => '⁶',
+                    '7' => '⁷',
+                    '8' => '⁸',
+                    '9' => '⁹',
+                    '+' => '⁺',
+                    '-' => '⁻',
+                    '=' => '⁼',
+                    '(' => '⁽',
+                    ')' => '⁾',
+                    'n' => 'ⁿ',
+                    'i' => 'ⁱ',
+                    'x' => 'ˣ',
+                    'y' => 'ʸ',
                     _ => next_c,
                 };
                 if super_c != next_c {
@@ -170,13 +185,38 @@ impl ChatMessage {
                     continue;
                 }
                 let sub_c = match next_c {
-                    '0' => '₀', '1' => '₁', '2' => '₂', '3' => '₃', '4' => '₄',
-                    '5' => '₅', '6' => '₆', '7' => '₇', '8' => '₈', '9' => '₉',
-                    '+' => '₊', '-' => '₋', '=' => '₌', '(' => '₍', ')' => '₎',
-                    'a' => 'ₐ', 'e' => 'ₑ', 'h' => 'ₕ', 'i' => 'ᵢ', 'j' => 'ⱼ',
-                    'k' => 'ₖ', 'l' => 'ₗ', 'm' => 'ₘ', 'n' => 'ₙ', 'o' => 'ₒ',
-                    'p' => 'ₚ', 'r' => 'ᵣ', 's' => 'ₛ', 't' => 'ₜ', 'u' => 'ᵤ',
-                    'v' => 'ᵥ', 'x' => 'ₓ',
+                    '0' => '₀',
+                    '1' => '₁',
+                    '2' => '₂',
+                    '3' => '₃',
+                    '4' => '₄',
+                    '5' => '₅',
+                    '6' => '₆',
+                    '7' => '₇',
+                    '8' => '₈',
+                    '9' => '₉',
+                    '+' => '₊',
+                    '-' => '₋',
+                    '=' => '₌',
+                    '(' => '₍',
+                    ')' => '₎',
+                    'a' => 'ₐ',
+                    'e' => 'ₑ',
+                    'h' => 'ₕ',
+                    'i' => 'ᵢ',
+                    'j' => 'ⱼ',
+                    'k' => 'ₖ',
+                    'l' => 'ₗ',
+                    'm' => 'ₘ',
+                    'n' => 'ₙ',
+                    'o' => 'ₒ',
+                    'p' => 'ₚ',
+                    'r' => 'ᵣ',
+                    's' => 'ₛ',
+                    't' => 'ₜ',
+                    'u' => 'ᵤ',
+                    'v' => 'ᵥ',
+                    'x' => 'ₓ',
                     _ => next_c,
                 };
                 if sub_c != next_c {
@@ -264,13 +304,32 @@ impl ChatMessage {
         let mut changed = true;
 
         let bb_map: &[(&str, &str)] = &[
-            ("A", "𝔸"), ("B", "𝔹"), ("C", "ℂ"), ("D", "𝔻"),
-            ("E", "𝔼"), ("F", "𝔽"), ("G", "𝔾"), ("H", "ℍ"),
-            ("I", "𝕀"), ("J", "𝕁"), ("K", "𝕂"), ("L", "𝕃"),
-            ("M", "𝕄"), ("N", "ℕ"), ("O", "𝕆"), ("P", "ℙ"),
-            ("Q", "ℚ"), ("R", "ℝ"), ("S", "𝕊"), ("T", "𝕋"),
-            ("U", "𝕌"), ("V", "𝕍"), ("W", "𝕎"), ("X", "𝕏"),
-            ("Y", "𝕐"), ("Z", "ℤ"),
+            ("A", "𝔸"),
+            ("B", "𝔹"),
+            ("C", "ℂ"),
+            ("D", "𝔻"),
+            ("E", "𝔼"),
+            ("F", "𝔽"),
+            ("G", "𝔾"),
+            ("H", "ℍ"),
+            ("I", "𝕀"),
+            ("J", "𝕁"),
+            ("K", "𝕂"),
+            ("L", "𝕃"),
+            ("M", "𝕄"),
+            ("N", "ℕ"),
+            ("O", "𝕆"),
+            ("P", "ℙ"),
+            ("Q", "ℚ"),
+            ("R", "ℝ"),
+            ("S", "𝕊"),
+            ("T", "𝕋"),
+            ("U", "𝕌"),
+            ("V", "𝕍"),
+            ("W", "𝕎"),
+            ("X", "𝕏"),
+            ("Y", "𝕐"),
+            ("Z", "ℤ"),
         ];
 
         while changed {
@@ -432,7 +491,8 @@ impl ChatMessage {
                             let numerator = &result[num_start..n_end];
                             let denominator = &result[den_start..d_end];
                             let suffix = &result[d_end + 1..];
-                            result = format!("{}({})/({}){}", prefix, numerator, denominator, suffix);
+                            result =
+                                format!("{}({})/({}){}", prefix, numerator, denominator, suffix);
                             changed = true;
                             continue;
                         }
@@ -838,7 +898,7 @@ impl ChatMessage {
         let mut cells = Vec::new();
         let mut current_cell = String::new();
         let mut chars = line.chars().peekable();
-        
+
         let mut first = true;
         while let Some(c) = chars.next() {
             if c == '\\' && chars.peek() == Some(&'|') {
@@ -885,14 +945,14 @@ impl ChatMessage {
         let mut blocks = Vec::new();
         let mut current_markdown = String::new();
         let mut in_code_block = false;
-        
+
         let lines: Vec<&str> = content.lines().collect();
         let mut i = 0;
-        
+
         while i < lines.len() {
             let line = lines[i];
             let trimmed = line.trim();
-            
+
             if trimmed.starts_with("```") {
                 in_code_block = !in_code_block;
                 current_markdown.push_str(line);
@@ -900,48 +960,48 @@ impl ChatMessage {
                 i += 1;
                 continue;
             }
-            
+
             if in_code_block {
                 current_markdown.push_str(line);
                 current_markdown.push('\n');
                 i += 1;
                 continue;
             }
-            
+
             // Look ahead for table headers and separator rows
             let is_header_candidate = line.contains('|');
             let has_next = i + 1 < lines.len();
             let is_next_separator = has_next && Self::is_separator_line(lines[i + 1]);
-            
+
             if is_header_candidate && is_next_separator {
                 // Flush current markdown if not empty
                 if !current_markdown.is_empty() {
                     blocks.push(ContentBlock::Markdown(current_markdown.clone()));
                     current_markdown.clear();
                 }
-                
+
                 let header_line = line;
                 let separator_line = lines[i + 1];
-                
+
                 let headers = Self::split_table_row(header_line);
                 let sep_cells = Self::split_table_row(separator_line);
-                
+
                 let alignments: Vec<TableAlign> = sep_cells
                     .iter()
                     .map(|cell| Self::parse_alignment(cell))
                     .collect();
-                
+
                 let mut rows = Vec::new();
                 i += 2; // skip header and separator
-                
+
                 while i < lines.len() {
                     let data_line = lines[i];
                     let trimmed_data = data_line.trim();
-                    
+
                     if trimmed_data.starts_with("```") {
                         break;
                     }
-                    
+
                     if data_line.contains('|') {
                         if Self::is_separator_line(data_line) {
                             break;
@@ -952,25 +1012,25 @@ impl ChatMessage {
                         break;
                     }
                 }
-                
+
                 blocks.push(ContentBlock::Table {
                     headers,
                     alignments,
                     rows,
                 });
-                
+
                 continue;
             }
-            
+
             current_markdown.push_str(line);
             current_markdown.push('\n');
             i += 1;
         }
-        
+
         if !current_markdown.is_empty() {
             blocks.push(ContentBlock::Markdown(current_markdown));
         }
-        
+
         blocks
     }
 
@@ -980,16 +1040,19 @@ impl ChatMessage {
         if line_width <= max_w {
             return line;
         }
-        
+
         if max_w <= 1 {
-            return Line::from(vec![Span::styled("…", Style::default().fg(Color::Rgb(120, 144, 156)))]);
+            return Line::from(vec![Span::styled(
+                "…",
+                Style::default().fg(Color::Rgb(120, 144, 156)),
+            )]);
         }
-        
+
         let target_w = max_w - 1;
         let mut total_w = 0;
         let mut new_spans = Vec::new();
         let mut truncated = false;
-        
+
         for span in line.spans {
             let span_w = span.content.width();
             if total_w + span_w <= target_w {
@@ -1012,11 +1075,14 @@ impl ChatMessage {
                 break;
             }
         }
-        
+
         if truncated || total_w < line_width {
-            new_spans.push(Span::styled("…", Style::default().fg(Color::Rgb(120, 144, 156))));
+            new_spans.push(Span::styled(
+                "…",
+                Style::default().fg(Color::Rgb(120, 144, 156)),
+            ));
         }
-        
+
         Line::from(new_spans)
     }
 
@@ -1029,15 +1095,15 @@ impl ChatMessage {
         cell_style: Style,
     ) -> Vec<Line<'static>> {
         let col_count = col_widths.len();
-        
+
         // Wrap and split cell contents for each column
         let mut cell_wrapped_lines: Vec<Vec<Line<'static>>> = Vec::new();
         for (i, cell_text) in cells.iter().enumerate() {
             let w = col_widths[i];
-            
+
             // Replace <br> and <br/> with newline characters
             let clean_text = cell_text.replace("<br>", "\n").replace("<br/>", "\n");
-            
+
             let mut col_lines = Vec::new();
             for part in clean_text.split('\n') {
                 let parsed_line = Self::parse_line_to_spans(part, cell_style);
@@ -1046,29 +1112,37 @@ impl ChatMessage {
             }
             cell_wrapped_lines.push(col_lines);
         }
-        
+
         // Determine max line count for this row
-        let line_count = cell_wrapped_lines.iter().map(|lines| lines.len()).max().unwrap_or(1);
-        
+        let line_count = cell_wrapped_lines
+            .iter()
+            .map(|lines| lines.len())
+            .max()
+            .unwrap_or(1);
+
         let mut sub_rows = Vec::new();
         for sub_idx in 0..line_count {
             let mut row_spans = Vec::new();
             row_spans.push(Span::styled("│", border_style));
-            
+
             for i in 0..col_count {
                 let w = col_widths[i];
                 let align = alignments[i];
-                
+
                 // Get the line for this sub-row, or default to an empty line if this cell has fewer lines
                 let cell_line = if sub_idx < cell_wrapped_lines[i].len() {
                     cell_wrapped_lines[i][sub_idx].clone()
                 } else {
                     Line::from(Vec::new())
                 };
-                
-                let line_width = cell_line.spans.iter().map(|s| s.content.width()).sum::<usize>();
+
+                let line_width = cell_line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.width())
+                    .sum::<usize>();
                 let remaining_w = w.saturating_sub(line_width);
-                
+
                 let (left_pad, right_pad) = match align {
                     TableAlign::Left => (0, remaining_w),
                     TableAlign::Right => (remaining_w, 0),
@@ -1078,7 +1152,7 @@ impl ChatMessage {
                         (lp, rp)
                     }
                 };
-                
+
                 row_spans.push(Span::styled(" ", cell_style));
                 if left_pad > 0 {
                     row_spans.push(Span::styled(" ".repeat(left_pad), cell_style));
@@ -1090,12 +1164,12 @@ impl ChatMessage {
                     row_spans.push(Span::styled(" ".repeat(right_pad), cell_style));
                 }
                 row_spans.push(Span::styled(" ", cell_style));
-                
+
                 row_spans.push(Span::styled("│", border_style));
             }
             sub_rows.push(Line::from(row_spans));
         }
-        
+
         sub_rows
     }
 
@@ -1111,12 +1185,12 @@ impl ChatMessage {
         if col_count == 0 {
             return Vec::new();
         }
-        
+
         let mut alignments = alignments;
         while alignments.len() < col_count {
             alignments.push(TableAlign::Left);
         }
-        
+
         let mut formatted_rows = Vec::new();
         for row in rows {
             let mut cells = row;
@@ -1128,45 +1202,53 @@ impl ChatMessage {
             }
             formatted_rows.push(cells);
         }
-        
+
         // Calculate max natural width of columns, clamping them reasonably
         let max_natural_width = (viewport_width / 3).max(20);
         let mut col_widths = vec![0; col_count];
         for (i, h) in headers.iter().enumerate() {
             let header_line = Self::parse_line_to_spans(h, content_style);
-            let header_width = header_line.spans.iter().map(|s| s.content.width()).sum::<usize>();
+            let header_width = header_line
+                .spans
+                .iter()
+                .map(|s| s.content.width())
+                .sum::<usize>();
             col_widths[i] = col_widths[i].max(header_width.min(max_natural_width));
         }
         for row in &formatted_rows {
             for (i, cell) in row.iter().enumerate() {
                 let cell_line = Self::parse_line_to_spans(cell, content_style);
-                let cell_width = cell_line.spans.iter().map(|s| s.content.width()).sum::<usize>();
+                let cell_width = cell_line
+                    .spans
+                    .iter()
+                    .map(|s| s.content.width())
+                    .sum::<usize>();
                 col_widths[i] = col_widths[i].max(cell_width.min(max_natural_width));
             }
         }
-        
+
         // Check if table exceeds viewport width and scale down if needed
         let max_table_width = viewport_width.saturating_sub(4);
         let total_content_width: usize = col_widths.iter().sum();
         let total_table_width = 1 + total_content_width + 3 * col_count;
-        
+
         if total_table_width > max_table_width && total_content_width > 0 {
             let available_content_width = max_table_width
                 .saturating_sub(1)
                 .saturating_sub(3 * col_count);
-            
+
             if available_content_width >= col_count {
                 let mut new_widths = vec![1; col_count];
                 let mut assigned = col_count;
                 let remaining_to_assign = available_content_width - col_count;
-                
+
                 if remaining_to_assign > 0 {
                     for i in 0..col_count {
                         let share = (col_widths[i] * remaining_to_assign) / total_content_width;
                         new_widths[i] += share;
                         assigned += share;
                     }
-                    
+
                     let mut remainder = available_content_width - assigned;
                     while remainder > 0 {
                         let mut best_col = 0;
@@ -1187,13 +1269,13 @@ impl ChatMessage {
                 col_widths = new_widths;
             }
         }
-        
+
         // Border styling and header styling
         let border_style = Style::default().fg(Color::Rgb(100, 116, 139));
         let header_style = content_style.add_modifier(Modifier::BOLD);
-        
+
         let mut lines = Vec::new();
-        
+
         // Render top border
         let mut top_spans = Vec::new();
         top_spans.push(Span::styled("┌", border_style));
@@ -1205,10 +1287,16 @@ impl ChatMessage {
         }
         top_spans.push(Span::styled("┐", border_style));
         lines.push(Line::from(top_spans));
-        
+
         // Render headers
-        lines.extend(Self::render_table_row(&headers, &col_widths, &alignments, border_style, header_style));
-        
+        lines.extend(Self::render_table_row(
+            &headers,
+            &col_widths,
+            &alignments,
+            border_style,
+            header_style,
+        ));
+
         // Render separator and data rows
         if !formatted_rows.is_empty() {
             let mut sep_spans = Vec::new();
@@ -1221,12 +1309,18 @@ impl ChatMessage {
             }
             sep_spans.push(Span::styled("┤", border_style));
             lines.push(Line::from(sep_spans));
-            
+
             for row in &formatted_rows {
-                lines.extend(Self::render_table_row(row, &col_widths, &alignments, border_style, content_style));
+                lines.extend(Self::render_table_row(
+                    row,
+                    &col_widths,
+                    &alignments,
+                    border_style,
+                    content_style,
+                ));
             }
         }
-        
+
         // Render bottom border
         let mut bottom_spans = Vec::new();
         bottom_spans.push(Span::styled("└", border_style));
@@ -1238,7 +1332,7 @@ impl ChatMessage {
         }
         bottom_spans.push(Span::styled("┘", border_style));
         lines.push(Line::from(bottom_spans));
-        
+
         lines
     }
 
@@ -1380,11 +1474,13 @@ impl ChatMessage {
                     for line in thought.lines() {
                         let text = format!("    {}", line);
                         if text.width() <= viewport_width {
-                            self.cached_visual_lines.push(Line::from(Span::styled(text, reasoning_style)));
+                            self.cached_visual_lines
+                                .push(Line::from(Span::styled(text, reasoning_style)));
                         } else {
                             let wrapped = ChatApp::wrap_text_to_width(&text, viewport_width);
                             for wrapped_line in wrapped {
-                                self.cached_visual_lines.push(Line::from(Span::styled(wrapped_line, reasoning_style)));
+                                self.cached_visual_lines
+                                    .push(Line::from(Span::styled(wrapped_line, reasoning_style)));
                             }
                         }
                     }
@@ -1404,14 +1500,25 @@ impl ChatMessage {
                     ContentBlock::Markdown(text) => {
                         let rendered = tui_markdown::from_str(&text);
                         for line in rendered.lines {
-                            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                            let text: String =
+                                line.spans.iter().map(|s| s.content.as_ref()).collect();
                             let parsed_line = Self::parse_line_to_spans(&text, content_style);
                             let wrapped = Self::wrap_line(parsed_line, viewport_width);
                             self.cached_visual_lines.extend(wrapped);
                         }
                     }
-                    ContentBlock::Table { headers, alignments, rows } => {
-                        let table_lines = Self::render_table(headers, alignments, rows, viewport_width, content_style);
+                    ContentBlock::Table {
+                        headers,
+                        alignments,
+                        rows,
+                    } => {
+                        let table_lines = Self::render_table(
+                            headers,
+                            alignments,
+                            rows,
+                            viewport_width,
+                            content_style,
+                        );
                         self.cached_visual_lines.extend(table_lines);
                     }
                 }
@@ -1481,16 +1588,16 @@ impl ChatApp {
     /// Save the current conversation history to a file in markdown format
     pub fn save_conversation_to_file(&self, filepath: &str) -> std::io::Result<()> {
         use std::io::Write;
-        
+
         let path = std::path::Path::new(filepath);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
         let mut file = std::fs::File::create(path)?;
         writeln!(file, "# Perspt Conversation Session")?;
         writeln!(file, "Model: {}\n", self.model)?;
-        
+
         for msg in &self.messages {
             match msg.role {
                 MessageRole::User => {
@@ -1517,7 +1624,7 @@ impl ChatApp {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -1668,9 +1775,10 @@ impl ChatApp {
                                         if parts.len() > 1 {
                                             let new_model = parts[1..].join(" ");
                                             self.model = new_model;
-                                            self.push_message(ChatMessage::system(
-                                                format!("Switched model to: {}", self.model),
-                                            ));
+                                            self.push_message(ChatMessage::system(format!(
+                                                "Switched model to: {}",
+                                                self.model
+                                            )));
                                         } else {
                                             self.push_message(ChatMessage::system(
                                                 "Usage: /model <name>",
@@ -1683,13 +1791,18 @@ impl ChatApp {
                                             let filepath = parts[1..].join(" ");
                                             match self.save_conversation_to_file(&filepath) {
                                                 Ok(_) => {
-                                                    self.push_message(ChatMessage::system(
-                                                        format!("Conversation saved successfully to: {}", filepath),
-                                                    ));
+                                                    self
+                                                        .push_message(ChatMessage::system(format!(
+                                                        "Conversation saved successfully to: {}",
+                                                        filepath
+                                                    )));
                                                 }
                                                 Err(e) => {
                                                     self.push_message(ChatMessage::system(
-                                                        format!("Failed to save conversation: {}", e),
+                                                        format!(
+                                                            "Failed to save conversation: {}",
+                                                            e
+                                                        ),
                                                     ));
                                                 }
                                             }
@@ -1705,9 +1818,10 @@ impl ChatApp {
                                         ));
                                         self.input.clear();
                                     } else {
-                                        self.push_message(ChatMessage::system(
-                                            format!("Unknown command: {}. Type /help for help.", text),
-                                        ));
+                                        self.push_message(ChatMessage::system(format!(
+                                            "Unknown command: {}. Type /help for help.",
+                                            text
+                                        )));
                                         self.input.clear();
                                     }
                                 } else {
@@ -1920,13 +2034,12 @@ impl ChatApp {
                                 if parts.len() > 1 {
                                     let new_model = parts[1..].join(" ");
                                     self.model = new_model;
-                                    self.push_message(ChatMessage::system(
-                                        format!("Switched model to: {}", self.model),
-                                    ));
+                                    self.push_message(ChatMessage::system(format!(
+                                        "Switched model to: {}",
+                                        self.model
+                                    )));
                                 } else {
-                                    self.push_message(ChatMessage::system(
-                                        "Usage: /model <name>",
-                                    ));
+                                    self.push_message(ChatMessage::system("Usage: /model <name>"));
                                 }
                                 self.input.clear();
                             } else if cmd.starts_with("/save") {
@@ -1935,14 +2048,16 @@ impl ChatApp {
                                     let filepath = parts[1..].join(" ");
                                     match self.save_conversation_to_file(&filepath) {
                                         Ok(_) => {
-                                            self.push_message(ChatMessage::system(
-                                                format!("Conversation saved successfully to: {}", filepath),
-                                            ));
+                                            self.push_message(ChatMessage::system(format!(
+                                                "Conversation saved successfully to: {}",
+                                                filepath
+                                            )));
                                         }
                                         Err(e) => {
-                                            self.push_message(ChatMessage::system(
-                                                format!("Failed to save conversation: {}", e),
-                                            ));
+                                            self.push_message(ChatMessage::system(format!(
+                                                "Failed to save conversation: {}",
+                                                e
+                                            )));
                                         }
                                     }
                                 } else {
@@ -1957,9 +2072,10 @@ impl ChatApp {
                                 ));
                                 self.input.clear();
                             } else {
-                                self.push_message(ChatMessage::system(
-                                    format!("Unknown command: {}. Type /help for help.", text),
-                                ));
+                                self.push_message(ChatMessage::system(format!(
+                                    "Unknown command: {}. Type /help for help.",
+                                    text
+                                )));
                                 self.input.clear();
                             }
                         } else {
@@ -2115,7 +2231,12 @@ impl ChatApp {
                 break;
             }
 
-            let remove_idx = if self.messages.first().map(|m| m.role == MessageRole::System).unwrap_or(false) {
+            let remove_idx = if self
+                .messages
+                .first()
+                .map(|m| m.role == MessageRole::System)
+                .unwrap_or(false)
+            {
                 if self.messages.len() > 1 {
                     1
                 } else {
@@ -2292,7 +2413,10 @@ impl ChatApp {
             .title_alignment(ratatui::layout::HorizontalAlignment::Left);
 
         let show_reasoning_str = if self.show_reasoning { "ON" } else { "OFF" };
-        let model_display = format!(" {} │ Ctrl+R: Reasoning {} ", self.model, show_reasoning_str);
+        let model_display = format!(
+            " {} │ Ctrl+R: Reasoning {} ",
+            self.model, show_reasoning_str
+        );
         let model_span = Span::styled(
             model_display.clone(),
             Style::default()
@@ -2330,7 +2454,8 @@ impl ChatApp {
         let viewport_height = inner.height as usize;
 
         // Detect resize or first render
-        let resize_detected = viewport_width != self.last_viewport_width || self.total_visual_lines == 0;
+        let resize_detected =
+            viewport_width != self.last_viewport_width || self.total_visual_lines == 0;
         self.last_viewport_width = viewport_width;
         self.visible_height = viewport_height;
 
@@ -2349,7 +2474,9 @@ impl ChatApp {
         }
 
         // Add streaming content on the fly
-        if self.is_streaming && (!self.streaming_buffer.is_empty() || !self.streaming_reasoning.is_empty()) {
+        if self.is_streaming
+            && (!self.streaming_buffer.is_empty() || !self.streaming_reasoning.is_empty())
+        {
             let header_style = Style::default()
                 .fg(Color::Rgb(144, 202, 249))
                 .add_modifier(Modifier::BOLD);
@@ -2361,7 +2488,8 @@ impl ChatApp {
             )));
 
             // Parse thoughts from streaming content
-            let (inline_thought, display_content) = ChatMessage::parse_inline_thought(&self.streaming_buffer);
+            let (inline_thought, display_content) =
+                ChatMessage::parse_inline_thought(&self.streaming_buffer);
             let combined_thought = match (&self.streaming_reasoning, &inline_thought) {
                 (r, Some(i)) if !r.is_empty() => Some(format!("{}\n{}", r, i)),
                 (r, None) if !r.is_empty() => Some(r.clone()),
@@ -2388,7 +2516,10 @@ impl ChatApp {
                             } else {
                                 let wrapped = Self::wrap_text_to_width(&text, viewport_width);
                                 for wrapped_line in wrapped {
-                                    visual_lines.push(Line::from(Span::styled(wrapped_line, reasoning_style)));
+                                    visual_lines.push(Line::from(Span::styled(
+                                        wrapped_line,
+                                        reasoning_style,
+                                    )));
                                 }
                             }
                         }
@@ -2406,14 +2537,26 @@ impl ChatApp {
                     ContentBlock::Markdown(text) => {
                         let rendered = tui_markdown::from_str(&text);
                         for line in rendered.lines {
-                            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-                            let parsed_line = ChatMessage::parse_line_to_spans(&text, content_style);
+                            let text: String =
+                                line.spans.iter().map(|s| s.content.as_ref()).collect();
+                            let parsed_line =
+                                ChatMessage::parse_line_to_spans(&text, content_style);
                             let wrapped = ChatMessage::wrap_line(parsed_line, viewport_width);
                             visual_lines.extend(wrapped);
                         }
                     }
-                    ContentBlock::Table { headers, alignments, rows } => {
-                        let table_lines = ChatMessage::render_table(headers, alignments, rows, viewport_width, content_style);
+                    ContentBlock::Table {
+                        headers,
+                        alignments,
+                        rows,
+                    } => {
+                        let table_lines = ChatMessage::render_table(
+                            headers,
+                            alignments,
+                            rows,
+                            viewport_width,
+                            content_style,
+                        );
                         visual_lines.extend(table_lines);
                     }
                 }
@@ -2429,7 +2572,10 @@ impl ChatApp {
         }
 
         // Handle throbber when loading with empty buffers
-        if self.is_streaming && self.streaming_buffer.is_empty() && self.streaming_reasoning.is_empty() {
+        if self.is_streaming
+            && self.streaming_buffer.is_empty()
+            && self.streaming_reasoning.is_empty()
+        {
             let throbber = Throbber::default()
                 .label(" Thinking...")
                 .style(Style::default().fg(Color::Rgb(255, 183, 77)));
@@ -2542,7 +2688,10 @@ mod tests {
             KeyModifiers::NONE,
         )));
         assert_eq!(app.input.text(), "");
-        assert!(app.messages.iter().any(|m| m.content.contains("Available Slash Commands:")));
+        assert!(app
+            .messages
+            .iter()
+            .any(|m| m.content.contains("Available Slash Commands:")));
 
         // Test /model switching
         app.input.set_text("/model custom-gemma");
@@ -2552,7 +2701,10 @@ mod tests {
         )));
         assert_eq!(app.input.text(), "");
         assert_eq!(app.model, "custom-gemma");
-        assert!(app.messages.iter().any(|m| m.content.contains("Switched model to: custom-gemma")));
+        assert!(app
+            .messages
+            .iter()
+            .any(|m| m.content.contains("Switched model to: custom-gemma")));
 
         // Test /clear command
         app.input.set_text("/clear");
@@ -2562,13 +2714,15 @@ mod tests {
         )));
         assert_eq!(app.input.text(), "");
         assert_eq!(app.messages.len(), 1);
-        assert!(app.messages[0].content.contains("Conversation history cleared."));
+        assert!(app.messages[0]
+            .content
+            .contains("Conversation history cleared."));
 
         // Test /save command
         let temp_dir = std::env::temp_dir();
         let test_file = temp_dir.join("test_perspt_conv.md");
         let test_file_str = test_file.to_string_lossy().to_string();
-        
+
         app.input.set_text(&format!("/save {}", test_file_str));
         app.handle_terminal_event(CrosstermEvent::Key(KeyEvent::new(
             KeyCode::Enter,
@@ -2612,7 +2766,10 @@ mod tests {
         // Test transpile_math_in_text
         let text = "Formula is $E = m c^2$ and block is $$\\alpha + \\beta = \\gamma$$";
         let transpiled = ChatMessage::transpile_math_in_text(text);
-        assert_eq!(transpiled, "Formula is $E = m c²$ and block is $$α + β = γ$$");
+        assert_eq!(
+            transpiled,
+            "Formula is $E = m c²$ and block is $$α + β = γ$$"
+        );
 
         // Test parse_line_to_spans
         let line = ChatMessage::parse_line_to_spans("Formula is $E = m c²$ end.", Style::default());
@@ -2629,11 +2786,17 @@ mod tests {
         assert_eq!(ChatMessage::transpile_latex_to_unicode(r"\mathbb{Q}"), "ℚ");
 
         // Test pmod (critical: must not collide with \pm)
-        assert_eq!(ChatMessage::transpile_latex_to_unicode(r"n \equiv 0 \pmod{2}"), "n ≡ 0  (mod 2)");
+        assert_eq!(
+            ChatMessage::transpile_latex_to_unicode(r"n \equiv 0 \pmod{2}"),
+            "n ≡ 0  (mod 2)"
+        );
         assert_eq!(ChatMessage::transpile_latex_to_unicode(r"\pm"), "±");
 
         // Test begin/end environments are stripped
-        assert_eq!(ChatMessage::transpile_latex_to_unicode(r"\begin{cases} a \\ b \end{cases}"), " a  b ");
+        assert_eq!(
+            ChatMessage::transpile_latex_to_unicode(r"\begin{cases} a \\ b \end{cases}"),
+            " a  b "
+        );
 
         // Test dots
         assert_eq!(ChatMessage::transpile_latex_to_unicode(r"\dots"), "…");
@@ -2671,38 +2834,56 @@ mod tests {
         assert!(ChatMessage::is_separator_line("|---|---|"));
         assert!(ChatMessage::is_separator_line("| :--- | :---: | ---: |"));
         assert!(!ChatMessage::is_separator_line("| normal | line |"));
-        
+
         // Test split_table_row
-        assert_eq!(ChatMessage::split_table_row("| Header 1 | Header 2 |"), vec!["Header 1", "Header 2"]);
-        assert_eq!(ChatMessage::split_table_row("Col 1 | Col 2"), vec!["Col 1", "Col 2"]);
-        assert_eq!(ChatMessage::split_table_row("| escaped\\|pipe | second |"), vec!["escaped|pipe", "second"]);
-        
+        assert_eq!(
+            ChatMessage::split_table_row("| Header 1 | Header 2 |"),
+            vec!["Header 1", "Header 2"]
+        );
+        assert_eq!(
+            ChatMessage::split_table_row("Col 1 | Col 2"),
+            vec!["Col 1", "Col 2"]
+        );
+        assert_eq!(
+            ChatMessage::split_table_row("| escaped\\|pipe | second |"),
+            vec!["escaped|pipe", "second"]
+        );
+
         // Test parse_alignment
         assert_eq!(ChatMessage::parse_alignment(":---"), TableAlign::Left);
         assert_eq!(ChatMessage::parse_alignment(":---:"), TableAlign::Center);
         assert_eq!(ChatMessage::parse_alignment("---:"), TableAlign::Right);
         assert_eq!(ChatMessage::parse_alignment("---"), TableAlign::Left);
-        
+
         // Test parse_markdown_blocks
         let md = "Some text\n\n| H1 | H2 |\n|---|---|\n| v1 | v2 |\n\nFooter text";
         let blocks = ChatMessage::parse_markdown_blocks(md);
         assert_eq!(blocks.len(), 3);
-        
+
         // Test render_table
         let headers = vec!["Col A".to_string(), "Col B".to_string()];
         let alignments = vec![TableAlign::Left, TableAlign::Center];
         let rows = vec![vec!["1".to_string(), "2".to_string()]];
-        let table_lines = ChatMessage::render_table(headers, alignments, rows, 80, Style::default());
-        
+        let table_lines =
+            ChatMessage::render_table(headers, alignments, rows, 80, Style::default());
+
         assert_eq!(table_lines.len(), 5); // top, header, separator, row, bottom
-        
+
         // Check borders are drawn correctly
-        let top_str: String = table_lines[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        let top_str: String = table_lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(top_str.contains("┌"));
         assert!(top_str.contains("┬"));
         assert!(top_str.contains("┐"));
-        
-        let header_str: String = table_lines[1].spans.iter().map(|s| s.content.as_ref()).collect();
+
+        let header_str: String = table_lines[1]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(header_str.contains("Col A"));
         assert!(header_str.contains("Col B"));
         assert!(header_str.contains("│"));
@@ -2714,7 +2895,7 @@ mod tests {
             "Short".to_string(),
             "Line 1<br>Line 2 that is very long indeed".to_string(),
         ]];
-        
+
         // Render with a small viewport to force wrapping
         let wrapped_table_lines = ChatMessage::render_table(
             long_headers,
@@ -2723,7 +2904,7 @@ mod tests {
             30,
             Style::default(),
         );
-        
+
         // Due to wrapping of Col B, the row should span multiple sub-rows, increasing total line count
         assert!(wrapped_table_lines.len() > 5);
     }
