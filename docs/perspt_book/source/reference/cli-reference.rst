@@ -16,18 +16,10 @@ Global Options
 
    * - Flag
      - Description
-   * - ``--config <PATH>``
-     - Path to configuration file
-   * - ``--api-key <KEY>``
-     - API key for the LLM provider
-   * - ``--provider-type <TYPE>``
-     - Provider: ``openai``, ``anthropic``, ``gemini``, ``groq``, ``cohere``, ``xai``, ``deepseek``, ``ollama``
-   * - ``--provider <NAME>``
-     - Provider name (equivalent to ``--provider-type``)
-   * - ``--model <MODEL>``
-     - Model identifier
-   * - ``--list-models``
-     - List available models and exit
+   * - ``-v, --verbose``
+     - Enable verbose logging
+   * - ``-c, --config <PATH>``
+     - Path to the TOML configuration file
    * - ``-h, --help``
      - Print help
    * - ``-V, --version``
@@ -44,7 +36,7 @@ Launch the TUI chat interface.
 
 .. code-block:: bash
 
-   perspt chat [--model MODEL] [--provider-type TYPE]
+   perspt chat [--model MODEL]
 
 
 ``simple-chat``
@@ -91,11 +83,14 @@ See :doc:`../howto/agent-options` for full agent options.
 ``init``
 ~~~~~~~~
 
-Initialize a new project with Perspt configuration.
+Initialize project memory and policy rules.
 
 .. code-block:: bash
 
-   perspt init [--workdir DIR]
+   perspt init [--memory] [--rules]
+
+- ``--memory`` — Create the ``PERSPT.md`` project memory file
+- ``--rules`` — Create default Starlark policy rules
 
 
 ``config``
@@ -105,7 +100,11 @@ View or edit Perspt configuration.
 
 .. code-block:: bash
 
-   perspt config [show|edit|reset]
+   perspt config [--show] [--set KEY=VALUE] [--edit]
+
+- ``--show`` — Print the effective config (``api_key`` masked)
+- ``--set KEY=VALUE`` — Set a value with a structured TOML write
+- ``--edit`` — Open the config file in ``$EDITOR``
 
 
 ``ledger``

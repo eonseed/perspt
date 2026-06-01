@@ -343,20 +343,54 @@ impl SRBNOrchestrator {
         verifier_fallback_model: Option<String>,
         speculator_fallback_model: Option<String>,
     ) -> Self {
-        let context = AgentContext {
-            working_dir: working_dir.clone(),
-            auto_approve,
-            ..Default::default()
-        };
-
-        // Create a shared LLM provider - agents will use this for LLM calls
-        // In production, this would be configured from environment/config
+        // Create a shared LLM provider - agents will use this for LLM calls.
         let provider = std::sync::Arc::new(
             perspt_core::llm_provider::GenAIProvider::new().unwrap_or_else(|e| {
                 log::warn!("Failed to create GenAIProvider: {}, using default", e);
                 perspt_core::llm_provider::GenAIProvider::new().expect("GenAI must initialize")
             }),
         );
+
+        Self::new_with_models_and_provider(
+            working_dir,
+            auto_approve,
+            provider,
+            architect_model,
+            actuator_model,
+            verifier_model,
+            speculator_model,
+            architect_fallback_model,
+            actuator_fallback_model,
+            verifier_fallback_model,
+            speculator_fallback_model,
+        )
+    }
+
+    /// Create a new orchestrator with custom models and an injected provider.
+    ///
+    /// The injected provider should already be bound to the resolved adapter
+    /// (e.g. via `GenAIProvider::from_config`) so custom/local model names route
+    /// correctly. The bound adapter is only the fallback, so the four tiers may
+    /// still use recognized provider model names that route by prefix.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_models_and_provider(
+        working_dir: PathBuf,
+        auto_approve: bool,
+        provider: std::sync::Arc<perspt_core::llm_provider::GenAIProvider>,
+        architect_model: Option<String>,
+        actuator_model: Option<String>,
+        verifier_model: Option<String>,
+        speculator_model: Option<String>,
+        architect_fallback_model: Option<String>,
+        actuator_fallback_model: Option<String>,
+        verifier_fallback_model: Option<String>,
+        speculator_fallback_model: Option<String>,
+    ) -> Self {
+        let context = AgentContext {
+            working_dir: working_dir.clone(),
+            auto_approve,
+            ..Default::default()
+        };
 
         // Create agent tools for file/command operations
         let tools = AgentTools::new(working_dir.clone(), !auto_approve);

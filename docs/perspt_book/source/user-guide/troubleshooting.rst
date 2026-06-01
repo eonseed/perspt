@@ -12,8 +12,8 @@ API Key Issues
 
 1. Check env var is exported: ``echo $GEMINI_API_KEY``
 2. Verify spelling: ``ANTHROPIC_API_KEY`` (not ``ANTHROPIC_KEY``)
-3. Pass explicitly: ``perspt chat --api-key "your-key"``
-4. Check config file: ``~/.config/perspt/config.json``
+3. Store it in the config: ``perspt config --set api_key="your-key"``
+4. Check config file: ``~/.config/perspt/config.toml``
 
 
 Connection Errors

@@ -1,11 +1,11 @@
 Configuration Guide
 ===================
 
-Perspt supports zero-config auto-detection, environment variables, a JSON config
+Perspt supports zero-config auto-detection, environment variables, a TOML config
 file, and command-line flags. They are applied in this priority order (highest first):
 
 1. **Command-line arguments**
-2. **Configuration file** (``config.json``)
+2. **Configuration file** (``config.toml``)
 3. **Environment variables**
 4. **Auto provider detection**
 5. **Built-in defaults**
@@ -153,7 +153,7 @@ Since OAuth2 access tokens are short-lived (usually expiring in 1 hour), you can
 Supported Models & Naming Conventions
 -------------------------------------
 
-Perspt features an intelligent router that resolves your target provider from the model name prefix. In version 0.6.0, we support the latest generation of models across all providers:
+Perspt features an intelligent router that resolves your target provider from the model name prefix. In version 0.6.1, we support the latest generation of models across all providers:
 
 .. list-table::
    :header-rows: 1
@@ -182,42 +182,51 @@ Perspt features an intelligent router that resolves your target provider from th
 Configuration File
 ------------------
 
-Create ``config.json`` in one of these locations (searched in order):
+Perspt reads ``config.toml`` from the platform config directory, or from an
+explicit path:
 
 1. Path given via ``perspt --config <PATH>``
-2. ``./config.json`` in current directory
-3. ``~/.config/perspt/config.json`` (Linux), ``~/Library/Application Support/perspt/config.json`` (macOS)
+2. ``~/.config/perspt/config.toml`` (Linux)
+3. ``~/Library/Application Support/perspt/config.toml`` (macOS)
+4. ``%APPDATA%\perspt\config.toml`` (Windows)
+
+All fields are optional. ``provider`` accepts the aliases ``provider_type`` and
+``default_provider``; ``model`` accepts the alias ``default_model``.
 
 **Minimal example:**
 
-.. code-block:: json
+.. code-block:: toml
 
-   {
-     "api_key": "your-key",
-     "default_model": "gemini-pro-latest",
-     "default_provider": "gemini",
-     "provider_type": "gemini"
-   }
+   provider = "gemini"
+   model = "gemini-pro-latest"
+   api_key = "your-key"
 
 **Full example:**
 
-.. code-block:: json
+.. code-block:: toml
 
-   {
-     "api_key": "your-key",
-     "default_model": "gemini-pro-latest",
-     "default_provider": "gemini",
-     "provider_type": "gemini",
-     "providers": {
-       "openai": "https://api.openai.com/v1",
-       "anthropic": "https://api.anthropic.com",
-       "google": "https://generativelanguage.googleapis.com/v1beta"
-     }
-   }
+   provider = "openai"
+   model = "phi-4-npu-ov"
+   api_key = "your-key"
+   # Override the endpoint for OpenAI-compatible / local / proxy servers
+   base_url = "http://localhost:8000/v1"
+
+   # Optional per-tier overrides for `perspt agent`
+   architect_model = "gpt-4o"
+   actuator_model = "gpt-4o-mini"
+   verifier_model = "gpt-4o-mini"
+   speculator_model = "gpt-4o-mini"
 
 .. note::
-   The ``providers`` map overrides endpoint URLs. This is useful for Azure OpenAI,
-   proxy servers, or self-hosted endpoints.
+   ``base_url`` overrides the endpoint for the active provider. This is useful
+   for Azure OpenAI, proxy servers, local OpenAI-compatible servers, or
+   self-hosted endpoints. You can also set the provider's ``*_BASE_URL``
+   environment variable (``OPENAI_BASE_URL``, ``OLLAMA_BASE_URL``, ...).
+
+.. note::
+   Custom model names that genai does not recognize (for example
+   ``phi-4-npu-ov``) are routed to the configured ``provider``. You can also
+   target an adapter inline with namespacing, e.g. ``openai::phi-4-npu-ov``.
 
 Command-Line Flags
 ------------------
@@ -273,9 +282,10 @@ Manage configuration interactively:
 
 .. code-block:: bash
 
-   perspt config --show    # Print current config
+   perspt config --show    # Print the effective config (api_key masked)
    perspt config --edit    # Open in $EDITOR
-   perspt config --set provider_type=gemini
+   perspt config --set provider=gemini
+   perspt config --set default_model=gemini-pro-latest
 
 Initialize project-level configuration:
 

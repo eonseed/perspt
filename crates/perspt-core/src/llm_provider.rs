@@ -14,8 +14,44 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
 
+use crate::config::Config;
+
 /// End of transmission signal
 pub const EOT_SIGNAL: &str = "<|EOT|>";
+
+/// Effective provider id and model after merging config, CLI flags, and env.
+#[derive(Debug, Clone)]
+pub struct ResolvedProvider {
+    /// Provider id, e.g. `openai`, `ollama`.
+    pub provider: String,
+    /// Model name to use (passed to genai verbatim so namespacing works).
+    pub model: String,
+}
+
+/// Detect the provider id and a sensible default model from environment keys.
+///
+/// Used as the fallback when no provider is configured. Falls back to a local
+/// Ollama setup when no API keys are present.
+pub fn detect_provider_from_env() -> (&'static str, &'static str) {
+    if std::env::var("GEMINI_API_KEY").is_ok() {
+        ("gemini", "gemini-3.1-flash-lite-preview")
+    } else if std::env::var("OPENAI_API_KEY").is_ok() {
+        ("openai", "gpt-4o-mini")
+    } else if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+        ("anthropic", "claude-3-5-sonnet-20241022")
+    } else if std::env::var("GROQ_API_KEY").is_ok() {
+        ("groq", "llama-3.1-8b-instant")
+    } else if std::env::var("COHERE_API_KEY").is_ok() {
+        ("cohere", "command-r-plus")
+    } else if std::env::var("XAI_API_KEY").is_ok() {
+        ("xai", "grok-beta")
+    } else if std::env::var("DEEPSEEK_API_KEY").is_ok() {
+        ("deepseek", "deepseek-chat")
+    } else {
+        // Default to Ollama for local usage
+        ("ollama", "llama3.2")
+    }
+}
 
 /// Response from a non-streaming LLM call, carrying text and token usage.
 #[derive(Debug, Clone)]
@@ -79,6 +115,54 @@ impl GenAIProvider {
         };
 
         Ok(Self::from_client(client))
+    }
+
+    /// Build a provider from a `Config`, merging in environment detection and an
+    /// optional CLI model override, and return the effective provider/model.
+    ///
+    /// Precedence:
+    ///   - provider: `config.provider` > environment detection
+    ///   - model:    `cli_model` > `config.model` > provider default
+    ///   - api_key:  `config.api_key` > ambient environment
+    ///   - base_url: `config.base_url` > ambient environment
+    ///
+    /// The returned client is bound to the resolved adapter, so custom/local
+    /// OpenAI-compatible model names (e.g. `phi-4-npu-ov`) route correctly while
+    /// recognized names still resolve by prefix. Model names are passed through
+    /// verbatim so genai namespacing (`openai::model`) keeps working.
+    pub fn from_config(
+        config: &Config,
+        cli_model: Option<&str>,
+    ) -> Result<(Self, ResolvedProvider)> {
+        let (env_provider, env_model) = detect_provider_from_env();
+
+        let provider = config
+            .provider
+            .clone()
+            .unwrap_or_else(|| env_provider.to_string());
+
+        let env_model_override = std::env::var("OPENAI_MODEL")
+            .or_else(|_| std::env::var("MODEL"))
+            .ok();
+
+        let model = cli_model
+            .map(str::to_string)
+            .or_else(|| config.model.clone())
+            .or(env_model_override)
+            .unwrap_or_else(|| env_model.to_string());
+
+        // Propagate a configured base URL into the env var that build_bound_client
+        // reads, without clobbering an explicit ambient override.
+        if let Some(base_url) = config.base_url.as_deref() {
+            if let Some(env_var) = provider_base_url_env_var(&provider) {
+                if std::env::var(env_var).is_err() {
+                    std::env::set_var(env_var, base_url);
+                }
+            }
+        }
+
+        let provider_obj = Self::new_with_config(Some(&provider), config.api_key.as_deref())?;
+        Ok((provider_obj, ResolvedProvider { provider, model }))
     }
 
     fn from_client(client: Client) -> Self {
@@ -303,6 +387,9 @@ impl GenAIProvider {
                         chunk.content.len(),
                         elapsed
                     );
+                    if !chunk.content.is_empty() {
+                        let _ = tx.send(format!("__PERSPT_REASONING__:{}", chunk.content));
+                    }
                 }
                 Ok(ChatStreamEvent::End(_)) => {
                     log::info!(">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, {total_content_length} chars, {elapsed:?} elapsed");
@@ -422,18 +509,22 @@ fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) ->
     builder.build()
 }
 
+fn provider_base_url_env_var(provider: &str) -> Option<&'static str> {
+    match provider.to_lowercase().as_str() {
+        "openai" => Some("OPENAI_BASE_URL"),
+        "anthropic" => Some("ANTHROPIC_BASE_URL"),
+        "gemini" | "google" => Some("GEMINI_BASE_URL"),
+        "groq" => Some("GROQ_BASE_URL"),
+        "cohere" => Some("COHERE_BASE_URL"),
+        "ollama" => Some("OLLAMA_BASE_URL"),
+        "xai" => Some("XAI_BASE_URL"),
+        "deepseek" => Some("DEEPSEEK_BASE_URL"),
+        _ => None,
+    }
+}
+
 fn provider_base_url_from_env(provider: &str) -> Option<String> {
-    let env_var = match provider.to_lowercase().as_str() {
-        "openai" => "OPENAI_BASE_URL",
-        "anthropic" => "ANTHROPIC_BASE_URL",
-        "gemini" | "google" => "GEMINI_BASE_URL",
-        "groq" => "GROQ_BASE_URL",
-        "cohere" => "COHERE_BASE_URL",
-        "ollama" => "OLLAMA_BASE_URL",
-        "xai" => "XAI_BASE_URL",
-        "deepseek" => "DEEPSEEK_BASE_URL",
-        _ => return None,
-    };
+    let env_var = provider_base_url_env_var(provider)?;
 
     std::env::var(env_var)
         .ok()
@@ -511,6 +602,50 @@ mod tests {
             .unwrap();
 
         assert_eq!(target.model.adapter_kind, AdapterKind::OpenAI);
+    }
+
+    #[tokio::test]
+    async fn test_namespaced_model_resolves_on_unbound_client() {
+        // genai-native namespacing must work without a bound client.
+        let provider = GenAIProvider::new().unwrap();
+        let target = provider
+            .client
+            .resolve_service_target("openai::phi-4-npu-ov")
+            .await
+            .unwrap();
+
+        assert_eq!(target.model.adapter_kind, AdapterKind::OpenAI);
+    }
+
+    #[tokio::test]
+    async fn test_from_config_binds_adapter_for_custom_model() {
+        let config = Config {
+            provider: Some("openai".to_string()),
+            model: Some("phi-4-npu-ov".to_string()),
+            ..Default::default()
+        };
+        let (provider, resolved) = GenAIProvider::from_config(&config, None).unwrap();
+        assert_eq!(resolved.provider, "openai");
+        assert_eq!(resolved.model, "phi-4-npu-ov");
+
+        let target = provider
+            .client
+            .resolve_service_target(&resolved.model)
+            .await
+            .unwrap();
+        assert_eq!(target.model.adapter_kind, AdapterKind::OpenAI);
+    }
+
+    #[test]
+    fn test_from_config_model_precedence() {
+        let config = Config {
+            provider: Some("openai".to_string()),
+            model: Some("config-model".to_string()),
+            ..Default::default()
+        };
+        // CLI override wins over config model.
+        let (_p, resolved) = GenAIProvider::from_config(&config, Some("cli-model")).unwrap();
+        assert_eq!(resolved.model, "cli-model");
     }
 
     #[tokio::test]

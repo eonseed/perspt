@@ -4,7 +4,10 @@ use anyhow::Result;
 use std::fs;
 use std::path::Path;
 
-/// Initialize project configuration
+/// Initialize project memory and policy rules.
+///
+/// Note: this does not create the user configuration file; use
+/// `perspt config --set`/`--edit` for that.
 pub async fn run(memory: bool, rules: bool) -> Result<()> {
     if memory {
         create_project_memory().await?;
