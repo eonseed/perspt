@@ -428,22 +428,36 @@ Benefits: full privacy, zero API cost, offline operation.
 
 ## Chat Interface
 
+### Features
+- **Markdown and ASCII Tables**: Render rich text replies including multi-line box-drawn tables with clean Unicode borders.
+- **LaTeX Math Equations**: Automatically transpile LaTeX code segments into beautiful styled Unicode formulas (cyan and bold).
+- **Reasoning Process Display**: Toggle show/hide of model inner thinking process on the fly.
+
 ### Key Bindings
 
-| Key              | Action              |
-|------------------|---------------------|
-| Enter            | Send message        |
-| Esc              | Exit application    |
-| Ctrl+C / Ctrl+D  | Exit with cleanup   |
-| Up/Down arrows   | Scroll chat history |
-| Page Up/Down     | Fast scroll         |
+| Key              | Action                                                |
+|------------------|-------------------------------------------------------|
+| Enter            | Send message                                          |
+| Esc              | Exit application                                      |
+| Ctrl+C / Ctrl+D  | Cancel current stream or exit session                 |
+| Ctrl+R           | Toggle inner reasoning process display                |
+| Shift+Up/Down    | Scroll chat pane line-by-line                         |
+| Page Up/Down     | Fast scroll chat pane page-by-page                    |
+| Ctrl+A / Ctrl+E  | Jump cursor to start / end of input line              |
+| Ctrl+B / Ctrl+F  | Move cursor left / right by one character             |
+| Ctrl+D / Ctrl+H  | Delete character at / before cursor (Backspace)       |
+| Ctrl+K / Ctrl+U  | Delete text from cursor to end / start of input line  |
+| Ctrl+W           | Delete word before cursor                             |
 
 ### Built-in Commands
 
-| Command         | Description                      |
-|-----------------|----------------------------------|
-| `/save`         | Save conversation with timestamp |
-| `/save <file>`  | Save to a specific file          |
+| Command           | Description                                                        |
+|-------------------|--------------------------------------------------------------------|
+| `/exit` or `/quit`| Exit the chat session cleanly                                      |
+| `/clear`          | Reset the conversation history and clear screen                    |
+| `/model <name>`   | Switch the active LLM model on the fly                             |
+| `/save <file>`    | Export the entire conversation history to a clean markdown file   |
+| `/help`           | Display the help menu of available slash commands                 |
 
 ---
 

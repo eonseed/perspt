@@ -4,7 +4,7 @@ Architecture
 ============
 
 Perspt is a Rust workspace with nine crates including a root integration crate.
-Version 0.5.9 implements the PSP-7 specification for the experimental SRBN agent.
+Version 0.6.0 implements the PSP-7 specification for the experimental SRBN agent.
 
 Workspace Layout
 ----------------
@@ -200,8 +200,8 @@ Crate: ``perspt-tui``
 
 Ratatui-based terminal UI with two modes:
 
-- **ChatApp** — Interactive chat with markdown rendering and streaming
-- **AgentApp** — Agent dashboard with DAG tree, energy display, review modal
+- **ChatApp** - Interactive chat with streaming, LaTeX math transpilation, ASCII table wrapping, and markdown saving
+- **AgentApp** - Agent dashboard with DAG tree, energy display, review modal
 
 Key components:
 
