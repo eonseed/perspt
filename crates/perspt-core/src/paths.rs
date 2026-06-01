@@ -32,6 +32,11 @@ pub fn database_path() -> Option<PathBuf> {
     data_dir().map(|d| d.join("perspt.db"))
 }
 
+/// Path to the shared history file: `<data_dir>/history.txt`.
+pub fn history_file() -> Option<PathBuf> {
+    data_dir().map(|d| d.join("history.txt"))
+}
+
 /// Returns the legacy `~/.perspt` directory if it exists on disk.
 pub fn legacy_dir() -> Option<PathBuf> {
     dirs::home_dir()
@@ -147,6 +152,13 @@ mod tests {
     fn database_path_ends_with_db() {
         if let Some(path) = database_path() {
             assert_eq!(path.file_name().unwrap(), "perspt.db");
+        }
+    }
+
+    #[test]
+    fn history_file_ends_with_history_txt() {
+        if let Some(path) = history_file() {
+            assert_eq!(path.file_name().unwrap(), "history.txt");
         }
     }
 }
