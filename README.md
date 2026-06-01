@@ -1,5 +1,5 @@
 # Perspt
-**v0.6.0 "kukuza"** — *Nurturing the foundation, empowering the core.*
+**v0.6.1 "AKŪ"** — *AKŪ - sharp fixes from sharp ears.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
@@ -346,7 +346,7 @@ perspt agent [OPTIONS] <TASK>
 
 ## Configuration
 
-Perspt accepts configuration via environment variables, a JSON config file, or CLI arguments.
+Perspt is configured via environment variables, a TOML config file, or CLI arguments.
 
 **Environment variable (simplest):**
 
@@ -355,21 +355,53 @@ export OPENAI_API_KEY="sk-..."
 perspt
 ```
 
-**Config file (`config.json`):**
+**Config file (`config.toml`):**
 
-```json
-{
-  "provider_type": "openai",
-  "default_model": "gpt-4o-mini",
-  "api_key": "sk-..."
-}
+Perspt reads `config.toml` from the platform config directory:
+
+- Linux: `~/.config/perspt/config.toml`
+- macOS: `~/Library/Application Support/perspt/config.toml`
+- Windows: `%APPDATA%\perspt\config.toml`
+
+```toml
+provider = "openai"
+model = "gpt-4o-mini"
+api_key = "sk-..."
+# Optional: override the endpoint for OpenAI-compatible / local servers
+# base_url = "http://localhost:8000/v1"
+```
+
+Manage it from the CLI:
+
+```bash
+perspt config --show                       # show the effective config (keys masked)
+perspt config --set provider=openai        # set a value (structured TOML write)
+perspt config --set default_model=gpt-4o-mini
+perspt config --edit                       # open in $EDITOR
+perspt --config ./my-config.toml config --show   # use an explicit file
 ```
 
 **CLI arguments:**
 
 ```bash
-perspt --provider-type anthropic --model claude-sonnet-4-20250514
+perspt chat --model claude-sonnet-4-20250514
+perspt simple-chat --model gpt-4o-mini
 ```
+
+### Custom and local (OpenAI-compatible) models
+
+Custom model names that genai does not recognize (for example `phi-4-npu-ov`)
+are routed to the provider you configure, so set both `provider` and `model`:
+
+```toml
+provider = "openai"
+model = "phi-4-npu-ov"
+base_url = "http://localhost:8000/v1"
+```
+
+You can also point any provider at a local endpoint with its `*_BASE_URL`
+environment variable (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, etc.), or target a
+specific adapter inline with namespacing: `openai::phi-4-npu-ov`.
 
 ---
 
@@ -387,7 +419,7 @@ ollama serve
 ollama pull llama3.2
 
 # Use with Perspt
-perspt --provider-type ollama --model llama3.2
+perspt chat --model llama3.2
 ```
 
 Benefits: full privacy, zero API cost, offline operation.
@@ -396,22 +428,36 @@ Benefits: full privacy, zero API cost, offline operation.
 
 ## Chat Interface
 
+### Features
+- **Markdown and ASCII Tables**: Render rich text replies including multi-line box-drawn tables with clean Unicode borders.
+- **LaTeX Math Equations**: Automatically transpile LaTeX code segments into beautiful styled Unicode formulas (cyan and bold).
+- **Reasoning Process Display**: Toggle show/hide of model inner thinking process on the fly.
+
 ### Key Bindings
 
-| Key              | Action              |
-|------------------|---------------------|
-| Enter            | Send message        |
-| Esc              | Exit application    |
-| Ctrl+C / Ctrl+D  | Exit with cleanup   |
-| Up/Down arrows   | Scroll chat history |
-| Page Up/Down     | Fast scroll         |
+| Key              | Action                                                |
+|------------------|-------------------------------------------------------|
+| Enter            | Send message                                          |
+| Esc              | Exit application                                      |
+| Ctrl+C / Ctrl+D  | Cancel current stream or exit session                 |
+| Ctrl+R           | Toggle inner reasoning process display                |
+| Shift+Up/Down    | Scroll chat pane line-by-line                         |
+| Page Up/Down     | Fast scroll chat pane page-by-page                    |
+| Ctrl+A / Ctrl+E  | Jump cursor to start / end of input line              |
+| Ctrl+B / Ctrl+F  | Move cursor left / right by one character             |
+| Ctrl+D / Ctrl+H  | Delete character at / before cursor (Backspace)       |
+| Ctrl+K / Ctrl+U  | Delete text from cursor to end / start of input line  |
+| Ctrl+W           | Delete word before cursor                             |
 
 ### Built-in Commands
 
-| Command         | Description                      |
-|-----------------|----------------------------------|
-| `/save`         | Save conversation with timestamp |
-| `/save <file>`  | Save to a specific file          |
+| Command           | Description                                                        |
+|-------------------|--------------------------------------------------------------------|
+| `/exit` or `/quit`| Exit the chat session cleanly                                      |
+| `/clear`          | Reset the conversation history and clear screen                    |
+| `/model <name>`   | Switch the active LLM model on the fly                             |
+| `/save <file>`    | Export the entire conversation history to a clean markdown file   |
+| `/help`           | Display the help menu of available slash commands                 |
 
 ---
 
@@ -451,8 +497,8 @@ The SRBN engine is an experimental implementation of the theoretical framework d
 
 ```bash
 export OPENAI_API_KEY="your-key-here"
-# or pass directly
-perspt --provider-type openai --api-key YOUR_KEY
+# or store it in the config file
+perspt config --set api_key=YOUR_KEY
 ```
 
 **Connection timeout:** Verify your internet connection and API key validity. Try a different provider or model.

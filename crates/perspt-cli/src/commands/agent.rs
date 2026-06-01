@@ -53,15 +53,52 @@ pub async fn run(
     max_steps: usize,
     dashboard: bool,
     dashboard_port: u16,
+    config_override: Option<PathBuf>,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     let exec_mode = ExecutionMode::from_str(&mode);
 
-    // Resolve models: --model overrides all, otherwise use per-tier or defaults
-    let architect = model.clone().or(architect_model);
-    let actuator = model.clone().or(actuator_model);
-    let verifier = model.clone().or(verifier_model);
-    let speculator = model.or(speculator_model);
+    // Load configuration (explicit --config wins; missing file is fine).
+    let config_path = config_override
+        .or_else(perspt_core::paths::resolve_config_file)
+        .or_else(perspt_core::paths::config_file);
+    let config = match config_path {
+        Some(ref path) => perspt_core::Config::load_from_path(path)?,
+        None => perspt_core::Config::default(),
+    };
+
+    // Resolve per-tier models. Precedence:
+    //   --model (all tiers) > explicit tier flag > config tier field > config model
+    //   > hardcoded tier default (applied inside the orchestrator when None).
+    let architect = model
+        .clone()
+        .or(architect_model)
+        .or_else(|| config.architect_model.clone())
+        .or_else(|| config.model.clone());
+    let actuator = model
+        .clone()
+        .or(actuator_model)
+        .or_else(|| config.actuator_model.clone())
+        .or_else(|| config.model.clone());
+    let verifier = model
+        .clone()
+        .or(verifier_model)
+        .or_else(|| config.verifier_model.clone())
+        .or_else(|| config.model.clone());
+    let speculator = model
+        .clone()
+        .or(speculator_model)
+        .or_else(|| config.speculator_model.clone())
+        .or_else(|| config.model.clone());
+
+    // Build a shared, bound provider from config + env so custom/local model
+    // names and config api_key/base_url are applied. The --model override (if any)
+    // is passed through for provider resolution.
+    let (provider, resolved) =
+        perspt_core::GenAIProvider::from_config(&config, model.as_deref())
+            .context("Failed to create LLM provider. Ensure an API key or config is set.")?;
+    let provider = std::sync::Arc::new(provider);
+    log::info!("Agent provider: {}", resolved.provider);
 
     // Get default model name for logging
     let default_model = perspt_agent::ModelTier::default_model_name();
@@ -94,10 +131,11 @@ pub async fn run(
         speculator.as_deref().unwrap_or(default_model)
     );
 
-    // Create the orchestrator with model configuration
-    let mut orchestrator = perspt_agent::SRBNOrchestrator::new_with_models(
+    // Create the orchestrator with model configuration and the bound provider
+    let mut orchestrator = perspt_agent::SRBNOrchestrator::new_with_models_and_provider(
         working_dir.clone(),
         auto_approve,
+        provider,
         architect,
         actuator,
         verifier,

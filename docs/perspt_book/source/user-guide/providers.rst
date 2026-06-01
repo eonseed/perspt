@@ -63,26 +63,25 @@ Configuration Methods
 
 .. code-block:: bash
 
-   perspt chat --api-key "your-key" --provider-type openai --model gpt-4.1
+   perspt chat --model gpt-4.1
 
-**3. Config File** (``~/.config/perspt/config.json``):
+**3. Config File** (``config.toml`` in the platform config directory):
 
-.. code-block:: json
+* Linux: ``~/.config/perspt/config.toml``
+* macOS: ``~/Library/Application Support/perspt/config.toml``
+* Windows: ``%APPDATA%\perspt\config.toml``
 
-   {
-     "default_provider": "anthropic",
-     "default_model": "claude-sonnet-4-20250514",
-     "api_key": "sk-ant-xxx"
-   }
+.. code-block:: toml
 
-Priority order: CLI flags > environment variables > config file > auto-detection.
+   provider = "anthropic"
+   model = "claude-sonnet-4-20250514"
+   api_key = "sk-ant-xxx"
 
-Listing Available Models
-------------------------
+Manage it with ``perspt config --show``, ``perspt config --set key=value``, and
+``perspt config --edit``. Use ``perspt --config <path>`` to point at a specific
+file.
 
-.. code-block:: bash
-
-   perspt --list-models
+Priority order: CLI flags > config file > environment variables > auto-detection.
 
 Provider-Specific Notes
 -----------------------

@@ -39,8 +39,18 @@ to Large Language Models. It serves two complementary purposes:
    framework is mature; the implementation is under active development and has not
    yet been benchmarked.
 
-.. admonition:: Version 0.6.0 "kukuza" Highlights
+.. admonition:: Version 0.6.1 "AKŪ" Highlights
    :class: tip
+
+   **Config Coherency, Rich TUI Rendering & Slash Commands:**
+
+   - **Provider Coherency** — Bound the configured provider cohesively across all modes: TUI, CLI (simple-chat), and SRBN agent. Added robust TOML schema validation and refined config commands.
+   - **TUI & CLI Slash Commands** — Integrated ``rustyline`` command history and slash commands in CLI simple-chat. Added persistent history and UTF-8 safe input navigation in TUI inputs.
+   - **Mathematical & Structural Rendering** — Added real-time LaTeX math transpilation and self-wrapping ASCII tables inside the terminal chat UI.
+   - **Workspace Upgrades** — Bumped version of all workspace crates to ``0.6.1`` with codename **AKŪ - sharp fixes from sharp ears**.
+
+.. admonition:: Version 0.6.0 "kukuza" Highlights
+   :class: note
 
    **Ecosystem & Dependency Modernization:**
 

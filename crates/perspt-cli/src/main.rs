@@ -143,7 +143,7 @@ enum Commands {
         dashboard_port: u16,
     },
 
-    /// Initialize project configuration
+    /// Initialize project memory and policy rules
     Init {
         /// Create PERSPT.md project memory file
         #[arg(long)]
@@ -244,6 +244,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config_override = cli.config.clone();
 
     // Initialize logging
     // Suppress logs for TUI modes (Chat, Agent) to prevent bleeding into terminal
@@ -264,7 +265,8 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     match cli.command {
-        None | Some(Commands::Chat { model: _ }) => commands::chat::run().await,
+        None => commands::chat::run(None, config_override).await,
+        Some(Commands::Chat { model }) => commands::chat::run(model, config_override).await,
         Some(Commands::Agent {
             task,
             workdir,
@@ -319,11 +321,14 @@ async fn main() -> Result<()> {
                 max_steps,
                 dashboard,
                 dashboard_port,
+                config_override,
             )
             .await
         }
         Some(Commands::Init { memory, rules }) => commands::init::run(memory, rules).await,
-        Some(Commands::Config { show, set, edit }) => commands::config::run(show, set, edit).await,
+        Some(Commands::Config { show, set, edit }) => {
+            commands::config::run(show, set, edit, config_override).await
+        }
         Some(Commands::Ledger {
             recent,
             rollback,
@@ -339,8 +344,12 @@ async fn main() -> Result<()> {
             tui,
         }) => commands::logs::run(session_id, last, stats, tui).await,
         Some(Commands::SimpleChat { model, log_file }) => {
-            commands::simple_chat::run(commands::simple_chat::SimpleChatArgs { model, log_file })
-                .await
+            commands::simple_chat::run(commands::simple_chat::SimpleChatArgs {
+                model,
+                log_file,
+                config_override,
+            })
+            .await
         }
         Some(Commands::Dashboard { port, db_path }) => {
             commands::dashboard::run(port, db_path).await

@@ -9,31 +9,33 @@ Config File Location
 Perspt searches for configuration in this order:
 
 1. ``--config <path>`` (CLI flag)
-2. ``~/.config/perspt/config.json``
+2. ``~/.config/perspt/config.toml`` (Linux),
+   ``~/Library/Application Support/perspt/config.toml`` (macOS),
+   ``%APPDATA%\perspt\config.toml`` (Windows)
 3. Environment variables
 4. Auto-detection
 
 Config File Format
 ------------------
 
-.. code-block:: json
+The file is TOML. All fields are optional. ``provider`` accepts the aliases
+``provider_type`` and ``default_provider``; ``model`` accepts the alias
+``default_model``.
 
-   {
-     "default_provider": "gemini",
-     "default_model": "gemini-3.1-flash-lite-preview",
-     "api_key": "AIza...",
-     "provider_type": "gemini",
-     "providers": {
-       "openai": {
-         "api_key": "sk-xxx",
-         "default_model": "gpt-4.1"
-       },
-       "anthropic": {
-         "api_key": "sk-ant-xxx",
-         "default_model": "claude-sonnet-4-20250514"
-       }
-     }
-   }
+.. code-block:: toml
+
+   provider = "gemini"
+   model = "gemini-3.1-flash-lite-preview"
+   api_key = "AIza..."
+
+   # Optional endpoint override for OpenAI-compatible / local / proxy servers
+   # base_url = "http://localhost:8000/v1"
+
+   # Optional per-tier overrides for `perspt agent`
+   # architect_model = "gpt-4o"
+   # actuator_model = "gpt-4o-mini"
+   # verifier_model = "gpt-4o-mini"
+   # speculator_model = "gpt-4o-mini"
 
 Environment Variables
 ---------------------
@@ -73,24 +75,32 @@ Environment Variables
 .. note::
 
    When multiple keys are set, the highest-priority provider is used. Override
-   with ``--provider-type``.
+   with the ``provider`` field in the config or by setting only the key you
+   want detected.
 
 
-CLI Flag Override
------------------
+CLI Flag and Config Override
+----------------------------
 
-CLI flags always take precedence:
+Manage the config file from the CLI:
 
 .. code-block:: bash
 
-   # Override provider
-   perspt chat --provider-type openai --model gpt-4.1
+   # Show the effective config (api_key masked)
+   perspt config --show
 
-   # Override API key
-   perspt chat --api-key "sk-xxx"
+   # Set values (structured TOML write)
+   perspt config --set provider=openai
+   perspt config --set default_model=gpt-4.1
+
+   # Edit in $EDITOR
+   perspt config --edit
+
+   # Override the model per run
+   perspt chat --model gpt-4.1
 
    # Use a specific config file
-   perspt chat --config /path/to/config.json
+   perspt --config /path/to/config.toml chat
 
 Logging Configuration
 ---------------------
