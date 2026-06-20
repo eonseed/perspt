@@ -120,6 +120,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
      - Vikrant Rathore
      - Final
+   * - :psp:`000008`
+     - Enhancement
+     - :doc:`SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph <psp-000008>`
+     - Vikrant Rathore
+     - Draft
 
 ====================
 Index by Category
@@ -204,6 +209,11 @@ Enhancement PSPs improve existing Perspt functionality.
      - :doc:`Robust Typed Correction Loops and Plugin-Aware Prompt Contracts <psp-000007>`
      - Vikrant Rathore
      - Final
+   * - :psp:`000008`
+     - Enhancement
+     - :doc:`SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph <psp-000008>`
+     - Vikrant Rathore
+     - Draft
 
 UI/UX PSPs
 ===========
@@ -252,6 +262,11 @@ Draft PSPs (under development)
    * - :psp:`000002`
      - UI/UX
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
+     - Vikrant Rathore
+     - Draft
+   * - :psp:`000008`
+     - Enhancement
+     - :doc:`SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph <psp-000008>`
      - Vikrant Rathore
      - Draft
 
