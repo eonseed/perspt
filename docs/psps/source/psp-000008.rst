@@ -277,8 +277,9 @@ passes one of the accepted-state gates:
 
 * **Hard pass:** all required verifiers for the node scope pass and all hard
   policy constraints pass.
-* **Measured descent:** the candidate reduces the declared energy by at least
-  ``min_descent`` and remains inside policy, budget, and capability bounds.
+* **Measured descent:** the candidate reduces the energy below the best accepted
+  energy by at least ``rho_gate`` and remains inside policy, budget, and
+  capability bounds.
 * **Certified stop:** the system cannot reach stability, so it terminates with a
   residual certificate naming the remaining residuals, verifier routes, budget
   state, and ledger head.
@@ -312,11 +313,29 @@ domain package. The domain package SHALL map verifier evidence into residuals:
 
    r_e(x) = \rho_e(x_i) - x_j
 
-and the SDK SHALL compute a non-negative weighted energy:
+and the SDK SHALL compute the canonical non-negative weighted energy:
 
 .. math::
 
    V(x) = \sum_{e \in E} w_e \|r_e(x)\|^2,\qquad w_e > 0.
+
+This weighted sum of squared edge residuals SHALL be the single energy that
+gates acceptance, feeds the finite-decision bound, and is recorded for replay.
+Each ``ResidualEvent`` SHALL store the raw residual magnitude ``r_e >= 0``; the
+SDK SHALL square and weight it when computing ``V``. The component aggregates
+``V_syn``, ``V_str``, ``V_log``, ``V_boot``, and ``V_sheaf`` SHALL be derived
+rollups of this same quadratic energy, grouped by ``EnergyComponent``:
+
+.. math::
+
+   V_{\mathrm{comp}} = \sum_{e \in \mathrm{comp}} w_e \|r_e(x)\|^2,
+   \qquad
+   V(x) = \sum_{\mathrm{comp}} V_{\mathrm{comp}}.
+
+The component rollups are user-visible projections only. They SHALL NOT carry
+independent weights and SHALL NOT be summed through a second weighting pass.
+Every edge residual SHALL carry an explicit weight ``w_e``; no component SHALL
+default to an implicit weight of ``1`` while others are weighted.
 
 The safe set for the declared proxy is the zero-energy set:
 
@@ -331,6 +350,18 @@ residual, or policy residual. For research, the same equation can use claim-to-
 source residuals. For website-building, it can use build, accessibility,
 visual-layout, and deployment residuals. The SDK owns the energy equation and
 trace; domain packages own the residual construction and weights.
+
+Perspt's primary contract is the measured discrete energy and gate. The
+continuous embedding-space constants ``alpha`` (correction strength), ``beta``
+(drift strength), ``delta`` (persistent disturbance), ``L`` (smoothness), and
+``eta`` (step size) require a gradient field ``v(x) = -alpha grad V(x)`` and a
+drift field ``f(x)`` on an exposed or estimated continuous coordinate. The
+coding domain operates on discrete verifier residuals and exposes no such
+coordinate, so these constants are expected to remain ``NotClaimed`` for it. The
+SDK SHALL treat ``alpha``, ``beta``, ``delta``, ``L``, and ``eta`` as optional
+records that a domain package MAY register only when it can instrument them; it
+SHALL NOT require them, build acceptance on them, or display analytic floors
+derived from them unless they are registered with evidence.
 
 When a domain can expose or estimate a continuous correction coordinate, the
 paper model uses transverse error dynamics:
@@ -353,8 +384,6 @@ package claims them:
    \qquad
    \|\nabla V(x)\|^2 \ge 2\mu V(x).
 
-Here ``alpha`` is correction strength, ``beta`` is drift strength,
-``delta`` is persistent disturbance, and ``mu`` is the energy-slope constant.
 When these conditions are justified on the analyzed sublevel set, the SDK MAY
 report the input-to-state-stability energy floor:
 
@@ -367,6 +396,29 @@ report the input-to-state-stability energy floor:
 The implementation SHALL treat ``V_infty`` as a declared or estimated floor, not
 as a magical success condition. A candidate above the floor still requires hard
 checks, measured descent, or a residual certificate.
+
+The energy-slope constant ``mu`` is the exception: for the quadratic residual
+energy ``V(x) = x^T A x`` with ``A = B^T W B``, it is combinatorial rather than
+embedding-dependent and SHALL be computable from the WorkGraph verification
+structure:
+
+.. math::
+
+   \mu = 2\,\lambda_{\min}^{+}(A),
+
+the smallest non-zero eigenvalue of ``A``. In the identity-restriction case
+``A`` reduces to the weighted Laplacian of the verification graph and ``mu`` is
+its algebraic connectivity (Fiedler value). The SDK SHALL expose ``mu`` as a
+spectral diagnostic of the active verification graph and SHALL be able to report
+the change in ``mu`` produced by adding a candidate verifier edge, so that an
+independent verifier that raises the spectral gap is distinguishable from a
+redundant verifier that does not.
+
+``mu`` is a diagnostic, not an input to the acceptance gate. It SHALL be
+computed off the critical path -- on graph-revision commit, when the graph
+structure stabilizes, or asynchronously -- and SHALL NOT block worker dispatch,
+candidate verification, or the acceptance-gate decision. During high graph
+churn the SDK MAY report the last computed ``mu`` with its source revision.
 
 For discrete corrections, the SDK SHALL store the proposed step size ``eta`` and
 MAY validate it against the paper's sufficient bound when the domain provides
@@ -399,8 +451,14 @@ available:
       \Longleftrightarrow
       \operatorname{hard}(y_{k+1})
       \lor
-      V(y_{k+1}) \le V(x_k^{\mathrm{accepted}})
+      V(y_{k+1}) \le V(x_k^{\mathrm{best}})
          - \rho_{\mathrm{gate}}.
+
+Descent SHALL be measured against the best accepted energy ``V(x_k^best)``, not
+the most recent accepted energy. There SHALL be a single descent tolerance
+``rho_gate > 0``. ``min_descent`` is not a second gate threshold; where a domain
+records a predicted analytic decrease, it is advisory only and SHALL NOT relax
+or replace ``rho_gate`` in the gate decision.
 
 Otherwise the candidate is rejected for the accepted trajectory:
 
@@ -459,8 +517,8 @@ The capability attenuation preorder SHALL be represented explicitly:
 Delegation SHALL only create capabilities satisfying the preorder. Payload data,
 model text, or generated code SHALL NOT mint authority.
 
-For scheduler and dashboard observability, the SDK SHALL compute platform
-backlog potential from active workflows:
+For scheduler and dashboard observability, the SDK SHALL compute backlog
+potential from active work:
 
 .. math::
 
@@ -468,8 +526,9 @@ backlog potential from active workflows:
    \qquad
    \Phi(W) = \sum_{i \in W} \phi_i.
 
-If a deployment claims platform-level Foster-Lyapunov stability, it SHALL record
-the load estimate ``alpha_load`` and check:
+``Phi(W)`` SHALL be presented as a backlog and remaining-work gauge for the
+dashboard and for ETA projection. The platform-level Foster-Lyapunov drift
+condition
 
 .. math::
 
@@ -478,7 +537,15 @@ the load estimate ``alpha_load`` and check:
    \right]
    \le -\epsilon,
    \qquad
-   \epsilon = 1 - \alpha_{\mathrm{load}} > 0.
+   \epsilon = 1 - \alpha_{\mathrm{load}} > 0
+
+requires a stochastic workflow arrival process with a measurable sub-critical
+load ``alpha_load < 1``. A single-session run has no arrival process, so its
+potential is monotone non-increasing and the drift condition is trivially
+satisfied. Perspt SHALL NOT present the drift condition as a conformance result
+in single-session execution. A deployment MAY record ``alpha_load`` and check
+the drift condition only in a multi-session or server mode where the arrival
+process exists.
 
 The implementation SHALL distinguish between *measured SRBN conformance* and
 *analytic stability claims*. Measured conformance is mandatory: Perspt must
@@ -531,18 +598,37 @@ PSP-8-complete unless all applicable gates below pass.
   accepted trajectory from recorded observations without re-running stochastic
   sources.
 
-**Gate G: Analytic-claim conformance**
-  A run that claims continuous or stochastic stability must register a
-  ``StabilityClaim`` with ``alpha``, ``beta``, ``delta``, ``mu``, ``L``,
-  ``eta`` when relevant, the analysis domain, and evidence references. The SDK
-  computes ``V_infty`` and step-size checks from those values. A run without
-  these values remains measured-conformant but analytically ``NotClaimed``.
+**Gate G: Spectral and analytic-claim conformance**
+  The SDK computes the spectral energy-slope constant ``mu = 2 lambda_min+(A)``
+  from the quadratic residual energy and exposes it as a verification-graph
+  diagnostic. This spectral computation is required, computed off the critical
+  path so that it never blocks dispatch or the acceptance gate. The continuous
+  and
+  stochastic analytic claims are optional and not required for PSP-8
+  completion: a run that claims them must register a ``StabilityClaim`` with the
+  relevant constants, the analysis domain, and evidence references, after which
+  the SDK computes ``V_infty`` and step-size checks; a run without those
+  constants remains measured-conformant and analytically ``NotClaimed``. The
+  coding domain is expected to remain ``NotClaimed`` for the continuous
+  constants.
 
-**Gate H: Platform-potential conformance**
-  Long-running multi-workflow sessions record per-workflow potential
-  ``phi_i``, aggregate potential ``Phi(W)``, correction budgets, and load
-  estimates. Platform-level Foster-Lyapunov claims require these measurements
-  and the stated sub-critical drift check.
+**Gate H: Backlog-potential conformance**
+  Active work exposes per-item potential ``phi_i`` and aggregate potential
+  ``Phi(W)`` as a backlog gauge. This gauge is required. Platform-level
+  Foster-Lyapunov drift claims are optional and apply only to a multi-session or
+  server deployment with a measurable sub-critical load; they are not required
+  for single-session PSP-8 completion.
+
+**Gate I: Calibrated risk-budget conformance**
+  When a deployment enables autonomous commitment without per-effect approval,
+  validator acceptance thresholds are calibrated from the deployment's own
+  ledger by conformal risk control so that the marginal accepted-unsafe rate is
+  bounded by the declared budget. A drift monitor compares the live validator
+  score distribution against the calibration distribution and flags the
+  calibration stale when they diverge. A stale flag degrades gracefully to a
+  conservative back-off plus risk-class approval and an uncertified status,
+  never a hard halt, and triggers background recalibration. This gate is
+  required only when autonomous commitment is enabled.
 
 .. csv-table:: SRBN Theory to SDK Implementation Trace
    :header: "Paper object", "SDK representation", "Required implementation evidence"
@@ -598,15 +684,15 @@ The SDK-side adapter should expose types equivalent to:
 
    pub struct StabilityParameters {
        pub energy_tolerance: f64,
-       pub rho_gate: f64,
-       pub min_descent: f64,
-       pub alpha: Option<f64>,
-       pub beta: Option<f64>,
-       pub delta: Option<f64>,
-       pub mu: Option<f64>,
-       pub smoothness_l: Option<f64>,
-       pub eta: Option<f64>,
-       pub ultimate_floor: Option<f64>,
+       pub rho_gate: f64,                  // single descent tolerance for the gate
+       pub predicted_descent: Option<f64>, // advisory analytic decrease only
+       pub mu: Option<f64>,                // spectral, computed from the graph
+       pub alpha: Option<f64>,             // optional; coding domain: NotClaimed
+       pub beta: Option<f64>,              // optional; coding domain: NotClaimed
+       pub delta: Option<f64>,             // optional; coding domain: NotClaimed
+       pub smoothness_l: Option<f64>,      // optional; coding domain: NotClaimed
+       pub eta: Option<f64>,               // optional; coding domain: NotClaimed
+       pub ultimate_floor: Option<f64>,    // optional; requires alpha,beta,delta,mu
    }
 
    pub struct EnergyTracePoint {
@@ -786,16 +872,35 @@ to completion. It SHALL use a dependency-aware mutable ready queue:
      worker_pool -> ledger;
    }
 
+Two durable turns commute, and therefore need no relative order, only when
+their semantic read and write footprints are disjoint:
+
+.. math::
+
+   \operatorname{writes}(e) \cap \operatorname{reads}(e') = \emptyset
+   \quad\text{and}\quad
+   \operatorname{writes}(e') \cap \operatorname{reads}(e) = \emptyset.
+
+The conflict footprint SHALL include durable platform state, not only
+workspace files. The capability table, risk budgets, fresh-identifier
+allocation, and the ledger root SHALL be modeled as read/write state
+components. Because admissibility reads the capability table, any capability
+grant, attenuation, or revocation conflicts with every commit that touches the
+affected capabilities and SHALL serialize against them. Any turn that reads or
+updates a risk budget, allocates a fresh identifier, or advances the ledger root
+SHALL be ordered against other turns with an overlapping footprint.
+
 Parallel scheduling rules:
 
 * read-only exploration, verifier, symbol-index, and search tasks MAY run
-  concurrently when their capability scopes commute;
+  concurrently when their read/write footprints are disjoint;
 * implementation nodes MAY run concurrently only when their output targets,
-  dependency interfaces, toolchain locks, and state witnesses do not conflict;
+  dependency interfaces, toolchain locks, state witnesses, capability grants,
+  and budget reads do not conflict;
 * correction attempts for unrelated residual clusters MAY run concurrently, but
   accepted artifact commits SHALL serialize if they touch overlapping files,
-  public interfaces, dependency manifests, lockfiles, migrations, or shared test
-  fixtures;
+  public interfaces, dependency manifests, lockfiles, migrations, shared test
+  fixtures, capabilities, budgets, or the ledger root;
 * graph revisions SHALL acquire a graph-write lease and are serialized against
   other graph revisions;
 * package-manager writes, formatter writes, generated-code refreshes, and
@@ -1035,7 +1140,8 @@ line; it is the measured reason the current state is unsafe or incomplete.
        BudgetExhausted,
    }
 
-Each residual SHALL map into the existing SRBN energy components:
+Each verifier residual SHALL map into one SRBN energy component, which is the
+rollup that groups its squared weighted residual:
 
 * V_syn: syntax, parser, typechecker, and compiler diagnostics caused by the
   candidate;
@@ -1046,9 +1152,19 @@ Each residual SHALL map into the existing SRBN energy components:
   degraded-sensor residuals;
 * V_sheaf: cross-node, cross-domain, and cross-adapter consistency residuals.
 
-Perspt MAY add subcomponent fields to ``EnergyComponents`` for telemetry, but
-the primary energy equation from PSP 5 SHALL remain the user-visible model unless
-a separate PSP changes it.
+The energy components are the derived rollups defined in System 2; they are
+telemetry projections of the single quadratic residual energy.
+
+``CapabilityDenied`` and ``BudgetExhausted`` are admissibility outcomes, not
+verifier consistency residuals. They SHALL be recorded on a separate blocked
+channel and SHALL NOT be summed into the Lyapunov energy ``V`` or treated as a
+residual to be corrected by regeneration.
+
+A degraded sensor means the energy for its component is unknown, not low. When a
+required sensor is unavailable, the node SHALL take a degraded-validation stop
+and emit a residual certificate rather than accepting descent on an energy that
+is missing a required component. A ``V_boot`` residual for a degraded sensor is
+permitted only for sensors that are not required for the node scope.
 
 Correction prompts SHALL be generated from dominant residuals:
 
@@ -1076,8 +1192,25 @@ Verifier independence SHALL be recorded for every residual:
 * same-model critique.
 
 Dashboard and status views SHALL make same-model critique visibly weaker than
-deterministic or independent routes. Duplicate validators SHALL not be counted as
-independent merely because they appear twice.
+deterministic or independent routes. Same-model critique SHALL NOT contribute a
+full-weight descent acceptance.
+
+Verifier independence SHALL be measured, not assumed. The ledger SHALL retain
+each validator's verdict per candidate so that pairwise miss rates ``q_i`` and
+miss correlation ``kappa_ij`` are computable from history. For a conjunctive
+verifier gate the effective ensemble miss bound is
+
+.. math::
+
+   \rho_{\mathrm{eff}}
+      = \min_{i<j} \left( q_i q_j + \kappa_{ij}\,\sigma_i \sigma_j \right),
+   \qquad \sigma_i = \sqrt{q_i (1 - q_i)}.
+
+Residual weights ``w_e`` SHALL be reduced for verifiers whose measured
+correlation with an already-counted verifier is high, so that a redundant
+validator does not contribute the weight of an independent one. Duplicate
+validators SHALL NOT be counted as independent merely because they appear twice,
+and status views SHALL surface ``rho_eff`` rather than a raw count of validators.
 
 7. Capability-Constrained Admissibility
 =======================================
@@ -1171,6 +1304,52 @@ Default policy:
 Perspt SHALL keep ``perspt-policy`` as the deterministic trusted base for the
 kernel. Generated code, prompts, domain packages, adapters, and subagents SHALL
 be outside that trusted base.
+
+Calibrated Risk Budgets
+-----------------------
+
+A capability risk budget SHALL NOT be an asserted constant when autonomous
+commitment without per-effect approval is enabled. The kernel SHALL calibrate
+each validator acceptance threshold from the deployment's own ledger by
+conformal risk control.
+
+For a validator that emits a safety score ``s(p)`` and accepts when
+``s(p) > theta``, the kernel SHALL hold a calibration set of
+``(score, outcome)`` pairs in which an outcome is marked unsafe when a later
+independent verifier, regression, or reverted commit contradicts the accepted
+state. For a target budget ``rho``, the conformal threshold is
+
+.. math::
+
+   \hat{\theta} = \inf\left\{
+      \theta \in [0,1] :
+      \frac{n\,\hat{R}_n(\theta) + 1}{n + 1} \le \rho
+   \right\},
+
+where ``R_n(theta)`` is the empirical accepted-unsafe rate on the calibration
+set. The deployed kernel SHALL accept only when ``s(p) > theta_hat``, which
+bounds the marginal accepted-unsafe rate by ``rho``.
+
+The delayed unsafe label SHOULD be sourced from the undo/redo boundary and
+regression residuals already recorded in the ledger. The kernel SHALL run a
+drift monitor that compares the live validator score distribution against the
+calibration distribution with a two-sample statistic; when they diverge, the
+calibration SHALL be flagged stale and background recalibration SHALL be
+triggered.
+
+A stale flag SHALL NOT hard-halt autonomous execution. Software tasks shift
+regime routinely, so the runtime SHALL degrade gracefully rather than drop out
+of ``auto`` mode. While a calibration is stale the kernel SHALL apply a
+conservative back-off -- inflating the accepted threshold and continuing
+autonomous commitment for low-risk effects -- while routing high-risk effects to
+the risk-class approval policy, and SHALL continue background recalibration.
+
+During the stale window the conformal bound SHALL NOT be asserted: the marginal
+accepted-unsafe guarantee holds only under exchangeability, so the back-off
+window is uncertified and SHALL be reported as such. Acceptance in that window
+rests on the measured gate and the risk-class approval policy, not on a
+calibrated budget. When recalibration restores exchangeability, the kernel
+SHALL resume asserting the bound.
 
 8. Tool and Command Governance
 ==============================
@@ -1350,6 +1529,36 @@ randomness, wall-clock time, network data, or an external service, the ledger
 SHALL record the realized observation needed for replay. Replay SHALL read the
 recorded observation, not re-run the external source.
 
+The admissibility kernel SHALL refuse to commit any transition that references
+an observation lacking a ledger record. Recording every stochastic observation
+before it is used is what makes replay deterministic; the kernel-refusal rule
+SHALL enforce it rather than relying on convention.
+
+This rule is a static architectural guarantee at the SDK effect and capability
+boundary, not a dynamic operating-system interceptor. The SDK SHALL NOT be
+required to trace syscalls or network reads. Instead, domain packages and
+adapters SHALL obtain every observation by awaiting SDK-managed ``Effect``
+results, and the SDK SHALL record each observation before returning it. A
+transition therefore references observations only by their recorded handles or
+content addresses, and the kernel refuses any transition that references an
+observation with no such record. Structurally confining observation to the
+effect API is what discharges the recording obligation; an adapter that reaches
+around the effect API for nondeterministic data is outside the contract and its
+commits are inadmissible.
+
+The runtime SHALL satisfy six durable-execution obligations:
+
+.. csv-table:: Durable-Execution Obligations
+   :header: "Obligation", "Requirement", "Owning crate"
+   :widths: 12, 56, 32
+
+   "R1 durable single-assignment outcomes", "Every proposal and every commit or rejection outcome is written once and never reassigned; redelivery of the same idempotency key with equivalent content returns the prior result, and key reuse for different content is invalid", "``perspt-store``"
+   "R2 recorded nondeterminism", "Every stochastic observation a transition depends on is committed to the ledger before it is used", "``perspt-store``, ``perspt-agent``"
+   "R3 deterministic transition", "The committed transition is a deterministic function of the prior state and the recorded event", "``perspt-agent``"
+   "R4 unforgeable capability transport", "Capabilities are minted and checked by the kernel; payload data cannot denote authority; every delegation applies the attenuation check", "``perspt-policy``"
+   "R5 write-ahead external effects", "Every irreversible external effect is bracketed by intent, result, and where defined compensation records under a stable idempotency key", "``perspt-sandbox``"
+   "R6 ordered non-commuting durable turns", "Non-commuting durable turns are totally ordered; weaker coordination is permitted only for read-only, monotone, commutative, or causally independent work before it crosses a durable boundary", "``perspt-agent``, ``perspt-store``"
+
 12. User Experience
 ===================
 
@@ -1413,7 +1622,7 @@ Mechanism checks:
 * finite energy: every residual vector maps to a finite non-negative energy and
   sensor failure creates V_boot or degraded stop, never zero energy;
 * energy equation: a synthetic graph with known residuals verifies
-  ``V = sum_i w_i r_i^2`` and rejects negative, NaN, or infinite weights/scores;
+  ``V = sum_e w_e r_e^2`` and rejects negative, NaN, or infinite weights/scores;
 * acceptance gate: a hard-pass candidate commits, a candidate with
   ``V_next <= V_accepted - rho_gate`` commits by descent, and a non-descending
   candidate remains observed-only;
@@ -1758,68 +1967,96 @@ Core data structures:
        StopWithCertificate { certificate_id: String },
    }
 
-Implementation phases:
+Implementation phases are SDK-first: ``perspt-sdk`` is the foundation and
+``perspt-coding`` is its first consumer, so every contract is exercised by a
+real domain package and an SDK contract test as it lands rather than designed
+ahead of any consumer. Later domain packages reuse the same contracts. Each
+phase is independently shippable, is independently useful, and activates a named
+conformance gate.
 
-**Phase 0: Audit and Contract Tests**
-  Add failing tests for static topo snapshot execution, repair-action requeue,
-  capability denial, replay reconstruction, and SDK/domain boundary violations.
-  These tests define the bug surface before refactoring.
+**Phase 0: Audit, SDK Skeleton, and Contract Tests**
+  Add the ``perspt-sdk`` and ``perspt-coding`` crates with the domain-package
+  trait surface, and wire ``perspt-sdk`` to ``srbn`` and ``srbn-serde`` for the
+  stabilization loop and trace serialization in place of hand-rolled kernel
+  logic. Add failing tests for static topo snapshot execution, repair-action
+  requeue, capability denial, replay reconstruction, and SDK/domain boundary
+  violations. These tests define the bug surface and the SDK boundary before
+  the capabilities below are built.
 
-**Phase 1: SDK Boundary and Coding Package Split**
-  Add ``perspt-sdk`` and ``perspt-coding`` crates. Move domain-neutral
-  contracts into the SDK and replace existing language-plugin contracts with
-  coding adapters that implement SDK verifier-suite traits. Update CLI routing
-  to make domain selection explicit. Add direct ``srbn`` and ``srbn-serde``
-  dependencies to ``perspt-sdk`` and implement the narrow adapter from Perspt
-  residual vectors into SRBN barrier results and traces. This phase satisfies
-  Gate A only when residual vectors, energy models, gate decisions, and trace
-  serialization are all working.
+**Phase 1: Quadratic Residual Energy and Measured Gate**
+  In ``perspt-sdk`` add residual types with raw non-negative magnitudes,
+  finite-score validation, and the canonical energy ``V = sum_e w_e r_e^2`` with
+  component rollups as derived projections. Map existing verification results
+  into residual events through the coding package. Add ``EnergyModel``,
+  gate-decision, accepted-trajectory, residual-certificate, and
+  finite-decision-bound records, comparing descent against the best accepted
+  energy. Wire the kernel adapter and the prompt compiler to dominant residuals.
+  This phase activates Gate A and Gate B.
 
-**Phase 2: Exploration and Model Routing**
+**Phase 2: Parallel Mutable Scheduler**
+  Replace the topological snapshot loops with a dependency-aware ready-queue
+  scheduler in the SDK runtime. Add worker pools, leases, cancellation, and join
+  events. Convert repair actions into scheduler effects and graph revisions.
+  Ensure inserted or reset nodes execute. Parallelism is complete only when
+  noncommuting durable effects serialize on the read/write footprint and
+  commuting read-only/verifier work can proceed concurrently with replayable
+  spawn/join/cancel events. This phase activates Gate C.
+
+**Phase 3: Capability Kernel**
+  Add capability records, command IR, admissibility decisions, attenuation
+  checks, and state witnesses in ``perspt-policy``, with coding capability
+  templates supplied by ``perspt-coding``. Route all tool effects through the
+  kernel. This phase activates Gate E.
+
+**Phase 4: Replay Ledger and Durable Obligations**
+  Add event-sourced persistence, the kernel-refusal rule enforced at the SDK
+  effect boundary, the replay verifier, and the six durable-execution
+  obligations. Convert existing step, correction, energy, and artifact tables
+  into the new event stream or replace them with projections over it. This phase
+  activates Gate F.
+
+**Phase 5: Spectral Diagnostic and Verifier Independence**
+  Compute the spectral energy-slope constant ``mu`` from the verification graph
+  off the critical path and expose its sensitivity to candidate verifier edges.
+  Measure pairwise validator miss correlation from the ledger and weight
+  residuals by measured independence, surfacing ``rho_eff``. This phase
+  activates the required portion of Gate G.
+
+**Phase 6: Coding Verifier Suites**
+  In ``perspt-coding`` implement the Rust verifier suite first, then Python and
+  JavaScript/TypeScript, with AST/symbol/import graph extraction and
+  correction-direction mappers through the SDK verifier-suite traits. PSP
+  completion requires the first-party Rust, Python, and JavaScript/TypeScript
+  suites to satisfy Gate D, even if Rust is implemented first.
+
+**Phase 7: Exploration and Model Routing**
   Add read-only exploration reports, ``explorer_model`` config,
   ``--explorer-model``, ``--explorer-tier``, ``--exploration-only``, and
   exploration budgets. Default Explorer routing to the Speculator tier unless
   explicitly configured. Exploration output must be structured evidence with
   input witnesses, not free-form summary text that bypasses residual scoring.
 
-**Phase 3: SRBN Kernel Adapter and Residual Model**
-  Add residual types, finite-score validation, kernel adapter, and prompt
-  compiler inputs for dominant residuals. Map existing verification results into
-  residual events. Add ``EnergyModel``, ``StabilityClaim``, gate-decision,
-  accepted-trajectory, residual-certificate, and finite-decision-bound records.
-  Implement ``V = sum_i w_i r_i^2`` and the measured acceptance gate before
-  adding any learned or continuous correction claims.
+**Phase 8: Calibrated Risk Budgets**
+  Add conformal calibration of validator acceptance thresholds from the ledger,
+  the delayed unsafe label sourced from undo/redo and regression residuals, and
+  the calibration drift monitor with graceful back-off. This phase activates
+  Gate I and is required only when autonomous commitment without per-effect
+  approval is enabled.
 
-**Phase 4: Parallel Mutable Scheduler**
-  Replace the topological snapshot loops with a dependency-aware ready-queue
-  scheduler. Add worker pools, leases, cancellation, and join events. Convert
-  repair actions into scheduler effects and graph revisions. Ensure inserted or
-  reset nodes execute. Parallelism is complete only when noncommuting durable
-  effects serialize and commuting read-only/verifier work can proceed
-  concurrently with replayable spawn/join/cancel events.
-
-**Phase 5: Coding Verifier Suites**
-  Implement the Rust verifier suite inside ``perspt-coding`` first, then Python
-  and JavaScript/TypeScript. Add AST/symbol/import graph extraction and
-  correction-direction mappers through SDK verifier-suite traits. PSP
-  completion requires the first-party Rust, Python, and JavaScript/TypeScript
-  suites to satisfy Gate D, even if Rust is implemented first.
-
-**Phase 6: Capability Kernel**
-  Add capability records, command IR, admissibility decisions, and state
-  witnesses. Route all tool effects through the kernel.
-
-**Phase 7: Replay Ledger**
-  Add event-sourced persistence and replay verifier. Convert existing step,
-  correction, energy, and artifact tables into the new event stream or replace
-  them with projections over the new event stream.
-
-**Phase 8: UX and Web Observability**
+**Phase 9: UX and Web Observability**
   Expose graph revisions, residuals, capabilities, active workers, blocked
-  dependencies, model routes, observed/accepted trajectory, and residual
-  certificates in TUI, CLI, and dashboard.
+  dependencies, model routes, observed/accepted trajectory, the backlog gauge,
+  and residual certificates in TUI, CLI, and dashboard. This phase activates
+  Gate H.
 
-**Phase 9: Mechanism Checks and Benchmarks**
+**Phase 10: CLI Domain Routing and Second-Domain Readiness**
+  Make domain selection explicit in the CLI and confirm the SDK contracts admit
+  a second domain package without forking the scheduler, admissibility kernel,
+  residual model, replay ledger, or dashboard event model. A research or
+  website-builder package skeleton SHOULD compile against the SDK as the
+  readiness check for later domains.
+
+**Phase 11: Mechanism Checks and Benchmarks**
   Ship deterministic mechanism checks, SDK contract tests, and coding language
   fixture benchmarks. Publish results with failures preserved.
 
@@ -1996,45 +2233,52 @@ is intentional. False success is worse than visible non-convergence.
 Reference Implementation
 ========================
 
-Initial implementation should be narrow and test-driven:
+Initial implementation should be narrow and test-driven, SDK-first, with
+``perspt-coding`` as the first consumer that exercises each contract as it
+lands:
 
-1. Add a ``perspt-sdk`` crate with domain-neutral traits and a ``perspt-coding``
-   crate with new Rust, Python, and JavaScript/TypeScript adapters that
-   implement SDK verifier-suite traits directly. Wire ``perspt-sdk`` to
-   ``srbn`` and ``srbn-serde`` for stabilization traces.
-2. Add the SDK energy model: residual schema, weights, ``rho_gate``,
-   stability parameters, gate decisions, accepted trajectory records, and
-   residual certificates.
+0. Add the ``perspt-sdk`` and ``perspt-coding`` crates with the domain-package
+   trait surface, and wire ``perspt-sdk`` to ``srbn`` and ``srbn-serde``.
+1. Add ``ResidualEvent`` with raw non-negative magnitudes and map existing
+   ``VerificationResult`` into residuals through the coding package.
+2. Implement the canonical energy ``V = sum_e w_e r_e^2`` with component
+   rollups as derived projections, the measured gate against the best accepted
+   energy, gate decisions, accepted trajectory records, residual certificates,
+   and the finite-decision bound.
 3. Add a failing unit/integration test showing that a node inserted by
    ``NodeSplit`` or ``InterfaceInsertion`` is not executed by the current topo
    snapshot loop.
-4. Add an exploration model-routing test showing ``--explorer-model`` wins over
-   ``speculator_model`` and that absent overrides route Explorer to Speculator.
-5. Add a read-only exploration report for Rust workspaces through
-   ``perspt-coding``: package roots, ``cargo metadata`` summary, module/test
-   hints, and coding-adapter activation evidence.
-6. Add a ready-queue scheduler behind an experimental flag:
+4. Add a ready-queue scheduler behind an experimental flag:
    ``--scheduler mutable``.
-7. Add worker-pool and lease tests for two independent verifier tasks, one
-   dependent task, and two conflicting manifest mutations.
-8. Convert ``RewriteAction`` handling to produce ``SchedulerEffect``.
-9. Add ``ResidualEvent`` and map existing ``VerificationResult`` into residuals.
+5. Convert ``RewriteAction`` handling to produce ``SchedulerEffect``.
+6. Add worker-pool and lease tests for two independent verifier tasks, one
+   dependent task, and two conflicting manifest mutations, including capability
+   and budget footprints.
+7. Add capability records for read/search/write/run-verifier/run-shell and route
+   ``AgentTools`` through admissibility checks.
+8. Add event rows for proposal, admissibility, residual, graph revision,
+   exploration report, parallel task lifecycle, lease lifecycle, and accepted
+   candidate, with the kernel-refusal rule for unrecorded observations.
+9. Compute the spectral constant ``mu`` for a synthetic verification graph and
+   measure validator miss correlation from the ledger.
 10. Implement Rust unresolved-import and missing-module correction directions.
-11. Add capability records for read/search/write/run-verifier/run-shell and route
-    ``AgentTools`` through admissibility checks.
-12. Add event rows for proposal, admissibility, residual, graph revision,
-    exploration report, parallel task lifecycle, lease lifecycle, and accepted
-    candidate.
+11. Add an exploration model-routing test showing ``--explorer-model`` wins over
+    ``speculator_model`` and that absent overrides route Explorer to Speculator.
+12. Add a read-only exploration report for Rust workspaces: package roots,
+    ``cargo metadata`` summary, module/test hints, and adapter activation
+    evidence.
 13. Add dashboard panels for residuals, graph revisions, active workers, blocked
-    dependencies, and model routes.
-14. Add mechanism checks as CI tests.
-15. Remove the experimental flag after parity with current project mode is
-    reached.
+    dependencies, the backlog gauge, and model routes.
+14. Make domain selection explicit in the CLI and confirm a second domain
+    package compiles against the SDK contracts without forking the scheduler,
+    kernel, residual model, ledger, or dashboard event model.
+15. Add mechanism checks as CI tests, then remove the experimental flag after
+    parity with current project mode is reached.
 
 Testing strategy:
 
 * unit tests for residual scoring and non-negative finite validation;
-* unit tests for ``V = sum_i w_i r_i^2`` with deterministic synthetic
+* unit tests for ``V = sum_e w_e r_e^2`` with deterministic synthetic
   residuals;
 * unit tests for hard-pass, descent-pass, non-descending rejection, declared
   floor, and exhausted-certificate gate decisions;
