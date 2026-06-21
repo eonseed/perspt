@@ -20,6 +20,11 @@
 #![forbid(unsafe_code)]
 
 pub mod lang;
+pub mod runtime;
+pub mod symbols;
+
+pub use runtime::{crash_marker, SmokeInvocation};
+pub use symbols::{defined_symbols, expected_symbols};
 
 use perspt_sdk::{
     AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope, EnergyComponent,
