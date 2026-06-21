@@ -7,11 +7,14 @@
 //! normalization from raw diagnostic text to residual evidence, which is what
 //! makes corrections directed rather than undirected retries.
 
+use std::path::Path;
+
 use perspt_sdk::{
     CorrectionDirection, IndependenceRoute, ResidualClass, ResidualEvent, ResidualSeverity,
     SensorRef,
 };
 
+use crate::runtime::{default_classify_runtime, SmokeInvocation};
 use crate::CodingLanguage;
 
 /// A coding language adapter: a verifier-suite provider for one language.
@@ -23,6 +26,47 @@ pub trait LanguageAdapter: Send + Sync {
     fn parse_diagnostics(&self, node_id: &str, generation: u32, raw: &str) -> Vec<ResidualEvent>;
     /// Map a residual to a correction direction, or `None` when there is none.
     fn correction_for(&self, residual: &ResidualEvent) -> Option<CorrectionDirection>;
+
+    /// Runtime smoke invocations to exercise the built artifact's entrypoints
+    /// (PSP-8 runtime probe). Default: none — a new adapter opts in by overriding
+    /// this. The runtime executes the returned commands from `workspace`.
+    fn smoke_invocations(&self, _workspace: &Path) -> Vec<SmokeInvocation> {
+        Vec::new()
+    }
+
+    /// Classify the output of a smoke invocation into `Runtime` residuals.
+    /// Default: shared crash-marker + non-zero-exit detection.
+    fn classify_runtime(
+        &self,
+        node_id: &str,
+        generation: u32,
+        invocation: &SmokeInvocation,
+        exit_success: bool,
+        output: &str,
+    ) -> Vec<ResidualEvent> {
+        default_classify_runtime(node_id, generation, invocation, exit_success, output)
+    }
+}
+
+/// Read the `[package] name` from a Cargo.toml, for naming `cargo run -p` targets.
+fn cargo_package_name(manifest: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(manifest).ok()?;
+    let mut in_package = false;
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') {
+            in_package = line == "[package]";
+            continue;
+        }
+        if in_package {
+            if let Some(rest) = line.strip_prefix("name") {
+                if let Some(eq) = rest.trim().strip_prefix('=') {
+                    return Some(eq.trim().trim_matches('"').trim_matches('\'').to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Return the adapter for a language.
@@ -138,9 +182,90 @@ impl LanguageAdapter for RustAdapter {
                 ResidualClass::TestFailure,
                 "fix the implementation the failing test attributes to; do not weaken the assertion",
             )),
+            ResidualClass::Runtime => Some(CorrectionDirection::new(
+                ResidualClass::Runtime,
+                format!(
+                    "the built binary failed when actually run ({summary}); fix the runtime logic \
+                     (panics, index/shape mismatches, unwraps) so every entrypoint executes \
+                     cleanly, and add a test/example covering that runtime path"
+                ),
+            )),
             _ => None,
         }
     }
+
+    fn smoke_invocations(&self, workspace: &Path) -> Vec<SmokeInvocation> {
+        let mut out = Vec::new();
+        // Binary crates: `cargo run -p <name> -- --help` exercises startup +
+        // arg parsing without needing real arguments.
+        for (name, _dir) in rust_binary_crates(workspace) {
+            out.push(SmokeInvocation::new(
+                format!("cargo run -q -p {name} -- --help"),
+                format!("{name} --help"),
+            ));
+        }
+        // Examples are the project's own end-to-end smoke; run each one. A good
+        // example exercises the real pipeline (e.g. train→predict), so a runtime
+        // bug there is caught here.
+        for (pkg, example) in rust_examples(workspace) {
+            let cmd = match pkg {
+                Some(ref p) => format!("cargo run -q -p {p} --example {example}"),
+                None => format!("cargo run -q --example {example}"),
+            };
+            out.push(SmokeInvocation::new(cmd, format!("example {example}")));
+        }
+        out
+    }
+}
+
+/// Discover binary crates (those with `src/main.rs`) in a Cargo workspace:
+/// the root package and any `crates/*` members. Returns `(package_name, dir)`.
+fn rust_binary_crates(workspace: &Path) -> Vec<(String, std::path::PathBuf)> {
+    let mut out = Vec::new();
+    let mut consider = |dir: std::path::PathBuf| {
+        if dir.join("src/main.rs").exists() {
+            if let Some(name) = cargo_package_name(&dir.join("Cargo.toml")) {
+                out.push((name, dir));
+            }
+        }
+    };
+    consider(workspace.to_path_buf());
+    if let Ok(entries) = std::fs::read_dir(workspace.join("crates")) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                consider(entry.path());
+            }
+        }
+    }
+    out
+}
+
+/// Discover example targets: `examples/*.rs` at the root (no `-p`) and under
+/// each `crates/*` member (with that member's `-p`). Returns `(package, stem)`.
+fn rust_examples(workspace: &Path) -> Vec<(Option<String>, String)> {
+    let mut out = Vec::new();
+    let collect = |dir: &Path, pkg: Option<String>, out: &mut Vec<(Option<String>, String)>| {
+        if let Ok(entries) = std::fs::read_dir(dir.join("examples")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        out.push((pkg.clone(), stem.to_string()));
+                    }
+                }
+            }
+        }
+    };
+    collect(workspace, None, &mut out);
+    if let Ok(entries) = std::fs::read_dir(workspace.join("crates")) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let pkg = cargo_package_name(&entry.path().join("Cargo.toml"));
+                collect(&entry.path(), pkg, &mut out);
+            }
+        }
+    }
+    out
 }
 
 // ============================ Python ============================
@@ -204,9 +329,52 @@ impl LanguageAdapter for PythonAdapter {
                 ResidualClass::TestFailure,
                 "fix the code under the failing pytest case; preserve the assertion",
             )),
+            ResidualClass::Runtime => Some(CorrectionDirection::new(
+                ResidualClass::Runtime,
+                format!(
+                    "the package failed when actually run/imported ({summary}); fix the runtime \
+                     error (import-time exceptions, shape/type mismatches) and add a test/example \
+                     covering that path"
+                ),
+            )),
             _ => None,
         }
     }
+
+    fn smoke_invocations(&self, workspace: &Path) -> Vec<SmokeInvocation> {
+        // Import smoke: importing the package executes all module top-level code,
+        // catching import-time errors that unit tests on submodules can miss.
+        python_packages(workspace)
+            .into_iter()
+            .map(|pkg| {
+                SmokeInvocation::new(
+                    format!("uv run python -c \"import {pkg}\""),
+                    format!("import {pkg}"),
+                )
+            })
+            .collect()
+    }
+}
+
+/// Discover importable top-level packages: directories containing `__init__.py`
+/// under `src/` (src-layout) or the workspace root (flat layout).
+fn python_packages(workspace: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for base in [workspace.join("src"), workspace.to_path_buf()] {
+        if let Ok(entries) = std::fs::read_dir(&base) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("__init__.py").exists() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        if !out.iter().any(|p| p == name) {
+                            out.push(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 // ============================ TypeScript ============================
@@ -331,6 +499,41 @@ mod tests {
         assert_eq!(residuals[0].class, ResidualClass::ImportGraph);
         assert_eq!(residuals[1].class, ResidualClass::Type);
         assert!(adapter.correction_for(&residuals[0]).is_some());
+    }
+
+    #[test]
+    fn rust_smoke_discovers_workspace_binaries_and_examples() {
+        let dir = std::env::temp_dir().join(format!("perspt-smoke-rust-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(dir.join("crates/cli/src")).unwrap();
+        std::fs::create_dir_all(dir.join("crates/cli/examples")).unwrap();
+        std::fs::write(dir.join("crates/cli/Cargo.toml"), "[package]\nname = \"weather-cli\"\n").unwrap();
+        std::fs::write(dir.join("crates/cli/src/main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(dir.join("crates/cli/examples/demo.rs"), "fn main() {}\n").unwrap();
+
+        let inv = RustAdapter.smoke_invocations(&dir);
+        assert!(
+            inv.iter().any(|i| i.command == "cargo run -q -p weather-cli -- --help"),
+            "got {inv:?}"
+        );
+        assert!(
+            inv.iter().any(|i| i.command.contains("--example demo")),
+            "got {inv:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn python_smoke_discovers_src_layout_package() {
+        let dir = std::env::temp_dir().join(format!("perspt-smoke-py-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(dir.join("src/rpncalc")).unwrap();
+        std::fs::write(dir.join("src/rpncalc/__init__.py"), "").unwrap();
+
+        let inv = PythonAdapter.smoke_invocations(&dir);
+        assert!(
+            inv.iter().any(|i| i.command.contains("import rpncalc")),
+            "got {inv:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
