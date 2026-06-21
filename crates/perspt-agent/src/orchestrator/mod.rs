@@ -8,6 +8,7 @@ mod convergence;
 mod init;
 mod planning;
 mod repair;
+pub mod sdk_bridge;
 mod solo;
 mod verification;
 
@@ -109,6 +110,10 @@ pub struct SRBNOrchestrator {
     last_formatted_context: String,
     /// PSP-5 Phase 4: Last plugin-driven verification result (for convergence checks)
     last_verification_result: Option<perspt_core::types::VerificationResult>,
+    /// PSP-8: SDK measured-gate bridge. Translates verification results into the
+    /// canonical quadratic energy `V = sum_e w_e r_e^2` and runs the SDK
+    /// acceptance gate alongside the StabilityMonitor for telemetry.
+    sdk_gate: sdk_bridge::SdkGateState,
     /// PSP-5 Phase 9: Last applied artifact bundle (for persistence in step_commit)
     last_applied_bundle: Option<perspt_core::types::ArtifactBundle>,
     /// Last recorded RepairFootprint (for multi-file correction context)
@@ -443,6 +448,7 @@ impl SRBNOrchestrator {
             last_context_provenance: None,
             last_formatted_context: String::new(),
             last_verification_result: None,
+            sdk_gate: sdk_bridge::SdkGateState::new(),
             last_applied_bundle: None,
             last_repair_footprint: None,
             blocked_dependencies: Vec::new(),
@@ -505,6 +511,7 @@ impl SRBNOrchestrator {
             last_context_provenance: None,
             last_formatted_context: String::new(),
             last_verification_result: None,
+            sdk_gate: sdk_bridge::SdkGateState::new(),
             last_applied_bundle: None,
             last_repair_footprint: None,
             blocked_dependencies: Vec::new(),

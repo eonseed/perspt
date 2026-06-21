@@ -30,6 +30,29 @@ impl SRBNOrchestrator {
         let stable = node.monitor.stable;
         let should_escalate = node.monitor.should_escalate();
 
+        // PSP-8: run the SDK measured acceptance gate over the canonical
+        // quadratic energy derived from the real verification result, alongside
+        // the StabilityMonitor. This exercises perspt-sdk + perspt-coding on
+        // every live correction step and surfaces the gate decision.
+        {
+            let vr = self.last_verification_result.clone();
+            match self.sdk_gate.evaluate(
+                &node_id,
+                attempt_count as u32,
+                vr.as_ref(),
+                &energy,
+                total as f64,
+                stable,
+            ) {
+                Ok(report) => {
+                    let line = report.summary();
+                    log::info!(target: "perspt::sdk_gate", "{line}");
+                    self.emit_log(format!("📐 {line}"));
+                }
+                Err(e) => log::debug!("SDK gate evaluation skipped: {e}"),
+            }
+        }
+
         if stable {
             // PSP-5 Phase 4: Block false stability when verification was degraded
             if let Some(ref vr) = self.last_verification_result {
