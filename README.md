@@ -1,5 +1,5 @@
 # Perspt
-**v0.6.1 "AKŪ"** — *AKŪ - sharp fixes from sharp ears.*
+**v0.6.1 "AKU"** - *AKU - sharp fixes from sharp ears.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
@@ -13,7 +13,7 @@ Perspt (pronounced "perspect," short for **Per**sonal **S**pectrum **P**ertainin
 
 1. **Chat with any LLM from your terminal.** Set an API key, run `perspt`, and start talking. Supports OpenAI, Anthropic, Google Gemini, Groq, Cohere, xAI, DeepSeek, AWS Bedrock, Google Agent Platform (Vertex AI), and Ollama out of the box.
 
-2. **Run an experimental autonomous coding agent.** The SRBN (Stabilized Recursive Barrier Network) engine decomposes coding tasks into a DAG of nodes, generates code, verifies each node with real LSP diagnostics and tests, and commits only when Lyapunov energy converges. SRBN is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). Agent mode is under active development; the theoretical framework is mature, but the implementation has not yet been benchmarked.
+2. **Run an experimental autonomous coding agent.** The SRBN (Stabilized Recursive Barrier Network) engine decomposes coding tasks into a DAG of nodes, generates code, verifies each node with real LSP diagnostics and tests, and commits only when Lyapunov energy converges. SRBN is based on the three-paper *Stability is All You Need* series. Agent mode is under active development; the theoretical framework is mature, but the implementation has not yet been benchmarked.
 
 [![Perspt in Action](docs/screencast/perspt_terminal_ui.jpg)](https://github.com/user-attachments/assets/f80f7109-1615-487b-b2a8-b76e16ebf6a7)
 
@@ -60,7 +60,7 @@ Perspt auto-detects whichever provider key you have set. No config file required
 
 **Simple CLI Mode** -- A minimal prompt for direct Q&A, piping, and session logging. Ideal for scripting and accessibility.
 
-**Agent Mode (SRBN) [Experimental]** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold. Based on the SRBN paper's theoretical framework; under active development.
+**Agent Mode (SRBN) [Experimental]** -- An autonomous coding assistant that plans multi-file projects as directed acyclic graphs, verifies correctness through LSP diagnostics and test runners, and self-corrects until energy converges below a configurable threshold. Based on the SRBN paper series; under active development.
 
 **Web Dashboard** -- A browser-based monitoring interface for observing agent execution in real time. Shows DAG topology, energy convergence, LLM telemetry with token usage and latency, sandbox branches, and decision traces. Built with Axum, Askama, HTMX, and DaisyUI 5. Can be launched standalone (`perspt dashboard`) or embedded in the agent process (`perspt agent --dashboard`) for live monitoring during execution. The embedded mode opens a read-only DuckDB connection alongside the agent's writer, so it never interferes with the running session.
 
@@ -94,7 +94,7 @@ SRBN takes a different approach. Instead of hoping each step is correct, it **me
 
 The theoretical result: instead of reliability decaying exponentially with project size, the paper predicts that retry cost grows logarithmically. A hundred-node project should cost only modestly more than a ten-node one.
 
-This approach is based on the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.** and **Ronak R.** (pre-publication), which formalizes this intuition using control theory and proves it mathematically. Perspt's agent mode is an experimental implementation of this theory -- the mathematical framework is mature, but repository-level benchmarks have not yet been published. The next section covers the theory for those interested.
+This approach is based on the three-paper *Stability is All You Need* series. Paper I gives the Lyapunov-guided SRBN stability certificate; Paper II turns it into an observed harness with descent-gated acceptance; Paper III lifts it into a capability-constrained platform contract. Perspt's agent mode is an experimental implementation of this theory -- the mathematical framework is mature, but repository-level benchmarks have not yet been published. The next section covers the theory for those interested.
 
 **PSP-7 hardening.** The correction loop uses a fail-closed typed parse pipeline (five layers from raw capture to semantic validation) so malformed LLM output is classified rather than silently dropped. A prompt compiler with provenance tracking replaces ad-hoc template constants. Every correction attempt is recorded with its parse state, retry classification, and energy snapshot for full observability via `perspt status` and the web dashboard.
 
@@ -102,9 +102,9 @@ This approach is based on the paper *"Stability is All You Need: Lyapunov-Guided
 
 ## Theoretical Foundation
 
-The SRBN engine is grounded in the theoretical framework from *"Stability is All You Need"* (Vikrant R. and Ronak R., pre-publication). This section presents the paper's mathematical machinery for researchers and developers who want to understand the theoretical guarantees.
+The SRBN engine is grounded in the theoretical framework from the *Stability is All You Need* paper series. This section presents the mathematical machinery for researchers and developers who want to understand the theoretical guarantees.
 
-> **Note:** The theorems below are results from the SRBN paper. They describe properties of the formal system under stated assumptions. Perspt implements this framework as an experimental agent, but these theoretical results have not yet been empirically validated through published benchmarks on this implementation.
+> **Note:** The theorems below are results from the SRBN papers. They describe properties of the formal system under stated assumptions. Perspt implements this framework as an experimental agent, but these theoretical results have not yet been empirically validated through published benchmarks on this implementation.
 
 ### The Problem, Formally
 
@@ -263,6 +263,8 @@ $$
 | $V_{\text{log}}$ | Test failures (weighted) | $\gamma = 2.0$ |
 | $V_{\text{boot}}$ | Build success/failure | 1.0 |
 | $V_{\text{sheaf}}$ | Cross-node consistency | 1.0 |
+
+PSP-8 extends this coding loop into an SDK-first platform. The long-term design keeps scheduling, residual scoring, capability checks, replay, and dashboard projection in the SRBN SDK, while coding, research, website-building, and other domains provide their own verifier suites and admissible effects.
 
 ### Workspace Classification
 
@@ -487,7 +489,7 @@ Key implementation details:
 - **Axum + HTMX** powers the real-time web dashboard for agent monitoring
 - **Starlark** evaluates security policies that gate file writes and command execution
 
-The SRBN engine is an experimental implementation of the theoretical framework described in *"Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by Vikrant R. and Ronak R. (pre-publication). The paper reformulates LLM agency as a sheaf-theoretic control problem, replacing probabilistic search with Lyapunov stability analysis and Input-to-State Stability (ISS) proofs. See the [Theoretical Foundation](#theoretical-foundation) section for details.
+The SRBN engine is an experimental implementation of the theoretical framework described in the *Stability is All You Need* paper series. The series reformulates LLM agency as a sheaf-theoretic control problem, replacing probabilistic search with Lyapunov stability analysis, observed harness contracts, and capability-constrained platform control. See the [Theoretical Foundation](#theoretical-foundation) section for details.
 
 ---
 
