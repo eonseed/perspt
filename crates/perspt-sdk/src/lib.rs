@@ -43,6 +43,7 @@ pub mod energy;
 pub mod error;
 pub mod exploration;
 pub mod gate;
+pub mod goal;
 pub mod independence;
 pub mod kernel;
 pub mod ledger;
@@ -83,6 +84,9 @@ pub use exploration::{
 };
 pub use routing::{
     resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier, ModelTierConfig,
+};
+pub use goal::{
+    goal_presence_residual, goal_presence_sensor, missing_symbols, GoalSpec,
 };
 pub use gate::{
     evaluate_gate, finite_decision_bound, AcceptedTrajectory, GateDecision, GateDecisionRef,
