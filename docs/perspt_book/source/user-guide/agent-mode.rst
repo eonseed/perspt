@@ -3,8 +3,10 @@
 Agent Mode
 ==========
 
-The agent command activates the experimental SRBN (Stabilized Recursive Barrier Network)
-engine for autonomous multi-file code generation.
+The agent command activates the experimental SRBN (Stabilized Recursive Barrier
+Network) engine for autonomous multi-file code generation. Agent mode is the
+current coding-domain implementation of the stability contracts described in
+:doc:`../concepts/stability-agent-mode`.
 
 Launching Agent Mode
 --------------------
@@ -22,25 +24,34 @@ Core Workflow
 
 The SRBN agent follows the PSP-5 lifecycle:
 
-1. **Detection** — Identify workspace state (greenfield/brownfield) and select
+1. **Detection** - Identify workspace state (greenfield/brownfield) and select
    language plugins
-2. **Planning** — Based on the auto-selected ``PlanningPolicy``, either:
+2. **Planning** - Based on the auto-selected ``PlanningPolicy``, either:
 
-   - **LocalEdit** — Skip Architect, create a single-node graph
-   - **FeatureIncrement / LargeFeature / GreenfieldBuild / ArchitecturalRevision** —
+   - **LocalEdit** - Skip Architect, create a single-node graph
+   - **FeatureIncrement / LargeFeature / GreenfieldBuild / ArchitecturalRevision** -
      Architect decomposes the task into a DAG of nodes with assigned classes.
+
    A ``FeatureCharter`` is created with policy-derived limits (max modules, files,
    and revisions) to constrain plan scope.
-3. **Execution** — For each node in topological order:
+3. **Execution** - For each node in topological order:
 
    a. Actuator generates a multi-artifact bundle (writes, diffs, commands)
    b. Bundle is applied transactionally
-   c. Verification computes Lyapunov energy: V(x) = α·V_syn + β·V_str + γ·V_log + V_boot + V_sheaf
-   d. If V(x) < ε (default 0.10), node is stable; otherwise retry
+   c. Verification computes Lyapunov energy from syntax, structure, tests,
+      bootstrap, and sheaf checks
+   d. If :math:`V(x) \leq \varepsilon` (default 0.10), the node is stable;
+      otherwise the agent retries or escalates with residual evidence
 
-4. **Sheaf Validation** — Cross-node contract verification
-5. **Review** — In interactive mode: grouped-diff modal with approve/reject/correct
-6. **Commit** — Stable nodes are committed to the Merkle ledger
+The verification formula is:
+
+.. math::
+
+   V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log} + V_{boot} + V_{sheaf}
+
+4. **Sheaf Validation** - Cross-node contract verification
+5. **Review** - In interactive mode: grouped-diff modal with approve/reject/correct
+6. **Commit** - Stable nodes are committed to the Merkle ledger
 
 Node Classes
 ------------
@@ -88,7 +99,7 @@ When running without ``--yes``, the review modal presents:
 .. code-block:: text
 
    Review Node 3: Implement data transformer
-   ──────────────────────────────────────────
+   ------------------------------------------
    Bundle: 1 created, 1 modified
    + src/transformer.py    [create] (45 lines)
    ~ src/pipeline.py       [diff]   (+3, -1)
@@ -98,11 +109,11 @@ When running without ``--yes``, the review modal presents:
 
    [y] Approve  [n] Reject  [c] Correct  [e] Edit  [d] Diff
 
-- **y** — Approve and commit to ledger
-- **n** — Reject and regenerate
-- **c** — Send feedback for correction
-- **e** — Open files in your editor
-- **d** — Toggle full diff view
+- **y** - Approve and commit to ledger
+- **n** - Reject and regenerate
+- **c** - Send feedback for correction
+- **e** - Open files in your editor
+- **d** - Toggle full diff view
 
 Session Management
 ------------------
@@ -156,8 +167,8 @@ persisted with the parse result state, retry classification, and energy snapshot
 
 The ``perspt status`` command now shows:
 
-- **Step Timeline** — per-step-type counts and total execution time
-- **Correction Attempts** — per-node accepted/rejected attempt counts
+- **Step Timeline** - per-step-type counts and total execution time
+- **Correction Attempts** - per-node accepted/rejected attempt counts
 
 The dashboard **Decisions** page includes a dedicated Correction Attempts table with
 node, attempt number, parse state, and rejection reason.

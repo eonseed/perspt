@@ -28,6 +28,7 @@ extensions = [
     'sphinx.ext.ifconfig',
     'sphinx.ext.githubpages',
     'sphinx.ext.graphviz',
+    'matplotlib.sphinxext.plot_directive',
     'myst_parser',
     'sphinx_copybutton',
     'sphinx_design',
@@ -306,6 +307,23 @@ napoleon_attr_annotations = True
 graphviz_output_format = 'png'  # PNG for HTML
 graphviz_dot = 'dot'
 graphviz_dot_args = ['-Gdpi=150']  # Higher DPI for better PDF quality
+
+# Matplotlib plot directive configuration. The HTML builder consumes the PNG
+# rendering while the LaTeX/PDF builder automatically selects the PDF rendering,
+# so the same `.. plot::` block works for both outputs.
+plot_include_source = False
+plot_html_show_source_link = False
+plot_html_show_formats = False
+plot_formats = [('png', 150), 'pdf']
+plot_rcparams = {
+    'figure.figsize': (7.0, 4.0),
+    'figure.dpi': 150,
+    'savefig.bbox': 'tight',
+    'font.size': 10,
+    'axes.grid': True,
+    'grid.alpha': 0.3,
+}
+plot_apply_rcparams = True
 
 # MyST parser configuration
 myst_enable_extensions = [

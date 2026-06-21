@@ -3,23 +3,28 @@
 SRBN Architecture
 =================
 
-The **Stabilized Recursive Barrier Network (SRBN)** is the theoretical framework behind
-Perspt's experimental autonomous coding agent. SRBN is based on the paper *"Stability
-is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"*
-by **Vikrant R. and Ronak R.** (pre-publication), which reformulates LLM agency as a
-sheaf-theoretic control problem and proves Input-to-State Stability (ISS) under
-persistent noise. Perspt's implementation of this framework is defined by **PSP-5**
-(Perspt Specification Proposal 5).
+The **Stabilized Recursive Barrier Network (SRBN)** is the idea behind Perspt's
+experimental autonomous coding agent. It comes from the *Stability is All You
+Need* paper series.
+
+The idea is plain to state. A language model is good at proposing changes, but a
+proposal is only a guess. Left unchecked, a long run of guesses drifts: small
+mistakes pile up until the work is broken. SRBN refuses to trust a guess on its
+word. It measures every proposed change, keeps the change only when the
+measurement shows progress, and writes the kept result to a permanent record.
+Perspt's coding agent began this work in **PSP-5** and continues it in **PSP-8**,
+which carries the same discipline toward a reusable, software-development-kit
+platform.
 
 .. admonition:: Theory vs. Implementation
    :class: note
 
-   This page describes both the SRBN paper's theoretical model and how Perspt's
-   PSP-5 runtime implements it. Where a claim comes from the paper's formal proofs,
-   it is noted as a **paper result**. Where PSP-5 makes engineering choices that
-   approximate or extend the theory, those are noted as **implementation details**.
-   The theoretical framework is mature; empirical benchmarks on Perspt's implementation
-   have not yet been published.
+    This page describes both the SRBN paper series and how Perspt's
+    PSP runtime implements it. Where a claim comes from the papers' formal proofs,
+    it is noted as a **paper result**. Where PSP-5 makes engineering choices that
+    approximate or extend the theory, those are noted as **implementation details**.
+    The theoretical framework is mature; empirical benchmarks on Perspt's implementation
+    have not yet been published.
 
 Overview
 --------
@@ -114,13 +119,15 @@ The SRBN control loop as implemented by PSP-5 executes seven phases for each tas
        written transactionally.
    * - 4
      - **Verification**
-     - Compute five energy components: V_syn (LSP diagnostics), V_str (contract
-       violations), V_log (test failures), V_boot (init/build exit codes), and V_sheaf
-       (cross-node consistency). Total energy is V(x).
+     - Compute five energy components: :math:`V_{syn}` (LSP diagnostics),
+       :math:`V_{str}` (contract violations), :math:`V_{log}` (test failures),
+       :math:`V_{boot}` (init/build exit codes), and :math:`V_{sheaf}`
+       (cross-node consistency). Total energy is :math:`V(x)`.
    * - 5
      - **Convergence**
-     - If V(x) > epsilon, generate a grounded correction prompt containing the specific
-       error messages and retry. Bounded by ``RetryPolicy`` per error type.
+     - If :math:`V(x) > \varepsilon`, generate a grounded correction prompt
+       containing the specific error messages and retry. Bounded by
+       ``RetryPolicy`` per error type.
    * - 6
      - **Sheaf Validation**
      - After all nodes converge individually, run cross-node consistency checks.
@@ -128,7 +135,7 @@ The SRBN control loop as implemented by PSP-5 executes seven phases for each tas
    * - 7
      - **Commit & Outcome**
      - Record each node's terminal state in the Merkle ledger. Nodes that converge
-       (V(x) ≤ ε) are committed as ``Completed``; nodes whose retries are exhausted
+       (:math:`V(x) \leq \varepsilon`) are committed as ``Completed``; nodes whose retries are exhausted
        are recorded as ``Escalated``. After all nodes are processed, the orchestrator
        derives a ``SessionOutcome`` from completed/escalated counts: ``Success`` (all
        completed), ``PartialSuccess`` (some escalated), or ``Failed`` (none completed).
@@ -328,7 +335,7 @@ legacy ``extract_all_code_blocks_from_response()`` fallback. Each layer returns 
      - Attempt to parse the response as a structured JSON artifact bundle.
    * - **D (Tolerant Recovery)**
      - Recognize ``### File:``, ``File:``, and ``Diff:`` headings to extract
-       structured content. Never invents filenames — unnamed blocks produce ``None``.
+       structured content. Never invents filenames - unnamed blocks produce ``None``.
    * - **E (Semantic Validation)**
      - Plugin-driven ownership closure, ``legal_support_files()`` checks,
        ``dependency_command_policy()`` enforcement.
@@ -349,7 +356,7 @@ the correction loop a dedicated signal for infrastructure problems.
 Sheaf Pre-Check
 ~~~~~~~~~~~~~~~
 
-After a node converges (V(x) ≤ ε) but before the full sheaf validation pass, a fast
+After a node converges (:math:`V(x) \leq \varepsilon`) but before the full sheaf validation pass, a fast
 structural pre-check verifies that output artifacts declare consistent imports and
 exports with the ownership manifest. If the pre-check fails, the node re-enters
 ``step_converge()`` with sheaf-specific evidence. A retry guard (max 1 sheaf pre-check
@@ -375,12 +382,12 @@ Correction Telemetry
 
 Every correction attempt is recorded as a ``CorrectionAttemptRow`` in the DuckDB store:
 
-- ``parse_state`` — which ``ParseResultState`` was returned
-- ``retry_classification`` — how the failure was classified
-- ``response_fingerprint`` — hash of the raw LLM response
-- ``response_length`` — byte length for detecting degenerate responses
-- ``energy_json`` — energy components snapshot after verification
-- ``accepted`` / ``rejection_reason`` — whether the attempt was committed
+- ``parse_state`` - which ``ParseResultState`` was returned
+- ``retry_classification`` - how the failure was classified
+- ``response_fingerprint`` - hash of the raw LLM response
+- ``response_length`` - byte length for detecting degenerate responses
+- ``energy_json`` - energy components snapshot after verification
+- ``accepted`` / ``rejection_reason`` - whether the attempt was committed
 
 Additionally, ``srbn_step_records`` track per-node execution steps (speculate, verify,
 converge, sheaf_validate, commit) with timing, energy snapshots, and attempt counts.
@@ -465,9 +472,9 @@ The Actuator emits a JSON artifact bundle for each node:
 
 Operations:
 
-- **write** — Create or overwrite a file with the given content
-- **diff** — Apply a unified diff patch to an existing file
-- **command** — Execute a shell command (validated by policy engine)
+- **write** - Create or overwrite a file with the given content
+- **diff** - Apply a unified diff patch to an existing file
+- **command** - Execute a shell command (validated by policy engine)
 
 All artifacts are applied transactionally. If any operation fails, the entire
 bundle is rolled back.
@@ -533,11 +540,11 @@ Merkle Ledger
 
 All changes are recorded in a DuckDB-backed Merkle ledger:
 
-- **Integrity** — Each commit has a cryptographic hash chaining to its parent
-- **Rollback** — Revert to any previous state via ``perspt ledger --rollback``
-- **Resume** — ``perspt resume`` rehydrates session state including energy history,
+- **Integrity** - Each commit has a cryptographic hash chaining to its parent
+- **Rollback** - Revert to any previous state via ``perspt ledger --rollback``
+- **Resume** - ``perspt resume`` rehydrates session state including energy history,
   retry counts, and escalation reports
-- **Audit** — Complete trail of AI-generated changes with energy breakdowns
+- **Audit** - Complete trail of AI-generated changes with energy breakdowns
 
 .. code-block:: bash
 

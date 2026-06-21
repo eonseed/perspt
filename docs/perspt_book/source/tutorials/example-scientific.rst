@@ -99,19 +99,19 @@ Build a simple FEM solver in Rust:
 Tips for Scientific Tasks
 --------------------------
 
-1. **Be specific about algorithms** — Name the numerical method, discretization
+1. **Be specific about algorithms** - Name the numerical method, discretization
    scheme, and solver type in the prompt
-2. **Include validation criteria** — Reference known analytical solutions or
+2. **Include validation criteria** - Reference known analytical solutions or
    benchmark data for tests
-3. **Use --defer-tests** — Scientific tests often depend on numerical tolerances
+3. **Use --defer-tests** - Scientific tests often depend on numerical tolerances
    that need tuning after initial generation
-4. **Set higher cost limits** — Scientific code often requires more iterations
+4. **Set higher cost limits** - Scientific code often requires more iterations
    for convergence: ``--max-cost 10.0``
-5. **Review carefully** — Numerical correctness requires domain expertise beyond
+5. **Review carefully** - Numerical correctness requires domain expertise beyond
    what the LSP can verify
 
 See Also
 --------
 
-- :doc:`headless-mode` — Headless mode guide
-- :doc:`agent-mode` — Interactive agent mode
+- :doc:`headless-mode` - Headless mode guide
+- :doc:`agent-mode` - Interactive agent mode

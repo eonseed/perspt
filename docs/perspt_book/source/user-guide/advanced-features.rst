@@ -135,9 +135,9 @@ Merkle Ledger
 Every stable node is committed to a content-addressed Merkle ledger stored in
 DuckDB. This provides:
 
-- **Auditability** — Full trace of what each node produced
-- **Rollback** — Restore to any point in the session
-- **Resume** — Continue interrupted sessions with verified context
+- **Auditability** - Full trace of what each node produced
+- **Rollback** - Restore to any point in the session
+- **Resume** - Continue interrupted sessions with verified context
 
 .. code-block:: bash
 

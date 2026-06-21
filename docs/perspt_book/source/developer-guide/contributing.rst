@@ -45,12 +45,12 @@ Project Structure
 Coding Standards
 ----------------
 
-1. **Clippy clean** — ``cargo clippy -- -D warnings`` must pass
-2. **Formatted** — ``cargo fmt`` with default settings
-3. **Tests pass** — ``cargo test`` must pass all tests
-4. **No ``println!`` in UI paths** — Use the event system or ``env_logger``
-5. **Error types** — Use ``ErrorType`` enum for categorized errors
-6. **Streaming safety** — Never block the UI select loop; spawn on tokio tasks
+1. **Clippy clean** - ``cargo clippy -- -D warnings`` must pass
+2. **Formatted** - ``cargo fmt`` with default settings
+3. **Tests pass** - ``cargo test`` must pass all tests
+4. **No ``println!`` in UI paths** - Use the event system or ``env_logger``
+5. **Error types** - Use ``ErrorType`` enum for categorized errors
+6. **Streaming safety** - Never block the UI select loop; spawn on tokio tasks
 
 Commit Messages
 ---------------

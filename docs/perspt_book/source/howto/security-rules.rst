@@ -11,10 +11,10 @@ Starlark Policies (perspt-policy)
 The ``perspt-policy`` crate evaluates Starlark scripts to enforce rules on
 agent actions. Policies can:
 
-- **Allow/deny file operations** — Prevent writes to sensitive paths
-- **Restrict shell commands** — Block dangerous commands (``rm -rf``, etc.)
-- **Enforce naming conventions** — Require files match patterns
-- **Limit resource usage** — Cap file sizes, directory depth
+- **Allow/deny file operations** - Prevent writes to sensitive paths
+- **Restrict shell commands** - Block dangerous commands (``rm -rf``, etc.)
+- **Enforce naming conventions** - Require files match patterns
+- **Limit resource usage** - Cap file sizes, directory depth
 
 .. code-block:: python
 
@@ -40,9 +40,9 @@ Sandbox Isolation (perspt-sandbox)
 The ``perspt-sandbox`` crate provides filesystem and process isolation for
 agent-executed commands:
 
-- **Filesystem scoping** — Commands run in a restricted view of the filesystem
-- **Process limits** — Timeout, memory, and CPU constraints
-- **Network control** — Optional network access restriction
+- **Filesystem scoping** - Commands run in a restricted view of the filesystem
+- **Process limits** - Timeout, memory, and CPU constraints
+- **Network control** - Optional network access restriction
 
 Configuration:
 
@@ -85,9 +85,9 @@ Merkle Ledger
 Every committed change is recorded in a content-addressed Merkle tree stored in
 DuckDB. This provides:
 
-- **Tamper detection** — Hash chain integrity
-- **Full auditability** — Every node's input/output is recorded
-- **Rollback capability** — Restore to any point in the session
+- **Tamper detection** - Hash chain integrity
+- **Full auditability** - Every node's input/output is recorded
+- **Rollback capability** - Restore to any point in the session
 
 .. code-block:: bash
 
@@ -98,8 +98,8 @@ DuckDB. This provides:
 Best Practices
 --------------
 
-1. **Use interactive mode for production code** — Always review diffs
-2. **Set cost limits** — ``--max-cost`` prevents runaway spending
-3. **Use workspace directories** — ``-w <dir>`` scopes agent writes
-4. **Enable LLM logging** — ``--log-llm`` for post-run auditing
-5. **Review ledger after headless runs** — ``perspt ledger --recent``
+1. **Use interactive mode for production code** - Always review diffs
+2. **Set cost limits** - ``--max-cost`` prevents runaway spending
+3. **Use workspace directories** - ``-w <dir>`` scopes agent writes
+4. **Enable LLM logging** - ``--log-llm`` for post-run auditing
+5. **Review ledger after headless runs** - ``perspt ledger --recent``

@@ -72,16 +72,16 @@ PSP-5: The Core Lifecycle
 PSP-5 is the operative specification that governs the current SRBN agent runtime. It
 supersedes PSP-4 and introduces:
 
-- **Project-first execution** — multi-file DAGs instead of single-file tasks
-- **Ownership closure** — each file owned by exactly one node
-- **Artifact bundle protocol** — structured JSON with write/diff/command operations
-- **Node classes** — Interface, Implementation, Integration
-- **Five-component energy** — V_syn, V_str, V_log, V_boot, V_sheaf
-- **Plugin-driven verification** — language plugins select LSP, test runner, init commands
-- **Provisional branches** — speculative child execution isolated until parent commits
-- **Interface seals** — SHA-256 digest of exported signatures for dependency management
-- **Deterministic fallback planner** — handles plan parsing failures gracefully
-- **Ledger-based resume** — trustworthy session continuation from any interruption point
+- **Project-first execution** - multi-file DAGs instead of single-file tasks
+- **Ownership closure** - each file owned by exactly one node
+- **Artifact bundle protocol** - structured JSON with write/diff/command operations
+- **Node classes** - Interface, Implementation, Integration
+- **Five-component energy** - V_syn, V_str, V_log, V_boot, V_sheaf
+- **Plugin-driven verification** - language plugins select LSP, test runner, init commands
+- **Provisional branches** - speculative child execution isolated until parent commits
+- **Interface seals** - SHA-256 digest of exported signatures for dependency management
+- **Deterministic fallback planner** - handles plan parsing failures gracefully
+- **Ledger-based resume** - trustworthy session continuation from any interruption point
 
 See the full specification at ``docs/psps/source/psp-000005.rst``.
 
@@ -91,13 +91,13 @@ PSP-7: The Current Runtime
 PSP-7 is the operative specification that governs the current SRBN agent runtime. It
 builds on PSP-5's foundation and introduces:
 
-- **Typed parse pipeline** — 5-layer fail-closed parsing (raw capture → strict JSON → tolerant recovery → schema validation → semantic filtering) replacing Option-based extraction
-- **Retry classification** — ``RetryClassification`` enum (MalformedRetry, Retarget, SupportFileViolation, Replan) enabling intelligent convergence loop decisions
-- **Prompt compiler with provenance** — Structured ``PromptEvidence`` replaces ad-hoc template constants; exact target paths from evidence included in correction prompts
-- **Structured JSON artifact format** — ``{ artifacts: [], commands: [] }`` schema replaces free-form ``File: ...`` output instructions
-- **Manifest policy enforcement** — Semantic validation prevents implicit mutation of root manifests unless explicitly listed as output targets
-- **Strict budget exhaustion** — ``any_exhausted()`` checks all budget dimensions (steps, revisions, cost) before LLM calls
-- **Correction attempt records** — Every correction attempt persisted with parse state, retry classification, energy snapshot, and response fingerprint for full observability
+- **Typed parse pipeline** - 5-layer fail-closed parsing (raw capture -> strict JSON -> tolerant recovery -> schema validation -> semantic filtering) replacing Option-based extraction
+- **Retry classification** - ``RetryClassification`` enum (MalformedRetry, Retarget, SupportFileViolation, Replan) enabling intelligent convergence loop decisions
+- **Prompt compiler with provenance** - Structured ``PromptEvidence`` replaces ad-hoc template constants; exact target paths from evidence included in correction prompts
+- **Structured JSON artifact format** - ``{ artifacts: [], commands: [] }`` schema replaces free-form ``File: ...`` output instructions
+- **Manifest policy enforcement** - Semantic validation prevents implicit mutation of root manifests unless explicitly listed as output targets
+- **Strict budget exhaustion** - ``any_exhausted()`` checks all budget dimensions (steps, revisions, cost) before LLM calls
+- **Correction attempt records** - Every correction attempt persisted with parse state, retry classification, energy snapshot, and response fingerprint for full observability
 
 PSP-5 remains the foundation for the core SRBN lifecycle. See the full specification at
 ``docs/psps/source/psp-000005.rst``.
