@@ -39,6 +39,9 @@ rustyline = "15.0"
 # Async
 tokio = { version = "1.42", features = ["full"] }
 
+# TLS crypto provider selection (Vertex ADC via gcp_auth uses rustls/ring).
+rustls = { version = "0.23", features = ["ring"] }
+
 # Logging
 log = "0.4"
 env_logger = "0.11"
