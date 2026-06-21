@@ -632,7 +632,8 @@ PSP-8-complete unless all applicable gates below pass.
 
 .. csv-table:: SRBN Theory to SDK Implementation Trace
    :header: "Paper object", "SDK representation", "Required implementation evidence"
-   :widths: 24, 32, 44
+   :widths: 20, 34, 46
+   :class: longtable
 
    "Proxy state ``x``", "``WorkspaceSnapshot``, ``WorkGraphRevision``, ledger head, capability set, active candidate", "State witnesses and input digests recorded before proposal, verifier, and commit"
    "Sheaf residual ``r_e``", "``ResidualEvent`` with class, sensor, affected paths/symbols, score, and evidence payload", "Raw tool/LSP/test/AST/policy evidence normalized into finite non-negative residual score"
@@ -1550,7 +1551,8 @@ The runtime SHALL satisfy six durable-execution obligations:
 
 .. csv-table:: Durable-Execution Obligations
    :header: "Obligation", "Requirement", "Owning crate"
-   :widths: 12, 56, 32
+   :widths: 20, 52, 28
+   :class: longtable
 
    "R1 durable single-assignment outcomes", "Every proposal and every commit or rejection outcome is written once and never reassigned; redelivery of the same idempotency key with equivalent content returns the prior result, and key reuse for different content is invalid", "``perspt-store``"
    "R2 recorded nondeterminism", "Every stochastic observation a transition depends on is committed to the ledger before it is used", "``perspt-store``, ``perspt-agent``"
@@ -2086,7 +2088,8 @@ Requirement-to-code trace:
 
 .. csv-table:: PSP 8 Requirement Trace
    :header: "Requirement", "Current surface", "Required change"
-   :widths: 30, 35, 35
+   :widths: 22, 39, 39
+   :class: longtable
 
    "SDK/domain split", "Domain-neutral SRBN control plane is mixed with coding-agent and language-plugin concerns", "Add ``perspt-sdk`` and ``perspt-coding``; make plugins/adapters consume SDK contracts"
    "Mutable work graph", "``run_orchestration`` and ``run_resumed_inner`` snapshot ``Topo`` indices", "Introduce ready-queue scheduler and graph revisions"
