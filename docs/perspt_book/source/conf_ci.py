@@ -129,6 +129,7 @@ html_theme_options = {
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ['_static']
+html_css_files = ['custom.css']
 
 # Custom sidebar templates, must be a dictionary that maps document names
 # to template names.
@@ -149,10 +150,171 @@ latex_engine = 'luahbtex'  # LuaHBTeX for superior emoji and Unicode support in 
 latex_elements = {
     'papersize': 'letterpaper',
     'pointsize': '10pt',
+    'maketitle': r'''
+\begin{titlepage}
+    \thispagestyle{empty}
+    \pagecolor{CoverBG}
+    
+    \centering
+    \vspace*{0.4cm}
+    
+    {\fontsize{44}{52}\selectfont\bfseries P E R S P T} \\[0.4cm]
+    \rule{\textwidth}{1.0pt} \\[0.4cm]
+    {\fontsize{13}{16}\selectfont\scshape Your Terminal's Window to the AI World} \\[1.5cm]
+    
+    \begin{tikzpicture}[scale=1.2, every node/.style={transform shape}]
+        \definecolor{CoverBG}{HTML}{EBE3CD}
+        \definecolor{PrimaryColor}{HTML}{00D4AA}
+        \definecolor{AccentColor}{HTML}{6366F1}
+        \definecolor{SlateColor}{HTML}{475569}
+        \definecolor{LightSlateColor}{HTML}{94A3B8}
+        \definecolor{DarkSlateColor}{HTML}{0F172A}
+        \definecolor{GliderColor}{HTML}{F59E0B}
+        
+        % Clip region to keep it clean and ensure no frame clipping
+        \clip (-6.5, -4.5) rectangle (6.5, 4.5);
+        
+        % Double border frame
+        \draw[black, double, double distance=2.5pt, thick] (-6, -4.25) rectangle (6, 4.25);
+        
+        % Quadrant alignment axes
+        \draw[black, thin] (-6, 0) -- (6, 0);
+        \draw[black, thin] (0, -4.25) -- (0, 4.25);
+        
+        % TOP-RIGHT: 3D Lyapunov Attractor (Cone & Spiral)
+        \begin{scope}
+            \draw[SlateColor!50, thin] (3, 0.4) ellipse (1.8 and 0.4);
+            \draw[SlateColor!70, thick] (3, 3.8) -- (1.2, 0.4);
+            \draw[SlateColor!70, thick] (3, 3.8) -- (4.8, 0.4);
+            
+            % Spiral path converging to apex
+            \draw[PrimaryColor, very thick, ->, >=stealth, smooth, samples=150, domain=0:12.5]
+                plot ({3 + (1 - \x/12.5) * 1.8 * cos(\x r)}, {0.4 + \x/12.5 * 3.4 + (1 - \x/12.5) * 0.4 * sin(\x r)});
+            
+            \node[right, color=SlateColor, font=\tiny\sffamily] at (3.8, 2.5) {3D State Space $\mathcal{X}$};
+            \node[above, color=SlateColor, font=\tiny\sffamily] at (3, 3.8) {Attractor (Apex)};
+        \end{scope}
+        
+        % BOTTOM-RIGHT: 2D Lyapunov Level Sets & Projected Trajectory
+        \begin{scope}
+            \coordinate (Sink) at (3, -2.125);
+            
+            % Concentric circles
+            \foreach \k in {1, 2, 3, 4} {
+                \draw[AccentColor!50, thin, dashed] (Sink) circle (\k * 0.45);
+                \node[font=\tiny\sffamily, fill=CoverBG, text=AccentColor!80, inner sep=1pt] at (3, -2.125 + \k * 0.45) {$V_k = c_{\k}$};
+            }
+            
+            % Barrier Certificate Boundary B(x) = 0
+            \draw[red!75, thick] (Sink) circle (1.6);
+            \node[font=\tiny\sffamily, fill=CoverBG, text=red!80, inner sep=1pt] at (3 + 1.13, -2.125 - 1.13) {$B(x) = 0$};
+            
+            % Projected 2D spiral
+            \draw[PrimaryColor, very thick, ->, >=stealth, smooth, samples=150, domain=0:12.5]
+                plot ({3 + 1.8 * exp(-0.25 * \x) * cos(\x r)}, {-2.125 + 1.8 * exp(-0.25 * \x) * sin(\x r)});
+            
+            \fill[PrimaryColor] (Sink) circle (2.5pt);
+            \draw[PrimaryColor, thick] (Sink) circle (5pt);
+            
+            \node[below, color=SlateColor, font=\tiny\sffamily] at (3, -3.8) {Lyapunov Level Sets};
+        \end{scope}
+        
+        % TOP-LEFT: 3D Swarm Topology (Sphere & Agent Network)
+        \begin{scope}
+            \coordinate (Center) at (-3, 2.125);
+            \draw[SlateColor!50, thin] (Center) circle (1.6);
+            \draw[SlateColor!40, thin, dashed] (Center) ellipse (1.6 and 0.4);
+            \draw[SlateColor!40, thin, dashed] (Center) ellipse (0.4 and 1.6);
+            
+            \coordinate (N1) at (-3.8, 2.9);
+            \coordinate (N2) at (-2.2, 2.8);
+            \coordinate (N3) at (-2.5, 1.3);
+            \coordinate (N4) at (-3.6, 1.2);
+            \coordinate (N5) at (-3.0, 2.125);
+            \coordinate (N6) at (-4.2, 2.0);
+            \coordinate (N7) at (-1.8, 1.9);
+            
+            \draw[AccentColor!70, thin] (N1) -- (N2) -- (N7) -- (N3) -- (N4) -- (N6) -- (N1);
+            \draw[AccentColor!70, thin] (N1) -- (N5);
+            \draw[AccentColor!70, thin] (N2) -- (N5);
+            \draw[AccentColor!70, thin] (N3) -- (N5);
+            \draw[AccentColor!70, thin] (N4) -- (N5);
+            \draw[AccentColor!70, thin] (N6) -- (N5);
+            \draw[AccentColor!70, thin] (N7) -- (N5);
+            
+            \foreach \n in {N1, N2, N3, N4, N5, N6, N7} {
+                \fill[PrimaryColor] (\n) circle (2.5pt);
+                \draw[PrimaryColor!80, thin] (\n) circle (4pt);
+            }
+            
+            \node[left, color=SlateColor, font=\tiny\sffamily] at (-4.7, 3.2) {ABM Swarm $\mathcal{S}$};
+        \end{scope}
+        
+        % BOTTOM-LEFT: 2D Game of Life Glider Grid
+        \begin{scope}
+            % Grid
+            \draw[SlateColor!40, thin] (-4.5, -3.6) grid[step=0.6] (-1.5, -0.6);
+            
+            % Hatched glider cells (Amber GliderColor)
+            \foreach \X/\Y in {-3.9/-1.2, -3.3/-1.8, -3.3/-2.4, -3.9/-2.4, -4.5/-2.4} {
+                \fill[GliderColor!20] (\X, \Y) rectangle (\X+0.6, \Y+0.6);
+                \draw[GliderColor, thick] (\X, \Y) rectangle (\X+0.6, \Y+0.6);
+                \foreach \o in {0.1, 0.2, 0.3, 0.4, 0.5} {
+                    \draw[GliderColor!80, very thin] (\X + \o, \Y) -- (\X, \Y + \o);
+                    \draw[GliderColor!80, very thin] (\X + 0.6, \Y + \o) -- (\X + \o, \Y + 0.6);
+                }
+            }
+            
+            \node[below, color=SlateColor, font=\tiny\sffamily] at (-3, -3.8) {Cellular Automata Projection};
+        \end{scope}
+        
+        % Projection dashed lines
+        \draw[LightSlateColor, thin, dashed] (4.8, 0.4) -- (4.8, -2.125);
+        \draw[LightSlateColor, thin, dashed] (1.2, 0.4) -- (1.2, -2.125);
+        \draw[LightSlateColor, thin, dashed] (-3, 0.525) -- (-3, -0.6);
+        \draw[LightSlateColor, thin, dashed] (-4.6, 2.125) -- (-4.6, -2.1);
+        \draw[LightSlateColor, thin, dashed] (-1.4, 2.125) -- (-1.4, -2.1);
+        
+        % Coupling sheaf dashed lines across columns
+        \draw[AccentColor!70, dashed, thick] (-1.5, 2.125) to [out=20, in=160] (1.2, 2.125);
+        \draw[PrimaryColor!70, dashed, thick] (-1.5, -2.125) to [out=-20, in=-160] (1.4, -2.125);
+        \node[font=\tiny\itshape\sffamily, fill=CoverBG, text=AccentColor!80, inner sep=1pt] at (0, 2.4) {Sheaf Cohomology};
+        \node[font=\tiny\itshape\sffamily, fill=CoverBG, text=PrimaryColor!80, inner sep=1pt] at (0, -2.4) {Energy Coupling};
+        
+    \end{tikzpicture}
+    
+    \vspace{1.2cm}
+    
+    \begin{center}
+        \begin{minipage}{0.65\textwidth}
+            \raggedright
+            \fontsize{12}{18}\selectfont\itshape\color{black!90}
+            The keyboard hums, the screen aglow,\\
+            AI's wisdom, a steady flow.\\[0.4em]
+            Will robots take over, it's quite the fright,\\
+            Or just provide insights, day and night?\\[0.4em]
+            We ponder and chat, with code as our guide,\\
+            Is AI our helper or our human pride?
+        \end{minipage}
+    \end{center}
+    
+    \vspace{0.8cm}
+    
+    {\fontsize{13}{15}\selectfont\scshape\color{black} Ronak Rathore \quad \bullet \quad Vikrant Rathore} \\
+    
+    \vfill
+    
+    {\fontsize{11}{13}\selectfont\scshape\color{black!80} 2026}
+\end{titlepage}
+\pagecolor{white}
+\cleardoublepage
+''',
     'preamble': r'''
 % LuaLaTeX Unicode and font configuration for CI
 \usepackage{fontspec}
 \usepackage{unicode-math}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning,calc}
 
 % Font selection with fonts available on Ubuntu CI
 \setmainfont{Liberation Serif}[
@@ -170,6 +332,11 @@ latex_elements = {
 \usepackage{xcolor}
 \definecolor{TitleColor}{RGB}{37, 99, 235}
 \definecolor{AccentColor}{RGB}{99, 102, 241}
+\definecolor{PrimaryColor}{HTML}{00D4AA}
+\definecolor{SlateColor}{HTML}{475569}
+\definecolor{LightSlateColor}{HTML}{94A3B8}
+\definecolor{DarkSlateColor}{HTML}{0F172A}
+\definecolor{CoverBG}{HTML}{EBE3CD}
 
 % Title formatting
 \usepackage{titlesec}
