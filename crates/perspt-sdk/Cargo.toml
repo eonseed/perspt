@@ -1,0 +1,33 @@
+[package]
+name = "perspt-sdk"
+version = "0.6.1"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "Domain-neutral SRBN agent SDK for Perspt: residual energy, measured acceptance gate, spectral diagnostics, and stabilization-kernel adapter (PSP-8)"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-sdk"
+keywords = ["srbn", "agent", "stability", "lyapunov", "sdk"]
+categories = ["development-tools", "science"]
+
+[dependencies]
+# Published SRBN kernel and its serde helpers (PSP-8 References).
+srbn = "0.1.1"
+srbn-serde = "0.1.1"
+
+# Spectral energy-slope constant mu = 2*lambda_min+(A): symmetric eigensolver.
+nalgebra = "0.33"
+
+# Serialization for ledgerable records.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Stable identifiers for residuals, certificates, and claims.
+uuid = { version = "1.11", features = ["v4"] }
+
+# Cryptographic hashing for the Merkle replay ledger.
+sha2 = "0.10"
+
+# Error handling.
+thiserror = "2.0"
