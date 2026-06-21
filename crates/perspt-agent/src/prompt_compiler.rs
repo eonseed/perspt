@@ -90,6 +90,20 @@ pub fn compile(intent: PromptIntent, evidence: &PromptEvidence) -> CompiledPromp
             let task = evidence.user_goal.as_deref().unwrap_or("");
             crate::prompts::PROJECT_NAME_SUGGEST.replace("{task}", task)
         }
+        PromptIntent::GoalCompletionCheck => {
+            sources.push("goal_completion_check".into());
+            if evidence.project_file_tree.is_some() {
+                sources.push("project_file_tree".into());
+            }
+            compile_goal_completion(evidence)
+        }
+        PromptIntent::PlanAmendment => {
+            sources.push("plan_amendment".into());
+            if evidence.error_feedback.is_some() {
+                sources.push("goal_gap".into());
+            }
+            compile_plan_amendment(evidence)
+        }
     };
 
     let plugin_fragment_source = evidence
@@ -179,6 +193,80 @@ fn compile_verifier(ev: &PromptEvidence) -> String {
     )
 }
 
+/// Goal-completion check: ask a verifier-tier model whether the user's overall
+/// goal is fully achieved, given the delivered workspace. Returns a strict JSON
+/// `GoalVerdict`.
+fn compile_goal_completion(ev: &PromptEvidence) -> String {
+    let goal = ev.user_goal.as_deref().unwrap_or("");
+    let tree = ev
+        .project_file_tree
+        .as_deref()
+        .unwrap_or("(no file tree available)");
+    let mut files = String::new();
+    for (path, content) in &ev.existing_file_contents {
+        let body = if content.len() > 4000 {
+            &content[..4000]
+        } else {
+            content.as_str()
+        };
+        files.push_str(&format!("\n----- {path} -----\n{body}\n"));
+    }
+    if files.is_empty() {
+        files.push_str("(no key file contents captured)");
+    }
+    let tests = ev.build_test_output.as_deref().unwrap_or("(none)");
+
+    format!(
+        "You are a Verifier judging whether a coding task is COMPLETE.\n\n\
+         ## User goal (intent)\n{goal}\n\n\
+         ## Delivered workspace (file tree)\n{tree}\n\n\
+         ## Key file contents\n{files}\n\n\
+         ## Latest build/test output\n{tests}\n\n\
+         Decide whether the user's goal is FULLY achieved by what was delivered. \
+         Be strict: a stub, placeholder, or missing public API means NOT achieved. \
+         Respond with ONLY a JSON object, no prose:\n\
+         {{\n  \"achieved\": true|false,\n  \"missing\": [\"...\"],\n  \"next_steps\": [\"...\"],\n  \"rationale\": \"one line\"\n}}\n"
+    )
+}
+
+/// Plan amendment: ask the architect for ADDITIONAL tasks that close an unmet
+/// goal gap, without re-doing completed work. Returns a strict JSON task plan.
+fn compile_plan_amendment(ev: &PromptEvidence) -> String {
+    let goal = ev.user_goal.as_deref().unwrap_or("");
+    let tree = ev
+        .project_file_tree
+        .as_deref()
+        .unwrap_or("(no file tree available)");
+    let gap = ev
+        .error_feedback
+        .as_deref()
+        .unwrap_or("(goal not yet achieved; infer the remaining work)");
+    // existing_file_contents is reused here to carry the "already owned files +
+    // existing task ids" context the amendment must not collide with.
+    let mut owned = String::new();
+    for (path, note) in &ev.existing_file_contents {
+        owned.push_str(&format!("- {path}: {note}\n"));
+    }
+    if owned.is_empty() {
+        owned.push_str("(none recorded)\n");
+    }
+
+    format!(
+        "You are the Architect AMENDING an existing plan to finish the user's goal.\n\n\
+         ## User goal (intent)\n{goal}\n\n\
+         ## What is still missing\n{gap}\n\n\
+         ## Current workspace (file tree)\n{tree}\n\n\
+         ## Already-owned files / existing task ids (do NOT claim these again)\n{owned}\n\
+         Produce ONLY NEW tasks needed to close the gap. Rules:\n\
+         - Each task's output_files MUST be files not already owned above.\n\
+         - A task may depend on an existing task id or another new task id.\n\
+         - A test-only task must depend on every source task whose files it tests.\n\
+         - Use distinct task ids not already used above.\n\n\
+         Respond with ONLY a JSON object, no prose:\n\
+         {{\n  \"tasks\": [\n    {{\"id\": \"...\", \"goal\": \"...\", \"output_files\": [\"...\"], \"context_files\": [\"...\"], \"dependencies\": [\"...\"], \"task_type\": \"code\"}}\n  ]\n}}\n"
+    )
+}
+
 fn compile_correction(ev: &PromptEvidence) -> String {
     let goal = ev.node_goal.as_deref().unwrap_or("");
     let diagnostics = ev
@@ -234,6 +322,18 @@ fn compile_correction(ev: &PromptEvidence) -> String {
         ));
     } else {
         prompt.push_str(&format!("### Detected Errors\n{}\n", diagnostics));
+    }
+
+    // SRBN residual-directed corrections: the dominant residual clusters mapped
+    // to specific, directed fix instructions (PSP-8 / Paper II). These steer the
+    // actuator toward the precise change instead of an undirected rewrite.
+    if let Some(ref directed) = ev.directed_corrections {
+        if !directed.trim().is_empty() {
+            prompt.push_str(&format!(
+                "\n### Directed Fixes (apply these specific changes)\n{}\n",
+                directed
+            ));
+        }
     }
 
     if let Some(ref fragment) = ev.plugin_correction_fragment {
@@ -535,6 +635,19 @@ mod tests {
             .provenance
             .evidence_sources
             .contains(&"solo_generate_template".to_string()));
+    }
+
+    #[test]
+    fn test_compile_correction_includes_directed_fixes() {
+        let ev = PromptEvidence {
+            node_goal: Some("Implement calculator".into()),
+            verifier_diagnostics: Some("error[E0432]: unresolved import".into()),
+            directed_corrections: Some("- [ImportGraph] add the missing `use` path\n".into()),
+            ..Default::default()
+        };
+        let compiled = compile(PromptIntent::CorrectionRetry, &ev);
+        assert!(compiled.text.contains("Directed Fixes"));
+        assert!(compiled.text.contains("add the missing `use` path"));
     }
 
     #[test]

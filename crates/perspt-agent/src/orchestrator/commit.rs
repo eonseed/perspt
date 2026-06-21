@@ -158,7 +158,15 @@ impl SRBNOrchestrator {
                 "select_validators for {}: build_ok={}, tests_ok={}, tests_failed={}, tests_passed={}, degraded={}",
                 node.node_id, vr.build_ok, vr.tests_ok, vr.tests_failed, vr.tests_passed, vr.degraded
             );
-            if !vr.build_ok {
+            // Only check build-graph consistency when the Build stage actually
+            // RAN and failed. `build_ok` defaults to false, so a node that never
+            // runs Build (e.g. a syntax-only Interface/manifest node) would
+            // otherwise trip a phantom build-graph failure with no real error.
+            let build_ran_and_failed = vr
+                .stage_outcomes
+                .iter()
+                .any(|s| s.stage == "build" && !s.passed);
+            if !vr.build_ok && build_ran_and_failed {
                 validators.push(SheafValidatorClass::BuildGraphConsistency);
             }
             // Only check test ownership when tests actually ran and failed

@@ -221,13 +221,23 @@ impl SRBNOrchestrator {
                         }
                     }
 
-                    // Map verification result to energy components:
+                    // Map verification result to energy components. CRITICAL:
+                    // only penalize a stage that actually RAN for this node.
+                    // `VerificationResult` derives Default (all *_ok = false), so a
+                    // node that never runs Build (e.g. a syntax-only Interface
+                    // node) would otherwise be charged a phantom build failure
+                    // with no captured error — an uncorrectable escalation.
+                    use perspt_core::plugin::VerifierStage;
+                    let ran_syntax = stages.contains(&VerifierStage::SyntaxCheck);
+                    let ran_build = stages.contains(&VerifierStage::Build);
+                    let ran_lint = stages.contains(&VerifierStage::Lint);
+
                     // - Syntax fail → V_syn (cap at 5.0, don't override tool-failure 10.0)
-                    if !vr.syntax_ok && energy.v_syn < 5.0 {
+                    if ran_syntax && !vr.syntax_ok && energy.v_syn < 5.0 {
                         energy.v_syn = 5.0;
                     }
                     // - Build fail → V_syn (cap at 8.0, don't override higher)
-                    if !vr.build_ok && energy.v_syn < 8.0 {
+                    if ran_build && !vr.build_ok && energy.v_syn < 8.0 {
                         energy.v_syn = 8.0;
                     }
                     // - Test fail → V_log (weighted calculation)
@@ -235,7 +245,7 @@ impl SRBNOrchestrator {
                         let node = &self.graph[idx];
                         if !node.contract.weighted_tests.is_empty() {
                             // Use weighted test calculation if contract has weights
-                            let py_runner = PythonTestRunner::new(verify_dir);
+                            let py_runner = PythonTestRunner::new(verify_dir.clone());
                             let test_results = TestResults {
                                 passed: vr.tests_passed,
                                 failed: vr.tests_failed,
@@ -298,8 +308,9 @@ impl SRBNOrchestrator {
                             );
                         }
                     }
-                    // - Lint fail → V_str penalty
-                    if !vr.lint_ok
+                    // - Lint fail → V_str penalty (only if the Lint stage ran)
+                    if ran_lint
+                        && !vr.lint_ok
                         && self.context.verifier_strictness
                             == perspt_core::types::VerifierStrictness::Strict
                     {
@@ -341,15 +352,45 @@ impl SRBNOrchestrator {
                         }
                     }
 
-                    // D1: Feed raw output into correction context
+                    // D1: Feed real tool output into the correction context so the
+                    // correction prompt always shows the actual error. Prefer the
+                    // explicit raw_output, but fall back to any failing stage's
+                    // captured output — without this, a genuinely failing stage
+                    // could still surface "No specific errors captured".
                     if let Some(ref raw) = vr.raw_output {
                         self.context.last_test_output = Some(raw.clone());
+                    } else if let Some(failed_out) = vr
+                        .stage_outcomes
+                        .iter()
+                        .find(|so| !so.passed && so.output.as_deref().is_some_and(|o| !o.trim().is_empty()))
+                        .and_then(|so| so.output.clone())
+                    {
+                        self.context.last_test_output = Some(failed_out);
                     }
 
                     self.emit_log(format!("📊 Verification: {}", vr.summary));
+
+                    // PSP-8 runtime probe: once syntax/build/tests are clean,
+                    // actually RUN the built artifact's entrypoints so runtime
+                    // failures (panics, import errors, crashes) become Runtime
+                    // residuals instead of slipping past build+test.
+                    if energy.v_syn == 0.0 && energy.v_log == 0.0 {
+                        self.run_runtime_smoke(idx, &verify_dir, &mut energy).await;
+                    }
                 }
             }
         }
+
+        // PSP-8: Goal-presence sensor — the verifier that refuses false
+        // stability. An empty or placeholder output file compiles, runs no
+        // failing tests, and emits no diagnostics, so every code-quality sensor
+        // reports zero and the node would be declared "stable" without the
+        // requested work ever being done. The sensor extracts the symbols the
+        // node must produce (from its contract signature + goal) and the symbols
+        // actually defined in its output targets; any absent required symbol
+        // raises structural energy so the node cannot converge until the goal is
+        // satisfied, and injects a directed diagnostic for the correction loop.
+        self.apply_goal_presence_energy(idx, &mut energy);
 
         let node = &self.graph[idx];
         // Record energy in persistent ledger
@@ -426,6 +467,185 @@ impl SRBNOrchestrator {
         }
 
         Ok(energy)
+    }
+
+    /// PSP-8 goal-presence sensor: raise structural energy when the symbols a
+    /// node must produce are absent from its delivered output targets.
+    ///
+    /// Runs the `sdk_bridge::goal_presence_check` (perspt-coding symbol
+    /// extraction + perspt-sdk blocking residual). When required symbols are
+    /// missing it adds a strong `V_str` penalty so the node cannot be declared
+    /// stable, records the blocking residual on the SDK gate state, injects a
+    /// directed diagnostic into the correction context, and emits a log line.
+    /// It is a no-op when the node owns no code source files (e.g. a manifest or
+    /// scaffold node), declares no checkable symbols (a command or prose-only
+    /// goal), or when the goal is already satisfied, so it never invents a false
+    /// obligation.
+    fn apply_goal_presence_energy(&mut self, idx: NodeIndex, energy: &mut EnergyComponents) {
+        let node = &self.graph[idx];
+        if node.output_targets.is_empty() {
+            return;
+        }
+        let node_id = node.node_id.clone();
+        let goal = node.goal.clone();
+        let interface_signature = node.contract.interface_signature.clone();
+        let generation = node.monitor.attempt_count as u32;
+
+        // Restrict to code source files. A node that only owns a manifest
+        // (pyproject.toml, package.json, Cargo.toml) or other non-code asset has
+        // no code-symbol obligation, so the symbol sensor must not fire on it.
+        let output_targets: Vec<PathBuf> = node
+            .output_targets
+            .iter()
+            .filter(|t| is_code_source_file(t))
+            .cloned()
+            .collect();
+        if output_targets.is_empty() {
+            return;
+        }
+
+        // Read the current contents of every code output target the node owns.
+        let work_dir = self.effective_working_dir(idx);
+        let sources: Vec<String> = output_targets
+            .iter()
+            .filter_map(|target| std::fs::read_to_string(work_dir.join(target)).ok())
+            .collect();
+
+        let report = match super::sdk_bridge::goal_presence_check(
+            &node_id,
+            generation,
+            &interface_signature,
+            &goal,
+            &sources,
+        ) {
+            Ok(Some(report)) => report,
+            Ok(None) => return,
+            Err(e) => {
+                log::debug!("Goal-presence sensor skipped for '{}': {}", node_id, e);
+                return;
+            }
+        };
+
+        // Strong structural penalty so the node cannot converge while the
+        // requested work is missing (β·V_str ≫ ε for any missing symbol).
+        let penalty = 5.0 * report.missing.len() as f32;
+        energy.v_str += penalty;
+
+        let line = report.summary();
+        log::warn!("Node {}: {}", node_id, line);
+        self.emit_log(format!("🚧 {} — raising V_str by {:.1}", line, penalty));
+
+        // Inject a directed diagnostic so the correction loop tells the actuator
+        // exactly which symbols to define (build_correction_prompt reads these).
+        let missing_list = report.missing.join(", ");
+        let target_hint = output_targets
+            .first()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        self.context.last_diagnostics.push(lsp_types::Diagnostic {
+            range: lsp_types::Range::default(),
+            severity: Some(lsp_types::DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("goal-presence".to_string()),
+            message: format!(
+                "Required symbol(s) not defined in {}: {}. The goal is not satisfied until \
+                 each is implemented.",
+                if target_hint.is_empty() { "the output" } else { &target_hint },
+                missing_list
+            ),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+
+        // Record the blocking residual on the SDK gate so it is reflected in the
+        // measured acceptance gate / telemetry as well as the orchestrator energy.
+        self.sdk_gate.record_goal_residual(report.residual);
+    }
+
+    /// PSP-8 runtime probe: run the built artifact's smoke invocations (from the
+    /// language adapter in `perspt-coding`) and translate runtime failures into
+    /// `V_log` energy + a directed-correction context. Generic across languages:
+    /// each adapter declares its own smoke invocations and output classification.
+    async fn run_runtime_smoke(
+        &mut self,
+        idx: NodeIndex,
+        work_dir: &std::path::Path,
+        energy: &mut EnergyComponents,
+    ) {
+        let owner_plugin = self.graph[idx].owner_plugin.clone();
+        let Some(lang) = super::sdk_bridge::coding_language_for(&owner_plugin) else {
+            return;
+        };
+        let node_id = self.graph[idx].node_id.clone();
+        let generation = self.graph[idx].monitor.attempt_count as u32;
+
+        let adapter = perspt_coding::lang::adapter_for(lang);
+        let invocations = adapter.smoke_invocations(work_dir);
+        if invocations.is_empty() {
+            return;
+        }
+        self.emit_log(format!(
+            "🚦 Runtime smoke: exercising {} entrypoint(s)",
+            invocations.len()
+        ));
+
+        let mut residual_total = 0usize;
+        let mut failure_report = String::new();
+        for inv in &invocations {
+            let (exit_ok, output) = Self::run_smoke_command(&inv.command, work_dir).await;
+            let residuals = adapter.classify_runtime(&node_id, generation, inv, exit_ok, &output);
+            if residuals.is_empty() {
+                self.emit_log(format!("   ✅ {}", inv.description));
+            } else {
+                residual_total += residuals.len();
+                self.emit_log(format!("   ❌ {} — runtime failure", inv.description));
+                let tail: String = output.lines().rev().take(20).collect::<Vec<_>>()
+                    .into_iter().rev().collect::<Vec<_>>().join("\n");
+                failure_report.push_str(&format!(
+                    "Runtime smoke failed: `{}` ({})\n{}\n\n",
+                    inv.command, inv.description, tail
+                ));
+                for r in residuals {
+                    self.sdk_gate.record_goal_residual(r);
+                }
+            }
+        }
+
+        if residual_total > 0 {
+            // Runtime residuals map to the Log component (behavioral failure).
+            energy.v_log += 3.0 * residual_total as f32;
+            // Feed the real runtime error into the correction context so the
+            // directed-correction path produces a Runtime fix instruction.
+            self.context.last_test_output = Some(failure_report);
+            self.emit_log(format!(
+                "🚧 Runtime smoke found {} failure(s) — raising V_log",
+                residual_total
+            ));
+        }
+    }
+
+    /// Run a single smoke shell command from `work_dir` with a timeout. Returns
+    /// `(exit_success, combined_stdout_stderr)`; a timeout/spawn error is a failure.
+    async fn run_smoke_command(command: &str, work_dir: &std::path::Path) -> (bool, String) {
+        use tokio::process::Command;
+        let child = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .current_dir(work_dir)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output();
+        match tokio::time::timeout(std::time::Duration::from_secs(120), child).await {
+            Ok(Ok(out)) => {
+                let mut combined = String::from_utf8_lossy(&out.stdout).to_string();
+                combined.push_str(&String::from_utf8_lossy(&out.stderr));
+                (out.status.success(), combined)
+            }
+            Ok(Err(e)) => (false, format!("failed to spawn smoke command: {e}")),
+            Err(_) => (false, "runtime smoke command timed out after 120s".to_string()),
+        }
     }
 
     /// PSP-5: Run plugin-driven verification for a node
@@ -1146,6 +1366,17 @@ impl SRBNOrchestrator {
 }
 
 /// Convert diagnostic severity to string
+/// Whether a path is a code source file the goal-presence symbol sensor
+/// understands (Rust / Python / TypeScript / JavaScript). Manifests, configs,
+/// data, and docs are excluded so a scaffold/manifest node carries no
+/// code-symbol obligation.
+fn is_code_source_file(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("rs" | "py" | "pyi" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs")
+    )
+}
+
 pub(super) fn severity_to_str(severity: Option<lsp_types::DiagnosticSeverity>) -> &'static str {
     match severity {
         Some(lsp_types::DiagnosticSeverity::ERROR) => "ERROR",
