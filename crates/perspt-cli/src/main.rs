@@ -141,6 +141,12 @@ enum Commands {
         /// Port for the embedded dashboard server (default: 3000)
         #[arg(long, default_value = "3000")]
         dashboard_port: u16,
+
+        /// Package manager for greenfield project init, interpreted by the
+        /// language plugin: Python → uv (default), poetry, pdm, pipenv;
+        /// JS → npm (default), pnpm, yarn. Unknown values use the plugin default.
+        #[arg(long, visible_alias = "python-package-manager")]
+        package_manager: Option<String>,
     },
 
     /// Initialize project memory and policy rules
@@ -300,6 +306,7 @@ async fn main() -> Result<()> {
             output_plan,
             dashboard,
             dashboard_port,
+            package_manager,
         }) => {
             commands::agent::run(
                 task,
@@ -327,6 +334,7 @@ async fn main() -> Result<()> {
                 max_steps,
                 dashboard,
                 dashboard_port,
+                package_manager,
                 config_override,
             )
             .await

@@ -53,6 +53,7 @@ pub async fn run(
     max_steps: usize,
     dashboard: bool,
     dashboard_port: u16,
+    package_manager: Option<String>,
     config_override: Option<PathBuf>,
 ) -> Result<()> {
     let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
@@ -177,6 +178,10 @@ pub async fn run(
         };
         orchestrator.set_budget(max_s, None, max_c);
     }
+
+    // Greenfield package manager: CLI flag wins, else config; the active
+    // language plugin maps it (default uv for Python, npm for JS).
+    orchestrator.set_package_manager(package_manager.or_else(|| config.package_manager.clone()));
 
     // PSP-5 Phase 8: Wire stability threshold from CLI flag
     orchestrator.stability_epsilon = stability_threshold;
