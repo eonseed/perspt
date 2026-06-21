@@ -8,13 +8,15 @@
 //! The result is surfaced as telemetry so a real coding run exercises — and
 //! shows — the SDK energy, gate decision, and finite-decision bound.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
-use perspt_coding::CodingDomain;
+use perspt_coding::lang::adapter_for;
+use perspt_coding::{defined_symbols, expected_symbols, CodingDomain, CodingLanguage};
 use perspt_core::types::{SensorStatus, VerificationResult};
 use perspt_sdk::{
-    self as sdk, score_candidate, AgentDomainPackage, DomainScope, EnergyModel, GateDecision,
-    IndependenceRoute, ResidualClass, ResidualEvent, ResidualSeverity, SensorRef,
+    self as sdk, goal_presence_residual, score_candidate, AgentDomainPackage, DomainScope,
+    EnergyModel, GateDecision, GoalSpec, IndependenceRoute, ResidualClass, ResidualEvent,
+    ResidualSeverity, SensorRef,
 };
 
 /// Per-node accepted-energy tracking plus the shared coding energy model.
@@ -71,6 +73,132 @@ impl SdkGateReport {
     }
 }
 
+/// Outcome of the PSP-8 goal-presence sensor: which required symbols are absent
+/// from the node's delivered work, and the blocking residual that records it.
+#[derive(Debug, Clone)]
+pub struct GoalPresenceReport {
+    /// Symbol names the node was required to define but did not.
+    pub missing: Vec<String>,
+    /// The blocking `SymbolMismatch` residual for the absence.
+    pub residual: ResidualEvent,
+}
+
+impl GoalPresenceReport {
+    /// A compact, human-readable telemetry line.
+    pub fn summary(&self) -> String {
+        format!(
+            "goal-presence FAIL: {} required symbol(s) absent: {}",
+            self.missing.len(),
+            self.missing.join(", ")
+        )
+    }
+}
+
+/// Run the PSP-8 goal-presence sensor for a coding node.
+///
+/// Extracts the symbols the node is required to produce (from its contract's
+/// interface signature and its goal text) and the symbols actually defined in
+/// the delivered `sources`, then asks the SDK sensor whether any required symbol
+/// is missing. Returns `None` when the goal declares no checkable symbols or is
+/// satisfied — the sensor never invents an obligation, so a node whose success
+/// cannot be expressed as named symbols is left to the other verifiers.
+///
+/// This is the verifier that refuses *false stability*: an empty or placeholder
+/// file compiles with `V = 0`, but if the requested symbol is absent the sensor
+/// emits a blocking residual so the node cannot be accepted.
+pub fn goal_presence_check(
+    node_id: &str,
+    generation: u32,
+    interface_signature: &str,
+    goal: &str,
+    sources: &[String],
+) -> sdk::Result<Option<GoalPresenceReport>> {
+    let expected = expected_symbols(interface_signature, goal);
+    if expected.is_empty() {
+        return Ok(None);
+    }
+    let spec = GoalSpec::new(node_id, expected);
+
+    let mut observed: BTreeSet<String> = BTreeSet::new();
+    for source in sources {
+        observed.extend(defined_symbols(source));
+    }
+
+    match goal_presence_residual(&spec, generation, &observed)? {
+        Some(residual) => {
+            let missing = residual
+                .affected_symbols
+                .iter()
+                .map(|s| s.name.clone())
+                .collect();
+            Ok(Some(GoalPresenceReport { missing, residual }))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Map an orchestrator plugin name to a `perspt-coding` language adapter.
+pub fn coding_language_for(owner_plugin: &str) -> Option<CodingLanguage> {
+    match owner_plugin.to_ascii_lowercase().as_str() {
+        "rust" => Some(CodingLanguage::Rust),
+        "python" => Some(CodingLanguage::Python),
+        "typescript" | "javascript" | "ts" | "js" => Some(CodingLanguage::TypeScript),
+        _ => None,
+    }
+}
+
+/// SRBN residual-directed corrections (PSP-8 / Paper II): parse raw verifier
+/// output for the node's language into typed residuals and return the dominant,
+/// *directed* correction instructions — one per residual class, in first-seen
+/// order, capped. Returns an empty vec for unknown languages or when no residual
+/// maps to a direction, so callers can treat it as additive enrichment.
+pub fn directed_corrections(
+    owner_plugin: &str,
+    node_id: &str,
+    raw_output: &str,
+) -> Vec<(ResidualClass, String)> {
+    let Some(lang) = coding_language_for(owner_plugin) else {
+        return Vec::new();
+    };
+    if raw_output.trim().is_empty() {
+        return Vec::new();
+    }
+    let adapter = adapter_for(lang);
+    let mut residuals = adapter.parse_diagnostics(node_id, 0, raw_output);
+
+    // Runtime crashes (panics/tracebacks) are not compiler/test diagnostics, so
+    // parse_diagnostics misses them — detect them here so a runtime smoke failure
+    // also yields a directed Runtime fix.
+    if let Some(line) = perspt_coding::crash_marker(raw_output) {
+        if let Some(r) = perspt_coding::runtime::runtime_residual(node_id, 0, line) {
+            residuals.push(r);
+        }
+    } else if let Some(tok) = perspt_coding::runtime::numeric_anomaly(raw_output) {
+        if let Some(r) = perspt_coding::runtime::runtime_residual(
+            node_id,
+            0,
+            format!("numeric anomaly ({tok}) in output"),
+        ) {
+            residuals.push(r);
+        }
+    }
+
+    let mut seen: BTreeSet<ResidualClass> = BTreeSet::new();
+    let mut out: Vec<(ResidualClass, String)> = Vec::new();
+    for residual in &residuals {
+        if !seen.insert(residual.class) {
+            continue; // one direction per dominant class
+        }
+        if let Some(direction) = adapter.correction_for(residual) {
+            out.push((residual.class, direction.instruction));
+        }
+        if out.len() >= 5 {
+            break;
+        }
+    }
+    out
+}
+
 impl Default for SdkGateState {
     fn default() -> Self {
         Self::new()
@@ -86,6 +214,29 @@ impl SdkGateState {
             best_accepted: HashMap::new(),
             baseline: HashMap::new(),
         }
+    }
+
+    /// Record a blocking goal-presence residual on the SDK gate channel.
+    ///
+    /// The orchestrator's `V_str` penalty is what enforces non-convergence; this
+    /// surfaces the canonical PSP-8 residual (class, score, component, affected
+    /// symbols) so the measured-gate telemetry reflects exactly why the node is
+    /// not stable.
+    pub fn record_goal_residual(&self, residual: ResidualEvent) {
+        log::info!(
+            target: "perspt::sdk_gate",
+            "SDK goal-presence residual: node={} class={:?} component={:?} score={} symbols=[{}]",
+            residual.node_id,
+            residual.class,
+            residual.component,
+            residual.score,
+            residual
+                .affected_symbols
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
     }
 
     /// Translate a concrete verification result into SDK residual events.
@@ -341,5 +492,80 @@ mod tests {
         }];
         let residuals = SdkGateState::residuals_from("n1", 0, &vr);
         assert!(residuals.iter().any(|r| r.class == ResidualClass::SensorUnavailable));
+    }
+
+    #[test]
+    fn goal_presence_flags_unwritten_function() {
+        // Placeholder file, goal asks for `is_even` — the no-op false-stability case.
+        let report = goal_presence_check(
+            "n1",
+            0,
+            "pub fn is_even(n: i32) -> bool",
+            "Add is_even(n) returning true for even n.",
+            &["// implement here\n".to_string()],
+        )
+        .unwrap()
+        .expect("missing symbol must be flagged");
+        assert_eq!(report.missing, vec!["is_even"]);
+        assert_eq!(report.residual.class, ResidualClass::SymbolMismatch);
+        assert_eq!(report.residual.severity, ResidualSeverity::Blocking);
+    }
+
+    #[test]
+    fn goal_presence_passes_when_symbol_defined() {
+        let report = goal_presence_check(
+            "n1",
+            0,
+            "pub fn multiply(a: i32, b: i32) -> i32",
+            "Add `multiply`.",
+            &["pub fn multiply(a: i32, b: i32) -> i32 { a * b }\n".to_string()],
+        )
+        .unwrap();
+        assert!(report.is_none());
+    }
+
+    #[test]
+    fn directed_corrections_rust_import_and_symbol() {
+        let raw = "error[E0432]: unresolved import `crate::foo::Bar`\n\
+                   error[E0425]: cannot find value `baz` in this scope";
+        let dirs = directed_corrections("rust", "n1", raw);
+        assert!(!dirs.is_empty());
+        assert!(dirs.iter().any(|(c, _)| *c == ResidualClass::ImportGraph));
+        assert!(dirs.iter().any(|(c, _)| *c == ResidualClass::SymbolMismatch));
+        // The directions carry specific, actionable instructions.
+        assert!(dirs.iter().any(|(_, i)| i.contains("use") || i.contains("import")));
+    }
+
+    #[test]
+    fn directed_corrections_python_failure() {
+        let raw = "test_x.py::test_add FAILED\nE   ModuleNotFoundError: No module named 'requests'";
+        let dirs = directed_corrections("python", "n1", raw);
+        assert!(!dirs.is_empty());
+    }
+
+    #[test]
+    fn directed_corrections_detects_runtime_crash() {
+        // A panic in the (runtime-smoke) output must yield a Runtime fix even
+        // though it is not a compiler/test diagnostic.
+        let raw = "Running `target/debug/cli predict`\nthread 'main' panicked at src/main.rs:42:9:\nInput tensor size does not match model weights";
+        let dirs = directed_corrections("rust", "n1", raw);
+        assert!(dirs.iter().any(|(c, _)| *c == ResidualClass::Runtime));
+        assert!(dirs.iter().any(|(_, i)| i.contains("runtime")));
+    }
+
+    #[test]
+    fn directed_corrections_unknown_language_is_empty() {
+        assert!(directed_corrections("haskell", "n1", "some error").is_empty());
+        // Empty input → no directions even for a known language.
+        assert!(directed_corrections("rust", "n1", "   ").is_empty());
+    }
+
+    #[test]
+    fn goal_presence_silent_without_declared_symbols() {
+        // A prose-only goal with no contract signature declares no obligation.
+        let report =
+            goal_presence_check("n1", 0, "", "Improve the documentation.", &["".to_string()])
+                .unwrap();
+        assert!(report.is_none());
     }
 }

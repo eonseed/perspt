@@ -54,8 +54,56 @@ pub enum ApprovalResult {
 pub enum NodeOutcome {
     /// Node converged and committed successfully.
     Completed,
-    /// Node failed to converge and was escalated.
+    /// Node failed to converge and was escalated (terminal).
     Escalated,
+    /// A repair/rewrite was applied (node set back to Retry, or split/interface/
+    /// replan inserted new work). The node is NOT terminal — the control loop
+    /// should re-evaluate the graph and re-run the affected node(s) next round.
+    Reworked,
+}
+
+/// Decision taken when the control loop "settles" (no runnable node remains).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettleDecision {
+    /// The user's overall goal is judged achieved — finish with success.
+    Achieved,
+    /// The plan was amended (new nodes queued) — keep looping.
+    Replanned,
+    /// Stop the loop (goal not achievable within bounds, or not in auto mode).
+    Stop,
+}
+
+/// Bookkeeping for the goal-driven re-plan loop, threaded through the control
+/// loop so no orchestrator field is needed. Bounds re-planning by a revision
+/// count and a progress (Φ / completed-count) non-regression check.
+#[derive(Debug, Clone)]
+struct ReplanState {
+    /// Number of architect amendments applied so far.
+    count: usize,
+    /// Maximum amendments allowed (from the FeatureCharter revision budget).
+    max: usize,
+    /// Completed-node count at the previous re-plan, to detect non-progress.
+    last_completed: usize,
+    /// Workflow potential Φ at the previous settle, to detect non-regression.
+    last_phi: Option<f64>,
+}
+
+impl ReplanState {
+    fn new(max: usize) -> Self {
+        Self { count: 0, max, last_completed: 0, last_phi: None }
+    }
+}
+
+/// Tolerantly parse a [`perspt_core::types::GoalVerdict`] from a model response
+/// by extracting the outermost `{ ... }` JSON object. Returns `None` if no valid
+/// object is found.
+fn parse_goal_verdict(resp: &str) -> Option<perspt_core::types::GoalVerdict> {
+    let start = resp.find('{')?;
+    let end = resp.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str(&resp[start..=end]).ok()
 }
 
 /// The SRBN Orchestrator - manages the agent workflow
@@ -124,6 +172,10 @@ pub struct SRBNOrchestrator {
     budget: perspt_core::types::BudgetEnvelope,
     /// Adaptive planning policy for agent phase selection.
     pub planning_policy: perspt_core::PlanningPolicy,
+    /// Preferred package manager for greenfield project init. Plugin-driven:
+    /// fed verbatim into `InitOptions.package_manager`; each language plugin maps
+    /// it to its own init command and default (Python → uv, JS → npm).
+    pub package_manager: Option<String>,
     /// Session-level stability threshold (ε for V(x) < ε convergence)
     pub stability_epsilon: f32,
     /// Energy weight α (syntax/build errors)
@@ -454,6 +506,7 @@ impl SRBNOrchestrator {
             blocked_dependencies: Vec::new(),
             budget: perspt_core::types::BudgetEnvelope::new("pending"),
             planning_policy: perspt_core::PlanningPolicy::default(),
+            package_manager: None,
             stability_epsilon: 0.1,
             energy_alpha: 1.0,
             energy_beta: 0.5,
@@ -517,6 +570,7 @@ impl SRBNOrchestrator {
             blocked_dependencies: Vec::new(),
             budget: perspt_core::types::BudgetEnvelope::new("test"),
             planning_policy: perspt_core::PlanningPolicy::default(),
+            package_manager: None,
             stability_epsilon: 0.1,
             energy_alpha: 1.0,
             energy_beta: 0.5,
@@ -583,6 +637,14 @@ impl SRBNOrchestrator {
         self.budget.max_steps = max_steps;
         self.budget.max_revisions = max_revisions;
         self.budget.max_cost_usd = max_cost_usd;
+    }
+
+    /// Set the preferred package manager for greenfield project init. The value
+    /// is interpreted by the active language plugin (e.g. Python → uv/poetry/pdm/
+    /// pipenv, JS → npm/pnpm/yarn); an unrecognized value falls back to the
+    /// plugin's default.
+    pub fn set_package_manager(&mut self, pm: Option<String>) {
+        self.package_manager = pm;
     }
 
     // =========================================================================
@@ -933,6 +995,14 @@ impl SRBNOrchestrator {
                 }
                 Ok(NodeOutcome::Escalated) => {
                     escalated += 1;
+                    self.budget.record_step();
+                    continue;
+                }
+                Ok(NodeOutcome::Reworked) => {
+                    // A repair was applied during resume; the node is left
+                    // non-terminal (Retry). Record the step and move on — a
+                    // subsequent resume picks it up. The full closed loop runs in
+                    // run_orchestration, not the resume fast-path.
                     self.budget.record_step();
                     continue;
                 }
@@ -1298,7 +1368,7 @@ impl SRBNOrchestrator {
         // Gate architect planning on policy: LocalEdit skips the architect
         // and creates a single-node deterministic graph directly.
         if self.planning_policy.needs_architect() {
-            self.step_sheafify(task).await?;
+            self.step_sheafify(task.clone()).await?;
         } else {
             self.emit_log("📐 LocalEdit policy — skipping architect, single-node plan".to_string());
             self.create_deterministic_fallback_graph(&task)?;
@@ -1327,49 +1397,89 @@ impl SRBNOrchestrator {
             }
         }
 
-        // Step 2-7: Execute nodes in topological order
-        let topo = Topo::new(&self.graph);
-        let indices: Vec<_> = topo.iter(&self.graph).collect();
-        let total_nodes = indices.len();
+        // Step 2-7: Closed-loop ("fly-by-wire") execution.
+        //
+        // Instead of walking a frozen topological snapshot once, re-evaluate the
+        // mutable work graph each round and run the next *ready* node. This lets
+        // repair/rewrite actions (Retry, split, interface, replan) and goal-driven
+        // re-plan amendments actually take effect: a reworked node is re-picked,
+        // and newly inserted nodes are executed. When the ready set empties the
+        // loop "settles" and the goal-completion gate decides whether the user's
+        // intent is met, the plan should be amended, or the loop should stop.
         let mut completed_count: usize = 0;
         let mut escalated_count: usize = 0;
+        let mut goal_achieved = false;
 
-        for (i, idx) in indices.iter().enumerate() {
-            // Abort gate: stop execution if abort was requested.
+        // Infinite-loop backstop: bound total rounds by plan size and the allowed
+        // number of re-plan revisions. The per-step budget is the primary bound;
+        // this is a hard ceiling so the controller can never spin forever.
+        let max_revisions = self
+            .ledger
+            .get_feature_charter()
+            .ok()
+            .flatten()
+            .and_then(|c| c.max_revisions)
+            .unwrap_or(5) as usize;
+        let max_rounds = (self.graph.node_count() + 1) * (max_revisions + 2) + 16;
+        let mut replan_state = ReplanState::new(max_revisions);
+
+        // Per-node rework guard: a node that keeps reworking without reaching a
+        // terminal state is force-escalated so it cannot stall the loop.
+        const MAX_REWORKS_PER_NODE: usize = 6;
+        let mut rework_counts: HashMap<NodeIndex, usize> = HashMap::new();
+
+        let mut round: usize = 0;
+        loop {
+            round += 1;
+            if round > max_rounds {
+                log::warn!("Control loop reached round cap ({max_rounds}) — stopping");
+                self.emit_log(format!(
+                    "⛔ Control loop reached round cap ({max_rounds}) — stopping"
+                ));
+                break;
+            }
+
+            // Abort gate.
             if self.is_abort_requested() {
                 self.emit_log("⚠️ Session aborted — stopping execution".to_string());
                 break;
             }
-
-            // Budget gate: stop execution if step/cost/revision budget exhausted.
+            // Budget gate (steps / cost / revisions).
             if self.budget.any_exhausted() {
-                let node_id = self.graph[*idx].node_id.clone();
-                self.emit_log(format!(
-                    "⛔ Budget exhausted — skipping node '{}' and remaining nodes",
-                    node_id
-                ));
-                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
-                    node_id,
-                    status: perspt_core::NodeStatus::Escalated,
-                });
+                self.emit_log("⛔ Budget exhausted — stopping execution".to_string());
                 break;
             }
 
-            // PSP-5 Phase 6: Check if node is blocked on a parent interface seal.
-            // In the current sequential topo-order execution this should not fire
-            // (parents commit before children), but it establishes the gating
-            // contract for when speculative parallelism is introduced later.
-            if self.check_seal_prerequisites(*idx) {
-                log::warn!(
-                    "Node {} blocked on seal prerequisite — skipping in this iteration",
-                    self.graph[*idx].node_id
-                );
-                continue;
-            }
+            // Pick the next runnable node (deps satisfied, not seal-blocked).
+            let idx = match self.next_ready_node() {
+                Some(idx) => idx,
+                None => {
+                    // Settle: nothing runnable. Decide whether the goal is met,
+                    // the plan should be amended, or we stop.
+                    match self.evaluate_goal_completion(&task, &mut replan_state).await {
+                        SettleDecision::Achieved => {
+                            goal_achieved = true;
+                            break;
+                        }
+                        SettleDecision::Replanned => {
+                            // Amendment added new ready work — keep looping.
+                            continue;
+                        }
+                        SettleDecision::Stop => break,
+                    }
+                }
+            };
 
-            // PSP-5: Emit NodeSelected event before execution
-            if let Some(node) = self.graph.node_weight(*idx) {
-                self.emit_log(format!("📝 [{}/{}] {}", i + 1, total_nodes, node.goal));
+            // Emit selection events. Progress is over the *current* node count,
+            // which can grow as the plan is amended.
+            let total_nodes = self.graph.node_count();
+            if let Some(node) = self.graph.node_weight(idx) {
+                self.emit_log(format!(
+                    "📝 [{}/{}] {}",
+                    completed_count + 1,
+                    total_nodes,
+                    node.goal
+                ));
                 self.emit_event(perspt_core::AgentEvent::NodeSelected {
                     node_id: node.node_id.clone(),
                     goal: node.goal.clone(),
@@ -1381,76 +1491,88 @@ impl SRBNOrchestrator {
                 });
             }
 
-            match self.execute_node(*idx).await {
+            let outcome = self.execute_node(idx).await;
+            // Every dispatch consumes a step, so the per-step budget bounds the
+            // closed loop regardless of how many reworks occur.
+            self.budget.record_step();
+            self.emit_event(perspt_core::AgentEvent::BudgetUpdated {
+                steps_used: self.budget.steps_used,
+                max_steps: self.budget.max_steps,
+                cost_used_usd: self.budget.cost_used_usd,
+                max_cost_usd: self.budget.max_cost_usd,
+                revisions_used: self.budget.revisions_used,
+                max_revisions: self.budget.max_revisions,
+            });
+            if let Err(e) = self.ledger.upsert_budget_envelope(&self.budget) {
+                log::warn!("Failed to persist budget envelope: {}", e);
+            }
+
+            match outcome {
                 Ok(NodeOutcome::Completed) => {
                     completed_count += 1;
-
-                    // Record step in budget envelope
-                    self.budget.record_step();
-
-                    // Emit budget status after each step
-                    self.emit_event(perspt_core::AgentEvent::BudgetUpdated {
-                        steps_used: self.budget.steps_used,
-                        max_steps: self.budget.max_steps,
-                        cost_used_usd: self.budget.cost_used_usd,
-                        max_cost_usd: self.budget.max_cost_usd,
-                        revisions_used: self.budget.revisions_used,
-                        max_revisions: self.budget.max_revisions,
-                    });
-
-                    // Persist budget envelope to store for auditability.
-                    if let Err(e) = self.ledger.upsert_budget_envelope(&self.budget) {
-                        log::warn!("Failed to persist budget envelope: {}", e);
-                    }
-
-                    // Emit completed status
-                    if let Some(node) = self.graph.node_weight(*idx) {
+                    if let Some(node) = self.graph.node_weight(idx) {
                         self.emit_event(perspt_core::AgentEvent::NodeCompleted {
                             node_id: node.node_id.clone(),
                             goal: node.goal.clone(),
                         });
                     }
                 }
+                Ok(NodeOutcome::Reworked) => {
+                    // A repair was applied; the node is back in Retry (or replaced
+                    // by inserted nodes). Bound per-node reworks so a node that
+                    // never converges is force-escalated instead of stalling.
+                    let count = rework_counts.entry(idx).or_insert(0);
+                    *count += 1;
+                    if *count > MAX_REWORKS_PER_NODE {
+                        let node_id = self.graph[idx].node_id.clone();
+                        log::warn!(
+                            "Node {node_id} exceeded rework limit ({MAX_REWORKS_PER_NODE}) — escalating"
+                        );
+                        self.emit_log(format!(
+                            "⛔ Node {node_id} exceeded rework limit — escalating"
+                        ));
+                        self.graph[idx].state = NodeState::Escalated;
+                        escalated_count += 1;
+                        self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                            node_id,
+                            status: perspt_core::NodeStatus::Escalated,
+                        });
+                    }
+                    // Otherwise leave the node in its repair-assigned state so the
+                    // next round re-picks it (or runs the newly inserted nodes).
+                }
                 Ok(NodeOutcome::Escalated) => {
                     escalated_count += 1;
-                    self.budget.record_step();
-
-                    // Do NOT emit NodeCompleted — the node was escalated, not completed.
-                    if let Some(node) = self.graph.node_weight(*idx) {
+                    if let Some(node) = self.graph.node_weight(idx) {
                         self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                             node_id: node.node_id.clone(),
                             status: perspt_core::NodeStatus::Escalated,
                         });
                     }
-                    continue;
                 }
                 Err(e) => {
                     escalated_count += 1;
-                    let node_id = self.graph[*idx].node_id.clone();
+                    let node_id = self.graph[idx].node_id.clone();
                     eprintln!("[SRBN-DIAG] Node {} failed: {:#}", node_id, e);
                     log::error!("Node {} failed: {}", node_id, e);
                     self.emit_log(format!("❌ Node {} failed: {}", node_id, e));
 
-                    // Flush the node's provisional branch so sandbox files
-                    // don't leak. Without this, files written to the sandbox
-                    // are lost when step_commit/step_sheaf_validate fails
-                    // before merge.
-                    if let Some(bid) = self.graph[*idx].provisional_branch_id.clone() {
+                    // Flush the node's provisional branch so sandbox files don't leak.
+                    if let Some(bid) = self.graph[idx].provisional_branch_id.clone() {
                         self.flush_provisional_branch(&bid, &node_id);
                     }
-                    self.flush_descendant_branches(*idx);
+                    self.flush_descendant_branches(idx);
 
-                    self.graph[*idx].state = NodeState::Escalated;
+                    self.graph[idx].state = NodeState::Escalated;
                     self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
                         node_id: node_id.clone(),
                         status: perspt_core::NodeStatus::Escalated,
                     });
-                    // Continue to next node instead of stopping all execution
-                    continue;
                 }
             }
         }
 
+        let total_nodes = self.graph.node_count();
         log::info!("SRBN execution completed");
 
         // PSP-5 Phase 6: Clean up all session sandboxes
@@ -1461,10 +1583,12 @@ impl SRBNOrchestrator {
             log::warn!("Failed to clean up session sandboxes: {}", e);
         }
 
-        // Derive session outcome from actual node results.
-        // If not all nodes were attempted (due to budget/abort), only Success
-        // when every node in the plan completed.
-        let outcome = if escalated_count == 0 && completed_count >= total_nodes {
+        // Derive session outcome. Success requires either an explicit goal
+        // verdict (auto mode) or — when the goal gate did not run — every node
+        // completing with no escalations.
+        let all_completed_no_escalation =
+            escalated_count == 0 && completed_count >= total_nodes && total_nodes > 0;
+        let outcome = if goal_achieved || all_completed_no_escalation {
             perspt_core::SessionOutcome::Success
         } else if completed_count > 0 {
             perspt_core::SessionOutcome::PartialSuccess
@@ -1479,6 +1603,258 @@ impl SRBNOrchestrator {
             ),
         });
         Ok(outcome)
+    }
+
+    /// Pick the next runnable node for the closed control loop.
+    ///
+    /// A node is *ready* when its state is `TaskQueued` or `Retry`, every
+    /// dependency parent has `Completed`, and it is not blocked on an interface
+    /// seal prerequisite. Candidates are returned in ascending `NodeIndex`
+    /// order, which preserves the original topological order for the common
+    /// linear DAG while also re-picking reworked nodes and newly inserted ones.
+    fn next_ready_node(&mut self) -> Option<NodeIndex> {
+        let mut candidates: Vec<NodeIndex> = self
+            .graph
+            .node_indices()
+            .filter(|&idx| {
+                matches!(
+                    self.graph[idx].state,
+                    NodeState::TaskQueued | NodeState::Retry
+                )
+            })
+            .filter(|&idx| {
+                self.graph
+                    .neighbors_directed(idx, petgraph::Direction::Incoming)
+                    .all(|parent| self.graph[parent].state == NodeState::Completed)
+            })
+            .collect();
+        candidates.sort();
+
+        for idx in candidates {
+            // check_seal_prerequisites takes &mut self (it may emit events), so
+            // evaluate candidates one at a time after the immutable scan.
+            if self.check_seal_prerequisites(idx) {
+                continue;
+            }
+            return Some(idx);
+        }
+        None
+    }
+
+    /// Decide what to do when the control loop settles (no runnable node).
+    ///
+    /// Phase A provides the deterministic settle: the goal is "achieved" when
+    /// every node completed with no escalations. Phase B extends this into the
+    /// full hybrid gate (verifier LLM verdict + architect re-plan amendment).
+    /// Hybrid goal-completion gate (PSP-8 closed loop).
+    ///
+    /// Runs when the work graph settles. In auto mode: a cheap deterministic
+    /// pre-gate (all nodes completed, none escalated) must pass before a
+    /// verifier-tier LLM is asked for a structured `GoalVerdict`; an unmet goal
+    /// triggers a bounded architect re-plan amendment. In interactive mode it
+    /// never auto-amends — achieved iff the deterministic gate passes.
+    async fn evaluate_goal_completion(
+        &mut self,
+        task: &str,
+        state: &mut ReplanState,
+    ) -> SettleDecision {
+        let completed = self.count_in_state(NodeState::Completed);
+        let escalated = self.count_in_state(NodeState::Escalated);
+        let total = self.graph.node_count();
+        let phi = self.workflow_phi();
+
+        // Telemetry: Φ is the progress / "altitude" indicator for the loop.
+        log::info!(
+            target: "perspt::sdk_gate",
+            "settle: completed={completed}/{total} escalated={escalated} Φ={phi:.2} replans={}/{}",
+            state.count, state.max
+        );
+        self.emit_log(format!(
+            "📐 settle: {completed}/{total} done, {escalated} escalated, Φ={phi:.2} (replans {}/{})",
+            state.count, state.max
+        ));
+
+        let det = self.deterministic_goal_gate();
+
+        // Interactive mode: do not auto-amend the plan.
+        if !self.auto_approve {
+            return if det {
+                SettleDecision::Achieved
+            } else {
+                SettleDecision::Stop
+            };
+        }
+
+        if det {
+            // Cheap gate passed → confirm with the verifier LLM verdict.
+            match self.goal_verdict(task).await {
+                Some(v) if v.achieved => {
+                    self.emit_log("✅ Goal verdict: achieved".to_string());
+                    SettleDecision::Achieved
+                }
+                Some(v) => {
+                    self.emit_log(format!(
+                        "🛠️ Goal not yet met — missing: {}",
+                        v.missing.join("; ")
+                    ));
+                    self.try_replan(task, &v.missing, completed, phi, state).await
+                }
+                None => {
+                    // Verdict unavailable (LLM error): trust deterministic completion.
+                    log::warn!("Goal verdict unavailable — accepting deterministic completion");
+                    SettleDecision::Achieved
+                }
+            }
+        } else {
+            // Some nodes escalated/incomplete. Try to route around the gap.
+            let missing = self.collect_unmet_summary();
+            self.try_replan(task, &missing, completed, phi, state).await
+        }
+    }
+
+    /// Attempt a bounded architect re-plan amendment toward the goal.
+    async fn try_replan(
+        &mut self,
+        task: &str,
+        missing: &[String],
+        completed: usize,
+        phi: f64,
+        state: &mut ReplanState,
+    ) -> SettleDecision {
+        if state.count >= state.max {
+            self.emit_log(format!(
+                "⛔ Re-plan budget exhausted ({}/{}) — stopping",
+                state.count, state.max
+            ));
+            return SettleDecision::Stop;
+        }
+        if self.budget.any_exhausted() {
+            return SettleDecision::Stop;
+        }
+        // Progress non-regression: after the first amendment, require that the
+        // previous one actually advanced (more completed nodes, or Φ decreased).
+        if state.count > 0 {
+            let progressed = completed > state.last_completed
+                || state.last_phi.map(|p| phi < p - 1e-6).unwrap_or(true);
+            if !progressed {
+                self.emit_log(
+                    "⛔ Re-plan made no progress (Φ/completed not improving) — stopping".to_string(),
+                );
+                return SettleDecision::Stop;
+            }
+        }
+
+        match self.amend_plan_for_goal(task, missing).await {
+            Ok(n) if n > 0 => {
+                state.count += 1;
+                state.last_completed = completed;
+                state.last_phi = Some(phi);
+                self.emit_log(format!(
+                    "🗺️ Re-planned: +{n} task(s) toward the goal (revision {}/{})",
+                    state.count, state.max
+                ));
+                SettleDecision::Replanned
+            }
+            Ok(_) => {
+                self.emit_log("⚠️ Amendment produced no new tasks — stopping".to_string());
+                SettleDecision::Stop
+            }
+            Err(e) => {
+                log::warn!("Plan amendment failed: {e}");
+                self.emit_log(format!("⚠️ Plan amendment failed: {e}"));
+                SettleDecision::Stop
+            }
+        }
+    }
+
+    /// Deterministic pre-gate: every node is `Completed`, none escalated, and
+    /// there is at least one node. The cheap condition that must hold before any
+    /// LLM goal verdict.
+    fn deterministic_goal_gate(&self) -> bool {
+        let mut any = false;
+        for idx in self.graph.node_indices() {
+            any = true;
+            if self.graph[idx].state != NodeState::Completed {
+                return false;
+            }
+        }
+        any
+    }
+
+    /// Count nodes currently in a given state.
+    fn count_in_state(&self, state: NodeState) -> usize {
+        self.graph
+            .node_indices()
+            .filter(|&i| self.graph[i].state == state)
+            .count()
+    }
+
+    /// Workflow potential Φ (SDK `observability::phi`) over the live graph:
+    /// total residual energy + remaining step budget. Lower energy = closer to
+    /// the goal manifold; used as the loop's progress indicator.
+    fn workflow_phi(&self) -> f64 {
+        // Nodes that never recorded energy report `current_energy() == INFINITY`
+        // ("unknown"); exclude those so Φ reflects the known residual backlog
+        // rather than collapsing to infinity.
+        let accepted_energy: f64 = self
+            .graph
+            .node_indices()
+            .map(|i| self.graph[i].monitor.current_energy() as f64)
+            .filter(|e| e.is_finite())
+            .sum();
+        let remaining = match self.budget.max_steps {
+            Some(m) => m.saturating_sub(self.budget.steps_used),
+            None => 0,
+        };
+        perspt_sdk::phi(accepted_energy, 0.5, remaining)
+    }
+
+    /// Goals of nodes that did not complete, used to seed a re-plan amendment.
+    fn collect_unmet_summary(&self) -> Vec<String> {
+        self.graph
+            .node_indices()
+            .filter(|&i| self.graph[i].state != NodeState::Completed)
+            .map(|i| format!("{}: {}", self.graph[i].node_id, self.graph[i].goal))
+            .collect()
+    }
+
+    /// Ask the verifier-tier model whether the user's overall goal is achieved.
+    /// Returns `None` on any LLM/parse failure (caller decides the fallback).
+    async fn goal_verdict(&mut self, task: &str) -> Option<perspt_core::types::GoalVerdict> {
+        let tree = crate::tools::list_sandbox_files(&self.context.working_dir)
+            .ok()
+            .filter(|t| !t.is_empty())
+            .map(|t| t.join("\n"));
+
+        // Key file contents: the output targets the plan produced (capped).
+        let mut files: Vec<(String, String)> = Vec::new();
+        'outer: for idx in self.graph.node_indices() {
+            for target in &self.graph[idx].output_targets {
+                let path = self.context.working_dir.join(target);
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    files.push((target.to_string_lossy().to_string(), content));
+                    if files.len() >= 12 {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some(task.to_string()),
+            project_file_tree: tree,
+            existing_file_contents: files,
+            build_test_output: self.context.last_test_output.clone(),
+            ..Default::default()
+        };
+        let prompt = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::GoalCompletionCheck,
+            &ev,
+        )
+        .text;
+        let model = self.verifier_model.clone();
+        let resp = self.call_llm_with_logging(&model, &prompt, None).await.ok()?;
+        parse_goal_verdict(&resp)
     }
 
     /// Execute a single node through the control loop
@@ -1598,19 +1974,30 @@ impl SRBNOrchestrator {
                 // Apply the chosen repair action or escalate to user
                 let applied = self.apply_repair_action(idx, &action).await;
 
-                if !applied {
-                    self.graph[idx].state = NodeState::Escalated;
-                    self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
-                        node_id: self.graph[idx].node_id.clone(),
-                        status: perspt_core::NodeStatus::Escalated,
-                    });
-                    log::warn!(
-                        "Node {} escalated to user: {} → {}",
+                if applied {
+                    // The repair mutated the graph (node set to Retry, or new
+                    // nodes inserted). Signal the control loop to re-evaluate and
+                    // re-run the affected work rather than treating it as terminal.
+                    log::info!(
+                        "Node {} reworked via {}: {} — will re-evaluate",
                         self.graph[idx].node_id,
-                        category,
-                        action
+                        action,
+                        category
                     );
+                    return Ok(NodeOutcome::Reworked);
                 }
+
+                self.graph[idx].state = NodeState::Escalated;
+                self.emit_event(perspt_core::AgentEvent::TaskStatusChanged {
+                    node_id: self.graph[idx].node_id.clone(),
+                    status: perspt_core::NodeStatus::Escalated,
+                });
+                log::warn!(
+                    "Node {} escalated to user: {} → {}",
+                    self.graph[idx].node_id,
+                    category,
+                    action
+                );
 
                 return Ok(NodeOutcome::Escalated);
             }
@@ -3037,6 +3424,244 @@ mod tests {
     }
 
     // =========================================================================
+    // PSP-8: Goal-presence sensor (false-stability guard) tests
+    // =========================================================================
+
+    fn goal_presence_tmpdir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "perspt-gp-{}-{}",
+            tag,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn goal_presence_raises_energy_for_unwritten_symbol() {
+        // A placeholder output file compiles and has no diagnostics, but the
+        // goal's required symbol is absent — the sensor must raise V_str so the
+        // node is not declared falsely stable.
+        let dir = goal_presence_tmpdir("missing");
+        std::fs::write(dir.join("src/lib.rs"), "// implement here\n").unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(dir.clone());
+        orch.context.defer_tests = true;
+        let mut node = SRBNNode::new(
+            "n".into(),
+            "Add a public function `is_even(n: i32) -> bool` returning true for even n.".into(),
+            ModelTier::Actuator,
+        );
+        node.output_targets = vec![PathBuf::from("src/lib.rs")];
+        node.contract.interface_signature = "pub fn is_even(n: i32) -> bool".into();
+        node.owner_plugin = "rust".into();
+        orch.add_node(node);
+        let idx = orch.node_indices["n"];
+
+        let energy = orch.step_verify(idx).await.unwrap();
+        assert!(
+            energy.v_str >= 5.0,
+            "missing required symbol must raise V_str (got {})",
+            energy.v_str
+        );
+        assert!(
+            energy.total(&orch.graph[idx].contract) > orch.graph[idx].monitor.stability_epsilon,
+            "energy must exceed epsilon so the node is not falsely stable"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn goal_presence_silent_when_symbol_present() {
+        // Once the required symbol is actually defined, the sensor adds nothing.
+        let dir = goal_presence_tmpdir("present");
+        std::fs::write(
+            dir.join("src/lib.rs"),
+            "pub fn is_even(n: i32) -> bool { n % 2 == 0 }\n",
+        )
+        .unwrap();
+
+        let mut orch = SRBNOrchestrator::new_for_testing(dir.clone());
+        orch.context.defer_tests = true;
+        let mut node = SRBNNode::new(
+            "n".into(),
+            "Add `is_even`.".into(),
+            ModelTier::Actuator,
+        );
+        node.output_targets = vec![PathBuf::from("src/lib.rs")];
+        node.contract.interface_signature = "pub fn is_even(n: i32) -> bool".into();
+        node.owner_plugin = "rust".into();
+        orch.add_node(node);
+        let idx = orch.node_indices["n"];
+
+        let energy = orch.step_verify(idx).await.unwrap();
+        assert_eq!(energy.v_str, 0.0, "satisfied goal must not raise V_str");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // =========================================================================
+    // PSP-8: Closed-loop control (ready-queue scheduler + re-plan) tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn next_ready_node_respects_dependencies() {
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        orch.add_node(SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator));
+        orch.add_node(SRBNNode::new("b".into(), "g".into(), ModelTier::Actuator));
+        orch.add_dependency("a", "b", "depends_on").unwrap();
+
+        // Only 'a' (no deps) is ready while both are queued.
+        let idx = orch.next_ready_node().unwrap();
+        assert_eq!(orch.graph[idx].node_id, "a");
+
+        // Completing 'a' makes 'b' ready.
+        let a_idx = orch.node_indices["a"];
+        orch.graph[a_idx].state = NodeState::Completed;
+        let idx2 = orch.next_ready_node().unwrap();
+        assert_eq!(orch.graph[idx2].node_id, "b");
+    }
+
+    #[tokio::test]
+    async fn reworked_retry_node_is_ready_again() {
+        // A node set back to Retry by a repair must be re-picked by the loop.
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        orch.add_node(SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator));
+        let a = orch.node_indices["a"];
+        orch.graph[a].state = NodeState::Retry;
+        assert_eq!(orch.next_ready_node(), Some(a));
+
+        // Completed/Escalated nodes are never ready.
+        orch.graph[a].state = NodeState::Completed;
+        assert_eq!(orch.next_ready_node(), None);
+        orch.graph[a].state = NodeState::Escalated;
+        assert_eq!(orch.next_ready_node(), None);
+    }
+
+    #[tokio::test]
+    async fn deterministic_goal_gate_requires_all_completed() {
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        orch.add_node(SRBNNode::new("a".into(), "g".into(), ModelTier::Actuator));
+        assert!(!orch.deterministic_goal_gate()); // queued
+        let a = orch.node_indices["a"];
+        orch.graph[a].state = NodeState::Completed;
+        assert!(orch.deterministic_goal_gate());
+
+        // An empty graph is never "achieved".
+        let empty = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        assert!(!empty.deterministic_goal_gate());
+    }
+
+    fn seed_impl_plan(orch: &mut SRBNOrchestrator) {
+        use perspt_core::types::PlannedTask;
+        let plan = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "impl".into(),
+                goal: "implement".into(),
+                output_files: vec!["src/lib.rs".into()],
+                ..PlannedTask::new("impl", "implement")
+            }],
+        };
+        orch.create_nodes_from_plan(&plan).unwrap();
+    }
+
+    #[tokio::test]
+    async fn merge_amendment_appends_valid_tasks_and_edges() {
+        use perspt_core::types::PlannedTask;
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        seed_impl_plan(&mut orch);
+
+        let amend = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "tests".into(),
+                goal: "write tests".into(),
+                output_files: vec!["tests/test_lib.rs".into()],
+                dependencies: vec!["impl".into()],
+                ..PlannedTask::new("tests", "write tests")
+            }],
+        };
+        let added = orch.merge_plan_amendment(&amend).unwrap();
+        assert_eq!(added, 1);
+        assert!(orch.node_indices.contains_key("tests"));
+        let impl_idx = orch.node_indices["impl"];
+        let test_idx = orch.node_indices["tests"];
+        assert!(orch.graph.find_edge(impl_idx, test_idx).is_some());
+    }
+
+    #[tokio::test]
+    async fn merge_amendment_rejects_ownership_collision() {
+        use perspt_core::types::PlannedTask;
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        seed_impl_plan(&mut orch);
+        let amend = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "extra".into(),
+                goal: "g".into(),
+                output_files: vec!["src/lib.rs".into()], // already owned by impl
+                ..PlannedTask::new("extra", "g")
+            }],
+        };
+        assert!(orch.merge_plan_amendment(&amend).is_err());
+    }
+
+    #[tokio::test]
+    async fn merge_amendment_rejects_duplicate_id_and_unknown_dep() {
+        use perspt_core::types::PlannedTask;
+        let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+        seed_impl_plan(&mut orch);
+
+        let dup = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "impl".into(), // duplicate of existing node
+                goal: "g".into(),
+                output_files: vec!["src/other.rs".into()],
+                ..PlannedTask::new("impl", "g")
+            }],
+        };
+        assert!(orch.merge_plan_amendment(&dup).is_err());
+
+        let bad_dep = TaskPlan {
+            tasks: vec![PlannedTask {
+                id: "more".into(),
+                goal: "g".into(),
+                output_files: vec!["src/other.rs".into()],
+                dependencies: vec!["nonexistent".into()],
+                ..PlannedTask::new("more", "g")
+            }],
+        };
+        assert!(orch.merge_plan_amendment(&bad_dep).is_err());
+    }
+
+    #[test]
+    fn interface_node_runs_only_syntax_so_build_penalty_is_gated() {
+        // Regression for the phantom-build-failure bug: an Interface node must
+        // not include the Build stage, so the stage-gated energy mapping never
+        // charges it for `build_ok == false` (the Default) when Build never ran.
+        use perspt_core::plugin::VerifierStage;
+        let mut node = SRBNNode::new("scaffold".into(), "g".into(), ModelTier::Actuator);
+        node.node_class = perspt_core::types::NodeClass::Interface;
+        node.output_targets = vec![PathBuf::from("pyproject.toml")];
+        let stages = super::verification::verification_stages_for_node(&node);
+        assert_eq!(stages, vec![VerifierStage::SyntaxCheck]);
+        assert!(!stages.contains(&VerifierStage::Build));
+    }
+
+    #[test]
+    fn parse_goal_verdict_is_tolerant() {
+        let v = super::parse_goal_verdict("sure thing: {\"achieved\": true, \"missing\": []} ok")
+            .unwrap();
+        assert!(v.achieved);
+        let v2 = super::parse_goal_verdict(
+            "{\"achieved\": false, \"missing\": [\"add tests\"], \"next_steps\": []}",
+        )
+        .unwrap();
+        assert!(!v2.achieved);
+        assert_eq!(v2.missing, vec!["add tests"]);
+        assert!(super::parse_goal_verdict("no json here").is_none());
+    }
+
+    // =========================================================================
     // Phase 5: Graph rewrite & sheaf validator tests
     // =========================================================================
 
@@ -3515,6 +4140,27 @@ mod tests {
         assert_eq!(orch.actuator_model, ModelTier::Actuator.default_model());
         assert_eq!(orch.verifier_model, ModelTier::Verifier.default_model());
         assert_eq!(orch.speculator_model, ModelTier::Speculator.default_model());
+    }
+
+    #[tokio::test]
+    async fn test_deterministic_fallback_graph_is_valid_plan() {
+        // Regression: the fallback plan previously had `scaffold` and `implement`
+        // both claiming the main module file, violating ownership exclusivity and
+        // hard-failing every greenfield run that fell back to it. Each task must
+        // own a distinct file (manifest / main module / tests).
+        for task in [
+            "build a python RPN calculator library",
+            "build a rust command-line tool",
+            "build a javascript utility package",
+        ] {
+            let mut orch = SRBNOrchestrator::new_for_testing(PathBuf::from("."));
+            let result = orch.create_deterministic_fallback_graph(task);
+            assert!(
+                result.is_ok(),
+                "fallback graph for {task:?} must be a valid plan, got {result:?}"
+            );
+            assert_eq!(orch.node_count(), 3, "fallback plan should have 3 nodes");
+        }
     }
 
     #[tokio::test]

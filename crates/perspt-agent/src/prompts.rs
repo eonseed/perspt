@@ -48,11 +48,20 @@ Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
 3. Entry point task should depend on all modules it imports
 4. Test tasks depend on the module they test
 
+### RUNTIME COVERAGE
+- If the project produces a runnable artifact (a CLI/binary or a library with a
+  public API), include a task whose tests OR an `examples/` program exercise each
+  entrypoint's happy path END TO END (e.g. for a CLI with `train`/`predict`,
+  actually run train then predict on real data). Unit tests on individual
+  functions are not enough — the built artifact is run at verification time, so a
+  runtime crash on an uncovered path will fail the build.
+
 ### COMPLETENESS CHECKLIST
 - [ ] Every file path appears in exactly one task's `output_files` (no duplicates across tasks)
 - [ ] Every import in generated code must reference an existing or planned file
 - [ ] The project must be immediately runnable after all tasks complete
 - [ ] Include at least one test file per core module
+- [ ] Every binary/CLI entrypoint is exercised end-to-end by a test or example
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
 ## CRITICAL CONSTRAINTS — MANIFEST FILES
@@ -185,11 +194,20 @@ Since this is a new project, design the file structure from scratch:
 3. Entry point task should depend on all modules it imports
 4. Test tasks depend on the module they test
 
+### RUNTIME COVERAGE
+- If the project produces a runnable artifact (a CLI/binary or a library with a
+  public API), include a task whose tests OR an `examples/` program exercise each
+  entrypoint's happy path END TO END (e.g. for a CLI with `train`/`predict`,
+  actually run train then predict on real data). Unit tests on individual
+  functions are not enough — the built artifact is run at verification time, so a
+  runtime crash on an uncovered path will fail the build.
+
 ### COMPLETENESS CHECKLIST
 - [ ] Every file path appears in exactly one task's `output_files` (no duplicates across tasks)
 - [ ] Every import in generated code must reference an existing or planned file
 - [ ] The project must be immediately runnable after all tasks complete
 - [ ] Include at least one test file per core module
+- [ ] Every binary/CLI entrypoint is exercised end-to-end by a test or example
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
 ## CRITICAL CONSTRAINTS — MANIFEST FILES

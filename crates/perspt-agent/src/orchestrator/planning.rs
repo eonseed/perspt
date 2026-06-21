@@ -372,6 +372,172 @@ impl SRBNOrchestrator {
         Ok(())
     }
 
+    /// PSP-8 closed loop: merge a goal-driven plan amendment into the live graph.
+    ///
+    /// Unlike `create_nodes_from_plan` (which validates a plan in isolation and
+    /// rebuilds ownership), this validates the amendment against the **existing**
+    /// graph: amendment task ids must be new, amendment output files must not
+    /// collide with files already owned (or with each other), and dependencies
+    /// may reference either existing node ids or other amendment task ids. On
+    /// success it appends nodes + edges (wiring deps to existing nodes too) and
+    /// merges the ownership manifest. Returns the number of nodes added.
+    pub(super) fn merge_plan_amendment(&mut self, amendment: &TaskPlan) -> Result<usize> {
+        if amendment.tasks.is_empty() {
+            anyhow::bail!("Amendment has no tasks");
+        }
+
+        // 1. Validate ids and ownership against the existing graph + within the
+        //    amendment itself.
+        let mut amendment_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut amendment_files: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for task in &amendment.tasks {
+            if task.goal.trim().is_empty() {
+                anyhow::bail!("Amendment task '{}' has an empty goal", task.id);
+            }
+            if self.node_indices.contains_key(&task.id) {
+                anyhow::bail!("Amendment task id '{}' already exists in the graph", task.id);
+            }
+            if !amendment_ids.insert(task.id.as_str()) {
+                anyhow::bail!("Amendment has duplicate task id '{}'", task.id);
+            }
+            for file in &task.output_files {
+                if self.context.ownership_manifest.owner_of(file).is_some() {
+                    anyhow::bail!(
+                        "Amendment task '{}' claims file '{}' already owned by an existing task",
+                        task.id,
+                        file
+                    );
+                }
+                if !amendment_files.insert(file.clone()) {
+                    anyhow::bail!(
+                        "Amendment claims file '{}' in more than one task",
+                        file
+                    );
+                }
+            }
+        }
+
+        // 2. Validate dependencies resolve to an existing node or an amendment id.
+        for task in &amendment.tasks {
+            for dep in &task.dependencies {
+                let known = self.node_indices.contains_key(dep) || amendment_ids.contains(dep.as_str());
+                if !known {
+                    anyhow::bail!(
+                        "Amendment task '{}' depends on unknown task '{}'",
+                        task.id,
+                        dep
+                    );
+                }
+            }
+        }
+
+        // 3. Append nodes (new nodes start TaskQueued).
+        let mut new_idx: HashMap<String, NodeIndex> = HashMap::new();
+        for task in &amendment.tasks {
+            let node = task.to_srbn_node(ModelTier::Actuator);
+            let idx = self.add_node(node);
+            new_idx.insert(task.id.clone(), idx);
+            log::info!("  Amendment node: {} - {}", task.id, task.goal);
+        }
+
+        // 4. Wire dependencies (resolve to existing or new node indices).
+        for task in &amendment.tasks {
+            let Some(&to_idx) = new_idx.get(&task.id) else {
+                continue;
+            };
+            for dep in &task.dependencies {
+                let from_idx = new_idx
+                    .get(dep)
+                    .copied()
+                    .or_else(|| self.node_indices.get(dep).copied());
+                if let Some(from_idx) = from_idx {
+                    self.graph.add_edge(
+                        from_idx,
+                        to_idx,
+                        Dependency {
+                            kind: "depends_on".to_string(),
+                        },
+                    );
+                    if let Err(e) = self.ledger.record_task_graph_edge(dep, &task.id, "depends_on") {
+                        log::warn!("Failed to persist amendment edge {} -> {}: {}", dep, task.id, e);
+                    }
+                }
+            }
+        }
+
+        // 5. Merge ownership manifest (assigns only the amendment's files).
+        self.build_ownership_manifest_from_plan(amendment);
+
+        log::info!("Merged plan amendment: {} new node(s)", amendment.tasks.len());
+        Ok(amendment.tasks.len())
+    }
+
+    /// PSP-8 closed loop: ask the architect for additional tasks that close an
+    /// unmet goal gap, then merge them into the live graph. Returns the number
+    /// of new nodes added (0 if the architect proposed nothing usable).
+    pub(super) async fn amend_plan_for_goal(
+        &mut self,
+        task: &str,
+        missing: &[String],
+    ) -> Result<usize> {
+        let tree = crate::tools::list_sandbox_files(&self.context.working_dir)
+            .ok()
+            .filter(|t| !t.is_empty())
+            .map(|t| t.join("\n"));
+
+        // Existing task ids + owned files so the architect does not collide.
+        let owned: Vec<(String, String)> = self
+            .graph
+            .node_indices()
+            .map(|idx| {
+                let n = &self.graph[idx];
+                let files: Vec<String> = n
+                    .output_targets
+                    .iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+                let owns = if files.is_empty() {
+                    "(no files)".to_string()
+                } else {
+                    files.join(", ")
+                };
+                (n.node_id.clone(), format!("state={:?}, owns: {}", n.state, owns))
+            })
+            .collect();
+
+        let gap = if missing.is_empty() {
+            None
+        } else {
+            Some(missing.join("\n"))
+        };
+
+        let ev = perspt_core::types::PromptEvidence {
+            user_goal: Some(task.to_string()),
+            project_file_tree: tree,
+            existing_file_contents: owned,
+            error_feedback: gap,
+            ..Default::default()
+        };
+        let prompt = crate::prompt_compiler::compile(
+            perspt_core::types::PromptIntent::PlanAmendment,
+            &ev,
+        )
+        .text;
+
+        let model = self.get_architect_model();
+        let response = self
+            .call_llm_with_logging(&model, &prompt, None)
+            .await
+            .context("Architect amendment call failed")?;
+
+        let amendment = self
+            .parse_task_plan(&response)
+            .context("Failed to parse amendment plan")?;
+
+        self.merge_plan_amendment(&amendment)
+    }
+
     /// PSP-5 Phase 2: Build ownership manifest from a TaskPlan
     ///
     /// Assigns each task's output_files to the owning node, detecting the
@@ -642,22 +808,35 @@ impl SRBNOrchestrator {
             _ => "py",
         };
 
-        // Determine file names based on language
-        let (main_file, test_file) = match lang {
+        // Determine file names based on language. The scaffold task owns the
+        // project manifest, the implementation task owns the main module, and
+        // the test task owns the test file — three *distinct* files so the plan
+        // satisfies the ownership-exclusivity rule enforced by
+        // `create_nodes_from_plan` (each output file in exactly one task).
+        let (manifest_file, main_file, test_file) = match lang {
             "rust" => (
+                "Cargo.toml".to_string(),
                 "src/main.rs".to_string(),
                 "tests/integration_test.rs".to_string(),
             ),
-            "javascript" => ("index.js".to_string(), "test/index.test.js".to_string()),
-            _ => ("main.py".to_string(), format!("tests/test_main.{}", ext)),
+            "javascript" => (
+                "package.json".to_string(),
+                "index.js".to_string(),
+                "test/index.test.js".to_string(),
+            ),
+            _ => (
+                "pyproject.toml".to_string(),
+                "main.py".to_string(),
+                format!("tests/test_main.{}", ext),
+            ),
         };
 
-        // Node 1: Scaffold/structure
+        // Node 1: Scaffold/structure — owns the project manifest.
         let scaffold_task = perspt_core::types::PlannedTask {
             id: "scaffold".to_string(),
-            goal: format!("Set up project structure for: {}", task),
+            goal: format!("Set up project structure and manifest for: {}", task),
             context_files: vec![],
-            output_files: vec![main_file.clone()],
+            output_files: vec![manifest_file],
             dependencies: vec![],
             task_type: perspt_core::types::TaskType::Code,
             contract: Default::default(),
@@ -666,11 +845,11 @@ impl SRBNOrchestrator {
             dependency_expectations: Default::default(),
         };
 
-        // Node 2: Core implementation
+        // Node 2: Core implementation — owns the main module.
         let impl_task = perspt_core::types::PlannedTask {
             id: "implement".to_string(),
             goal: format!("Implement core logic for: {}", task),
-            context_files: vec![main_file.clone()],
+            context_files: vec![],
             output_files: vec![main_file],
             dependencies: vec!["scaffold".to_string()],
             task_type: perspt_core::types::TaskType::Code,
@@ -680,13 +859,14 @@ impl SRBNOrchestrator {
             dependency_expectations: Default::default(),
         };
 
-        // Node 3: Tests
+        // Node 3: Tests — a test-only task must depend on every source task
+        // (the manifest scaffold and the implementation).
         let test_task = perspt_core::types::PlannedTask {
             id: "test".to_string(),
             goal: format!("Write tests for: {}", task),
             context_files: vec![],
             output_files: vec![test_file],
-            dependencies: vec!["implement".to_string()],
+            dependencies: vec!["scaffold".to_string(), "implement".to_string()],
             task_type: perspt_core::types::TaskType::UnitTest,
             contract: Default::default(),
             command_contract: None,
