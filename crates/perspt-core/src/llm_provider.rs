@@ -7,9 +7,12 @@ use anyhow::{Context, Result};
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
-use genai::resolver::{Endpoint, ProviderConfig, ServiceTargetResolver};
+use genai::resolver::{AuthData, AuthResolver, Endpoint, ProviderConfig, ServiceTargetResolver};
 use genai::Client;
+use genai::ModelIden;
 use genai::ServiceTarget;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
@@ -33,7 +36,11 @@ pub struct ResolvedProvider {
 /// Used as the fallback when no provider is configured. Falls back to a local
 /// Ollama setup when no API keys are present.
 pub fn detect_provider_from_env() -> (&'static str, &'static str) {
-    if std::env::var("GEMINI_API_KEY").is_ok() {
+    if std::env::var("VERTEX_PROJECT_ID").is_ok() {
+        // Google Vertex AI (Agent/AI Platform). Models are namespace-routed as
+        // `vertex::<model>`; auth is an OAuth2 Bearer token in VERTEX_API_KEY.
+        ("vertex", "vertex::gemini-2.5-flash")
+    } else if std::env::var("GEMINI_API_KEY").is_ok() {
         ("gemini", "gemini-3.1-flash-lite-preview")
     } else if std::env::var("OPENAI_API_KEY").is_ok() {
         ("openai", "gpt-4o-mini")
@@ -109,9 +116,19 @@ impl GenAIProvider {
             }
         }
 
-        let client = match adapter_kind {
-            Some(adapter_kind) => build_bound_client(adapter_kind, provider_type),
-            None => Client::default(),
+        let is_vertex = provider_type
+            .map(|p| p.eq_ignore_ascii_case("vertex"))
+            .unwrap_or(false);
+
+        let client = if is_vertex {
+            // Vertex AI authenticates with an OAuth2 Bearer token from ADC; no
+            // static API key is required when ADC is configured.
+            build_vertex_client()
+        } else {
+            match adapter_kind {
+                Some(adapter_kind) => build_bound_client(adapter_kind, provider_type),
+                None => Client::default(),
+            }
         };
 
         Ok(Self::from_client(client))
@@ -490,6 +507,48 @@ impl GenAIProvider {
     }
 }
 
+/// Build a genai client for Google Vertex AI authenticated via Application
+/// Default Credentials (ADC).
+///
+/// genai's Vertex adapter reads `VERTEX_PROJECT_ID` (required) and
+/// `VERTEX_LOCATION` (optional, defaults to `global`) to construct the request
+/// URL, and expects an OAuth2 Bearer token from an [`AuthResolver`]. This
+/// resolver fetches that token from ADC (gcloud login, a service account, or the
+/// metadata server) on each request, so no static API key is needed. If a
+/// `VERTEX_API_KEY` bearer token is explicitly set, it is used as an override.
+fn build_vertex_client() -> Client {
+    let resolver = AuthResolver::from_resolver_async_fn(
+        |_model: ModelIden| -> Pin<
+            Box<dyn Future<Output = genai::resolver::Result<Option<AuthData>>> + Send>,
+        > {
+            Box::pin(async move {
+                // Explicit bearer-token override wins when present.
+                if let Ok(token) = std::env::var("VERTEX_API_KEY") {
+                    if !token.trim().is_empty() {
+                        return Ok(Some(AuthData::from_single(token)));
+                    }
+                }
+                // Otherwise resolve an access token from ADC.
+                let provider = gcp_auth::provider().await.map_err(|e| {
+                    genai::resolver::Error::Custom(format!(
+                        "Vertex ADC provider init failed (run `gcloud auth application-default login`): {e}"
+                    ))
+                })?;
+                let scopes = ["https://www.googleapis.com/auth/cloud-platform"];
+                let token = provider.token(&scopes).await.map_err(|e| {
+                    genai::resolver::Error::Custom(format!("Vertex ADC token fetch failed: {e}"))
+                })?;
+                Ok(Some(AuthData::from_single(token.as_str())))
+            })
+        },
+    );
+
+    Client::builder()
+        .with_adapter_kind(AdapterKind::Vertex)
+        .with_auth_resolver(resolver)
+        .build()
+}
+
 fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) -> Client {
     let mut builder = Client::builder().with_adapter_kind(adapter_kind);
 
@@ -537,6 +596,7 @@ fn provider_api_key_env_var(provider: &str) -> Option<&'static str> {
         "openai" => Some("OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "gemini" | "google" => Some("GEMINI_API_KEY"),
+        "vertex" => Some("VERTEX_API_KEY"),
         "groq" => Some("GROQ_API_KEY"),
         "cohere" => Some("COHERE_API_KEY"),
         "xai" => Some("XAI_API_KEY"),
@@ -559,6 +619,7 @@ fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
         "openai" => Ok(AdapterKind::OpenAI),
         "anthropic" => Ok(AdapterKind::Anthropic),
         "gemini" | "google" => Ok(AdapterKind::Gemini),
+        "vertex" => Ok(AdapterKind::Vertex),
         "groq" => Ok(AdapterKind::Groq),
         "cohere" => Ok(AdapterKind::Cohere),
         "ollama" => Ok(AdapterKind::Ollama),

@@ -243,6 +243,12 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Install a process-level rustls CryptoProvider before any TLS use. Both
+    // `ring` and `aws-lc-rs` are present in the dependency tree (gcp_auth pulls
+    // ring for Vertex ADC), so rustls 0.23 cannot auto-select one and would
+    // panic on first HTTPS request. Pin `ring` explicitly.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let cli = Cli::parse();
     let config_override = cli.config.clone();
 
