@@ -17,6 +17,8 @@ bundled = ["perspt-store/bundled"]
 
 [dependencies]
 perspt-core = { version = "0.6.1", path = "../perspt-core" }
+perspt-sdk = { version = "0.6.1", path = "../perspt-sdk" }
+perspt-coding = { version = "0.6.1", path = "../perspt-coding" }
 perspt-policy = { version = "0.6.1", path = "../perspt-policy" }
 perspt-sandbox = { version = "0.6.1", path = "../perspt-sandbox" }
 perspt-store = { version = "0.6.1", path = "../perspt-store" }
