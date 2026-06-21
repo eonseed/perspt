@@ -65,7 +65,7 @@ Step 2: Watch the SRBN Loop
 
 The agent proceeds through the PSP-5 phases:
 
-**Detection** — Perspt identifies Python from the task description and selects
+**Detection** - Perspt identifies Python from the task description and selects
 the ``python`` plugin:
 
 .. code-block:: text
@@ -73,7 +73,7 @@ the ``python`` plugin:
    [detect] Workspace: greenfield
    [detect] Plugin: python (LSP: ty, tests: pytest, init: uv init --lib)
 
-**Planning** — The Architect decomposes the task into a DAG:
+**Planning** - The Architect decomposes the task into a DAG:
 
 .. code-block:: text
 
@@ -90,7 +90,7 @@ Each node owns specific output files (ownership closure):
 - node-3: ``src/main.py``
 - node-4: ``tests/test_calculator.py``
 
-**Execution** — Nodes execute in topological order. For each node:
+**Execution** - Nodes execute in topological order. For each node:
 
 1. Actuator generates a multi-artifact bundle (writes, diffs, commands)
 2. Files are applied transactionally
@@ -117,7 +117,7 @@ In interactive mode, the review modal presents grouped diffs:
 .. code-block:: text
 
    Review Node 2: Create calculator module
-   ────────────────────────────────────────
+   ----------------------------------------
    Bundle: 2 created, 0 modified
    + src/calculator/__init__.py  [create] (3 lines)
    + src/calculator/core.py      [create] (45 lines)
@@ -129,11 +129,11 @@ In interactive mode, the review modal presents grouped diffs:
 
 Actions:
 
-- **y** — Approve and commit to ledger
-- **n** — Reject and re-generate from scratch
-- **c** — Send correction feedback to the agent
-- **e** — Open files in your editor, then return
-- **d** — Toggle full unified diff view
+- **y** - Approve and commit to ledger
+- **n** - Reject and re-generate from scratch
+- **c** - Send correction feedback to the agent
+- **e** - Open files in your editor, then return
+- **d** - Toggle full unified diff view
 
 Step 4: Inspect Results
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -279,13 +279,13 @@ LLM Logging
 Best Practices
 --------------
 
-1. **Start with a clear task description** — Include language, package structure,
+1. **Start with a clear task description** - Include language, package structure,
    and testing requirements in the prompt
-2. **Use workspace directories** — Always specify ``-w <dir>`` for clarity
-3. **Set cost limits** — Use ``--max-cost`` to prevent runaway spending
-4. **Review before committing** — In interactive mode, inspect diffs carefully
-5. **Use per-tier models** — Match model capabilities to task complexity
-6. **Track changes** — Use ``perspt ledger`` to review and rollback
+2. **Use workspace directories** - Always specify ``-w <dir>`` for clarity
+3. **Set cost limits** - Use ``--max-cost`` to prevent runaway spending
+4. **Review before committing** - In interactive mode, inspect diffs carefully
+5. **Use per-tier models** - Match model capabilities to task complexity
+6. **Track changes** - Use ``perspt ledger`` to review and rollback
 
 
 Troubleshooting
@@ -311,6 +311,6 @@ Troubleshooting
 See Also
 --------
 
-- :doc:`headless-mode` — Fully autonomous operation
-- :doc:`../concepts/srbn-architecture` — SRBN technical details
-- :doc:`../howto/agent-options` — Full CLI reference
+- :doc:`headless-mode` - Fully autonomous operation
+- :doc:`../concepts/srbn-architecture` - SRBN technical details
+- :doc:`../howto/agent-options` - Full CLI reference

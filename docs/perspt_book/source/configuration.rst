@@ -61,7 +61,7 @@ Set any supported API key environment variable and run ``perspt`` with no argume
      - ``gemini-2.5-flash``
    * - 10
      - Ollama
-     - *(none — auto-detected)*
+     - *(none - auto-detected)*
      - ``llama3.2``
 
 .. code-block:: bash

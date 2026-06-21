@@ -36,7 +36,7 @@ Perspt auto-detects Ollama if no cloud API keys are set:
    # Unset any cloud keys
    unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
 
-   # Launch Perspt — auto-detects Ollama
+   # Launch Perspt - auto-detects Ollama
    perspt
 
    # Or specify a model explicitly

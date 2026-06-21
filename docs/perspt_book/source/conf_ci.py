@@ -12,8 +12,8 @@ import sys
 project = 'Perspt'
 copyright = '2025, Ronak Rathore, Vikrant Rathore'
 author = 'Ronak Rathore, Vikrant Rathore'
-release = '0.5.6'
-version = '0.5.6'
+release = '0.6.1'
+version = '0.6.1'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -27,6 +27,8 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.ifconfig',
     'sphinx.ext.githubpages',
+    'sphinx.ext.graphviz',
+    'matplotlib.sphinxext.plot_directive',
     'myst_parser',
     'sphinx_copybutton',
     'sphinx_design',
@@ -76,6 +78,27 @@ numfig_format = {
 html_use_smartypants = True
 html_copy_source = True
 html_show_sourcelink = True
+
+# Graphviz configuration for diagram rendering
+graphviz_output_format = 'png'  # PNG renders in both HTML and LaTeX/PDF
+graphviz_dot = 'dot'
+graphviz_dot_args = ['-Gdpi=150']  # Higher DPI for better PDF quality
+
+# Matplotlib plot directive configuration. The LaTeX/PDF builder selects the PDF
+# rendering automatically while the HTML builder uses the PNG rendering.
+plot_include_source = False
+plot_html_show_source_link = False
+plot_html_show_formats = False
+plot_formats = [('png', 150), 'pdf']
+plot_rcparams = {
+    'figure.figsize': (7.0, 4.0),
+    'figure.dpi': 150,
+    'savefig.bbox': 'tight',
+    'font.size': 10,
+    'axes.grid': True,
+    'grid.alpha': 0.3,
+}
+plot_apply_rcparams = True
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

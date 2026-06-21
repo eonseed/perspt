@@ -26,7 +26,8 @@ What This Means
 
 The LGPL v3 is a copyleft license that provides strong protection for software freedom while allowing linking with proprietary software. Here's what it means in practical terms:
 
-✅ **What you CAN do:**
+Allowed: What you CAN do
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Use** Perspt for any purpose, including commercial projects
 - **Modify** the source code to fit your needs
@@ -35,7 +36,8 @@ The LGPL v3 is a copyleft license that provides strong protection for software f
 - **Combine** Perspt with software under different licenses
 - **Create** derivative works based on Perspt
 
-❗ **What you MUST do:**
+Required: What you MUST do
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Provide source code** for any modifications to Perspt itself
 - **Include** the LGPL v3 license text with distributions
@@ -43,7 +45,8 @@ The LGPL v3 is a copyleft license that provides strong protection for software f
 - **Allow users** to replace the Perspt library with modified versions
 - **Make modified source** available under LGPL v3 terms
 
-🚫 **What we DON'T provide:**
+Not Provided: What we DON'T provide
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Warranty** - The software is provided "as is"
 - **Liability coverage** - We're not responsible for any damages
@@ -163,7 +166,8 @@ Commercial Use
 
 Perspt can be freely used in commercial projects:
 
-✅ **Allowed Commercial Uses:**
+Allowed Commercial Uses
+~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Internal tools** - Use Perspt as part of your development workflow
 - **Linked libraries** - Link Perspt as a library in commercial software
@@ -171,7 +175,8 @@ Perspt can be freely used in commercial projects:
 - **Modified library versions** - Create modified versions for internal use
 - **Enterprise solutions** - Build enterprise tools that use Perspt
 
-📋 **Requirements for Commercial Use:**
+Requirements for Commercial Use
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. **Include LGPL license text** in your distribution
 2. **Maintain copyright notices** from the original code

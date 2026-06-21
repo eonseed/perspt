@@ -43,9 +43,9 @@ Step 3: Open the Overview
 Navigate to ``http://localhost:3000`` in your browser. The Overview
 page shows your active session with:
 
-- **Status badge** — "running" (blue) while the agent works
-- **Node count** — completed/total with failed count if any
-- **Budget** — steps used and cost consumed
+- **Status badge** - "running" (blue) while the agent works
+- **Node count** - completed/total with failed count if any
+- **Budget** - steps used and cost consumed
 
 Step 4: Explore the DAG
 ------------------------
@@ -53,11 +53,11 @@ Step 4: Explore the DAG
 Click **DAG** next to your session. Node cards show the task
 decomposition:
 
-- Green border — committed/verified nodes
-- Blue border — currently running
-- Red border — failed (will be retried)
+- Green border - committed/verified nodes
+- Blue border - currently running
+- Red border - failed (will be retried)
 
-The edge table below shows parent → child relationships.
+The edge table below shows parent -> child relationships.
 
 Step 5: Watch Energy Convergence
 --------------------------------
@@ -88,12 +88,12 @@ Step 8: Understand Decisions
 
 The **Decisions** page reveals the agent's internal reasoning:
 
-- **Escalation Reports** — when nodes were escalated for re-planning
-- **Sheaf Validations** — multi-source consistency checks
-- **Rewrites** — DAG modifications (requeued/inserted nodes)
-- **Plan Revisions** — architect plan amendments with reasons
-- **Repair Footprints** — correction attempts and diagnoses
-- **Verification Results** — syntax, build, test, and lint results
+- **Escalation Reports** - when nodes were escalated for re-planning
+- **Sheaf Validations** - multi-source consistency checks
+- **Rewrites** - DAG modifications (requeued/inserted nodes)
+- **Plan Revisions** - architect plan amendments with reasons
+- **Repair Footprints** - correction attempts and diagnoses
+- **Verification Results** - syntax, build, test, and lint results
 
 Step 9: Monitor Live Updates
 -----------------------------

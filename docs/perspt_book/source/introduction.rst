@@ -1,77 +1,100 @@
 Introduction to Perspt
 ======================
 
-.. raw:: html
+.. only:: html
 
-   <div style="text-align: center; margin: 2em 0;">
-   <pre style="font-family: monospace; font-size: 0.8em; line-height: 1.2; margin: 0 auto; display: inline-block;">
-   ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
-   ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
-   ██████╔╝█████╗  ██████╔╝███████╗██████╔╝   ██║
-   ██╔═══╝ ██╔══╝  ██╔══██╗╚════██║██╔═══╝    ██║
-   ██║     ███████╗██║  ██║███████║██║        ██║
-   ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
-   </pre>
-   <p><em>Your Terminal's Window to the AI World</em></p>
-   </div>
+   .. raw:: html
+
+      <div style="text-align: center; margin: 2em 0;">
+      <pre style="font-family: monospace; font-size: 0.8em; line-height: 1.2; margin: 0 auto; display: inline-block; text-align: left;">
+      ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
+      ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
+      ██████╔╝█████╗  ██████╔╝███████╗██████╔╝   ██║
+      ██╔═══╝ ██╔══╝  ██╔══██╗╚════██║██╔═══╝    ██║
+      ██║     ███████╗██║  ██║███████║██║        ██║
+      ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
+      </pre>
+      <p><em>Your Terminal's Window to the AI World</em></p>
+      </div>
+
+.. centered:: **Perspt: Your Terminal's Window to the AI World**
 
 What is Perspt?
 ---------------
 
 **Perspt** (pronounced "perspect," short for **Per**\ sonal **S**\ pectrum
 **P**\ ertaining **T**\ houghts) is a high-performance, terminal-based interface
-to Large Language Models. It serves two complementary purposes:
+to Large Language Models (LLMs). It serves two complementary purposes:
 
-1. **A simple CLI for testing LLM services** — Connect to OpenAI, Anthropic,
-   Google Gemini, Groq, Cohere, xAI, DeepSeek, or Ollama with a single command.
-   Auto-detect your API key, chat interactively in a beautiful TUI, or pipe
-   responses through the simple-chat mode. Perspt makes it effortless to
+1. **A simple command-line interface (CLI) for testing LLM services** - Connect
+   to OpenAI, Anthropic, Google Gemini, Groq, Cohere, xAI, DeepSeek, or Ollama
+   with a single command. Auto-detect your application programming interface
+   (API) key, chat interactively in a beautiful terminal user interface (TUI),
+   or pipe responses through the simple-chat mode. Perspt makes it effortless to
    evaluate and compare different LLM providers from your terminal.
 
-2. **An experimental implementation of the SRBN engine** — Perspt's agent mode
-   is a practical implementation of the **Stabilized Recursive Barrier Network
-   (SRBN)** framework described in the paper *"Stability is All You Need:
-   Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by
-   **Vikrant R. and Ronak R.** (pre-publication). The SRBN engine decomposes
-   coding tasks into DAGs, uses Lyapunov energy as a stability measure through
-   multi-stage verification barriers, and commits only when energy converges —
-   applying control-theoretic ideas to autonomous code generation. The theoretical
-   framework is mature; the implementation is under active development and has not
-   yet been benchmarked.
+2. **An experimental implementation of the SRBN engine** - Perspt's agent mode
+    is a practical implementation of the **Stabilized Recursive Barrier Network**
+    (SRBN) framework described by the three-paper *Stability is All You Need*
+    series. The SRBN engine decomposes coding tasks into directed acyclic graphs
+    (DAGs), uses Lyapunov energy as a stability measure through multi-stage
+    verification barriers, and commits only when energy converges - applying
+    control-theoretic ideas to autonomous code generation. The theoretical
+    framework is mature; the implementation is under active development and has
+    not yet been benchmarked.
 
-.. admonition:: Version 0.6.1 "AKŪ" Highlights
+.. admonition:: Version 0.6.1 "AKU" Highlights
    :class: tip
 
-   **Config Coherency, Rich TUI Rendering & Slash Commands:**
+    **Config Coherency, Rich TUI Rendering, and Slash Commands:**
 
-   - **Provider Coherency** — Bound the configured provider cohesively across all modes: TUI, CLI (simple-chat), and SRBN agent. Added robust TOML schema validation and refined config commands.
-   - **TUI & CLI Slash Commands** — Integrated ``rustyline`` command history and slash commands in CLI simple-chat. Added persistent history and UTF-8 safe input navigation in TUI inputs.
-   - **Mathematical & Structural Rendering** — Added real-time LaTeX math transpilation and self-wrapping ASCII tables inside the terminal chat UI.
-   - **Workspace Upgrades** — Bumped version of all workspace crates to ``0.6.1`` with codename **AKŪ - sharp fixes from sharp ears**.
+    - **Provider Coherency** - Bound the configured provider cohesively across all modes: TUI, CLI (simple-chat), and SRBN agent. Added robust schema validation for TOML (Tom's Obvious, Minimal Language) configuration files and refined config commands.
+    - **TUI and CLI Slash Commands** - Integrated ``rustyline`` command history and slash commands in CLI simple-chat. Added persistent history and UTF-8 safe input navigation in TUI inputs.
+    - **Mathematical and Structural Rendering** - Added real-time LaTeX math transpilation and self-wrapping ASCII tables inside the terminal chat UI.
+    - **Workspace Upgrades** - Bumped version of all workspace crates to ``0.6.1`` with codename **AKU - sharp fixes from sharp ears**.
 
 .. admonition:: Version 0.6.0 "kukuza" Highlights
    :class: note
 
    **Ecosystem & Dependency Modernization:**
 
-   - **Major Upgrades** — Bumped core dependencies to their latest major versions including ``duckdb (=1.10503.1)``, ``starlark (0.14)``, ``genai (0.6.1)``, ``askama (0.16)``, and ``diffy (0.5)``.
-   - **Enterprise AI Providers** — Integrated native support for **AWS Bedrock** and **Google Agent Platform** (formerly Vertex AI) with advanced IAM credentials and OAuth2 token authorization.
-   - **State-of-the-Art Models** — Added full, out-of-the-box support for the newest generation of models, including ``gpt-5.5`` and ``claude-sonnet-4.7``.
+    - **Major Upgrades** - Bumped core dependencies to their latest major versions including ``duckdb (=1.10503.1)``, ``starlark (0.14)``, ``genai (0.6.1)``, ``askama (0.16)``, and ``diffy (0.5)``.
+    - **Enterprise AI Providers** - Integrated native support for **AWS Bedrock** and **Google Agent Platform** (formerly Vertex AI) with advanced Identity and Access Management (IAM) credentials and Open Authorization 2.0 (OAuth2) token authorization.
+    - **State-of-the-Art Models** - Added full, out-of-the-box support for the newest generation of models, including ``gpt-5.5`` and ``claude-sonnet-4.7``.
 
-.. admonition:: Version 0.5.9 "心砺光华" Highlights
+.. admonition:: Version 0.5.9 Highlights
    :class: note
 
-   **Robust Correction Loop Contracts (PSP-7):**
+   **Robust Correction Loop Contracts (Perspt Specification Proposal 7, PSP-7):**
 
-   - **Structured Artifact Bundle Format** — Switched correction prompt from free-form output to a strict JSON schema, ensuring the LLM explicitly declares target paths and artifacts.
-   - **Typed Parse Pipeline** — Replaced Option-based extraction with a 5-layer fail-closed parse pipeline that classifies retries (Retarget, MalformedRetry, SupportFileViolation, Replan) for intelligent convergence.
-   - **Manifest Policy Enforcement** — Added semantic validation to prevent implicit mutation of root manifests unless explicitly requested.
-   - **Strict Budget Exhaustion** — Upgraded budget checks to respect step and revision caps alongside cost, preventing runaway loops.
+    - **Structured Artifact Bundle Format** - Switched correction prompt from free-form output to a strict JavaScript Object Notation (JSON) schema, ensuring the LLM explicitly declares target paths and artifacts.
+    - **Typed Parse Pipeline** - Replaced Option-based extraction with a 5-layer fail-closed parse pipeline that classifies retries (Retarget, MalformedRetry, SupportFileViolation, Replan) for intelligent convergence.
+    - **Manifest Policy Enforcement** - Added semantic validation to prevent implicit mutation of root manifests unless explicitly requested.
+    - **Strict Budget Exhaustion** - Upgraded budget checks to respect step and revision caps alongside cost, preventing runaway loops.
 
 Architecture
 ------------
 
-Perspt is built as a **9-crate Rust workspace**:
+Perspt is one program assembled from twelve small Rust libraries. Rust calls
+such a library a *crate*. Each crate has one job, and a crate may use another
+crate to get its work done.
+
+The crates fall into four groups. The first group faces the user: one crate
+reads the commands you type, and another draws the terminal interface. The
+second group does the work: one crate talks to the language model, one crate
+runs the agent, and one crate stores the history of a session. The third group
+keeps that work safe and visible: one crate checks each command against a set of
+rules, one crate isolates commands so they cannot escape the project, and one
+crate serves a web dashboard that lets you watch the agent run. The fourth group
+is a single umbrella crate that ties the others together.
+
+Three of the work crates - ``perspt-sdk``, ``perspt-coding``, and
+``perspt-research`` - form a reusable platform. The agent already follows a set
+of stability rules every time it changes a file. These three crates package
+those rules so that a new field of work, such as research instead of coding, can
+reuse the same guarantees without rewriting the engine. The design of this
+platform is recorded in Perspt Specification Proposal 8 (PSP-8); the developer
+guide describes it in detail.
 
 .. graphviz::
    :align: center
@@ -84,7 +107,7 @@ Perspt is built as a **9-crate Rust workspace**:
        subgraph cluster_cli {
            label="User Interface";
            style=dashed;
-           cli [label="perspt-cli\n10 commands", fillcolor="#4ECDC4"];
+           cli [label="perspt-cli\n11 commands", fillcolor="#4ECDC4"];
            tui [label="perspt-tui\nTerminal UI", fillcolor="#96CEB4"];
        }
 
@@ -94,6 +117,14 @@ Perspt is built as a **9-crate Rust workspace**:
            core [label="perspt-core\nLLM Provider + Types", fillcolor="#45B7D1"];
            agent [label="perspt-agent\nSRBN Engine", fillcolor="#FFEAA7"];
            store [label="perspt-store\nDuckDB Sessions", fillcolor="#B8D4E3"];
+       }
+
+       subgraph cluster_sdk {
+           label="Reusable SDK Platform";
+           style=dashed;
+           sdk [label="perspt-sdk\nStability Contract", fillcolor="#AED9E0"];
+           coding [label="perspt-coding\nCoding Domain", fillcolor="#C7CEEA"];
+           research [label="perspt-research\nResearch Domain", fillcolor="#E2C2C6"];
        }
 
        subgraph cluster_security {
@@ -109,6 +140,8 @@ Perspt is built as a **9-crate Rust workspace**:
            dashboard [label="perspt-dashboard\nWeb Dashboard", fillcolor="#FFB6C1"];
        }
 
+       meta [label="perspt\nUmbrella Crate", fillcolor="#D5E8D4"];
+
        cli -> tui;
        cli -> agent;
        cli -> dashboard;
@@ -116,9 +149,21 @@ Perspt is built as a **9-crate Rust workspace**:
        agent -> store;
        agent -> policy;
        agent -> sandbox;
+       agent -> sdk [style=dotted, label="PSP-8"];
+       coding -> sdk;
+       research -> sdk;
        dashboard -> store;
        dashboard -> core;
+       meta -> core [style=dotted];
    }
+
+.. note::
+
+   The 12 crates are: ``perspt-core``, ``perspt-agent``, ``perspt-cli``,
+   ``perspt-tui``, ``perspt-store``, ``perspt-policy``, ``perspt-sandbox``,
+   ``perspt-dashboard``, ``perspt-sdk``, ``perspt-coding``, ``perspt-research``,
+   and the ``perspt`` umbrella crate. See :doc:`concepts/workspace-crates` for a
+   crate-by-crate tour.
 
 Key Features
 ------------
@@ -153,7 +198,7 @@ Key Features
        enforcement prevents escaping the project directory.
    * - **Budget**
      - **Token Budget**
-     - Per-session cost tracking with ``--max-cost`` USD limit and ``--max-steps`` iteration cap.
+     - Per-session cost tracking with a ``--max-cost`` United States dollar (USD) limit and ``--max-steps`` iteration cap.
    * - **TUI**
      - **Terminal UI**
      - Ratatui-based with markdown rendering, diff viewer, task tree, dashboard,
@@ -166,12 +211,13 @@ Key Features
 SRBN: Stabilized Recursive Barrier Network
 ------------------------------------------
 
-The SRBN engine in Perspt is based on the paper *"Stability is All You Need:
-Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"* by **Vikrant R.
-and Ronak R.** (pre-publication). The paper introduces a topological framework
-that reformulates LLM agency as a sheaf-theoretic control problem, replacing
-probabilistic search with Lyapunov stability analysis. Key theoretical
-contributions include:
+The SRBN engine in Perspt is based on the *Stability is All You Need* paper
+series. Paper I introduces the stability certificate for accepted trajectories;
+Paper II turns that certificate into an observed harness with descent-gated
+acceptance; Paper III lifts the harness into a capability-constrained platform
+contract. Together they reformulate LLM agency as a control problem in which
+proposed states must be measured, corrected, and recorded before they are
+trusted. Key theoretical contributions include:
 
 - **Input-to-State Stability (ISS)** proof showing bounded reasoning errors
   result in bounded system deviation (paper result)
@@ -180,9 +226,33 @@ contributions include:
 - **Adaptive Flow Speculation** for latency reduction via branch prediction
 - Theoretical reliability scaling from exponential decay to logarithmic: :math:`O(\log N)` (paper prediction)
 
-Perspt implements this theory as an experimental coding agent, governed by PSP-7.
-The mathematical framework is mature; empirical benchmarks on this implementation
-have not yet been published.
+Perspt implements this theory as an experimental coding agent and extends it
+through PSP-8 toward an SDK-first agent platform. The mathematical framework is
+mature; empirical benchmarks on this implementation have not yet been published.
+
+The central paper prediction is that *measured, barrier-gated* acceptance turns
+the error growth of a long autonomous run from a quantity that accumulates with
+the number of steps :math:`N` into one that grows only logarithmically. The
+following chart illustrates the qualitative difference (conceptual, not measured):
+
+.. plot::
+   :caption: Conceptual residual-error growth: an unbarriered agent versus the
+             SRBN logarithmic prediction (illustrative, not a benchmark).
+
+   import numpy as np
+   import matplotlib.pyplot as plt
+
+   N = np.arange(1, 101)
+   naive = 0.05 * N                 # O(N): errors accumulate every step
+   srbn = 0.05 * np.log(N + 1)      # O(log N): barrier-gated acceptance
+
+   fig, ax = plt.subplots()
+   ax.plot(N, naive, label=r'Unbarriered agent  $O(N)$', color='#E53935', lw=2)
+   ax.plot(N, srbn, label=r'SRBN prediction  $O(\log N)$', color='#1E88E5', lw=2)
+   ax.set_xlabel('Autonomous steps $N$')
+   ax.set_ylabel('Expected uncorrected errors')
+   ax.set_title('Reliability scaling: accumulation vs. logarithmic bound')
+   ax.legend()
 
 .. graphviz::
    :align: center
@@ -215,11 +285,11 @@ have not yet been published.
 
    V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
 
-- **V_syn** — LSP diagnostic count (errors + warnings)
-- **V_str** — Structural contract violations
-- **V_log** — Weighted test failures (pytest)
-- **V_boot** — Bootstrap command exit codes (build, init)
-- **V_sheaf** — Cross-node consistency failures
+- :math:`V_{syn}` - LSP diagnostic count (errors plus warnings)
+- :math:`V_{str}` - Structural contract violations
+- :math:`V_{log}` - Weighted test failures (pytest)
+- :math:`V_{boot}` - Bootstrap command exit codes (build, init)
+- :math:`V_{sheaf}` - Cross-node consistency failures
 
 Default weights: alpha = 1.0, beta = 0.5, gamma = 2.0. Convergence threshold: epsilon = 0.10.
 
@@ -300,7 +370,7 @@ Supported Providers
      - DeepSeek Coder
    * - Ollama
      - *(none)*
-     - Local models — no API key required
+     - Local models - no API key required
 
 Philosophy
 ----------
@@ -312,16 +382,16 @@ Philosophy
    | *Through SRBN's loop, stability we find,*
    | *Code that works, refined and aligned.*
 
-   — The Perspt Manifesto
+  -- The Perspt Manifesto
 
 Perspt embodies the belief that AI tools should be:
 
-- **Accessible** — A simple ``perspt`` command connects you to any LLM provider
-- **Fast** — Rust-native performance with async streaming
-- **Stable** — Lyapunov energy guides convergence before commit (SRBN agent, based on paper theory)
-- **Secure** — Policy-controlled execution with workspace bounds
-- **Extensible** — Modular 9-crate architecture
-- **Experimental** — A testbed for control-theoretic approaches to LLM reliability
+- **Accessible** - A simple ``perspt`` command connects you to any LLM provider
+- **Fast** - Rust-native performance with async streaming
+- **Stable** - Lyapunov energy guides convergence before commit (SRBN agent, based on paper theory)
+- **Secure** - Policy-controlled execution with workspace bounds
+- **Extensible** - Modular twelve-crate architecture
+- **Experimental** - A testbed for control-theoretic approaches to LLM reliability
 
 Next Steps
 ----------
@@ -345,4 +415,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 9-crate design.
+      Understand the twelve-crate design.

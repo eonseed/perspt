@@ -14,11 +14,17 @@ Understanding the foundations of Perspt.
 
       The theoretical framework and its experimental implementation in Perspt.
 
+   .. grid-item-card:: Stability Papers in Agent Mode
+      :link: stability-agent-mode
+      :link-type: doc
+
+      How the three Stability papers shape PSP-8, agent mode, and future plugins.
+
    .. grid-item-card:: Workspace Crates
       :link: workspace-crates
       :link-type: doc
 
-      The 9-crate modular architecture.
+      The twelve-crate modular architecture.
 
    .. grid-item-card:: PSP Process
       :link: psp-process
@@ -31,5 +37,6 @@ Understanding the foundations of Perspt.
    :hidden:
 
    srbn-architecture
+   stability-agent-mode
    workspace-crates
    psp-process

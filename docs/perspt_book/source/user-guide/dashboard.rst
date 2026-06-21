@@ -30,30 +30,30 @@ To use a different port:
 Dashboard Pages
 ---------------
 
-**Overview** — Lists all recent sessions with status badges (running,
+**Overview** - Lists all recent sessions with status badges (running,
 completed, failed), node completion counts, and budget consumption.
 Click any session to drill into its sub-pages.
 
-**DAG Topology** — Shows node cards colored by state (green for
+**DAG Topology** - Shows node cards colored by state (green for
 committed/verified, red for failed, blue for running). Displays the
 task graph edges below. Useful for understanding the agent's
 decomposition of work.
 
-**Energy Convergence** — Displays per-node energy components: V_syn
+**Energy Convergence** - Displays per-node energy components: V_syn
 (syntax), V_str (structure), V_log (tests), V_boot (bootstrap), and
 V_sheaf (sheaf validation). The V_total column shows the combined
 energy value.
 
-**LLM Telemetry** — Summary stats bar showing total requests, tokens
+**LLM Telemetry** - Summary stats bar showing total requests, tokens
 in/out, and cumulative latency. Below, a table of individual LLM
 requests with model, node, token counts, latency, and prompt/response
 previews.
 
-**Sandbox Monitoring** — Lists provisional branches with their state
+**Sandbox Monitoring** - Lists provisional branches with their state
 (active, merged, flushed) and sandbox directories. Useful for tracking
 which code changes are being explored.
 
-**Decision Trace** — Collapsible sections for each decision category:
+**Decision Trace** - Collapsible sections for each decision category:
 escalation reports, sheaf validations, DAG rewrites, plan revisions,
 repair footprints, and verification results. Each section shows relevant
 details in tabular form.
@@ -77,10 +77,10 @@ subsequent requests pass through.
 
 Cookie attributes:
 
-- ``HttpOnly`` — not accessible via JavaScript
-- ``SameSite=Lax`` — CSRF protection
-- ``Secure`` — set when not on localhost
-- ``Path=/`` — applies to all dashboard routes
+- ``HttpOnly`` - not accessible via JavaScript
+- ``SameSite=Lax`` - CSRF protection
+- ``Secure`` - set when not on localhost
+- ``Path=/`` - applies to all dashboard routes
 
 Using with a Running Agent
 --------------------------

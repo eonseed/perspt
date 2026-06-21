@@ -32,12 +32,12 @@ and Perspt will auto-detect the provider:
 
 .. code-block:: bash
 
-   # Pick one — Perspt auto-detects from the environment
+   # Pick one - Perspt auto-detects from the environment
    export OPENAI_API_KEY="sk-..."
    export ANTHROPIC_API_KEY="sk-ant-..."
    export GEMINI_API_KEY="..."
 
-   # Ollama needs no key — just run: ollama serve
+   # Ollama needs no key - just run: ollama serve
 
 .. note::
    **Auto-detection priority**: OpenAI > Anthropic > Gemini > Groq > Cohere >
@@ -111,17 +111,17 @@ Agent mode (experimental) lets the SRBN engine plan and write multi-file project
 
 What happens:
 
-1. **Detection** — Perspt identifies Python from the task description, selects the
+1. **Detection** - Perspt identifies Python from the task description, selects the
    ``python`` plugin (``ty`` LSP, ``pytest`` runner, ``uv init --lib``).
-2. **Planning** — The Architect model decomposes the task into a DAG of nodes, each
+2. **Planning** - The Architect model decomposes the task into a DAG of nodes, each
    owning specific output files (ownership closure rule).
-3. **Execution** — Nodes execute in topological order. For each node, the Actuator
+3. **Execution** - Nodes execute in topological order. For each node, the Actuator
    generates a multi-file artifact bundle (writes, diffs, commands).
-4. **Verification** — LSP diagnostics compute V_syn, ``pytest`` computes V_log,
+4. **Verification** - LSP diagnostics compute V_syn, ``pytest`` computes V_log,
    and bootstrap commands compute V_boot. Total energy V(x) is checked.
-5. **Review** — In interactive mode, a diff viewer presents changes for approval.
+5. **Review** - In interactive mode, a diff viewer presents changes for approval.
    In headless mode (``--yes``), all changes are auto-approved.
-6. **Commit** — Stable nodes are recorded in the Merkle ledger.
+6. **Commit** - Stable nodes are recorded in the Merkle ledger.
 
 After completion, inspect the output:
 

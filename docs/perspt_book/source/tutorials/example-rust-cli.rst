@@ -68,5 +68,5 @@ Key Observations
 See Also
 --------
 
-- :doc:`agent-mode` — Agent mode tutorial
-- :doc:`example-python-etl` — Python project example
+- :doc:`agent-mode` - Agent mode tutorial
+- :doc:`example-python-etl` - Python project example

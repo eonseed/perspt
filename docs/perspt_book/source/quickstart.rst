@@ -91,13 +91,13 @@ Let the experimental SRBN agent autonomously plan and build multi-file projects:
 
 The SRBN engine will:
 
-1. **Detect** — Identify language plugins and workspace state
-2. **Plan** — Architect decomposes task into a DAG with ownership closure
-3. **Generate** — Actuator emits multi-file artifact bundles per node
-4. **Verify** — LSP diagnostics + tests compute Lyapunov energy V(x)
-5. **Converge** — Retry with grounded error feedback until V(x) < epsilon
-6. **Sheaf Check** — Validate cross-node consistency
-7. **Commit** — Record stable state in Merkle ledger
+1. **Detect** - Identify language plugins and workspace state
+2. **Plan** - Architect decomposes task into a DAG with ownership closure
+3. **Generate** - Actuator emits multi-file artifact bundles per node
+4. **Verify** - LSP diagnostics + tests compute Lyapunov energy V(x)
+5. **Converge** - Retry with grounded error feedback until V(x) < epsilon
+6. **Sheaf Check** - Validate cross-node consistency
+7. **Commit** - Record stable state in Merkle ledger
 
 .. seealso:: :doc:`tutorials/agent-mode` for a full walkthrough.
 
@@ -197,4 +197,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the 9-crate design.
+      Understand the twelve-crate design.

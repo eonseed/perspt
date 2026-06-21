@@ -131,8 +131,8 @@ Embedded Dashboard
 
 When ``--dashboard`` is provided, an Axum web server is spawned as a background
 task within the agent process. It opens a separate read-only DuckDB connection
-to the same database file the agent writes to—DuckDB supports one writer plus
-concurrent readers—so the dashboard can display live progress without
+to the same database file the agent writes to-DuckDB supports one writer plus
+concurrent readers-so the dashboard can display live progress without
 interfering with the agent.
 
 The dashboard server is automatically stopped when the agent process exits.

@@ -47,6 +47,47 @@ Language plugins implement the ``LanguagePlugin`` trait from ``perspt-core``.
 2. Register in the ``PluginRegistry``
 3. Add LSP config for ``gopls``
 
+Designing PSP-8 Domain Adapters
+-------------------------------
+
+PSP-8 changes the long-term extension model from plugin-first to SDK-first.
+Language plugins remain useful, but they should become domain adapters over the
+SRBN SDK rather than miniature orchestrators. The SRBN control plane should own
+scheduling, residual scoring, capability checks, replay, and dashboard
+projection. A domain adapter should own the facts that only the domain can know.
+
+For a coding adapter, that means:
+
+.. rubric:: Coding adapter responsibilities
+
+Workspace sensing
+   Project detection, initialization command, manifest inventory, dependency
+   graph, and import graph.
+
+Verification sensors
+   Parser or AST extraction, LSP diagnostics, formatter checks, build checks,
+   targeted tests, and logical validators.
+
+Residual taxonomy
+   Compiler residuals, import residuals, test residuals, policy residuals,
+   bootstrap residuals, and sheaf residuals.
+
+Correction directions
+   Typed hints that map residual evidence to repair prompts or graph rewrite
+   actions.
+
+Admissible effects
+   Rules for file mutation, dependency mutation, command execution, network
+   access, and approval requirements.
+
+Replay fixtures
+   Small examples that test descent, recovery, escalation, and deterministic
+   replay.
+
+Research, website-building, and other future plugins should follow the same
+shape: expose measurable residuals and admissible effects, then let the SRBN SDK
+perform the control work.
+
 Adding an Agent Tool
 --------------------
 
