@@ -3,6 +3,17 @@
 Perspt Documentation
 ====================
 
+.. plot:: plots/front_page_abm.py
+
+.. epigraph::
+
+   The keyboard hums, the screen aglow,
+   AI's wisdom, a steady flow.
+   Will robots take over, it's quite the fright,
+   Or just provide insights, day and night?
+   We ponder and chat, with code as our guide,
+   Is AI our helper or our human pride?
+
 **Your Terminal's Window to the AI World**
 
 Perspt is a high-performance terminal-based LLM interface that serves two purposes:
