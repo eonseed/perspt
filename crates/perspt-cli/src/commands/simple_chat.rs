@@ -271,9 +271,15 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
                 } else {
                     println!("\nError during response: {}", e);
                 }
+                if !is_terminal {
+                    anyhow::bail!("LLM request failed: {e}");
+                }
             }
             Err(e) => {
                 println!("Request failed: {}", e);
+                if !is_terminal {
+                    anyhow::bail!("LLM request task failed: {e}");
+                }
             }
         }
 
