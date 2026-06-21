@@ -13,7 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # LLM unified interface
-genai = "0.6"
+genai = "0.6.5"
 futures = "0.3"
 
 # Google Cloud Application Default Credentials (ADC) for Vertex AI auth.

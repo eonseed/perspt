@@ -19,7 +19,7 @@ const MASKED_API_KEY: &str = "***";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Provider id, e.g. `openai`, `anthropic`, `gemini`, `ollama`.
+    /// Provider id, e.g. `openai`, `anthropic`, `gemini`, `vertex`, `ollama`.
     #[serde(
         alias = "provider_type",
         alias = "default_provider",
@@ -38,6 +38,23 @@ pub struct Config {
     /// Optional base URL override for OpenAI-compatible / local endpoints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+
+    /// Google Cloud project id for Vertex AI. Optional; may also come from
+    /// `VERTEX_PROJECT_ID` or Google Cloud project environment variables.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vertex_project_id: Option<String>,
+
+    /// Vertex AI location. Optional; may also come from `VERTEX_LOCATION`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vertex_location: Option<String>,
+
+    /// Preferred package manager for greenfield project init. Optional and
+    /// fully plugin-driven: the active language plugin maps it to its own init
+    /// command and default (e.g. Python → `uv`, JS → `npm`). Unknown values fall
+    /// back to each plugin's default. Examples: `uv`, `poetry`, `pdm`, `pipenv`
+    /// (Python); `pnpm`, `yarn` (JS).
+    #[serde(skip_serializing_if = "Option::is_none", alias = "python_package_manager")]
+    pub package_manager: Option<String>,
 
     /// Agent Architect-tier model override.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,13 +114,17 @@ impl Config {
             "model" | "default_model" => self.model = Some(value),
             "api_key" => self.api_key = Some(value),
             "base_url" => self.base_url = Some(value),
+            "vertex_project_id" => self.vertex_project_id = Some(value),
+            "vertex_location" => self.vertex_location = Some(value),
             "architect_model" => self.architect_model = Some(value),
             "actuator_model" => self.actuator_model = Some(value),
             "verifier_model" => self.verifier_model = Some(value),
             "speculator_model" => self.speculator_model = Some(value),
+            "package_manager" | "python_package_manager" => self.package_manager = Some(value),
             other => anyhow::bail!(
                 "Unknown configuration key: {other}. Valid keys: provider, model, api_key, \
-                 base_url, architect_model, actuator_model, verifier_model, speculator_model"
+                 base_url, vertex_project_id, vertex_location, architect_model, actuator_model, \
+                 verifier_model, speculator_model, package_manager"
             ),
         }
         Ok(())
@@ -120,6 +141,17 @@ mod tests {
         assert!(cfg.provider.is_none());
         assert!(cfg.model.is_none());
         assert!(cfg.api_key.is_none());
+    }
+
+    #[test]
+    fn package_manager_set_value_and_alias() {
+        let mut cfg = Config::default();
+        cfg.set_value("package_manager", "poetry").unwrap();
+        assert_eq!(cfg.package_manager.as_deref(), Some("poetry"));
+        // The python-specific key is accepted as an alias for clarity.
+        let mut cfg2 = Config::default();
+        cfg2.set_value("python_package_manager", "pdm").unwrap();
+        assert_eq!(cfg2.package_manager.as_deref(), Some("pdm"));
     }
 
     #[test]
@@ -164,6 +196,10 @@ mod tests {
         assert_eq!(cfg.model.as_deref(), Some("phi-4-npu-ov"));
         cfg.set_value("provider", "openai").unwrap();
         assert_eq!(cfg.provider.as_deref(), Some("openai"));
+        cfg.set_value("vertex_project_id", "test-project").unwrap();
+        cfg.set_value("vertex_location", "test-location").unwrap();
+        assert_eq!(cfg.vertex_project_id.as_deref(), Some("test-project"));
+        assert_eq!(cfg.vertex_location.as_deref(), Some("test-location"));
     }
 
     #[test]
