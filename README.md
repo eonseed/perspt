@@ -49,7 +49,7 @@ Perspt auto-detects whichever provider key you have set. No config file required
 | xAI        | `XAI_API_KEY`           | Yes              |
 | DeepSeek   | `DEEPSEEK_API_KEY`      | Yes              |
 | AWS Bedrock| `AWS_ACCESS_KEY_ID` (and region/creds) | Yes              |
-| Google Agent Platform | `VERTEX_API_KEY` (and project/region) | Yes              |
+| Google Agent Platform | Google Cloud ADC plus project/region | Yes              |
 | Ollama     | *(none)*                | No               |
 
 ---
