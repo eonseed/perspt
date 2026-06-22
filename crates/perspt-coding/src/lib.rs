@@ -27,9 +27,9 @@ pub use runtime::{crash_marker, SmokeInvocation};
 pub use symbols::{defined_symbols, expected_symbols};
 
 use perspt_sdk::{
-    AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope, EnergyComponent,
-    EnergyModel, ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight, StabilityClaim,
-    WorkspaceSnapshot,
+    AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope,
+    EnergyComponent, EnergyModel, ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight,
+    StabilityClaim, WorkspaceSnapshot,
 };
 
 /// The language an adapter targets, used to specialize correction directions.
@@ -222,7 +222,10 @@ mod tests {
             SensorRef::new("rust-analyzer", IndependenceRoute::Lsp),
         )
         .unwrap();
-        r.affected_symbols = vec![SymbolRef { name: "Bar".into(), container: Some("crate::foo".into()) }];
+        r.affected_symbols = vec![SymbolRef {
+            name: "Bar".into(),
+            container: Some("crate::foo".into()),
+        }];
         r.affected_paths = vec!["src/main.rs".into()];
         r
     }
@@ -242,7 +245,10 @@ mod tests {
         let model = domain.energy_model(&DomainScope::default());
         assert!(model.validate().is_ok());
         let claim = model.stability_claim.unwrap();
-        assert!(!claim.claims_floor(), "coding domain must remain NotClaimed");
+        assert!(
+            !claim.claims_floor(),
+            "coding domain must remain NotClaimed"
+        );
     }
 
     #[test]

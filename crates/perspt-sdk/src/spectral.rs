@@ -41,7 +41,10 @@ pub struct VerificationGraph {
 
 impl VerificationGraph {
     pub fn new(node_count: usize) -> Self {
-        Self { node_count, edges: Vec::new() }
+        Self {
+            node_count,
+            edges: Vec::new(),
+        }
     }
 
     pub fn with_edge(mut self, src: usize, dst: usize, weight: f64) -> Self {
@@ -106,7 +109,9 @@ impl VerificationGraph {
     /// zero and `mu` is uninformative (a disconnected verifier component cannot
     /// be driven to consensus by the others).
     pub fn mu(&self, tol: f64) -> Result<Option<f64>> {
-        Ok(self.smallest_nonzero_eigenvalue(tol)?.map(|lambda| 2.0 * lambda))
+        Ok(self
+            .smallest_nonzero_eigenvalue(tol)?
+            .map(|lambda| 2.0 * lambda))
     }
 
     /// Algebraic connectivity (Fiedler value) — the smallest non-zero
@@ -176,7 +181,10 @@ mod tests {
         // by counting zeros.
         let eigs = g.eigenvalues_sorted().unwrap();
         let zeros = eigs.iter().filter(|&&v| v.abs() <= TOL).count();
-        assert_eq!(zeros, 2, "disconnected graph has multiplicity-2 zero eigenvalue");
+        assert_eq!(
+            zeros, 2,
+            "disconnected graph has multiplicity-2 zero eigenvalue"
+        );
     }
 
     #[test]
@@ -207,7 +215,13 @@ mod tests {
 
     #[test]
     fn rejects_self_loop_and_out_of_range() {
-        assert!(VerificationGraph::new(2).with_edge(0, 0, 1.0).mu(TOL).is_err());
-        assert!(VerificationGraph::new(2).with_edge(0, 5, 1.0).mu(TOL).is_err());
+        assert!(VerificationGraph::new(2)
+            .with_edge(0, 0, 1.0)
+            .mu(TOL)
+            .is_err());
+        assert!(VerificationGraph::new(2)
+            .with_edge(0, 5, 1.0)
+            .mu(TOL)
+            .is_err());
     }
 }

@@ -42,7 +42,10 @@ pub fn accepted_unsafe_rate(samples: &[CalibrationSample], theta: f64) -> f64 {
     if samples.is_empty() {
         return 0.0;
     }
-    let unsafe_accepted = samples.iter().filter(|s| s.score > theta && s.is_unsafe).count();
+    let unsafe_accepted = samples
+        .iter()
+        .filter(|s| s.score > theta && s.is_unsafe)
+        .count();
     unsafe_accepted as f64 / samples.len() as f64
 }
 
@@ -53,10 +56,14 @@ pub fn accepted_unsafe_rate(samples: &[CalibrationSample], theta: f64) -> f64 {
 /// `1/(n+1) > rho`), returns `1.0` (accept nothing in `[0,1]`).
 pub fn conformal_threshold(samples: &[CalibrationSample], rho: f64) -> Result<f64> {
     if !(0.0..=1.0).contains(&rho) {
-        return Err(SdkError::InvalidGate(format!("rho must be in [0,1]: {rho}")));
+        return Err(SdkError::InvalidGate(format!(
+            "rho must be in [0,1]: {rho}"
+        )));
     }
     if samples.is_empty() {
-        return Err(SdkError::Domain("conformal calibration needs samples".into()));
+        return Err(SdkError::Domain(
+            "conformal calibration needs samples".into(),
+        ));
     }
     let n = samples.len() as f64;
 
@@ -85,8 +92,11 @@ pub fn ks_statistic(live: &[f64], calib: &[f64]) -> f64 {
     let mut all: Vec<f64> = live.iter().chain(calib.iter()).copied().collect();
     all.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     all.dedup();
-    let cdf = |data: &[f64], x: f64| data.iter().filter(|&&v| v <= x).count() as f64 / data.len() as f64;
-    all.iter().map(|&x| (cdf(live, x) - cdf(calib, x)).abs()).fold(0.0, f64::max)
+    let cdf =
+        |data: &[f64], x: f64| data.iter().filter(|&&v| v <= x).count() as f64 / data.len() as f64;
+    all.iter()
+        .map(|&x| (cdf(live, x) - cdf(calib, x)).abs())
+        .fold(0.0, f64::max)
 }
 
 /// Whether the live distribution has drifted from the calibration distribution.
@@ -128,7 +138,10 @@ impl CalibrationState {
         };
         // Inflate halfway toward 1.0.
         let backoff = (last + 1.0) / 2.0;
-        CalibrationState::Stale { backoff_theta: backoff, last_theta: last }
+        CalibrationState::Stale {
+            backoff_theta: backoff,
+            last_theta: last,
+        }
     }
 
     /// Whether the conformal accepted-unsafe bound may currently be asserted.
@@ -212,7 +225,10 @@ mod tests {
     fn threshold_excludes_unsafe_low_scores() {
         // With a tight budget, theta_hat must rise above the unsafe scores.
         let theta = conformal_threshold(&samples(), 0.2).unwrap();
-        assert!(theta >= 0.3, "theta={theta} should exclude unsafe scores <= 0.3");
+        assert!(
+            theta >= 0.3,
+            "theta={theta} should exclude unsafe scores <= 0.3"
+        );
         // No unsafe sample is accepted above the threshold.
         assert_eq!(accepted_unsafe_rate(&samples(), theta), 0.0);
     }
@@ -255,11 +271,19 @@ mod tests {
 
     #[test]
     fn stale_window_backs_off_and_does_not_hard_halt() {
-        let state = CalibrationState::calibrate(&samples(), 0.3).unwrap().mark_stale();
+        let state = CalibrationState::calibrate(&samples(), 0.3)
+            .unwrap()
+            .mark_stale();
         // Low-risk effect with a high score still commits, but uncertified.
-        assert_eq!(decide(&state, 0.99, RiskClass::Low), AcceptOutcome::UncertifiedAccept);
+        assert_eq!(
+            decide(&state, 0.99, RiskClass::Low),
+            AcceptOutcome::UncertifiedAccept
+        );
         // High-risk effect routes to approval rather than halting.
-        assert_eq!(decide(&state, 0.99, RiskClass::High), AcceptOutcome::RouteToApproval);
+        assert_eq!(
+            decide(&state, 0.99, RiskClass::High),
+            AcceptOutcome::RouteToApproval
+        );
     }
 
     #[test]
@@ -269,7 +293,10 @@ mod tests {
             CalibrationState::Calibrated { theta_hat, .. } => theta_hat,
             _ => unreachable!(),
         };
-        assert_eq!(decide(&state, threshold + 0.05, RiskClass::Low), AcceptOutcome::CertifiedAccept);
+        assert_eq!(
+            decide(&state, threshold + 0.05, RiskClass::Low),
+            AcceptOutcome::CertifiedAccept
+        );
         assert_eq!(decide(&state, 0.0, RiskClass::Low), AcceptOutcome::Reject);
     }
 }

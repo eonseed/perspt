@@ -396,7 +396,10 @@ impl SRBNOrchestrator {
                 anyhow::bail!("Amendment task '{}' has an empty goal", task.id);
             }
             if self.node_indices.contains_key(&task.id) {
-                anyhow::bail!("Amendment task id '{}' already exists in the graph", task.id);
+                anyhow::bail!(
+                    "Amendment task id '{}' already exists in the graph",
+                    task.id
+                );
             }
             if !amendment_ids.insert(task.id.as_str()) {
                 anyhow::bail!("Amendment has duplicate task id '{}'", task.id);
@@ -410,10 +413,7 @@ impl SRBNOrchestrator {
                     );
                 }
                 if !amendment_files.insert(file.clone()) {
-                    anyhow::bail!(
-                        "Amendment claims file '{}' in more than one task",
-                        file
-                    );
+                    anyhow::bail!("Amendment claims file '{}' in more than one task", file);
                 }
             }
         }
@@ -421,7 +421,8 @@ impl SRBNOrchestrator {
         // 2. Validate dependencies resolve to an existing node or an amendment id.
         for task in &amendment.tasks {
             for dep in &task.dependencies {
-                let known = self.node_indices.contains_key(dep) || amendment_ids.contains(dep.as_str());
+                let known =
+                    self.node_indices.contains_key(dep) || amendment_ids.contains(dep.as_str());
                 if !known {
                     anyhow::bail!(
                         "Amendment task '{}' depends on unknown task '{}'",
@@ -459,8 +460,16 @@ impl SRBNOrchestrator {
                             kind: "depends_on".to_string(),
                         },
                     );
-                    if let Err(e) = self.ledger.record_task_graph_edge(dep, &task.id, "depends_on") {
-                        log::warn!("Failed to persist amendment edge {} -> {}: {}", dep, task.id, e);
+                    if let Err(e) = self
+                        .ledger
+                        .record_task_graph_edge(dep, &task.id, "depends_on")
+                    {
+                        log::warn!(
+                            "Failed to persist amendment edge {} -> {}: {}",
+                            dep,
+                            task.id,
+                            e
+                        );
                     }
                 }
             }
@@ -469,7 +478,10 @@ impl SRBNOrchestrator {
         // 5. Merge ownership manifest (assigns only the amendment's files).
         self.build_ownership_manifest_from_plan(amendment);
 
-        log::info!("Merged plan amendment: {} new node(s)", amendment.tasks.len());
+        log::info!(
+            "Merged plan amendment: {} new node(s)",
+            amendment.tasks.len()
+        );
         Ok(amendment.tasks.len())
     }
 
@@ -502,7 +514,10 @@ impl SRBNOrchestrator {
                 } else {
                     files.join(", ")
                 };
-                (n.node_id.clone(), format!("state={:?}, owns: {}", n.state, owns))
+                (
+                    n.node_id.clone(),
+                    format!("state={:?}, owns: {}", n.state, owns),
+                )
             })
             .collect();
 
@@ -519,11 +534,9 @@ impl SRBNOrchestrator {
             error_feedback: gap,
             ..Default::default()
         };
-        let prompt = crate::prompt_compiler::compile(
-            perspt_core::types::PromptIntent::PlanAmendment,
-            &ev,
-        )
-        .text;
+        let prompt =
+            crate::prompt_compiler::compile(perspt_core::types::PromptIntent::PlanAmendment, &ev)
+                .text;
 
         let model = self.get_architect_model();
         let response = self

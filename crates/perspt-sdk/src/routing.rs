@@ -53,7 +53,11 @@ pub struct ModelBudget {
 
 impl Default for ModelBudget {
     fn default() -> Self {
-        Self { max_tokens: 100_000, max_calls: 50, max_wall_clock_secs: 600 }
+        Self {
+            max_tokens: 100_000,
+            max_calls: 50,
+            max_wall_clock_secs: 600,
+        }
     }
 }
 
@@ -220,14 +224,24 @@ mod tests {
 
     #[test]
     fn explicit_tier_override_beats_phase_default() {
-        let route = resolve_route(AgentPhase::Implement, &config(), Some(ModelTier::Speculator), ModelBudget::default());
+        let route = resolve_route(
+            AgentPhase::Implement,
+            &config(),
+            Some(ModelTier::Speculator),
+            ModelBudget::default(),
+        );
         assert_eq!(route.resolved_tier, ModelTier::Speculator);
     }
 
     #[test]
     fn uniform_sets_all_tiers() {
         let config = ModelTierConfig::uniform("one-model");
-        for phase in [AgentPhase::Explore, AgentPhase::Plan, AgentPhase::Implement, AgentPhase::Verify] {
+        for phase in [
+            AgentPhase::Explore,
+            AgentPhase::Plan,
+            AgentPhase::Implement,
+            AgentPhase::Verify,
+        ] {
             let route = resolve_route(phase, &config, None, ModelBudget::default());
             assert_eq!(route.model, "one-model");
         }

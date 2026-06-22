@@ -85,8 +85,15 @@ fn residual(
     sensor: SensorRef,
     summary: &str,
 ) -> ResidualEvent {
-    let mut r = ResidualEvent::new(node_id, generation, class, ResidualSeverity::Error, 1.0, sensor)
-        .expect("unit score is valid");
+    let mut r = ResidualEvent::new(
+        node_id,
+        generation,
+        class,
+        ResidualSeverity::Error,
+        1.0,
+        sensor,
+    )
+    .expect("unit score is valid");
     r.evidence.summary = summary.to_string();
     r
 }
@@ -107,7 +114,9 @@ pub fn classify_rust_code(code: &str) -> ResidualClass {
         // Type / trait-bound mismatches.
         "E0308" | "E0277" | "E0599" | "E0061" => ResidualClass::Type,
         // Borrow / ownership / lifetimes.
-        "E0382" | "E0499" | "E0502" | "E0505" | "E0506" | "E0597" => ResidualClass::OwnershipViolation,
+        "E0382" | "E0499" | "E0502" | "E0505" | "E0506" | "E0597" => {
+            ResidualClass::OwnershipViolation
+        }
         // Visibility / privacy.
         "E0603" | "E0616" => ResidualClass::InterfaceMismatch,
         // Anything else compiler-emitted is a generic type/build residual.
@@ -134,7 +143,13 @@ impl LanguageAdapter for RustAdapter {
                     let code = &rest[..end];
                     let class = classify_rust_code(code);
                     let summary = rest[end + 1..].trim_start_matches(':').trim();
-                    residuals.push(residual(node_id, generation, class, self.diagnostic_sensor(), summary));
+                    residuals.push(residual(
+                        node_id,
+                        generation,
+                        class,
+                        self.diagnostic_sensor(),
+                        summary,
+                    ));
                 }
             } else if line.starts_with("test result: FAILED") || line.contains("... FAILED") {
                 residuals.push(residual(
@@ -287,11 +302,16 @@ impl LanguageAdapter for PythonAdapter {
         let mut residuals = Vec::new();
         for line in raw.lines() {
             let lower = line.to_lowercase();
-            let class = if lower.contains("could not be resolved") || lower.contains("no module named") {
+            let class = if lower.contains("could not be resolved")
+                || lower.contains("no module named")
+            {
                 Some(ResidualClass::ImportGraph)
             } else if lower.contains("is not defined") || lower.contains("is possibly unbound") {
                 Some(ResidualClass::SymbolMismatch)
-            } else if lower.contains("incompatible") || lower.contains("expected type") || lower.contains("has type") {
+            } else if lower.contains("incompatible")
+                || lower.contains("expected type")
+                || lower.contains("has type")
+            {
                 Some(ResidualClass::Type)
             } else if lower.contains("failed") && lower.contains("test") {
                 Some(ResidualClass::TestFailure)
@@ -386,11 +406,11 @@ pub struct TypeScriptAdapter;
 /// Classify a TypeScript diagnostic code (e.g. `TS2307`).
 pub fn classify_ts_code(code: &str) -> ResidualClass {
     match code {
-        "TS2307" => ResidualClass::ImportGraph,    // cannot find module
+        "TS2307" => ResidualClass::ImportGraph, // cannot find module
         "TS2304" => ResidualClass::SymbolMismatch, // cannot find name
         "TS2305" | "TS2614" => ResidualClass::InterfaceMismatch, // no exported member
-        "TS2322" | "TS2345" | "TS2769" => ResidualClass::Type,   // type mismatches
-        "TS6133" | "TS6192" => ResidualClass::Lint,              // unused
+        "TS2322" | "TS2345" | "TS2769" => ResidualClass::Type, // type mismatches
+        "TS6133" | "TS6192" => ResidualClass::Lint, // unused
         _ => ResidualClass::Type,
     }
 }
@@ -410,10 +430,19 @@ impl LanguageAdapter for TypeScriptAdapter {
             // `src/x.ts(3,10): error TS2307: Cannot find module 'foo'.`
             if let Some(idx) = line.find("error TS") {
                 let rest = &line[idx + "error ".len()..];
-                let code: String = rest.chars().take_while(|c| !c.is_whitespace() && *c != ':').collect();
+                let code: String = rest
+                    .chars()
+                    .take_while(|c| !c.is_whitespace() && *c != ':')
+                    .collect();
                 let class = classify_ts_code(&code);
                 let summary = rest.split_once(':').map(|(_, s)| s.trim()).unwrap_or(rest);
-                residuals.push(residual(node_id, generation, class, self.diagnostic_sensor(), summary));
+                residuals.push(residual(
+                    node_id,
+                    generation,
+                    class,
+                    self.diagnostic_sensor(),
+                    summary,
+                ));
             }
         }
         residuals
@@ -466,8 +495,14 @@ mod tests {
     #[test]
     fn rust_classifies_a_spread_of_codes() {
         assert_eq!(classify_rust_code("E0308"), ResidualClass::Type);
-        assert_eq!(classify_rust_code("E0382"), ResidualClass::OwnershipViolation);
-        assert_eq!(classify_rust_code("E0603"), ResidualClass::InterfaceMismatch);
+        assert_eq!(
+            classify_rust_code("E0382"),
+            ResidualClass::OwnershipViolation
+        );
+        assert_eq!(
+            classify_rust_code("E0603"),
+            ResidualClass::InterfaceMismatch
+        );
         assert_eq!(classify_rust_code("E0425"), ResidualClass::SymbolMismatch);
     }
 
@@ -503,16 +538,27 @@ mod tests {
 
     #[test]
     fn rust_smoke_discovers_workspace_binaries_and_examples() {
-        let dir = std::env::temp_dir().join(format!("perspt-smoke-rust-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let dir = std::env::temp_dir().join(format!(
+            "perspt-smoke-rust-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(dir.join("crates/cli/src")).unwrap();
         std::fs::create_dir_all(dir.join("crates/cli/examples")).unwrap();
-        std::fs::write(dir.join("crates/cli/Cargo.toml"), "[package]\nname = \"weather-cli\"\n").unwrap();
+        std::fs::write(
+            dir.join("crates/cli/Cargo.toml"),
+            "[package]\nname = \"weather-cli\"\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("crates/cli/src/main.rs"), "fn main() {}\n").unwrap();
         std::fs::write(dir.join("crates/cli/examples/demo.rs"), "fn main() {}\n").unwrap();
 
         let inv = RustAdapter.smoke_invocations(&dir);
         assert!(
-            inv.iter().any(|i| i.command == "cargo run -q -p weather-cli -- --help"),
+            inv.iter()
+                .any(|i| i.command == "cargo run -q -p weather-cli -- --help"),
             "got {inv:?}"
         );
         assert!(
@@ -524,7 +570,13 @@ mod tests {
 
     #[test]
     fn python_smoke_discovers_src_layout_package() {
-        let dir = std::env::temp_dir().join(format!("perspt-smoke-py-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let dir = std::env::temp_dir().join(format!(
+            "perspt-smoke-py-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         std::fs::create_dir_all(dir.join("src/rpncalc")).unwrap();
         std::fs::write(dir.join("src/rpncalc/__init__.py"), "").unwrap();
 
@@ -538,8 +590,17 @@ mod tests {
 
     #[test]
     fn adapter_for_dispatches_by_language() {
-        assert_eq!(adapter_for(CodingLanguage::Rust).language(), CodingLanguage::Rust);
-        assert_eq!(adapter_for(CodingLanguage::Python).language(), CodingLanguage::Python);
-        assert_eq!(adapter_for(CodingLanguage::TypeScript).language(), CodingLanguage::TypeScript);
+        assert_eq!(
+            adapter_for(CodingLanguage::Rust).language(),
+            CodingLanguage::Rust
+        );
+        assert_eq!(
+            adapter_for(CodingLanguage::Python).language(),
+            CodingLanguage::Python
+        );
+        assert_eq!(
+            adapter_for(CodingLanguage::TypeScript).language(),
+            CodingLanguage::TypeScript
+        );
     }
 }

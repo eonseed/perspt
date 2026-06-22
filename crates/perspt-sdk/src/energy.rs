@@ -38,7 +38,13 @@ pub struct ResidualWeight {
 
 impl ResidualWeight {
     pub fn new(class: ResidualClass, component: EnergyComponent, weight: f64) -> Self {
-        Self { class, sensor: None, component, weight, hard_threshold: None }
+        Self {
+            class,
+            sensor: None,
+            component,
+            weight,
+            hard_threshold: None,
+        }
     }
 
     pub fn for_sensor(mut self, sensor: impl Into<String>) -> Self {
@@ -251,8 +257,16 @@ mod tests {
 
     fn model() -> EnergyModel {
         EnergyModel::new("test", 0.5)
-            .with_weight(ResidualWeight::new(ResidualClass::Type, EnergyComponent::Syn, 2.0))
-            .with_weight(ResidualWeight::new(ResidualClass::TestFailure, EnergyComponent::Log, 1.0))
+            .with_weight(ResidualWeight::new(
+                ResidualClass::Type,
+                EnergyComponent::Syn,
+                2.0,
+            ))
+            .with_weight(ResidualWeight::new(
+                ResidualClass::TestFailure,
+                EnergyComponent::Log,
+                1.0,
+            ))
     }
 
     fn residual(class: ResidualClass, score: f64) -> ResidualEvent {
@@ -302,7 +316,8 @@ mod tests {
     #[test]
     fn hard_threshold_flags_violation() {
         let model = EnergyModel::new("test", 0.5).with_weight(
-            ResidualWeight::new(ResidualClass::Type, EnergyComponent::Syn, 1.0).with_hard_threshold(0.0),
+            ResidualWeight::new(ResidualClass::Type, EnergyComponent::Syn, 1.0)
+                .with_hard_threshold(0.0),
         );
         let score = score_candidate(&model, &[residual(ResidualClass::Type, 1.0)]).unwrap();
         assert_eq!(score.hard_violations, vec![ResidualClass::Type]);
@@ -310,8 +325,11 @@ mod tests {
 
     #[test]
     fn rejects_non_positive_weight() {
-        let model = EnergyModel::new("test", 0.5)
-            .with_weight(ResidualWeight::new(ResidualClass::Type, EnergyComponent::Syn, 0.0));
+        let model = EnergyModel::new("test", 0.5).with_weight(ResidualWeight::new(
+            ResidualClass::Type,
+            EnergyComponent::Syn,
+            0.0,
+        ));
         assert!(model.validate().is_err());
     }
 

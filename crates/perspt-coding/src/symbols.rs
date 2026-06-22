@@ -16,7 +16,15 @@ use std::collections::BTreeSet;
 /// Declaration keywords across the supported languages whose following token is
 /// a defined symbol name.
 const DECL_KEYWORDS: &[&str] = &[
-    "fn", "def", "function", "struct", "enum", "trait", "class", "interface", "type",
+    "fn",
+    "def",
+    "function",
+    "struct",
+    "enum",
+    "trait",
+    "class",
+    "interface",
+    "type",
 ];
 
 /// True for an identifier start character (ASCII letter or underscore).
@@ -90,7 +98,9 @@ pub fn expected_symbols(interface_signature: &str, goal: &str) -> Vec<String> {
     let mut seen: BTreeSet<String> = BTreeSet::new();
 
     let mut push = |name: String| {
-        if name.len() >= 2 && is_ident_start(name.chars().next().unwrap()) && seen.insert(name.clone())
+        if name.len() >= 2
+            && is_ident_start(name.chars().next().unwrap())
+            && seen.insert(name.clone())
         {
             ordered.push(name);
         }
@@ -144,15 +154,74 @@ fn is_bare_identifier(s: &str) -> bool {
 fn is_primitive_or_keyword(name: &str) -> bool {
     const DENY: &[&str] = &[
         // Rust integer / float / core scalar types.
-        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
-        "f32", "f64", "bool", "char", "str", "String", "Vec", "Option", "Result", "Box", "Self",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "i128",
+        "isize",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "u128",
+        "usize",
+        "f32",
+        "f64",
+        "bool",
+        "char",
+        "str",
+        "String",
+        "Vec",
+        "Option",
+        "Result",
+        "Box",
+        "Self",
         // Common literals / keywords.
-        "self", "true", "false", "None", "Some", "Ok", "Err", "fn", "def", "function", "struct",
-        "enum", "trait", "class", "interface", "type", "pub", "let", "const", "mut", "async",
-        "await", "return", "if", "else", "for", "while", "match",
+        "self",
+        "true",
+        "false",
+        "None",
+        "Some",
+        "Ok",
+        "Err",
+        "fn",
+        "def",
+        "function",
+        "struct",
+        "enum",
+        "trait",
+        "class",
+        "interface",
+        "type",
+        "pub",
+        "let",
+        "const",
+        "mut",
+        "async",
+        "await",
+        "return",
+        "if",
+        "else",
+        "for",
+        "while",
+        "match",
         // TypeScript / Python primitives.
-        "number", "string", "boolean", "void", "any", "unknown", "int", "float", "double", "long",
-        "short", "byte", "object", "null", "undefined",
+        "number",
+        "string",
+        "boolean",
+        "void",
+        "any",
+        "unknown",
+        "int",
+        "float",
+        "double",
+        "long",
+        "short",
+        "byte",
+        "object",
+        "null",
+        "undefined",
     ];
     DENY.contains(&name)
 }
@@ -291,8 +360,7 @@ mod tests {
     #[test]
     fn backticked_primitive_type_is_not_an_obligation() {
         // `i32` and `src/lib.rs` are quoted prose, not symbols to create.
-        let expected =
-            expected_symbols("", "Use an `i32`-based signature; write to `src/lib.rs`.");
+        let expected = expected_symbols("", "Use an `i32`-based signature; write to `src/lib.rs`.");
         assert!(expected.is_empty(), "got {expected:?}");
     }
 

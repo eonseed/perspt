@@ -9,23 +9,59 @@ use perspt_sdk::*;
 #[test]
 fn energy_equation_is_weighted_sum_of_squares() {
     let model = EnergyModel::new("d", 0.5)
-        .with_weight(ResidualWeight::new(ResidualClass::Type, EnergyComponent::Syn, 2.0))
-        .with_weight(ResidualWeight::new(ResidualClass::TestFailure, EnergyComponent::Log, 1.0));
+        .with_weight(ResidualWeight::new(
+            ResidualClass::Type,
+            EnergyComponent::Syn,
+            2.0,
+        ))
+        .with_weight(ResidualWeight::new(
+            ResidualClass::TestFailure,
+            EnergyComponent::Log,
+            1.0,
+        ));
     let r = |class, score| {
-        ResidualEvent::new("n", 0, class, ResidualSeverity::Error, score,
-            SensorRef::new("c", IndependenceRoute::Compiler)).unwrap()
+        ResidualEvent::new(
+            "n",
+            0,
+            class,
+            ResidualSeverity::Error,
+            score,
+            SensorRef::new("c", IndependenceRoute::Compiler),
+        )
+        .unwrap()
     };
     // 2*3^2 + 1*2^2 = 22.
-    let score = score_candidate(&model, &[r(ResidualClass::Type, 3.0), r(ResidualClass::TestFailure, 2.0)]).unwrap();
+    let score = score_candidate(
+        &model,
+        &[
+            r(ResidualClass::Type, 3.0),
+            r(ResidualClass::TestFailure, 2.0),
+        ],
+    )
+    .unwrap();
     assert_eq!(score.total, 22.0);
 }
 
 #[test]
 fn negative_or_nonfinite_residuals_are_rejected() {
-    assert!(ResidualEvent::new("n", 0, ResidualClass::Type, ResidualSeverity::Error, -1.0,
-        SensorRef::new("c", IndependenceRoute::Compiler)).is_err());
-    assert!(ResidualEvent::new("n", 0, ResidualClass::Type, ResidualSeverity::Error, f64::INFINITY,
-        SensorRef::new("c", IndependenceRoute::Compiler)).is_err());
+    assert!(ResidualEvent::new(
+        "n",
+        0,
+        ResidualClass::Type,
+        ResidualSeverity::Error,
+        -1.0,
+        SensorRef::new("c", IndependenceRoute::Compiler)
+    )
+    .is_err());
+    assert!(ResidualEvent::new(
+        "n",
+        0,
+        ResidualClass::Type,
+        ResidualSeverity::Error,
+        f64::INFINITY,
+        SensorRef::new("c", IndependenceRoute::Compiler)
+    )
+    .is_err());
 }
 
 // --- Acceptance gate + finite-decision bound + residual certificate ----------
@@ -53,8 +89,15 @@ fn finite_decision_bound_holds() {
 
 #[test]
 fn exhaustion_yields_residual_certificate() {
-    let residual = ResidualEvent::new("n", 3, ResidualClass::ImportGraph, ResidualSeverity::Error, 1.0,
-        SensorRef::new("rust-analyzer", IndependenceRoute::Lsp)).unwrap();
+    let residual = ResidualEvent::new(
+        "n",
+        3,
+        ResidualClass::ImportGraph,
+        ResidualSeverity::Error,
+        1.0,
+        SensorRef::new("rust-analyzer", IndependenceRoute::Lsp),
+    )
+    .unwrap();
     let cert = ResidualCertificate::from_residuals("n", 3, "head", 1.0, vec![residual]);
     assert_eq!(cert.verifier_routes, vec![IndependenceRoute::Lsp]);
     assert_eq!(cert.final_energy, 1.0);
@@ -92,7 +135,12 @@ fn shell_confinement_denies_sed_in_place_without_capability() {
     let proposal = EffectProposal::new(actor, "n", EffectKind::ReadFile)
         .with_command(canonicalize("sed -i s/a/b/ f", "/r"));
     let w = check_admissibility(&proposal, &[cap], &KernelState::new());
-    assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::MutationNotPermitted }));
+    assert!(matches!(
+        w.decision,
+        AdmissibilityDecision::Deny {
+            reason: DenyReason::MutationNotPermitted
+        }
+    ));
 }
 
 #[test]
@@ -108,21 +156,35 @@ fn attenuation_cannot_widen_authority() {
 fn static_graph_snapshot_bug_is_fixed() {
     let mut a = WorkNode::new("a", "first", NodeClass::Implement);
     a.state = WorkNodeState::Stable;
-    let rev1 = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, vec![a], vec![]).unwrap();
+    let rev1 = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, vec![a], vec![])
+        .unwrap();
     // A repair inserts node "b".
     let mut nodes = rev1.nodes.clone();
     nodes.push(WorkNode::new("b", "inserted", NodeClass::Implement));
-    let rev2 = WorkGraphRevision::build(1, Some(rev1.revision_id.clone()),
-        GraphRevisionReason::LocalRepair, nodes, vec![]).unwrap();
+    let rev2 = WorkGraphRevision::build(
+        1,
+        Some(rev1.revision_id.clone()),
+        GraphRevisionReason::LocalRepair,
+        nodes,
+        vec![],
+    )
+    .unwrap();
     let sched = Scheduler::new(4);
     let fp = |n: &WorkNode| Footprint::new().write(Resource::File(format!("{}.rs", n.node_id)));
-    assert!(sched.ready_nodes(&rev2, fp).iter().any(|n| n.node_id == "b"));
+    assert!(sched
+        .ready_nodes(&rev2, fp)
+        .iter()
+        .any(|n| n.node_id == "b"));
 }
 
 #[test]
 fn conflicting_manifest_mutations_cannot_run_together() {
-    let nodes = vec![WorkNode::new("a", "x", NodeClass::Implement), WorkNode::new("b", "y", NodeClass::Implement)];
-    let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, vec![]).unwrap();
+    let nodes = vec![
+        WorkNode::new("a", "x", NodeClass::Implement),
+        WorkNode::new("b", "y", NodeClass::Implement),
+    ];
+    let rev =
+        WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, vec![]).unwrap();
     let sched = Scheduler::new(4);
     let fp = |_n: &WorkNode| Footprint::new().write(Resource::Manifest("Cargo.toml".into()));
     assert_eq!(sched.ready_nodes(&rev, fp).len(), 1);
@@ -133,13 +195,30 @@ fn conflicting_manifest_mutations_cannot_run_together() {
 #[test]
 fn replay_reconstructs_accepted_trajectory_and_refuses_unrecorded() {
     let mut ledger = Ledger::new();
-    ledger.append(LedgerEvent::CandidateAccepted { node_id: "a".into(), generation: 0, energy: 5.0 }).unwrap();
-    ledger.append(LedgerEvent::CandidateAccepted { node_id: "b".into(), generation: 0, energy: 0.0 }).unwrap();
+    ledger
+        .append(LedgerEvent::CandidateAccepted {
+            node_id: "a".into(),
+            generation: 0,
+            energy: 5.0,
+        })
+        .unwrap();
+    ledger
+        .append(LedgerEvent::CandidateAccepted {
+            node_id: "b".into(),
+            generation: 0,
+            energy: 0.0,
+        })
+        .unwrap();
     assert!(ledger.verify_chain().is_ok());
     assert_eq!(replay_accepted_trajectory(&ledger).len(), 2);
 
-    let commit = LedgerEvent::EffectApplied { proposal_id: "p".into(), idempotency_key: "k".into() };
-    assert!(ledger.commit_transition(commit.clone(), &["unrecorded".into()]).is_err());
+    let commit = LedgerEvent::EffectApplied {
+        proposal_id: "p".into(),
+        idempotency_key: "k".into(),
+    };
+    assert!(ledger
+        .commit_transition(commit.clone(), &["unrecorded".into()])
+        .is_err());
     let handle = ledger.record_observation(b"data").unwrap();
     assert!(ledger.commit_transition(commit, &[handle]).is_ok());
 }
@@ -148,7 +227,9 @@ fn replay_reconstructs_accepted_trajectory_and_refuses_unrecorded() {
 
 #[test]
 fn spectral_mu_is_positive_for_connected_graph() {
-    let g = VerificationGraph::new(3).with_edge(0, 1, 1.0).with_edge(1, 2, 1.0);
+    let g = VerificationGraph::new(3)
+        .with_edge(0, 1, 1.0)
+        .with_edge(1, 2, 1.0);
     assert!(g.mu(1e-9).unwrap().unwrap() > 0.0);
 }
 
@@ -167,8 +248,14 @@ fn conformal_bound_asserted_when_calibrated_not_when_stale() {
     let stale = state.mark_stale();
     assert!(!stale.bound_is_asserted());
     // Stale window does not hard-halt low-risk work.
-    assert_eq!(conformal_decide(&stale, 0.99, RiskClass::Low), AcceptOutcome::UncertifiedAccept);
-    assert_eq!(conformal_decide(&stale, 0.99, RiskClass::High), AcceptOutcome::RouteToApproval);
+    assert_eq!(
+        conformal_decide(&stale, 0.99, RiskClass::Low),
+        AcceptOutcome::UncertifiedAccept
+    );
+    assert_eq!(
+        conformal_decide(&stale, 0.99, RiskClass::High),
+        AcceptOutcome::RouteToApproval
+    );
 }
 
 // --- Backlog gauge -----------------------------------------------------------

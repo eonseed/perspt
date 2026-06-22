@@ -30,7 +30,12 @@ pub struct WorkflowPotential {
 }
 
 impl WorkflowPotential {
-    pub fn new(workflow_id: impl Into<String>, accepted_energy: f64, rho_gate: f64, remaining_budget: u32) -> Self {
+    pub fn new(
+        workflow_id: impl Into<String>,
+        accepted_energy: f64,
+        rho_gate: f64,
+        remaining_budget: u32,
+    ) -> Self {
         Self {
             workflow_id: workflow_id.into(),
             accepted_energy,
@@ -63,9 +68,14 @@ impl TrajectoryProjection {
         let mut p = TrajectoryProjection::default();
         for rec in ledger.records() {
             match &rec.event {
-                LedgerEvent::CandidateAccepted { node_id, generation, energy } => {
+                LedgerEvent::CandidateAccepted {
+                    node_id,
+                    generation,
+                    energy,
+                } => {
                     p.accepted += 1;
-                    p.energy_timeline.push((node_id.clone(), *generation, *energy));
+                    p.energy_timeline
+                        .push((node_id.clone(), *generation, *energy));
                 }
                 LedgerEvent::CandidateRejected { .. } => p.rejected += 1,
                 LedgerEvent::ResidualCertificateIssued { .. } => p.certificates += 1,
@@ -140,10 +150,32 @@ mod tests {
     #[test]
     fn trajectory_projection_counts_ledger_events() {
         let mut ledger = Ledger::new();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "a".into(), generation: 0, energy: 5.0 }).unwrap();
-        ledger.append(LedgerEvent::CandidateRejected { node_id: "a".into(), generation: 1 }).unwrap();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "a".into(), generation: 2, energy: 0.0 }).unwrap();
-        ledger.append(LedgerEvent::GraphRevisionAccepted { revision_id: "r1".into(), sequence: 1 }).unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "a".into(),
+                generation: 0,
+                energy: 5.0,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::CandidateRejected {
+                node_id: "a".into(),
+                generation: 1,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "a".into(),
+                generation: 2,
+                energy: 0.0,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::GraphRevisionAccepted {
+                revision_id: "r1".into(),
+                sequence: 1,
+            })
+            .unwrap();
         let p = TrajectoryProjection::from_ledger(&ledger);
         assert_eq!(p.accepted, 2);
         assert_eq!(p.rejected, 1);
@@ -155,9 +187,33 @@ mod tests {
     fn residual_heatmap_groups_by_component_and_class() {
         let sensor = SensorRef::new("c", IndependenceRoute::Compiler);
         let residuals = vec![
-            ResidualEvent::new("n", 0, ResidualClass::Type, ResidualSeverity::Error, 1.0, sensor.clone()).unwrap(),
-            ResidualEvent::new("n", 0, ResidualClass::Type, ResidualSeverity::Error, 1.0, sensor.clone()).unwrap(),
-            ResidualEvent::new("n", 0, ResidualClass::TestFailure, ResidualSeverity::Error, 1.0, sensor).unwrap(),
+            ResidualEvent::new(
+                "n",
+                0,
+                ResidualClass::Type,
+                ResidualSeverity::Error,
+                1.0,
+                sensor.clone(),
+            )
+            .unwrap(),
+            ResidualEvent::new(
+                "n",
+                0,
+                ResidualClass::Type,
+                ResidualSeverity::Error,
+                1.0,
+                sensor.clone(),
+            )
+            .unwrap(),
+            ResidualEvent::new(
+                "n",
+                0,
+                ResidualClass::TestFailure,
+                ResidualSeverity::Error,
+                1.0,
+                sensor,
+            )
+            .unwrap(),
         ];
         let heatmap = residual_heatmap(&residuals);
         assert_eq!(heatmap.by_component[&EnergyComponent::Syn], 2);
@@ -168,9 +224,24 @@ mod tests {
     #[test]
     fn capability_audit_counts_grants_and_denials() {
         let mut ledger = Ledger::new();
-        ledger.append(LedgerEvent::CapabilityGranted { capability_id: "c1".into(), holder: "a".into() }).unwrap();
-        ledger.append(LedgerEvent::EffectDenied { proposal_id: "p1".into(), reason: "scope".into() }).unwrap();
-        ledger.append(LedgerEvent::EffectDenied { proposal_id: "p2".into(), reason: "budget".into() }).unwrap();
+        ledger
+            .append(LedgerEvent::CapabilityGranted {
+                capability_id: "c1".into(),
+                holder: "a".into(),
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::EffectDenied {
+                proposal_id: "p1".into(),
+                reason: "scope".into(),
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::EffectDenied {
+                proposal_id: "p2".into(),
+                reason: "budget".into(),
+            })
+            .unwrap();
         let audit = CapabilityAudit::from_ledger(&ledger);
         assert_eq!(audit.grants, 1);
         assert_eq!(audit.denials, 2);

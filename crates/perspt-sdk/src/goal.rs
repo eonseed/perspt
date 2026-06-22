@@ -42,7 +42,10 @@ pub struct GoalSpec {
 
 impl GoalSpec {
     pub fn new(node_id: impl Into<String>, expected_symbols: Vec<String>) -> Self {
-        Self { node_id: node_id.into(), expected_symbols }
+        Self {
+            node_id: node_id.into(),
+            expected_symbols,
+        }
     }
 
     /// No declared obligation — the sensor MUST NOT fire.
@@ -111,7 +114,10 @@ pub fn goal_presence_residual(
     residual.evidence.summary = summary;
     residual.affected_symbols = missing
         .iter()
-        .map(|name| SymbolRef { name: name.clone(), container: None })
+        .map(|name| SymbolRef {
+            name: name.clone(),
+            container: None,
+        })
         .collect();
     residual = residual.with_correction(
         CorrectionDirection::new(
@@ -139,7 +145,9 @@ mod tests {
     #[test]
     fn empty_spec_never_fires() {
         let spec = GoalSpec::new("n1", vec![]);
-        assert!(goal_presence_residual(&spec, 0, &observed(&[])).unwrap().is_none());
+        assert!(goal_presence_residual(&spec, 0, &observed(&[]))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -166,7 +174,9 @@ mod tests {
     #[test]
     fn score_counts_all_missing_symbols() {
         let spec = GoalSpec::new("n1", vec!["a".into(), "b".into(), "c".into()]);
-        let r = goal_presence_residual(&spec, 0, &observed(&["b"])).unwrap().unwrap();
+        let r = goal_presence_residual(&spec, 0, &observed(&["b"]))
+            .unwrap()
+            .unwrap();
         assert_eq!(r.score, 2.0); // a and c missing
     }
 

@@ -14,9 +14,7 @@
 //! overrides them for its language, so new language plugins extend the scheme by
 //! implementing two methods.
 
-use perspt_sdk::{
-    IndependenceRoute, ResidualClass, ResidualEvent, ResidualSeverity, SensorRef,
-};
+use perspt_sdk::{IndependenceRoute, ResidualClass, ResidualEvent, ResidualSeverity, SensorRef};
 
 /// A single smoke invocation: a shell command run from the workspace root to
 /// exercise a built artifact's runtime entrypoint.
@@ -211,7 +209,10 @@ mod tests {
 
     #[test]
     fn numeric_anomaly_detects_nan_and_inf_not_substrings() {
-        assert_eq!(numeric_anomaly("Forecasted Value: NaN").as_deref(), Some("NaN"));
+        assert_eq!(
+            numeric_anomaly("Forecasted Value: NaN").as_deref(),
+            Some("NaN")
+        );
         assert!(numeric_anomaly("loss = inf after epoch 3").is_some());
         assert!(numeric_anomaly("result: -inf").is_some());
         // Must NOT false-positive on words containing nan/inf.

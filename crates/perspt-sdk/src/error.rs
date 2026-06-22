@@ -51,10 +51,14 @@ pub type Result<T> = std::result::Result<T, SdkError>;
 /// Validate that a value is finite and non-negative (PSP-8 residual contract).
 pub(crate) fn check_non_negative_finite(value: f64, what: &str) -> Result<()> {
     if !value.is_finite() {
-        return Err(SdkError::InvalidScore(format!("{what} is not finite: {value}")));
+        return Err(SdkError::InvalidScore(format!(
+            "{what} is not finite: {value}"
+        )));
     }
     if value < 0.0 {
-        return Err(SdkError::InvalidScore(format!("{what} is negative: {value}")));
+        return Err(SdkError::InvalidScore(format!(
+            "{what} is negative: {value}"
+        )));
     }
     Ok(())
 }
@@ -62,7 +66,9 @@ pub(crate) fn check_non_negative_finite(value: f64, what: &str) -> Result<()> {
 /// Validate that a weight is finite and strictly positive (PSP-8 `w_e > 0`).
 pub(crate) fn check_positive_finite(value: f64, what: &str) -> Result<()> {
     if !value.is_finite() {
-        return Err(SdkError::InvalidWeight(format!("{what} is not finite: {value}")));
+        return Err(SdkError::InvalidWeight(format!(
+            "{what} is not finite: {value}"
+        )));
     }
     if value <= 0.0 {
         return Err(SdkError::InvalidWeight(format!(

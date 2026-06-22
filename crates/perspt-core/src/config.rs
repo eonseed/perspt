@@ -53,7 +53,10 @@ pub struct Config {
     /// command and default (e.g. Python → `uv`, JS → `npm`). Unknown values fall
     /// back to each plugin's default. Examples: `uv`, `poetry`, `pdm`, `pipenv`
     /// (Python); `pnpm`, `yarn` (JS).
-    #[serde(skip_serializing_if = "Option::is_none", alias = "python_package_manager")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        alias = "python_package_manager"
+    )]
     pub package_manager: Option<String>,
 
     /// Agent Architect-tier model override.

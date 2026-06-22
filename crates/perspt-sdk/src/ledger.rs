@@ -29,25 +29,79 @@ use crate::error::{Result, SdkError};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum LedgerEvent {
-    ProposalObserved { proposal_id: String, actor: String },
-    AdmissibilityChecked { proposal_id: String, allowed: bool },
-    EffectApplied { proposal_id: String, idempotency_key: String },
-    EffectDenied { proposal_id: String, reason: String },
-    VerifierCompleted { node_id: String, generation: u32 },
-    ResidualEmitted { residual_id: String, node_id: String },
-    EnergyScored { node_id: String, generation: u32, energy: f64 },
-    GateDecisionRecorded { node_id: String, accepted: bool },
-    CandidateAccepted { node_id: String, generation: u32, energy: f64 },
-    CandidateRejected { node_id: String, generation: u32 },
-    GraphRevisionAccepted { revision_id: String, sequence: u32 },
-    NodeGenerationRetired { node_id: String, generation: u32 },
-    ResidualCertificateIssued { certificate_id: String, node_id: String },
-    RollbackApplied { target_event: String },
-    CapabilityGranted { capability_id: String, holder: String },
-    CapabilityRevoked { capability_id: String },
+    ProposalObserved {
+        proposal_id: String,
+        actor: String,
+    },
+    AdmissibilityChecked {
+        proposal_id: String,
+        allowed: bool,
+    },
+    EffectApplied {
+        proposal_id: String,
+        idempotency_key: String,
+    },
+    EffectDenied {
+        proposal_id: String,
+        reason: String,
+    },
+    VerifierCompleted {
+        node_id: String,
+        generation: u32,
+    },
+    ResidualEmitted {
+        residual_id: String,
+        node_id: String,
+    },
+    EnergyScored {
+        node_id: String,
+        generation: u32,
+        energy: f64,
+    },
+    GateDecisionRecorded {
+        node_id: String,
+        accepted: bool,
+    },
+    CandidateAccepted {
+        node_id: String,
+        generation: u32,
+        energy: f64,
+    },
+    CandidateRejected {
+        node_id: String,
+        generation: u32,
+    },
+    GraphRevisionAccepted {
+        revision_id: String,
+        sequence: u32,
+    },
+    NodeGenerationRetired {
+        node_id: String,
+        generation: u32,
+    },
+    ResidualCertificateIssued {
+        certificate_id: String,
+        node_id: String,
+    },
+    RollbackApplied {
+        target_event: String,
+    },
+    CapabilityGranted {
+        capability_id: String,
+        holder: String,
+    },
+    CapabilityRevoked {
+        capability_id: String,
+    },
     /// An observation of nondeterministic data, recorded before use (R2).
-    ObservationRecorded { handle: String, content_hash: String },
-    Custom { kind: String, payload: serde_json::Value },
+    ObservationRecorded {
+        handle: String,
+        content_hash: String,
+    },
+    Custom {
+        kind: String,
+        payload: serde_json::Value,
+    },
 }
 
 /// One record in the Merkle-chained ledger.
@@ -102,7 +156,10 @@ impl Ledger {
 
     /// The current ledger head (Merkle root), or `"GENESIS"` when empty.
     pub fn head(&self) -> String {
-        self.records.last().map(|r| r.hash.clone()).unwrap_or_else(|| "GENESIS".to_string())
+        self.records
+            .last()
+            .map(|r| r.hash.clone())
+            .unwrap_or_else(|| "GENESIS".to_string())
     }
 
     pub fn len(&self) -> usize {
@@ -123,10 +180,20 @@ impl Ledger {
         let prev_hash = self.head();
         let hash = chain_hash(&prev_hash, sequence, &event)?;
         // Track observation records as they are appended (R2).
-        if let LedgerEvent::ObservationRecorded { handle, content_hash } = &event {
-            self.observations.insert(handle.clone(), content_hash.clone());
+        if let LedgerEvent::ObservationRecorded {
+            handle,
+            content_hash,
+        } = &event
+        {
+            self.observations
+                .insert(handle.clone(), content_hash.clone());
         }
-        self.records.push(LedgerRecord { sequence, event, prev_hash, hash: hash.clone() });
+        self.records.push(LedgerRecord {
+            sequence,
+            event,
+            prev_hash,
+            hash: hash.clone(),
+        });
         Ok(hash)
     }
 
@@ -173,11 +240,17 @@ impl Ledger {
                 return Err(SdkError::Domain(format!("sequence gap at index {i}")));
             }
             if rec.prev_hash != prev {
-                return Err(SdkError::Domain(format!("broken chain at sequence {}", rec.sequence)));
+                return Err(SdkError::Domain(format!(
+                    "broken chain at sequence {}",
+                    rec.sequence
+                )));
             }
             let expected = chain_hash(&rec.prev_hash, rec.sequence, &rec.event)?;
             if expected != rec.hash {
-                return Err(SdkError::Domain(format!("hash mismatch at sequence {}", rec.sequence)));
+                return Err(SdkError::Domain(format!(
+                    "hash mismatch at sequence {}",
+                    rec.sequence
+                )));
             }
             prev = rec.hash.clone();
         }
@@ -193,9 +266,11 @@ pub fn replay_accepted_trajectory(ledger: &Ledger) -> Vec<(String, u32, f64)> {
         .records()
         .iter()
         .filter_map(|r| match &r.event {
-            LedgerEvent::CandidateAccepted { node_id, generation, energy } => {
-                Some((node_id.clone(), *generation, *energy))
-            }
+            LedgerEvent::CandidateAccepted {
+                node_id,
+                generation,
+                energy,
+            } => Some((node_id.clone(), *generation, *energy)),
             _ => None,
         })
         .collect()
@@ -231,7 +306,8 @@ impl IdempotencyLog {
                 }
             }
             None => {
-                self.entries.insert(key.to_string(), (ch, outcome.to_string()));
+                self.entries
+                    .insert(key.to_string(), (ch, outcome.to_string()));
                 Ok(outcome.to_string())
             }
         }
@@ -260,7 +336,10 @@ impl ExternalEffectLog {
 
     /// Record intent before the external effect executes.
     pub fn intent(&mut self, key: &str) {
-        self.phases.entry(key.to_string()).or_default().push(ExternalEffectPhase::Intent);
+        self.phases
+            .entry(key.to_string())
+            .or_default()
+            .push(ExternalEffectPhase::Intent);
     }
 
     /// Record the result after the external effect executes.
@@ -271,12 +350,18 @@ impl ExternalEffectLog {
                 "R5 violation: result recorded for `{key}` without prior intent"
             )));
         }
-        self.phases.get_mut(key).unwrap().push(ExternalEffectPhase::Result);
+        self.phases
+            .get_mut(key)
+            .unwrap()
+            .push(ExternalEffectPhase::Result);
         Ok(())
     }
 
     pub fn compensation(&mut self, key: &str) {
-        self.phases.entry(key.to_string()).or_default().push(ExternalEffectPhase::Compensation);
+        self.phases
+            .entry(key.to_string())
+            .or_default()
+            .push(ExternalEffectPhase::Compensation);
     }
 
     /// Whether an effect was properly bracketed (intent precedes result).
@@ -299,8 +384,20 @@ mod tests {
     #[test]
     fn chain_is_verifiable() {
         let mut ledger = Ledger::new();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "a".into(), generation: 0, energy: 5.0 }).unwrap();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "b".into(), generation: 0, energy: 0.0 }).unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "a".into(),
+                generation: 0,
+                energy: 5.0,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "b".into(),
+                generation: 0,
+                energy: 0.0,
+            })
+            .unwrap();
         assert_eq!(ledger.len(), 2);
         assert!(ledger.verify_chain().is_ok());
     }
@@ -308,8 +405,20 @@ mod tests {
     #[test]
     fn tampering_breaks_the_chain() {
         let mut ledger = Ledger::new();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "a".into(), generation: 0, energy: 5.0 }).unwrap();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "b".into(), generation: 0, energy: 0.0 }).unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "a".into(),
+                generation: 0,
+                energy: 5.0,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "b".into(),
+                generation: 0,
+                energy: 0.0,
+            })
+            .unwrap();
         // Tamper with a recorded energy.
         if let LedgerEvent::CandidateAccepted { energy, .. } = &mut ledger.records[0].event {
             *energy = 999.0;
@@ -320,9 +429,26 @@ mod tests {
     #[test]
     fn replay_reconstructs_accepted_trajectory() {
         let mut ledger = Ledger::new();
-        ledger.append(LedgerEvent::CandidateRejected { node_id: "a".into(), generation: 0 }).unwrap();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "a".into(), generation: 1, energy: 8.0 }).unwrap();
-        ledger.append(LedgerEvent::CandidateAccepted { node_id: "b".into(), generation: 0, energy: 0.0 }).unwrap();
+        ledger
+            .append(LedgerEvent::CandidateRejected {
+                node_id: "a".into(),
+                generation: 0,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "a".into(),
+                generation: 1,
+                energy: 8.0,
+            })
+            .unwrap();
+        ledger
+            .append(LedgerEvent::CandidateAccepted {
+                node_id: "b".into(),
+                generation: 0,
+                energy: 0.0,
+            })
+            .unwrap();
         let traj = replay_accepted_trajectory(&ledger);
         assert_eq!(traj, vec![("a".into(), 1, 8.0), ("b".into(), 0, 0.0)]);
     }
@@ -330,7 +456,10 @@ mod tests {
     #[test]
     fn kernel_refuses_unrecorded_observation() {
         let mut ledger = Ledger::new();
-        let event = LedgerEvent::EffectApplied { proposal_id: "p1".into(), idempotency_key: "k1".into() };
+        let event = LedgerEvent::EffectApplied {
+            proposal_id: "p1".into(),
+            idempotency_key: "k1".into(),
+        };
         // Referencing an observation that was never recorded is refused.
         let err = ledger.commit_transition(event.clone(), &["never-recorded".into()]);
         assert!(err.is_err());

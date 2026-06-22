@@ -92,7 +92,11 @@ pub struct WorkEdge {
 
 impl WorkEdge {
     pub fn new(src: impl Into<String>, dst: impl Into<String>, kind: EdgeKind) -> Self {
-        Self { src: src.into(), dst: dst.into(), kind }
+        Self {
+            src: src.into(),
+            dst: dst.into(),
+            kind,
+        }
     }
 }
 
@@ -236,7 +240,13 @@ impl WorkGraphRevision {
         self.edges
             .iter()
             .filter(|e| e.kind == EdgeKind::ConflictsWith && (e.src == node_id || e.dst == node_id))
-            .map(|e| if e.src == node_id { e.dst.as_str() } else { e.src.as_str() })
+            .map(|e| {
+                if e.src == node_id {
+                    e.dst.as_str()
+                } else {
+                    e.src.as_str()
+                }
+            })
             .collect()
     }
 }
@@ -252,7 +262,8 @@ pub fn validate(nodes: &[WorkNode], edges: &[WorkEdge]) -> Result<GraphValidatio
         .collect();
 
     // Kahn's algorithm over dependency edges only.
-    let mut indegree: HashMap<&str, usize> = nodes.iter().map(|n| (n.node_id.as_str(), 0)).collect();
+    let mut indegree: HashMap<&str, usize> =
+        nodes.iter().map(|n| (n.node_id.as_str(), 0)).collect();
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for e in edges.iter().filter(|e| e.kind.is_dependency()) {
         if !ids.contains(e.src.as_str()) || !ids.contains(e.dst.as_str()) {
@@ -262,8 +273,11 @@ pub fn validate(nodes: &[WorkNode], edges: &[WorkEdge]) -> Result<GraphValidatio
         *indegree.get_mut(e.dst.as_str()).unwrap() += 1;
     }
 
-    let mut queue: BTreeSet<&str> =
-        indegree.iter().filter(|(_, &d)| d == 0).map(|(&n, _)| n).collect();
+    let mut queue: BTreeSet<&str> = indegree
+        .iter()
+        .filter(|(_, &d)| d == 0)
+        .map(|(&n, _)| n)
+        .collect();
     let mut topo_order = Vec::new();
     while let Some(&n) = queue.iter().next() {
         queue.remove(n);
@@ -302,7 +316,8 @@ mod tests {
             WorkEdge::new("a", "b", EdgeKind::RequiresArtifact),
             WorkEdge::new("b", "c", EdgeKind::RequiresInterface),
         ];
-        let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges).unwrap();
+        let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges)
+            .unwrap();
         assert!(rev.validation.acyclic);
         assert_eq!(rev.validation.topo_order, vec!["a", "b", "c"]);
     }
@@ -314,14 +329,20 @@ mod tests {
             WorkEdge::new("a", "b", EdgeKind::RequiresArtifact),
             WorkEdge::new("b", "a", EdgeKind::RequiresArtifact),
         ];
-        assert!(WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges).is_err());
+        assert!(
+            WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges)
+                .is_err()
+        );
     }
 
     #[test]
     fn dangling_edge_is_rejected() {
         let nodes = vec![node("a")];
         let edges = vec![WorkEdge::new("a", "ghost", EdgeKind::RequiresArtifact)];
-        assert!(WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges).is_err());
+        assert!(
+            WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges)
+                .is_err()
+        );
     }
 
     #[test]
@@ -330,7 +351,8 @@ mod tests {
         // of conflicting nodes is still a valid acyclic revision.
         let nodes = vec![node("a"), node("b")];
         let edges = vec![WorkEdge::new("a", "b", EdgeKind::ConflictsWith)];
-        let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges).unwrap();
+        let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::InitialPlan, nodes, edges)
+            .unwrap();
         assert!(rev.validation.acyclic);
         assert_eq!(rev.explicit_conflicts_of("a"), vec!["b"]);
     }
@@ -351,7 +373,8 @@ mod tests {
             WorkEdge::new("a", "b", EdgeKind::DerivedFrom),
             WorkEdge::new("a", "b", EdgeKind::ConflictsWith),
         ];
-        let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::LocalRepair, nodes, edges).unwrap();
+        let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::LocalRepair, nodes, edges)
+            .unwrap();
         assert!(rev.dependencies_of("b").is_empty());
     }
 }

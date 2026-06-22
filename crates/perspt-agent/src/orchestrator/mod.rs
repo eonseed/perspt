@@ -90,7 +90,12 @@ struct ReplanState {
 
 impl ReplanState {
     fn new(max: usize) -> Self {
-        Self { count: 0, max, last_completed: 0, last_phi: None }
+        Self {
+            count: 0,
+            max,
+            last_completed: 0,
+            last_phi: None,
+        }
     }
 }
 
@@ -1467,7 +1472,10 @@ impl SRBNOrchestrator {
                 None => {
                     // Settle: nothing runnable. Decide whether the goal is met,
                     // the plan should be amended, or we stop.
-                    match self.evaluate_goal_completion(&task, &mut replan_state).await {
+                    match self
+                        .evaluate_goal_completion(&task, &mut replan_state)
+                        .await
+                    {
                         SettleDecision::Achieved => {
                             goal_achieved = true;
                             break;
@@ -1708,7 +1716,8 @@ impl SRBNOrchestrator {
                         "🛠️ Goal not yet met — missing: {}",
                         v.missing.join("; ")
                     ));
-                    self.try_replan(task, &v.missing, completed, phi, state).await
+                    self.try_replan(task, &v.missing, completed, phi, state)
+                        .await
                 }
                 None => {
                     // Verdict unavailable (LLM error): trust deterministic completion.
@@ -1749,7 +1758,8 @@ impl SRBNOrchestrator {
                 || state.last_phi.map(|p| phi < p - 1e-6).unwrap_or(true);
             if !progressed {
                 self.emit_log(
-                    "⛔ Re-plan made no progress (Φ/completed not improving) — stopping".to_string(),
+                    "⛔ Re-plan made no progress (Φ/completed not improving) — stopping"
+                        .to_string(),
                 );
                 return SettleDecision::Stop;
             }
@@ -1864,7 +1874,10 @@ impl SRBNOrchestrator {
         )
         .text;
         let model = self.verifier_model.clone();
-        let resp = self.call_llm_with_logging(&model, &prompt, None).await.ok()?;
+        let resp = self
+            .call_llm_with_logging(&model, &prompt, None)
+            .await
+            .ok()?;
         parse_goal_verdict(&resp)
     }
 
@@ -3439,11 +3452,7 @@ mod tests {
     // =========================================================================
 
     fn goal_presence_tmpdir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "perspt-gp-{}-{}",
-            tag,
-            uuid::Uuid::new_v4()
-        ));
+        let dir = std::env::temp_dir().join(format!("perspt-gp-{}-{}", tag, uuid::Uuid::new_v4()));
         std::fs::create_dir_all(dir.join("src")).unwrap();
         dir
     }
@@ -3498,11 +3507,7 @@ mod tests {
 
         let mut orch = SRBNOrchestrator::new_for_testing(dir.clone());
         orch.context.defer_tests = true;
-        let mut node = SRBNNode::new(
-            "n".into(),
-            "Add `is_even`.".into(),
-            ModelTier::Actuator,
-        );
+        let mut node = SRBNNode::new("n".into(), "Add `is_even`.".into(), ModelTier::Actuator);
         node.output_targets = vec![PathBuf::from("src/lib.rs")];
         node.contract.interface_signature = "pub fn is_even(n: i32) -> bool".into();
         node.owner_plugin = "rust".into();

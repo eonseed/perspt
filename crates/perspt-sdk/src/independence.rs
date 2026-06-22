@@ -34,7 +34,11 @@ pub struct VerdictRecord {
 }
 
 impl VerdictRecord {
-    pub fn new(validator_id: impl Into<String>, candidate_id: impl Into<String>, missed: bool) -> Self {
+    pub fn new(
+        validator_id: impl Into<String>,
+        candidate_id: impl Into<String>,
+        missed: bool,
+    ) -> Self {
         Self {
             validator_id: validator_id.into(),
             candidate_id: candidate_id.into(),
@@ -119,7 +123,11 @@ pub fn compute(records: &[VerdictRecord]) -> Result<IndependenceStats> {
         }
     }
 
-    Ok(IndependenceStats { miss_rates, correlations, rho_eff })
+    Ok(IndependenceStats {
+        miss_rates,
+        correlations,
+        rho_eff,
+    })
 }
 
 /// Phi coefficient (Pearson correlation for two binary variables) over paired
@@ -181,7 +189,11 @@ mod tests {
             VerdictRecord::new("b", "c4", true),
         ];
         let stats = compute(&records).unwrap();
-        let kappa = stats.correlations.get(&("a".into(), "b".into())).copied().unwrap();
+        let kappa = stats
+            .correlations
+            .get(&("a".into(), "b".into()))
+            .copied()
+            .unwrap();
         assert!(kappa < 0.0, "expected anti-correlation, got {kappa}");
         assert!(stats.rho_eff.unwrap() >= 0.0);
     }
@@ -198,8 +210,15 @@ mod tests {
             VerdictRecord::new("b", "c3", true),
         ];
         let stats = compute(&records).unwrap();
-        let kappa = stats.correlations.get(&("a".into(), "b".into())).copied().unwrap();
-        assert!((kappa - 1.0).abs() < 1e-9, "expected perfect correlation, got {kappa}");
+        let kappa = stats
+            .correlations
+            .get(&("a".into(), "b".into()))
+            .copied()
+            .unwrap();
+        assert!(
+            (kappa - 1.0).abs() < 1e-9,
+            "expected perfect correlation, got {kappa}"
+        );
         assert_eq!(attenuate_weight(2.0, kappa), 0.0);
     }
 
