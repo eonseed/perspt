@@ -1,6 +1,6 @@
 [package]
 name = "perspt-core"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -23,7 +23,7 @@ futures = "0.3"
 gcp_auth = "0.12"
 
 # TOML configuration parsing/serialization
-toml = "0.8"
+toml = "1.1"
 
 # Core async and traits
 async-trait = "0.1.88"

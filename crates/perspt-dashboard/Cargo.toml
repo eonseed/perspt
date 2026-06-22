@@ -1,6 +1,6 @@
 [package]
 name = "perspt-dashboard"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -16,8 +16,8 @@ default = []
 bundled = ["perspt-store/bundled"]
 
 [dependencies]
-perspt-store = { version = "0.6.1", path = "../perspt-store" }
-perspt-core = { version = "0.6.1", path = "../perspt-core" }
+perspt-store = { version = "0.6.2", path = "../perspt-store" }
+perspt-core = { version = "0.6.2", path = "../perspt-core" }
 
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.12", features = ["cookie"] }
@@ -25,7 +25,7 @@ askama = "0.16"
 tokio = { version = "1.42", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["time"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "cors"] }
+tower-http = { version = "0.7", features = ["fs", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 similar = "3"
