@@ -196,6 +196,15 @@ The dashboard should present the SRBN energy model using the same notation as th
 
 where :math:`V(x)` is the composite verification energy for a node and stability is reached when :math:`V(x) \leq \varepsilon`.
 
+.. note:: Superseded by PSP-8 — the energy is now quadratic.
+
+   The dashboard now plots the **quadratic residual energy**
+   :math:`V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2` (PSP-8 System 2). The
+   per-component lines :math:`V_{syn}, V_{str}, V_{log}, V_{boot}, V_{sheaf}` are
+   *derived rollups* of this single energy rather than independently weighted
+   terms; ``--energy-weights`` scales the per-component weights proportionally.
+   See :doc:`psp-000008`.
+
 * **Node Selector:** A ``select`` dropdown to pick which node's energy history to display.
 * **Energy Chart:** An inline SVG chart (rendered server-side by Askama as ``<svg>`` elements -- no JS charting library needed) showing energy over attempt iterations:
 
