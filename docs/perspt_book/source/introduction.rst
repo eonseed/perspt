@@ -185,42 +185,80 @@ The application interface is accessed via the following commands:
 Supported Oracles and Providers
 -------------------------------
 
-The client library supports direct integration with the following external providers:
+The client library supports direct integration with all **29 adapters** natively supported by the ``genai`` crate, ensuring complete flexibility for developers:
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
+   :widths: 25 25 50
 
-   * - Provider
+   * - Provider / Adapter ID
      - Target Env Variable
      - Reference Models
-   * - **OpenAI**
+   * - **OpenAI** (``openai``)
      - ``OPENAI_API_KEY``
      - gpt-5.5, gpt-5-mini
-   * - **Anthropic**
+   * - **Azure OpenAI / Custom** (``openai_resp``)
+     - ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL``
+     - gpt-5.5, custom-model
+   * - **Anthropic** (``anthropic``)
      - ``ANTHROPIC_API_KEY``
-     - claude-fable, opus-4.8, claude-3-5-sonnet
-   * - **Google Gemini**
+     - claude-fable, opus-4.8, sonnet-4.6, haiku-4.6
+   * - **Google Gemini** (``gemini``)
      - ``GEMINI_API_KEY``
-     - gemini-3.5-flash, gemini-3.1-pro
-   * - **Google Vertex AI**
-     - ``VERTEX_API_KEY``
+     - gemini-3.5-flash, gemini-3.1-pro, gemini-3.1-flash-lite
+   * - **Google Vertex AI** (``vertex``)
+     - GCP OAuth (or ``VERTEX_PROJECT_ID``)
      - vertex::gemini-3.5-flash, vertex::gemini-3.1-pro
-   * - **Groq**
+   * - **AWS Bedrock** (``bedrock_api``/``bedrock_sigv4``)
+     - AWS credentials (e.g. ``AWS_ACCESS_KEY_ID``)
+     - us.amazon.nova-pro-v2:0, us.anthropic.claude-fable-v1:0
+   * - **Groq** (``groq``)
      - ``GROQ_API_KEY``
-     - llama-4-70b
-   * - **Cohere**
+     - llama-3.3-70b-specdec, gemma2-9b-it
+   * - **Cohere** (``cohere``)
      - ``COHERE_API_KEY``
-     - command-r7
-   * - **XAI**
+     - command-a-plus, north-mini-code
+   * - **xAI** (``xai``)
      - ``XAI_API_KEY``
      - grok-4
-   * - **DeepSeek**
+   * - **DeepSeek** (``deepseek``)
      - ``DEEPSEEK_API_KEY``
      - deepseek-v4, deepseek-coder-v4
-   * - **Ollama**
-     - None
-     - llama4, mistral
+   * - **Ollama** (``ollama``/``ollama_cloud``)
+     - None (local port) / Cloud credentials
+     - llama3.3, qwen2.5-coder, phi4
+   * - **GitHub Copilot** (``github_copilot``)
+     - Copilot session token
+     - copilot-model
+   * - **OpenRouter** (``open_router``)
+     - ``OPENROUTER_API_KEY``
+     - router-model
+   * - **Together AI** (``together``)
+     - ``TOGETHER_API_KEY``
+     - together-model
+   * - **Fireworks AI** (``fireworks``)
+     - ``FIREWORKS_API_KEY``
+     - fireworks-model
+   * - **Nebius AI** (``nebius``)
+     - ``NEBIUS_API_KEY``
+     - nebius-model
+   * - **Zhipu AI** (``zai``/``zai_coding``)
+     - ``ZHIPU_API_KEY``
+     - glm-4
+   * - **Aliyun DashScope** (``aliyun``)
+     - ``DASHSCOPE_API_KEY``
+     - qwen-turbo
+   * - **Baidu Qianfan** (``baidu``)
+     - ``QIANFAN_ACCESS_KEY`` / ``QIANFAN_SECRET_KEY``
+     - qianfan-model
+   * - **Moonshot Kimi** (``moonshot``)
+     - ``MOONSHOT_API_KEY``
+     - kimi-model
+   * - **Other Adapters**
+     - Refer to :ref:`user-guide-providers`
+     - Mimo, BigModel, AIHubMix, OpenCode Go, Custom
+
+For detailed setup guides and provider-specific details, please see :ref:`user-guide-providers`.
 
 System Philosophy
 -----------------
