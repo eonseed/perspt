@@ -750,19 +750,30 @@ pub struct EnergyComponents {
 }
 
 impl EnergyComponents {
-    /// Calculate total energy: V(x) = α*V_syn + β*V_str + γ*V_log + V_boot + V_sheaf
-    pub fn total(&self, contract: &BehavioralContract) -> f32 {
-        contract.alpha() * self.v_syn
-            + contract.beta() * self.v_str
-            + contract.gamma() * self.v_log
-            + self.v_boot
-            + self.v_sheaf
+    /// Total energy `V(x) = Σ_comp V_comp` (PSP-8 System 2).
+    ///
+    /// The five fields are the *derived component rollups* of the single
+    /// canonical quadratic energy `V(x) = Σ_e w_e‖r_e(x)‖²`: each already carries
+    /// its squared, weighted residual contribution (`V_comp = Σ_{e∈comp} w_e‖r_e‖²`),
+    /// so the total is their plain sum. There is no second `α/β/γ` weighting pass —
+    /// those per-component weights are folded into the residual weights `w_e` of
+    /// the [`crate`]'s energy model before the rollups are formed.
+    pub fn total(&self) -> f32 {
+        self.v_syn + self.v_str + self.v_log + self.v_boot + self.v_sheaf
     }
 
-    /// Calculate total energy for Solo Mode (implicit weights = 1.0)
-    /// Used when no BehavioralContract is available
+    /// Deprecated alias for [`EnergyComponents::total`]. The component rollups are
+    /// already weighted, so the `contract` argument is ignored; retained only so
+    /// older call sites keep compiling during the migration.
+    #[deprecated(note = "weights are folded into the residual model; use total()")]
+    pub fn total_weighted(&self, _contract: &BehavioralContract) -> f32 {
+        self.total()
+    }
+
+    /// Total energy for Solo Mode. Identical to [`EnergyComponents::total`] now
+    /// that aggregation carries no separate weights.
     pub fn total_simple(&self) -> f32 {
-        self.v_syn + self.v_str + self.v_log + self.v_boot + self.v_sheaf
+        self.total()
     }
 }
 

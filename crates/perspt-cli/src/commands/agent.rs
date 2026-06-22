@@ -193,9 +193,7 @@ pub async fn run(
             .filter_map(|s| s.trim().parse().ok())
             .collect();
         if parts.len() == 3 {
-            orchestrator.energy_alpha = parts[0];
-            orchestrator.energy_beta = parts[1];
-            orchestrator.energy_gamma = parts[2];
+            orchestrator.set_energy_weights(parts[0], parts[1], parts[2]);
         }
     }
 

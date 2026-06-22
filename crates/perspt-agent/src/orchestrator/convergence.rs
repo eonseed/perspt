@@ -15,10 +15,7 @@ impl SRBNOrchestrator {
         log::info!("Step 5: Convergence check");
 
         // First compute what we need from the node
-        let total = {
-            let node = &self.graph[idx];
-            energy.total(&node.contract)
-        };
+        let total = energy.total();
 
         // Now mutate
         let node = &mut self.graph[idx];

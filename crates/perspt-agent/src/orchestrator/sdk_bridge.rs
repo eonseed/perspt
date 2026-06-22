@@ -216,6 +216,33 @@ impl SdkGateState {
         }
     }
 
+    /// Apply the user's `--energy-weights "α,β,γ"` as *proportional* scales on the
+    /// coding energy model's per-class weights, grouped by component
+    /// (α→`Syn`, β→`Str`, γ→`Log`). The scales are taken relative to the legacy
+    /// reference defaults `(1.0, 0.5, 2.0)`, so the default leaves the model's
+    /// built-in per-class weights untouched (scale = 1) and only an explicit
+    /// override re-weights — a single weighting pass with no double counting.
+    pub fn set_energy_weights(&mut self, alpha: f32, beta: f32, gamma: f32) {
+        use perspt_sdk::EnergyComponent;
+        let s_syn = (alpha / 1.0) as f64;
+        let s_str = (beta / 0.5) as f64;
+        let s_log = (gamma / 2.0) as f64;
+        let domain = CodingDomain::new();
+        let mut model = domain.energy_model(&DomainScope::default());
+        for w in &mut model.residual_weights {
+            let scale = match w.component {
+                EnergyComponent::Syn => s_syn,
+                EnergyComponent::Str => s_str,
+                EnergyComponent::Log => s_log,
+                _ => 1.0,
+            };
+            if scale > 0.0 {
+                w.weight *= scale;
+            }
+        }
+        self.model = model;
+    }
+
     /// Record a blocking goal-presence residual on the SDK gate channel.
     ///
     /// The orchestrator's `V_str` penalty is what enforces non-convergence; this
@@ -314,6 +341,47 @@ impl SdkGateState {
         }
 
         residuals
+    }
+
+    /// Score an arbitrary residual vector with the shared coding energy model and
+    /// project it onto the orchestrator's [`perspt_core::types::EnergyComponents`].
+    ///
+    /// This is the PSP-8 acceptance energy `V(x) = Σ_e w_e‖r_e‖²`: the magnitudes
+    /// the orchestrator collects (diagnostic counts, failed-test counts, …) are
+    /// squared and weighted by the model, and the result is grouped into the five
+    /// component rollups. Returns `(total, components)` in `f32`. On the
+    /// (construction-time-unreachable) error path where a residual class has no
+    /// declared weight, it falls back to a conservative `Σ score²` charged to the
+    /// structural component so a defect can never be rounded down to "stable".
+    pub fn score_components(
+        &self,
+        residuals: &[ResidualEvent],
+    ) -> (f32, perspt_core::types::EnergyComponents) {
+        match score_candidate(&self.model, residuals) {
+            Ok(score) => {
+                let c = perspt_core::types::EnergyComponents {
+                    v_syn: score.components.v_syn as f32,
+                    v_str: score.components.v_str as f32,
+                    v_log: score.components.v_log as f32,
+                    v_boot: score.components.v_boot as f32,
+                    v_sheaf: score.components.v_sheaf as f32,
+                };
+                (score.total as f32, c)
+            }
+            Err(e) => {
+                log::warn!("SDK energy scoring failed ({e}); using conservative fallback");
+                let v: f32 = residuals
+                    .iter()
+                    .filter(|r| !r.is_admissibility_outcome())
+                    .map(|r| (r.score * r.score) as f32)
+                    .sum();
+                let c = perspt_core::types::EnergyComponents {
+                    v_str: v,
+                    ..Default::default()
+                };
+                (v, c)
+            }
+        }
     }
 
     /// Evaluate the SDK measured gate for a convergence step.
@@ -567,5 +635,66 @@ mod tests {
             goal_presence_check("n1", 0, "", "Improve the documentation.", &["".to_string()])
                 .unwrap();
         assert!(report.is_none());
+    }
+
+    fn residual(class: ResidualClass, score: f64) -> ResidualEvent {
+        ResidualEvent::new(
+            "n1",
+            0,
+            class,
+            ResidualSeverity::Error,
+            score,
+            SensorRef::new("test", IndependenceRoute::DeterministicTool),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn score_components_is_quadratic_sum_of_squares() {
+        let state = SdkGateState::new();
+        // No residuals → V = 0 (a clean candidate).
+        let (total, c) = state.score_components(&[]);
+        assert_eq!(total, 0.0);
+        assert_eq!(c.total(), 0.0);
+
+        // 2 Type diagnostics (weight 3.0) + 1 TestFailure (weight 2.0):
+        // V = 3.0·2² + 2.0·1² = 12 + 2 = 14, NOT the linear 3·2 + 2·1 = 8.
+        let residuals = vec![
+            residual(ResidualClass::Type, 2.0),
+            residual(ResidualClass::TestFailure, 1.0),
+        ];
+        let (total, c) = state.score_components(&residuals);
+        assert_eq!(c.v_syn, 12.0);
+        assert_eq!(c.v_log, 2.0);
+        assert_eq!(total, 14.0);
+        assert_eq!(c.total(), 14.0);
+    }
+
+    #[test]
+    fn policy_residual_scores_into_structural() {
+        // Forbidden-pattern (Policy) residuals must resolve in the model, not hit
+        // the conservative fallback — Policy weight 1.0 → V_str = 1.0·1² = 1.0.
+        let state = SdkGateState::new();
+        let (total, c) = state.score_components(&[residual(ResidualClass::Policy, 1.0)]);
+        assert_eq!(c.v_str, 1.0);
+        assert_eq!(total, 1.0);
+    }
+
+    #[test]
+    fn energy_weights_scale_model_proportionally() {
+        // Default (1.0, 0.5, 2.0) is the identity reference: a TestFailure score 1
+        // gives V_log = 2.0·1² = 2.0.
+        let mut state = SdkGateState::new();
+        let (_t, c) = state.score_components(&[residual(ResidualClass::TestFailure, 1.0)]);
+        assert_eq!(c.v_log, 2.0);
+
+        // Doubling γ (2.0 → 4.0) doubles the Log-component weights.
+        state.set_energy_weights(1.0, 0.5, 4.0);
+        let (_t, c) = state.score_components(&[residual(ResidualClass::TestFailure, 1.0)]);
+        assert_eq!(c.v_log, 4.0);
+
+        // Syn/Str unaffected by the γ change.
+        let (_t, c) = state.score_components(&[residual(ResidualClass::Type, 1.0)]);
+        assert_eq!(c.v_syn, 3.0);
     }
 }
