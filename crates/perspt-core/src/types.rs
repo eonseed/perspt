@@ -787,7 +787,12 @@ impl EnergyComponents {
 pub enum TaskType {
     /// Implementation code
     #[default]
-    #[serde(alias = "implementation", alias = "impl", alias = "feature", alias = "source")]
+    #[serde(
+        alias = "implementation",
+        alias = "impl",
+        alias = "feature",
+        alias = "source"
+    )]
     Code,
     /// Shell command execution (e.g., cargo new, npm init)
     #[serde(alias = "shell", alias = "scaffold", alias = "setup", alias = "init")]
@@ -795,7 +800,12 @@ pub enum TaskType {
     /// Unit tests. Models commonly emit the bare word "test"/"tests", so accept
     /// those as aliases — rejecting them was forcing valid plans to fail and
     /// fall back to the deterministic graph.
-    #[serde(alias = "test", alias = "tests", alias = "unittest", alias = "unit-test")]
+    #[serde(
+        alias = "test",
+        alias = "tests",
+        alias = "unittest",
+        alias = "unit-test"
+    )]
     UnitTest,
     /// Integration/E2E tests
     #[serde(alias = "integration", alias = "e2e", alias = "integration-test")]

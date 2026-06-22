@@ -716,7 +716,10 @@ impl LanguagePlugin for PythonPlugin {
                 if opts.is_empty_dir || opts.name == "." || opts.name == "./" {
                     "pipenv install".to_string()
                 } else {
-                    format!("mkdir -p {} && cd {} && pipenv install", opts.name, opts.name)
+                    format!(
+                        "mkdir -p {} && cd {} && pipenv install",
+                        opts.name, opts.name
+                    )
                 }
             }
             // uv is the default for any other (or unspecified) value — the plugin

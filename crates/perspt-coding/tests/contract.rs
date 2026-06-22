@@ -19,7 +19,10 @@ fn import_residual(node: &str, generation: u32, score: f64) -> ResidualEvent {
         SensorRef::new("rust-analyzer", IndependenceRoute::Lsp),
     )
     .unwrap();
-    r.affected_symbols = vec![SymbolRef { name: "Bar".into(), container: Some("crate::foo".into()) }];
+    r.affected_symbols = vec![SymbolRef {
+        name: "Bar".into(),
+        container: Some("crate::foo".into()),
+    }];
     r.affected_paths = vec!["src/main.rs".into()];
     r
 }
@@ -39,9 +42,14 @@ fn srbn_loop_descends_then_certifies() {
     let baseline_score = score_candidate(&model, &baseline).unwrap();
     assert_eq!(baseline_score.total, 16.0);
 
-    let mut traj =
-        AcceptedTrajectory::new("n1", 0, baseline_score.total, model.rho_gate, model.correction_budget)
-            .unwrap();
+    let mut traj = AcceptedTrajectory::new(
+        "n1",
+        0,
+        baseline_score.total,
+        model.rho_gate,
+        model.correction_budget,
+    )
+    .unwrap();
 
     // Attempt 1: no progress (still 16.0) -> rejected, not accepted.
     let stuck = score_candidate(&model, &baseline).unwrap();
@@ -83,7 +91,8 @@ fn run_respects_finite_decision_bound() {
     let domain = CodingDomain::new();
     let model = domain.energy_model(&DomainScope::default());
     let v0 = 16.0;
-    let mut traj = AcceptedTrajectory::new("n1", 0, v0, model.rho_gate, model.correction_budget).unwrap();
+    let mut traj =
+        AcceptedTrajectory::new("n1", 0, v0, model.rho_gate, model.correction_budget).unwrap();
     let bound = traj.decision_bound().unwrap();
     // floor(16 / 0.5) + 4 + 1 = 32 + 5 = 37.
     assert_eq!(bound, 37);
@@ -124,7 +133,9 @@ fn degraded_sensor_does_not_read_as_zero_energy() {
 #[test]
 fn spectral_distinguishes_independent_from_redundant_verifier() {
     // compiler(0) - lsp(1) - test(2) verification chain.
-    let graph = VerificationGraph::new(3).with_edge(0, 1, 1.0).with_edge(1, 2, 1.0);
+    let graph = VerificationGraph::new(3)
+        .with_edge(0, 1, 1.0)
+        .with_edge(1, 2, 1.0);
     let independent = graph.edge_mu_sensitivity(0, 2, 1.0, 1e-9).unwrap();
     let redundant = graph.edge_mu_sensitivity(0, 1, 1.0, 1e-9).unwrap();
     assert!(independent > 0.0);

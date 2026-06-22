@@ -63,7 +63,10 @@ impl SRBNOrchestrator {
                 3.0,
                 SensorRef::new("tool", IndependenceRoute::DeterministicTool),
             );
-            log::warn!("Tool failure detected, ToolFailure residual raised: {}", err);
+            log::warn!(
+                "Tool failure detected, ToolFailure residual raised: {}",
+                err
+            );
             self.emit_log(format!("⚠️ Tool failure prevents verification: {}", err));
             // We can return early or allow other checks. Usually tool failure means broken state.
 
@@ -465,7 +468,9 @@ impl SRBNOrchestrator {
                     } else if let Some(failed_out) = vr
                         .stage_outcomes
                         .iter()
-                        .find(|so| !so.passed && so.output.as_deref().is_some_and(|o| !o.trim().is_empty()))
+                        .find(|so| {
+                            !so.passed && so.output.as_deref().is_some_and(|o| !o.trim().is_empty())
+                        })
                         .and_then(|so| so.output.clone())
                     {
                         self.context.last_test_output = Some(failed_out);
@@ -489,7 +494,8 @@ impl SRBNOrchestrator {
                         )
                     });
                     if code_clean {
-                        self.run_runtime_smoke(idx, &verify_dir, &mut residuals).await;
+                        self.run_runtime_smoke(idx, &verify_dir, &mut residuals)
+                            .await;
                     }
                 }
             }
@@ -514,9 +520,9 @@ impl SRBNOrchestrator {
 
         let node = &self.graph[idx];
         // Record energy in persistent ledger
-        if let Err(e) =
-            self.ledger
-                .record_energy(&node.node_id, &energy, energy.total())
+        if let Err(e) = self
+            .ledger
+            .record_energy(&node.node_id, &energy, energy.total())
         {
             log::error!("Failed to record energy: {}", e);
         }
@@ -572,7 +578,11 @@ impl SRBNOrchestrator {
             // of residual is absent).
             let (syntax_ok, build_ok, tests_ok) = match self.last_verification_result {
                 Some(ref vr) => (vr.syntax_ok, vr.build_ok, vr.tests_ok),
-                None => (energy.v_syn == 0.0, energy.v_syn == 0.0, energy.v_log == 0.0),
+                None => (
+                    energy.v_syn == 0.0,
+                    energy.v_syn == 0.0,
+                    energy.v_log == 0.0,
+                ),
             };
             self.emit_event(perspt_core::AgentEvent::VerificationComplete {
                 node_id: node.node_id.clone(),
@@ -673,7 +683,11 @@ impl SRBNOrchestrator {
             message: format!(
                 "Required symbol(s) not defined in {}: {}. The goal is not satisfied until \
                  each is implemented.",
-                if target_hint.is_empty() { "the output" } else { &target_hint },
+                if target_hint.is_empty() {
+                    "the output"
+                } else {
+                    &target_hint
+                },
                 missing_list
             ),
             related_information: None,
@@ -726,8 +740,15 @@ impl SRBNOrchestrator {
             } else {
                 residual_total += runtime_residuals.len();
                 self.emit_log(format!("   ❌ {} — runtime failure", inv.description));
-                let tail: String = output.lines().rev().take(20).collect::<Vec<_>>()
-                    .into_iter().rev().collect::<Vec<_>>().join("\n");
+                let tail: String = output
+                    .lines()
+                    .rev()
+                    .take(20)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n");
                 failure_report.push_str(&format!(
                     "Runtime smoke failed: `{}` ({})\n{}\n\n",
                     inv.command, inv.description, tail
@@ -771,7 +792,10 @@ impl SRBNOrchestrator {
                 (out.status.success(), combined)
             }
             Ok(Err(e)) => (false, format!("failed to spawn smoke command: {e}")),
-            Err(_) => (false, "runtime smoke command timed out after 120s".to_string()),
+            Err(_) => (
+                false,
+                "runtime smoke command timed out after 120s".to_string(),
+            ),
         }
     }
 

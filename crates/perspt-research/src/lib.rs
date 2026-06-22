@@ -15,9 +15,9 @@
 #![forbid(unsafe_code)]
 
 use perspt_sdk::{
-    AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope, EnergyComponent,
-    EnergyModel, ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight, StabilityClaim,
-    WorkspaceSnapshot,
+    AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope,
+    EnergyComponent, EnergyModel, ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight,
+    StabilityClaim, WorkspaceSnapshot,
 };
 
 /// The research domain package.
@@ -37,7 +37,12 @@ impl AgentDomainPackage for ResearchDomain {
 
     fn detect(&self, workspace: &WorkspaceSnapshot) -> DomainDetection {
         let mut evidence = Vec::new();
-        for marker in ["references.bib", "refs.bib", "bibliography.bib", "sources.md"] {
+        for marker in [
+            "references.bib",
+            "refs.bib",
+            "bibliography.bib",
+            "sources.md",
+        ] {
             if workspace.has_file_named(marker) {
                 evidence.push(format!("found {marker}"));
             }
@@ -56,10 +61,10 @@ impl AgentDomainPackage for ResearchDomain {
         // logic residual, a citation gap to a structural one, stale evidence to
         // context drift, and a contradiction to a sheaf inconsistency.
         ResidualSchema::new(vec![
-            ResidualClass::TestFailure,      // unsupported / contradicted claim
-            ResidualClass::InterfaceMismatch, // source mismatch
-            ResidualClass::ImportGraph,       // citation gap (missing source link)
-            ResidualClass::ContextDrift,      // stale evidence
+            ResidualClass::TestFailure,        // unsupported / contradicted claim
+            ResidualClass::InterfaceMismatch,  // source mismatch
+            ResidualClass::ImportGraph,        // citation gap (missing source link)
+            ResidualClass::ContextDrift,       // stale evidence
             ResidualClass::SheafInconsistency, // cross-source contradiction
             ResidualClass::SensorUnavailable,
         ])
@@ -78,7 +83,10 @@ impl AgentDomainPackage for ResearchDomain {
             ResidualWeight::new(SensorUnavailable, Boot, 1.0),
         ];
         model.energy_tolerance = 0.0;
-        model.stability_claim = Some(StabilityClaim::not_claimed(format!("research scope: {}", scope.label)));
+        model.stability_claim = Some(StabilityClaim::not_claimed(format!(
+            "research scope: {}",
+            scope.label
+        )));
         model
     }
 
@@ -107,7 +115,9 @@ impl AgentDomainPackage for ResearchDomain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use perspt_sdk::{score_candidate, DomainRegistry, IndependenceRoute, ResidualSeverity, SensorRef};
+    use perspt_sdk::{
+        score_candidate, DomainRegistry, IndependenceRoute, ResidualSeverity, SensorRef,
+    };
 
     #[test]
     fn research_domain_detects_bibliography() {

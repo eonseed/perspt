@@ -47,7 +47,9 @@ impl CommandInvocation {
 
 /// Shell metacharacters that force the `Shell` form. Their presence means the
 /// command cannot be canonicalized to a single program execution.
-const SHELL_METACHARS: &[char] = &['|', '&', ';', '<', '>', '$', '`', '(', ')', '{', '}', '*', '?', '~', '!', '\n'];
+const SHELL_METACHARS: &[char] = &[
+    '|', '&', ';', '<', '>', '$', '`', '(', ')', '{', '}', '*', '?', '~', '!', '\n',
+];
 
 /// Whether a raw command string contains shell composition.
 pub fn has_shell_composition(raw: &str) -> bool {
@@ -104,7 +106,9 @@ pub fn classify_tier(invocation: &CommandInvocation) -> CommandTier {
         CommandInvocation::Program { program, args, .. } => (program.as_str(), args.as_slice()),
         // A shell script is treated as mutation unless an explicit declaration
         // proves otherwise; the kernel still requires a shell capability.
-        CommandInvocation::Shell { declared_writes, .. } => {
+        CommandInvocation::Shell {
+            declared_writes, ..
+        } => {
             return if declared_writes.is_empty() {
                 CommandTier::Inspection
             } else {
@@ -170,24 +174,45 @@ mod tests {
 
     #[test]
     fn read_only_tools_are_inspection() {
-        assert_eq!(classify_tier(&canonicalize("rg pattern", "/r")), CommandTier::Inspection);
-        assert_eq!(classify_tier(&canonicalize("git grep foo", "/r")), CommandTier::Inspection);
-        assert_eq!(classify_tier(&canonicalize("sed -n 1p file", "/r")), CommandTier::Inspection);
+        assert_eq!(
+            classify_tier(&canonicalize("rg pattern", "/r")),
+            CommandTier::Inspection
+        );
+        assert_eq!(
+            classify_tier(&canonicalize("git grep foo", "/r")),
+            CommandTier::Inspection
+        );
+        assert_eq!(
+            classify_tier(&canonicalize("sed -n 1p file", "/r")),
+            CommandTier::Inspection
+        );
     }
 
     #[test]
     fn sed_in_place_is_mutation() {
-        assert_eq!(classify_tier(&canonicalize("sed -i s/a/b/ file", "/r")), CommandTier::Mutation);
+        assert_eq!(
+            classify_tier(&canonicalize("sed -i s/a/b/ file", "/r")),
+            CommandTier::Mutation
+        );
     }
 
     #[test]
     fn package_managers_are_mutation() {
-        assert_eq!(classify_tier(&canonicalize("cargo add serde", "/r")), CommandTier::Mutation);
-        assert_eq!(classify_tier(&canonicalize("rm file", "/r")), CommandTier::Mutation);
+        assert_eq!(
+            classify_tier(&canonicalize("cargo add serde", "/r")),
+            CommandTier::Mutation
+        );
+        assert_eq!(
+            classify_tier(&canonicalize("rm file", "/r")),
+            CommandTier::Mutation
+        );
     }
 
     #[test]
     fn unknown_tool_defaults_to_mutation() {
-        assert_eq!(classify_tier(&canonicalize("frobnicate x", "/r")), CommandTier::Mutation);
+        assert_eq!(
+            classify_tier(&canonicalize("frobnicate x", "/r")),
+            CommandTier::Mutation
+        );
     }
 }

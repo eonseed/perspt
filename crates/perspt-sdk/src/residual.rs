@@ -80,7 +80,10 @@ impl ResidualClass {
     /// SHALL be recorded on a separate blocked channel and SHALL NOT be summed
     /// into the Lyapunov energy `V` (PSP-8 System 6).
     pub fn is_admissibility_outcome(self) -> bool {
-        matches!(self, ResidualClass::CapabilityDenied | ResidualClass::BudgetExhausted)
+        matches!(
+            self,
+            ResidualClass::CapabilityDenied | ResidualClass::BudgetExhausted
+        )
     }
 }
 
@@ -130,7 +133,10 @@ pub struct SensorRef {
 
 impl SensorRef {
     pub fn new(id: impl Into<String>, route: IndependenceRoute) -> Self {
-        Self { id: id.into(), route }
+        Self {
+            id: id.into(),
+            route,
+        }
     }
 }
 
@@ -288,23 +294,61 @@ mod tests {
 
     #[test]
     fn rejects_negative_score() {
-        let err = ResidualEvent::new("n1", 0, ResidualClass::Type, ResidualSeverity::Error, -1.0, sensor());
+        let err = ResidualEvent::new(
+            "n1",
+            0,
+            ResidualClass::Type,
+            ResidualSeverity::Error,
+            -1.0,
+            sensor(),
+        );
         assert!(err.is_err());
     }
 
     #[test]
     fn rejects_nan_and_inf_score() {
-        assert!(ResidualEvent::new("n1", 0, ResidualClass::Type, ResidualSeverity::Error, f64::NAN, sensor()).is_err());
-        assert!(ResidualEvent::new("n1", 0, ResidualClass::Type, ResidualSeverity::Error, f64::INFINITY, sensor()).is_err());
+        assert!(ResidualEvent::new(
+            "n1",
+            0,
+            ResidualClass::Type,
+            ResidualSeverity::Error,
+            f64::NAN,
+            sensor()
+        )
+        .is_err());
+        assert!(ResidualEvent::new(
+            "n1",
+            0,
+            ResidualClass::Type,
+            ResidualSeverity::Error,
+            f64::INFINITY,
+            sensor()
+        )
+        .is_err());
     }
 
     #[test]
     fn class_maps_to_default_component() {
-        assert_eq!(ResidualClass::Type.default_component(), EnergyComponent::Syn);
-        assert_eq!(ResidualClass::TestFailure.default_component(), EnergyComponent::Log);
-        assert_eq!(ResidualClass::ImportGraph.default_component(), EnergyComponent::Str);
-        assert_eq!(ResidualClass::ToolFailure.default_component(), EnergyComponent::Boot);
-        assert_eq!(ResidualClass::SheafInconsistency.default_component(), EnergyComponent::Sheaf);
+        assert_eq!(
+            ResidualClass::Type.default_component(),
+            EnergyComponent::Syn
+        );
+        assert_eq!(
+            ResidualClass::TestFailure.default_component(),
+            EnergyComponent::Log
+        );
+        assert_eq!(
+            ResidualClass::ImportGraph.default_component(),
+            EnergyComponent::Str
+        );
+        assert_eq!(
+            ResidualClass::ToolFailure.default_component(),
+            EnergyComponent::Boot
+        );
+        assert_eq!(
+            ResidualClass::SheafInconsistency.default_component(),
+            EnergyComponent::Sheaf
+        );
     }
 
     #[test]

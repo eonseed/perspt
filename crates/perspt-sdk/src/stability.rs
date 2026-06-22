@@ -79,7 +79,12 @@ impl StabilityClaim {
 ///
 /// Requires `alpha > beta` and `mu > 0` (PSP-8 System 2).
 pub fn ultimate_floor(alpha: f64, beta: f64, delta: f64, mu: f64) -> Result<f64> {
-    for (name, v) in [("alpha", alpha), ("beta", beta), ("delta", delta), ("mu", mu)] {
+    for (name, v) in [
+        ("alpha", alpha),
+        ("beta", beta),
+        ("delta", delta),
+        ("mu", mu),
+    ] {
         if !v.is_finite() {
             return Err(SdkError::InvalidStability(format!("{name} is not finite")));
         }
@@ -105,10 +110,14 @@ pub fn ultimate_floor(alpha: f64, beta: f64, delta: f64, mu: f64) -> Result<f64>
 /// ```
 pub fn step_size_upper_bound(alpha: f64, beta: f64, smoothness_l: f64, mu: f64) -> Result<f64> {
     if alpha <= beta {
-        return Err(SdkError::InvalidStability("step-size bound requires alpha > beta".into()));
+        return Err(SdkError::InvalidStability(
+            "step-size bound requires alpha > beta".into(),
+        ));
     }
     if smoothness_l <= 0.0 || mu <= 0.0 {
-        return Err(SdkError::InvalidStability("step-size bound requires L > 0 and mu > 0".into()));
+        return Err(SdkError::InvalidStability(
+            "step-size bound requires L > 0 and mu > 0".into(),
+        ));
     }
     let gap = alpha - beta;
     let sum = alpha + beta;
@@ -130,7 +139,13 @@ pub fn geometric_factor(eta: f64, c: f64, mu: f64) -> f64 {
 }
 
 /// Check that a proposed step size respects the sufficient bound.
-pub fn validate_step_size(eta: f64, alpha: f64, beta: f64, smoothness_l: f64, mu: f64) -> Result<bool> {
+pub fn validate_step_size(
+    eta: f64,
+    alpha: f64,
+    beta: f64,
+    smoothness_l: f64,
+    mu: f64,
+) -> Result<bool> {
     if eta <= 0.0 {
         return Ok(false);
     }

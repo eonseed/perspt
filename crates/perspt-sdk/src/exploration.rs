@@ -144,7 +144,12 @@ mod tests {
     #[test]
     fn budget_admits_within_limits_and_rejects_overflow() {
         let budget = ExplorationBudget::default();
-        let ok = ExplorationUsage { files: 10, tokens: 1000, tool_calls: 5, wall_clock_secs: 10 };
+        let ok = ExplorationUsage {
+            files: 10,
+            tokens: 1000,
+            tool_calls: 5,
+            wall_clock_secs: 10,
+        };
         assert!(budget.admits(&ok));
         let over = ExplorationUsage { files: 9999, ..ok };
         assert!(!budget.admits(&over));

@@ -43,8 +43,16 @@ pub struct BenchmarkCase {
 }
 
 impl BenchmarkCase {
-    pub fn new(case_id: impl Into<String>, domain: impl Into<String>, description: impl Into<String>) -> Self {
-        Self { case_id: case_id.into(), domain: domain.into(), description: description.into() }
+    pub fn new(
+        case_id: impl Into<String>,
+        domain: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            case_id: case_id.into(),
+            domain: domain.into(),
+            description: description.into(),
+        }
     }
 }
 
@@ -133,7 +141,9 @@ impl BenchmarkReport {
     /// Whether the implementation is correctness-conformant: no false-stability
     /// outcomes occurred.
     pub fn is_correctness_conformant(&self) -> bool {
-        self.results.iter().all(|r| !r.outcome.is_correctness_violation())
+        self.results
+            .iter()
+            .all(|r| !r.outcome.is_correctness_violation())
     }
 }
 
@@ -146,7 +156,10 @@ mod tests {
         let mut report = BenchmarkReport::new();
         report.add(BenchmarkResult::new("c1", BenchmarkOutcome::HardPass));
         report.add(BenchmarkResult::new("c2", BenchmarkOutcome::HardPass));
-        report.add(BenchmarkResult::new("c3", BenchmarkOutcome::ResidualCertified));
+        report.add(BenchmarkResult::new(
+            "c3",
+            BenchmarkOutcome::ResidualCertified,
+        ));
         report.add(BenchmarkResult::new("c4", BenchmarkOutcome::Regression));
         assert_eq!(report.total(), 4);
         assert_eq!(report.hard_pass_rate(), 0.5);
@@ -158,9 +171,15 @@ mod tests {
     fn failed_runs_are_preserved_not_omitted() {
         let mut report = BenchmarkReport::new();
         report.add(BenchmarkResult::new("ok", BenchmarkOutcome::HardPass));
-        report.add(BenchmarkResult::new("certified", BenchmarkOutcome::ResidualCertified));
+        report.add(BenchmarkResult::new(
+            "certified",
+            BenchmarkOutcome::ResidualCertified,
+        ));
         // The certified (non-success) run is retained in the report.
-        assert!(report.results.iter().any(|r| r.outcome == BenchmarkOutcome::ResidualCertified));
+        assert!(report
+            .results
+            .iter()
+            .any(|r| r.outcome == BenchmarkOutcome::ResidualCertified));
         assert!(report.preserves_failures());
     }
 
@@ -169,7 +188,10 @@ mod tests {
         let mut report = BenchmarkReport::new();
         report.add(BenchmarkResult::new("ok", BenchmarkOutcome::HardPass));
         assert!(report.is_correctness_conformant());
-        report.add(BenchmarkResult::new("bad", BenchmarkOutcome::FalseStability));
+        report.add(BenchmarkResult::new(
+            "bad",
+            BenchmarkOutcome::FalseStability,
+        ));
         assert!(!report.is_correctness_conformant());
         assert!(report.false_stability_rate() > 0.0);
     }

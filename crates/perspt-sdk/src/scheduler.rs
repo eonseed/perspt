@@ -141,14 +141,41 @@ impl LeaseTable {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum RepairAction {
-    RetryNode { node_id: String, generation: u32 },
-    ExpandScope { node_id: String, generation: u32, added_paths: Vec<String> },
-    SplitNode { node_id: String, generation: u32, child_goals: Vec<String> },
-    InsertInterfaceNode { boundary: String },
-    AddNode { goal: String, reason: String },
-    RetireNode { node_id: String, generation: u32, reason: String },
-    ReplanSubgraph { root: String, affected: Vec<String> },
-    StopNode { node_id: String, generation: u32, certificate_id: String },
+    RetryNode {
+        node_id: String,
+        generation: u32,
+    },
+    ExpandScope {
+        node_id: String,
+        generation: u32,
+        added_paths: Vec<String>,
+    },
+    SplitNode {
+        node_id: String,
+        generation: u32,
+        child_goals: Vec<String>,
+    },
+    InsertInterfaceNode {
+        boundary: String,
+    },
+    AddNode {
+        goal: String,
+        reason: String,
+    },
+    RetireNode {
+        node_id: String,
+        generation: u32,
+        reason: String,
+    },
+    ReplanSubgraph {
+        root: String,
+        affected: Vec<String>,
+    },
+    StopNode {
+        node_id: String,
+        generation: u32,
+        certificate_id: String,
+    },
 }
 
 /// A durable scheduler command consumed by the ready-queue loop (PSP-8
@@ -156,13 +183,31 @@ pub enum RepairAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "effect", rename_all = "snake_case")]
 pub enum SchedulerEffect {
-    CommitNode { node_id: String, generation: u32 },
-    RequeueNode { node_id: String, generation: u32, reason: String },
-    ApplyGraphRevision { revision_id: String },
-    SpawnWork { work_id: String },
-    CancelWork { work_id: String, reason: String },
-    RequestApproval { proposal_id: String },
-    StopWithCertificate { certificate_id: String },
+    CommitNode {
+        node_id: String,
+        generation: u32,
+    },
+    RequeueNode {
+        node_id: String,
+        generation: u32,
+        reason: String,
+    },
+    ApplyGraphRevision {
+        revision_id: String,
+    },
+    SpawnWork {
+        work_id: String,
+    },
+    CancelWork {
+        work_id: String,
+        reason: String,
+    },
+    RequestApproval {
+        proposal_id: String,
+    },
+    StopWithCertificate {
+        certificate_id: String,
+    },
 }
 
 /// Convert a repair action into scheduler effects. A local repair that produces
@@ -170,34 +215,51 @@ pub enum SchedulerEffect {
 /// loop consumes (PSP-8 System 4).
 pub fn repair_to_effects(action: &RepairAction) -> Vec<SchedulerEffect> {
     match action {
-        RepairAction::RetryNode { node_id, generation } => vec![SchedulerEffect::RequeueNode {
+        RepairAction::RetryNode {
+            node_id,
+            generation,
+        } => vec![SchedulerEffect::RequeueNode {
             node_id: node_id.clone(),
             generation: *generation,
             reason: "retry".into(),
         }],
-        RepairAction::ExpandScope { node_id, generation, .. } => vec![SchedulerEffect::RequeueNode {
+        RepairAction::ExpandScope {
+            node_id,
+            generation,
+            ..
+        } => vec![SchedulerEffect::RequeueNode {
             node_id: node_id.clone(),
             generation: generation + 1,
             reason: "scope expanded".into(),
         }],
         RepairAction::SplitNode { child_goals, .. } => child_goals
             .iter()
-            .map(|_| SchedulerEffect::SpawnWork { work_id: uuid::Uuid::new_v4().to_string() })
+            .map(|_| SchedulerEffect::SpawnWork {
+                work_id: uuid::Uuid::new_v4().to_string(),
+            })
             .chain(std::iter::once(SchedulerEffect::ApplyGraphRevision {
                 revision_id: uuid::Uuid::new_v4().to_string(),
             }))
             .collect(),
         RepairAction::InsertInterfaceNode { .. } | RepairAction::AddNode { .. } => {
             vec![
-                SchedulerEffect::SpawnWork { work_id: uuid::Uuid::new_v4().to_string() },
-                SchedulerEffect::ApplyGraphRevision { revision_id: uuid::Uuid::new_v4().to_string() },
+                SchedulerEffect::SpawnWork {
+                    work_id: uuid::Uuid::new_v4().to_string(),
+                },
+                SchedulerEffect::ApplyGraphRevision {
+                    revision_id: uuid::Uuid::new_v4().to_string(),
+                },
             ]
         }
         RepairAction::RetireNode { .. } | RepairAction::ReplanSubgraph { .. } => {
-            vec![SchedulerEffect::ApplyGraphRevision { revision_id: uuid::Uuid::new_v4().to_string() }]
+            vec![SchedulerEffect::ApplyGraphRevision {
+                revision_id: uuid::Uuid::new_v4().to_string(),
+            }]
         }
         RepairAction::StopNode { certificate_id, .. } => {
-            vec![SchedulerEffect::StopWithCertificate { certificate_id: certificate_id.clone() }]
+            vec![SchedulerEffect::StopWithCertificate {
+                certificate_id: certificate_id.clone(),
+            }]
         }
     }
 }
@@ -253,7 +315,8 @@ impl Scheduler {
         let mut ready = Vec::new();
         // Footprints occupied by running tasks plus already-selected ready nodes,
         // so two conflicting ready nodes are not dispatched together.
-        let mut occupied: Vec<Footprint> = self.running.iter().map(|t| t.footprint.clone()).collect();
+        let mut occupied: Vec<Footprint> =
+            self.running.iter().map(|t| t.footprint.clone()).collect();
         let slots = self.max_parallel.saturating_sub(self.running.len());
 
         for node in &revision.nodes {
@@ -436,7 +499,10 @@ mod tests {
         let sched = Scheduler::new(4);
         let fp = |n: &WorkNode| Footprint::new().write(Resource::File(format!("{}.rs", n.node_id)));
         let ready = sched.ready_nodes(&revision2, fp);
-        assert!(ready.iter().any(|n| n.node_id == "b"), "inserted node must be ready");
+        assert!(
+            ready.iter().any(|n| n.node_id == "b"),
+            "inserted node must be ready"
+        );
     }
 
     #[test]
@@ -445,17 +511,26 @@ mod tests {
         let scope = Resource::Toolchain("cargo".into());
         let l1 = table.acquire("w1", LeaseKind::Toolchain, scope.clone());
         assert!(l1.is_some());
-        assert!(table.acquire("w2", LeaseKind::Toolchain, scope.clone()).is_none());
+        assert!(table
+            .acquire("w2", LeaseKind::Toolchain, scope.clone())
+            .is_none());
         table.release(&l1.unwrap());
         assert!(table.acquire("w2", LeaseKind::Toolchain, scope).is_some());
     }
 
     #[test]
     fn repair_retry_becomes_requeue_effect() {
-        let effects = repair_to_effects(&RepairAction::RetryNode { node_id: "a".into(), generation: 0 });
+        let effects = repair_to_effects(&RepairAction::RetryNode {
+            node_id: "a".into(),
+            generation: 0,
+        });
         assert_eq!(
             effects,
-            vec![SchedulerEffect::RequeueNode { node_id: "a".into(), generation: 0, reason: "retry".into() }]
+            vec![SchedulerEffect::RequeueNode {
+                node_id: "a".into(),
+                generation: 0,
+                reason: "retry".into()
+            }]
         );
     }
 
@@ -466,8 +541,14 @@ mod tests {
             generation: 0,
             child_goals: vec!["x".into(), "y".into()],
         });
-        let spawns = effects.iter().filter(|e| matches!(e, SchedulerEffect::SpawnWork { .. })).count();
-        let revs = effects.iter().filter(|e| matches!(e, SchedulerEffect::ApplyGraphRevision { .. })).count();
+        let spawns = effects
+            .iter()
+            .filter(|e| matches!(e, SchedulerEffect::SpawnWork { .. }))
+            .count();
+        let revs = effects
+            .iter()
+            .filter(|e| matches!(e, SchedulerEffect::ApplyGraphRevision { .. }))
+            .count();
         assert_eq!(spawns, 2);
         assert_eq!(revs, 1);
     }
@@ -476,11 +557,20 @@ mod tests {
     fn recovery_totality_requires_every_node_classified() {
         let nodes = vec![node("a"), node("b")];
         let revision = rev(nodes, vec![]);
-        let outcomes = vec![NodeOutcome::Committed { node_id: "a".into(), generation: 0 }];
+        let outcomes = vec![NodeOutcome::Committed {
+            node_id: "a".into(),
+            generation: 0,
+        }];
         assert!(!recovery_is_total(&revision, &outcomes));
         let outcomes = vec![
-            NodeOutcome::Committed { node_id: "a".into(), generation: 0 },
-            NodeOutcome::Escalated { node_id: "b".into(), reason: "blocked".into() },
+            NodeOutcome::Committed {
+                node_id: "a".into(),
+                generation: 0,
+            },
+            NodeOutcome::Escalated {
+                node_id: "b".into(),
+                reason: "blocked".into(),
+            },
         ];
         assert!(recovery_is_total(&revision, &outcomes));
     }

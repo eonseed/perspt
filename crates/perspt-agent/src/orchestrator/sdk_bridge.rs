@@ -443,15 +443,21 @@ impl SdkGateState {
         residual_count: usize,
     ) -> sdk::Result<SdkGateReport> {
         let baseline = *self.baseline.entry(node_id.to_string()).or_insert(total);
-        let best = *self.best_accepted.entry(node_id.to_string()).or_insert(total);
+        let best = *self
+            .best_accepted
+            .entry(node_id.to_string())
+            .or_insert(total);
 
         let decision = sdk::evaluate_gate(hard_pass, total, best, self.model.rho_gate)?;
         if decision.is_accepted() && total < best {
             self.best_accepted.insert(node_id.to_string(), total);
         }
 
-        let decision_bound =
-            sdk::finite_decision_bound(baseline, self.model.rho_gate, self.model.correction_budget)?;
+        let decision_bound = sdk::finite_decision_bound(
+            baseline,
+            self.model.rho_gate,
+            self.model.correction_budget,
+        )?;
 
         Ok(SdkGateReport {
             energy: total,
@@ -498,7 +504,9 @@ mod tests {
     #[test]
     fn clean_result_is_hard_pass_zero_energy() {
         let mut state = SdkGateState::new();
-        let report = state.evaluate("n1", 0, Some(&clean()), &comps(), 0.0, true).unwrap();
+        let report = state
+            .evaluate("n1", 0, Some(&clean()), &comps(), 0.0, true)
+            .unwrap();
         assert_eq!(report.energy, 0.0);
         assert!(report.hard_pass);
         assert!(matches!(report.decision, GateDecision::HardPass));
@@ -527,7 +535,9 @@ mod tests {
         // One Type residual (2 diagnostics) + one TestFailure residual (1).
         assert_eq!(residuals.len(), 2);
         let mut state = SdkGateState::new();
-        let report = state.evaluate("n1", 0, Some(&vr), &comps(), 0.0, false).unwrap();
+        let report = state
+            .evaluate("n1", 0, Some(&vr), &comps(), 0.0, false)
+            .unwrap();
         // Type weight 3.0 * 2^2 = 12 (V_syn) + TestFailure 2.0 * 1^2 = 2 (V_log) = 14.
         assert_eq!(report.v_syn, 12.0);
         assert_eq!(report.v_log, 2.0);
@@ -541,12 +551,22 @@ mod tests {
         let mut vr = clean();
         vr.syntax_ok = false;
         vr.diagnostics_count = 3; // V_syn = 3*9 = 27
-        let first = state.evaluate("n1", 0, Some(&vr), &comps(), 0.0, false).unwrap();
-        assert!(matches!(first.decision, GateDecision::RejectedNonDescending { .. }));
+        let first = state
+            .evaluate("n1", 0, Some(&vr), &comps(), 0.0, false)
+            .unwrap();
+        assert!(matches!(
+            first.decision,
+            GateDecision::RejectedNonDescending { .. }
+        ));
         // Fewer diagnostics next attempt -> energy descends -> accepted.
         vr.diagnostics_count = 1; // V_syn = 3*1 = 3
-        let second = state.evaluate("n1", 1, Some(&vr), &comps(), 0.0, false).unwrap();
-        assert!(matches!(second.decision, GateDecision::AcceptedByDescent { .. }));
+        let second = state
+            .evaluate("n1", 1, Some(&vr), &comps(), 0.0, false)
+            .unwrap();
+        assert!(matches!(
+            second.decision,
+            GateDecision::AcceptedByDescent { .. }
+        ));
     }
 
     #[test]
@@ -555,11 +575,15 @@ mod tests {
         vr.stage_outcomes = vec![perspt_core::types::StageOutcome {
             stage: "tests".to_string(),
             passed: false,
-            sensor_status: SensorStatus::Unavailable { reason: "pytest missing".into() },
+            sensor_status: SensorStatus::Unavailable {
+                reason: "pytest missing".into(),
+            },
             output: None,
         }];
         let residuals = SdkGateState::residuals_from("n1", 0, &vr);
-        assert!(residuals.iter().any(|r| r.class == ResidualClass::SensorUnavailable));
+        assert!(residuals
+            .iter()
+            .any(|r| r.class == ResidualClass::SensorUnavailable));
     }
 
     #[test]
@@ -599,9 +623,13 @@ mod tests {
         let dirs = directed_corrections("rust", "n1", raw);
         assert!(!dirs.is_empty());
         assert!(dirs.iter().any(|(c, _)| *c == ResidualClass::ImportGraph));
-        assert!(dirs.iter().any(|(c, _)| *c == ResidualClass::SymbolMismatch));
+        assert!(dirs
+            .iter()
+            .any(|(c, _)| *c == ResidualClass::SymbolMismatch));
         // The directions carry specific, actionable instructions.
-        assert!(dirs.iter().any(|(_, i)| i.contains("use") || i.contains("import")));
+        assert!(dirs
+            .iter()
+            .any(|(_, i)| i.contains("use") || i.contains("import")));
     }
 
     #[test]

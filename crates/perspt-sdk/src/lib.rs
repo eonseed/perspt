@@ -69,8 +69,8 @@ pub use capability::{
 pub use certificate::{BudgetRef, ResidualCertificate};
 pub use command::{canonicalize, classify_tier, CommandInvocation, CommandTier};
 pub use conformal::{
-    conformal_threshold, decide as conformal_decide, AcceptOutcome, CalibrationSample,
-    CalibrationState, is_drifted, ks_statistic,
+    conformal_threshold, decide as conformal_decide, is_drifted, ks_statistic, AcceptOutcome,
+    CalibrationSample, CalibrationState,
 };
 pub use domain::{
     AgentDomainPackage, DomainDetection, DomainId, DomainRegistry, DomainScope, ResidualSchema,
@@ -82,15 +82,10 @@ pub use exploration::{
     exploration_capability, is_read_only_capability, ExplorationBudget, ExplorationReport,
     ExplorationUsage, GraphHint, ProjectMap,
 };
-pub use routing::{
-    resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier, ModelTierConfig,
-};
-pub use goal::{
-    goal_presence_residual, goal_presence_sensor, missing_symbols, GoalSpec,
-};
 pub use gate::{
     evaluate_gate, finite_decision_bound, AcceptedTrajectory, GateDecision, GateDecisionRef,
 };
+pub use goal::{goal_presence_residual, goal_presence_sensor, missing_symbols, GoalSpec};
 pub use independence::{compute as compute_independence, IndependenceStats, VerdictRecord};
 pub use kernel::{AgentBarrierResult, AgentStabilizationStatus, CorrectionDirectionSet, Evidence};
 pub use ledger::{
@@ -105,8 +100,9 @@ pub use residual::{
     CorrectionDirection, EnergyComponent, EvidencePayload, IndependenceRoute, ResidualClass,
     ResidualEvent, ResidualEventRef, ResidualSeverity, SensorRef, SymbolRef,
 };
+pub use routing::{resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier, ModelTierConfig};
 pub use scheduler::{
-    repair_to_effects, recovery_is_total, ExecutionLease, Footprint, LeaseKind, LeaseTable,
+    recovery_is_total, repair_to_effects, ExecutionLease, Footprint, LeaseKind, LeaseTable,
     NodeOutcome, RepairAction, Resource, Scheduler, SchedulerEffect,
 };
 pub use spectral::{VerificationEdge, VerificationGraph};

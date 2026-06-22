@@ -42,12 +42,17 @@ pub struct WorkspaceSnapshot {
 
 impl WorkspaceSnapshot {
     pub fn new(root: impl Into<String>, files: Vec<String>) -> Self {
-        Self { root: root.into(), files }
+        Self {
+            root: root.into(),
+            files,
+        }
     }
 
     /// Whether any discovered file ends with the given suffix.
     pub fn has_file_named(&self, name: &str) -> bool {
-        self.files.iter().any(|f| f == name || f.ends_with(&format!("/{name}")))
+        self.files
+            .iter()
+            .any(|f| f == name || f.ends_with(&format!("/{name}")))
     }
 }
 
@@ -122,7 +127,14 @@ pub struct DomainRegistry {
 impl std::fmt::Debug for DomainRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DomainRegistry")
-            .field("domains", &self.packages.iter().map(|p| p.domain_id()).collect::<Vec<_>>())
+            .field(
+                "domains",
+                &self
+                    .packages
+                    .iter()
+                    .map(|p| p.domain_id())
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -153,7 +165,10 @@ impl DomainRegistry {
 
     /// Look up a package by explicit domain id.
     pub fn by_id(&self, id: &DomainId) -> Option<&dyn AgentDomainPackage> {
-        self.packages.iter().find(|p| &p.domain_id() == id).map(|p| p.as_ref())
+        self.packages
+            .iter()
+            .find(|p| &p.domain_id() == id)
+            .map(|p| p.as_ref())
     }
 
     /// The activated package with the highest detection confidence.
@@ -163,7 +178,9 @@ impl DomainRegistry {
             .map(|p| (p, p.detect(workspace)))
             .filter(|(_, d)| d.activated)
             .max_by(|(_, a), (_, b)| {
-                a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal)
+                a.confidence
+                    .partial_cmp(&b.confidence)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(p, _)| p.as_ref())
     }
@@ -218,8 +235,16 @@ mod tests {
 
     fn registry() -> DomainRegistry {
         let mut r = DomainRegistry::new();
-        r.register(Box::new(StubDomain { id: "coding", marker: "Cargo.toml", confidence: 0.9 }));
-        r.register(Box::new(StubDomain { id: "research", marker: "refs.bib", confidence: 0.8 }));
+        r.register(Box::new(StubDomain {
+            id: "coding",
+            marker: "Cargo.toml",
+            confidence: 0.9,
+        }));
+        r.register(Box::new(StubDomain {
+            id: "research",
+            marker: "refs.bib",
+            confidence: 0.8,
+        }));
         r
     }
 

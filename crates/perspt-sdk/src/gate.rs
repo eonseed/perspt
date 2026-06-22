@@ -41,7 +41,10 @@ pub enum GateDecision {
 impl GateDecision {
     /// Whether this decision admits the candidate into the accepted trajectory.
     pub fn is_accepted(&self) -> bool {
-        matches!(self, GateDecision::HardPass | GateDecision::AcceptedByDescent { .. })
+        matches!(
+            self,
+            GateDecision::HardPass | GateDecision::AcceptedByDescent { .. }
+        )
     }
 }
 
@@ -73,12 +76,18 @@ pub fn evaluate_gate(
 }
 
 /// Finite-decision bound `floor(V_0 / rho_gate) + B + 1` (PSP-8 System 2).
-pub fn finite_decision_bound(baseline_energy: f64, rho_gate: f64, rejection_budget: u32) -> Result<u64> {
+pub fn finite_decision_bound(
+    baseline_energy: f64,
+    rho_gate: f64,
+    rejection_budget: u32,
+) -> Result<u64> {
     check_positive_finite(rho_gate, "rho_gate")?;
     crate::error::check_non_negative_finite(baseline_energy, "baseline energy")?;
     let descents = (baseline_energy / rho_gate).floor();
     if !descents.is_finite() {
-        return Err(SdkError::InvalidGate("finite-decision bound overflow".into()));
+        return Err(SdkError::InvalidGate(
+            "finite-decision bound overflow".into(),
+        ));
     }
     Ok(descents as u64 + rejection_budget as u64 + 1)
 }
@@ -141,7 +150,12 @@ impl AcceptedTrajectory {
     /// the best accepted energy on acceptance and the rejection count on
     /// rejection. Returns the decision taken.
     pub fn submit(&mut self, hard_pass: bool, candidate_v: f64) -> Result<GateDecision> {
-        let decision = evaluate_gate(hard_pass, candidate_v, self.best_accepted_energy, self.rho_gate)?;
+        let decision = evaluate_gate(
+            hard_pass,
+            candidate_v,
+            self.best_accepted_energy,
+            self.rho_gate,
+        )?;
         self.gate_decisions.push(GateDecisionRef {
             decision: decision.clone(),
             observed_energy: candidate_v,

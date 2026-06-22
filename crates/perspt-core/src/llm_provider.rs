@@ -556,11 +556,10 @@ fn build_vertex_client() -> Client {
         .with_auth_resolver(resolver);
 
     if let Some(endpoint) = resolved_vertex_endpoint() {
-        builder =
-            builder.with_service_target_resolver_fn(move |mut target: ServiceTarget| {
-                target.endpoint = Endpoint::from_owned(endpoint.clone());
-                Ok(target)
-            });
+        builder = builder.with_service_target_resolver_fn(move |mut target: ServiceTarget| {
+            target.endpoint = Endpoint::from_owned(endpoint.clone());
+            Ok(target)
+        });
     }
 
     builder.build()
@@ -587,20 +586,18 @@ fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) ->
 
 fn provider_from_model_namespace(model: &str) -> Option<&'static str> {
     let lower = model.to_ascii_lowercase();
-    lower
-        .split_once("::")
-        .and_then(|(prefix, _)| match prefix {
-            "openai" => Some("openai"),
-            "anthropic" => Some("anthropic"),
-            "gemini" | "google" => Some("gemini"),
-            "vertex" => Some("vertex"),
-            "groq" => Some("groq"),
-            "cohere" => Some("cohere"),
-            "ollama" => Some("ollama"),
-            "xai" => Some("xai"),
-            "deepseek" => Some("deepseek"),
-            _ => None,
-        })
+    lower.split_once("::").and_then(|(prefix, _)| match prefix {
+        "openai" => Some("openai"),
+        "anthropic" => Some("anthropic"),
+        "gemini" | "google" => Some("gemini"),
+        "vertex" => Some("vertex"),
+        "groq" => Some("groq"),
+        "cohere" => Some("cohere"),
+        "ollama" => Some("ollama"),
+        "xai" => Some("xai"),
+        "deepseek" => Some("deepseek"),
+        _ => None,
+    })
 }
 
 fn configure_vertex_environment(config: &Config) {
@@ -648,11 +645,16 @@ fn configure_vertex_environment(config: &Config) {
 }
 
 fn vertex_project_from_env() -> Option<String> {
-    ["VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"]
-        .into_iter()
-        .filter_map(|key| std::env::var(key).ok())
-        .map(|value| value.trim().to_string())
-        .find(|value| !value.is_empty())
+    [
+        "VERTEX_PROJECT_ID",
+        "GOOGLE_CLOUD_PROJECT",
+        "GCLOUD_PROJECT",
+        "CLOUDSDK_CORE_PROJECT",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok())
+    .map(|value| value.trim().to_string())
+    .find(|value| !value.is_empty())
 }
 
 fn gcloud_config_dir() -> Option<PathBuf> {
@@ -932,7 +934,9 @@ mod tests {
         assert!(std::env::var("VERTEX_LOCATION").is_err());
         assert_eq!(
             resolved_vertex_endpoint().as_deref(),
-            Some("https://aiplatform.googleapis.com/v1/projects/unit-test-project/locations/global/")
+            Some(
+                "https://aiplatform.googleapis.com/v1/projects/unit-test-project/locations/global/"
+            )
         );
 
         match previous_project {
@@ -1019,7 +1023,10 @@ mod tests {
         account = user@example.com
         project = test-project
         "#;
-        assert_eq!(parse_gcloud_project(content).as_deref(), Some("test-project"));
+        assert_eq!(
+            parse_gcloud_project(content).as_deref(),
+            Some("test-project")
+        );
     }
 
     #[tokio::test]

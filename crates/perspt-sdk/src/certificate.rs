@@ -104,7 +104,11 @@ mod tests {
         ));
 
         let cert = ResidualCertificate::from_residuals("n1", 2, "head-abc", 1.0, vec![residual])
-            .with_exhausted_budget(BudgetRef { name: "correction".into(), limit: 4, used: 4 });
+            .with_exhausted_budget(BudgetRef {
+                name: "correction".into(),
+                limit: 4,
+                used: 4,
+            });
 
         assert_eq!(cert.verifier_routes, vec![IndependenceRoute::Lsp]);
         assert_eq!(cert.next_correction_directions.len(), 1);

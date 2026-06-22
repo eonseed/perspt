@@ -36,7 +36,13 @@ pub struct AgentBarrierResult {
 
 impl AgentBarrierResult {
     pub fn new(ok: bool, score: f64) -> Self {
-        Self { ok, score, residuals: Vec::new(), feedback: Vec::new(), evidence: Evidence::new() }
+        Self {
+            ok,
+            score,
+            residuals: Vec::new(),
+            feedback: Vec::new(),
+            evidence: Evidence::new(),
+        }
     }
 
     pub fn with_residuals(mut self, residuals: Vec<ResidualEvent>) -> Self {
@@ -61,8 +67,19 @@ impl AgentBarrierResult {
             .first()
             .map(|d| d.instruction.clone())
             .unwrap_or_default();
-        let correction = if self.feedback.is_empty() { None } else { Some(self.feedback) };
-        srbn::BarrierResult::new(name, self.ok, self.score, feedback, correction, self.evidence)
+        let correction = if self.feedback.is_empty() {
+            None
+        } else {
+            Some(self.feedback)
+        };
+        srbn::BarrierResult::new(
+            name,
+            self.ok,
+            self.score,
+            feedback,
+            correction,
+            self.evidence,
+        )
     }
 }
 
@@ -120,7 +137,10 @@ pub fn stabilize<State, B, U>(
 where
     State: Clone,
     B: FnMut(&State) -> AgentBarrierResult,
-    U: FnMut(State, &srbn::BarrierResult<CorrectionDirectionSet, Evidence>) -> srbn::SrbnResult<State>,
+    U: FnMut(
+        State,
+        &srbn::BarrierResult<CorrectionDirectionSet, Evidence>,
+    ) -> srbn::SrbnResult<State>,
 {
     let srbn_barrier = move |state: &State| barrier(state).into_srbn("agent-barrier");
     let result = srbn::stabilize(initial, srbn_barrier, updater, policy(params, max_attempts))?;
@@ -145,8 +165,14 @@ mod tests {
 
     #[test]
     fn maps_kernel_status() {
-        assert_eq!(AgentStabilizationStatus::from(srbn::Status::Stable), AgentStabilizationStatus::Stable);
-        assert_eq!(AgentStabilizationStatus::from(srbn::Status::Stopped), AgentStabilizationStatus::Stopped);
+        assert_eq!(
+            AgentStabilizationStatus::from(srbn::Status::Stable),
+            AgentStabilizationStatus::Stable
+        );
+        assert_eq!(
+            AgentStabilizationStatus::from(srbn::Status::Stopped),
+            AgentStabilizationStatus::Stopped
+        );
         assert_eq!(
             AgentStabilizationStatus::from(srbn::Status::Exhausted),
             AgentStabilizationStatus::Exhausted
@@ -179,7 +205,8 @@ mod tests {
     fn rejects_non_finite_score_at_barrier() {
         let params = StabilityParameters::measured(0.5, 0.0);
         let barrier = |_state: &i64| AgentBarrierResult::new(false, f64::NAN);
-        let updater = |state: i64, _b: &srbn::BarrierResult<CorrectionDirectionSet, Evidence>| Ok(state);
+        let updater =
+            |state: i64, _b: &srbn::BarrierResult<CorrectionDirectionSet, Evidence>| Ok(state);
         // The kernel validates scores and surfaces an error.
         assert!(stabilize(1, barrier, updater, &params, 3).is_err());
     }

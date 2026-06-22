@@ -139,7 +139,11 @@ pub struct RiskBudget {
 
 impl RiskBudget {
     pub fn new(name: impl Into<String>, limit: f64) -> Self {
-        Self { name: name.into(), limit, spent: 0.0 }
+        Self {
+            name: name.into(),
+            limit,
+            spent: 0.0,
+        }
     }
 
     /// Whether `spent + cost <= limit`.
@@ -199,7 +203,10 @@ impl Capability {
     }
 
     pub fn with_paths(mut self, patterns: Vec<&str>) -> Self {
-        self.path_scope = patterns.into_iter().map(|p| PathPattern(p.to_string())).collect();
+        self.path_scope = patterns
+            .into_iter()
+            .map(|p| PathPattern(p.to_string()))
+            .collect();
         self
     }
 
@@ -221,7 +228,8 @@ impl Capability {
         }
         // Path/command/network scope subset (each pattern must be covered).
         let scope_subset = self.path_scope.iter().all(|p| {
-            source.path_scope.iter().any(|sp| sp == p) || source.path_scope.iter().any(|sp| sp.0 == "*")
+            source.path_scope.iter().any(|sp| sp == p)
+                || source.path_scope.iter().any(|sp| sp.0 == "*")
         });
         if !source.path_scope.is_empty() && !scope_subset {
             return false;
@@ -394,7 +402,12 @@ impl KernelState {
     }
 }
 
-fn deny(proposal: &EffectProposal, cap: Option<&Capability>, reason: DenyReason, recovery: RecoveryClass) -> AdmissibilityWitness {
+fn deny(
+    proposal: &EffectProposal,
+    cap: Option<&Capability>,
+    reason: DenyReason,
+    recovery: RecoveryClass,
+) -> AdmissibilityWitness {
     AdmissibilityWitness {
         proposal_id: proposal.proposal_id.clone(),
         actor: proposal.actor.clone(),
@@ -431,7 +444,12 @@ pub fn check_admissibility(
     let cap = match cap {
         Some(c) => c,
         None => {
-            return deny(proposal, None, DenyReason::NoCapability, RecoveryClass::NeedsCapability)
+            return deny(
+                proposal,
+                None,
+                DenyReason::NoCapability,
+                RecoveryClass::NeedsCapability,
+            )
         }
     };
 
@@ -440,29 +458,53 @@ pub fn check_admissibility(
         // A timestamp of 0 in preconditions is treated as "now unknown"; callers
         // pass the real clock through the witness resource. Here we only reject
         // when an explicit `__now` witness exceeds expiry.
-        if let Some(now) = state.witnesses.get("__now").and_then(|s| s.parse::<i64>().ok()) {
+        if let Some(now) = state
+            .witnesses
+            .get("__now")
+            .and_then(|s| s.parse::<i64>().ok())
+        {
             if now > expiry {
-                return deny(proposal, Some(cap), DenyReason::Expired, RecoveryClass::NeedsCapability);
+                return deny(
+                    proposal,
+                    Some(cap),
+                    DenyReason::Expired,
+                    RecoveryClass::NeedsCapability,
+                );
             }
         }
     }
 
     // Call budget.
     if cap.max_calls == Some(0) {
-        return deny(proposal, Some(cap), DenyReason::CallBudgetExhausted, RecoveryClass::NeedsCapability);
+        return deny(
+            proposal,
+            Some(cap),
+            DenyReason::CallBudgetExhausted,
+            RecoveryClass::NeedsCapability,
+        );
     }
 
     // Effect scope: path.
     if let Some(path) = &proposal.path {
         if !cap.path_scope.is_empty() && !cap.path_scope.iter().any(|p| p.matches(path)) {
-            return deny(proposal, Some(cap), DenyReason::PathOutOfScope, RecoveryClass::NeedsApproval);
+            return deny(
+                proposal,
+                Some(cap),
+                DenyReason::PathOutOfScope,
+                RecoveryClass::NeedsApproval,
+            );
         }
     }
 
     // Command governance.
     if let Some(command) = &proposal.command {
         if command.requires_shell() && !cap.grants(EffectKind::RunShell) {
-            return deny(proposal, Some(cap), DenyReason::ShellNotPermitted, RecoveryClass::NeedsApproval);
+            return deny(
+                proposal,
+                Some(cap),
+                DenyReason::ShellNotPermitted,
+                RecoveryClass::NeedsApproval,
+            );
         }
         let tier = classify_tier(command);
         let mutation_effect = matches!(
@@ -474,17 +516,37 @@ pub fn check_admissibility(
                 | EffectKind::MutateDependencies
         );
         if tier == CommandTier::Mutation && !mutation_effect && proposal.effect.is_read_only() {
-            return deny(proposal, Some(cap), DenyReason::MutationNotPermitted, RecoveryClass::NeedsApproval);
+            return deny(
+                proposal,
+                Some(cap),
+                DenyReason::MutationNotPermitted,
+                RecoveryClass::NeedsApproval,
+            );
         }
-        if !cap.command_scope.is_empty() && !cap.command_scope.iter().any(|p| p.matches(command.program_name())) {
-            return deny(proposal, Some(cap), DenyReason::CommandOutOfScope, RecoveryClass::NeedsApproval);
+        if !cap.command_scope.is_empty()
+            && !cap
+                .command_scope
+                .iter()
+                .any(|p| p.matches(command.program_name()))
+        {
+            return deny(
+                proposal,
+                Some(cap),
+                DenyReason::CommandOutOfScope,
+                RecoveryClass::NeedsApproval,
+            );
         }
     }
 
     // Network scope.
     if let Some(target) = &proposal.network_target {
         if !cap.network_scope.iter().any(|p| p.matches(target)) {
-            return deny(proposal, Some(cap), DenyReason::NetworkOutOfScope, RecoveryClass::NeedsApproval);
+            return deny(
+                proposal,
+                Some(cap),
+                DenyReason::NetworkOutOfScope,
+                RecoveryClass::NeedsApproval,
+            );
         }
     }
 
@@ -493,21 +555,40 @@ pub fn check_admissibility(
         match state.witnesses.get(&w.resource) {
             Some(current) if current == &w.content_hash => {}
             _ => {
-                return deny(proposal, Some(cap), DenyReason::StateWitnessMismatch, RecoveryClass::Retryable)
+                return deny(
+                    proposal,
+                    Some(cap),
+                    DenyReason::StateWitnessMismatch,
+                    RecoveryClass::Retryable,
+                )
             }
         }
     }
 
     // Risk budget: spent + cost <= limit.
-    let risk_ok = cap.risk_budget.as_ref().map(|b| b.admits(proposal.risk_cost)).unwrap_or(true);
+    let risk_ok = cap
+        .risk_budget
+        .as_ref()
+        .map(|b| b.admits(proposal.risk_cost))
+        .unwrap_or(true);
     if !risk_ok {
-        return deny(proposal, Some(cap), DenyReason::RiskBudgetExhausted, RecoveryClass::NeedsApproval);
+        return deny(
+            proposal,
+            Some(cap),
+            DenyReason::RiskBudgetExhausted,
+            RecoveryClass::NeedsApproval,
+        );
     }
 
     // Approval policy.
     let decision = match cap.approval_policy {
         ApprovalPolicy::Deny => {
-            return deny(proposal, Some(cap), DenyReason::PolicyDenied, RecoveryClass::Fatal)
+            return deny(
+                proposal,
+                Some(cap),
+                DenyReason::PolicyDenied,
+                RecoveryClass::Fatal,
+            )
         }
         ApprovalPolicy::Ask => AdmissibilityDecision::NeedsApproval,
         ApprovalPolicy::Auto | ApprovalPolicy::SessionApproved => AdmissibilityDecision::Allow,
@@ -542,26 +623,46 @@ mod tests {
 
     #[test]
     fn read_only_actor_cannot_write() {
-        let caps = vec![Capability::new(actor(), vec![EffectKind::ReadFile, EffectKind::Search])];
-        let proposal = EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("src/x.rs");
+        let caps = vec![Capability::new(
+            actor(),
+            vec![EffectKind::ReadFile, EffectKind::Search],
+        )];
+        let proposal =
+            EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("src/x.rs");
         let w = check_admissibility(&proposal, &caps, &KernelState::new());
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::NoCapability }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::NoCapability
+            }
+        ));
     }
 
     #[test]
     fn write_in_scope_is_allowed() {
-        let caps = vec![Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"])];
-        let proposal = EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("src/x.rs");
+        let caps = vec![
+            Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"])
+        ];
+        let proposal =
+            EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("src/x.rs");
         let w = check_admissibility(&proposal, &caps, &KernelState::new());
         assert_eq!(w.decision, AdmissibilityDecision::Allow);
     }
 
     #[test]
     fn write_out_of_path_scope_is_denied() {
-        let caps = vec![Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"])];
-        let proposal = EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("/etc/passwd");
+        let caps = vec![
+            Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"])
+        ];
+        let proposal =
+            EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("/etc/passwd");
         let w = check_admissibility(&proposal, &caps, &KernelState::new());
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::PathOutOfScope }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::PathOutOfScope
+            }
+        ));
     }
 
     #[test]
@@ -571,7 +672,12 @@ mod tests {
         let proposal = EffectProposal::new(actor(), "n1", EffectKind::RunVerifier)
             .with_command(canonicalize("cat x | grep y", "/r"));
         let w = check_admissibility(&proposal, &[cap], &KernelState::new());
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::ShellNotPermitted }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::ShellNotPermitted
+            }
+        ));
     }
 
     #[test]
@@ -581,28 +687,53 @@ mod tests {
         let proposal = EffectProposal::new(actor(), "n1", EffectKind::ReadFile)
             .with_command(canonicalize("sed -i s/a/b/ f", "/r"));
         let w = check_admissibility(&proposal, &[cap], &KernelState::new());
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::MutationNotPermitted }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::MutationNotPermitted
+            }
+        ));
     }
 
     #[test]
     fn stale_state_witness_is_denied() {
-        let caps = vec![Capability::new(actor(), vec![EffectKind::ApplyPatch]).with_paths(vec!["*"])];
-        let mut proposal = EffectProposal::new(actor(), "n1", EffectKind::ApplyPatch).with_path("src/x.rs");
-        proposal.preconditions = vec![StateWitness { resource: "src/x.rs".into(), content_hash: "old".into() }];
+        let caps =
+            vec![Capability::new(actor(), vec![EffectKind::ApplyPatch]).with_paths(vec!["*"])];
+        let mut proposal =
+            EffectProposal::new(actor(), "n1", EffectKind::ApplyPatch).with_path("src/x.rs");
+        proposal.preconditions = vec![StateWitness {
+            resource: "src/x.rs".into(),
+            content_hash: "old".into(),
+        }];
         let mut state = KernelState::new();
         state.set_witness("src/x.rs", "new"); // changed since proposal
         let w = check_admissibility(&proposal, &caps, &state);
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::StateWitnessMismatch }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::StateWitnessMismatch
+            }
+        ));
     }
 
     #[test]
     fn risk_budget_exhaustion_is_denied() {
         let mut cap = Capability::new(actor(), vec![EffectKind::ApplyPatch]).with_paths(vec!["*"]);
-        cap.risk_budget = Some(RiskBudget { name: "session".into(), limit: 1.0, spent: 0.8 });
-        let mut proposal = EffectProposal::new(actor(), "n1", EffectKind::ApplyPatch).with_path("x");
+        cap.risk_budget = Some(RiskBudget {
+            name: "session".into(),
+            limit: 1.0,
+            spent: 0.8,
+        });
+        let mut proposal =
+            EffectProposal::new(actor(), "n1", EffectKind::ApplyPatch).with_path("x");
         proposal.risk_cost = 0.5;
         let w = check_admissibility(&proposal, &[cap], &KernelState::new());
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::RiskBudgetExhausted }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::RiskBudgetExhausted
+            }
+        ));
     }
 
     #[test]
@@ -618,11 +749,15 @@ mod tests {
 
     #[test]
     fn attenuation_only_shrinks_authority() {
-        let parent = Capability::new(actor(), vec![EffectKind::ReadFile, EffectKind::WriteArtifact])
-            .with_paths(vec!["*"])
-            .delegable();
+        let parent = Capability::new(
+            actor(),
+            vec![EffectKind::ReadFile, EffectKind::WriteArtifact],
+        )
+        .with_paths(vec!["*"])
+        .delegable();
         // Valid child: fewer effects, bounded calls.
-        let mut child = Capability::new(ActorId::new("sub"), vec![EffectKind::ReadFile]).with_paths(vec!["src/*"]);
+        let mut child = Capability::new(ActorId::new("sub"), vec![EffectKind::ReadFile])
+            .with_paths(vec!["src/*"]);
         child.max_calls = Some(3);
         assert!(child.attenuates(&parent));
         assert!(parent.delegate(child).is_some());
@@ -646,6 +781,11 @@ mod tests {
         // what the proposal claims.
         let proposal = EffectProposal::new(ActorId::new("ghost"), "n1", EffectKind::UpdatePolicy);
         let w = check_admissibility(&proposal, &[], &KernelState::new());
-        assert!(matches!(w.decision, AdmissibilityDecision::Deny { reason: DenyReason::NoCapability }));
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::NoCapability
+            }
+        ));
     }
 }
