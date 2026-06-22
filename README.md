@@ -114,29 +114,37 @@ Over $N$ generation steps with per-step error rate $\delta$, the probability of 
 
 SRBN reformulates LLM agency as a **sheaf over a task DAG**. Each node in the DAG owns a set of output files. A sheaf assigns local data (code, tests, configs) to each node, subject to a **consistency condition**: overlapping data between adjacent nodes must agree.
 
-The system defines a **Lyapunov energy function** that measures how far the current state is from this consistent, correct target:
+The system evaluates a canonical **quadratic residual energy**: each sensor $e$ emits a residual with a non-negative magnitude $r_e(x) \geq 0$, and the energy $V(x)$ is a weighted sum of their squares:
 
 $$
-V(x) = \sum_{V \supseteq U} \| \rho_{VU}(x_U) - x_V \|^2
+V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0
 $$
 
-where $\rho_{VU}$ is the restriction map from node $U$ to node $V$. When $V(x) = 0$, every node agrees with its neighbors and all verification checks pass.
-
-Perspt implements this as a weighted sum of five measurable verification barriers:
+We group the individual residuals into five component rollups:
 
 $$
-V(x) = \alpha \cdot V_{\text{syn}} + \beta \cdot V_{\text{str}} + \gamma \cdot V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+V(x) = V_{\text{syn}} + V_{\text{str}} + V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
 $$
 
-| Barrier | What It Measures | How It Is Computed |
-|---------|-----------------|--------------------|
-| $V_{\text{syn}}$ | Syntax correctness | LSP diagnostic count (errors weighted 1.0, warnings 0.3) |
-| $V_{\text{str}}$ | Structural contracts | Interface signature match, forbidden pattern absence |
-| $V_{\text{log}}$ | Logical correctness | Weighted test failures: $\sum w_i \cdot \mathbb{1}[\text{test}_i\ \text{failed}]$ |
-| $V_{\text{boot}}$ | Build integrity | Binary: 1.0 if build fails, 0.0 if it succeeds |
-| $V_{\text{sheaf}}$ | Cross-node consistency | Import resolution, type agreement across file boundaries |
+| Barrier | What It Measures | Mapped Residual Classes (Default Weights) |
+|---------|-----------------|-------------------------------------------|
+| $V_{\text{syn}}$ | Syntactic energy | `Syntax` (4.0), `Type` (3.0), `Build` (3.0) |
+| $V_{\text{str}}$ | Structural energy | `ImportGraph` (2.0), `SymbolMismatch` (2.0), `InterfaceMismatch` (2.5), `OwnershipViolation` (2.0), `Policy` (1.0), `Dependency` (1.5), `Manifest` (1.5), `Format` (0.25) |
+| $V_{\text{log}}$ | Logical energy | `TestFailure` (2.0), `Runtime` (2.0), `Regression` (3.0) |
+| $V_{\text{boot}}$ | Bootstrap energy | `SensorUnavailable` (1.0), `ToolFailure` (1.0) |
+| $V_{\text{sheaf}}$ | Sheaf energy | `SheafInconsistency` (2.0) |
 
-Default weights: $\alpha = 1.0$, $\beta = 0.5$, $\gamma = 2.0$.
+The legacy `--energy-weights "alpha,beta,gamma"` flag is parsed and folded proportionally into the individual residual weights $w_e$ relative to reference defaults (where $\text{Syn}_{\text{default}} = 1.0$, $\text{Str}_{\text{default}} = 0.5$, and $\text{Log}_{\text{default}} = 2.0$), leaving the core mathematical engine as a pure sum of pre-weighted squares.
+
+### Convergence and Gating
+
+A candidate state $x$ is admitted to the accepted trajectory if and only if it satisfies the gating condition:
+
+$$
+\operatorname{accept}(x) \iff V(x) \leq \varepsilon \quad \lor \quad V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
+$$
+
+where $\varepsilon$ is the convergence threshold (default $0.10$), $x_{\text{best}}$ is the best previously accepted state in the current node generation, and $\rho_{\text{gate}}$ is the minimum required descent step (default $0.50$).
 
 ### Key Theorems (from the Paper)
 
@@ -174,28 +182,23 @@ The following diagram illustrates how a coding task flows through the SRBN engin
 
 ```mermaid
 flowchart TD
-    A["Task Description"] --> B["Architect: Decompose into DAG"]
-    B --> C["Actuator: Generate Code per Node"]
-    C --> D{"Compute V(x)"}
-    D -->|"V(x) > epsilon"| E["Flow Matching: Correct with Error Feedback"]
-    E --> C
-    D -->|"V(x) <= epsilon"| F["Sheaf Validation: Cross-Node Consistency"]
-    F -->|"V_sheaf > 0"| G["Repair Inconsistencies"]
-    G --> D
-    F -->|"V_sheaf = 0"| H["Commit to Merkle Ledger"]
-
-    subgraph Verification Barriers
-        D1["V_syn: LSP Diagnostics"]
-        D2["V_str: Structural Contracts"]
-        D3["V_log: Test Runner"]
-        D4["V_boot: Build Check"]
-    end
-
-    C --> D1 & D2 & D3 & D4
-    D1 & D2 & D3 & D4 --> D
+    A["Task Description"] --> B["Planning: Decompose into DAG"]
+    B --> C["Generation: Actuator Bundle"]
+    C --> D1["V_syn: Syntax & Build"] & D2["V_str: Interface Contracts"] & D3["V_log: Test Suite"] & D4["V_boot: Sensor Integrity"] & D5["V_sheaf: Cross-Node Pre-Check"]
+    D1 & D2 & D3 & D4 & D5 --> E{"Compute V(x)"}
+    
+    E -->|"V(x) > epsilon"| F{"Descent Gate?"}
+    F -->|"Satisfied"| G["Provisional Accept"]
+    F -->|"Unsatisfied"| H["Correction Loop: Feedback Prompt"]
+    H --> C
+    
+    E -->|"V(x) <= epsilon"| I["Sheaf Validation: Global Consistency"]
+    I -->|"Inconsistent"| J["Graph Surgery / Local Repair"]
+    J --> C
+    I -->|"Consistent"| K["Merkle Ledger: Completed"]
 ```
 
-Each retry is not blind re-prompting. The flow matching barrier is designed to project the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
+Each retry is not blind re-prompting. The correction loop is designed to project the LLM's output back toward the feasible manifold using the gradient of $V(x)$, providing targeted error context that directs the next generation.
 
 For the complete theoretical treatment, proofs, and design rationale, see the [Perspt Book](https://eonseed.github.io/perspt/book/index.html).
 
