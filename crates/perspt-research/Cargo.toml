@@ -1,6 +1,6 @@
 [package]
 name = "perspt-research"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -12,4 +12,4 @@ keywords = ["srbn", "research", "agent", "citation", "sdk"]
 categories = ["development-tools"]
 
 [dependencies]
-perspt-sdk = { version = "0.6.1", path = "../perspt-sdk" }
+perspt-sdk = { version = "0.6.2", path = "../perspt-sdk" }
