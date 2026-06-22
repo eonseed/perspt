@@ -15,7 +15,7 @@ mod verification;
 use crate::agent::{ActuatorAgent, Agent, ArchitectAgent, SpeculatorAgent, VerifierAgent};
 use crate::context_retriever::ContextRetriever;
 use crate::lsp::LspClient;
-use crate::test_runner::{self, PythonTestRunner, TestResults};
+use crate::test_runner::{self};
 use crate::tools::{AgentTools, ToolCall};
 use crate::types::{AgentContext, EnergyComponents, ModelTier, NodeState, SRBNNode, TaskPlan};
 use anyhow::{Context, Result};
@@ -645,6 +645,17 @@ impl SRBNOrchestrator {
     /// plugin's default.
     pub fn set_package_manager(&mut self, pm: Option<String>) {
         self.package_manager = pm;
+    }
+
+    /// Set the PSP-8 energy weights `(α, β, γ)`. These are applied as proportional
+    /// scales on the canonical quadratic energy model's per-component class weights
+    /// (see [`sdk_bridge::SdkGateState::set_energy_weights`]); they no longer drive
+    /// a separate linear aggregation pass.
+    pub fn set_energy_weights(&mut self, alpha: f32, beta: f32, gamma: f32) {
+        self.energy_alpha = alpha;
+        self.energy_beta = beta;
+        self.energy_gamma = gamma;
+        self.sdk_gate.set_energy_weights(alpha, beta, gamma);
     }
 
     // =========================================================================
@@ -3459,13 +3470,16 @@ mod tests {
         let idx = orch.node_indices["n"];
 
         let energy = orch.step_verify(idx).await.unwrap();
+        // PSP-8 quadratic energy: a missing required symbol yields a SymbolMismatch
+        // residual that rolls up into the structural component (V_str > 0), and the
+        // total must exceed ε so the node cannot be declared falsely stable.
         assert!(
-            energy.v_str >= 5.0,
-            "missing required symbol must raise V_str (got {})",
+            energy.v_str > 0.0,
+            "missing required symbol must raise structural energy (got {})",
             energy.v_str
         );
         assert!(
-            energy.total(&orch.graph[idx].contract) > orch.graph[idx].monitor.stability_epsilon,
+            energy.total() > orch.graph[idx].monitor.stability_epsilon,
             "energy must exceed epsilon so the node is not falsely stable"
         );
 

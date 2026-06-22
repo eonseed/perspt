@@ -250,19 +250,21 @@ See [Theoretical Foundation](#theoretical-foundation-stability-is-all-you-need) 
 4. **Convergence** -- If $V(x) > \epsilon$, flow matching corrects with targeted error feedback
 5. **Commit** -- When $V(x) \leq \epsilon$, record changes in the Merkle ledger
 
-The energy function:
+The energy function (quadratic residual energy since PSP-8):
 
 $$
-V(x) = \alpha \cdot V_{\text{syn}} + \beta \cdot V_{\text{str}} + \gamma \cdot V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2
 $$
 
-| Component | Source | Default Weight |
-|-----------|--------|----------------|
-| $V_{\text{syn}}$ | LSP diagnostics (errors, warnings) | $\alpha = 1.0$ |
-| $V_{\text{str}}$ | Structural contracts | $\beta = 0.5$ |
-| $V_{\text{log}}$ | Test failures (weighted) | $\gamma = 2.0$ |
-| $V_{\text{boot}}$ | Build success/failure | 1.0 |
-| $V_{\text{sheaf}}$ | Cross-node consistency | 1.0 |
+The component rollups ($V_{\text{syn}}$, $V_{\text{str}}$, $V_{\text{log}}$, $V_{\text{boot}}$, $V_{\text{sheaf}}$) are derived projections of this single energy sum, representing:
+
+| Component | Source | Description |
+|-----------|--------|-------------|
+| $V_{\text{syn}}$ | LSP diagnostics | Syntactic diagnostics (compiler errors/warnings) |
+| $V_{\text{str}}$ | Structural contracts | Contract and interface seals |
+| $V_{\text{log}}$ | Test failures | Logic errors from test suite execution |
+| $V_{\text{boot}}$ | Build environments | Setup and compilation exit codes |
+| $V_{\text{sheaf}}$ | Cross-node sheaf | Shared interface and import consistency |
 
 PSP-8 extends this coding loop into an SDK-first platform. The long-term design keeps scheduling, residual scoring, capability checks, replay, and dashboard projection in the SRBN SDK, while coding, research, website-building, and other domains provide their own verifier suites and admissible effects.
 
