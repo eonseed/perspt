@@ -61,7 +61,8 @@ Energy and Convergence
    * - Flag
      - Description
    * - ``--energy-weights <W>``
-     - Comma-separated ``alpha,beta,gamma`` (default: ``1.0,0.5,2.0``)
+     - Comma-separated ``a,b,g`` — proportional scales on the syntactic/structural/logic
+       component weights of the quadratic energy (default ``1.0,0.5,2.0`` = identity)
    * - ``--stability-threshold <E>``
      - Convergence epsilon (default: ``0.10``)
    * - ``--verifier-strictness <S>``
