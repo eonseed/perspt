@@ -82,5 +82,5 @@ Type your question, get a streamed text answer. Type ``exit`` or ``Ctrl+D`` to q
 Next Steps
 ----------
 
-- :doc:`agent-mode` — Try autonomous multi-file coding
-- :doc:`local-models` — Use Ollama for offline conversations
+- :doc:`agent-mode` - Try autonomous multi-file coding
+- :doc:`local-models` - Use Ollama for offline conversations

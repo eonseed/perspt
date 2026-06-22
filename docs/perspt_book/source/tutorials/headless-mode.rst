@@ -20,16 +20,16 @@ it enables fully autonomous project generation.
 When to Use Headless Mode
 -------------------------
 
-- **CI/CD pipelines** — Generate boilerplate or scaffold projects in automation
-- **Batch processing** — Run multiple agent tasks in sequence from a script
-- **Rapid prototyping** — Skip review when iterating quickly
-- **Testing the agent** — Validate agent behavior without manual intervention
+- **CI/CD pipelines** - Generate boilerplate or scaffold projects in automation
+- **Batch processing** - Run multiple agent tasks in sequence from a script
+- **Rapid prototyping** - Skip review when iterating quickly
+- **Testing the agent** - Validate agent behavior without manual intervention
 
 When NOT to use headless mode:
 
-- **Production codebases** — Always review changes before committing
-- **Security-sensitive projects** — Manual review catches policy violations
-- **Learning** — Interactive mode teaches you how SRBN works
+- **Production codebases** - Always review changes before committing
+- **Security-sensitive projects** - Manual review catches policy violations
+- **Learning** - Interactive mode teaches you how SRBN works
 
 
 Basic Headless Run
@@ -167,16 +167,16 @@ Run multiple agent tasks from a shell script:
 Safety Recommendations
 ----------------------
 
-1. **Always set cost limits** — ``--max-cost 5.0`` prevents runaway spending
-2. **Use disposable directories** — Point ``-w`` to a fresh directory
-3. **Review after generation** — Inspect the output before using it in production
-4. **Use --log-llm** — Enables post-run analysis of what the agent did
-5. **Set --max-steps** — Bounds the total number of retries across all nodes
+1. **Always set cost limits** - ``--max-cost 5.0`` prevents runaway spending
+2. **Use disposable directories** - Point ``-w`` to a fresh directory
+3. **Review after generation** - Inspect the output before using it in production
+4. **Use --log-llm** - Enables post-run analysis of what the agent did
+5. **Set --max-steps** - Bounds the total number of retries across all nodes
 
 
 See Also
 --------
 
-- :doc:`agent-mode` — Interactive agent mode tutorial
-- :doc:`../concepts/srbn-architecture` — SRBN technical details
-- :doc:`../howto/agent-options` — Full agent CLI reference
+- :doc:`agent-mode` - Interactive agent mode tutorial
+- :doc:`../concepts/srbn-architecture` - SRBN technical details
+- :doc:`../howto/agent-options` - Full agent CLI reference

@@ -24,8 +24,8 @@ Running the Agent
    export GEMINI_API_KEY="your-key"
 
    perspt agent --yes -w /tmp/etl-demo \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      "Create a Python ETL pipeline package. It should:
       1. Read CSV files into Pydantic models for validation
       2. Transform records (clean nulls, normalize strings, compute derived fields)
@@ -92,5 +92,5 @@ Key Observations
 See Also
 --------
 
-- :doc:`agent-mode` — Agent mode tutorial
-- :doc:`example-rust-cli` — Rust project example
+- :doc:`agent-mode` - Agent mode tutorial
+- :doc:`example-rust-cli` - Rust project example

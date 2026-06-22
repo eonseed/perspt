@@ -1,0 +1,15 @@
+[package]
+name = "perspt-research"
+version = "0.6.2"
+edition = "2021"
+authors = ["Vikrant Rathore", "Ronak Rathore"]
+license = "LGPL-3.0"
+description = "Research domain package skeleton for the Perspt SRBN agent SDK: second-domain readiness check (PSP-8 Phase 10)"
+repository = "https://github.com/eonseed/perspt"
+homepage = "https://github.com/eonseed/perspt"
+documentation = "https://docs.rs/perspt-research"
+keywords = ["srbn", "research", "agent", "citation", "sdk"]
+categories = ["development-tools"]
+
+[dependencies]
+perspt-sdk = { version = "0.6.2", path = "../perspt-sdk" }

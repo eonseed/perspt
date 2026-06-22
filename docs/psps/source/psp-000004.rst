@@ -121,6 +121,19 @@ The stability of each task node is governed by a local energy function $V(x)$, r
 *   **Default Weights:** $\alpha = 1.0$, $\beta = 0.5$, $\gamma = 2.0$. Logic failures are most critical. These are CLI-overridable via ``--energy-weights``.
 *   **Stability Threshold ($\epsilon$):** Default: ``0.1``. A node is stable when $V(x) < \epsilon$. Override via ``--stability-threshold``.
 
+.. note:: Superseded by PSP-8 — the energy is now quadratic.
+
+   This document records the original **linear** aggregation
+   :math:`V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log}`. As of
+   **PSP-8 (System 2)** the canonical, implemented energy is the **quadratic
+   residual energy** :math:`V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2`,
+   where each sensor emits a residual of magnitude :math:`r_e \ge 0`. The
+   components :math:`V_{syn}, V_{str}, V_{log}, V_{boot}, V_{sheaf}` are now
+   *derived rollups* of this single energy (no separate
+   :math:`\alpha/\beta/\gamma` pass), and ``--energy-weights`` scales the
+   per-component weights proportionally. See :doc:`psp-000008` for the
+   authoritative definition.
+
 **2. LSP-First Sensor Strategy:**
 Perspt acts as a native **Language Server Client**. This provides the "Sensor Architecture" for the SRBN:
 *   Real-time syntax and semantic diagnostics are ingested directly from servers like `rust-analyzer` or `pyright`.

@@ -1,0 +1,32 @@
+/* Custom styles for the Perspt documentation book */
+
+.epigraph {
+    font-family: "Georgia", "Garamond", "Times New Roman", serif;
+    font-style: italic;
+    font-weight: bold;
+    font-size: 1.35em;
+    text-align: center;
+    color: #1e293b; /* Slate-800 */
+    border-left: none;
+    margin: 2.5em auto;
+    max-width: 650px;
+    line-height: 1.7;
+    letter-spacing: 0.01em;
+}
+
+[data-theme="dark"] .epigraph {
+    color: #f1f5f9; /* Slate-100 */
+}
+
+/* Add vertical line spacing and center the text blocks */
+.epigraph blockquote {
+    border-left: none;
+    padding: 0;
+    margin: 0;
+    display: inline-block;
+    text-align: left;
+}
+
+.epigraph p {
+    margin: 0.25em 0;
+}

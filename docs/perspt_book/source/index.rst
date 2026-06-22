@@ -1,15 +1,45 @@
 .. Perspt documentation master file
 
-Perspt Documentation
-====================
+.. title:: Perspt: Your Terminal's Window to the AI World
+
+.. only:: html
+
+   .. raw:: html
+
+      <div style="text-align: center; margin: 2em 0;">
+      <pre style="font-family: monospace; font-size: 0.8em; line-height: 1.2; margin: 0 auto; display: inline-block; text-align: left;">
+      ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
+      ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
+      ██████╔╝█████╗  ██████╔╝███████╗██████╔╝   ██║
+      ██╔═══╝ ██╔══╝  ██╔══██╗╚════██║██╔═══╝    ██║
+      ██║     ███████╗██║  ██║███████║██║        ██║
+      ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
+      </pre>
+      <p><em>Your Terminal's Window to the AI World</em></p>
+      </div>
+
+.. only:: latex
+
+   Perspt: Your Terminal's Window to the AI World
+   ==============================================
+
+.. plot:: plots/front_page_abm.py
+
+.. epigraph::
+
+   The keyboard hums, the screen aglow,
+   AI's wisdom, a steady flow.
+   Will robots take over, it's quite the fright,
+   Or just provide insights, day and night?
+   We ponder and chat, with code as our guide,
+   Is AI our helper or our human pride?
 
 **Your Terminal's Window to the AI World**
 
 Perspt is a high-performance terminal-based LLM interface that serves two purposes:
-a **simple CLI for testing and comparing LLM services** across 8 providers, and an
-**experimental implementation** of the **SRBN (Stabilized Recursive Barrier Network)**
-engine from the paper *"Stability is All You Need: Lyapunov-Guided Hierarchies for
-Long-Horizon LLM Reliability"* by **Vikrant R. and Ronak R.** (pre-publication).
+a **simple CLI for testing and comparing LLM services** across supported providers,
+and an **experimental implementation** of the **SRBN (Stabilized Recursive Barrier
+Network)** engine inspired by the three-paper *Stability is All You Need* series.
 The SRBN agent plans multi-file projects as directed acyclic graphs, verifies each
 node with real LSP diagnostics and tests, and commits only when Lyapunov energy
 converges. The theoretical framework is mature; the implementation is under active
@@ -42,7 +72,7 @@ development.
          :link: developer-guide/architecture
          :link-type: doc
 
-         9-crate workspace design.
+         Twelve-crate workspace design.
 
    Key Features
    ------------
@@ -52,7 +82,7 @@ development.
       :class: borderless
 
       * - **SRBN Agent**
-        - Experimental autonomous multi-file coding guided by Lyapunov energy, ownership closure, and sheaf validation (based on SRBN paper)
+        - Experimental autonomous multi-file coding guided by Lyapunov energy, ownership closure, and sheaf validation from the SRBN paper series
       * - **Multi-Provider**
         - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, Ollama
       * - **LSP Sensors**

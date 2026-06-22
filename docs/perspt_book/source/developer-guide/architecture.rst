@@ -3,8 +3,10 @@
 Architecture
 ============
 
-Perspt is a Rust workspace with nine crates including a root integration crate.
-Version 0.6.1 implements the PSP-7 specification for the experimental SRBN agent.
+Perspt is a Rust workspace of twelve crates. Eight crates make up the running
+program, three crates form a reusable platform layer, and one root crate ties
+them together. Version 0.6.2 implements the correction-loop contracts and
+adds the platform SDK layer for the experimental SRBN agent.
 
 Workspace Layout
 ----------------
@@ -21,6 +23,9 @@ Workspace Layout
    |   +-- perspt-policy/        # Starlark policy engine
    |   +-- perspt-sandbox/       # Command sandboxing
    |   +-- perspt-dashboard/     # Axum web dashboard
+   |   +-- perspt-sdk/           # Domain-neutral SRBN platform SDK
+   |   +-- perspt-coding/        # Coding domain package (first domain)
+   |   +-- perspt-research/      # Research domain skeleton (second domain)
    +-- tests/                    # Integration tests
    +-- docs/                     # Sphinx documentation
 
@@ -42,11 +47,14 @@ Dependency Graph
        "perspt-agent" -> "perspt-store";
        "perspt-agent" -> "perspt-policy";
        "perspt-agent" -> "perspt-sandbox";
+       "perspt-agent" -> "perspt-sdk" [style=dotted, label="SDK Bridge"];
        "perspt-tui" -> "perspt-core";
        "perspt-tui" -> "perspt-agent";
        "perspt-store" -> "perspt-core";
        "perspt-policy" [label="perspt-policy\n(Starlark)"];
        "perspt-sandbox" [label="perspt-sandbox"];
+       "perspt-coding" -> "perspt-sdk";
+       "perspt-research" -> "perspt-sdk";
        "perspt-dashboard" -> "perspt-store";
        "perspt-dashboard" -> "perspt-core";
        "perspt-cli" -> "perspt-dashboard";
@@ -60,13 +68,13 @@ The foundation crate. Re-exports all canonical types.
 
 **Modules:**
 
-- ``types`` — All PSP-5 types (see :ref:`type-inventory` below)
-- ``config`` — ``Config { provider, model, api_key }``
-- ``events`` — ``AgentEvent`` (~30 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``
-- ``llm_provider`` — ``GenAIProvider`` wrapping the ``genai`` crate; ``EOT_SIGNAL``
-- ``plugin`` — ``LanguagePlugin`` trait + ``PythonPlugin``, ``RustPlugin``, ``JsPlugin``
-- ``memory`` — ``ProjectMemory`` loaded from ``.perspt/memory.toml``
-- ``normalize`` — Model and provider name normalization
+- ``types`` - All PSP-5 types (see :ref:`type-inventory` below)
+- ``config`` - ``Config { provider, model, api_key }``
+- ``events`` - ``AgentEvent`` (~30 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``
+- ``llm_provider`` - ``GenAIProvider`` wrapping the ``genai`` crate; ``EOT_SIGNAL``
+- ``plugin`` - ``LanguagePlugin`` trait + ``PythonPlugin``, ``RustPlugin``, ``JsPlugin``
+- ``memory`` - ``ProjectMemory`` loaded from ``.perspt/memory.toml``
+- ``normalize`` - Model and provider name normalization
 
 **Key Plugin Types:**
 
@@ -109,14 +117,14 @@ The experimental SRBN orchestrator and its subsystems.
 
 **Modules:**
 
-- ``orchestrator`` — ``SRBNOrchestrator`` with ``petgraph::DiGraph<SRBNNode, Dependency>``.  Split into phase-focused sub-modules: ``mod`` (struct, constructors, run, helpers, tests), ``init`` (workspace bootstrap), ``solo`` (single-file mode), ``planning`` (architect interaction), ``verification`` (energy computation), ``convergence`` (stability loop), ``commit`` (ledger promotion), ``repair`` (correction prompts), ``bundle`` (artifact application).
-- ``agent`` — ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
-- ``tools`` — ``AgentTools`` (read_file, write_file, apply_diff, delete_file, move_file, run_command, search_code, etc.)
-- ``prompts`` — Externalized prompt templates for architect (existing/greenfield) and actuator roles
-- ``ledger`` — ``MerkleLedger`` atop ``SessionStore``
-- ``lsp`` — ``LspClient`` (JSON-RPC over stdio)
-- ``test_runner`` — ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
-- ``context_retriever`` — ``ContextRetriever`` for workspace search
+- ``orchestrator`` - ``SRBNOrchestrator`` with ``petgraph::DiGraph<SRBNNode, Dependency>``.  Split into phase-focused sub-modules: ``mod`` (struct, constructors, run, helpers, tests), ``init`` (workspace bootstrap), ``solo`` (single-file mode), ``planning`` (architect interaction), ``verification`` (energy computation), ``convergence`` (stability loop), ``commit`` (ledger promotion), ``repair`` (correction prompts), ``bundle`` (artifact application).
+- ``agent`` - ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
+- ``tools`` - ``AgentTools`` (read_file, write_file, apply_diff, delete_file, move_file, run_command, search_code, etc.)
+- ``prompts`` - Externalized prompt templates for architect (existing/greenfield) and actuator roles
+- ``ledger`` - ``MerkleLedger`` atop ``SessionStore``
+- ``lsp`` - ``LspClient`` (JSON-RPC over stdio)
+- ``test_runner`` - ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
+- ``context_retriever`` - ``ContextRetriever`` for workspace search
 
 **Agent Trait:**
 
@@ -143,20 +151,29 @@ The experimental SRBN orchestrator and its subsystems.
        //   event/action channels, per-tier model names + fallbacks
    }
 
-The orchestrator drives the PSP-5 lifecycle:
+The orchestrator drives the core workspace lifecycle:
 
-1. ``detect_workspace()`` — Identify plugins and workspace state
-2. ``plan_task()`` — Architect decomposes task into DAG
-3. ``execute_dag()`` — Topological traversal with per-node verification loop
-4. ``verify_node()`` — Compute V(x) via plugin verifier profile
-5. ``sheaf_validate()`` — Cross-node contract checking
-6. ``review_node()`` — Interactive approval (unless ``--yes``)
-7. ``execute_node()`` — Returns ``NodeOutcome::Completed`` when V(x) ≤ ε
-   or ``NodeOutcome::Escalated`` when retries are exhausted
-8. ``commit_node()`` — Record stable node in Merkle ledger
+1. ``detect_workspace()`` - Identify plugins and workspace state
+2. ``plan_task()`` - Architect decomposes task into the initial work graph
+3. Closed-loop scheduler - A ``loop`` that calls ``next_ready_node()`` each round
+   to select the next dependency-satisfied node from the mutable work graph
+   (see the mutable work graph specifications), instead of a one-shot topological traversal. Repair actions
+   (requeue, split, insert interface, replan subgraph) mutate the graph between
+   rounds and reworked/inserted nodes are re-picked.
+4. ``verify_node()`` - Compute V(x) via plugin verifier profile
+5. ``sheaf_validate()`` - Cross-node contract checking
+6. ``review_node()`` - Interactive approval (unless ``--yes``)
+7. ``execute_node()`` - Returns ``NodeOutcome::Completed`` when V(x) <= epsilon,
+   ``NodeOutcome::Reworked`` when a repair mutated the graph, or
+   ``NodeOutcome::Escalated`` when retries are exhausted
+8. ``commit_node()`` - Record stable node in Merkle ledger
 
-After all nodes are processed, the orchestrator derives ``SessionOutcome``
-from completed/escalated counts and emits a ``Complete`` event.
+When the ready queue empties, a goal-completion gate may amend the plan or
+settle; the orchestrator then derives ``SessionOutcome`` from
+completed/escalated counts and emits a ``Complete`` event. Each graph revision
+is acyclic. The scheduler runs one ready node per round today — bounded
+parallelism (worker pool with leases, ``max_parallel*`` controls) is planned for
+a future release.
 
 
 Crate: ``perspt-store``
@@ -170,29 +187,71 @@ DuckDB-backed persistence. **Not SQLite.**
        conn: Mutex<Connection>,  // duckdb::Connection
    }
 
-Tables:
+DuckDB Schema and Tables
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-- ``sessions`` — Session metadata (id, task, working_dir, merkle_root, status)
-- ``node_states`` — Per-node snapshots
-- ``energy_records`` — Energy history
-- ``llm_requests`` — Full LLM request/response logging
-- ``structural_digests`` — Content hashes for interface seals
-- ``context_provenance`` — Provenance tracking per node
-- ``escalation_reports`` — Classified escalations
-- ``rewrite_records`` — Graph rewrite audit trail
-- ``sheaf_validations`` — Cross-node validation results
-- ``provisional_branches`` — Branch lifecycle
-- ``branch_lineage`` — Parent-child branch relationships
-- ``interface_seals`` — Sealed interface records
-- ``branch_flushes`` — Flush cascade records
-- ``task_graph_edges`` — DAG edges
-- ``review_outcomes`` — Human review decisions
-- ``verification_results`` — Full verification snapshots
-- ``artifact_bundles`` — Bundle JSON per node
-- ``plan_revisions`` — Plan version history
-- ``feature_charters`` — Scope governance records
-- ``repair_footprints`` — Correction audit trail
-- ``budget_envelopes`` — Session budget caps and usage
+The database model is implemented as a set of relational tables in a DuckDB store. Key tables and their columns are structured as follows:
+
+.. list-table:: Database Core Tables
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Table Name
+     - Column Structure (DuckDB Data Types)
+     - Invariant Relationships and Purpose
+   * - ``sessions``
+     - * ``session_id`` (VARCHAR, PRIMARY KEY)
+       * ``task_description`` (TEXT)
+       * ``working_dir`` (VARCHAR)
+       * ``merkle_root`` (VARCHAR)
+       * ``status`` (VARCHAR)
+     - Tracks the life cycle of active agent sessions. The ``merkle_root`` maps to the final committed workspace hash.
+   * - ``node_states``
+     - * ``node_id`` (VARCHAR)
+       * ``session_id`` (VARCHAR, FK -> sessions)
+       * ``generation`` (INTEGER)
+       * ``status`` (VARCHAR)
+       * ``output_files`` (JSON array)
+     - Preserves snapshots of workspace nodes across successive generations. Combined with ``session_id``, forms the unique node key.
+   * - ``energy_records``
+     - * ``node_id`` (VARCHAR)
+       * ``session_id`` (VARCHAR)
+       * ``generation`` (INTEGER)
+       * ``v_syn`` (FLOAT)
+       * ``v_str`` (FLOAT)
+       * ``v_log`` (FLOAT)
+       * ``v_boot`` (FLOAT)
+       * ``v_sheaf`` (FLOAT)
+     - Records step-by-step energy changes. Captures the output of the SDK Measured Acceptance Gate.
+   * - ``llm_requests``
+     - * ``request_id`` (VARCHAR, PRIMARY KEY)
+       * ``session_id`` (VARCHAR)
+       * ``node_id`` (VARCHAR)
+       * ``prompt`` (TEXT)
+       * ``response`` (TEXT)
+       * ``tokens_sent`` (INTEGER)
+       * ``tokens_received`` (INTEGER)
+     - Captures full dialogue request payloads, response bodies, and token telemetry for usage audits.
+
+Remaining Audit and Control Tables:
+
+* ``structural_digests``: Maps file paths to their content hashes to enforce interface-seal validations.
+* ``context_provenance``: Records the sources of context files retrieved for the Actuator.
+* ``escalation_reports``: Contains logs of failed convergence steps that triggered an escalation.
+* ``rewrite_records``: Logs scheduler graph mutation operations (node splits, requeues, etc.).
+* ``sheaf_validations``: Logs cross-node consistency checks.
+* ``provisional_branches``: Manages provisional workspaces for downstream nodes.
+* ``branch_lineage``: Tracks parent-child branch structures.
+* ``interface_seals``: Stores structural hashes of interfaces.
+* ``branch_flushes``: Logs discarded provisional work.
+* ``task_graph_edges``: Records DAG dependency edges between nodes.
+* ``review_outcomes``: Records human approval decisions.
+* ``verification_results``: Contains full tool outputs from validation runs.
+* ``artifact_bundles``: Stores transactional JSON artifact payloads.
+* ``plan_revisions``: Stores Architect-generated graph structures.
+* ``feature_charters``: Documents resource ceilings assigned at planning time.
+* ``repair_footprints``: Records repair prompts and correction steps.
+* ``budget_envelopes``: Tracks session financial caps.
 
 
 Crate: ``perspt-tui``
@@ -245,9 +304,9 @@ Starlark policy evaluation:
 
 Utility functions:
 
-- ``sanitize_command(cmd)`` → ``SanitizeResult`` (split, validate, filter)
-- ``validate_workspace_bound(cmd, working_dir)`` — Ensure commands stay in scope
-- ``validate_artifact_mutation(path, workspace_root, operation)`` — Protect root project files from delete/move
+- ``sanitize_command(cmd)`` -> ``SanitizeResult`` (split, validate, filter)
+- ``validate_workspace_bound(cmd, working_dir)`` - Ensure commands stay in scope
+- ``validate_artifact_mutation(path, workspace_root, operation)`` - Protect root project files from delete/move
 
 
 Crate: ``perspt-sandbox``
@@ -289,7 +348,7 @@ All canonical types live in ``perspt_core::types``:
    * - ``SRBNNode``
      - DAG node: goal, output_targets, contract, tier, monitor, state, node_class, owner_plugin, provisional_branch_id, interface_seal_hash
    * - ``NodeState`` (12 variants)
-     - TaskQueued → Planning → Coding → Verifying → Retry → SheafCheck → Committing → Completed / Failed / Escalated / Aborted / Superseded. Includes ``from_display_str()`` (case-insensitive canonical parser with legacy aliases), ``is_success()``, ``is_active()``, and ``Display`` impl.
+     - TaskQueued -> Planning -> Coding -> Verifying -> Retry -> SheafCheck -> Committing -> Completed / Failed / Escalated / Aborted / Superseded. Includes ``from_display_str()`` (case-insensitive canonical parser with legacy aliases), ``is_success()``, ``is_active()``, and ``Display`` impl.
    * - ``NodeClass``
      - Interface, Implementation (default), Integration
    * - ``ModelTier``
@@ -303,7 +362,7 @@ All canonical types live in ``perspt_core::types``:
    * - ``SessionOutcome``
      - Success (all nodes completed), PartialSuccess (some escalated), Failed (none completed)
    * - ``NodeOutcome``
-     - Completed (V(x) ≤ ε) or Escalated (retries exhausted). Returned by ``execute_node()``
+     - Completed (V(x) <= epsilon) or Escalated (retries exhausted). Returned by ``execute_node()``
 
 **Energy:**
 
@@ -429,7 +488,7 @@ All canonical types live in ``perspt_core::types``:
    * - ``ProvisionalBranch``
      - branch_id, node_id, state, parent_seal_hash, sandbox_dir
    * - ``ProvisionalBranchState``
-     - Active → Sealed → Merged / Flushed
+     - Active -> Sealed -> Merged / Flushed
    * - ``InterfaceSealRecord``
      - node_id, sealed_path, artifact_kind, seal_hash, version
    * - ``BranchFlushRecord``
@@ -520,7 +579,7 @@ Data Flow
    |       +-- SRBNOrchestrator
    |       |     +-- detect_workspace()  -> [plugins]
    |       |     +-- plan_task()         -> [Architect Agent]
-   |       |     +-- execute_dag()       -> [Actuator Agent]
+   |       |     +-- control loop        -> next_ready_node() + [Actuator Agent]
    |       |     +-- verify_node()       -> [LSP, TestRunner, Verifier Agent]
    |       |     +-- sheaf_validate()    -> [Sheaf Validators]
    |       |     +-- commit_node()       -> [MerkleLedger]
@@ -547,7 +606,7 @@ Both chat and agent mode use the same streaming protocol:
 
 1. LLM requests stream chunks over ``mpsc::UnboundedSender<String>``
 2. End-of-response signaled by ``EOT_SIGNAL`` (``<|EOT|>``)
-3. Provider sends EOT — UI never adds its own
+3. Provider sends EOT - UI never adds its own
 4. UI batches channel messages, handles first EOT, ignores duplicates
 5. Streaming buffer updates the last assistant message live
 6. Pending inputs queue until EOT is received

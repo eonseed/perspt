@@ -3,117 +3,151 @@
 Changelog
 =========
 
-Version 0.6.1 — "AKŪ"
+Version 0.6.2 - "Hózhó"
+-----------------------
+
+*Hózhó (Navajo) — A state of perfect balance, harmony, and continuous self-improvement.*
+
+This iteration focuses on bringing greater stability, balance, and refinement to the core architecture. It introduces the full platform SDK implementation alongside the mathematical constructs outlined in the *Stability is All You Need* paper series (Papers I, II, and III) and formalizes PSP-8.
+
+**Stability Is All You Need & Platform SDK (PSP-8):**
+
+- **SDK Platform Crates** - Introduced ``perspt-sdk``, ``perspt-coding``, and ``perspt-research`` to separate domain-neutral orchestration logic from target execution domains.
+- **Measured Acceptance Gate** - Implemented the PSP-8 spectral acceptance gate using symmetric eigensolvers (via ``nalgebra``) to compute energy-slope convergence guarantees.
+- **Goal Verification Loop** - Integrated target validation kernels with directed LLM corrections and structured ``GoalVerdict``/``TaskType`` contracts.
+- **Symbol Extraction & Verification** - Added runtime parsing, dependency tracing, and semantic verification to enforce correct output states.
+
+**Core Capabilities & Providers:**
+
+- **Vertex AI Support** - Added seamless Google Cloud Vertex AI provider support with automatic OAuth2 Bearer token resolution via ``gcp_auth`` ADC.
+- **29 LLM Adapters** - Expanded provider configurations to handle 29 unique genai adapters, modernizing model defaults (e.g., ``gemini-3.5-flash``, ``gpt-5.5``, ``claude-fable``).
+- **Pipenv Integration** - Added support for ``pipenv`` environment isolation to the Python execution plugin.
+
+**Documentation Overhaul:**
+
+- **Stability Foundations** - Reworked core concept and developer documentation to align with the theoretical foundations of the Stability paper series.
+- **Sphinx Book Polish** - Redesigned the Sphinx book layout featuring a retro scientific textbook LaTeX cover, custom plots, and enhanced tables.
+- **Refined Clinical Tone** - Rewrote the user manual, tutorials, and configuration guides in a formal, clinical documentation style.
+
+**Workspace Maintenance & Upgrades:**
+
+- **Ratatui Upgrade** - Bumped ``ratatui`` dependency to ``0.30.2`` in ``perspt-tui`` to support modern terminal layouts and components.
+- **TUI Textarea Fork Migration** - Migrated from the unmaintained ``tui-textarea`` to ``tui-textarea-2`` version ``0.11.0`` to resolve API compatibility conflicts.
+- **Dependency Upgrades** - Bumped ``rustyline`` to ``18.0``, ``duckdb`` to ``=1.10504.0``, ``toml`` to ``1.1``, and ``tower-http`` to ``0.7`` across the workspace.
+- **GitHub Actions Security** - Upgraded GitHub Action workflows to use ``actions/checkout@v7`` for improved stability and security.
+
+Version 0.6.1 - "AKU"
 ---------------------
 
-*AKŪ - sharp fixes from sharp ears.*
+*AKU - sharp fixes from sharp ears.*
 
 **Config Coherency & Schema-Driven Settings:**
 
-- **TOML Config Schema & Resolution** — Added a robust TOML configuration schema with smart config-driven provider resolution.
-- **Unified Provider Binding** — Bound the configured provider cohesively across all modes including ``chat`` (TUI), ``simple-chat`` (CLI), and the autonomous ``agent`` mode.
-- **Refined Config Commands** — Redesigned `perspt config` command to be fully structured, interactive, and improved key initialization/init prompts.
+- **TOML Config Schema & Resolution** - Added a robust TOML configuration schema with smart config-driven provider resolution.
+- **Unified Provider Binding** - Bound the configured provider cohesively across all modes including ``chat`` (TUI), ``simple-chat`` (CLI), and the autonomous ``agent`` mode.
+- **Refined Config Commands** - Redesigned `perspt config` command to be fully structured, interactive, and improved key initialization/init prompts.
 
 **TUI & CLI Slash Commands:**
 
-- **CLI Simple-Chat Enhancements** — Integrated ``rustyline`` file-based history and introduced interactive slash commands inside simple-chat.
-- **TUI Input Navigation & Persistence** — Added persistent history paths and implemented fully UTF-8 safe input navigation in TUI inputs.
-- **Conversation Persistence** — Added new conversation save commands to easily export dialogues to local files.
+- **CLI Simple-Chat Enhancements** - Integrated ``rustyline`` file-based history and introduced interactive slash commands inside simple-chat.
+- **TUI Input Navigation & Persistence** - Added persistent history paths and implemented fully UTF-8 safe input navigation in TUI inputs.
+- **Conversation Persistence** - Added new conversation save commands to easily export dialogues to local files.
 
 **Advanced Terminal UI Rendering:**
 
-- **LaTeX Math Transpilation** — Integrated real-time LaTeX mathematical transpilation into the markdown rendering pipeline.
-- **Intelligent ASCII Table Wrapping** — Implemented self-wrapping logic for ASCII tables in the chat UI to ensure readable presentation on narrow views.
+- **LaTeX Math Transpilation** - Integrated real-time LaTeX mathematical transpilation into the markdown rendering pipeline.
+- **Intelligent ASCII Table Wrapping** - Implemented self-wrapping logic for ASCII tables in the chat UI to ensure readable presentation on narrow views.
 
 **Documentation:**
 
-- **Comprehensive Feature Guides** — Fully documented TUI/CLI slash commands, config schemas, and keyboard shortcut matrices in the user guides.
+- **Comprehensive Feature Guides** - Fully documented TUI/CLI slash commands, config schemas, and keyboard shortcut matrices in the user guides.
+- **PSP-8 Stability Documentation** - Added a dedicated Perspt Book chapter explaining how the three *Stability is All You Need* papers shape agent mode, the SDK-first roadmap, and future domain plugins.
 
 **Workspace Maintenance:**
 
-- **Crate Version Alignment** — Bumped version of all workspace crates to ``0.6.1``.
+- **Crate Version Alignment** - Bumped version of all workspace crates to ``0.6.1``.
 
-Version 0.6.0 — "kukuza"
+Version 0.6.0 - "kukuza"
 ------------------------
 
 *Nurturing the foundation, empowering the core.*
 
 **Workspace-Wide Dependency Upgrades:**
 
-- **duckdb Upgrade** — Bumped ``duckdb`` requirement to ``=1.10503.1`` in the workspace root.
-- **askama Upgrade** — Bumped ``askama`` requirement to ``0.16`` in ``perspt-dashboard``.
-- **diffy Upgrade** — Bumped ``diffy`` requirement to ``0.5`` in ``perspt-agent``.
-- **genai Upgrade** — Bumped ``genai`` requirement to ``0.6.1`` in ``perspt-core``.
-- **starlark Upgrade** — Bumped ``starlark`` requirement to ``0.14`` in ``perspt-policy``.
+- **duckdb Upgrade** - Bumped ``duckdb`` requirement to ``=1.10503.1`` in the workspace root.
+- **askama Upgrade** - Bumped ``askama`` requirement to ``0.16`` in ``perspt-dashboard``.
+- **diffy Upgrade** - Bumped ``diffy`` requirement to ``0.5`` in ``perspt-agent``.
+- **genai Upgrade** - Bumped ``genai`` requirement to ``0.6.1`` in ``perspt-core``.
+- **starlark Upgrade** - Bumped ``starlark`` requirement to ``0.14`` in ``perspt-policy``.
 
 **API Alignments & Adaptations:**
 
-- **genai API Alignment** — Updated ``all_model_names`` inside ``llm_provider.rs`` to pass ``()`` for the new ``ProviderConfig`` parameter.
-- **starlark API Alignment** — Adapted policy loading in ``engine.rs`` to use ``Module::with_temp_heap`` since ``Module::new`` was deprecated and made private in ``0.14``.
+- **genai API Alignment** - Updated ``all_model_names`` inside ``llm_provider.rs`` to pass ``()`` for the new ``ProviderConfig`` parameter.
+- **starlark API Alignment** - Adapted policy loading in ``engine.rs`` to use ``Module::with_temp_heap`` since ``Module::new`` was deprecated and made private in ``0.14``.
 
 **Specification & Ecosystem Maintenance:**
 
-- **PSP-7 Finalization** — Formally transitioned the PSP-7 specification to ``Final`` status under the PSP-000001 process.
+- **PSP-7 Finalization** - Formally transitioned the PSP-7 specification to ``Final`` status under the PSP-000001 process.
 
-Version 0.5.9 — "心砺光华"
---------------------------
+Version 0.5.9 - "xinli guanghua"
+----------------------------------
 
 *Perfecting the essence until the work needs no words to shine.*
 
 **PSP-7: Robust Correction Loop Contracts:**
 
-- **Structured Artifact Bundle Format** — Switched correction prompt from free-form ``File: ...`` output to a strict JSON ``{ artifacts: [], commands: [] }`` schema. Includes exact target paths from evidence so the LLM targets the correct files, reducing parse failures.
-- **AgentTools Integration** — Routed correction commands through ``execute_correction_command()`` to integrate with plugin policy, user approval gates, and tool failure tracking.
-- **Typed Parse Pipeline** — Replaced Option-based bundle extraction with a 5-layer fail-closed typed parse pipeline. Added ``RetryClassification`` (Retarget, MalformedRetry, SupportFileViolation, Replan) population in ``CorrectionAttemptRecord``.
-- **Manifest Policy Enforcement** — Added semantic validation to prevent implicit mutation of root manifests (Cargo.toml, package.json) unless explicitly listed as output targets, while preserving legal support files.
-- **Strict Budget Exhaustion** — Widened budget exhaustion checks from cost-only to ``any_exhausted()`` to properly respect step and revision caps before attempting LLM calls.
+- **Structured Artifact Bundle Format** - Switched correction prompt from free-form ``File: ...`` output to a strict JSON ``{ artifacts: [], commands: [] }`` schema. Includes exact target paths from evidence so the LLM targets the correct files, reducing parse failures.
+- **AgentTools Integration** - Routed correction commands through ``execute_correction_command()`` to integrate with plugin policy, user approval gates, and tool failure tracking.
+- **Typed Parse Pipeline** - Replaced Option-based bundle extraction with a 5-layer fail-closed typed parse pipeline. Added ``RetryClassification`` (Retarget, MalformedRetry, SupportFileViolation, Replan) population in ``CorrectionAttemptRecord``.
+- **Manifest Policy Enforcement** - Added semantic validation to prevent implicit mutation of root manifests (Cargo.toml, package.json) unless explicitly listed as output targets, while preserving legal support files.
+- **Strict Budget Exhaustion** - Widened budget exhaustion checks from cost-only to ``any_exhausted()`` to properly respect step and revision caps before attempting LLM calls.
 
 **LLM Provider Maintenance:**
 
-- **genai Upgrade** — Bumped ``genai`` dependency from 0.5.1 to 0.5.3 (stable patch release with bug fixes).
-- **Dead Code Cleanup** — Removed ``generate_response_with_history()`` and ``generate_response_with_options()`` which had zero callers across the workspace and were the only methods leaking ``genai::ChatOptions`` into the public API surface.
-- **Clippy Fixes** — Fixed `clippy::unnecessary-sort-by` and applied `clippy::collapsible-match` auto-fixes for Rust 1.95 compatibility.
+- **genai Upgrade** - Bumped ``genai`` dependency from 0.5.1 to 0.5.3 (stable patch release with bug fixes).
+- **Dead Code Cleanup** - Removed ``generate_response_with_history()`` and ``generate_response_with_options()`` which had zero callers across the workspace and were the only methods leaking ``genai::ChatOptions`` into the public API surface.
+- **Clippy Fixes** - Fixed `clippy::unnecessary-sort-by` and applied `clippy::collapsible-match` auto-fixes for Rust 1.95 compatibility.
 
-Version 0.5.8 — "Qualitätsveredelung"
+Version 0.5.8 - "Qualitaetsveredelung"
 ----------------------------------------
 
 *Orchestration State Overhaul Release*
 
-   "Qualitätsveredelung — the craft of refining what exists until its quality speaks
+   "Qualitaetsveredelung - the craft of refining what exists until its quality speaks
    for itself. Not new features, but the quiet discipline of making every state
    transition truthful, every metric honest, and every dead path removed."
 
 **Orchestration Correctness (Refs: #112, #113, #114, #116):**
 
-- **SessionOutcome enum** — New ``SessionOutcome`` type (Success, PartialSuccess,
+- **SessionOutcome enum** - New ``SessionOutcome`` type (Success, PartialSuccess,
   Failed) derived from actual completed/escalated node counts. The ``Complete``
   event now carries truthful outcomes instead of unconditional ``success: true``.
-- **NodeOutcome enum** — ``execute_node()`` returns ``Result<NodeOutcome>`` where
+- **NodeOutcome enum** - ``execute_node()`` returns ``Result<NodeOutcome>`` where
   ``NodeOutcome`` is ``Completed`` or ``Escalated``, replacing the previous
   ``Result<()>`` that could not distinguish outcomes.
-- **Correct session outcome derivation** — ``run_orchestration()`` and
+- **Correct session outcome derivation** - ``run_orchestration()`` and
   ``run_resumed_inner()`` track completed/escalated counts per node and derive
   the final ``SessionOutcome`` accordingly.
-- **Always-on LLM telemetry** — ``call_llm_with_logging()`` now records token
+- **Always-on LLM telemetry** - ``call_llm_with_logging()`` now records token
   usage (in/out), latency, and estimated cost via ``record_llm_usage()`` after
   every LLM call, regardless of ``--log-llm``. The flag now only controls verbose
   prompt/response text persistence.
-- **Budget envelope persistence** — ``upsert_budget_envelope()`` called after each
+- **Budget envelope persistence** - ``upsert_budget_envelope()`` called after each
   ``BudgetUpdated`` event to persist cost/step tracking to the database.
-- **Sandbox-aware context retrieval** — ``ContextRetriever`` in ``step_speculate()``
+- **Sandbox-aware context retrieval** - ``ContextRetriever`` in ``step_speculate()``
   uses ``effective_working_dir(idx)`` (the node's sandbox directory) instead of the
   workspace root. Sandbox file tree listings included in actuator and correction
   prompts for better generation grounding.
 
 **Type-Safe State Management (Refs: #114):**
 
-- **NodeState::from_display_str()** — Case-insensitive canonical parser with legacy
-  aliases ("running" → Coding, "stable" → Completed, "retrying" → Retry). Replaces
+- **NodeState::from_display_str()** - Case-insensitive canonical parser with legacy
+  aliases ("running" -> Coding, "stable" -> Completed, "retrying" -> Retry). Replaces
   all ad-hoc string parsing across the codebase.
-- **NodeState helpers** — ``is_success()`` (true only for Completed), ``is_active()``
+- **NodeState helpers** - ``is_success()`` (true only for Completed), ``is_active()``
   (true for Coding, Verifying, Planning, Retry, SheafCheck, Committing), and
   ``Display`` impl producing lowercase labels.
-- **CLI state cleanup** — All string-based state comparisons in ``status.rs``,
+- **CLI state cleanup** - All string-based state comparisons in ``status.rs``,
   ``agent.rs``, and ``resume.rs`` replaced with ``NodeState::from_display_str()``
   and type-safe helper methods.
 
@@ -126,9 +160,9 @@ Version 0.5.8 — "Qualitätsveredelung"
 
 **Bug Fixes (Refs: #107, #111):**
 
-- **Session status stuck at RUNNING** — Status now persisted in ``end_session()``
+- **Session status stuck at RUNNING** - Status now persisted in ``end_session()``
   with ``COALESCE``-based finalization guarantee (#111)
-- **LLM token counts always zero** — Real provider token usage (prompt +
+- **LLM token counts always zero** - Real provider token usage (prompt +
   completion tokens) extracted from ``genai`` ``ChatResponse::usage`` and
   persisted per request (#107, #110)
 
@@ -141,119 +175,119 @@ Version 0.5.8 — "Qualitätsveredelung"
 
 **Documentation:**
 
-- Updated README: fixed crate count (8 → 9), deduplicated dashboard command,
+- Updated README: fixed crate count (8 -> 9), deduplicated dashboard command,
   added missing agent flags (``--single-file``, ``--verifier-strictness``,
   ``--output-plan``, all ``--*-fallback-model``), aligned contributing commands
   with CI gates
-- Updated Perspt Book: SRBN architecture (Phase 7 → Commit & Outcome),
+- Updated Perspt Book: SRBN architecture (Phase 7 -> Commit & Outcome),
   CLI reference (``logs`` always shows token metrics), developer architecture
   guide (orchestrator lifecycle, NodeOutcome, SessionOutcome in type inventory
   and data flow), workspace crates (removed dead ``is_safe_for_auto_exec``)
-- Updated PSP-5: execution flow steps 8–11 with Completed/Escalated paths and
+- Updated PSP-5: execution flow steps 8-11 with Completed/Escalated paths and
   SessionOutcome derivation, headless output with ``OUTCOME`` line, added
   Orchestration State Overhaul implementation appendix
 
 
-Version 0.5.7 — "navikaran नवीकरण"
+Version 0.5.7 - "navikaran"
 -------------------------------------
 
 *Dashboard UX Polish Release*
 
-   "Bridging the purpose of Ikigai with the momentum of Kaizen — renewal through
+   "Bridging the purpose of Ikigai with the momentum of Kaizen - renewal through
    continuous, intentional refinement."
 
 **Dashboard UX Improvements (PSP-6 continued):**
 
-- **Custom DaisyUI 5 themes** — ``perspt-light`` and ``perspt-dark`` themes with
+- **Custom DaisyUI 5 themes** - ``perspt-light`` and ``perspt-dark`` themes with
   orange/pink oklch palette (WCAG AA compliant), powered by
   ``@plugin "daisyui/theme"`` blocks
-- **Theme toggle** — Navbar button with sun/moon icons, localStorage persistence,
+- **Theme toggle** - Navbar button with sun/moon icons, localStorage persistence,
   and migration from legacy theme names
-- **Friendly session names** — Deterministic human-readable names (e.g.
+- **Friendly session names** - Deterministic human-readable names (e.g.
   "bold-hawk") derived from session UUIDs via hash-indexed adjective+noun arrays
-- **Breadcrumb friendly names** — All six session sub-pages show friendly name
+- **Breadcrumb friendly names** - All six session sub-pages show friendly name
   with UUID-on-hover tooltip
-- **Session card layout** — Stacked vertical cards with ``btn-outline`` sub-page
+- **Session card layout** - Stacked vertical cards with ``btn-outline`` sub-page
   buttons replacing ghost buttons
-- **Task text formatting** — ``whitespace-pre-line`` rendering for readable
+- **Task text formatting** - ``whitespace-pre-line`` rendering for readable
   multi-line task descriptions
-- **Collapse arrow fix** — ``pe-10`` padding on DAG and LLM collapse summaries
+- **Collapse arrow fix** - ``pe-10`` padding on DAG and LLM collapse summaries
   to prevent arrow overlap with text
-- **Decisions page resilience** — All six store queries use
+- **Decisions page resilience** - All six store queries use
   ``unwrap_or_default()`` instead of ``?`` early-return, preventing 503 errors
   on partial data
-- **Paginated overview** — 20 sessions per page with DaisyUI ``join`` pagination
+- **Paginated overview** - 20 sessions per page with DaisyUI ``join`` pagination
   controls, backed by ``list_sessions_paginated()`` and ``count_sessions()``
   store methods
-- **Login page theme** — Updated to ``perspt-light`` default
+- **Login page theme** - Updated to ``perspt-light`` default
 
 **CI & Build:**
 
-- **Node.js in CI** — Added ``actions/setup-node@v4`` (Node 22) to CI test matrix
+- **Node.js in CI** - Added ``actions/setup-node@v4`` (Node 22) to CI test matrix
   and release workflows so ``npx @tailwindcss/cli`` runs on all runners
 
 **Store:**
 
-- ``list_sessions_paginated(limit, offset)`` — LIMIT/OFFSET SQL for paginated
+- ``list_sessions_paginated(limit, offset)`` - LIMIT/OFFSET SQL for paginated
   session listing
-- ``count_sessions()`` — Total session count for pagination controls
+- ``count_sessions()`` - Total session count for pagination controls
 
 
-Version 0.5.6 — "ikigai 生き甲斐"
+Version 0.5.6 - "ikigai"
 -----------------------------------
 
 *SRBN Sandbox Revision Flow Release*
 
-   "A reason for being — the happiness of always being busy with what you love."
+   "A reason for being - the happiness of always being busy with what you love."
 
 **Real-Time Web Dashboard (PSP-6):**
 
-- **perspt-dashboard crate** — Axum 0.8 + Askama 0.15 + HTMX 2 + Tailwind v4/DaisyUI 5
+- **perspt-dashboard crate** - Axum 0.8 + Askama 0.15 + HTMX 2 + Tailwind v4/DaisyUI 5
   web interface for monitoring agent execution
-- **Read-only store access** — ``SessionStore::open_read_only()`` with DuckDB
+- **Read-only store access** - ``SessionStore::open_read_only()`` with DuckDB
   ``AccessMode::ReadOnly`` for safe concurrent reads alongside the agent
-- **Six monitoring pages** — Overview (sessions), DAG (task graph), Energy
+- **Six monitoring pages** - Overview (sessions), DAG (task graph), Energy
   (Lyapunov components), LLM (request telemetry), Sandbox (provisional branches),
   Decisions (escalations, sheaf validations, rewrites, plan revisions, repairs,
   verifications)
-- **SSE live updates** — Server-Sent Events stream node statistics every 2 seconds
-- **Password authentication** — Random token, HttpOnly/SameSite cookie, Secure flag
+- **SSE live updates** - Server-Sent Events stream node statistics every 2 seconds
+- **Password authentication** - Random token, HttpOnly/SameSite cookie, Secure flag
   on non-localhost deployments
-- **``perspt dashboard`` CLI command** — Launches the dashboard server on a
+- **``perspt dashboard`` CLI command** - Launches the dashboard server on a
   configurable port
-- **12 integration tests** — Route smoke tests, SSE content-type, auth flow
-- **Store extensions** — ``get_session_energy_history()``,
+- **12 integration tests** - Route smoke tests, SSE content-type, auth flow
+- **Store extensions** - ``get_session_energy_history()``,
   ``get_all_sheaf_validations()``, ``get_all_repair_footprints()``
 
 **SRBN Sandbox Revision Flow (PSP-5 Phases 3-12):**
 
-- **PlanningPolicy** — Adaptive agent gating with 5 policies (LocalEdit,
+- **PlanningPolicy** - Adaptive agent gating with 5 policies (LocalEdit,
   FeatureIncrement, LargeFeature, GreenfieldBuild, ArchitecturalRevision).
   ``needs_architect()`` and ``needs_speculator()`` gate agent tier activation
-- **FeatureCharter auto-creation** — Policy-derived file/module/revision limits
+- **FeatureCharter auto-creation** - Policy-derived file/module/revision limits
   created before architect planning so the plan gate has bounds to enforce
-- **Speculator lookahead gating** — Speculator tier only activates for LargeFeature,
+- **Speculator lookahead gating** - Speculator tier only activates for LargeFeature,
   GreenfieldBuild, and ArchitecturalRevision policies
-- **BudgetEnvelope session restore** — Step/cost/revision caps restored from DB
+- **BudgetEnvelope session restore** - Step/cost/revision caps restored from DB
   during ``resume`` so interrupted sessions honour the original limits
-- **Bundle path normalization** — ``filter_bundle_to_declared_paths`` uses
+- **Bundle path normalization** - ``filter_bundle_to_declared_paths`` uses
   ``normalize_artifact_path`` for correct comparison of path variants (e.g.
   ``./src/main.rs`` vs ``src/main.rs``)
-- **NodeState::Superseded** — New terminal state for plan amendment (Phase 14
+- **NodeState::Superseded** - New terminal state for plan amendment (Phase 14
   preparation). Updated ``is_terminal()``, ``parse_node_state()``, and
   ``NodeStatus`` conversion
-- **Orchestrator module extraction** — ``orchestrator.rs`` split into 9 submodules:
+- **Orchestrator module extraction** - ``orchestrator.rs`` split into 9 submodules:
   ``mod.rs``, ``bundle.rs``, ``commit.rs``, ``convergence.rs``, ``init.rs``,
   ``planning.rs``, ``repair.rs``, ``solo.rs``, ``verification.rs``
-- **Centralized prompts** — All 15 agent prompts consolidated in ``prompts.rs``
+- **Centralized prompts** - All 15 agent prompts consolidated in ``prompts.rs``
   with constants and ``render_*`` helpers; duplicates removed from ``agent.rs``
-- **RepairFootprint-backed correction** — ``build_correction_prompt`` uses
+- **RepairFootprint-backed correction** - ``build_correction_prompt`` uses
   ``RepairFootprint`` for precise, grounded repair context
-- **Greenfield bootstrap ordering** — Plugin-driven project initialization with
+- **Greenfield bootstrap ordering** - Plugin-driven project initialization with
   correct pre-sheafify plugin re-detection
-- **Provisional branch lifecycle** — Sandbox-first execution with branch creation,
+- **Provisional branch lifecycle** - Sandbox-first execution with branch creation,
   merge, and flush cascade
-- **Escalation classification** — 5 categories with 9 rewrite actions and
+- **Escalation classification** - 5 categories with 9 rewrite actions and
   graph surgery support
 
 **Documentation:**
@@ -274,23 +308,23 @@ Version 0.5.5
 
 **Cross-Platform Fixes:**
 
-- **Windows sandbox path normalization** — ``list_sandbox_files`` now returns
+- **Windows sandbox path normalization** - ``list_sandbox_files`` now returns
   forward-slash-separated relative paths on all platforms
-- **Windows workspace-bound validation** — ``validate_workspace_bound`` correctly
+- **Windows workspace-bound validation** - ``validate_workspace_bound`` correctly
   detects absolute paths with Windows drive prefixes (``C:\...``) and normalizes
   backslash path separators before POSIX shell tokenization
-- **Clippy and fmt CI compliance** — Resolved ``items_after_test_module`` and
+- **Clippy and fmt CI compliance** - Resolved ``items_after_test_module`` and
   ``useless_vec`` warnings that were failing CI on all platforms
 
 **Build and CI Improvements:**
 
-- **Removed accidental eval workspace member** — ``.perspt-eval/rust_cli`` removed
+- **Removed accidental eval workspace member** - ``.perspt-eval/rust_cli`` removed
   from workspace members; ``.perspt-eval/`` added to ``.gitignore``
-- **Stabilized cargo doc** — Added ``doc = false`` to CLI bin target to prevent
+- **Stabilized cargo doc** - Added ``doc = false`` to CLI bin target to prevent
   output collision with the ``perspt`` library crate
-- **Removed deprecated atty dependency** — Replaced with ``std::io::IsTerminal``
+- **Removed deprecated atty dependency** - Replaced with ``std::io::IsTerminal``
   for TTY detection
-- **Lockfile refresh** — Cleared hard ``cargo audit`` vulnerability failures via
+- **Lockfile refresh** - Cleared hard ``cargo audit`` vulnerability failures via
   dependency updates
 
 **Documentation:**
@@ -305,17 +339,17 @@ Version 0.5.4
 
 **SRBN Agent Enhancements:**
 
-- **Per-node error recovery** — Retry logic respects ``ErrorType`` classification
+- **Per-node error recovery** - Retry logic respects ``ErrorType`` classification
   (``Compilation``, ``ToolFailure``, ``ReviewRejection``) with separate counters
-- **Multi-file extraction** — Actuator reliably extracts artifact bundles with
+- **Multi-file extraction** - Actuator reliably extracts artifact bundles with
   multiple files from LLM responses
-- **Multi-artifact bundles** — Bundle protocol correctly handles write, diff, and
+- **Multi-artifact bundles** - Bundle protocol correctly handles write, diff, and
   command artifacts in a single node
-- **Plugin-driven project initialization** — All plugins use ``uv init --lib``
+- **Plugin-driven project initialization** - All plugins use ``uv init --lib``
   (Python), ``cargo init`` (Rust), ``npm init`` (JS) for proper project scaffolding
-- **Degraded verification mode** — When tool binaries are missing, falls back to
+- **Degraded verification mode** - When tool binaries are missing, falls back to
   heuristic verification with clear warnings
-- **Sheaf validation** — 7 validator classes for cross-node contract verification
+- **Sheaf validation** - 7 validator classes for cross-node contract verification
 
 **Bug Fixes:**
 

@@ -165,6 +165,23 @@ latex_elements = {
 % Force monospaced throughout
 \renewcommand{\familydefault}{\ttdefault}
 
+% The monospaced family is used for prose too, and typewriter text does not
+% hyphenate by default, so long identifiers and words overran narrow table
+% columns and the page boundary. Enable typewriter hyphenation and allow a small
+% amount of emergency stretch so cell content wraps inside the page instead of
+% overflowing it.
+\usepackage[htt]{hyphenat}
+\setlength{\emergencystretch}{3em}
+
+% Sphinx renders literal hyphens in prose as \sphinxhyphen, which by default is
+% non-breaking (``-\kern\z@``). Hyphenated compounds such as
+% "single-assignment", "non-commuting", and "Residual-directed" then could not
+% wrap and overran narrow table columns. Allow a line break after a literal
+% hyphen in prose (inline literals keep their own non-breaking hyphen macro).
+\AtBeginDocument{%
+  \protected\def\sphinxhyphen#1{-\penalty\exhyphenpenalty}%
+}
+
 \fancypagestyle{normal}{
     \fancyhf{}
     \fancyhead[L]{Perspt Specification Proposal}
