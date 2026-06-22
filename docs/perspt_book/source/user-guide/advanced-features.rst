@@ -11,10 +11,10 @@ Assign different models to each SRBN tier:
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
-     --speculator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
+     --speculator-model gemini-3.5-flash \
      -w ./project "Task description"
 
 Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failover:
@@ -22,8 +22,8 @@ Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failove
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --architect-fallback-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --architect-fallback-model gemini-3.5-flash \
      -w ./project "Task"
 
 

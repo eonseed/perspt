@@ -73,7 +73,7 @@ To launch the default terminal user interface:
    perspt
 
    # Or specify a model explicitly
-   perspt chat --model gemini-pro-latest
+   perspt chat --model gemini-3.1-pro
 
 Type your dialogue prompt and press **Enter** to submit. Press **Esc** to exit the application.
 
@@ -112,8 +112,8 @@ To execute autonomous multi-file code generation under the SRBN orchestrator:
 
    # Run with specific models for Architect and Actuator roles
    perspt agent \
-     --architect-model gemini-2.5-pro \
-     --actuator-model gemini-2.5-flash \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      -w ./project "Create an ETL pipeline in Python"
 
 An execution run displays the active scheduling, verifier execution, and SDK gate telemetry. Below is a clinical trace of a typical autonomous run:
@@ -122,7 +122,7 @@ An execution run displays the active scheduling, verifier execution, and SDK gat
 
    🚀 Starting SRBN agent session (ID: 01H2X...)
    [Step 1/3] Planning Task...
-     Running Architect (model: gemini-pro-latest)
+     Running Architect (model: gemini-3.1-pro)
      Decomposing task: "Create Python calculator package..."
      Generated 3 graph nodes (Interface -> Implementation -> Integration)
      Ownership closure verified.

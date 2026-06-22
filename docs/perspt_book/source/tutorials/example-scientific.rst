@@ -24,8 +24,8 @@ Create a computational fluid dynamics simulation scaffolding:
    export GEMINI_API_KEY="your-key"
 
    perspt agent --yes --defer-tests -w /tmp/cfd-sim \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      "Create a Python CFD simulation package that:
       1. Defines a 2D grid mesh using numpy arrays
       2. Implements a simple Navier-Stokes solver (lid-driven cavity)
@@ -64,8 +64,8 @@ Analyze experimental wind tunnel data:
 .. code-block:: bash
 
    perspt agent --yes --defer-tests -w /tmp/wind-tunnel \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      "Create a Python wind tunnel data analysis package that:
       1. Reads pressure tap data from CSV files
       2. Computes lift and drag coefficients (Cl, Cd) from pressure distributions
@@ -85,8 +85,8 @@ Build a simple FEM solver in Rust:
 .. code-block:: bash
 
    perspt agent --yes -w /tmp/fem-solver \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      "Create a Rust finite element package that:
       1. Defines 2D triangular mesh elements
       2. Assembles global stiffness matrix for heat conduction

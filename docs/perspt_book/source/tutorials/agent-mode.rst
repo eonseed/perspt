@@ -41,8 +41,8 @@ Basic Usage
 
    # Use specific models per tier
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      -w ./project "Build an ETL pipeline"
 
 
@@ -166,10 +166,10 @@ Assign specialized models to each SRBN phase:
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
-     --speculator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
+     --speculator-model gemini-3.5-flash \
      -w ./project "Build a web server"
 
 .. list-table::
