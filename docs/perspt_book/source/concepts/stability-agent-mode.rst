@@ -35,6 +35,20 @@ Paper III (*Stability is All You Need III: The SRBN Platform Contract*) lifts th
 
 In the Perspt runtime, this is implemented via the SDK-first separation. The core SRBN engine (in ``perspt-sdk``) manages scheduling and gating, while domain packages (such as ``perspt-coding``) define domain-specific sensors and capabilities.
 
+The Byzantine Generals Metaphor
+-------------------------------
+
+To illustrate the stabilization protocol, we map the closed-loop convergence system to the Byzantine Generals Problem formulation (Lamport, Shostak, and Pease, 1982).
+
+Let the Actuator agent be a commanding general whose loyalty is unknown; the commander's objective is to propose a series of operations (file modifications, deletions, or command executions) to reach a stable repository state. Let the verification sensors (the compiler, the type-checker, the linter, and the test oracle) be the loyal lieutenants. 
+
+The protocol proceeds in rounds:
+
+1. **Proposal**: The commander (Actuator) issues a proposed workspace change.
+2. **Observation**: The loyal lieutenants (Sensors) independently inspect the proposal and report their findings as a vector of residual events.
+3. **Consensus**: The gatekeeper (Orchestrator) aggregates the lieutenants' reports using the quadratic energy function. If the loyal lieutenants consensus reveals no critical residual errors (i.e., :math:`V(x) \le \varepsilon`), the proposal is committed.
+4. **Correction or Escalation**: If the energy exceeds the threshold, the lieutenants' specific error reports are compiled into a feedback message. The commander is instructed to repair the state. If the commander fails to reach stability within the allocated round budget, the lieutenants reject further proposals and execute an escalation protocol to alert the operator.
+
 The Energy Formulation
 ----------------------
 
@@ -86,6 +100,25 @@ Let :math:`T_{\text{acc}}` be the set of accepted states:
    T_{\text{acc}} = \{ x \in T_{\text{obs}} \mid \operatorname{accept}(x) = \text{true} \}
 
 The Merkle ledger commits only elements of :math:`T_{\text{acc}}`. Unaccepted proposals in :math:`T_{\text{obs}} \setminus T_{\text{acc}}` are recorded as telemetry for correction feedback, but they never modify the workspace files.
+
+The GoalPresence Verification Sensor
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A primary check performed by the structural sensor (lieutenant) is the validation of required symbol presence. Let :math:`\mathcal{S}_{\text{req}}` be the set of symbols (functions, structures, classes, or modules) that the node is required to implement, as declared by its behavioral contract interface signature and goal text. Let :math:`\mathcal{S}_{\text{obs}}` be the set of symbols actually defined in the generated source code.
+
+The goal-presence sensor computes the missing required symbols set :math:`\mathcal{M}`:
+
+.. math::
+
+   \mathcal{M} = \mathcal{S}_{\text{req}} \setminus \mathcal{S}_{\text{obs}}
+
+If :math:`\mathcal{M} \neq \emptyset`, the sensor emits a blocking residual of class ``SymbolMismatch``:
+
+.. math::
+
+   r_{\text{symbol}}(x) = \lvert \mathcal{M} \rvert
+
+This forces the structural energy component :math:`V_{\text{str}}` to remain high, preventing the state from satisfying the acceptance gate until all required symbols are present in the workspace.
 
 Operational Mechanisms
 ----------------------
