@@ -144,9 +144,9 @@ latex_elements = {
     
     {\fontsize{44}{52}\selectfont\bfseries P E R S P T} \\[0.4cm]
     \rule{\textwidth}{1.0pt} \\[0.4cm]
-    {\fontsize{13}{16}\selectfont\scshape Your Terminal's Window to the AI World} \\[1.5cm]
+    {\fontsize{13}{16}\selectfont\scshape Your Terminal's Window to the AI World} \\[0.8cm]
     
-    \begin{tikzpicture}[scale=1.2, every node/.style={transform shape}]
+    \begin{tikzpicture}[scale=1.0, every node/.style={transform shape}]
         \definecolor{CoverBG}{HTML}{EBE3CD}
         \definecolor{PrimaryColor}{HTML}{00D4AA}
         \definecolor{AccentColor}{HTML}{6366F1}
@@ -267,7 +267,7 @@ latex_elements = {
         
     \end{tikzpicture}
     
-    \vspace{1.2cm}
+    \vspace{0.6cm}
     
     \begin{center}
         \begin{minipage}{0.65\textwidth}
@@ -282,7 +282,7 @@ latex_elements = {
         \end{minipage}
     \end{center}
     
-    \vspace{0.8cm}
+    \vspace{0.4cm}
     
     {\fontsize{13}{15}\selectfont\scshape\color{black} Ronak Rathore \quad \bullet \quad Vikrant Rathore} \\
     

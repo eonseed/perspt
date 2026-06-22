@@ -1,24 +1,39 @@
 Introduction to Perspt
 ======================
 
-Perspt is a system designed to address the problem of reliable communication and execution with non-deterministic Large Language Models (LLMs). The system provides two modes of operation:
+Perspt is an interface designed to bring the capabilities of Large Language Models (LLMs) directly and reliably into your terminal. Rather than treating artificial intelligence as a disconnected web service, Perspt integrates LLMs into your daily development workflow, offering three distinct interaction surfaces: Simple Chat, TUI, and Agent.
 
-1. **A Diagnostic Interface**: A terminal interface for communicating with various LLM providers, enabling developers to evaluate and compare model responses.
-2. **A Stabilized Execution Engine**: An implementation of the Stabilized Recursive Barrier Network (SRBN) framework. The engine models multi-file development tasks as state graphs and guides generation toward verified manifolds using a control-theoretic Lyapunov energy gate.
+Whether you need to quickly ask a question using command-line pipelines, converse interactively in a rich terminal interface, or delegate complex multi-file engineering tasks to a team of specialized agents, Perspt provides a unified, structured, and stable environment for developer-AI collaboration.
 
-The Problem of Guessing
------------------------
+The Three Surfaces of Perspt
+----------------------------
 
-A language model operates by proposing sequences of tokens. In complex tasks, such as multi-file software construction, each proposed change is a guess. Because these models are non-deterministic and lack internal verification loops, errors propagate. Left unchecked, a sequence of guesses drifts away from a working state, eventually resulting in system failure.
+Perspt operates across three primary surfaces, each designed for a different type of developer workflow:
 
-To prevent this drift, we must not rely on the model's self-assessment. We require a system that:
+1. **Simple Chat Mode (``simple-chat``)**:
+   A lightweight, streamable command-line interface. It is designed to converse with an LLM and integrate seamlessly with Unix bash pipelines. You can quickly pipe files, logs, or command outputs directly into the model to request a response, and redirect the LLM's output to other command-line utilities. This makes it an ideal tool for shell scripting, fast code analysis, and automated diagnostics.
 
-- Measures the correctness of each proposed modification using external, deterministic tools (such as compilers, type-checkers, and test suites).
-- Quantifies the remaining errors as a non-negative scalar value (the Lyapunov energy).
-- Generates targeted feedback from these error vectors to guide subsequent model attempts.
-- Commits changes to the persistent workspace only when the energy converges to zero or falls within an acceptable tolerance.
+2. **Interactive TUI Mode (``chat``)**:
+   A rich, full-screen Terminal User Interface (TUI) built on ``ratatui``. It provides an interactive conversational interface with the LLM right on your terminal. The TUI supports real-time streaming, markdown rendering with syntax highlighting, inline LaTeX math equations, keyboard-driven navigation, and prompt history. It allows you to explore ideas, ask code questions, and interactively write code without leaving your terminal workspace.
+
+3. **Agent Mode (``agent``)**:
+   A collaborative multi-agent system composed of specialized virtual actors (the Architect, Actuator, Verifier, and Speculator) that work together to solve complex software engineering and coding jobs. It models development tasks as state graphs and uses the **Stabilized Recursive Barrier Network (SRBN)** framework to ensure reliability and workflow stability. By integrating with local tests, compilers, and linters, Agent Mode automatically detects, corrects, and verifies code updates, ensuring the repository moves systematically toward a clean, working state.
+
+The Problem of Guessing (Reliability via Verification)
+------------------------------------------------------
+
+To understand why Perspt is designed this way, consider the challenge of writing complex code.
+Every time a language model suggests code, it is making a guess. Because language models are non-deterministic and lack internal verification loops, even a tiny error in a single guess can propagate across files. Left to run on its own without external guidance, an agentic system will quickly drift away from a working codebase, culminating in compilation failures and broken tests.
+
+In the spirit of Leslie Lamport’s work on distributed systems, where consensus must be reached among potentially faulty or unpredictable nodes, Perspt does not trust the model to self-verify. Instead, it wraps the model in a deterministic control loop. The system:
+
+- Validates every proposed change using local type-checkers, compilers, and test suites.
+- Measures errors as a scalar value (the Lyapunov energy).
+- Feeds specific compiler and test diagnostics back to the LLM to guide corrections.
+- Commits changes to the code repository only when the workspace is stable and error-free.
 
 Perspt implements this discipline through the SRBN orchestrator.
+
 
 Core System Features
 --------------------
