@@ -141,7 +141,7 @@ The legacy `--energy-weights "alpha,beta,gamma"` flag is parsed and folded propo
 A candidate state $x$ is admitted to the accepted trajectory if and only if it satisfies the gating condition:
 
 $$
-\operatorname{accept}(x) \iff V(x) \leq \varepsilon \quad \lor \quad V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
+\text{accept}(x) \iff V(x) \leq \varepsilon \quad \lor \quad V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
 $$
 
 where $\varepsilon$ is the convergence threshold (default $0.10$), $x_{\text{best}}$ is the best previously accepted state in the current node generation, and $\rho_{\text{gate}}$ is the minimum required descent step (default $0.50$).
