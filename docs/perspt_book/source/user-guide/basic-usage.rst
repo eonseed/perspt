@@ -3,8 +3,8 @@
 Basic Usage
 ===========
 
-Perspt offers two interactive modes: the **TUI** (rich terminal UI) and
-**simple-chat** (plain-text streaming).
+Perspt offers three primary modes of interaction: the **TUI** (rich interactive terminal UI),
+**simple-chat** (plain-text streaming for pipeline integration), and **Agent** (self-stabilizing autonomous multi-agent coding workflows).
 
 Launching the TUI
 ------------------
@@ -101,6 +101,17 @@ For a minimal text interface suitable for piping and logging:
 
 Type your message, press Enter. Responses stream to stdout. Type ``exit`` or
 press ``Ctrl+D`` to quit.
+
+Autonomous Agent Mode
+---------------------
+
+For complex software engineering and coding jobs that require self-stabilizing, multi-file edits:
+
+.. code-block:: bash
+
+   perspt agent "Implement a parsing logic for custom CSV formats in src/csv.rs"
+
+This starts the multi-agent orchestration loop. The system automatically plans, executes, and verifies the changes using local verification commands. You can specify custom models and configure validation parameters to match your codebase. Refer to :doc:`agent-mode` for details.
 
 
 Provider Auto-Detection
