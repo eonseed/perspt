@@ -154,17 +154,26 @@ The experimental SRBN orchestrator and its subsystems.
 The orchestrator drives the PSP-5 lifecycle:
 
 1. ``detect_workspace()`` - Identify plugins and workspace state
-2. ``plan_task()`` - Architect decomposes task into DAG
-3. ``execute_dag()`` - Topological traversal with per-node verification loop
+2. ``plan_task()`` - Architect decomposes task into the initial work graph
+3. Closed-loop scheduler - A ``loop`` that calls ``next_ready_node()`` each round
+   to select the next dependency-satisfied node from the mutable work graph
+   (PSP-8 §4), instead of a one-shot topological traversal. Repair actions
+   (requeue, split, insert interface, replan subgraph) mutate the graph between
+   rounds and reworked/inserted nodes are re-picked.
 4. ``verify_node()`` - Compute V(x) via plugin verifier profile
 5. ``sheaf_validate()`` - Cross-node contract checking
 6. ``review_node()`` - Interactive approval (unless ``--yes``)
-7. ``execute_node()`` - Returns ``NodeOutcome::Completed`` when V(x) <= epsilon
-   or ``NodeOutcome::Escalated`` when retries are exhausted
+7. ``execute_node()`` - Returns ``NodeOutcome::Completed`` when V(x) <= epsilon,
+   ``NodeOutcome::Reworked`` when a repair mutated the graph, or
+   ``NodeOutcome::Escalated`` when retries are exhausted
 8. ``commit_node()`` - Record stable node in Merkle ledger
 
-After all nodes are processed, the orchestrator derives ``SessionOutcome``
-from completed/escalated counts and emits a ``Complete`` event.
+When the ready queue empties, a goal-completion gate may amend the plan or
+settle; the orchestrator then derives ``SessionOutcome`` from
+completed/escalated counts and emits a ``Complete`` event. Each graph revision
+is acyclic. The scheduler runs one ready node per round today — PSP-8 bounded
+parallelism (worker pool with leases, ``max_parallel*`` controls) is planned for
+a future release.
 
 
 Crate: ``perspt-store``
@@ -528,7 +537,7 @@ Data Flow
    |       +-- SRBNOrchestrator
    |       |     +-- detect_workspace()  -> [plugins]
    |       |     +-- plan_task()         -> [Architect Agent]
-   |       |     +-- execute_dag()       -> [Actuator Agent]
+   |       |     +-- control loop        -> next_ready_node() + [Actuator Agent]
    |       |     +-- verify_node()       -> [LSP, TestRunner, Verifier Agent]
    |       |     +-- sheaf_validate()    -> [Sheaf Validators]
    |       |     +-- commit_node()       -> [MerkleLedger]
