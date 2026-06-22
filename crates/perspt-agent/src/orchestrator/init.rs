@@ -214,6 +214,7 @@ impl SRBNOrchestrator {
                     let opts = perspt_core::plugin::InitOptions {
                         name: project_name.clone(),
                         is_empty_dir: is_empty,
+                        package_manager: self.package_manager.clone(),
                         ..Default::default()
                     };
 
@@ -255,6 +256,7 @@ impl SRBNOrchestrator {
                                     let edited_opts = perspt_core::plugin::InitOptions {
                                         name: final_name.clone(),
                                         is_empty_dir: is_empty,
+                                        package_manager: self.package_manager.clone(),
                                         ..Default::default()
                                     };
                                     match plugin.get_init_action(&edited_opts) {
@@ -359,6 +361,7 @@ impl SRBNOrchestrator {
                         let opts = perspt_core::plugin::InitOptions {
                             name: project_name.clone(),
                             is_empty_dir: false,
+                            package_manager: self.package_manager.clone(),
                             ..Default::default()
                         };
 
@@ -391,6 +394,7 @@ impl SRBNOrchestrator {
                                         let edited_opts = perspt_core::plugin::InitOptions {
                                             name: final_name.clone(),
                                             is_empty_dir: false,
+                                            package_manager: self.package_manager.clone(),
                                             ..Default::default()
                                         };
                                         match plugin.get_init_action(&edited_opts) {

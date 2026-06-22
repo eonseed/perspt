@@ -36,7 +36,7 @@ Perspt auto-detects Ollama if no cloud API keys are set:
    # Unset any cloud keys
    unset OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY
 
-   # Launch Perspt — auto-detects Ollama
+   # Launch Perspt - auto-detects Ollama
    perspt
 
    # Or specify a model explicitly
@@ -47,7 +47,7 @@ Agent Mode with Local Models
 
 .. code-block:: bash
 
-   perspt agent --model codellama -w ./my-project "Create a Python utility"
+   perspt agent --model qwen2.5-coder -w ./my-project "Create a Python utility"
 
 .. admonition:: Performance Note
    :class: note
@@ -60,8 +60,8 @@ Agent Mode with Local Models
 
       export GEMINI_API_KEY="your-key"
       perspt agent \
-        --architect-model gemini-pro-latest \
-        --actuator-model codellama \
+        --architect-model gemini-3.1-pro \
+        --actuator-model qwen2.5-coder \
         -w ./project "Create a utility"
 
 Available Models
@@ -76,18 +76,18 @@ Popular Ollama models for use with Perspt:
    * - Model
      - Size
      - Best For
-   * - ``llama3.2``
-     - 3B/70B
+   * - ``llama3.3``
+     - 8B/70B
      - General chat
-   * - ``codellama``
-     - 7B/34B
+   * - ``qwen2.5-coder``
+     - 7B/32B
      - Code generation
-   * - ``deepseek-coder``
-     - 6.7B/33B
+   * - ``deepseek-coder-v2``
+     - 16B/236B
      - Code generation
    * - ``mistral``
      - 7B
      - General purpose
-   * - ``phi3``
-     - 3.8B
-     - Lightweight tasks
+   * - ``phi4``
+     - 14B
+     - Reasoning and lightweight tasks

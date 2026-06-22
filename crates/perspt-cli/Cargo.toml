@@ -1,6 +1,6 @@
 [package]
 name = "perspt-cli"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -26,18 +26,21 @@ bundled = [
 ]
 
 [dependencies]
-perspt-core = { version = "0.6.1", path = "../perspt-core" }
-perspt-tui = { version = "0.6.1", path = "../perspt-tui" }
-perspt-agent = { version = "0.6.1", path = "../perspt-agent" }
-perspt-store = { version = "0.6.1", path = "../perspt-store" }
-perspt-dashboard = { version = "0.6.1", path = "../perspt-dashboard" }
+perspt-core = { version = "0.6.2", path = "../perspt-core" }
+perspt-tui = { version = "0.6.2", path = "../perspt-tui" }
+perspt-agent = { version = "0.6.2", path = "../perspt-agent" }
+perspt-store = { version = "0.6.2", path = "../perspt-store" }
+perspt-dashboard = { version = "0.6.2", path = "../perspt-dashboard" }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
-rustyline = "15.0"
+rustyline = "18.0"
 
 # Async
 tokio = { version = "1.42", features = ["full"] }
+
+# TLS crypto provider selection (Vertex ADC via gcp_auth uses rustls/ring).
+rustls = { version = "0.23", features = ["ring"] }
 
 # Logging
 log = "0.4"

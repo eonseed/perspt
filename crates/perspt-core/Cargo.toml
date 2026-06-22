@@ -1,6 +1,6 @@
 [package]
 name = "perspt-core"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -13,11 +13,17 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # LLM unified interface
-genai = "0.6"
+genai = "0.6.5"
 futures = "0.3"
 
+# Google Cloud Application Default Credentials (ADC) for Vertex AI auth.
+# genai's Vertex adapter needs an OAuth2 Bearer token supplied via an
+# AuthResolver; gcp_auth auto-detects ADC (gcloud login / service account /
+# metadata server) so no static API key is required.
+gcp_auth = "0.12"
+
 # TOML configuration parsing/serialization
-toml = "0.8"
+toml = "1.1"
 
 # Core async and traits
 async-trait = "0.1.88"

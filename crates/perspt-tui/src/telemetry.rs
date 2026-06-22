@@ -45,14 +45,17 @@ pub struct EnergyComponents {
 }
 
 impl EnergyComponents {
-    pub fn new(v_syn: f32, v_str: f32, v_log: f32, alpha: f32, beta: f32, gamma: f32) -> Self {
+    /// Build from the five PSP-8 component rollups. The rollups already carry the
+    /// squared, weighted residual energy (`V_comp = Σ_{e∈comp} w_e‖r_e‖²`), so the
+    /// total is their plain sum — there is no separate `α/β/γ` aggregation pass.
+    pub fn new(v_syn: f32, v_str: f32, v_log: f32, v_boot: f32, v_sheaf: f32) -> Self {
         Self {
             v_syn,
             v_str,
             v_log,
-            v_boot: 0.0,
-            v_sheaf: 0.0,
-            total: alpha * v_syn + beta * v_str + gamma * v_log,
+            v_boot,
+            v_sheaf,
+            total: v_syn + v_str + v_log + v_boot + v_sheaf,
         }
     }
 

@@ -15,10 +15,7 @@ impl SRBNOrchestrator {
         log::info!("Step 5: Convergence check");
 
         // First compute what we need from the node
-        let total = {
-            let node = &self.graph[idx];
-            energy.total(&node.contract)
-        };
+        let total = energy.total();
 
         // Now mutate
         let node = &mut self.graph[idx];
@@ -29,6 +26,29 @@ impl SRBNOrchestrator {
         let attempt_count = node.monitor.attempt_count;
         let stable = node.monitor.stable;
         let should_escalate = node.monitor.should_escalate();
+
+        // PSP-8: run the SDK measured acceptance gate over the canonical
+        // quadratic energy derived from the real verification result, alongside
+        // the StabilityMonitor. This exercises perspt-sdk + perspt-coding on
+        // every live correction step and surfaces the gate decision.
+        {
+            let vr = self.last_verification_result.clone();
+            match self.sdk_gate.evaluate(
+                &node_id,
+                attempt_count as u32,
+                vr.as_ref(),
+                &energy,
+                total as f64,
+                stable,
+            ) {
+                Ok(report) => {
+                    let line = report.summary();
+                    log::info!(target: "perspt::sdk_gate", "{line}");
+                    self.emit_log(format!("📐 {line}"));
+                }
+                Err(e) => log::debug!("SDK gate evaluation skipped: {e}"),
+            }
+        }
 
         if stable {
             // PSP-5 Phase 4: Block false stability when verification was degraded
@@ -489,6 +509,31 @@ impl SRBNOrchestrator {
             .map(|idx| self.graph[*idx].monitor.attempt_count)
             .unwrap_or(0);
 
+        // SRBN residual-directed corrections (PSP-8 / Paper II): parse the real
+        // verifier output (build/test text + diagnostic messages) for the node's
+        // language into typed residuals and derive specific, directed fixes.
+        let directed_corrections = {
+            let mut raw = String::new();
+            if let Some(out) = self.context.last_test_output.as_deref() {
+                raw.push_str(out);
+                raw.push('\n');
+            }
+            for d in diagnostics {
+                raw.push_str(&d.message);
+                raw.push('\n');
+            }
+            let pairs = super::sdk_bridge::directed_corrections(&owner_plugin, node_id, &raw);
+            if pairs.is_empty() {
+                None
+            } else {
+                let mut s = String::new();
+                for (class, instruction) in &pairs {
+                    s.push_str(&format!("- [{:?}] {}\n", class, instruction));
+                }
+                Some(s)
+            }
+        };
+
         let evidence = perspt_core::types::PromptEvidence {
             node_goal: Some(goal.to_string()),
             existing_file_contents: file_sections,
@@ -498,6 +543,7 @@ impl SRBNOrchestrator {
                 Some(diag_text)
             },
             energy_v_syn: Some(energy.v_syn),
+            directed_corrections,
             owner_plugin: Some(owner_plugin),
             restriction_map_context: if self.last_formatted_context.is_empty() {
                 None

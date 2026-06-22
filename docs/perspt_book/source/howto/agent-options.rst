@@ -61,7 +61,8 @@ Energy and Convergence
    * - Flag
      - Description
    * - ``--energy-weights <W>``
-     - Comma-separated ``alpha,beta,gamma`` (default: ``1.0,0.5,2.0``)
+     - Comma-separated ``a,b,g`` — proportional scales on the syntactic/structural/logic
+       component weights of the quadratic energy (default ``1.0,0.5,2.0`` = identity)
    * - ``--stability-threshold <E>``
      - Convergence epsilon (default: ``0.10``)
    * - ``--verifier-strictness <S>``
@@ -131,8 +132,8 @@ Embedded Dashboard
 
 When ``--dashboard`` is provided, an Axum web server is spawned as a background
 task within the agent process. It opens a separate read-only DuckDB connection
-to the same database file the agent writes to—DuckDB supports one writer plus
-concurrent readers—so the dashboard can display live progress without
+to the same database file the agent writes to-DuckDB supports one writer plus
+concurrent readers-so the dashboard can display live progress without
 interfering with the agent.
 
 The dashboard server is automatically stopped when the agent process exits.
@@ -148,9 +149,9 @@ Examples
 
    # Full control
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
      --energy-weights "1.0,1.0,2.0" \
      --stability-threshold 0.05 \
      --max-cost 5.0 \

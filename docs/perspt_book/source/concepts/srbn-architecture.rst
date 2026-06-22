@@ -3,33 +3,52 @@
 SRBN Architecture
 =================
 
-The **Stabilized Recursive Barrier Network (SRBN)** is the theoretical framework behind
-Perspt's experimental autonomous coding agent. SRBN is based on the paper *"Stability
-is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability"*
-by **Vikrant R. and Ronak R.** (pre-publication), which reformulates LLM agency as a
-sheaf-theoretic control problem and proves Input-to-State Stability (ISS) under
-persistent noise. Perspt's implementation of this framework is defined by **PSP-5**
-(Perspt Specification Proposal 5).
+The **Stabilized Recursive Barrier Network (SRBN)** is the idea behind Perspt's
+experimental autonomous coding agent. It comes from the *Stability is All You
+Need* paper series.
+
+The idea is plain to state. A language model is good at proposing changes, but a
+proposal is only a guess. Left unchecked, a long run of guesses drifts: small
+mistakes pile up until the work is broken. SRBN refuses to trust a guess on its
+word. It measures every proposed change, keeps the change only when the
+measurement shows progress, and writes the kept result to a permanent record.
+Perspt's coding agent implements this work via a reusable software-development-kit
+(SDK) platform (originally specified in the references section under PSP-8).
 
 .. admonition:: Theory vs. Implementation
    :class: note
 
-   This page describes both the SRBN paper's theoretical model and how Perspt's
-   PSP-5 runtime implements it. Where a claim comes from the paper's formal proofs,
-   it is noted as a **paper result**. Where PSP-5 makes engineering choices that
-   approximate or extend the theory, those are noted as **implementation details**.
-   The theoretical framework is mature; empirical benchmarks on Perspt's implementation
-   have not yet been published.
+    This page describes both the SRBN paper series and how Perspt's
+    runtime implements it. Where a claim comes from the papers' formal proofs,
+    it is noted as a **paper result**. Where the developer team makes engineering choices that
+    approximate or extend the theory, those are noted as **implementation details**.
+    The theoretical framework is mature; empirical benchmarks on Perspt's implementation
+    have not yet been published.
 
 Overview
 --------
 
 The SRBN paper models coding tasks as a directed acyclic graph (DAG) of nodes with
-a sheaf structure that enforces consistency across shared boundaries. PSP-5 implements
-this model concretely: each node owns a set of output files (ownership closure),
-generates a multi-artifact bundle, and must pass multi-stage verification before its
-energy falls below the convergence threshold. Only then is the node committed to the
-Merkle ledger.
+a sheaf structure that enforces consistency across shared boundaries. The system 
+establishes the following concrete mechanics: each node owns a set
+of output files (ownership closure), generates a multi-artifact bundle, and must
+pass multi-stage verification before its energy falls below the convergence
+threshold. Only then is the node committed to the Merkle ledger.
+
+The runtime environment structures execution in two primary ways:
+
+- **Quadratic energy.** Acceptance is gated on the quadratic residual energy
+  :math:`V(x) = \sum_{e} w_e \lVert r_e \rVert^2` (see `Lyapunov Energy`_ below).
+- **Mutable work graph.** Rather than walking a precomputed topological order, a
+  closed-loop scheduler re-evaluates a dependency-aware ready queue each round and
+  may requeue, split, insert, or replan nodes as verifier evidence arrives. 
+  Each individual graph *revision* stays acyclic.
+  Node execution is currently sequential. Bounded parallelism (a worker
+  pool with file/interface/toolchain leases) is planned for a future release.
+
+The core concepts of the control system — ownership closure, typed
+artifact bundles, the verifier profiles, node classes, and the Merkle ledger —
+are described below.
 
 .. graphviz::
    :align: center
@@ -80,10 +99,15 @@ Merkle ledger.
    }
 
 
-The Control Loop (PSP-5 Implementation)
----------------------------------------
+The Control Loop
+----------------
 
-The SRBN control loop as implemented by PSP-5 executes seven phases for each task:
+Detection and planning run once at the start; the remaining phases run **per node
+inside the closed loop**. The scheduler re-evaluates the mutable work graph
+each round, picks the next ready node, and runs Generation → Verification →
+Convergence for it. A node that fails to converge can trigger a graph repair
+(requeue, split, insert interface, or replan a subgraph) and be re-picked on a
+later round, so these phases are *not* a single topological pass:
 
 .. list-table::
    :header-rows: 1
@@ -114,89 +138,173 @@ The SRBN control loop as implemented by PSP-5 executes seven phases for each tas
        written transactionally.
    * - 4
      - **Verification**
-     - Compute five energy components: V_syn (LSP diagnostics), V_str (contract
-       violations), V_log (test failures), V_boot (init/build exit codes), and V_sheaf
-       (cross-node consistency). Total energy is V(x).
+     - Compute five energy components: :math:`V_{syn}` (LSP diagnostics),
+       :math:`V_{str}` (contract violations), :math:`V_{log}` (test failures),
+       :math:`V_{boot}` (init/build exit codes), and :math:`V_{sheaf}`
+       (cross-node consistency). Total energy is :math:`V(x)`.
    * - 5
      - **Convergence**
-     - If V(x) > epsilon, generate a grounded correction prompt containing the specific
-       error messages and retry. Bounded by ``RetryPolicy`` per error type.
+     - If :math:`V(x) > \varepsilon`, generate a grounded correction prompt
+       containing the specific error messages and retry. Bounded by
+       ``RetryPolicy`` per error type.
    * - 6
      - **Sheaf Validation**
-     - After all nodes converge individually, run cross-node consistency checks.
-       Validates import paths, shared type signatures, and interface-seal digests.
+     - Cross-node consistency checks. A per-node sheaf pre-check runs as each node
+       commits, and a full validation runs when the ready queue settles. Validates
+       import paths, shared type signatures, and interface-seal digests.
    * - 7
      - **Commit & Outcome**
      - Record each node's terminal state in the Merkle ledger. Nodes that converge
-       (V(x) ≤ ε) are committed as ``Completed``; nodes whose retries are exhausted
-       are recorded as ``Escalated``. After all nodes are processed, the orchestrator
-       derives a ``SessionOutcome`` from completed/escalated counts: ``Success`` (all
-       completed), ``PartialSuccess`` (some escalated), or ``Failed`` (none completed).
-       Emit ``Complete`` event with the derived outcome.
+       (:math:`V(x) \leq \varepsilon`) are committed as ``Completed``; nodes whose retries are exhausted
+       are recorded as ``Escalated``. When the work graph settles (no node is
+       ready), a goal-completion gate may amend the plan or stop; the orchestrator
+       then derives a ``SessionOutcome`` from completed/escalated counts:
+       ``Success`` (all completed), ``PartialSuccess`` (some escalated), or
+       ``Failed`` (none completed), and emits a ``Complete`` event.
 
 
 Lyapunov Energy
 ---------------
 
 The stability of generated code is measured using a Lyapunov energy function, adapted
-from the paper's sheaf-theoretic formulation into five concrete verification barriers:
+from the paper's sheaf-theoretic formulation into concrete verification barriers. The
+system evaluates a canonical **quadratic residual energy**: each sensor :math:`e`
+emits a residual with a non-negative magnitude :math:`r_e(x)`, and the energy is a weighted
+sum of their squares.
 
-.. admonition:: Energy Formula
-   :class: important
+Let :math:`\mathcal{E}` be the set of active sensors monitoring the system. For a proposed
+state :math:`x`, the total Lyapunov energy :math:`V(x)` is defined by the quadratic form:
 
-   .. math::
+.. math::
 
-      V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
+   V(x) = \sum_{e \in \mathcal{E}} w_e \, \lVert r_e(x) \rVert^2
 
-   Default weights: alpha = 1.0, beta = 0.5, gamma = 2.0
+where :math:`w_e > 0` represents the positive weight assigned to the residual class of
+sensor :math:`e`. 
+
+The five component readouts :math:`V_{syn}`, :math:`V_{str}`, :math:`V_{log}`,
+:math:`V_{boot}`, and :math:`V_{sheaf}` are **derived rollups** of this same energy,
+grouped by component type, such that the total is the sum of the rollups:
+
+.. math::
+
+   V(x) = V_{\text{syn}} + V_{\text{str}} + V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+
+In this formulation, the rollups themselves carry the squared, weighted
+residual contributions:
+
+.. math::
+
+   V_{\text{comp}} = \sum_{e \in \text{comp}} w_e \, \lVert r_e(x) \rVert^2
+
+There is no secondary :math:`\alpha/\beta/\gamma` aggregation pass. The legacy
+``--energy-weights "alpha,beta,gamma"`` flag is parsed and folded proportionally into the
+individual residual weights :math:`w_e` relative to reference defaults (where
+:math:`\text{Syn}_{\text{default}} = 1.0`, :math:`\text{Str}_{\text{default}} = 0.5`,
+and :math:`\text{Log}_{\text{default}} = 2.0`), leaving the core mathematical engine as a
+pure sum of pre-weighted squares.
 
 Components
 ~~~~~~~~~~
+
+We enumerate the five component categories and the specific residual classes mapped
+to them from the `perspt-coding` domain package:
 
 .. list-table::
    :header-rows: 1
    :widths: 15 25 60
 
    * - Component
-     - Source
-     - Description
+     - Mapped Residual Classes (Weights)
+     - Operational Semantics
    * - **V_syn**
-     - LSP Diagnostics
-     - Count of errors and warnings from the language server (``rust-analyzer``, ``ty``,
-       ``pyright``, ``typescript-language-server``, ``gopls``).
+     - * ``Syntax`` (weight: 4.0)
+       * ``Type`` (weight: 3.0)
+       * ``Build`` (weight: 3.0)
+     - Captures syntax errors, build-time compilation failures, and LSP diagnostic warnings.
+       Compiler warnings or type-check diagnostics produce residuals of class ``Type``,
+       where the magnitude is the raw diagnostic count. A build failure raises a blocking
+       residual of class ``Build``.
    * - **V_str**
-     - Contract Verification
-     - Violations of ``BehavioralContract`` constraints: interface signatures, invariants,
-       and forbidden patterns.
+     - * ``ImportGraph`` (weight: 2.0)
+       * ``SymbolMismatch`` (weight: 2.0)
+       * ``InterfaceMismatch`` (weight: 2.5)
+       * ``OwnershipViolation`` (weight: 2.0)
+       * ``Policy`` (weight: 1.0)
+       * ``Dependency`` (weight: 1.5)
+       * ``Manifest`` (weight: 1.5)
+       * ``Format`` (weight: 0.25)
+     - Measures structural contract adherence. If a required symbol defined by a node's public
+       interface signature is absent from the generated output files, the ``GoalPresence`` sensor
+       registers a blocking ``SymbolMismatch`` residual, preventing convergence. Policy and format
+       irregularities are likewise squared into this component.
    * - **V_log**
-     - Test Failures
-     - Weighted sum of test failures. Critical tests carry weight 10, high-priority 3,
-       low-priority 1. Computed via pytest or ``cargo test``.
+     - * ``TestFailure`` (weight: 2.0)
+       * ``Runtime`` (weight: 2.0)
+       * ``Regression`` (weight: 3.0)
+     - Evaluates behavioral outcomes. Unit test failures yield a ``TestFailure`` residual with a
+       magnitude matching the count of failing test cases. Post-build runtime smoke probes detect
+       process crashes, tracebacks, or numeric anomalies, adding a ``Runtime`` residual.
    * - **V_boot**
-     - Bootstrap Commands
-     - Non-zero exit codes from init commands (``uv init --lib``, ``cargo init``),
-       build commands, and dependency installs.
+     - * ``SensorUnavailable`` (weight: 1.0)
+       * ``ToolFailure`` (weight: 1.0)
+     - Registers system infrastructure state. If a required sensor (e.g., an LSP server or
+       test runner) is degraded or unavailable, it raises a ``SensorUnavailable`` residual,
+       forcing the energy high so the system knows its stability status is indeterminate.
    * - **V_sheaf**
-     - Cross-Node Consistency
-     - Failures from sheaf validators: import-path resolution, shared-type agreement,
-       and interface-seal digest mismatches.
+     - * ``SheafInconsistency`` (weight: 2.0)
+     - Evaluates global structural consistency across nodes. Cross-node import/dependency
+       mismatches or signature differences raise a ``SheafInconsistency`` residual.
 
 Convergence Criterion
 ~~~~~~~~~~~~~~~~~~~~~
 
-The system is considered stable when:
+The system is considered stable if and only if the candidate state satisfies:
 
 .. math::
 
    V(x) \leq \varepsilon
 
-Default: epsilon = 0.10. Configurable via ``--stability-threshold``.
+where :math:`\varepsilon` is the stability threshold (default :math:`\varepsilon = 0.10`), configurable
+via the ``--stability-threshold`` CLI argument. If the state is not stable, the accept-gate
+evaluates descent. A state :math:`x` can be provisionally accepted during convergence if:
+
+.. math::
+
+   V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
+
+where :math:`x_{\text{best}}` is the best previously accepted state, and :math:`\rho_{\text{gate}}`
+is the minimum descent gate (default :math:`0.50`), ensuring non-trivial progress.
+
+Spectral Diagnostic (planned)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system supports an energy-slope constant :math:`\mu = 2\,\lambda_{\min}^{+}(A)`
+— twice the algebraic connectivity (Fiedler value) of the verification graph
+built from the quadratic energy :math:`V(x)=x^{\top}Ax`. It measures how
+strongly the verifier ensemble drives the code toward consensus, and its
+sensitivity to a candidate verifier edge distinguishes an *independent* verifier
+(which raises the spectral gap) from a *redundant* one. A companion measure,
+:math:`\rho_{\text{eff}}`, captures effective verifier independence from observed
+miss correlations.
+
+.. note::
+
+   ``mu`` and :math:`\rho_{\text{eff}}` are **diagnostics, not acceptance-gate
+   inputs** — by design they are computed off the critical path and never block a
+   node. The eigensolver and independence math are **implemented in
+   ``perspt-sdk``** (``spectral::VerificationGraph``, ``independence::compute``)
+   but are **not yet wired into the live agent** — the orchestrator tags each
+   residual with its verifier route but does not yet assemble the verification
+   graph or emit ``mu`` / :math:`\rho_{\text{eff}}`. This represents a planned
+   enhancement (see the references section under PSP-8 for further architectural
+   specifications).
 
 
 Node Classes
 ------------
 
-PSP-5 introduces three node classes that govern execution order and verification:
+The system utilizes three node classes that govern execution order and verification:
 
 .. list-table::
    :header-rows: 1
@@ -241,26 +349,26 @@ SRBN uses four specialized model tiers. Each tier can be configured independentl
      - Default Model
    * - **Architect**
      - Deep reasoning, task decomposition, DAG planning
-     - ``gemini-pro-latest``
+     - ``gemini-3.1-pro``
    * - **Actuator**
      - Code generation, artifact bundle emission
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
    * - **Verifier**
      - LSP diagnostics, contract checking, energy computation
-     - ``gemini-pro-latest``
+     - ``gemini-3.1-pro``
    * - **Speculator**
      - Fast lookahead, provisional branch prediction
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
 
 Configure per-tier models via CLI:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
-     --speculator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
+     --speculator-model gemini-3.5-flash \
      "Build a REST API"
 
 Each tier also supports a fallback model (``--architect-fallback-model``, etc.).
@@ -328,7 +436,7 @@ legacy ``extract_all_code_blocks_from_response()`` fallback. Each layer returns 
      - Attempt to parse the response as a structured JSON artifact bundle.
    * - **D (Tolerant Recovery)**
      - Recognize ``### File:``, ``File:``, and ``Diff:`` headings to extract
-       structured content. Never invents filenames — unnamed blocks produce ``None``.
+       structured content. Never invents filenames - unnamed blocks produce ``None``.
    * - **E (Semantic Validation)**
      - Plugin-driven ownership closure, ``legal_support_files()`` checks,
        ``dependency_command_policy()`` enforcement.
@@ -349,7 +457,7 @@ the correction loop a dedicated signal for infrastructure problems.
 Sheaf Pre-Check
 ~~~~~~~~~~~~~~~
 
-After a node converges (V(x) ≤ ε) but before the full sheaf validation pass, a fast
+After a node converges (:math:`V(x) \leq \varepsilon`) but before the full sheaf validation pass, a fast
 structural pre-check verifies that output artifacts declare consistent imports and
 exports with the ownership manifest. If the pre-check fails, the node re-enters
 ``step_converge()`` with sheaf-specific evidence. A retry guard (max 1 sheaf pre-check
@@ -375,12 +483,12 @@ Correction Telemetry
 
 Every correction attempt is recorded as a ``CorrectionAttemptRow`` in the DuckDB store:
 
-- ``parse_state`` — which ``ParseResultState`` was returned
-- ``retry_classification`` — how the failure was classified
-- ``response_fingerprint`` — hash of the raw LLM response
-- ``response_length`` — byte length for detecting degenerate responses
-- ``energy_json`` — energy components snapshot after verification
-- ``accepted`` / ``rejection_reason`` — whether the attempt was committed
+- ``parse_state`` - which ``ParseResultState`` was returned
+- ``retry_classification`` - how the failure was classified
+- ``response_fingerprint`` - hash of the raw LLM response
+- ``response_length`` - byte length for detecting degenerate responses
+- ``energy_json`` - energy components snapshot after verification
+- ``accepted`` / ``rejection_reason`` - whether the attempt was committed
 
 Additionally, ``srbn_step_records`` track per-node execution steps (speculate, verify,
 converge, sheaf_validate, commit) with timing, energy snapshots, and attempt counts.
@@ -465,9 +573,9 @@ The Actuator emits a JSON artifact bundle for each node:
 
 Operations:
 
-- **write** — Create or overwrite a file with the given content
-- **diff** — Apply a unified diff patch to an existing file
-- **command** — Execute a shell command (validated by policy engine)
+- **write** - Create or overwrite a file with the given content
+- **diff** - Apply a unified diff patch to an existing file
+- **command** - Execute a shell command (validated by policy engine)
 
 All artifacts are applied transactionally. If any operation fails, the entire
 bundle is rolled back.
@@ -533,11 +641,11 @@ Merkle Ledger
 
 All changes are recorded in a DuckDB-backed Merkle ledger:
 
-- **Integrity** — Each commit has a cryptographic hash chaining to its parent
-- **Rollback** — Revert to any previous state via ``perspt ledger --rollback``
-- **Resume** — ``perspt resume`` rehydrates session state including energy history,
+- **Integrity** - Each commit has a cryptographic hash chaining to its parent
+- **Rollback** - Revert to any previous state via ``perspt ledger --rollback``
+- **Resume** - ``perspt resume`` rehydrates session state including energy history,
   retry counts, and escalation reports
-- **Audit** — Complete trail of AI-generated changes with energy breakdowns
+- **Audit** - Complete trail of AI-generated changes with energy breakdowns
 
 .. code-block:: bash
 

@@ -3,8 +3,8 @@
 Basic Usage
 ===========
 
-Perspt offers two interactive modes: the **TUI** (rich terminal UI) and
-**simple-chat** (plain-text streaming).
+Perspt offers three primary modes of interaction: the **TUI** (rich interactive terminal UI),
+**simple-chat** (plain-text streaming for pipeline integration), and **Agent** (self-stabilizing autonomous multi-agent coding workflows).
 
 Launching the TUI
 ------------------
@@ -15,10 +15,10 @@ Launching the TUI
    perspt
 
    # Explicit model (provider comes from config or env detection)
-   perspt chat --model claude-sonnet-4-20250514
+   perspt chat --model claude-fable
 
    # Use a specific config file
-   perspt --config ./config.toml chat --model gpt-4.1
+   perspt --config ./config.toml chat --model gpt-5.5
 
 The TUI provides:
 
@@ -102,6 +102,17 @@ For a minimal text interface suitable for piping and logging:
 Type your message, press Enter. Responses stream to stdout. Type ``exit`` or
 press ``Ctrl+D`` to quit.
 
+Autonomous Agent Mode
+---------------------
+
+For complex software engineering and coding jobs that require self-stabilizing, multi-file edits:
+
+.. code-block:: bash
+
+   perspt agent "Implement a parsing logic for custom CSV formats in src/csv.rs"
+
+This starts the multi-agent orchestration loop. The system automatically plans, executes, and verifies the changes using local verification commands. You can specify custom models and configure validation parameters to match your codebase. Refer to :doc:`agent-mode` for details.
+
 
 Provider Auto-Detection
 -----------------------
@@ -117,27 +128,27 @@ Perspt checks environment variables in this priority order:
      - Default Model
    * - ``ANTHROPIC_API_KEY``
      - Anthropic
-     - ``claude-sonnet-4-20250514``
+     - ``claude-fable``
    * - ``OPENAI_API_KEY``
      - OpenAI
-     - ``gpt-4.1``
+     - ``gpt-5-mini``
    * - ``GEMINI_API_KEY``
      - Gemini
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
    * - ``GROQ_API_KEY``
      - Groq
-     - ``llama-3.3-70b-versatile``
+     - ``llama-3.3-70b-specdec``
    * - ``COHERE_API_KEY``
      - Cohere
-     - ``command-r-plus``
+     - ``command-a-plus``
    * - ``XAI_API_KEY``
      - xAI
-     - ``grok-3-mini-fast``
+     - ``grok-4``
    * - ``DEEPSEEK_API_KEY``
      - DeepSeek
-     - ``deepseek-chat``
+     - ``deepseek-v4``
    * - *(none)*
      - Ollama (local)
-     - ``llama3.2``
+     - ``llama3.3``
 
 See :doc:`providers` for full provider details.

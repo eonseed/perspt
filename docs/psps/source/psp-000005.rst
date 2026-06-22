@@ -558,6 +558,15 @@ The runtime SHALL implement the practical energy model:
 
    V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log} + V_{boot} + V_{sheaf}
 
+.. note:: Superseded by PSP-8 — the energy is now quadratic.
+
+   This **linear** aggregation is the original proposal. As of **PSP-8
+   (System 2)** the canonical, implemented energy is the **quadratic residual
+   energy** :math:`V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2`. The five
+   terms above are now *derived rollups* of this single energy (no separate
+   :math:`\alpha/\beta/\gamma` pass); ``--energy-weights`` scales the
+   per-component weights proportionally. See :doc:`psp-000008`.
+
 With the following concrete meanings:
 
 * :math:`V_{syn}`: LSP and compiler diagnostics

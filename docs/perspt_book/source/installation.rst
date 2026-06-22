@@ -3,137 +3,143 @@
 Installation
 ============
 
+To deploy and execute Perspt, the environment must satisfy the specified system requirements. This document outlines the procedures for building the application, configuring provider keys, and setting up domain-specific tools.
+
 System Requirements
 -------------------
 
-- **OS**: macOS, Linux, Windows (WSL recommended)
-- **Rust**: 1.75+ (for building from source)
-- **Terminal**: 256-color support recommended
+- **Operating System**: macOS, Linux, or Windows (via Windows Subsystem for Linux).
+- **Rust Toolchain**: Version 1.82.0 or later (required for compilation from source).
+- **Terminal Emulator**: Must support 256-color escape codes and UTF-8 encoding.
 
-Install from Source
--------------------
+Building from Source
+--------------------
+
+To compile the executable from the source repository:
 
 .. code-block:: bash
 
-   # Clone the repository
+   # Clone the source repository
    git clone https://github.com/eonseed/perspt.git
    cd perspt
 
-   # Build in release mode
+   # Compile the project in release mode
    cargo build --release
 
-   # The binary is at target/release/perspt
-   # Optionally, copy to your PATH:
+The compiled binary will be placed at ``target/release/perspt``. To make the command globally accessible, copy the binary to a directory in your system ``PATH``, for example:
+
+.. code-block:: bash
+
    cp target/release/perspt ~/.local/bin/
 
-Install with Cargo
-------------------
+Installing via Cargo
+--------------------
+
+If you possess the Rust toolchain and wish to install directly from the local directory:
 
 .. code-block:: bash
 
    cargo install --path .
 
+Verifying the Installation
+--------------------------
 
-Verify Installation
--------------------
+To verify that the executable is operational, query the system version and help manual:
 
 .. code-block:: bash
 
    perspt --version
-   # perspt 0.5.6
+   # Expected output: perspt 0.6.2
 
    perspt --help
 
+Configuring API Keys
+--------------------
 
-Provider Setup
---------------
+The application requires access to an LLM provider. Set the appropriate API key as an environment variable. The program will automatically detect the provider from the environment:
 
-Set at least one API key:
+.. code-block:: bash
 
-.. tabs::
+   # For Google Gemini
+   export GEMINI_API_KEY="your-api-key"
 
-   .. tab:: Gemini (recommended)
+   # For OpenAI
+   export OPENAI_API_KEY="sk-..."
 
-      .. code-block:: bash
+   # For Anthropic
+   export ANTHROPIC_API_KEY="sk-ant-..."
 
-         export GEMINI_API_KEY="your-key"
+If you are using Ollama for local execution, start the local service. No API key is required:
 
-   .. tab:: OpenAI
+.. code-block:: bash
 
-      .. code-block:: bash
-
-         export OPENAI_API_KEY="sk-xxx"
-
-   .. tab:: Anthropic
-
-      .. code-block:: bash
-
-         export ANTHROPIC_API_KEY="sk-ant-xxx"
-
-   .. tab:: Ollama (local)
-
-      .. code-block:: bash
-
-         # No API key needed
-         ollama serve
-         ollama pull llama3.2
-
-See :doc:`user-guide/providers` for all supported providers.
-
+   ollama serve
+   ollama pull llama3.2
 
 Agent Mode Prerequisites
 ------------------------
 
-For agent mode, install the tool binaries for your target language:
+Autonomous agent execution requires the presence of domain-specific compilers, type checkers, and test runners on the system path.
 
-.. tabs::
+Python Domain
+~~~~~~~~~~~~~
 
-   .. tab:: Python
+The Python adapter requires:
 
-      .. code-block:: bash
+1. **uv**: For dependency management and environment isolation.
+2. **ty**: For static type verification.
+3. **pytest**: For logical assertion testing.
 
-         # uv (package manager + project init)
-         curl -LsSf https://astral.sh/uv/install.sh | sh
-
-         # ty (type checker / LSP)
-         pip install ty
-
-         # pytest (test runner)
-         pip install pytest
-
-   .. tab:: Rust
-
-      .. code-block:: bash
-
-         # Rust toolchain
-         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-         # rust-analyzer (LSP)
-         rustup component add rust-analyzer
-
-   .. tab:: JavaScript
-
-      .. code-block:: bash
-
-         # Node.js and npm
-         # (install via your package manager)
-
-         # TypeScript (LSP)
-         npm install -g typescript
-
-
-Optional: Documentation Build
-------------------------------
-
-To build the documentation locally:
+Install these dependencies as follows:
 
 .. code-block:: bash
 
-   # Install uv (Python package manager)
+   # Install the uv package manager
    curl -LsSf https://astral.sh/uv/install.sh | sh
 
-   # Build HTML docs
-   cd docs/perspt_book && uv run make html
+   # Install verification tools
+   pip install ty pytest
 
-   # Open in browser
-   open docs/perspt_book/build/html/index.html
+Rust Domain
+~~~~~~~~~~~
+
+The Rust adapter requires:
+
+1. **rustup**: For compiler toolchain management.
+2. **rust-analyzer**: For language server diagnostics.
+
+Install these components as follows:
+
+.. code-block:: bash
+
+   # Install the Rust compiler and manager
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+   # Install the LSP component
+   rustup component add rust-analyzer
+
+JavaScript/TypeScript Domain
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The TypeScript adapter requires Node.js and the TypeScript compiler:
+
+.. code-block:: bash
+
+   # Install Node.js via your system package manager, then install the compiler
+   npm install -g typescript
+
+Building the Documentation
+--------------------------
+
+To compile the Sphinx-based documentation books locally:
+
+.. code-block:: bash
+
+   # Ensure the uv tool is installed, then build the HTML output
+   cd docs/perspt_book
+   uv run make html
+
+   # To compile to a PDF file (requires a LaTeX distribution like TeX Live)
+   uv run make latexpdf
+
+The generated HTML files are located at ``docs/perspt_book/build/html/index.html``, and the PDF is placed at ``docs/perspt_book/build/latex/perspt.pdf``.

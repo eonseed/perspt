@@ -9,9 +9,9 @@ Overview
 --------
 
 Agent mode lets Perspt plan, write, test, and commit multi-file projects
-autonomously. The PSP-5 runtime decomposes tasks into a directed acyclic graph
-(DAG) of nodes, each owning specific output files, verified by real LSP
-diagnostics and test runners.
+autonomously. The SRBN runtime (extended by the dependency-aware mutable work graph)
+decomposes tasks into a graph of nodes — each revision acyclic — with each node
+owning specific output files, verified by real LSP diagnostics and test runners.
 
 .. admonition:: Experimental Feature
    :class: note
@@ -41,8 +41,8 @@ Basic Usage
 
    # Use specific models per tier
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      -w ./project "Build an ETL pipeline"
 
 
@@ -65,7 +65,7 @@ Step 2: Watch the SRBN Loop
 
 The agent proceeds through the PSP-5 phases:
 
-**Detection** — Perspt identifies Python from the task description and selects
+**Detection** - Perspt identifies Python from the task description and selects
 the ``python`` plugin:
 
 .. code-block:: text
@@ -73,7 +73,7 @@ the ``python`` plugin:
    [detect] Workspace: greenfield
    [detect] Plugin: python (LSP: ty, tests: pytest, init: uv init --lib)
 
-**Planning** — The Architect decomposes the task into a DAG:
+**Planning** - The Architect decomposes the task into a DAG:
 
 .. code-block:: text
 
@@ -90,12 +90,18 @@ Each node owns specific output files (ownership closure):
 - node-3: ``src/main.py``
 - node-4: ``tests/test_calculator.py``
 
-**Execution** — Nodes execute in topological order. For each node:
+**Execution** - A closed-loop scheduler (utilizing the mutable work graph) re-evaluates
+the graph each round and runs the next *ready* node from a dependency-aware
+queue — not a precomputed topological walk. Reworked nodes are re-picked and
+inserted nodes are executed on later rounds. For each node:
 
 1. Actuator generates a multi-artifact bundle (writes, diffs, commands)
 2. Files are applied transactionally
 3. LSP diagnostics run (V_syn), contracts check (V_str), tests run (V_log)
 4. Bootstrap commands check (V_boot)
+
+Nodes run sequentially (one per round) in the current release; bounded
+parallelism is planned for a future version.
 
 .. code-block:: text
 
@@ -117,7 +123,7 @@ In interactive mode, the review modal presents grouped diffs:
 .. code-block:: text
 
    Review Node 2: Create calculator module
-   ────────────────────────────────────────
+   ----------------------------------------
    Bundle: 2 created, 0 modified
    + src/calculator/__init__.py  [create] (3 lines)
    + src/calculator/core.py      [create] (45 lines)
@@ -129,11 +135,11 @@ In interactive mode, the review modal presents grouped diffs:
 
 Actions:
 
-- **y** — Approve and commit to ledger
-- **n** — Reject and re-generate from scratch
-- **c** — Send correction feedback to the agent
-- **e** — Open files in your editor, then return
-- **d** — Toggle full unified diff view
+- **y** - Approve and commit to ledger
+- **n** - Reject and re-generate from scratch
+- **c** - Send correction feedback to the agent
+- **e** - Open files in your editor, then return
+- **d** - Toggle full unified diff view
 
 Step 4: Inspect Results
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -160,10 +166,10 @@ Assign specialized models to each SRBN phase:
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
-     --speculator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
+     --speculator-model gemini-3.5-flash \
      -w ./project "Build a web server"
 
 .. list-table::
@@ -279,13 +285,13 @@ LLM Logging
 Best Practices
 --------------
 
-1. **Start with a clear task description** — Include language, package structure,
+1. **Start with a clear task description** - Include language, package structure,
    and testing requirements in the prompt
-2. **Use workspace directories** — Always specify ``-w <dir>`` for clarity
-3. **Set cost limits** — Use ``--max-cost`` to prevent runaway spending
-4. **Review before committing** — In interactive mode, inspect diffs carefully
-5. **Use per-tier models** — Match model capabilities to task complexity
-6. **Track changes** — Use ``perspt ledger`` to review and rollback
+2. **Use workspace directories** - Always specify ``-w <dir>`` for clarity
+3. **Set cost limits** - Use ``--max-cost`` to prevent runaway spending
+4. **Review before committing** - In interactive mode, inspect diffs carefully
+5. **Use per-tier models** - Match model capabilities to task complexity
+6. **Track changes** - Use ``perspt ledger`` to review and rollback
 
 
 Troubleshooting
@@ -311,6 +317,6 @@ Troubleshooting
 See Also
 --------
 
-- :doc:`headless-mode` — Fully autonomous operation
-- :doc:`../concepts/srbn-architecture` — SRBN technical details
-- :doc:`../howto/agent-options` — Full CLI reference
+- :doc:`headless-mode` - Fully autonomous operation
+- :doc:`../concepts/srbn-architecture` - SRBN technical details
+- :doc:`../howto/agent-options` - Full CLI reference

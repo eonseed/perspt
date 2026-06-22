@@ -1,6 +1,6 @@
 [package]
 name = "perspt-tui"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0"
@@ -16,12 +16,12 @@ default = []
 bundled = ["perspt-store/bundled", "perspt-agent/bundled"]
 
 [dependencies]
-perspt-core = { version = "0.6.1", path = "../perspt-core" }
-perspt-agent = { version = "0.6.1", path = "../perspt-agent" }
-perspt-store = { version = "0.6.1", path = "../perspt-store" }
+perspt-core = { version = "0.6.2", path = "../perspt-core" }
+perspt-agent = { version = "0.6.2", path = "../perspt-agent" }
+perspt-store = { version = "0.6.2", path = "../perspt-store" }
 
 # UI components
-ratatui = "0.30"
+ratatui = "0.30.2"
 crossterm = { version = "0.29", features = ["event-stream"] }
 pulldown-cmark = "0.13"
 
@@ -31,7 +31,7 @@ tokio-stream = "0.1"
 futures = "0.3"
 
 # Rich Input
-tui-textarea = "0.7"
+tui-textarea = { package = "tui-textarea-2", version = "0.11" }
 
 # Diff Computation
 similar = "3.0"

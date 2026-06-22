@@ -121,5 +121,5 @@ Getting Help
 
 For more details, see:
 
-- :doc:`../reference/cli-reference` — Full CLI reference
-- :doc:`../reference/troubleshooting` — Advanced troubleshooting
+- :doc:`../reference/cli-reference` - Full CLI reference
+- :doc:`../reference/troubleshooting` - Advanced troubleshooting

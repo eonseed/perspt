@@ -202,6 +202,17 @@ The SRBN energy model from PSP 000005 remains:
 
    V(x) = \alpha\, V_{syn} + \beta\, V_{str} + \gamma\, V_{log} + V_{boot} + V_{sheaf}
 
+.. note:: Superseded by PSP-8 — the energy is now quadratic.
+
+   This PSP still uses the **linear** notation, but as of **PSP-8 (System 2)**
+   the canonical, implemented energy is the **quadratic residual energy**
+   :math:`V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2`. The components are now
+   *derived rollups* of this single energy (no separate
+   :math:`\alpha/\beta/\gamma` pass), and ``--energy-weights`` scales the
+   per-component weights proportionally. The :math:`V_{boot}` activation goal
+   below is realised by emitting typed ``SensorUnavailable``/``ToolFailure``
+   residuals into the boot component. See :doc:`psp-000008`.
+
 This PSP does not redefine the equation. It addresses two current implementation gaps:
 
 * :math:`V_{boot}` is currently always 0.0 in project mode's ``step_verify``. (Solo mode computes :math:`V_{boot}` from ``run_script_check()``, but this signal is not available in the multi-node orchestrator.) The implementation SHALL compute :math:`V_{boot}` from bootstrap and dependency-tooling failures that ``step_verify`` already detects via plugin verification (missing crates, ``cargo fetch`` failures, missing Python modules). These failures are currently folded into :math:`V_{syn}`.

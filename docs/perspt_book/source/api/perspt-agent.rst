@@ -15,24 +15,24 @@ Modules
    * - Module
      - Description
    * - ``orchestrator``
-     - ``SRBNOrchestrator`` — petgraph-based DAG execution with PSP-5 lifecycle
+     - ``SRBNOrchestrator`` - petgraph-based DAG execution with PSP-5 lifecycle
    * - ``agent``
      - ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
    * - ``tools``
-     - ``AgentTools`` — 10+ filesystem and shell tools (read_file, write_file, apply_diff, run_command, search_code, list_files, apply_patch, sed_replace, awk_filter, diff_files)
+     - ``AgentTools`` - 10+ filesystem and shell tools (read_file, write_file, apply_diff, run_command, search_code, list_files, apply_patch, sed_replace, awk_filter, diff_files)
    * - ``ledger``
-     - ``MerkleLedger`` — Content-addressed commit tracking over DuckDB
+     - ``MerkleLedger`` - Content-addressed commit tracking over DuckDB
    * - ``lsp``
-     - ``LspClient`` — JSON-RPC stdio client for rust-analyzer, ty, pyright, etc.
+     - ``LspClient`` - JSON-RPC stdio client for rust-analyzer, ty, pyright, etc.
    * - ``test_runner``
      - ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
    * - ``context_retriever``
-     - ``ContextRetriever`` — Workspace search with byte budget limits
+     - ``ContextRetriever`` - Workspace search with byte budget limits
 
 Key Traits
 ----------
 
-**Agent** — Per-tier LLM interaction:
+**Agent** - Per-tier LLM interaction:
 
 .. code-block:: rust
 
@@ -46,7 +46,7 @@ Key Traits
        fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
    }
 
-**TestRunnerTrait** — Plugin-driven verification:
+**TestRunnerTrait** - Plugin-driven verification:
 
 .. code-block:: rust
 

@@ -58,9 +58,9 @@ Launch the real-time web monitoring dashboard.
 
    perspt dashboard [--port PORT] [--bind ADDR] [--db-path PATH]
 
-- ``--port`` — HTTP port (default ``3000``)
-- ``--bind`` — Bind address (default ``127.0.0.1``)
-- ``--db-path`` — Path to DuckDB database file (default: platform data directory)
+- ``--port`` - HTTP port (default ``3000``)
+- ``--bind`` - Bind address (default ``127.0.0.1``)
+- ``--db-path`` - Path to DuckDB database file (default: platform data directory)
 
 See :doc:`../howto/dashboard-setup` for configuration details.
 
@@ -74,8 +74,8 @@ Run the SRBN autonomous coding agent.
 
    perspt agent [OPTIONS] <TASK>
 
-- ``--dashboard`` — Start the web monitoring dashboard alongside the agent
-- ``--dashboard-port <PORT>`` — Port for the embedded dashboard (default ``3000``)
+- ``--dashboard`` - Start the web monitoring dashboard alongside the agent
+- ``--dashboard-port <PORT>`` - Port for the embedded dashboard (default ``3000``)
 
 See :doc:`../howto/agent-options` for full agent options.
 
@@ -89,8 +89,8 @@ Initialize project memory and policy rules.
 
    perspt init [--memory] [--rules]
 
-- ``--memory`` — Create the ``PERSPT.md`` project memory file
-- ``--rules`` — Create default Starlark policy rules
+- ``--memory`` - Create the ``PERSPT.md`` project memory file
+- ``--rules`` - Create default Starlark policy rules
 
 
 ``config``
@@ -102,9 +102,9 @@ View or edit Perspt configuration.
 
    perspt config [--show] [--set KEY=VALUE] [--edit]
 
-- ``--show`` — Print the effective config (``api_key`` masked)
-- ``--set KEY=VALUE`` — Set a value with a structured TOML write
-- ``--edit`` — Open the config file in ``$EDITOR``
+- ``--show`` - Print the effective config (``api_key`` masked)
+- ``--set KEY=VALUE`` - Set a value with a structured TOML write
+- ``--edit`` - Open the config file in ``$EDITOR``
 
 
 ``ledger``

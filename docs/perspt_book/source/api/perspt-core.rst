@@ -33,7 +33,7 @@ Modules
 Key Types
 ---------
 
-**SRBNNode** — The core DAG node:
+**SRBNNode** - The core DAG node:
 
 .. code-block:: rust
 
@@ -54,7 +54,7 @@ Key Types
        pub interface_seal_hash: Option<String>,
    }
 
-**EnergyComponents** — Lyapunov energy decomposition:
+**EnergyComponents** - Lyapunov energy decomposition:
 
 .. code-block:: rust
 
@@ -66,7 +66,7 @@ Key Types
        pub v_sheaf: f32,  // Cross-node validation
    }
 
-**AgentEvent** — 30+ lifecycle events:
+**AgentEvent** - 30+ lifecycle events:
 
 ``TaskStatusChanged``, ``PlanGenerated``, ``PlanReady``, ``NodeSelected``,
 ``BundleApplied``, ``VerificationComplete``, ``SheafValidationComplete``,

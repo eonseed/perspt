@@ -18,8 +18,8 @@ Running the Agent
    export GEMINI_API_KEY="your-key"
 
    perspt agent --yes -w /tmp/csv2json \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
      "Create a Rust CLI tool called csv2json that:
       1. Reads a CSV file from a path argument
       2. Converts each row to a JSON object
@@ -68,5 +68,5 @@ Key Observations
 See Also
 --------
 
-- :doc:`agent-mode` — Agent mode tutorial
-- :doc:`example-python-etl` — Python project example
+- :doc:`agent-mode` - Agent mode tutorial
+- :doc:`example-python-etl` - Python project example

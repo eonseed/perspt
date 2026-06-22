@@ -8,7 +8,7 @@
 # Or point at it explicitly: `perspt --config ./config.toml chat`
 # All fields are optional; missing values fall back to environment detection.
 
-# Provider id: openai, anthropic, gemini, groq, cohere, ollama, xai, deepseek
+# Provider id: openai, anthropic, gemini, vertex, groq, cohere, ollama, xai, deepseek
 provider = "openai"
 
 # Default model for chat / simple-chat. Custom OpenAI-compatible names
@@ -22,6 +22,14 @@ model = "gpt-4o-mini"
 # Optional endpoint override for OpenAI-compatible or local servers.
 # You can also set OPENAI_BASE_URL / OLLAMA_BASE_URL etc. in the environment.
 # base_url = "http://localhost:8000/v1"
+
+# Vertex AI (Google Agent Platform) uses Google Cloud ADC by default.
+# Configure provider/model and either set these fields or use
+# VERTEX_PROJECT_ID / VERTEX_LOCATION in the environment.
+# provider = "vertex"
+# model = "vertex::<model-id>"
+# vertex_project_id = "<gcp-project-id>"
+# vertex_location = "<vertex-location>"
 
 # Optional per-tier model overrides for `perspt agent`.
 # architect_model = "gpt-4o"

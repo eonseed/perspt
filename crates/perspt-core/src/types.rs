@@ -48,6 +48,32 @@ mod tests {
     use super::ModelTier;
 
     #[test]
+    fn task_type_accepts_common_model_aliases() {
+        use super::TaskType;
+        // The bare "test"/"tests" the model naturally emits must deserialize
+        // (regression: rejecting them forced valid plans to fall back).
+        let t: TaskType = serde_json::from_str("\"test\"").unwrap();
+        assert_eq!(t, TaskType::UnitTest);
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"tests\"").unwrap(),
+            TaskType::UnitTest
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"implementation\"").unwrap(),
+            TaskType::Code
+        );
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"docs\"").unwrap(),
+            TaskType::Documentation
+        );
+        // Canonical snake_case still works.
+        assert_eq!(
+            serde_json::from_str::<TaskType>("\"unit_test\"").unwrap(),
+            TaskType::UnitTest
+        );
+    }
+
+    #[test]
     fn gemini_defaults_use_requested_latest_models() {
         assert_eq!(
             ModelTier::Architect.default_model(),
@@ -724,19 +750,30 @@ pub struct EnergyComponents {
 }
 
 impl EnergyComponents {
-    /// Calculate total energy: V(x) = α*V_syn + β*V_str + γ*V_log + V_boot + V_sheaf
-    pub fn total(&self, contract: &BehavioralContract) -> f32 {
-        contract.alpha() * self.v_syn
-            + contract.beta() * self.v_str
-            + contract.gamma() * self.v_log
-            + self.v_boot
-            + self.v_sheaf
+    /// Total energy `V(x) = Σ_comp V_comp` (PSP-8 System 2).
+    ///
+    /// The five fields are the *derived component rollups* of the single
+    /// canonical quadratic energy `V(x) = Σ_e w_e‖r_e(x)‖²`: each already carries
+    /// its squared, weighted residual contribution (`V_comp = Σ_{e∈comp} w_e‖r_e‖²`),
+    /// so the total is their plain sum. There is no second `α/β/γ` weighting pass —
+    /// those per-component weights are folded into the residual weights `w_e` of
+    /// the [`crate`]'s energy model before the rollups are formed.
+    pub fn total(&self) -> f32 {
+        self.v_syn + self.v_str + self.v_log + self.v_boot + self.v_sheaf
     }
 
-    /// Calculate total energy for Solo Mode (implicit weights = 1.0)
-    /// Used when no BehavioralContract is available
+    /// Deprecated alias for [`EnergyComponents::total`]. The component rollups are
+    /// already weighted, so the `contract` argument is ignored; retained only so
+    /// older call sites keep compiling during the migration.
+    #[deprecated(note = "weights are folded into the residual model; use total()")]
+    pub fn total_weighted(&self, _contract: &BehavioralContract) -> f32 {
+        self.total()
+    }
+
+    /// Total energy for Solo Mode. Identical to [`EnergyComponents::total`] now
+    /// that aggregation carries no separate weights.
     pub fn total_simple(&self) -> f32 {
-        self.v_syn + self.v_str + self.v_log + self.v_boot + self.v_sheaf
+        self.total()
     }
 }
 
@@ -750,16 +787,34 @@ impl EnergyComponents {
 pub enum TaskType {
     /// Implementation code
     #[default]
+    #[serde(
+        alias = "implementation",
+        alias = "impl",
+        alias = "feature",
+        alias = "source"
+    )]
     Code,
     /// Shell command execution (e.g., cargo new, npm init)
+    #[serde(alias = "shell", alias = "scaffold", alias = "setup", alias = "init")]
     Command,
-    /// Unit tests
+    /// Unit tests. Models commonly emit the bare word "test"/"tests", so accept
+    /// those as aliases — rejecting them was forcing valid plans to fail and
+    /// fall back to the deterministic graph.
+    #[serde(
+        alias = "test",
+        alias = "tests",
+        alias = "unittest",
+        alias = "unit-test"
+    )]
     UnitTest,
     /// Integration/E2E tests
+    #[serde(alias = "integration", alias = "e2e", alias = "integration-test")]
     IntegrationTest,
     /// Refactoring existing code
+    #[serde(alias = "refactoring")]
     Refactor,
     /// Documentation
+    #[serde(alias = "docs", alias = "doc")]
     Documentation,
 }
 
@@ -3096,6 +3151,31 @@ pub enum PromptIntent {
     SoloCorrect,
     /// Project name suggestion.
     ProjectNameSuggest,
+    /// Goal-completion verdict: judge whether the user's overall goal is met.
+    GoalCompletionCheck,
+    /// Plan amendment: produce additional tasks to close an unmet goal gap.
+    PlanAmendment,
+}
+
+/// Structured verdict from the goal-completion check (PSP-8 closed loop).
+///
+/// In auto mode, when the work graph settles and the deterministic gate passes,
+/// a verifier-tier model is asked whether the user's overall intent is met. The
+/// verdict drives the controller: `achieved` ends the session; otherwise
+/// `missing` seeds an architect re-plan amendment.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GoalVerdict {
+    /// Whether the user's overall goal is judged fully achieved.
+    pub achieved: bool,
+    /// Aspects of the goal still missing or incomplete.
+    #[serde(default)]
+    pub missing: Vec<String>,
+    /// Suggested next steps to close the gap.
+    #[serde(default)]
+    pub next_steps: Vec<String>,
+    /// Optional one-line rationale for the verdict.
+    #[serde(default)]
+    pub rationale: String,
 }
 
 /// Provenance metadata for a compiled prompt (PSP-7 §5).
@@ -3190,6 +3270,12 @@ pub struct PromptEvidence {
     pub owner_plugin: Option<String>,
     /// Syntactic energy score from the last verification pass.
     pub energy_v_syn: Option<f32>,
+    /// SRBN residual-directed correction instructions (PSP-8 / Paper II),
+    /// pre-formatted, derived from the dominant residual clusters in the
+    /// verifier output. Steers the actuator with specific fixes rather than
+    /// undirected retries.
+    #[serde(default)]
+    pub directed_corrections: Option<String>,
 }
 
 /// Policy decision for a dependency command (PSP-7 §4).

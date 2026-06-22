@@ -712,6 +712,18 @@ impl LanguagePlugin for PythonPlugin {
                     )
                 }
             }
+            Some("pipenv") => {
+                if opts.is_empty_dir || opts.name == "." || opts.name == "./" {
+                    "pipenv install".to_string()
+                } else {
+                    format!(
+                        "mkdir -p {} && cd {} && pipenv install",
+                        opts.name, opts.name
+                    )
+                }
+            }
+            // uv is the default for any other (or unspecified) value — the plugin
+            // owns this fallback, so an unrecognized manager degrades gracefully.
             _ => {
                 // Default to uv --lib for src-layout with build-system
                 if opts.is_empty_dir || opts.name == "." || opts.name == "./" {
@@ -724,6 +736,7 @@ impl LanguagePlugin for PythonPlugin {
         let description = match opts.package_manager.as_deref() {
             Some("poetry") => "Initialize Python project with Poetry",
             Some("pdm") => "Initialize Python project with PDM",
+            Some("pipenv") => "Initialize Python project with Pipenv",
             _ => "Initialize Python project with uv",
         };
         ProjectAction::ExecCommand {

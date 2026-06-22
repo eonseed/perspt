@@ -11,10 +11,10 @@ Assign different models to each SRBN tier:
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
-     --speculator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
+     --speculator-model gemini-3.5-flash \
      -w ./project "Task description"
 
 Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failover:
@@ -22,30 +22,52 @@ Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failove
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --architect-fallback-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --architect-fallback-model gemini-3.5-flash \
      -w ./project "Task"
 
 
 Energy Weights
 --------------
 
-Customize the Lyapunov energy function:
+The single energy that gates acceptance is the **quadratic residual
+energy**
 
 .. math::
 
-   V(x) = \alpha \cdot V_{\text{syn}} + \beta \cdot V_{\text{str}} + \gamma \cdot V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+   V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0,
+
+a weighted sum of *squared* edge residuals. Each sensor (compiler, type checker,
+test oracle, lint, runtime probe, goal-presence) emits a residual with a
+non-negative magnitude :math:`r_e`; the energy model squares and weights it. The
+familiar component readouts :math:`V_{\text{syn}}`, :math:`V_{\text{str}}`,
+:math:`V_{\text{log}}`, :math:`V_{\text{boot}}`, and :math:`V_{\text{sheaf}}` are
+**derived rollups** of this same energy, grouped by component, with
+:math:`V(x) = \sum_{\text{comp}} V_{\text{comp}}` — there is no second weighting
+pass.
+
+The ``--energy-weights "a,b,g"`` flag scales the per-component weights
+(``a`` → syntactic, ``b`` → structural, ``g`` → logic) *proportionally*: the
+default ``1.0,0.5,2.0`` is the identity reference that leaves the model's
+built-in per-class weights untouched, and overrides re-weight relative to it.
 
 .. code-block:: bash
 
-   # Default: alpha=1.0, beta=0.5, gamma=2.0
+   # Default (identity): use the model's built-in per-class weights
    perspt agent --energy-weights "1.0,0.5,2.0" -w . "Task"
 
-   # Prioritize tests (higher gamma)
-   perspt agent --energy-weights "0.5,0.5,3.0" -w . "Add tests"
+   # Prioritize tests (raise the logic-component weight)
+   perspt agent --energy-weights "1.0,0.5,3.0" -w . "Add tests"
 
-   # Prioritize type safety (higher alpha)
-   perspt agent --energy-weights "2.0,1.0,0.5" -w . "Add types"
+   # Prioritize type safety (raise the syntactic-component weight)
+   perspt agent --energy-weights "2.0,0.5,2.0" -w . "Add types"
+
+.. note::
+
+   Because the energy is now quadratic, its scale differs from the old linear
+   form: a clean candidate still has :math:`V = 0`, but a defect with magnitude
+   :math:`r` contributes :math:`w_e r^2` rather than :math:`w_e r`. The stability
+   threshold :math:`\varepsilon` is interpreted against this quadratic scale.
 
 
 Stability Threshold
@@ -135,9 +157,9 @@ Merkle Ledger
 Every stable node is committed to a content-addressed Merkle ledger stored in
 DuckDB. This provides:
 
-- **Auditability** — Full trace of what each node produced
-- **Rollback** — Restore to any point in the session
-- **Resume** — Continue interrupted sessions with verified context
+- **Auditability** - Full trace of what each node produced
+- **Rollback** - Restore to any point in the session
+- **Resume** - Continue interrupted sessions with verified context
 
 .. code-block:: bash
 

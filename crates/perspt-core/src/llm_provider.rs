@@ -7,9 +7,13 @@ use anyhow::{Context, Result};
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
-use genai::resolver::{Endpoint, ProviderConfig, ServiceTargetResolver};
+use genai::resolver::{AuthData, AuthResolver, Endpoint, ProviderConfig, ServiceTargetResolver};
 use genai::Client;
+use genai::ModelIden;
 use genai::ServiceTarget;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, RwLock};
@@ -33,7 +37,12 @@ pub struct ResolvedProvider {
 /// Used as the fallback when no provider is configured. Falls back to a local
 /// Ollama setup when no API keys are present.
 pub fn detect_provider_from_env() -> (&'static str, &'static str) {
-    if std::env::var("GEMINI_API_KEY").is_ok() {
+    if vertex_project_from_env().is_some() {
+        // Google Vertex AI (Agent/AI Platform). Models are namespace-routed as
+        // `vertex::<model>`; auth is an OAuth2 Bearer token from ADC or
+        // VERTEX_API_KEY.
+        ("vertex", "vertex::gemini-2.5-flash")
+    } else if std::env::var("GEMINI_API_KEY").is_ok() {
         ("gemini", "gemini-3.1-flash-lite-preview")
     } else if std::env::var("OPENAI_API_KEY").is_ok() {
         ("openai", "gpt-4o-mini")
@@ -109,9 +118,19 @@ impl GenAIProvider {
             }
         }
 
-        let client = match adapter_kind {
-            Some(adapter_kind) => build_bound_client(adapter_kind, provider_type),
-            None => Client::default(),
+        let is_vertex = provider_type
+            .map(|p| p.eq_ignore_ascii_case("vertex"))
+            .unwrap_or(false);
+
+        let client = if is_vertex {
+            // Vertex AI authenticates with an OAuth2 Bearer token from ADC; no
+            // static API key is required when ADC is configured.
+            build_vertex_client()
+        } else {
+            match adapter_kind {
+                Some(adapter_kind) => build_bound_client(adapter_kind, provider_type),
+                None => Client::default(),
+            }
         };
 
         Ok(Self::from_client(client))
@@ -136,11 +155,6 @@ impl GenAIProvider {
     ) -> Result<(Self, ResolvedProvider)> {
         let (env_provider, env_model) = detect_provider_from_env();
 
-        let provider = config
-            .provider
-            .clone()
-            .unwrap_or_else(|| env_provider.to_string());
-
         let env_model_override = std::env::var("OPENAI_MODEL")
             .or_else(|_| std::env::var("MODEL"))
             .ok();
@@ -151,6 +165,12 @@ impl GenAIProvider {
             .or(env_model_override)
             .unwrap_or_else(|| env_model.to_string());
 
+        let provider = config
+            .provider
+            .clone()
+            .or_else(|| provider_from_model_namespace(&model).map(str::to_string))
+            .unwrap_or_else(|| env_provider.to_string());
+
         // Propagate a configured base URL into the env var that build_bound_client
         // reads, without clobbering an explicit ambient override.
         if let Some(base_url) = config.base_url.as_deref() {
@@ -159,6 +179,10 @@ impl GenAIProvider {
                     std::env::set_var(env_var, base_url);
                 }
             }
+        }
+
+        if provider.eq_ignore_ascii_case("vertex") {
+            configure_vertex_environment(config);
         }
 
         let provider_obj = Self::new_with_config(Some(&provider), config.api_key.as_deref())?;
@@ -443,6 +467,7 @@ impl GenAIProvider {
             "groq",
             "cohere",
             "ollama",
+            "vertex",
             "xai",
             "deepseek",
         ]
@@ -490,6 +515,56 @@ impl GenAIProvider {
     }
 }
 
+/// Build a genai client for Google Vertex AI authenticated via Application
+/// Default Credentials (ADC).
+///
+/// genai's Vertex adapter reads `VERTEX_PROJECT_ID` (required) and
+/// `VERTEX_LOCATION` to construct the request
+/// URL, and expects an OAuth2 Bearer token from an [`AuthResolver`]. This
+/// resolver fetches that token from ADC (gcloud login, a service account, or the
+/// metadata server) on each request, so no static API key is needed. If a
+/// `VERTEX_API_KEY` bearer token is explicitly set, it is used as an override.
+fn build_vertex_client() -> Client {
+    let resolver = AuthResolver::from_resolver_async_fn(
+        |_model: ModelIden| -> Pin<
+            Box<dyn Future<Output = genai::resolver::Result<Option<AuthData>>> + Send>,
+        > {
+            Box::pin(async move {
+                // Explicit bearer-token override wins when present.
+                if let Ok(token) = std::env::var("VERTEX_API_KEY") {
+                    if !token.trim().is_empty() {
+                        return Ok(Some(AuthData::from_single(token)));
+                    }
+                }
+                // Otherwise resolve an access token from ADC.
+                let provider = gcp_auth::provider().await.map_err(|e| {
+                    genai::resolver::Error::Custom(format!(
+                        "Vertex ADC provider init failed (run `gcloud auth application-default login`): {e}"
+                    ))
+                })?;
+                let scopes = ["https://www.googleapis.com/auth/cloud-platform"];
+                let token = provider.token(&scopes).await.map_err(|e| {
+                    genai::resolver::Error::Custom(format!("Vertex ADC token fetch failed: {e}"))
+                })?;
+                Ok(Some(AuthData::from_single(token.as_str())))
+            })
+        },
+    );
+
+    let mut builder = Client::builder()
+        .with_adapter_kind(AdapterKind::Vertex)
+        .with_auth_resolver(resolver);
+
+    if let Some(endpoint) = resolved_vertex_endpoint() {
+        builder = builder.with_service_target_resolver_fn(move |mut target: ServiceTarget| {
+            target.endpoint = Endpoint::from_owned(endpoint.clone());
+            Ok(target)
+        });
+    }
+
+    builder.build()
+}
+
 fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) -> Client {
     let mut builder = Client::builder().with_adapter_kind(adapter_kind);
 
@@ -507,6 +582,190 @@ fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) ->
     }
 
     builder.build()
+}
+
+fn provider_from_model_namespace(model: &str) -> Option<&'static str> {
+    let lower = model.to_ascii_lowercase();
+    lower.split_once("::").and_then(|(prefix, _)| match prefix {
+        "openai" => Some("openai"),
+        "anthropic" => Some("anthropic"),
+        "gemini" | "google" => Some("gemini"),
+        "vertex" => Some("vertex"),
+        "groq" => Some("groq"),
+        "cohere" => Some("cohere"),
+        "ollama" => Some("ollama"),
+        "xai" => Some("xai"),
+        "deepseek" => Some("deepseek"),
+        _ => None,
+    })
+}
+
+fn configure_vertex_environment(config: &Config) {
+    if std::env::var("VERTEX_PROJECT_ID").is_err() {
+        if let Some(project) = config
+            .vertex_project_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .or_else(vertex_project_from_env)
+            .or_else(read_gcloud_project)
+        {
+            // Only propagate a syntactically valid project into the process env;
+            // genai reads VERTEX_PROJECT_ID to build the request URL, so an
+            // invalid value should not be planted there from config discovery.
+            match valid_vertex_segment(&project) {
+                Some(valid) => std::env::set_var("VERTEX_PROJECT_ID", valid),
+                None => log::warn!(
+                    "Ignoring discovered Vertex project ID (must contain only ASCII letters, \
+                     digits, and hyphens)"
+                ),
+            }
+        }
+    }
+
+    if std::env::var("VERTEX_LOCATION").is_err() {
+        if let Some(location) = config
+            .vertex_location
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            // The location is interpolated into the endpoint host, so never
+            // plant an invalid value into the env from a config file.
+            match valid_vertex_segment(location) {
+                Some(valid) => std::env::set_var("VERTEX_LOCATION", valid),
+                None => log::warn!(
+                    "Ignoring invalid vertex_location from config (must contain only ASCII \
+                     letters, digits, and hyphens)"
+                ),
+            }
+        }
+    }
+}
+
+fn vertex_project_from_env() -> Option<String> {
+    [
+        "VERTEX_PROJECT_ID",
+        "GOOGLE_CLOUD_PROJECT",
+        "GCLOUD_PROJECT",
+        "CLOUDSDK_CORE_PROJECT",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok())
+    .map(|value| value.trim().to_string())
+    .find(|value| !value.is_empty())
+}
+
+fn gcloud_config_dir() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("CLOUDSDK_CONFIG") {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+    dirs::home_dir().map(|home| home.join(".config").join("gcloud"))
+}
+
+fn read_gcloud_project() -> Option<String> {
+    let config_dir = gcloud_config_dir()?;
+    let active_config = std::fs::read_to_string(config_dir.join("active_config"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "default".to_string());
+    let config_path = config_dir
+        .join("configurations")
+        .join(format!("config_{active_config}"));
+    let content = std::fs::read_to_string(config_path).ok()?;
+    parse_gcloud_project(&content)
+}
+
+fn parse_gcloud_project(content: &str) -> Option<String> {
+    let mut in_core = false;
+    for raw in content.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_core = line.eq_ignore_ascii_case("[core]");
+            continue;
+        }
+        if !in_core {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "project" {
+            let project = value.trim();
+            if !project.is_empty() {
+                return Some(project.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Validate a Vertex project/location segment before it is interpolated into the
+/// request endpoint URL.
+///
+/// GCP project IDs and Vertex locations are limited to ASCII letters, digits,
+/// and hyphens. Rejecting anything else prevents a crafted value (e.g. one
+/// containing `/`, `.`, `:`, or `@`) from altering the endpoint *host* — the
+/// location is interpolated into `{location}-aiplatform.googleapis.com`, so an
+/// unvalidated value could otherwise redirect the OAuth bearer token to an
+/// attacker-controlled host. Returns the trimmed value when valid.
+fn valid_vertex_segment(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        .then_some(trimmed)
+}
+
+fn resolved_vertex_endpoint() -> Option<String> {
+    let project_raw = std::env::var("VERTEX_PROJECT_ID").ok()?;
+    let project = match valid_vertex_segment(&project_raw) {
+        Some(p) => p.to_string(),
+        None => {
+            log::warn!(
+                "Ignoring VERTEX_PROJECT_ID for endpoint construction: must be non-empty and \
+                 contain only ASCII letters, digits, and hyphens"
+            );
+            return None;
+        }
+    };
+    let location = match std::env::var("VERTEX_LOCATION") {
+        Ok(raw) if !raw.trim().is_empty() => match valid_vertex_segment(&raw) {
+            Some(l) => l.to_string(),
+            None => {
+                log::warn!(
+                    "Ignoring invalid VERTEX_LOCATION (must contain only ASCII letters, digits, \
+                     and hyphens); falling back to 'global'"
+                );
+                "global".to_string()
+            }
+        },
+        _ => "global".to_string(),
+    };
+    Some(vertex_endpoint_base(&project, &location))
+}
+
+fn vertex_endpoint_base(project: &str, location: &str) -> String {
+    let project = project.trim();
+    let location = location.trim();
+    if location.eq_ignore_ascii_case("global") {
+        format!("https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/")
+    } else {
+        format!(
+            "https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/"
+        )
+    }
 }
 
 fn provider_base_url_env_var(provider: &str) -> Option<&'static str> {
@@ -537,6 +796,7 @@ fn provider_api_key_env_var(provider: &str) -> Option<&'static str> {
         "openai" => Some("OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "gemini" | "google" => Some("GEMINI_API_KEY"),
+        "vertex" => Some("VERTEX_API_KEY"),
         "groq" => Some("GROQ_API_KEY"),
         "cohere" => Some("COHERE_API_KEY"),
         "xai" => Some("XAI_API_KEY"),
@@ -559,6 +819,7 @@ fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
         "openai" => Ok(AdapterKind::OpenAI),
         "anthropic" => Ok(AdapterKind::Anthropic),
         "gemini" | "google" => Ok(AdapterKind::Gemini),
+        "vertex" => Ok(AdapterKind::Vertex),
         "groq" => Ok(AdapterKind::Groq),
         "cohere" => Ok(AdapterKind::Cohere),
         "ollama" => Ok(AdapterKind::Ollama),
@@ -581,6 +842,7 @@ mod tests {
         assert!(str_to_adapter_kind("groq").is_ok());
         assert!(str_to_adapter_kind("cohere").is_ok());
         assert!(str_to_adapter_kind("ollama").is_ok());
+        assert!(str_to_adapter_kind("vertex").is_ok());
         assert!(str_to_adapter_kind("xai").is_ok());
         assert!(str_to_adapter_kind("deepseek").is_ok());
         assert!(str_to_adapter_kind("invalid").is_err());
@@ -646,6 +908,125 @@ mod tests {
         // CLI override wins over config model.
         let (_p, resolved) = GenAIProvider::from_config(&config, Some("cli-model")).unwrap();
         assert_eq!(resolved.model, "cli-model");
+    }
+
+    #[test]
+    fn test_provider_from_model_namespace_detects_vertex() {
+        assert_eq!(
+            provider_from_model_namespace("vertex::gemini-2.5-flash"),
+            Some("vertex")
+        );
+        assert_eq!(provider_from_model_namespace("gemini-2.5-flash"), None);
+    }
+
+    #[tokio::test]
+    async fn test_from_config_uses_namespaced_vertex_model_when_provider_absent() {
+        let previous_project = std::env::var("VERTEX_PROJECT_ID").ok();
+        let previous_location = std::env::var("VERTEX_LOCATION").ok();
+        std::env::set_var("VERTEX_PROJECT_ID", "unit-test-project");
+        std::env::remove_var("VERTEX_LOCATION");
+
+        let config = Config::default();
+        let (_provider, resolved) =
+            GenAIProvider::from_config(&config, Some("vertex::gemini-2.5-flash")).unwrap();
+        assert_eq!(resolved.provider, "vertex");
+        assert_eq!(resolved.model, "vertex::gemini-2.5-flash");
+        assert!(std::env::var("VERTEX_LOCATION").is_err());
+        assert_eq!(
+            resolved_vertex_endpoint().as_deref(),
+            Some(
+                "https://aiplatform.googleapis.com/v1/projects/unit-test-project/locations/global/"
+            )
+        );
+
+        match previous_project {
+            Some(value) => std::env::set_var("VERTEX_PROJECT_ID", value),
+            None => std::env::remove_var("VERTEX_PROJECT_ID"),
+        }
+        match previous_location {
+            Some(value) => std::env::set_var("VERTEX_LOCATION", value),
+            None => std::env::remove_var("VERTEX_LOCATION"),
+        }
+    }
+
+    #[test]
+    fn test_valid_vertex_segment_accepts_real_values() {
+        assert_eq!(valid_vertex_segment("perspt"), Some("perspt"));
+        assert_eq!(valid_vertex_segment("us-central1"), Some("us-central1"));
+        assert_eq!(valid_vertex_segment("global"), Some("global"));
+        assert_eq!(valid_vertex_segment("europe-west4"), Some("europe-west4"));
+        assert_eq!(valid_vertex_segment("  perspt  "), Some("perspt")); // trimmed
+    }
+
+    #[test]
+    fn test_valid_vertex_segment_rejects_host_redirection() {
+        // Values that could alter the endpoint host or path must be rejected.
+        assert_eq!(valid_vertex_segment("evil.com/"), None);
+        assert_eq!(valid_vertex_segment("evil.com"), None); // '.'
+        assert_eq!(valid_vertex_segment("a/b"), None);
+        assert_eq!(valid_vertex_segment("a:b"), None);
+        assert_eq!(valid_vertex_segment("a@b"), None);
+        assert_eq!(valid_vertex_segment("a b"), None);
+        assert_eq!(valid_vertex_segment(""), None);
+        assert_eq!(valid_vertex_segment("   "), None);
+    }
+
+    #[test]
+    fn test_resolved_vertex_endpoint_rejects_malicious_location() {
+        let prev_project = std::env::var("VERTEX_PROJECT_ID").ok();
+        let prev_location = std::env::var("VERTEX_LOCATION").ok();
+
+        // A crafted location must not be interpolated into the host; it falls
+        // back to the safe global endpoint instead.
+        std::env::set_var("VERTEX_PROJECT_ID", "perspt");
+        std::env::set_var("VERTEX_LOCATION", "evil.com/");
+        assert_eq!(
+            resolved_vertex_endpoint().as_deref(),
+            Some("https://aiplatform.googleapis.com/v1/projects/perspt/locations/global/"),
+            "malicious location must fall back to global, never redirect the host"
+        );
+
+        // An invalid project yields no endpoint override at all.
+        std::env::set_var("VERTEX_PROJECT_ID", "bad/project");
+        std::env::set_var("VERTEX_LOCATION", "us-central1");
+        assert_eq!(resolved_vertex_endpoint(), None);
+
+        match prev_project {
+            Some(v) => std::env::set_var("VERTEX_PROJECT_ID", v),
+            None => std::env::remove_var("VERTEX_PROJECT_ID"),
+        }
+        match prev_location {
+            Some(v) => std::env::set_var("VERTEX_LOCATION", v),
+            None => std::env::remove_var("VERTEX_LOCATION"),
+        }
+    }
+
+    #[test]
+    fn test_vertex_endpoint_base_matches_genai_vertex_shape() {
+        assert_eq!(
+            vertex_endpoint_base("test-project", "global"),
+            "https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/"
+        );
+        assert_eq!(
+            vertex_endpoint_base("test-project", "test-location"),
+            "https://test-location-aiplatform.googleapis.com/v1/projects/test-project/locations/test-location/"
+        );
+    }
+
+    #[test]
+    fn test_parse_gcloud_project_reads_core_project() {
+        let content = r#"
+        [compute]
+        region = ignored-location
+
+        [core]
+        account = user@example.com
+        project = test-project
+        "#;
+        assert_eq!(
+            parse_gcloud_project(content).as_deref(),
+            Some("test-project")
+        );
     }
 
     #[tokio::test]

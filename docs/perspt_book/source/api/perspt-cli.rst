@@ -3,7 +3,7 @@
 ``perspt-cli``
 ==============
 
-Clap-based CLI entry point with 10 subcommands.
+Clap-based CLI entry point with 11 subcommands.
 
 Subcommands
 -----------

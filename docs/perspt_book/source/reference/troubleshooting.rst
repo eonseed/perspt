@@ -128,7 +128,7 @@ Performance
 **Slow response streaming:**
 
 1. Check network latency to the provider
-2. Try a faster model (e.g., ``gemini-3.1-flash-lite-preview``)
+2. Try a faster model (e.g., ``gemini-3.5-flash``)
 3. Use Groq for the fastest inference
 
 **High memory usage in agent mode:**
