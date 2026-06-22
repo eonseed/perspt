@@ -22,7 +22,8 @@ Launching Agent Mode
 Core Workflow
 -------------
 
-The SRBN agent follows the PSP-5 lifecycle:
+The SRBN agent follows the PSP-5 lifecycle, extended by PSP-8 (quadratic energy
+and a mutable work graph):
 
 1. **Detection** - Identify workspace state (greenfield/brownfield) and select
    language plugins
@@ -34,20 +35,44 @@ The SRBN agent follows the PSP-5 lifecycle:
 
    A ``FeatureCharter`` is created with policy-derived limits (max modules, files,
    and revisions) to constrain plan scope.
-3. **Execution** - For each node in topological order:
+3. **Execution** - The scheduler does *not* walk a precomputed topological
+   order. Following PSP-8 §4 (Mutable Work Graph), it runs a closed
+   ("fly-by-wire") loop: each round it re-evaluates the graph and selects the
+   next *ready* node — one whose dependencies are all complete and whose
+   interface seals are satisfied — from a dependency-aware ready queue. For the
+   selected node:
 
    a. Actuator generates a multi-artifact bundle (writes, diffs, commands)
    b. Bundle is applied transactionally
    c. Verification computes Lyapunov energy from syntax, structure, tests,
       bootstrap, and sheaf checks
    d. If :math:`V(x) \leq \varepsilon` (default 0.10), the node is stable;
-      otherwise the agent retries or escalates with residual evidence
+      otherwise the agent retries, repairs the graph (requeue, split, insert
+      interface, or replan a subgraph), or escalates with residual evidence
 
-The verification formula is:
+   Because the graph is mutable, a reworked node is re-picked on a later round
+   and newly inserted nodes are executed. When the ready queue empties, a
+   goal-completion gate decides whether the task is met, the plan should be
+   amended, or the loop should stop. Each graph *revision* remains acyclic.
+
+   .. note::
+
+      The scheduler currently executes **one ready node per round
+      (sequential)**. PSP-8's *bounded parallelism* — a worker pool with
+      file/interface/toolchain leases running non-conflicting nodes
+      concurrently (``max_parallel*`` controls) — is planned for a future
+      release.
+
+The verification formula is the PSP-8 quadratic residual energy (each sensor
+emits a residual of magnitude :math:`r_e \ge 0`):
 
 .. math::
 
-   V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log} + V_{boot} + V_{sheaf}
+   V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0.
+
+The component readouts :math:`V_{syn}, V_{str}, V_{log}, V_{boot}, V_{sheaf}` are
+derived rollups of this single energy, so :math:`V(x) = \sum_{\text{comp}}
+V_{\text{comp}}` (no separate :math:`\alpha/\beta/\gamma` pass).
 
 4. **Sheaf Validation** - Cross-node contract verification
 5. **Review** - In interactive mode: grouped-diff modal with approve/reject/correct

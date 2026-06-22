@@ -272,7 +272,7 @@ Agent-specific (see :doc:`howto/agent-options` for the full list):
    --mode <MODE>                # cautious | balanced | yolo
    --max-cost <USD>             # Maximum cost in USD
    --max-steps <N>              # Maximum iterations
-   --energy-weights <a,b,g>     # Custom alpha,beta,gamma
+   --energy-weights <a,b,g>     # Proportional syn/str/log component scales (default 1.0,0.5,2.0)
    --stability-threshold <e>    # Custom epsilon
    --log-llm                    # Log all LLM calls to DB
    --single-file                # Force single-file mode
