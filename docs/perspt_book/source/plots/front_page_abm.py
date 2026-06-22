@@ -130,11 +130,11 @@ ax.add_patch(boundary_circle)
 # Section Labels at the bottom
 label_y = 1.0
 ax.text(5.0, label_y, "Decentralized SWARM\n(Agent-Based Model)", color=neutral_color,
-        fontsize=9, ha='center', va='top', fontweight='medium', alpha=0.85)
+        fontsize=9, ha='center', va='top', fontweight='normal', alpha=0.85)
 ax.text(14.5, label_y, "Local State Rules\n(Game of Life Glider)", color=neutral_color,
-        fontsize=9, ha='center', va='top', fontweight='medium', alpha=0.85)
+        fontsize=9, ha='center', va='top', fontweight='normal', alpha=0.85)
 ax.text(24.5, label_y, "Lyapunov Attractor\n(Stable Manifold Convergence)", color=neutral_color,
-        fontsize=9, ha='center', va='top', fontweight='medium', alpha=0.85)
+        fontsize=9, ha='center', va='top', fontweight='normal', alpha=0.85)
 
 plt.tight_layout()
 plt.show()
