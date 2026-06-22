@@ -1,5 +1,5 @@
 # Perspt
-**v0.6.1 "AKU"** - *AKU - sharp fixes from sharp ears.*
+**v0.6.2 "Hózhó"** - *Hózhó (Navajo) — A state of perfect balance, harmony, and continuous self-improvement.*
 **Your Terminal's Window to the AI World**
 
 > "The keyboard hums, the screen aglow,\
