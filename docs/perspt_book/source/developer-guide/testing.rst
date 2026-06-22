@@ -91,11 +91,7 @@ Test energy calculation with known inputs:
            v_boot: 0.0,
            v_sheaf: 0.0,
        };
-       let contract = BehavioralContract {
-           energy_weights: (1.0, 0.5, 1.0),
-           ..Default::default()
-       };
-       assert_eq!(energy.total(&contract), 3.0);
+       assert_eq!(energy.total(), 3.0);
    }
 
 **Event Testing:**
