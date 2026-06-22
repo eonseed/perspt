@@ -15,10 +15,10 @@ Launching the TUI
    perspt
 
    # Explicit model (provider comes from config or env detection)
-   perspt chat --model claude-sonnet-4-20250514
+   perspt chat --model claude-fable
 
    # Use a specific config file
-   perspt --config ./config.toml chat --model gpt-4.1
+   perspt --config ./config.toml chat --model gpt-5.5
 
 The TUI provides:
 
@@ -128,27 +128,27 @@ Perspt checks environment variables in this priority order:
      - Default Model
    * - ``ANTHROPIC_API_KEY``
      - Anthropic
-     - ``claude-sonnet-4-20250514``
+     - ``claude-fable``
    * - ``OPENAI_API_KEY``
      - OpenAI
-     - ``gpt-4.1``
+     - ``gpt-5-mini``
    * - ``GEMINI_API_KEY``
      - Gemini
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
    * - ``GROQ_API_KEY``
      - Groq
-     - ``llama-3.3-70b-versatile``
+     - ``llama-3.3-70b-specdec``
    * - ``COHERE_API_KEY``
      - Cohere
-     - ``command-r-plus``
+     - ``command-a-plus``
    * - ``XAI_API_KEY``
      - xAI
-     - ``grok-3-mini-fast``
+     - ``grok-4``
    * - ``DEEPSEEK_API_KEY``
      - DeepSeek
-     - ``deepseek-chat``
+     - ``deepseek-v4``
    * - *(none)*
      - Ollama (local)
-     - ``llama3.2``
+     - ``llama3.3``
 
 See :doc:`providers` for full provider details.

@@ -149,9 +149,9 @@ Examples
 
    # Full control
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
      --energy-weights "1.0,1.0,2.0" \
      --stability-threshold 0.05 \
      --max-cost 5.0 \

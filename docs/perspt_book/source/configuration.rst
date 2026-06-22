@@ -26,50 +26,50 @@ Set any supported API key environment variable and run ``perspt`` with no argume
    * - 1
      - OpenAI
      - ``OPENAI_API_KEY``
-     - ``gpt-4o-mini``
+     - ``gpt-5-mini``
    * - 2
      - Anthropic
      - ``ANTHROPIC_API_KEY``
-     - ``claude-sonnet-4-20250514``
+     - ``claude-fable``
    * - 3
      - Google Gemini
      - ``GEMINI_API_KEY``
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
    * - 4
      - Groq
      - ``GROQ_API_KEY``
-     - ``llama-3.1-70b-versatile``
+     - ``llama-4-70b``
    * - 5
      - Cohere
      - ``COHERE_API_KEY``
-     - ``command-r-plus``
+     - ``command-r7``
    * - 6
      - XAI
      - ``XAI_API_KEY``
-     - ``grok-beta``
+     - ``grok-4``
    * - 7
      - DeepSeek
      - ``DEEPSEEK_API_KEY``
-     - ``deepseek-chat``
+     - ``deepseek-v4``
    * - 8
      - AWS Bedrock
      - ``AWS_ACCESS_KEY_ID`` (and region/creds)
-     - ``us.amazon.nova-pro-v1:0``
+     - ``us.amazon.nova-pro-v2:0``
    * - 9
      - Google Agent Platform
      - ``VERTEX_API_KEY`` (and project/region)
-     - ``gemini-2.5-flash``
+     - ``vertex::gemini-3.5-flash``
    * - 10
      - Ollama
      - *(none - auto-detected)*
-     - ``llama3.2``
+     - ``llama4``
 
 .. code-block:: bash
 
    # Example: set a key and run
    export GEMINI_API_KEY="your-key"
-   perspt                # auto-detects Gemini, uses gemini-3.1-flash-lite-preview
-   perspt chat --model gemini-pro-latest   # override model
+   perspt                # auto-detects Gemini, uses gemini-3.5-flash
+   perspt chat --model gemini-3.1-pro   # override model
 
 Advanced Enterprise Provider Configurations
 -------------------------------------------
@@ -148,7 +148,7 @@ Since OAuth2 access tokens are short-lived (usually expiring in 1 hour), you can
    export VERTEX_API_KEY=$(gcloud auth print-access-token)
 
    # 3. Launch Perspt using a Vertex AI model
-   perspt chat --model gemini-2.5-flash
+   perspt chat --model gemini-3.5-flash
 
 Supported Models & Naming Conventions
 -------------------------------------
@@ -163,20 +163,20 @@ Perspt features an intelligent router that resolves your target provider from th
      - Model Prefix / Name
      - Target Model ID
    * - **OpenAI**
-     - ``gpt-5.5-*`` / ``gpt-4o-*``
-     - ``gpt-5.5-preview``, ``gpt-4o-mini``
+     - ``gpt-5.5-*`` / ``gpt-5-*``
+     - ``gpt-5.5-preview``, ``gpt-5-mini``
    * - **Anthropic**
-     - ``claude-4.7-*`` / ``claude-3-5-*``
-     - ``claude-sonnet-4.7``, ``claude-3-5-sonnet-20241022``
+     - ``claude-fable`` / ``claude-4.8-*``
+     - ``claude-fable``, ``opus-4.8``
    * - **Google Gemini**
-     - ``gemini-3.1-*`` / ``gemini-3.0-*``
-     - ``gemini-3.1-flash``, ``gemini-3.1-pro``
+     - ``gemini-3.5-*`` / ``gemini-3.1-*``
+     - ``gemini-3.5-flash``, ``gemini-3.1-pro``
    * - **AWS Bedrock**
      - ``aws.*`` / ``bedrock.*``
-     - ``us.amazon.nova-pro-v1:0``, ``us.anthropic.claude-3-5-sonnet-v2:0``
+     - ``us.amazon.nova-pro-v2:0``, ``us.anthropic.claude-fable-v1:0``
    * - **Google Agent Platform**
      - ``vertex.*``
-     - ``vertex::gemini-2.5-pro``, ``vertex::claude-sonnet-4-6``
+     - ``vertex::gemini-3.5-flash``, ``vertex::gemini-3.1-pro``
 
 
 Configuration File
@@ -198,7 +198,7 @@ All fields are optional. ``provider`` accepts the aliases ``provider_type`` and
 .. code-block:: toml
 
    provider = "gemini"
-   model = "gemini-pro-latest"
+   model = "gemini-3.1-pro"
    api_key = "your-key"
 
 **Full example:**
@@ -212,10 +212,10 @@ All fields are optional. ``provider`` accepts the aliases ``provider_type`` and
    base_url = "http://localhost:8000/v1"
 
    # Optional per-tier overrides for `perspt agent`
-   architect_model = "gpt-4o"
-   actuator_model = "gpt-4o-mini"
-   verifier_model = "gpt-4o-mini"
-   speculator_model = "gpt-4o-mini"
+   architect_model = "gpt-5.5"
+   actuator_model = "gpt-5-mini"
+   verifier_model = "gpt-5-mini"
+   speculator_model = "gpt-5-mini"
 
 .. note::
    ``base_url`` overrides the endpoint for the active provider. This is useful
@@ -285,7 +285,7 @@ Manage configuration interactively:
    perspt config --show    # Print the effective config (api_key masked)
    perspt config --edit    # Open in $EDITOR
    perspt config --set provider=gemini
-   perspt config --set default_model=gemini-pro-latest
+   perspt config --set default_model=gemini-3.1-pro
 
 Initialize project-level configuration:
 

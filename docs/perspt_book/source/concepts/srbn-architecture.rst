@@ -349,26 +349,26 @@ SRBN uses four specialized model tiers. Each tier can be configured independentl
      - Default Model
    * - **Architect**
      - Deep reasoning, task decomposition, DAG planning
-     - ``gemini-pro-latest``
+     - ``gemini-3.1-pro``
    * - **Actuator**
      - Code generation, artifact bundle emission
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
    * - **Verifier**
      - LSP diagnostics, contract checking, energy computation
-     - ``gemini-pro-latest``
+     - ``gemini-3.1-pro``
    * - **Speculator**
      - Fast lookahead, provisional branch prediction
-     - ``gemini-3.1-flash-lite-preview``
+     - ``gemini-3.5-flash``
 
 Configure per-tier models via CLI:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-pro-latest \
-     --actuator-model gemini-3.1-flash-lite-preview \
-     --verifier-model gemini-pro-latest \
-     --speculator-model gemini-3.1-flash-lite-preview \
+     --architect-model gemini-3.1-pro \
+     --actuator-model gemini-3.5-flash \
+     --verifier-model gemini-3.1-pro \
+     --speculator-model gemini-3.5-flash \
      "Build a REST API"
 
 Each tier also supports a fallback model (``--architect-fallback-model``, etc.).

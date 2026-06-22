@@ -25,17 +25,17 @@ The file is TOML. All fields are optional. ``provider`` accepts the aliases
 .. code-block:: toml
 
    provider = "gemini"
-   model = "gemini-3.1-flash-lite-preview"
+   model = "gemini-3.5-flash"
    api_key = "AIza..."
 
    # Optional endpoint override for OpenAI-compatible / local / proxy servers
    # base_url = "http://localhost:8000/v1"
 
    # Optional per-tier overrides for `perspt agent`
-   # architect_model = "gpt-4o"
-   # actuator_model = "gpt-4o-mini"
-   # verifier_model = "gpt-4o-mini"
-   # speculator_model = "gpt-4o-mini"
+   # architect_model = "gpt-5.5"
+   # actuator_model = "gpt-5-mini"
+   # verifier_model = "gpt-5-mini"
+   # speculator_model = "gpt-5-mini"
 
 Environment Variables
 ---------------------
@@ -91,13 +91,13 @@ Manage the config file from the CLI:
 
    # Set values (structured TOML write)
    perspt config --set provider=openai
-   perspt config --set default_model=gpt-4.1
+   perspt config --set default_model=gpt-5.5
 
    # Edit in $EDITOR
    perspt config --edit
 
    # Override the model per run
-   perspt chat --model gpt-4.1
+   perspt chat --model gpt-5.5
 
    # Use a specific config file
    perspt --config /path/to/config.toml chat

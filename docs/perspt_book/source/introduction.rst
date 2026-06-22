@@ -150,7 +150,7 @@ The application interface is accessed via the following commands:
      - Invocation Example
    * - ``chat``
      - Launches the interactive terminal UI (default).
-     - ``perspt chat --model gemini-pro-latest``
+     - ``perspt chat --model gemini-3.1-pro``
    * - ``simple-chat``
      - Launches a streamable CLI interface without terminal styling.
      - ``perspt simple-chat``
@@ -196,28 +196,31 @@ The client library supports direct integration with the following external provi
      - Reference Models
    * - **OpenAI**
      - ``OPENAI_API_KEY``
-     - gpt-4o, o3-mini, o1-preview
+     - gpt-5.5, gpt-5-mini
    * - **Anthropic**
      - ``ANTHROPIC_API_KEY``
-     - claude-3-5-sonnet, claude-3-5-opus
+     - claude-fable, opus-4.8, claude-3-5-sonnet
    * - **Google Gemini**
      - ``GEMINI_API_KEY``
-     - gemini-2.5-pro, gemini-2.5-flash
+     - gemini-3.5-flash, gemini-3.1-pro
+   * - **Google Vertex AI**
+     - ``VERTEX_API_KEY``
+     - vertex::gemini-3.5-flash, vertex::gemini-3.1-pro
    * - **Groq**
      - ``GROQ_API_KEY``
-     - llama-3.3-70b (optimized for low-latency inference)
+     - llama-4-70b
    * - **Cohere**
      - ``COHERE_API_KEY``
-     - command-r-plus
+     - command-r7
    * - **XAI**
      - ``XAI_API_KEY``
-     - grok-2
+     - grok-4
    * - **DeepSeek**
      - ``DEEPSEEK_API_KEY``
-     - deepseek-chat, deepseek-coder
+     - deepseek-v4, deepseek-coder-v4
    * - **Ollama**
-     - None (local port)
-     - Local model execution (no external network required)
+     - None
+     - llama4, mistral
 
 System Philosophy
 -----------------
