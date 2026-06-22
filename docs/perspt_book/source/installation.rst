@@ -49,7 +49,7 @@ To verify that the executable is operational, query the system version and help 
 .. code-block:: bash
 
    perspt --version
-   # Expected output: perspt 0.6.1
+   # Expected output: perspt 0.6.2
 
    perspt --help
 

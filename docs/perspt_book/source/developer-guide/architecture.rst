@@ -5,7 +5,7 @@ Architecture
 
 Perspt is a Rust workspace of twelve crates. Eight crates make up the running
 program, three crates form a reusable platform layer, and one root crate ties
-them together. Version 0.6.1 implements the correction-loop contracts and
+them together. Version 0.6.2 implements the correction-loop contracts and
 adds the platform SDK layer for the experimental SRBN agent.
 
 Workspace Layout

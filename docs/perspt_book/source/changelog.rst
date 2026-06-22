@@ -3,6 +3,39 @@
 Changelog
 =========
 
+Version 0.6.2 - "Hózhó"
+-----------------------
+
+*Hózhó (Navajo) — A state of perfect balance, harmony, and continuous self-improvement.*
+
+This iteration focuses on bringing greater stability, balance, and refinement to the core architecture. It introduces the full platform SDK implementation alongside the mathematical constructs outlined in the *Stability is All You Need* paper series (Papers I, II, and III) and formalizes PSP-8.
+
+**Stability Is All You Need & Platform SDK (PSP-8):**
+
+- **SDK Platform Crates** - Introduced ``perspt-sdk``, ``perspt-coding``, and ``perspt-research`` to separate domain-neutral orchestration logic from target execution domains.
+- **Measured Acceptance Gate** - Implemented the PSP-8 spectral acceptance gate using symmetric eigensolvers (via ``nalgebra``) to compute energy-slope convergence guarantees.
+- **Goal Verification Loop** - Integrated target validation kernels with directed LLM corrections and structured ``GoalVerdict``/``TaskType`` contracts.
+- **Symbol Extraction & Verification** - Added runtime parsing, dependency tracing, and semantic verification to enforce correct output states.
+
+**Core Capabilities & Providers:**
+
+- **Vertex AI Support** - Added seamless Google Cloud Vertex AI provider support with automatic OAuth2 Bearer token resolution via ``gcp_auth`` ADC.
+- **29 LLM Adapters** - Expanded provider configurations to handle 29 unique genai adapters, modernizing model defaults (e.g., ``gemini-3.5-flash``, ``gpt-5.5``, ``claude-fable``).
+- **Pipenv Integration** - Added support for ``pipenv`` environment isolation to the Python execution plugin.
+
+**Documentation Overhaul:**
+
+- **Stability Foundations** - Reworked core concept and developer documentation to align with the theoretical foundations of the Stability paper series.
+- **Sphinx Book Polish** - Redesigned the Sphinx book layout featuring a retro scientific textbook LaTeX cover, custom plots, and enhanced tables.
+- **Refined Clinical Tone** - Rewrote the user manual, tutorials, and configuration guides in a formal, clinical documentation style.
+
+**Workspace Maintenance & Upgrades:**
+
+- **Ratatui Upgrade** - Bumped ``ratatui`` dependency to ``0.30.2`` in ``perspt-tui`` to support modern terminal layouts and components.
+- **TUI Textarea Fork Migration** - Migrated from the unmaintained ``tui-textarea`` to ``tui-textarea-2`` version ``0.11.0`` to resolve API compatibility conflicts.
+- **Dependency Upgrades** - Bumped ``rustyline`` to ``18.0``, ``duckdb`` to ``=1.10504.0``, ``toml`` to ``1.1``, and ``tower-http`` to ``0.7`` across the workspace.
+- **GitHub Actions Security** - Upgraded GitHub Action workflows to use ``actions/checkout@v7`` for improved stability and security.
+
 Version 0.6.1 - "AKU"
 ---------------------
 
