@@ -3,217 +3,97 @@
 Stability Papers in Agent Mode
 ==============================
 
-Perspt's agent mode is the first executable surface where the three
-*Stability is All You Need* papers are being turned into product machinery. The
-central rule is plain: a model may propose an action, but Perspt must measure
-the proposed state before it accepts it.
+The execution of autonomous agents in Perspt is governed by control-theoretic stability contracts derived from the *Stability is All You Need* paper series. We do not assume that a language model's proposal is correct. Instead, the agent system measures the proposed state, determines its residual errors, and admits changes only when they satisfy a formal convergence constraint.
 
-The papers do not ask the reader to trust generation. They describe a discipline
-for long-running agents: observe each candidate, compute residuals, correct the
-dominant residuals through independent barriers, and commit only an accepted
-trajectory to durable history. PSP-8 carries that discipline from one coding
-agent toward an SDK-first platform with reusable stability contracts.
-
-.. admonition:: Scope of claim
-   :class: note
-
-   This chapter describes how Perspt implements and plans around the SRBN
-   contracts. The mathematical claims belong to the papers and their stated
-   assumptions. Perspt's implementation is an active engineering system; it is
-   not presented here as a completed empirical proof of those claims.
+We formulate this stabilization process using three distinct contracts.
 
 The Three Contracts
 -------------------
 
-Paper I: stable state
-~~~~~~~~~~~~~~~~~~~~~
+Let a session consist of a sequence of proposed states :math:`x_1, x_2, \dots` and a corresponding sequence of accepted states :math:`s_1, s_2, \dots`.
 
-Paper I, *Stability is All You Need: Lyapunov-Guided Hierarchies for
-Long-Horizon LLM Reliability*, gives the basic SRBN certificate. It treats an
-agent run as a sequence of candidate states and asks whether accepted states
-move toward a verified manifold.
+Paper I: The Single-Agent Stability Contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In Perspt, the corresponding object is a DAG node. The Actuator may produce an
-artifact bundle, but the bundle is still only a proposal. It becomes accepted
-state only after verification measures its residual energy and the node reaches
-the configured acceptance rule.
+Paper I (*Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability*) establishes the concept of a state-space manifold and the Lyapunov energy function. 
 
-Paper II: observed harness
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Let :math:`x` be a candidate state. The system computes a vector of residual errors :math:`r(x)`. We define the Lyapunov energy :math:`V(x)` as a measure of the distance from :math:`x` to the verified manifold :math:`V(x) = 0`. The single-agent contract asserts that the state converges if each step reduces :math:`V(x)`.
 
-Paper II, *Stability is All You Need II: SRBN-Control Beyond Harness
-Engineering*, turns the certificate into a harness contract. Every candidate is
-observed. A candidate may enter the accepted trajectory only when it hard-passes
-the checks or descends under the measured energy. Exhaustion must end with a
-residual certificate, not with a success claim.
+In the Perspt runtime, the candidate state corresponds to a modification proposed by the actuator model. The orchestrator validates the proposal using domain-specific sensors to calculate the energy.
 
-In Perspt, PSP-7 and PSP-8 express this through parse states, retry classes,
-correction attempt records, energy snapshots, and terminal outcomes visible
-through ``perspt status`` and the dashboard.
+Paper II: The Harness Contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Paper III: platform control
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Paper II (*Stability is All You Need II: SRBN-Control Beyond Harness Engineering*) describes the measurement harness. The harness must observe every candidate, partition them into observed and accepted trajectories, and guarantee that the system terminates with a formal certificate of remaining errors if convergence is not achieved.
 
-Paper III, *Stability is All You Need III: The SRBN Platform Contract*, moves
-from a single harness to a platform. Stochastic actors emit proposals;
-deterministic capabilities mediate effects; authority can only be scoped down;
-risk budgets and recovery decisions are recorded; replay must be deterministic.
+In the Perspt runtime, this contract is implemented by the tracking engine. Every verification run, retry attempt, and error message is persisted in the ledger, culminating in either a committed state or an explicit escalation report.
 
-In Perspt, PSP-8 maps this idea to an SDK/domain split. The SRBN control plane
-should be reusable. Coding, research, website building, and other domains should
-provide their own sensors, residuals, verifier suites, artifacts, and admissible
-effects.
+Paper III: The Platform Contract
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The Energy That Agent Mode Measures
------------------------------------
+Paper III (*Stability is All You Need III: The SRBN Platform Contract*) lifts the single-agent harness to a multi-domain platform. The platform must isolate stochastic proposals from deterministic side-effects. It mandates that models propose actions, while a deterministic capability kernel enforces security bounds and records budgets.
 
-Perspt uses a concrete Lyapunov-style score for coding work. The verifier
-combines syntax, structure, tests, bootstrap, and cross-node consistency:
+In the Perspt runtime, this is implemented via the SDK-first separation. The core SRBN engine (in ``perspt-sdk``) manages scheduling and gating, while domain packages (such as ``perspt-coding``) define domain-specific sensors and capabilities.
+
+The Energy Formulation
+----------------------
+
+Let :math:`E` be the set of active sensors. Each sensor :math:`e \in E` evaluates the candidate state :math:`x` and emits a residual magnitude :math:`r_e(x) \geq 0`. 
+
+The Lyapunov energy :math:`V(x)` is the weighted sum of the squared residuals:
 
 .. math::
 
-   \begin{aligned}
-   V(x) ={}& \alpha V_{syn}(x) + \beta V_{str}(x)
-             + \gamma V_{log}(x) \\
-           & + V_{boot}(x) + V_{sheaf}(x).
-   \end{aligned}
+   V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0
 
-The default weights are :math:`\alpha = 1.0`, :math:`\beta = 0.5`, and
-:math:`\gamma = 2.0`. The default acceptance threshold is
-:math:`\varepsilon = 0.10`.
+We group the individual residuals into five component rollups:
 
-The important point is not the arithmetic alone. The score gives the controller
-a memory of direction. A retry is useful only when it is tied to evidence about
-what remains broken.
+- **Syntactic energy (:math:`V_{\text{syn}}`)**: Derived from compiler syntax errors and language server diagnostics.
+- **Structural energy (:math:`V_{\text{str}}`)**: Derived from interface contract violations.
+- **Logical energy (:math:`V_{\text{log}}`)**: Derived from test suite failures.
+- **Bootstrap energy (:math:`V_{\text{boot}}`)**: Derived from initialization and build environment failures.
+- **Sheaf energy (:math:`V_{\text{sheaf}}`)**: Derived from cross-node import and dependency contradictions.
 
-The acceptance rule can be read as follows:
+The total energy is the sum of these component rollups:
 
 .. math::
 
-   \operatorname{accept}(x_{t+1}) =
-   \begin{cases}
-   \mathrm{true}, & V(x_{t+1}) \leq \varepsilon, \\
-   \mathrm{true}, & V(x_{t+1}) < V(x_t)\ \mathrm{and\ descent\ is\ allowed}, \\
-   \mathrm{false}, & \mathrm{otherwise}.
-   \end{cases}
+   V(x) = V_{\text{syn}} + V_{\text{str}} + V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
 
-How Agent Mode Uses The Contracts
----------------------------------
+A candidate state :math:`x` is admitted to the accepted trajectory if and only if it satisfies the gating condition:
 
-Agent mode incorporates the papers through five load-bearing mechanisms.
+.. math::
 
-Accepted trajectory
-   Generated text and accepted state are different things. The Actuator may
-   propose a bundle, but the ledger records only stable nodes, escalations, and
-   explicit outcomes.
+   \operatorname{accept}(x) \iff V(x) \leq \varepsilon \quad \lor \quad V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
 
-Residual-directed verification
-   LSP diagnostics, build commands, tests, contract checks, bootstrap commands,
-   and sheaf validators become residual evidence. The controller uses that
-   evidence to choose correction, graph revision, escalation, or commit.
+where :math:`\varepsilon` is the convergence threshold (default :math:`0.10`), :math:`x_{\text{best}}` is the best previously accepted state in the current node generation, and :math:`\rho_{\text{gate}}` is the minimum required descent step.
 
-Independent correction barriers
-   Corrections are grounded in verifier output rather than blind retry.
-   Diagnostic messages, failing tests, parse failures, rejected bundles, and
-   cross-node consistency failures are rendered into typed correction prompts.
+Observed vs. Accepted Trajectories
+----------------------------------
 
-Ledgered history
-   Accepted nodes, correction attempts, energy snapshots, approvals, and session
-   outcomes are written to the DuckDB-backed Merkle ledger. A committed run must
-   be inspectable, resumable, and auditable.
+We maintain a strict boundary between the actions the model proposes and the actions the system commits.
 
-Plugin-provided sensors
-   Coding-domain language plugins provide project detection, LSP selection,
-   syntax and build checks, test commands, bootstrap commands, and verifier
-   profiles. In PSP-8, these plugins become adapters over the SRBN SDK instead
-   of containers for the whole control plane.
+Let :math:`T_{\text{obs}}` be the set of all observed candidate states:
 
-What PSP-8 Adds
----------------
+.. math::
 
-PSP-8 reframes Perspt from a hardcoded coding agent into an SRBN agent platform.
-The coding agent remains the first domain package, but the shared stability
-machinery moves behind SDK contracts.
+   T_{\text{obs}} = \{ x_t \mid t \ge 1 \}
 
-.. list-table:: PSP-8 platform contracts
-   :header-rows: 1
-   :widths: 28 72
-   :class: longtable
+Let :math:`T_{\text{acc}}` be the set of accepted states:
 
-   * - Contract
-     - Purpose
-   * - SRBN kernel adapter
-     - Standardize stabilization loops, barrier results, attempt traces,
-       descent gates, and terminal statuses.
-   * - Mutable work graph
-     - Let repair actions split nodes, insert interface nodes, reset subgraphs,
-       and schedule newly generated work instead of walking one fixed snapshot.
-   * - Residual taxonomy
-     - Explain verifier failures in typed form and attach correction directions
-       to compiler, LSP, AST, import, test, policy, and logical residuals.
-   * - Capability kernel
-     - Treat model output as proposals. File writes, command execution, network
-       access, and durable commits must pass scoped capability and policy checks.
-   * - Replayable ledger
-     - Record proposals, rejections, approvals, effects, observations, graph
-       revisions, and rollbacks so sessions can be replayed and audited.
-   * - Dashboard projection
-     - Expose graph, residual, capability, worker, verifier, budget, and replay
-       state without coupling the UI to coding-specific internals.
+.. math::
 
-Improvement Roadmap
--------------------
+   T_{\text{acc}} = \{ x \in T_{\text{obs}} \mid \operatorname{accept}(x) = \text{true} \}
 
-The next Perspt improvements should make the implementation closer to the
-papers' measurable contracts.
+The Merkle ledger commits only elements of :math:`T_{\text{acc}}`. Unaccepted proposals in :math:`T_{\text{obs}} \setminus T_{\text{acc}}` are recorded as telemetry for correction feedback, but they never modify the workspace files.
 
-1. Replace stage-only verification summaries with first-class residual vectors.
-   Each vector should name the failed invariant, its evidence, its severity, and
-   the recommended correction direction.
-2. Make repair actions durable scheduler commands. Graph rewrites, retries,
-   splits, and inserted nodes should be executed by the active work graph.
-3. Add cheap read-only repository exploration before planning unfamiliar
-   codebases. The Architect should receive witnesses, not a blind map of every
-   file.
-4. Parallelize independent scans, symbol extraction, verifier runs, and unrelated
-   node execution while preserving explicit dependency edges and commit ordering
-   for conflicting durable effects.
-5. Route correction prompt families through the typed prompt compiler, with
-   provenance from residual evidence to rendered prompt.
-6. Strengthen replay until a session can be reconstructed from ledger events:
-   proposals, admissibility decisions, verifier observations, accepted states,
-   escalations, and recovery actions.
+Operational Mechanisms
+----------------------
 
-Plugin Roadmap
---------------
+The platform achieves stabilization through five mechanisms:
 
-Future plugins should be domain adapters over the SDK, not standalone
-orchestrators. A complete coding adapter should provide:
-
-* project detection and initialization commands;
-* parser or AST extraction;
-* symbol and import graph inventory;
-* LSP, formatter, build, and test sensors;
-* dependency and manifest mutation policies;
-* residual classes and correction-direction mappers;
-* benchmark fixtures that test descent, recovery, and replay behavior.
-
-Near-term coding adapters should deepen Rust, Python, and TypeScript support,
-then add Go and other languages where deterministic tooling is strong. Beyond
-coding, the same SDK can support research plugins with citation and claim
-residuals, website-builder plugins with accessibility and responsive-layout
-residuals, and task-specific plugins whose verifiers define their own safe
-manifolds.
-
-The principle is constant: a plugin should not merely tell the model what to do.
-It should define what can be measured, what counts as a residual, what
-corrections are admissible, and what evidence is required before Perspt commits
-state.
-
-.. seealso::
-
-   :doc:`srbn-architecture`
-      Technical details of the current SRBN coding agent.
-
-   :doc:`../developer-guide/extending`
-      Developer guidance for language plugins and future domain adapters.
+1. **Closed-Loop Scheduler**: Re-evaluates the ready state of the graph dynamically. If a node fails to converge, the scheduler registers a repair action as a graph revision event (e.g., splitting a node or inserting an interface node).
+2. **Capability Filtering**: All proposals must pass through the admissibility kernel. A proposal requesting a file edit or command run must possess a valid capability token.
+3. **Structured Prompt Compilation**: When a proposal is rejected, the system compiles the residual diagnostics into a correction prompt.
+4. **Event-Sourced Ledger**: Every transaction (proposals, rejections, commits, rollbacks) is written to a Merkle ledger to enable complete session replay.
+5. **Domain Abstraction**: The core engine processes abstract residuals and energy models. Domain-specific behavior is relegated to domain packages.
