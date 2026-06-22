@@ -30,11 +30,28 @@ Overview
 --------
 
 The SRBN paper models coding tasks as a directed acyclic graph (DAG) of nodes with
-a sheaf structure that enforces consistency across shared boundaries. PSP-5 implements
-this model concretely: each node owns a set of output files (ownership closure),
-generates a multi-artifact bundle, and must pass multi-stage verification before its
-energy falls below the convergence threshold. Only then is the node committed to the
-Merkle ledger.
+a sheaf structure that enforces consistency across shared boundaries. PSP-5
+established the concrete mechanics that remain in force today: each node owns a set
+of output files (ownership closure), generates a multi-artifact bundle, and must
+pass multi-stage verification before its energy falls below the convergence
+threshold. Only then is the node committed to the Merkle ledger.
+
+**PSP-8 extends this model** (it *extends*, and does not replace, PSP-5) in two
+ways that change the runtime:
+
+- **Quadratic energy.** Acceptance is gated on the quadratic residual energy
+  :math:`V(x) = \sum_{e} w_e \lVert r_e \rVert^2` (see `Lyapunov Energy`_ below),
+  rather than the earlier linear component sum.
+- **Mutable work graph.** Rather than walking a precomputed topological order, a
+  closed-loop scheduler re-evaluates a dependency-aware ready queue each round and
+  may requeue, split, insert, or replan nodes as verifier evidence arrives
+  (PSP-8 §4, Mutable Work Graph). Each individual graph *revision* stays acyclic.
+  Node execution is currently sequential — PSP-8 bounded parallelism (a worker
+  pool with file/interface/toolchain leases) is planned for a future release.
+
+The PSP-5 concepts that PSP-8 preserves unchanged — ownership closure, typed
+artifact bundles, the verifier profiles, node classes, and the Merkle ledger —
+are described below; where the runtime now differs, it is marked as PSP-8.
 
 .. graphviz::
    :align: center
@@ -85,10 +102,15 @@ Merkle ledger.
    }
 
 
-The Control Loop (PSP-5 Implementation)
----------------------------------------
+The Control Loop
+----------------
 
-The SRBN control loop as implemented by PSP-5 executes seven phases for each task:
+Detection and planning run once at the start; the remaining phases run **per node
+inside the PSP-8 closed loop**. The scheduler re-evaluates the mutable work graph
+each round, picks the next ready node, and runs Generation → Verification →
+Convergence for it. A node that fails to converge can trigger a graph repair
+(requeue, split, insert interface, or replan a subgraph) and be re-picked on a
+later round, so these phases are *not* a single topological pass:
 
 .. list-table::
    :header-rows: 1
@@ -130,32 +152,42 @@ The SRBN control loop as implemented by PSP-5 executes seven phases for each tas
        ``RetryPolicy`` per error type.
    * - 6
      - **Sheaf Validation**
-     - After all nodes converge individually, run cross-node consistency checks.
-       Validates import paths, shared type signatures, and interface-seal digests.
+     - Cross-node consistency checks. A per-node sheaf pre-check runs as each node
+       commits, and a full validation runs when the ready queue settles. Validates
+       import paths, shared type signatures, and interface-seal digests.
    * - 7
      - **Commit & Outcome**
      - Record each node's terminal state in the Merkle ledger. Nodes that converge
        (:math:`V(x) \leq \varepsilon`) are committed as ``Completed``; nodes whose retries are exhausted
-       are recorded as ``Escalated``. After all nodes are processed, the orchestrator
-       derives a ``SessionOutcome`` from completed/escalated counts: ``Success`` (all
-       completed), ``PartialSuccess`` (some escalated), or ``Failed`` (none completed).
-       Emit ``Complete`` event with the derived outcome.
+       are recorded as ``Escalated``. When the work graph settles (no node is
+       ready), a goal-completion gate may amend the plan or stop; the orchestrator
+       then derives a ``SessionOutcome`` from completed/escalated counts:
+       ``Success`` (all completed), ``PartialSuccess`` (some escalated), or
+       ``Failed`` (none completed), and emits a ``Complete`` event.
 
 
 Lyapunov Energy
 ---------------
 
 The stability of generated code is measured using a Lyapunov energy function, adapted
-from the paper's sheaf-theoretic formulation into five concrete verification barriers:
+from the paper's sheaf-theoretic formulation into concrete verification barriers. Since
+PSP-8 it is the **quadratic residual energy**: each sensor emits a residual with a
+non-negative magnitude :math:`r_e`, and the energy is a weighted sum of their *squares*.
 
 .. admonition:: Energy Formula
    :class: important
 
    .. math::
 
-      V(x) = \alpha \cdot V_{syn} + \beta \cdot V_{str} + \gamma \cdot V_{log} + V_{boot} + V_{sheaf}
+      V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0.
 
-   Default weights: alpha = 1.0, beta = 0.5, gamma = 2.0
+   The five component readouts :math:`V_{syn}`, :math:`V_{str}`, :math:`V_{log}`,
+   :math:`V_{boot}`, :math:`V_{sheaf}` are **derived rollups** of this same energy,
+   grouped by component, so that :math:`V(x) = \sum_{\text{comp}} V_{\text{comp}}`.
+   There is no separate :math:`\alpha/\beta/\gamma` aggregation pass — those weights
+   are folded into the per-class residual weights :math:`w_e`. The
+   ``--energy-weights "a,b,g"`` flag scales the syntactic/structural/logic component
+   weights proportionally (default ``1.0,0.5,2.0`` = identity).
 
 Components
 ~~~~~~~~~~
@@ -176,9 +208,10 @@ Components
      - Violations of ``BehavioralContract`` constraints: interface signatures, invariants,
        and forbidden patterns.
    * - **V_log**
-     - Test Failures
-     - Weighted sum of test failures. Critical tests carry weight 10, high-priority 3,
-       low-priority 1. Computed via pytest or ``cargo test``.
+     - Test Failures / Runtime
+     - Failing-test count and runtime-probe failures (panics, import errors, numeric
+       anomalies), squared and weighted into the logic component. Computed via pytest
+       or ``cargo test`` plus the post-build runtime smoke probe.
    * - **V_boot**
      - Bootstrap Commands
      - Non-zero exit codes from init commands (``uv init --lib``, ``cargo init``),
@@ -198,6 +231,30 @@ The system is considered stable when:
    V(x) \leq \varepsilon
 
 Default: epsilon = 0.10. Configurable via ``--stability-threshold``.
+
+Spectral Diagnostic (planned)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PSP-8 defines an energy-slope constant :math:`\mu = 2\,\lambda_{\min}^{+}(A)`
+— twice the algebraic connectivity (Fiedler value) of the verification graph
+built from the quadratic energy :math:`V(x)=x^{\top}Ax`. It measures how
+strongly the verifier ensemble drives the code toward consensus, and its
+sensitivity to a candidate verifier edge distinguishes an *independent* verifier
+(which raises the spectral gap) from a *redundant* one. A companion measure,
+:math:`\rho_{\text{eff}}`, captures effective verifier independence from observed
+miss correlations.
+
+.. note::
+
+   ``mu`` and :math:`\rho_{\text{eff}}` are **diagnostics, not acceptance-gate
+   inputs** — by design they are computed off the critical path and never block a
+   node. The eigensolver and independence math are **implemented in
+   ``perspt-sdk``** (``spectral::VerificationGraph``, ``independence::compute``)
+   but are **not yet wired into the live agent** — the orchestrator tags each
+   residual with its verifier route but does not yet assemble the verification
+   graph or emit ``mu`` / :math:`\rho_{\text{eff}}`. This is PSP-8 Phase 5; see
+   the *Implementation Status* and *Resolving Gate G* sections of PSP-8 for the
+   current matrix and the wiring steps.
 
 
 Node Classes
