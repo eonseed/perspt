@@ -30,7 +30,7 @@ Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failove
 Energy Weights
 --------------
 
-Since PSP-8, the single energy that gates acceptance is the **quadratic residual
+The single energy that gates acceptance is the **quadratic residual
 energy**
 
 .. math::

@@ -12,7 +12,7 @@ Internals, architecture, and contribution guide for Perspt developers.
       :link: architecture
       :link-type: doc
 
-      Crate structure, data flow, and SRBN internals from PSP-5 through PSP-8.
+      Crate structure, data flow, and SRBN internals.
 
    .. grid-item-card:: Contributing
       :link: contributing
@@ -24,7 +24,7 @@ Internals, architecture, and contribution guide for Perspt developers.
       :link: extending
       :link-type: doc
 
-      Add providers, tools, language plugins, and PSP-8 domain adapters.
+      Add providers, tools, language plugins, and custom domain adapters.
 
    .. grid-item-card:: Testing
       :link: testing

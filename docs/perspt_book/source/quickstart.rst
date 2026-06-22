@@ -116,6 +116,52 @@ To execute autonomous multi-file code generation under the SRBN orchestrator:
      --actuator-model gemini-2.5-flash \
      -w ./project "Create an ETL pipeline in Python"
 
+An execution run displays the active scheduling, verifier execution, and SDK gate telemetry. Below is a clinical trace of a typical autonomous run:
+
+.. code-block:: text
+
+   🚀 Starting SRBN agent session (ID: 01H2X...)
+   [Step 1/3] Planning Task...
+     Running Architect (model: gemini-pro-latest)
+     Decomposing task: "Create Python calculator package..."
+     Generated 3 graph nodes (Interface -> Implementation -> Integration)
+     Ownership closure verified.
+   
+   [Step 2/3] Closed-Loop Scheduling...
+     Picking ready node: node_1_interface
+       Generating outputs: [src/calc/__init__.py]
+       Executing verification stage: SyntaxCheck... ✅ passed (V_syn = 0.0)
+       Executing verification stage: StructuralCheck...
+         goal-presence check: expected [add, sub, mul, div]
+         missing required symbols: [add, sub, mul, div]
+         goal-presence FAIL: SymbolMismatch residual raised.
+         SDK V=Σwₑrₑ²=8.0 [syn 0.00|str 8.00|log 0.00|boot 0.00|sheaf 0.00] gate=rejected (Δ=8.0) ρ=0.5 bound≤3 (1 residuals)
+       Generating correction prompt for node_1_interface (generation 1)...
+       Generating outputs: [src/calc/__init__.py] (generation 2)
+       Executing verification stage: StructuralCheck... ✅ passed (V_str = 0.0)
+       SDK V=Σwₑrₑ²=0.0 [syn 0.00|str 0.00|log 0.00|boot 0.00|sheaf 0.00] gate=hard-pass ρ=0.5 bound≤3 (0 residuals)
+       Committing node_1_interface to Merkle ledger.
+   
+     Picking ready node: node_2_implementation
+       Generating outputs: [src/calc/core.py]
+       Executing verification stage: TestCheck... pytest failed 1 test case.
+       SDK V=Σwₑrₑ²=2.0 [syn 0.00|str 0.00|log 2.00|boot 0.00|sheaf 0.00] gate=rejected (Δ=2.0) ρ=0.5 bound≤3 (1 residuals)
+       Generating correction prompt for node_2_implementation (generation 1)...
+       Generating outputs: [src/calc/core.py] (generation 2)
+       Executing verification stage: TestCheck... ✅ all tests passed.
+       SDK V=Σwₑrₑ²=0.0 [syn 0.00|str 0.00|log 0.00|boot 0.00|sheaf 0.00] gate=hard-pass ρ=0.5 bound≤3 (0 residuals)
+       Committing node_2_implementation to Merkle ledger.
+   
+     Picking ready node: node_3_integration
+       Executing verification stage: SheafCheck... ✅ passed (V_sheaf = 0.0)
+       SDK V=Σwₑrₑ²=0.0 [syn 0.00|str 0.00|log 0.00|boot 0.00|sheaf 0.00] gate=hard-pass ρ=0.5 bound≤3 (0 residuals)
+       Committing node_3_integration to Merkle ledger.
+   
+   [Step 3/3] Settle Session...
+     Session converged successfully. Output Merkle root: 9f8a7e...
+     Completed nodes: 3, Escalated nodes: 0.
+     Session outcome: Success. Exiting.
+
 Operational Modes
 -----------------
 

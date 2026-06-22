@@ -41,7 +41,7 @@ Eight crates form the running executable program; three crates define the reusab
        agent -> store;
        agent -> policy;
        agent -> sandbox;
-       agent -> sdk [style=dotted, label="PSP-8 Bridge"];
+       agent -> sdk [style=dotted, label="SDK Bridge"];
        coding -> sdk;
        research -> sdk;
        dashboard -> store;
@@ -95,63 +95,146 @@ Crate Summary
 perspt-cli
 ~~~~~~~~~~
 
-The CLI crate parses user options via ``clap`` and dispatches tasks to the appropriate backend handlers. It supports commands for interactive chat, autonomous execution, ledger queries, configuration editing, and dashboard monitoring.
+The entry-point command-line utility. It parses command-line flags and subcommands using the ``clap`` library and dispatches execution control to corresponding subsystems in other workspace crates.
+
+Key structural types include:
+
+* ``Cli``: The root structure declaring command-line configuration arguments.
+* ``Commands``: The enum representing subcommands, including:
+  
+  * ``chat``: Starts the interactive terminal chat mode.
+  * ``agent``: Starts the autonomous closed-loop SRBN coding orchestrator.
+  * ``ledger``: Commands to query, inspect, or rollback Merkle ledger sessions.
+  * ``config``: Modifies runtime configuration values in ``config.toml``.
+  * ``dashboard``: Launches the monitoring Axum server and opens the browser.
 
 perspt-core
 ~~~~~~~~~~~
 
-The core library defines structural datatypes shared across all crates:
+The foundation crate. It defines the central types, data models, and configurations shared globally across all crates. It has no internal dependencies on other workspace crates, ensuring clean build separation.
 
-- **Data Models**: Structures representing nodes, task plans, budgets, retry policies, and session outcomes.
-- **Event Plane**: The ``AgentEvent`` enumeration, carrying over 40 lifecycle telemetry events.
-- **Provider Interface**: A wrapper around the ``genai`` crate to handle token stream requests and error failovers.
-- **Plugin Registry**: Outdated extension registry; maintained as a transition helper until all language logic is migrated to the coding domain adapter.
+Key components:
+
+* **Core Types**: Structures representing the execution parameters, such as:
+  
+  .. code-block:: rust
+
+     pub struct SRBNNode {
+         pub id: String,
+         pub goal: String,
+         pub output_files: Vec<String>,
+         pub dependencies: Vec<String>,
+         pub class: NodeClass, // Interface, Implementation, Integration
+         pub status: NodeStatus,
+     }
+
+* **Event Plane**: Defines the event system carrying over 40 lifecycle events. The ``AgentEvent`` enum is transmitted across channels to update the TUI and log database records.
+* **Provider Gate**: Integrates with the ``genai`` crate to handle provider-agnostic LLM requests, supporting token streaming, prompt assemblies, and backoff limits.
 
 perspt-agent
 ~~~~~~~~~~~~
 
-The orchestrator implementation crate.
+The orchestrator and runtime executor. It houses the autonomous agent loops, prompt templates, tool definitions, and system sensors.
 
-- **The Closed Loop**: ``SRBNOrchestrator`` parses the user's task, generates the initial dependency graph, and drives execution through planning, generation, verification, and commit phases.
-- **The SDK Bridge**: Currently, the orchestrator drives its internal queue using legacy ``SRBNNode`` and ``StabilityMonitor`` types. It executes the new ``perspt-sdk`` measured acceptance gate alongside this loop, outputting SDK quadratic energy calculations as telemetry.
-- **Subsystems**: Includes the native language-server protocol (LSP) client, test runners, local file utilities, and prompt templates.
+* **Closed-Loop Scheduler**: The ``SRBNOrchestrator`` drives the closed-loop convergence pipeline using a petgraph-based directed acyclic graph. It queries the graph for ready nodes, executes generation, verifies output energy, handles retry loops, and commits stable nodes.
+* **The SDK Bridge**: Coordinates the legacy orchestrator scheduler with the new platform SDK. It runs the ``perspt-sdk`` measured acceptance gate alongside the verification phase. The bridge is defined inside ``crates/perspt-agent/src/orchestrator/sdk_bridge.rs``:
+  
+  .. code-block:: rust
+
+     pub struct SdkGateState {
+         model: EnergyModel,
+         best_accepted: HashMap<String, f64>,
+         baseline: HashMap<String, f64>,
+     }
+
+  On each convergence step, the bridge maps verification outcomes to SDK residuals, evaluates gate descent conditions, and exposes detailed telemetry.
 
 perspt-tui
 ~~~~~~~~~~
 
-Implements the terminal rendering engine using ``ratatui``. It allows users to view streamed dialogue, browse unified code changes, inspect the active DAG execution tree, and interactive review of proposed commits.
+The terminal user interface built using the ``ratatui`` library. It provides high-performance terminal panels optimized for real-time human-in-the-loop review.
+
+* **ChatApp**: An interactive chat client that supports streaming LLM dialogue, rendering tables, and parsing markdown.
+* **AgentApp**: Displays active workspace executions. It visualizes the task graph DAG, displays active Lyapunov energy gauges, and opens a ``ReviewModal`` with unified code diffs for manual validation.
 
 perspt-store
 ~~~~~~~~~~~~
 
-Handles state persistence via DuckDB. It records session configurations, node outcomes, and LLM communication logs.
+The local database storage library built on DuckDB. It manages all persistent schemas for sessions, LLM requests, energy convergence logs, and ledger commits.
+
+Key interface structures:
+
+* ``SessionStore``: Encapsulates connection pools to the DuckDB file database.
+* **Schema Definitions**: It creates and maintains tables tracking:
+  
+  * ``node_states``: Per-generation code snapshots.
+  * ``energy_records``: Step-by-step energy changes.
+  * ``provisional_branches``: Tracking active branches prior to parent commits.
 
 perspt-policy
 ~~~~~~~~~~~~~
 
-Executes security rules using the Starlark scripting runtime. It checks proposed shell commands and file mutations to prevent actions outside the workspace footprint.
+The security policy engine running the Starlark scripting runtime. It checks proposed mutations before execution to guarantee safety bounds.
+
+Key API signatures:
+
+.. code-block:: rust
+
+   pub struct PolicyEngine {
+       globals: Globals,
+   }
+
+   impl PolicyEngine {
+       pub fn check_file_write(&self, path: &Path, content: &str) -> PolicyDecision;
+       pub fn check_command(&self, command: &str) -> PolicyDecision;
+   }
+
+Starlark scripts allow developers to enforce isolation, blacklist hazardous command invocations, or limit write directories.
 
 perspt-sandbox
 ~~~~~~~~~~~~~~
 
-Isolates command executions. It ensures that compiler and test suite runs do not leak resources or persist changes outside temporary workspace branches.
+Command sandboxing library. It spawns verifiers and test runners inside isolated process boundaries to prevent local system resource contamination.
+
+* ``SandboxedCommand``: Wraps standard library commands, enforcing memory ceilings, processor timeouts, environment sanitization, and redirecting stdout/stderr to files for analysis.
 
 perspt-dashboard
 ~~~~~~~~~~~~~~~~
 
-A local Axum-based server that reads the persistence store and streams updates to a web browser. It presents real-time heatmaps and graph status timelines.
+A read-only local dashboard built using the Axum web framework. It reads execution history directly from the DuckDB store and streams live progress to a local browser page.
+
+* **Server Routing**: Sets up REST routes for historical session analysis.
+* **SSE Stream**: Sends live event frames (graph state changes, energy rollups) using Server-Sent Events (SSE).
 
 perspt-sdk
 ~~~~~~~~~~
 
-The reusable platform layer. It contains the mathematical definitions of the SRBN stability contract: the quadratic Lyapunov energy model, the measured acceptance gate, the spectral constants, and the final residual certificate. It defines the traits that domain packages must implement to plug into the system.
+The core platform library defining the reusable SRBN stability protocol specifications.
+
+* **Domain-Neutral SDK**: Implements the mathematical formulations for the Measured Acceptance Gate. It has no knowledge of language rules, compilers, or project layouts. It operates purely on mathematical residuals and domain contracts.
+* **Domain Integration Trait**: The core trait that custom domain extensions must implement:
+  
+  .. code-block:: rust
+
+     pub trait AgentDomainPackage: Send + Sync {
+         fn domain_id(&self) -> DomainId;
+         fn detect(&self, workspace: &WorkspaceSnapshot) -> DomainDetection;
+         fn residual_schema(&self, scope: &DomainScope) -> ResidualSchema;
+         fn energy_model(&self, scope: &DomainScope) -> EnergyModel;
+         fn correction_directions(&self, residuals: &[ResidualEvent]) -> Vec<CorrectionDirection>;
+     }
 
 perspt-coding
 ~~~~~~~~~~~~~
 
-The primary domain package. It implements the SDK traits for code repositories, defining compiler diagnostics and test failures as formal residuals, and mapping them to target correction directions.
+The coding-domain package, implementing the ``AgentDomainPackage`` trait.
+
+* **Coding Domain Model**: Translates code verification outcomes (compiler syntax diagnostics, type warnings, failed tests, linter reports, and missing symbols) into SDK ``ResidualEvent`` representations.
+* **Language Adapters**: Implements adapters for Rust, Python, and TypeScript to parse raw toolchain output, associate them with residual classes, and supply directed correction instructions (e.g. telling the Actuator what type error was detected and how to resolve it).
 
 perspt-research
 ~~~~~~~~~~~~~~~
 
-A validation domain package. It implements the SDK traits to model research manuscript compilation and citation validation as stability objectives. It serves as a structural proof that the SDK handles fields of work outside of coding.
+An experimental verification domain package.
+
+* **Academic Manuscript Domain**: Implements the SDK traits to manage research document production. It treats LaTeX syntax errors, missing citations, and bibliography inconsistencies as residual events, driving convergence towards a fully validated scientific manuscript. It serves as a proof of concept for the SDK's domain-agnostic separation of concerns.

@@ -22,8 +22,7 @@ Launching Agent Mode
 Core Workflow
 -------------
 
-The SRBN agent follows the PSP-5 lifecycle, extended by PSP-8 (quadratic energy
-and a mutable work graph):
+The SRBN agent follows a structured closed-loop lifecycle utilizing a quadratic energy model and a mutable work graph:
 
 1. **Detection** - Identify workspace state (greenfield/brownfield) and select
    language plugins
@@ -36,7 +35,7 @@ and a mutable work graph):
    A ``FeatureCharter`` is created with policy-derived limits (max modules, files,
    and revisions) to constrain plan scope.
 3. **Execution** - The scheduler does *not* walk a precomputed topological
-   order. Following PSP-8 §4 (Mutable Work Graph), it runs a closed
+   order. Utilizing a mutable work graph, it runs a closed
    ("fly-by-wire") loop: each round it re-evaluates the graph and selects the
    next *ready* node — one whose dependencies are all complete and whose
    interface seals are satisfied — from a dependency-aware ready queue. For the
@@ -58,12 +57,12 @@ and a mutable work graph):
    .. note::
 
       The scheduler currently executes **one ready node per round
-      (sequential)**. PSP-8's *bounded parallelism* — a worker pool with
+      (sequential)**. Bounded parallelism — a worker pool with
       file/interface/toolchain leases running non-conflicting nodes
       concurrently (``max_parallel*`` controls) — is planned for a future
       release.
 
-The verification formula is the PSP-8 quadratic residual energy (each sensor
+The verification formula is the quadratic residual energy (each sensor
 emits a residual of magnitude :math:`r_e \ge 0`):
 
 .. math::

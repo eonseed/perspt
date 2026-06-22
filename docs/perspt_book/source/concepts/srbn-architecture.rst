@@ -12,16 +12,15 @@ proposal is only a guess. Left unchecked, a long run of guesses drifts: small
 mistakes pile up until the work is broken. SRBN refuses to trust a guess on its
 word. It measures every proposed change, keeps the change only when the
 measurement shows progress, and writes the kept result to a permanent record.
-Perspt's coding agent began this work in **PSP-5** and continues it in **PSP-8**,
-which carries the same discipline toward a reusable, software-development-kit
-platform.
+Perspt's coding agent implements this work via a reusable software-development-kit
+(SDK) platform (originally specified in the references section under PSP-8).
 
 .. admonition:: Theory vs. Implementation
    :class: note
 
     This page describes both the SRBN paper series and how Perspt's
-    PSP runtime implements it. Where a claim comes from the papers' formal proofs,
-    it is noted as a **paper result**. Where PSP-5 makes engineering choices that
+    runtime implements it. Where a claim comes from the papers' formal proofs,
+    it is noted as a **paper result**. Where the developer team makes engineering choices that
     approximate or extend the theory, those are noted as **implementation details**.
     The theoretical framework is mature; empirical benchmarks on Perspt's implementation
     have not yet been published.
@@ -30,28 +29,26 @@ Overview
 --------
 
 The SRBN paper models coding tasks as a directed acyclic graph (DAG) of nodes with
-a sheaf structure that enforces consistency across shared boundaries. PSP-5
-established the concrete mechanics that remain in force today: each node owns a set
+a sheaf structure that enforces consistency across shared boundaries. The system 
+establishes the following concrete mechanics: each node owns a set
 of output files (ownership closure), generates a multi-artifact bundle, and must
 pass multi-stage verification before its energy falls below the convergence
 threshold. Only then is the node committed to the Merkle ledger.
 
-**PSP-8 extends this model** (it *extends*, and does not replace, PSP-5) in two
-ways that change the runtime:
+The runtime environment structures execution in two primary ways:
 
 - **Quadratic energy.** Acceptance is gated on the quadratic residual energy
-  :math:`V(x) = \sum_{e} w_e \lVert r_e \rVert^2` (see `Lyapunov Energy`_ below),
-  rather than the earlier linear component sum.
+  :math:`V(x) = \sum_{e} w_e \lVert r_e \rVert^2` (see `Lyapunov Energy`_ below).
 - **Mutable work graph.** Rather than walking a precomputed topological order, a
   closed-loop scheduler re-evaluates a dependency-aware ready queue each round and
-  may requeue, split, insert, or replan nodes as verifier evidence arrives
-  (PSP-8 §4, Mutable Work Graph). Each individual graph *revision* stays acyclic.
-  Node execution is currently sequential — PSP-8 bounded parallelism (a worker
+  may requeue, split, insert, or replan nodes as verifier evidence arrives. 
+  Each individual graph *revision* stays acyclic.
+  Node execution is currently sequential. Bounded parallelism (a worker
   pool with file/interface/toolchain leases) is planned for a future release.
 
-The PSP-5 concepts that PSP-8 preserves unchanged — ownership closure, typed
+The core concepts of the control system — ownership closure, typed
 artifact bundles, the verifier profiles, node classes, and the Merkle ledger —
-are described below; where the runtime now differs, it is marked as PSP-8.
+are described below.
 
 .. graphviz::
    :align: center
@@ -106,7 +103,7 @@ The Control Loop
 ----------------
 
 Detection and planning run once at the start; the remaining phases run **per node
-inside the PSP-8 closed loop**. The scheduler re-evaluates the mutable work graph
+inside the closed loop**. The scheduler re-evaluates the mutable work graph
 each round, picks the next ready node, and runs Generation → Verification →
 Convergence for it. A node that fails to converge can trigger a graph repair
 (requeue, split, insert interface, or replan a subgraph) and be re-picked on a
@@ -170,72 +167,119 @@ Lyapunov Energy
 ---------------
 
 The stability of generated code is measured using a Lyapunov energy function, adapted
-from the paper's sheaf-theoretic formulation into concrete verification barriers. Since
-PSP-8 it is the **quadratic residual energy**: each sensor emits a residual with a
-non-negative magnitude :math:`r_e`, and the energy is a weighted sum of their *squares*.
+from the paper's sheaf-theoretic formulation into concrete verification barriers. The
+system evaluates a canonical **quadratic residual energy**: each sensor :math:`e`
+emits a residual with a non-negative magnitude :math:`r_e(x)`, and the energy is a weighted
+sum of their squares.
 
-.. admonition:: Energy Formula
-   :class: important
+Let :math:`\mathcal{E}` be the set of active sensors monitoring the system. For a proposed
+state :math:`x`, the total Lyapunov energy :math:`V(x)` is defined by the quadratic form:
 
-   .. math::
+.. math::
 
-      V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0.
+   V(x) = \sum_{e \in \mathcal{E}} w_e \, \lVert r_e(x) \rVert^2
 
-   The five component readouts :math:`V_{syn}`, :math:`V_{str}`, :math:`V_{log}`,
-   :math:`V_{boot}`, :math:`V_{sheaf}` are **derived rollups** of this same energy,
-   grouped by component, so that :math:`V(x) = \sum_{\text{comp}} V_{\text{comp}}`.
-   There is no separate :math:`\alpha/\beta/\gamma` aggregation pass — those weights
-   are folded into the per-class residual weights :math:`w_e`. The
-   ``--energy-weights "a,b,g"`` flag scales the syntactic/structural/logic component
-   weights proportionally (default ``1.0,0.5,2.0`` = identity).
+where :math:`w_e > 0` represents the positive weight assigned to the residual class of
+sensor :math:`e`. 
+
+The five component readouts :math:`V_{syn}`, :math:`V_{str}`, :math:`V_{log}`,
+:math:`V_{boot}`, and :math:`V_{sheaf}` are **derived rollups** of this same energy,
+grouped by component type, such that the total is the sum of the rollups:
+
+.. math::
+
+   V(x) = V_{\text{syn}} + V_{\text{str}} + V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+
+In this formulation, the rollups themselves carry the squared, weighted
+residual contributions:
+
+.. math::
+
+   V_{\text{comp}} = \sum_{e \in \text{comp}} w_e \, \lVert r_e(x) \rVert^2
+
+There is no secondary :math:`\alpha/\beta/\gamma` aggregation pass. The legacy
+``--energy-weights "alpha,beta,gamma"`` flag is parsed and folded proportionally into the
+individual residual weights :math:`w_e` relative to reference defaults (where
+:math:`\text{Syn}_{\text{default}} = 1.0`, :math:`\text{Str}_{\text{default}} = 0.5`,
+and :math:`\text{Log}_{\text{default}} = 2.0`), leaving the core mathematical engine as a
+pure sum of pre-weighted squares.
 
 Components
 ~~~~~~~~~~
+
+We enumerate the five component categories and the specific residual classes mapped
+to them from the `perspt-coding` domain package:
 
 .. list-table::
    :header-rows: 1
    :widths: 15 25 60
 
    * - Component
-     - Source
-     - Description
+     - Mapped Residual Classes (Weights)
+     - Operational Semantics
    * - **V_syn**
-     - LSP Diagnostics
-     - Count of errors and warnings from the language server (``rust-analyzer``, ``ty``,
-       ``pyright``, ``typescript-language-server``, ``gopls``).
+     - * ``Syntax`` (weight: 4.0)
+       * ``Type`` (weight: 3.0)
+       * ``Build`` (weight: 3.0)
+     - Captures syntax errors, build-time compilation failures, and LSP diagnostic warnings.
+       Compiler warnings or type-check diagnostics produce residuals of class ``Type``,
+       where the magnitude is the raw diagnostic count. A build failure raises a blocking
+       residual of class ``Build``.
    * - **V_str**
-     - Contract Verification
-     - Violations of ``BehavioralContract`` constraints: interface signatures, invariants,
-       and forbidden patterns.
+     - * ``ImportGraph`` (weight: 2.0)
+       * ``SymbolMismatch`` (weight: 2.0)
+       * ``InterfaceMismatch`` (weight: 2.5)
+       * ``OwnershipViolation`` (weight: 2.0)
+       * ``Policy`` (weight: 1.0)
+       * ``Dependency`` (weight: 1.5)
+       * ``Manifest`` (weight: 1.5)
+       * ``Format`` (weight: 0.25)
+     - Measures structural contract adherence. If a required symbol defined by a node's public
+       interface signature is absent from the generated output files, the ``GoalPresence`` sensor
+       registers a blocking ``SymbolMismatch`` residual, preventing convergence. Policy and format
+       irregularities are likewise squared into this component.
    * - **V_log**
-     - Test Failures / Runtime
-     - Failing-test count and runtime-probe failures (panics, import errors, numeric
-       anomalies), squared and weighted into the logic component. Computed via pytest
-       or ``cargo test`` plus the post-build runtime smoke probe.
+     - * ``TestFailure`` (weight: 2.0)
+       * ``Runtime`` (weight: 2.0)
+       * ``Regression`` (weight: 3.0)
+     - Evaluates behavioral outcomes. Unit test failures yield a ``TestFailure`` residual with a
+       magnitude matching the count of failing test cases. Post-build runtime smoke probes detect
+       process crashes, tracebacks, or numeric anomalies, adding a ``Runtime`` residual.
    * - **V_boot**
-     - Bootstrap Commands
-     - Non-zero exit codes from init commands (``uv init --lib``, ``cargo init``),
-       build commands, and dependency installs.
+     - * ``SensorUnavailable`` (weight: 1.0)
+       * ``ToolFailure`` (weight: 1.0)
+     - Registers system infrastructure state. If a required sensor (e.g., an LSP server or
+       test runner) is degraded or unavailable, it raises a ``SensorUnavailable`` residual,
+       forcing the energy high so the system knows its stability status is indeterminate.
    * - **V_sheaf**
-     - Cross-Node Consistency
-     - Failures from sheaf validators: import-path resolution, shared-type agreement,
-       and interface-seal digest mismatches.
+     - * ``SheafInconsistency`` (weight: 2.0)
+     - Evaluates global structural consistency across nodes. Cross-node import/dependency
+       mismatches or signature differences raise a ``SheafInconsistency`` residual.
 
 Convergence Criterion
 ~~~~~~~~~~~~~~~~~~~~~
 
-The system is considered stable when:
+The system is considered stable if and only if the candidate state satisfies:
 
 .. math::
 
    V(x) \leq \varepsilon
 
-Default: epsilon = 0.10. Configurable via ``--stability-threshold``.
+where :math:`\varepsilon` is the stability threshold (default :math:`\varepsilon = 0.10`), configurable
+via the ``--stability-threshold`` CLI argument. If the state is not stable, the accept-gate
+evaluates descent. A state :math:`x` can be provisionally accepted during convergence if:
+
+.. math::
+
+   V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
+
+where :math:`x_{\text{best}}` is the best previously accepted state, and :math:`\rho_{\text{gate}}`
+is the minimum descent gate (default :math:`0.50`), ensuring non-trivial progress.
 
 Spectral Diagnostic (planned)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PSP-8 defines an energy-slope constant :math:`\mu = 2\,\lambda_{\min}^{+}(A)`
+The system supports an energy-slope constant :math:`\mu = 2\,\lambda_{\min}^{+}(A)`
 — twice the algebraic connectivity (Fiedler value) of the verification graph
 built from the quadratic energy :math:`V(x)=x^{\top}Ax`. It measures how
 strongly the verifier ensemble drives the code toward consensus, and its
@@ -252,15 +296,15 @@ miss correlations.
    ``perspt-sdk``** (``spectral::VerificationGraph``, ``independence::compute``)
    but are **not yet wired into the live agent** — the orchestrator tags each
    residual with its verifier route but does not yet assemble the verification
-   graph or emit ``mu`` / :math:`\rho_{\text{eff}}`. This is PSP-8 Phase 5; see
-   the *Implementation Status* and *Resolving Gate G* sections of PSP-8 for the
-   current matrix and the wiring steps.
+   graph or emit ``mu`` / :math:`\rho_{\text{eff}}`. This represents a planned
+   enhancement (see the references section under PSP-8 for further architectural
+   specifications).
 
 
 Node Classes
 ------------
 
-PSP-5 introduces three node classes that govern execution order and verification:
+The system utilizes three node classes that govern execution order and verification:
 
 .. list-table::
    :header-rows: 1

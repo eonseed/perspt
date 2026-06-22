@@ -5,8 +5,8 @@ Architecture
 
 Perspt is a Rust workspace of twelve crates. Eight crates make up the running
 program, three crates form a reusable platform layer, and one root crate ties
-them together. Version 0.6.1 implements the PSP-7 correction-loop contracts and
-adds the PSP-8 platform layer for the experimental SRBN agent.
+them together. Version 0.6.1 implements the correction-loop contracts and
+adds the platform SDK layer for the experimental SRBN agent.
 
 Workspace Layout
 ----------------
@@ -23,7 +23,7 @@ Workspace Layout
    |   +-- perspt-policy/        # Starlark policy engine
    |   +-- perspt-sandbox/       # Command sandboxing
    |   +-- perspt-dashboard/     # Axum web dashboard
-   |   +-- perspt-sdk/           # Domain-neutral SRBN platform (PSP-8)
+   |   +-- perspt-sdk/           # Domain-neutral SRBN platform SDK
    |   +-- perspt-coding/        # Coding domain package (first domain)
    |   +-- perspt-research/      # Research domain skeleton (second domain)
    +-- tests/                    # Integration tests
@@ -47,7 +47,7 @@ Dependency Graph
        "perspt-agent" -> "perspt-store";
        "perspt-agent" -> "perspt-policy";
        "perspt-agent" -> "perspt-sandbox";
-       "perspt-agent" -> "perspt-sdk" [style=dotted, label="PSP-8"];
+       "perspt-agent" -> "perspt-sdk" [style=dotted, label="SDK Bridge"];
        "perspt-tui" -> "perspt-core";
        "perspt-tui" -> "perspt-agent";
        "perspt-store" -> "perspt-core";
@@ -151,13 +151,13 @@ The experimental SRBN orchestrator and its subsystems.
        //   event/action channels, per-tier model names + fallbacks
    }
 
-The orchestrator drives the PSP-5 lifecycle:
+The orchestrator drives the core workspace lifecycle:
 
 1. ``detect_workspace()`` - Identify plugins and workspace state
 2. ``plan_task()`` - Architect decomposes task into the initial work graph
 3. Closed-loop scheduler - A ``loop`` that calls ``next_ready_node()`` each round
    to select the next dependency-satisfied node from the mutable work graph
-   (PSP-8 §4), instead of a one-shot topological traversal. Repair actions
+   (see the mutable work graph specifications), instead of a one-shot topological traversal. Repair actions
    (requeue, split, insert interface, replan subgraph) mutate the graph between
    rounds and reworked/inserted nodes are re-picked.
 4. ``verify_node()`` - Compute V(x) via plugin verifier profile
@@ -171,7 +171,7 @@ The orchestrator drives the PSP-5 lifecycle:
 When the ready queue empties, a goal-completion gate may amend the plan or
 settle; the orchestrator then derives ``SessionOutcome`` from
 completed/escalated counts and emits a ``Complete`` event. Each graph revision
-is acyclic. The scheduler runs one ready node per round today — PSP-8 bounded
+is acyclic. The scheduler runs one ready node per round today — bounded
 parallelism (worker pool with leases, ``max_parallel*`` controls) is planned for
 a future release.
 
@@ -187,29 +187,71 @@ DuckDB-backed persistence. **Not SQLite.**
        conn: Mutex<Connection>,  // duckdb::Connection
    }
 
-Tables:
+DuckDB Schema and Tables
+~~~~~~~~~~~~~~~~~~~~~~~~
 
-- ``sessions`` - Session metadata (id, task, working_dir, merkle_root, status)
-- ``node_states`` - Per-node snapshots
-- ``energy_records`` - Energy history
-- ``llm_requests`` - Full LLM request/response logging
-- ``structural_digests`` - Content hashes for interface seals
-- ``context_provenance`` - Provenance tracking per node
-- ``escalation_reports`` - Classified escalations
-- ``rewrite_records`` - Graph rewrite audit trail
-- ``sheaf_validations`` - Cross-node validation results
-- ``provisional_branches`` - Branch lifecycle
-- ``branch_lineage`` - Parent-child branch relationships
-- ``interface_seals`` - Sealed interface records
-- ``branch_flushes`` - Flush cascade records
-- ``task_graph_edges`` - DAG edges
-- ``review_outcomes`` - Human review decisions
-- ``verification_results`` - Full verification snapshots
-- ``artifact_bundles`` - Bundle JSON per node
-- ``plan_revisions`` - Plan version history
-- ``feature_charters`` - Scope governance records
-- ``repair_footprints`` - Correction audit trail
-- ``budget_envelopes`` - Session budget caps and usage
+The database model is implemented as a set of relational tables in a DuckDB store. Key tables and their columns are structured as follows:
+
+.. list-table:: Database Core Tables
+   :header-rows: 1
+   :widths: 20 40 40
+
+   * - Table Name
+     - Column Structure (DuckDB Data Types)
+     - Invariant Relationships and Purpose
+   * - ``sessions``
+     - * ``session_id`` (VARCHAR, PRIMARY KEY)
+       * ``task_description`` (TEXT)
+       * ``working_dir`` (VARCHAR)
+       * ``merkle_root`` (VARCHAR)
+       * ``status`` (VARCHAR)
+     - Tracks the life cycle of active agent sessions. The ``merkle_root`` maps to the final committed workspace hash.
+   * - ``node_states``
+     - * ``node_id`` (VARCHAR)
+       * ``session_id`` (VARCHAR, FK -> sessions)
+       * ``generation`` (INTEGER)
+       * ``status`` (VARCHAR)
+       * ``output_files`` (JSON array)
+     - Preserves snapshots of workspace nodes across successive generations. Combined with ``session_id``, forms the unique node key.
+   * - ``energy_records``
+     - * ``node_id`` (VARCHAR)
+       * ``session_id`` (VARCHAR)
+       * ``generation`` (INTEGER)
+       * ``v_syn`` (FLOAT)
+       * ``v_str`` (FLOAT)
+       * ``v_log`` (FLOAT)
+       * ``v_boot`` (FLOAT)
+       * ``v_sheaf`` (FLOAT)
+     - Records step-by-step energy changes. Captures the output of the SDK Measured Acceptance Gate.
+   * - ``llm_requests``
+     - * ``request_id`` (VARCHAR, PRIMARY KEY)
+       * ``session_id`` (VARCHAR)
+       * ``node_id`` (VARCHAR)
+       * ``prompt`` (TEXT)
+       * ``response`` (TEXT)
+       * ``tokens_sent`` (INTEGER)
+       * ``tokens_received`` (INTEGER)
+     - Captures full dialogue request payloads, response bodies, and token telemetry for usage audits.
+
+Remaining Audit and Control Tables:
+
+* ``structural_digests``: Maps file paths to their content hashes to enforce interface-seal validations.
+* ``context_provenance``: Records the sources of context files retrieved for the Actuator.
+* ``escalation_reports``: Contains logs of failed convergence steps that triggered an escalation.
+* ``rewrite_records``: Logs scheduler graph mutation operations (node splits, requeues, etc.).
+* ``sheaf_validations``: Logs cross-node consistency checks.
+* ``provisional_branches``: Manages provisional workspaces for downstream nodes.
+* ``branch_lineage``: Tracks parent-child branch structures.
+* ``interface_seals``: Stores structural hashes of interfaces.
+* ``branch_flushes``: Logs discarded provisional work.
+* ``task_graph_edges``: Records DAG dependency edges between nodes.
+* ``review_outcomes``: Records human approval decisions.
+* ``verification_results``: Contains full tool outputs from validation runs.
+* ``artifact_bundles``: Stores transactional JSON artifact payloads.
+* ``plan_revisions``: Stores Architect-generated graph structures.
+* ``feature_charters``: Documents resource ceilings assigned at planning time.
+* ``repair_footprints``: Records repair prompts and correction steps.
+* ``budget_envelopes``: Tracks session financial caps.
 
 
 Crate: ``perspt-tui``

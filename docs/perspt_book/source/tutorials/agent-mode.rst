@@ -9,7 +9,7 @@ Overview
 --------
 
 Agent mode lets Perspt plan, write, test, and commit multi-file projects
-autonomously. The SRBN runtime (PSP-5, extended by the PSP-8 mutable work graph)
+autonomously. The SRBN runtime (extended by the dependency-aware mutable work graph)
 decomposes tasks into a graph of nodes — each revision acyclic — with each node
 owning specific output files, verified by real LSP diagnostics and test runners.
 
@@ -90,7 +90,7 @@ Each node owns specific output files (ownership closure):
 - node-3: ``src/main.py``
 - node-4: ``tests/test_calculator.py``
 
-**Execution** - A closed-loop scheduler (PSP-8 mutable work graph) re-evaluates
+**Execution** - A closed-loop scheduler (utilizing the mutable work graph) re-evaluates
 the graph each round and runs the next *ready* node from a dependency-aware
 queue — not a precomputed topological walk. Reworked nodes are re-picked and
 inserted nodes are executed on later rounds. For each node:
@@ -100,7 +100,7 @@ inserted nodes are executed on later rounds. For each node:
 3. LSP diagnostics run (V_syn), contracts check (V_str), tests run (V_log)
 4. Bootstrap commands check (V_boot)
 
-Nodes run sequentially (one per round) in the current release; PSP-8 bounded
+Nodes run sequentially (one per round) in the current release; bounded
 parallelism is planned for a future version.
 
 .. code-block:: text

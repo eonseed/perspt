@@ -47,46 +47,125 @@ Language plugins implement the ``LanguagePlugin`` trait from ``perspt-core``.
 2. Register in the ``PluginRegistry``
 3. Add LSP config for ``gopls``
 
-Designing PSP-8 Domain Adapters
--------------------------------
+Designing Domain Adapters
+--------------------------
 
-PSP-8 changes the long-term extension model from plugin-first to SDK-first.
-Language plugins remain useful, but they should become domain adapters over the
-SRBN SDK rather than miniature orchestrators. The SRBN control plane should own
-scheduling, residual scoring, capability checks, replay, and dashboard
-projection. A domain adapter should own the facts that only the domain can know.
+The platform SDK establishes a modular separation of concerns: the core SRBN control plane (in ``perspt-sdk``) owns scheduling, residual scoring, capability checking, ledger tracking, and telemetry monitoring, while the domain adapter owns the domain-specific logic.
 
-For a coding adapter, that means:
+To write a custom domain extension (for example, to support research manuscript compilation, cloud deployment stability, or databases), developers must implement the ``AgentDomainPackage`` trait.
 
-.. rubric:: Coding adapter responsibilities
+Implementing the AgentDomainPackage Trait
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Workspace sensing
-   Project detection, initialization command, manifest inventory, dependency
-   graph, and import graph.
+A domain package is a Rust struct that implements the ``AgentDomainPackage`` trait. Below is a complete implementation example of a custom research domain package:
 
-Verification sensors
-   Parser or AST extraction, LSP diagnostics, formatter checks, build checks,
-   targeted tests, and logical validators.
+.. code-block:: rust
 
-Residual taxonomy
-   Compiler residuals, import residuals, test residuals, policy residuals,
-   bootstrap residuals, and sheaf residuals.
+   use perspt_sdk::{
+       AgentDomainPackage, DomainDetection, DomainId, DomainScope, EnergyModel,
+       ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight, WorkspaceSnapshot,
+       CorrectionDirection, EnergyComponent, StabilityClaim
+   };
 
-Correction directions
-   Typed hints that map residual evidence to repair prompts or graph rewrite
-   actions.
+   pub struct ResearchDomain;
 
-Admissible effects
-   Rules for file mutation, dependency mutation, command execution, network
-   access, and approval requirements.
+   impl AgentDomainPackage for ResearchDomain {
+       /// Returns the unique identifier of the domain.
+       fn domain_id(&self) -> DomainId {
+           DomainId::new("research")
+       }
 
-Replay fixtures
-   Small examples that test descent, recovery, escalation, and deterministic
-   replay.
+       /// Detects if the current project workspace contains files corresponding to this domain.
+       fn detect(&self, workspace: &WorkspaceSnapshot) -> DomainDetection {
+           let mut evidence = Vec::new();
+           for marker in ["paper.tex", "thesis.tex", "bibliography.bib"] {
+               if workspace.has_file_named(marker) {
+                   evidence.push(format!("found academic manuscript file: {}", marker));
+               }
+           }
+           let activated = !evidence.is_empty();
+           DomainDetection {
+               domain: self.domain_id(),
+               activated,
+               confidence: if activated { 0.90 } else { 0.0 },
+               evidence,
+           }
+       }
 
-Research, website-building, and other future plugins should follow the same
-shape: expose measurable residuals and admissible effects, then let the SRBN SDK
-perform the control work.
+       /// Declares the list of residual classes this domain can emit.
+       fn residual_schema(&self, _scope: &DomainScope) -> ResidualSchema {
+           ResidualSchema::new(vec![
+               ResidualClass::Syntax,             // LaTeX syntax check
+               ResidualClass::SymbolMismatch,      // Missing citations
+               ResidualClass::InterfaceMismatch,   // Broken cross-references
+               ResidualClass::Build,              // pdflatex build failures
+           ])
+       }
+
+       /// Configures the energy model, including tolerances, bounds, and weights.
+       fn energy_model(&self, scope: &DomainScope) -> EnergyModel {
+           use EnergyComponent::*;
+           use ResidualClass::*;
+
+           let weights = vec![
+               ResidualWeight::new(Syntax, Syn, 2.0),
+               ResidualWeight::new(Build, Syn, 4.0).with_hard_threshold(0.0),
+               ResidualWeight::new(SymbolMismatch, Str, 1.5),
+               ResidualWeight::new(InterfaceMismatch, Str, 1.0),
+           ];
+
+           let mut model = EnergyModel::new("research", 0.10)
+               .with_correction_budget(5);
+           model.residual_weights = weights;
+           model.energy_tolerance = 0.0;
+           model.stability_claim = Some(StabilityClaim::not_claimed(format!(
+               "research scope: {}",
+               scope.label
+           )));
+           model
+       }
+
+       /// Maps residual events to directed correction prompts for the actuator.
+       fn correction_directions(&self, residuals: &[ResidualEvent]) -> Vec<CorrectionDirection> {
+           let mut directions = Vec::new();
+           for r in residuals {
+               match r.class {
+                   ResidualClass::Syntax => {
+                       directions.push(CorrectionDirection {
+                           instruction: format!(
+                               "Repair LaTeX syntax error: {}. Check brackets and escape characters.",
+                               r.message
+                           ),
+                           ..Default::default()
+                       });
+                   }
+                   ResidualClass::SymbolMismatch => {
+                       directions.push(CorrectionDirection {
+                           instruction: format!(
+                               "Insert missing citation entry in bibliography.bib for reference: {}.",
+                               r.message
+                           ),
+                           ..Default::default()
+                       });
+                   }
+                   _ => {}
+               }
+           }
+           directions
+       }
+   }
+
+Registering the Domain Adapter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Once implemented, register your custom package inside the ``DomainRegistry`` during the workspace detection phase in ``perspt-cli/src/main.rs``:
+
+.. code-block:: rust
+
+   let mut registry = DomainRegistry::new();
+   registry.register(Box::new(ResearchDomain));
+
+The SRBN control plane automatically detects, schedules, and gates the workspace based on the active domain configurations. Every domain must implement the same interface to maintain compatibility with the Merkle ledger and dashboard.
 
 Adding an Agent Tool
 --------------------
