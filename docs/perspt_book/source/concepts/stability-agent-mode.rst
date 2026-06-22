@@ -62,11 +62,11 @@ The Lyapunov energy :math:`V(x)` is the weighted sum of the squared residuals:
 
 We group the individual residuals into five component rollups:
 
-- **Syntactic energy (:math:`V_{\text{syn}}`)**: Derived from compiler syntax errors and language server diagnostics.
-- **Structural energy (:math:`V_{\text{str}}`)**: Derived from interface contract violations.
-- **Logical energy (:math:`V_{\text{log}}`)**: Derived from test suite failures.
-- **Bootstrap energy (:math:`V_{\text{boot}}`)**: Derived from initialization and build environment failures.
-- **Sheaf energy (:math:`V_{\text{sheaf}}`)**: Derived from cross-node import and dependency contradictions.
+- **Syntactic energy** (:math:`V_{\text{syn}}`): Derived from compiler syntax errors and language server diagnostics.
+- **Structural energy** (:math:`V_{\text{str}}`): Derived from interface contract violations.
+- **Logical energy** (:math:`V_{\text{log}}`): Derived from test suite failures.
+- **Bootstrap energy** (:math:`V_{\text{boot}}`): Derived from initialization and build environment failures.
+- **Sheaf energy** (:math:`V_{\text{sheaf}}`): Derived from cross-node import and dependency contradictions.
 
 The total energy is the sum of these component rollups:
 
