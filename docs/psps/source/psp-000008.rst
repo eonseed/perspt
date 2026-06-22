@@ -2062,6 +2062,130 @@ conformance gate.
   Ship deterministic mechanism checks, SDK contract tests, and coding language
   fixture benchmarks. Publish results with failures preserved.
 
+Implementation Status
+---------------------
+
+.. note::
+
+   This section tracks what is actually wired into the live ``perspt agent``
+   execution path as of **2026-06-22**, so the phase list above can be used as a
+   review checklist. The distinction that matters is **SDK contract implemented**
+   (a module exists and is unit-tested in ``perspt-sdk``) versus **wired into the
+   orchestrator** (invoked during a real run in
+   ``perspt-agent::orchestrator``). Several contracts are implemented in the SDK
+   but not yet consumed on the live path; these are marked *Not wired*.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 8 14 52
+
+   * - Phase
+     - Gate
+     - Status
+     - Notes
+   * - 0 — Audit, SDK skeleton, contract tests
+     - —
+     - **Done**
+     - ``perspt-sdk`` + ``perspt-coding`` crates exist; ``srbn`` / ``srbn-serde``
+       re-exported for the stabilization loop.
+   * - 1 — Quadratic residual energy + measured gate
+     - A, B
+     - **Done**
+     - :math:`V=\sum_e w_e\lVert r_e\rVert^2` via ``score_candidate`` is the live
+       agent gate (``convergence.rs``, ``sdk_bridge.rs``, ``verification.rs``);
+       component rollups are derived projections.
+   * - 2 — Parallel mutable scheduler
+     - C
+     - **Partial**
+     - Mutable ready-queue (``next_ready_node``) and repair-driven graph
+       revisions are wired. Worker pool, leases, and **bounded parallelism are
+       not implemented** — execution is sequential (one ready node per round).
+   * - 3 — Capability kernel
+     - E
+     - **Partial**
+     - ``perspt-policy`` command sanitization, workspace-bound, and
+       artifact-mutation checks are wired into tool/bundle execution. The SDK
+       admissibility kernel (``capability`` / ``command`` IR, admissibility
+       witnesses, attenuation, capability-consumption records) is **not yet
+       routed** for all effects.
+   * - 4 — Replay ledger + durable obligations
+     - F
+     - **Partial**
+     - A Merkle ledger, durable session store, and resume exist
+       (``perspt-agent::ledger``). Full event-sourced persistence with the replay
+       verifier and the SDK ``ledger`` event stream is **not yet** the live
+       persistence model.
+   * - 5 — Spectral diagnostic + verifier independence
+     - G
+     - **Not wired**
+     - ``spectral::VerificationGraph`` (``mu = 2 lambda_min+(A)``, Fiedler value,
+       ``edge_mu_sensitivity``) and ``independence::compute`` (``rho_eff``) are
+       implemented and unit-tested in ``perspt-sdk`` but are **never invoked in
+       the orchestrator**. The orchestrator tags each residual with its
+       ``IndependenceRoute`` but does not assemble the verification graph or
+       compute ``mu`` / ``rho_eff``. See *Resolving Gate G* below.
+   * - 6 — Coding verifier suites
+     - D
+     - **Done**
+     - Rust, Python, and JavaScript/TypeScript language adapters
+       (``perspt-coding::lang``) provide diagnostic classification and
+       correction directions, wired through verification.
+   * - 7 — Exploration + model routing
+     - —
+     - **Not started**
+     - No ``explorer_model`` config, ``--explorer-model`` /
+       ``--exploration-only`` flags, or structured exploration reports on the
+       live path. The SDK ``exploration`` / ``routing`` modules are unused by the
+       agent. (The existing Speculator tier is a separate lookahead mechanism.)
+   * - 8 — Calibrated risk budgets
+     - I
+     - **Not wired**
+     - The SDK ``conformal`` calibration module is implemented but has **no
+       consumer** outside ``perspt-sdk``. Required only when autonomous
+       commitment without per-effect approval is enabled.
+   * - 9 — UX + web observability
+     - H
+     - **Partial**
+     - ``perspt-dashboard`` surfaces energy convergence, the DAG, decisions, and
+       correction attempts. Graph revisions, residual certificates, active
+       workers/leases, and the backlog gauge are **pending** (some depend on
+       Phase 2).
+   * - 10 — CLI domain routing + second-domain readiness
+     - —
+     - **Partial**
+     - ``perspt-research`` compiles against the SDK and registers with
+       ``DomainRegistry`` (the second-domain readiness check), but explicit CLI
+       domain selection is **not yet** exposed.
+   * - 11 — Mechanism checks + benchmarks
+     - —
+     - **Partial**
+     - SDK ``benchmark`` module and ``mechanism_checks`` tests exist; coding
+       language fixture benchmarks and published results are **pending**.
+
+Resolving Gate G
+~~~~~~~~~~~~~~~~~
+
+Gate G's spectral and independence computation is a Phase-5 task and is
+explicitly a **diagnostic, not an acceptance-gate input** — it must be computed
+off the critical path and must never block dispatch or the gate (see *Gate G*
+above). Wiring it into active execution therefore requires no change to the
+acceptance gate, only the addition of an off-path diagnostic emitter:
+
+1. **Assemble the verification graph per revision.** Map each node's residual
+   sensors — already tagged with ``IndependenceRoute`` — to
+   ``spectral::VerificationEdge`` values weighted by the ``EnergyModel`` class
+   weights, and build a ``VerificationGraph`` on each graph-revision commit.
+2. **Compute and record** ``graph.mu(tol)`` (and ``edge_mu_sensitivity`` for
+   candidate verifier edges, to distinguish an independent verifier that raises
+   the spectral gap from a redundant one). Persist ``mu`` with its source
+   revision to the ledger (``StabilityClaim.mu``).
+3. **Compute** ``rho_eff`` via ``independence::compute`` from the ledger's
+   per-validator verdict history and surface it in ``perspt status`` and the
+   dashboard in place of any raw validator count.
+
+All three run asynchronously / on revision commit and never gate a node, so they
+can land without touching convergence semantics.
+
 Conformance Acceptance Criteria
 -------------------------------
 
