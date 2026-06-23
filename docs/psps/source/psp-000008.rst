@@ -12,7 +12,7 @@ Abstract
 ========
 
 This PSP defines the next implementation phase for Perspt's SRBN agent as an
-SDK-first platform. Perspt SHALL build a reusable SRBN agent SDK around
+SDK-first platform. Perspt is designed to build a reusable SRBN agent SDK around
 residual-directed verification, read-only exploration, domain-provided verifier
 suites, a mutable parallel work graph, deterministic capability/admissibility,
 replay, and observability. The coding agent becomes the first domain package
@@ -110,7 +110,7 @@ Proposed Changes
 
 .. rubric:: Functional Specification
 
-Perspt SHALL implement an SDK-first SRBN agent platform composed of nine
+Perspt implements an SDK-first SRBN agent platform composed of nine
 load-bearing systems:
 
 1. a domain-neutral SRBN agent SDK,
@@ -129,12 +129,12 @@ load-bearing systems:
    :align: center
 
    digraph psp8_control_loop {
-     rankdir=LR;
      bgcolor="transparent";
      splines=ortho;
      node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.18,0.10"];
      edge [fontname="Arial", fontsize=9, color="#546E7A", fontcolor="#455A64"];
 
+     // Nodes
      task [label="User task\nsession charter", fillcolor="#E3F2FD", color="#1E88E5"];
      explore [label="Explorer\nread-only evidence", fillcolor="#E8F5E9", color="#43A047"];
      profile [label="Project profile\ncontext witnesses", fillcolor="#F1F8E9", color="#689F38"];
@@ -150,6 +150,11 @@ load-bearing systems:
      ledger [label="Replay ledger\nMerkle history", fillcolor="#E0F2F1", color="#00897B"];
      dashboard [label="Web dashboard\nlive observability", fillcolor="#EDE7F6", color="#5E35B1"];
 
+     // Setup ranking to keep layout symmetric and portrait
+     { rank=same; verify; residuals; }
+     { rank=same; accept; revise; cert; }
+
+     // Edges
      task -> explore;
      explore -> profile;
      profile -> workgraph;
@@ -162,10 +167,10 @@ load-bearing systems:
      srbn -> accept [label="stable / descent"];
      srbn -> revise [label="correct / replan"];
      srbn -> cert [label="exhausted"];
-     revise -> workgraph [label="revision N+1"];
+     revise -> workgraph [label="revision N+1", constraint=false];
      accept -> ledger;
      cert -> ledger;
-     workgraph -> ledger [label="revision event"];
+     workgraph -> ledger [label="revision event", constraint=false];
      ledger -> dashboard;
    }
 
@@ -174,8 +179,7 @@ The systems below are normative for this PSP.
 1. SDK-First Architecture
 =========================
 
-This PSP SHALL use an SDK-first design. The SDK owns the domain-neutral control
-plane; domain packages provide task-specific semantics.
+This proposal uses an SDK-first design. The SDK owns the domain-neutral control plane, while domain packages provide task-specific semantics.
 
 The review conclusion is:
 
@@ -190,7 +194,7 @@ The review conclusion is:
 * research, website-builder, and task-specific packages should use the same SDK
   instead of forking the coding agent.
 
-Perspt SHALL add a public ``perspt-sdk`` crate. The SDK SHALL expose stable
+Perspt adds a public ``perspt-sdk`` crate. The SDK exposes stable
 interfaces for:
 
 * SRBN state adapters and barrier results;
@@ -206,14 +210,14 @@ interfaces for:
 * event-ledger records, replay observations, and dashboard projections;
 * benchmark harnesses and mechanism checks.
 
-The SDK SHALL NOT hardcode coding-specific concepts such as ``Cargo.toml``,
+The SDK does not hardcode coding-specific concepts such as ``Cargo.toml``,
 ``pytest``, TypeScript exports, AST import graphs, package-lock policies, or
 source-edit bundles beyond generic artifact operations. Those belong to the
 coding package.
 
-Perspt SHALL add a first-party coding domain package, named
+Perspt adds a first-party coding domain package, named
 ``perspt-coding`` unless implementation experience suggests a clearer crate
-name. The coding package SHALL provide:
+name. The coding package provides:
 
 * repository and language detection;
 * coding-specific project profiles;
@@ -225,41 +229,54 @@ name. The coding package SHALL provide:
 * dependency and manifest mutation policies;
 * coding benchmark fixtures and mechanism checks.
 
-The SDK/domain split SHALL be visible in the CLI and MAY introduce breaking
-changes. The preferred entry point SHOULD make the selected domain explicit,
+The SDK/domain split is visible in the CLI and may introduce breaking changes. The preferred entry point should make the selected domain explicit,
 for example ``perspt agent --domain coding "<task>"`` or a dedicated
 domain-oriented command. Legacy command aliases are out of scope for this PSP.
-Domain selection is a routing decision; it SHALL NOT bypass the SDK's
+Domain selection is a routing decision; it does not bypass the SDK's
 admissibility, residual, scheduler, ledger, or dashboard contracts.
 
-The extension stack SHALL be layered:
+The extension stack is layered:
 
-.. code-block:: text
+.. graphviz::
+   :caption: Perspt Extension Stack Layered Architecture
+   :align: center
 
-   perspt-cli / perspt-tui / perspt-dashboard
-                 |
-          generic perspt-agent runtime
-                 |
-              perspt-sdk
-                 |
-     +-----------+-------------+----------------+
-     |                         |                |
-   perspt-coding        perspt-research   perspt-website
-     |
-   Rust/Python/TypeScript language adapters
+   digraph psp8_extension_stack {
+     bgcolor="transparent";
+     splines=ortho;
+     node [shape=box, style="rounded,filled", fontname="Arial", fontsize=10, margin="0.18,0.10"];
+     edge [fontname="Arial", fontsize=9, color="#546E7A", fontcolor="#455A64"];
 
-Initial implementations MAY compile first-party domain packages in-process for
-simplicity. The SDK SHALL still define process boundaries clearly enough that
+     // Nodes
+     ui [label="perspt-cli / perspt-tui / perspt-dashboard", fillcolor="#ECEFF1", color="#607D8B"];
+     runtime [label="generic perspt-agent runtime", fillcolor="#E3F2FD", color="#1E88E5"];
+     sdk [label="perspt-sdk", fillcolor="#FFF3E0", color="#FB8C00"];
+     coding [label="perspt-coding", fillcolor="#E1F5FE", color="#039BE5"];
+     research [label="perspt-research", fillcolor="#E8F5E9", color="#43A047"];
+     website [label="perspt-website", fillcolor="#EDE7F6", color="#5E35B1"];
+     adapters [label="Rust/Python/TypeScript\nlanguage adapters", fillcolor="#FCE4EC", color="#D81B60"];
+
+     // Edges
+     ui -> runtime;
+     runtime -> sdk;
+     sdk -> coding;
+     sdk -> research;
+     sdk -> website;
+     coding -> adapters;
+   }
+
+Initial implementations may compile first-party domain packages in-process for
+simplicity. The SDK defines process boundaries clearly enough that
 future WASM or process-isolated packages can be added without redefining
 residual, capability, graph, or ledger semantics.
 
 2. SRBN Kernel Semantics
 ========================
 
-Perspt SHALL make the SRBN kernel semantics explicit in code rather than treating
+Perspt makes the SRBN kernel semantics explicit in code rather than treating
 them as documentation terms.
 
-The SDK proxy state SHALL be:
+The SDK proxy state consists of:
 
 * the current workspace state or sandbox branch,
 * the current work graph revision,
@@ -271,8 +288,7 @@ The SDK proxy state SHALL be:
   review.
 
 Every generated artifact, patch, command, graph rewrite, dependency mutation,
-research claim set, website build action, or domain-specific action SHALL be a
-candidate state first. A candidate enters the accepted trajectory only if it
+research claim set, website build action, or domain-specific action is a candidate state first. A candidate enters the accepted trajectory only if it
 passes one of the accepted-state gates:
 
 * **Hard pass:** all required verifiers for the node scope pass and all hard
@@ -284,7 +300,7 @@ passes one of the accepted-state gates:
   residual certificate naming the remaining residuals, verifier routes, budget
   state, and ledger head.
 
-Perspt SHALL distinguish the observed trajectory from the accepted trajectory:
+Perspt distinguishes the observed trajectory from the accepted trajectory:
 
 * observed attempts include malformed bundles, stripped bundles, denied commands,
   non-descending patches, failed tests, and rejected graph revisions;
@@ -292,14 +308,12 @@ Perspt SHALL distinguish the observed trajectory from the accepted trajectory:
 * rejected attempts are retained as training/audit data but are never treated as
   committed progress.
 
-Residual scores SHALL be finite and non-negative. A sensor failure SHALL produce
-either a V_boot residual or an explicit degraded-validation stop; it SHALL NOT be
-silently interpreted as zero energy.
+Residual scores are finite and non-negative. A sensor failure produces either a V_boot residual or an explicit degraded-validation stop, and is never silently interpreted as zero energy.
 
 Mathematical SRBN Contract
 --------------------------
 
-The SDK SHALL implement the paper theory as a measurable runtime contract. The
+The SDK implements the paper theory as a measurable runtime contract. The
 theory is conditional: Perspt claims SRBN stability only for a declared domain,
 state proxy, residual schema, verifier route, correction channel, disturbance
 estimate, and accepted trajectory.
@@ -307,23 +321,22 @@ estimate, and accepted trajectory.
 For a WorkGraph revision with nodes ``N`` and typed edges ``E``, each executable
 node or sealed interface contributes a local state component ``x_i``. Each edge
 ``e = (i, j)`` has a restriction or comparison map ``rho_e`` supplied by the
-domain package. The domain package SHALL map verifier evidence into residuals:
+domain package. The domain package maps verifier evidence into residuals:
 
 .. math::
 
    r_e(x) = \rho_e(x_i) - x_j
 
-and the SDK SHALL compute the canonical non-negative weighted energy:
+and the SDK computes the canonical non-negative weighted energy:
 
 .. math::
 
    V(x) = \sum_{e \in E} w_e \|r_e(x)\|^2,\qquad w_e > 0.
 
-This weighted sum of squared edge residuals SHALL be the single energy that
-gates acceptance, feeds the finite-decision bound, and is recorded for replay.
-Each ``ResidualEvent`` SHALL store the raw residual magnitude ``r_e >= 0``; the
-SDK SHALL square and weight it when computing ``V``. The component aggregates
-``V_syn``, ``V_str``, ``V_log``, ``V_boot``, and ``V_sheaf`` SHALL be derived
+This weighted sum of squared edge residuals is the single energy that gates acceptance, feeds the finite-decision bound, and is recorded for replay.
+Each ``ResidualEvent`` stores the raw residual magnitude ``r_e >= 0``; the
+SDK squares and weights it when computing ``V``. The component aggregates
+``V_syn``, ``V_str``, ``V_log``, ``V_boot``, and ``V_sheaf`` are derived
 rollups of this same quadratic energy, grouped by ``EnergyComponent``:
 
 .. math::
@@ -332,10 +345,8 @@ rollups of this same quadratic energy, grouped by ``EnergyComponent``:
    \qquad
    V(x) = \sum_{\mathrm{comp}} V_{\mathrm{comp}}.
 
-The component rollups are user-visible projections only. They SHALL NOT carry
-independent weights and SHALL NOT be summed through a second weighting pass.
-Every edge residual SHALL carry an explicit weight ``w_e``; no component SHALL
-default to an implicit weight of ``1`` while others are weighted.
+The component rollups are user-visible projections only. They do not carry independent weights and are not summed through a second weighting pass.
+Every edge residual carries an explicit weight ``w_e``; no component defaults to an implicit weight of ``1`` while others are weighted.
 
 The safe set for the declared proxy is the zero-energy set:
 
@@ -358,10 +369,7 @@ continuous embedding-space constants ``alpha`` (correction strength), ``beta``
 drift field ``f(x)`` on an exposed or estimated continuous coordinate. The
 coding domain operates on discrete verifier residuals and exposes no such
 coordinate, so these constants are expected to remain ``NotClaimed`` for it. The
-SDK SHALL treat ``alpha``, ``beta``, ``delta``, ``L``, and ``eta`` as optional
-records that a domain package MAY register only when it can instrument them; it
-SHALL NOT require them, build acceptance on them, or display analytic floors
-derived from them unless they are registered with evidence.
+SDK treats ``alpha``, ``beta``, ``delta``, ``L``, and ``eta`` as optional records that a domain package may register only when it can instrument them; it does not require them, build acceptance on them, or display analytic floors derived from them unless they are registered with evidence.
 
 When a domain can expose or estimate a continuous correction coordinate, the
 paper model uses transverse error dynamics:
@@ -371,8 +379,7 @@ paper model uses transverse error dynamics:
    \dot{x} = f(x) + v(x),\qquad
    v(x) = -\alpha \nabla V(x).
 
-The runtime SHALL NOT assume these equations hold globally. It SHALL record the
-declared constants and evidence for the local analysis domain when a domain
+The runtime does not assume these equations hold globally. It records the declared constants and evidence for the local analysis domain when a domain
 package claims them:
 
 .. math::
@@ -384,7 +391,7 @@ package claims them:
    \qquad
    \|\nabla V(x)\|^2 \ge 2\mu V(x).
 
-When these conditions are justified on the analyzed sublevel set, the SDK MAY
+When these conditions are justified on the analyzed sublevel set, the SDK may
 report the input-to-state-stability energy floor:
 
 .. math::
@@ -393,13 +400,13 @@ report the input-to-state-stability energy floor:
       = \frac{\delta^2}{2(\alpha-\beta)^2\mu},
    \qquad \alpha > \beta,\quad \mu > 0.
 
-The implementation SHALL treat ``V_infty`` as a declared or estimated floor, not
+The implementation treats ``V_infty`` as a declared or estimated floor, not
 as a magical success condition. A candidate above the floor still requires hard
 checks, measured descent, or a residual certificate.
 
 The energy-slope constant ``mu`` is the exception: for the quadratic residual
 energy ``V(x) = x^T A x`` with ``A = B^T W B``, it is combinatorial rather than
-embedding-dependent and SHALL be computable from the WorkGraph verification
+embedding-dependent and is computable from the WorkGraph verification
 structure:
 
 .. math::
@@ -408,20 +415,19 @@ structure:
 
 the smallest non-zero eigenvalue of ``A``. In the identity-restriction case
 ``A`` reduces to the weighted Laplacian of the verification graph and ``mu`` is
-its algebraic connectivity (Fiedler value). The SDK SHALL expose ``mu`` as a
-spectral diagnostic of the active verification graph and SHALL be able to report
+its algebraic connectivity (Fiedler value). The SDK exposes ``mu`` as a
+spectral diagnostic of the active verification graph and is able to report
 the change in ``mu`` produced by adding a candidate verifier edge, so that an
 independent verifier that raises the spectral gap is distinguishable from a
 redundant verifier that does not.
 
-``mu`` is a diagnostic, not an input to the acceptance gate. It SHALL be
-computed off the critical path -- on graph-revision commit, when the graph
-structure stabilizes, or asynchronously -- and SHALL NOT block worker dispatch,
+``mu`` is a diagnostic, not an input to the acceptance gate. It is computed off the critical path -- on graph-revision commit, when the graph
+structure stabilizes, or asynchronously -- and does not block worker dispatch,
 candidate verification, or the acceptance-gate decision. During high graph
-churn the SDK MAY report the last computed ``mu`` with its source revision.
+churn the SDK may report the last computed ``mu`` with its source revision.
 
-For discrete corrections, the SDK SHALL store the proposed step size ``eta`` and
-MAY validate it against the paper's sufficient bound when the domain provides
+For discrete corrections, the SDK stores the proposed step size ``eta`` and
+may validate it against the paper's sufficient bound when the domain provides
 the smoothness constant ``L``:
 
 .. math::
@@ -442,7 +448,7 @@ Under that declared model, the expected geometric factor is:
    V(x_k) \le (1 - 2\eta c(\eta)\mu)^k V(x_0).
 
 The acceptance gate used by Perspt is the measured discrete contract from the
-harness paper, and it SHALL apply even when the continuous assumptions are not
+harness paper, and it applies even when the continuous assumptions are not
 available:
 
 .. math::
@@ -454,10 +460,10 @@ available:
       V(y_{k+1}) \le V(x_k^{\mathrm{best}})
          - \rho_{\mathrm{gate}}.
 
-Descent SHALL be measured against the best accepted energy ``V(x_k^best)``, not
-the most recent accepted energy. There SHALL be a single descent tolerance
+Descent is measured against the best accepted energy ``V(x_k^best)``, not
+the most recent accepted energy. There is a single descent tolerance
 ``rho_gate > 0``. ``min_descent`` is not a second gate threshold; where a domain
-records a predicted analytic decrease, it is advisory only and SHALL NOT relax
+records a predicted analytic decrease, it is advisory only and does not relax
 or replace ``rho_gate`` in the gate decision.
 
 Otherwise the candidate is rejected for the accepted trajectory:
@@ -467,7 +473,7 @@ Otherwise the candidate is rejected for the accepted trajectory:
    x_{k+1}^{\mathrm{accepted}} \leftarrow x_k^{\mathrm{best}}.
 
 With ``V >= 0``, descent threshold ``rho_gate > 0``, baseline energy ``V_0``,
-and finite rejection budget ``B``, a run SHALL have the finite-decision bound:
+and finite rejection budget ``B``, a run has the finite-decision bound:
 
 .. math::
 
@@ -476,10 +482,10 @@ and finite rejection budget ``B``, a run SHALL have the finite-decision bound:
       \left\lfloor \frac{V_0}{\rho_{\mathrm{gate}}} \right\rfloor
       + B + 1.
 
-The SDK SHALL expose this bound in telemetry whenever the run has a fixed
+The SDK exposes this bound in telemetry whenever the run has a fixed
 ``rho_gate`` and correction budget.
 
-At platform level, every effect proposal SHALL satisfy the capability
+At platform level, every effect proposal must satisfy the capability
 admissibility predicate before any durable effect occurs. For proposal
 ``p = (a, c, i, y, e, \mu_p)`` and candidate next state ``x'``:
 
@@ -502,7 +508,7 @@ only if all of the following hold:
    \qquad
    \operatorname{spent}(x) + c_c \le \rho_c.
 
-The capability attenuation preorder SHALL be represented explicitly:
+The capability attenuation preorder is represented explicitly:
 
 .. math::
 
@@ -514,11 +520,10 @@ The capability attenuation preorder SHALL be represented explicitly:
    \land \tau_{c'} \le \tau_c
    \land d_{c'} \le d_c.
 
-Delegation SHALL only create capabilities satisfying the preorder. Payload data,
-model text, or generated code SHALL NOT mint authority.
+Delegation must only create capabilities satisfying the preorder. Payload data,
+model text, or generated code does not mint authority.
 
-For scheduler and dashboard observability, the SDK SHALL compute backlog
-potential from active work:
+For scheduler and dashboard observability, the SDK computes backlog potential from active work:
 
 .. math::
 
@@ -526,7 +531,7 @@ potential from active work:
    \qquad
    \Phi(W) = \sum_{i \in W} \phi_i.
 
-``Phi(W)`` SHALL be presented as a backlog and remaining-work gauge for the
+``Phi(W)`` is presented as a backlog and remaining-work gauge for the
 dashboard and for ETA projection. The platform-level Foster-Lyapunov drift
 condition
 
@@ -542,12 +547,12 @@ condition
 requires a stochastic workflow arrival process with a measurable sub-critical
 load ``alpha_load < 1``. A single-session run has no arrival process, so its
 potential is monotone non-increasing and the drift condition is trivially
-satisfied. Perspt SHALL NOT present the drift condition as a conformance result
-in single-session execution. A deployment MAY record ``alpha_load`` and check
+satisfied. Perspt does not present the drift condition as a conformance result
+in single-session execution. A deployment may record ``alpha_load`` and check
 the drift condition only in a multi-session or server mode where the arrival
 process exists.
 
-The implementation SHALL distinguish between *measured SRBN conformance* and
+The implementation distinguishes between *measured SRBN conformance* and
 *analytic stability claims*. Measured conformance is mandatory: Perspt must
 compute residuals, energy, gate decisions, correction directions, residual
 certificates, and replay records for every run. Analytic claims are stricter:
@@ -560,7 +565,7 @@ SRBN Conformance Gates
 ----------------------
 
 Implementation may be staged, but each stage is a named conformance gate, not a
-relaxation of the PSP. Perspt SHALL NOT present a run, release, or benchmark as
+relaxation of the PSP. Perspt does not present a run, release, or benchmark as
 PSP-8-complete unless all applicable gates below pass.
 
 **Gate A: Kernel and energy conformance**
@@ -648,17 +653,16 @@ PSP-8-complete unless all applicable gates below pass.
    "Platform potential ``Phi(W)``", "``WorkflowPotential`` dashboard projection", "Accepted energy, remaining budget, per-workflow potential, aggregate potential, and load estimate"
    "Durable execution obligations", "Replay ledger, command IR, idempotency keys, noncommuting leases", "Recorded nondeterminism, deterministic replay, write-ahead external effects, and serialized durable conflicts"
 
-``perspt-sdk`` SHALL use the published ``srbn`` crate as the canonical SRBN
+``perspt-sdk`` uses the published ``srbn`` crate as the canonical SRBN
 kernel dependency where the crate's ``run``/``stabilize`` and
-``BarrierResult`` contracts fit the SDK loop. ``perspt-sdk`` SHALL use
-``srbn-serde`` for serializing SRBN traces and barrier records when those
-records enter the Perspt ledger. Perspt SHOULD NOT fork the SRBN kernel logic
+``BarrierResult`` contracts fit the SDK loop. ``perspt-sdk`` uses ``srbn-serde`` for serializing SRBN traces and barrier records when those
+records enter the Perspt ledger. Perspt should NOT fork the SRBN kernel logic
 inside the agent runtime. If the current crate API is too small for Perspt's
-domain packages, Perspt SHOULD add a narrow adapter in ``perspt-sdk`` and feed
+domain packages, Perspt should add a narrow adapter in ``perspt-sdk`` and feed
 the reusable improvement back into the SRBN crate rather than creating a second
 kernel.
 
-The adapter boundary SHOULD keep Perspt-specific WorkGraph, capability, command
+The adapter boundary should keep Perspt-specific WorkGraph, capability, command
 IR, and ledger types outside the SRBN crate. The SRBN crate owns the generic
 stabilization contract; Perspt owns the domain runtime around that contract.
 
@@ -724,24 +728,24 @@ The SDK-side adapter should expose types equivalent to:
        pub next_correction_directions: Vec<CorrectionDirection>,
    }
 
-The adapter SHALL be used by the generic runtime, the coding package, and
+The adapter is used by the generic runtime, the coding package, and
 correction retries so that Perspt has one stabilization contract.
 
 3. Exploration and Model Routing
 ================================
 
-Perspt SHALL treat unfamiliar existing codebases as a distinct control problem:
+Perspt treats unfamiliar existing codebases as a distinct control problem:
 before the agent proposes durable mutations, it needs a cheap, bounded,
 read-only understanding of the repository. This exploration phase is evidence
 gathering, not implementation.
 
-Exploration SHALL run with read/search/list/LSP/query capabilities by default.
-It SHALL NOT write files, mutate dependencies, run package-manager writes,
+Exploration runs with read/search/list/LSP/query capabilities by default.
+It does not write files, mutate dependencies, run package-manager writes,
 change graph policy, or apply patches. If an exploration step discovers that a
-mutation may be required, it SHALL emit a residual, graph hint, or capability
+mutation may be required, it emits a residual, graph hint, or capability
 request rather than performing the mutation.
 
-Exploration outputs SHALL be structured artifacts:
+Exploration outputs are structured artifacts:
 
 * project map: languages, package roots, build systems, entry points, and
   ownership patterns;
@@ -755,39 +759,38 @@ Exploration outputs SHALL be structured artifacts:
 * files-to-read and files-to-avoid recommendations;
 * WorkGraph seed nodes, edge hints, and verifier-suite recommendations.
 
-Exploration evidence SHALL be advisory unless backed by deterministic tool
+Exploration evidence is advisory unless backed by deterministic tool
 output, structural digests, compiler/LSP observations, or repository-local
-metadata. A cheap model may summarize or rank evidence, but it SHALL NOT become
-an independent correctness barrier merely because it observed the codebase.
+metadata. A cheap model may summarize or rank evidence, but it does not become an independent correctness barrier merely because it observed the codebase.
 
-Model routing SHALL be phase-aware:
+Model routing is phase-aware:
 
-* Perspt SHALL support an explicit exploration model override through
+* Perspt supports an explicit exploration model override through
   ``explorer_model`` in config and ``--explorer-model`` on the CLI.
-* If no exploration model is configured, exploration SHALL default to the
+* If no exploration model is configured, exploration defaults to the
   cheapest configured tier suitable for read-only summarization. In the current
-  Perspt tier model this SHOULD be ``speculator_model``.
-* Implementations MAY avoid adding a fifth ``ModelTier`` by treating Explorer as
+  Perspt tier model this should be ``speculator_model``.
+* Implementations may avoid adding a fifth ``ModelTier`` by treating Explorer as
   a phase routed to ``ModelTier::Speculator`` by default.
-* Implementations MAY expose ``--explorer-tier`` with values such as
+* Implementations may expose ``--explorer-tier`` with values such as
   ``speculator``, ``verifier``, ``actuator``, and ``architect`` for users who
   want exploration to reuse one of the existing tier models.
-* ``--model`` SHALL continue to set all tiers unless a phase-specific override
+* ``--model`` continues to set all tiers unless a phase-specific override
   is provided.
-* Exploration SHALL have independent budgets: file count, token count, tool
+* Exploration has independent budgets: file count, token count, tool
   calls, wall-clock time, and maximum parallel workers.
-* ``--exploration-only`` SHOULD run the read-only inventory and write a project
+* ``--exploration-only`` should run the read-only inventory and write a project
   profile or exploration report without entering build mode.
 
-Exploration SHALL be parallel by default where safe:
+Exploration is parallel by default where safe:
 
 * file tree scans, ``rg``/``git grep`` searches, package metadata reads, LSP
-  symbol requests, AST extraction, and test discovery MAY run concurrently;
-* model summarization of independent repository slices MAY run concurrently
+  symbol requests, AST extraction, and test discovery may run concurrently;
+* model summarization of independent repository slices may run concurrently
   under the exploration budget;
-* each exploration task SHALL record its model route, capability use, input
+* each exploration task records its model route, capability use, input
   digests, and output evidence;
-* planner prompts SHALL receive summarized exploration artifacts with provenance,
+* planner prompts receive summarized exploration artifacts with provenance,
   not unbounded raw repository text.
 
 This layer directly supports the user need that an existing codebase often must
@@ -797,10 +800,10 @@ lower-cost model without weakening SRBN acceptance gates.
 4. Mutable Work Graph
 =====================
 
-Perspt SHALL replace static "plan DAG execution" with a mutable, revisioned work
-graph. Each graph revision SHALL be acyclic, but the session as a whole MAY add,
+Perspt replaces static "plan DAG execution" with a mutable, revisioned work
+graph. Each graph revision is acyclic, but the session as a whole may add,
 retire, split, merge, update, or requeue nodes as verifier evidence changes.
-The scheduler SHALL run independent work in parallel and serialize only work
+The scheduler runs independent work in parallel and serialize only work
 that conflicts through dependencies, leases, or non-commuting durable effects.
 
 This resolves the central limitation: software tasks are not known completely at
@@ -809,7 +812,7 @@ require a fixture node. An AST search may reveal a wider API migration. A
 dependency conflict may require a manifest repair node. A static DAG cannot
 faithfully model this; a revisioned acyclic work graph can.
 
-Perspt SHALL distinguish:
+Perspt distinguishes:
 
 * **PlanGraph:** the architect's current hypothesis about task decomposition.
 * **WorkGraph:** the scheduler's executable graph with node generations,
@@ -821,8 +824,8 @@ Perspt SHALL distinguish:
 * **RetiredNode:** a node generation that remains in the ledger but is no longer
   executable.
 
-The scheduler SHALL not precompute one vector of topological indices and walk it
-to completion. It SHALL use a dependency-aware mutable ready queue:
+The scheduler does not precompute one vector of topological indices and walk it
+to completion. It uses a dependency-aware mutable ready queue:
 
 1. load active graph revision;
 2. select executable nodes whose dependencies are stable, blocked sensors are
@@ -882,34 +885,34 @@ their semantic read and write footprints are disjoint:
    \quad\text{and}\quad
    \operatorname{writes}(e') \cap \operatorname{reads}(e) = \emptyset.
 
-The conflict footprint SHALL include durable platform state, not only
+The conflict footprint includes durable platform state, not only
 workspace files. The capability table, risk budgets, fresh-identifier
-allocation, and the ledger root SHALL be modeled as read/write state
+allocation, and the ledger root are modeled as read/write state
 components. Because admissibility reads the capability table, any capability
 grant, attenuation, or revocation conflicts with every commit that touches the
-affected capabilities and SHALL serialize against them. Any turn that reads or
+affected capabilities and serializes against them. Any turn that reads or
 updates a risk budget, allocates a fresh identifier, or advances the ledger root
-SHALL be ordered against other turns with an overlapping footprint.
+is ordered against other turns with an overlapping footprint.
 
 Parallel scheduling rules:
 
-* read-only exploration, verifier, symbol-index, and search tasks MAY run
+* read-only exploration, verifier, symbol-index, and search tasks may run
   concurrently when their read/write footprints are disjoint;
-* implementation nodes MAY run concurrently only when their output targets,
+* implementation nodes may run concurrently only when their output targets,
   dependency interfaces, toolchain locks, state witnesses, capability grants,
   and budget reads do not conflict;
-* correction attempts for unrelated residual clusters MAY run concurrently, but
-  accepted artifact commits SHALL serialize if they touch overlapping files,
+* correction attempts for unrelated residual clusters may run concurrently, but
+  accepted artifact commits serialize if they touch overlapping files,
   public interfaces, dependency manifests, lockfiles, migrations, shared test
   fixtures, capabilities, budgets, or the ledger root;
-* graph revisions SHALL acquire a graph-write lease and are serialized against
+* graph revisions acquire a graph-write lease and are serialized against
   other graph revisions;
 * package-manager writes, formatter writes, generated-code refreshes, and
-  database/schema migrations SHALL use explicit toolchain or resource leases;
-* scheduler fairness SHALL prevent a flood of cheap exploration tasks from
+  database/schema migrations use explicit toolchain or resource leases;
+* scheduler fairness prevents a flood of cheap exploration tasks from
   starving verifier or commit tasks.
 
-Perspt SHALL expose concurrency controls:
+Perspt exposes concurrency controls:
 
 * ``max_parallel``: total worker limit;
 * ``max_parallel_exploration``: read-only exploration worker limit;
@@ -917,13 +920,13 @@ Perspt SHALL expose concurrency controls:
 * ``max_parallel_model_calls``: concurrent LLM call limit;
 * ``max_parallel_mutations``: artifact-application limit, defaulting to 1.
 
-Every parallel task SHALL have a parent activity, worker id, model route if any,
+Every parallel task has a parent activity, worker id, model route if any,
 capability set, lease set, input witnesses, cancellation policy, and join event.
-If a dependency changes while a task is running, the task SHALL be cancelled,
+If a dependency changes while a task is running, the task is cancelled,
 revalidated, or converted into an observed rejected attempt before any effect is
 accepted.
 
-Repair actions SHALL return scheduler work items:
+Repair actions return scheduler work items:
 
 * ``RetryNode(node_generation, evidence)``
 * ``ExpandScope(node_generation, added_paths, reason)``
@@ -934,22 +937,22 @@ Repair actions SHALL return scheduler work items:
 * ``ReplanSubgraph(root, affected_nodes, evidence)``
 * ``StopNode(node_generation, residual_certificate)``
 
-``execute_node`` SHALL NOT return ``Escalated`` after a local repair action has
-successfully produced new executable work. It SHALL return a scheduler effect
+``execute_node`` does not return ``Escalated`` after a local repair action has
+successfully produced new executable work. It returns a scheduler effect
 that is consumed by the ready-queue loop.
 
 Graph revision rules:
 
-* every revision SHALL validate acyclicity before activation;
-* edge creation SHALL be serialized as a graph-write conflict;
-* a node MAY be updated only by creating a new generation;
-* descendants whose structural dependencies changed SHALL be requeued or retired;
-* graph revisions SHALL consume the revision budget;
-* graph churn SHALL be bounded by lineage and by session;
-* graph revisions SHALL include the verifier evidence that justified them;
-* replay SHALL reconstruct the same active graph sequence.
+* every revision validates acyclicity before activation;
+* edge creation is serialized as a graph-write conflict;
+* a node may be updated only by creating a new generation;
+* descendants whose structural dependencies changed are requeued or retired;
+* graph revisions consume the revision budget;
+* graph churn is bounded by lineage and by session;
+* graph revisions include the verifier evidence that justified them;
+* replay reconstructs the same active graph sequence.
 
-Edges SHALL carry typed semantics:
+Edges carry typed semantics:
 
 * ``RequiresArtifact``: destination reads a file produced by source;
 * ``RequiresInterface``: destination relies on a sealed signature/schema/symbol;
@@ -964,8 +967,8 @@ Edges SHALL carry typed semantics:
 5. SDK Domain Packages and Coding Verifier Suites
 =================================================
 
-The SDK SHALL define domain-package contracts instead of making language plugins
-the root extension point. A domain package SHALL be able to provide:
+The SDK defines domain-package contracts instead of making language plugins
+the root extension point. A domain package provides:
 
 * domain detection and activation evidence;
 * domain-specific project/profile generation;
@@ -978,7 +981,7 @@ the root extension point. A domain package SHALL be able to provide:
 * benchmark fixtures and mechanism checks;
 * dashboard projection labels and domain-specific summaries.
 
-The core SDK trait SHOULD look like this, with exact names left to
+The core SDK trait should look like this, with exact names left to
 implementation:
 
 .. code-block:: rust
@@ -997,7 +1000,7 @@ implementation:
        fn graph_hints(&self, evidence: &ExplorationReport) -> Vec<GraphHint>;
    }
 
-The ``ResidualSchema`` and ``EnergyModel`` SHALL declare:
+The ``ResidualSchema`` and ``EnergyModel`` declare:
 
 * residual classes and their allowed sensors;
 * normalization from raw tool output to finite non-negative scores;
@@ -1009,9 +1012,9 @@ The ``ResidualSchema`` and ``EnergyModel`` SHALL declare:
   ``L``, and ``eta`` when the domain claims a mathematical energy tube rather
   than only measured descent.
 
-``perspt-coding`` SHALL implement this trait. Inside ``perspt-coding``,
-language adapters SHALL evolve from command selectors into verifier-suite
-providers. A coding language adapter SHALL be able to provide:
+``perspt-coding`` implements this trait. Inside ``perspt-coding``,
+language adapters evolve from command selectors into verifier-suite
+providers. A coding language adapter provides:
 
 * repository detection and ownership patterns;
 * parser or AST provider;
@@ -1029,7 +1032,7 @@ providers. A coding language adapter SHALL be able to provide:
 * degraded-sensor fallback policy;
 * correction-direction mappers for all verifier evidence.
 
-First-party coding adapter milestones SHALL include:
+First-party coding adapter milestones include:
 
 **Rust**
   ``rust-analyzer`` diagnostics, ``cargo metadata``, ``cargo check``,
@@ -1053,10 +1056,10 @@ First-party coding adapter milestones SHALL include:
   directions for missing exports, tsconfig path aliases, package lock drift,
   bundler failures, and runtime test failures.
 
-Additional coding language adapters MAY follow for Go, Java, C/C++, Ruby,
-Swift, and shell, but they SHALL use the same SDK verifier-suite interface.
+Additional coding language adapters may follow for Go, Java, C/C++, Ruby,
+Swift, and shell, but they use the same SDK verifier-suite interface.
 
-Other first-party domain packages SHOULD follow the same SDK contracts:
+Other first-party domain packages should follow the same SDK contracts:
 
 **Research**
   Source discovery, citation provenance, claim extraction, quote bounds,
@@ -1070,12 +1073,12 @@ Other first-party domain packages SHOULD follow the same SDK contracts:
   broken assets, accessibility regressions, and deployment-policy denial.
 
 **Task-specific packages**
-  Domain authors MAY provide narrow packages for data cleanup, documentation,
-  migrations, release automation, or compliance review. They SHALL reuse SDK
+  Domain authors may provide narrow packages for data cleanup, documentation,
+  migrations, release automation, or compliance review. They reuse SDK
   graph, residual, capability, ledger, and dashboard contracts.
 
 Verifiers are not limited to compilers and LSPs. A domain package or coding
-adapter MAY use:
+adapter may use:
 
 * AST queries;
 * bounded tree search over imports, symbols, package versions, or migration
@@ -1090,13 +1093,13 @@ adapter MAY use:
 * generated fixtures;
 * documentation and API schema validators.
 
-These tools SHALL produce typed residual evidence. They SHOULD NOT directly edit
+These tools produce typed residual evidence. They should not directly edit
 the repository unless invoked through an approved artifact or command effect.
 
 6. Residual Evidence Model
 ==========================
 
-Perspt SHALL introduce a first-class residual model. A residual is not just a log
+Perspt introduces a first-class residual model. A residual is not just a log
 line; it is the measured reason the current state is unsafe or incomplete.
 
 .. code-block:: rust
@@ -1141,7 +1144,7 @@ line; it is the measured reason the current state is unsafe or incomplete.
        BudgetExhausted,
    }
 
-Each verifier residual SHALL map into one SRBN energy component, which is the
+Each verifier residual maps into one SRBN energy component, which is the
 rollup that groups its squared weighted residual:
 
 * V_syn: syntax, parser, typechecker, and compiler diagnostics caused by the
@@ -1157,17 +1160,17 @@ The energy components are the derived rollups defined in System 2; they are
 telemetry projections of the single quadratic residual energy.
 
 ``CapabilityDenied`` and ``BudgetExhausted`` are admissibility outcomes, not
-verifier consistency residuals. They SHALL be recorded on a separate blocked
-channel and SHALL NOT be summed into the Lyapunov energy ``V`` or treated as a
+verifier consistency residuals. They are recorded on a separate blocked
+channel and are not summed into the Lyapunov energy ``V`` or treated as a
 residual to be corrected by regeneration.
 
 A degraded sensor means the energy for its component is unknown, not low. When a
-required sensor is unavailable, the node SHALL take a degraded-validation stop
+required sensor is unavailable, the node takes a degraded-validation stop
 and emit a residual certificate rather than accepting descent on an energy that
 is missing a required component. A ``V_boot`` residual for a degraded sensor is
 permitted only for sensors that are not required for the node scope.
 
-Correction prompts SHALL be generated from dominant residuals:
+Correction prompts are generated from dominant residuals:
 
 1. sort residuals by weighted score and dependency order;
 2. cluster residuals by likely root cause;
@@ -1176,11 +1179,11 @@ Correction prompts SHALL be generated from dominant residuals:
 5. ask the model to produce a bundle addressing the named residuals;
 6. verify whether the same residuals decreased or disappeared.
 
-Undirected retries SHALL be considered a bug. If Perspt cannot produce a
-correction direction, it SHALL say so and either run another verifier, ask a
+Undirected retries are considered a bug. If Perspt cannot produce a
+correction direction, it reports this and either run another verifier, ask a
 bounded question, or escalate with a residual certificate.
 
-Verifier independence SHALL be recorded for every residual:
+Verifier independence is recorded for every residual:
 
 * deterministic tool;
 * compiler/typechecker;
@@ -1192,11 +1195,11 @@ Verifier independence SHALL be recorded for every residual:
 * separate model/provider;
 * same-model critique.
 
-Dashboard and status views SHALL make same-model critique visibly weaker than
-deterministic or independent routes. Same-model critique SHALL NOT contribute a
+Dashboard and status views make same-model critique visibly weaker than
+deterministic or independent routes. Same-model critique does not contribute a
 full-weight descent acceptance.
 
-Verifier independence SHALL be measured, not assumed. The ledger SHALL retain
+Verifier independence is measured, not assumed. The ledger retains
 each validator's verdict per candidate so that pairwise miss rates ``q_i`` and
 miss correlation ``kappa_ij`` are computable from history. For a conjunctive
 verifier gate the effective ensemble miss bound is
@@ -1207,19 +1210,19 @@ verifier gate the effective ensemble miss bound is
       = \min_{i<j} \left( q_i q_j + \kappa_{ij}\,\sigma_i \sigma_j \right),
    \qquad \sigma_i = \sqrt{q_i (1 - q_i)}.
 
-Residual weights ``w_e`` SHALL be reduced for verifiers whose measured
+Residual weights ``w_e`` are reduced for verifiers whose measured
 correlation with an already-counted verifier is high, so that a redundant
 validator does not contribute the weight of an independent one. Duplicate
-validators SHALL NOT be counted as independent merely because they appear twice,
-and status views SHALL surface ``rho_eff`` rather than a raw count of validators.
+validators are not counted as independent merely because they appear twice,
+and status views surface ``rho_eff`` rather than a raw count of validators.
 
 7. Capability-Constrained Admissibility
 =======================================
 
-Perspt SHALL adopt Paper III's platform rule: stochastic components emit
+Perspt adopts Paper III's platform rule: stochastic components emit
 proposals, never unmediated effects.
 
-Every effect SHALL pass through an admissibility kernel before execution:
+Every effect passes through an admissibility kernel before execution:
 
 .. code-block:: rust
 
@@ -1250,7 +1253,7 @@ Every effect SHALL pass through an admissibility kernel before execution:
        pub approval_policy: ApprovalPolicy,
    }
 
-Effect classes SHALL include:
+Effect classes include:
 
 * ``ReadFile``
 * ``Search``
@@ -1275,7 +1278,7 @@ Effect classes SHALL include:
 * ``UpdateGraph``
 * ``UpdatePolicy``
 
-The kernel SHALL evaluate:
+The kernel evaluates:
 
 * actor holds a matching capability;
 * requested effect is in capability scope;
@@ -1292,30 +1295,30 @@ The kernel SHALL evaluate:
 
 Default policy:
 
-* read/search/list/LSP query effects MAY be allowed in workspace scope;
-* write/patch/move/delete effects SHALL require either user approval or an
+* read/search/list/LSP query effects may be allowed in workspace scope;
+* write/patch/move/delete effects require either user approval or an
   approved session policy;
-* dependency mutations SHALL require domain-package policy and approval unless
+* dependency mutations require domain-package policy and approval unless
   explicitly delegated in the session charter;
-* arbitrary ``RunShell`` SHALL default to ask;
-* network effects SHALL default to ask;
-* graph and policy updates SHALL be privileged effects;
-* self-modifying agents SHALL NOT be able to grant themselves new capabilities.
+* arbitrary ``RunShell`` defaults to ask;
+* network effects default to ask;
+* graph and policy updates are privileged effects;
+* self-modifying agents cannot grant themselves new capabilities.
 
-Perspt SHALL keep ``perspt-policy`` as the deterministic trusted base for the
-kernel. Generated code, prompts, domain packages, adapters, and subagents SHALL
+Perspt keeps ``perspt-policy`` as the deterministic trusted base for the
+kernel. Generated code, prompts, domain packages, adapters, and subagents are
 be outside that trusted base.
 
 Calibrated Risk Budgets
 -----------------------
 
-A capability risk budget SHALL NOT be an asserted constant when autonomous
-commitment without per-effect approval is enabled. The kernel SHALL calibrate
+A capability risk budget is not an asserted constant when autonomous
+commitment without per-effect approval is enabled. The kernel calibrates
 each validator acceptance threshold from the deployment's own ledger by
 conformal risk control.
 
 For a validator that emits a safety score ``s(p)`` and accepts when
-``s(p) > theta``, the kernel SHALL hold a calibration set of
+``s(p) > theta``, the kernel holds a calibration set of
 ``(score, outcome)`` pairs in which an outcome is marked unsafe when a later
 independent verifier, regression, or reverted commit contradicts the accepted
 state. For a target budget ``rho``, the conformal threshold is
@@ -1328,39 +1331,39 @@ state. For a target budget ``rho``, the conformal threshold is
    \right\},
 
 where ``R_n(theta)`` is the empirical accepted-unsafe rate on the calibration
-set. The deployed kernel SHALL accept only when ``s(p) > theta_hat``, which
+set. The deployed kernel accepts only when ``s(p) > theta_hat``, which
 bounds the marginal accepted-unsafe rate by ``rho``.
 
-The delayed unsafe label SHOULD be sourced from the undo/redo boundary and
-regression residuals already recorded in the ledger. The kernel SHALL run a
+The delayed unsafe label should be sourced from the undo/redo boundary and
+regression residuals already recorded in the ledger. The kernel runs a
 drift monitor that compares the live validator score distribution against the
 calibration distribution with a two-sample statistic; when they diverge, the
-calibration SHALL be flagged stale and background recalibration SHALL be
+calibration is flagged stale and background recalibration is
 triggered.
 
-A stale flag SHALL NOT hard-halt autonomous execution. Software tasks shift
-regime routinely, so the runtime SHALL degrade gracefully rather than drop out
-of ``auto`` mode. While a calibration is stale the kernel SHALL apply a
+A stale flag does not hard-halt autonomous execution. Software tasks shift
+regime routinely, so the runtime degrades gracefully rather than drop out
+of ``auto`` mode. While a calibration is stale the kernel applies a
 conservative back-off -- inflating the accepted threshold and continuing
 autonomous commitment for low-risk effects -- while routing high-risk effects to
-the risk-class approval policy, and SHALL continue background recalibration.
+the risk-class approval policy, and continues background recalibration.
 
-During the stale window the conformal bound SHALL NOT be asserted: the marginal
+During the stale window the conformal bound is not asserted: the marginal
 accepted-unsafe guarantee holds only under exchangeability, so the back-off
-window is uncertified and SHALL be reported as such. Acceptance in that window
+window is uncertified and is reported as such. Acceptance in that window
 rests on the measured gate and the risk-class approval policy, not on a
 calibrated budget. When recalibration restores exchangeability, the kernel
-SHALL resume asserting the bound.
+resumes asserting the bound.
 
 8. Tool and Command Governance
 ==============================
 
-The current ``AgentTools`` API SHALL be split into typed tools and command IR.
-``sh -c`` SHALL NOT remain as an implicit compatibility path. Shell execution is
+The current ``AgentTools`` API is split into typed tools and command IR.
+``sh -c`` does not remain as an implicit compatibility path. Shell execution is
 allowed only as an explicit ``RunShell`` effect with declared scope,
 capability, state witnesses, and ledgered approval.
 
-Command proposals SHALL be parsed into:
+Command proposals are parsed into:
 
 .. code-block:: rust
 
@@ -1379,10 +1382,10 @@ Command proposals SHALL be parsed into:
        },
    }
 
-Verifier commands SHALL prefer ``Program`` form. Shell form SHALL require a
+Verifier commands prefer ``Program`` form. Shell form requires a
 capability that names shell execution.
 
-Coreutils, ``awk``, and ``sed`` SHALL be modeled in three tiers:
+Coreutils, ``awk``, and ``sed`` are modeled in three tiers:
 
 * **Inspection:** read-only commands such as ``rg``, ``git grep``, ``find``,
   ``sort``, ``uniq``, ``wc``, ``awk`` filters, and ``sed -n``. These can produce
@@ -1393,7 +1396,7 @@ Coreutils, ``awk``, and ``sed`` SHALL be modeled in three tiers:
   generated scripts, package-manager writes, or build-system rewrites. These
   require mutation capabilities and state witnesses.
 
-Every command result SHALL be attached to one of:
+Every command result is attached to one of:
 
 * verifier evidence;
 * correction evidence;
@@ -1404,7 +1407,7 @@ Every command result SHALL be attached to one of:
 9. Agent Roles and Modes
 ========================
 
-Perspt's "agents" mode SHALL become a capability-bounded role system. Roles are
+Perspt's "agents" mode becomes a capability-bounded role system. Roles are
 not trusted because they are named; they are trusted only through capabilities.
 
 Required roles:
@@ -1422,25 +1425,25 @@ Required roles:
 
 Modes:
 
-* ``plan`` mode SHALL disable mutation effects and produce graph proposals,
+* ``plan`` mode disables mutation effects and produce graph proposals,
   residual expectations, and verification plans.
-* ``build`` mode SHALL allow artifact and verifier effects inside the approved
+* ``build`` mode allows artifact and verifier effects inside the approved
   session policy.
-* ``review`` mode SHALL run read-only verifiers and produce critique without
+* ``review`` mode runs read-only verifiers and produce critique without
   workspace mutation.
-* ``auto`` mode SHALL require an explicit session charter naming allowed effects,
+* ``auto`` mode requires an explicit session charter naming allowed effects,
   scopes, and budgets.
 
-Subagents SHALL receive attenuated capabilities. A verifier subagent should not
+Subagents receive attenuated capabilities. A verifier subagent should not
 receive artifact-write permissions; a researcher should not receive repository
 write permissions; an implementer should not receive policy-update permissions.
-Explorer subagents SHALL start read-only and SHALL be budgeted separately from
+Explorer subagents start read-only and are budgeted separately from
 Planner and Implementer agents.
 
 10. Project Knowledge and Context
 =================================
 
-Perspt SHALL introduce a project profile similar in purpose to ``AGENTS.md`` but
+Perspt introduces a project profile similar in purpose to ``AGENTS.md`` but
 owned by Perspt:
 
 * default path: ``.perspt/project.md`` or ``AGENTS.md`` if the project already
@@ -1452,8 +1455,8 @@ owned by Perspt:
 * committed only with user approval;
 * hashed and referenced by context provenance.
 
-Context assembly SHALL remain graph-derived. Large repositories SHALL not be
-stuffed into prompts. Context packages SHALL contain:
+Context assembly remains graph-derived. Large repositories are not
+stuffed into prompts. Context packages provide:
 
 * node-owned files;
 * sealed interfaces and structural digests of dependencies;
@@ -1463,14 +1466,14 @@ stuffed into prompts. Context packages SHALL contain:
 * project profile excerpts with hashes;
 * prior accepted ledger summaries, not raw conversational history.
 
-Context drift SHALL produce a residual. If the file, digest, or project profile
-used to generate a prompt no longer matches the workspace, the candidate SHALL be
+Context drift produces a residual. If the file, digest, or project profile
+used to generate a prompt no longer matches the workspace, the candidate is
 rejected or revalidated before application.
 
 11. Durable Ledger and Replay
 =============================
 
-The ledger SHALL become an event-sourced replay contract. It SHALL be possible to
+The ledger becomes an event-sourced replay contract. It is possible to
 reconstruct:
 
 * the active graph revision at every point;
@@ -1487,7 +1490,7 @@ reconstruct:
 * every rollback and undo action;
 * every capability grant, attenuation, expiry, and consumption.
 
-New ledger events SHALL include:
+New ledger events include:
 
 * ``proposal_observed``
 * ``admissibility_checked``
@@ -1521,25 +1524,25 @@ New ledger events SHALL include:
 * ``lease_acquired``
 * ``lease_released``
 
-Perspt SHALL use cryptographic hashes for durable commitments. Non-cryptographic
-hashes such as ``DefaultHasher`` MAY be used only for in-memory maps or tests,
+Perspt uses cryptographic hashes for durable commitments. Non-cryptographic
+hashes such as ``DefaultHasher`` may be used only for in-memory maps or tests,
 not for Merkle, replay, or provenance claims.
 
-Replay SHALL be deterministic over recorded observations. If a verifier used
+Replay is deterministic over recorded observations. If a verifier used
 randomness, wall-clock time, network data, or an external service, the ledger
-SHALL record the realized observation needed for replay. Replay SHALL read the
+records the realized observation needed for replay. Replay reads the
 recorded observation, not re-run the external source.
 
-The admissibility kernel SHALL refuse to commit any transition that references
+The admissibility kernel refuses to commit any transition that references
 an observation lacking a ledger record. Recording every stochastic observation
 before it is used is what makes replay deterministic; the kernel-refusal rule
-SHALL enforce it rather than relying on convention.
+enforces it rather than relying on convention.
 
 This rule is a static architectural guarantee at the SDK effect and capability
-boundary, not a dynamic operating-system interceptor. The SDK SHALL NOT be
+boundary, not a dynamic operating-system interceptor. The SDK is not
 required to trace syscalls or network reads. Instead, domain packages and
-adapters SHALL obtain every observation by awaiting SDK-managed ``Effect``
-results, and the SDK SHALL record each observation before returning it. A
+adapters obtain every observation by awaiting SDK-managed ``Effect``
+results, and the SDK records each observation before returning it. A
 transition therefore references observations only by their recorded handles or
 content addresses, and the kernel refuses any transition that references an
 observation with no such record. Structurally confining observation to the
@@ -1547,7 +1550,7 @@ effect API is what discharges the recording obligation; an adapter that reaches
 around the effect API for nondeterministic data is outside the contract and its
 commits are inadmissible.
 
-The runtime SHALL satisfy six durable-execution obligations:
+The runtime satisfies six durable-execution obligations:
 
 .. csv-table:: Durable-Execution Obligations
    :header: "Obligation", "Requirement", "Owning crate"
@@ -1564,12 +1567,12 @@ The runtime SHALL satisfy six durable-execution obligations:
 12. User Experience
 ===================
 
-The user experience SHALL expose SRBN evidence rather than hiding it. The
+The user experience exposes SRBN evidence rather than hiding it. The
 existing web interface is the primary live observability surface for
 long-running agent sessions; TUI, CLI, and headless output are compact
 projections over the same ledgered events.
 
-TUI and headless output SHALL show:
+TUI and headless output show:
 
 * active mode: plan, build, review, auto;
 * current graph revision and node generation;
@@ -1584,7 +1587,7 @@ TUI and headless output SHALL show:
   stop, or commit;
 * budget state: attempts, steps, graph revisions, cost, and risk if enabled.
 
-The web dashboard SHALL add:
+The web dashboard adds:
 
 * graph revision timeline;
 * parallel worker timeline and blocked-dependency view;
@@ -1596,24 +1599,24 @@ The web dashboard SHALL add:
 * non-commuting durable commits;
 * unstable nodes with suggested next action.
 
-The dashboard SHALL also show what Perspt is doing under the hood while work is
+The dashboard also shows what Perspt is doing under the hood while work is
 active: current agent role, model route, tool invocation, lease wait, verifier
 stage, residual cluster, graph revision proposal, admissibility decision, and
-the exact reason a worker is blocked or cancelled. These views SHALL be powered
+the exact reason a worker is blocked or cancelled. These views are powered
 by read-only projections of the event ledger so monitoring cannot mutate the
 running session.
 
-Perspt SHALL support undo/redo at the accepted candidate boundary:
+Perspt supports undo/redo at the accepted candidate boundary:
 
 * undo reverts the last accepted artifact commit or graph revision;
 * undo creates a new ledger event and never deletes history;
 * redo reapplies an undone accepted event only if state witnesses still match;
-* undo/redo SHALL NOT rewrite the Merkle history.
+* undo/redo does not rewrite the Merkle history.
 
 13. Evaluation and Benchmarks
 =============================
 
-Perspt SHALL not claim SRBN reliability from implementation alone. It SHALL ship
+Perspt does not claim SRBN reliability from implementation alone. It ships
 mechanism checks and coding benchmarks that can falsify this PSP's claims.
 
 Mechanism checks:
@@ -1700,7 +1703,7 @@ Metrics:
 * platform potential ``Phi(W)`` and load estimate ``alpha_load``;
 * same-model critique ablation versus independent verifier route.
 
-No benchmark report SHALL omit failed runs. Residual certificates are first-class
+No benchmark report omits failed runs. Residual certificates are first-class
 outcomes, not discarded failures.
 
 .. rubric:: UI/UX Design
@@ -1735,7 +1738,7 @@ Interaction flow:
 8. Perspt completes with hard-pass success, partial success, or a residual
    certificate.
 
-Headless mode SHALL remain useful in CI or scripted contexts. It SHALL print
+Headless mode remains useful in CI or scripted contexts. It prints
 structured stage lines and write all rich evidence to the ledger.
 
 .. rubric:: Technical Specification
@@ -1745,8 +1748,8 @@ Crate-level changes:
 **perspt-core**
   Keep only low-level shared types, configuration, providers, and event
   primitives that are not part of the agent SDK. The existing language-plugin
-  registry MAY be removed or reduced to a temporary migration aid. Public
-  domain-neutral agent contracts SHOULD move to ``perspt-sdk`` instead of
+  registry may be removed or reduced to a temporary migration aid. Public
+  domain-neutral agent contracts should move to ``perspt-sdk`` instead of
   accumulating in ``perspt-core``.
 
 **perspt-sdk**
@@ -1773,8 +1776,8 @@ Crate-level changes:
   sensors, AST/symbol/import graph extraction, source-edit artifact bundle
   helpers, dependency policies, coding correction mappers, and coding benchmark
   fixtures out of the generic runtime. The existing Rust, Python, and
-  JavaScript/TypeScript language plugins MAY inform the implementation, but the
-  new adapters SHOULD implement SDK verifier-suite traits directly rather than
+  JavaScript/TypeScript language plugins may inform the implementation, but the
+  new adapters should implement SDK verifier-suite traits directly rather than
   preserving the old plugin ABI.
 
 **perspt-policy**
@@ -1786,8 +1789,8 @@ Crate-level changes:
   Add event-sourced tables for proposals, admissibility decisions, residuals,
   capabilities, graph revisions, node generations, replay observations, rollback
   events, exploration reports, parallel worker lifecycle events, leases, and
-  residual certificates. The event stream SHALL be canonical. Existing PSP-7
-  ``srbn_step_records`` and ``correction_attempts`` tables MAY be dropped,
+  residual certificates. The event stream is canonical. Existing PSP-7
+  ``srbn_step_records`` and ``correction_attempts`` tables may be dropped,
   migrated forward, or regenerated as new projections; this PSP does not require
   old stored sessions to remain readable.
 
@@ -1804,7 +1807,7 @@ Crate-level changes:
   residual heatmap, parallel worker timeline, blocked-dependency view,
   capability/audit views, verifier independence routes, model-route telemetry,
   replay status, rollback history, and observed-versus-accepted trajectory
-  views. The dashboard SHALL remain a read-only observer over the agent event
+  views. The dashboard remains a read-only observer over the agent event
   stream.
 
 **perspt-cli**
@@ -1813,8 +1816,8 @@ Crate-level changes:
   selection, concurrency, and benchmark mechanism checks.
 
 **future domain packages**
-  Research, website-builder, and task-specific packages SHOULD use
-  ``perspt-sdk`` contracts directly. They MUST NOT fork the scheduler,
+  Research, website-builder, and task-specific packages should use
+  ``perspt-sdk`` contracts directly. They must not fork the scheduler,
   admissibility kernel, residual model, replay ledger, or dashboard event model.
 
 Core data structures:
@@ -2055,7 +2058,7 @@ conformance gate.
   Make domain selection explicit in the CLI and confirm the SDK contracts admit
   a second domain package without forking the scheduler, admissibility kernel,
   residual model, replay ledger, or dashboard event model. A research or
-  website-builder package skeleton SHOULD compile against the SDK as the
+  website-builder package skeleton should compile against the SDK as the
   readiness check for later domains.
 
 **Phase 11: Mechanism Checks and Benchmarks**
@@ -2322,23 +2325,23 @@ Required breaking changes:
 * ``perspt-sdk`` becomes the canonical public agent API for SRBN state,
   residuals, graph scheduling, capabilities, replay, and domain packages.
 * ``perspt-coding`` becomes the owner of coding-specific behavior. Rust, Python,
-  and JavaScript/TypeScript integrations SHALL move out of the generic runtime.
-* The existing language-plugin ABI MAY be removed. New coding adapters SHALL
+  and JavaScript/TypeScript integrations move out of the generic runtime.
+* The existing language-plugin ABI may be removed. New coding adapters
   implement SDK verifier-suite traits directly.
-* The old topological scheduler MAY be removed once the mutable ready-queue
+* The old topological scheduler may be removed once the mutable ready-queue
   scheduler is available behind tests.
 * The old session/event schema does not need to remain readable. A one-way
-  migration command MAY be provided, but replay correctness applies only to the
+  migration command may be provided, but replay correctness applies only to the
   new event-sourced ledger.
-* Command policy configuration MAY be replaced by capability policies and
+* Command policy configuration may be replaced by capability policies and
   command IR rules.
-* Direct shell execution behavior SHALL become stricter and SHALL route through
+* Direct shell execution behavior becomes stricter and routes through
   explicit ``RunShell`` proposals.
-* Legacy prompt-template entry points MAY be deleted once the typed prompt
+* Legacy prompt-template entry points may be deleted once the typed prompt
   compiler owns all prompt families.
-* CLI defaults MAY change to expose explicit domain selection, concurrency, and
+* CLI defaults may change to expose explicit domain selection, concurrency, and
   capability policy.
-* Dashboard and TUI views MAY be rebuilt on top of new ledger projections rather
+* Dashboard and TUI views may be rebuilt on top of new ledger projections rather
   than preserving old event shapes.
 
 Migration guidance:
@@ -2466,7 +2469,7 @@ References
 ==========
 
 The paper references point to local PDF builds until the manuscripts have stable
-publisher metadata. Future revisions SHOULD replace these entries with DOI,
+publisher metadata. Future revisions should replace these entries with DOI,
 publisher, or archival metadata when available.
 
 * Rathore, Vikrant. *Stability is All You Need I*. Forthcoming. Reviewed PDF:
