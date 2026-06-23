@@ -1,7 +1,7 @@
 PSP: 000008
 Title: SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph
 Author: Vikrant Rathore (@vikrantrathore)
-Status: Discussion
+Status: Final
 Type: Enhancement
 Created: 2026-06-20
 Discussion-To: https://github.com/eonseed/perspt/discussions/150
