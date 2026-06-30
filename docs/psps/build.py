@@ -38,10 +38,10 @@ def create_parser():
 def create_index_file(html_root: Path, builder: str) -> None:
     """Copies PSP 0 to the root index.html so that /psps/ works."""
     if builder == "dirhtml":
-        psp_zero_file = html_root / "psp-0000" / "index.html"
+        psp_zero_file = html_root / "psp-000000" / "index.html"
         index_file = html_root / "index.html"
     else:
-        psp_zero_file = html_root / "psp-0000.html"
+        psp_zero_file = html_root / "psp-000000.html"
         index_file = html_root / "index.html"
 
     if psp_zero_file.exists():
