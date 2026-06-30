@@ -17,7 +17,7 @@ srbn = "0.1.1"
 srbn-serde = "0.1.1"
 
 # Spectral energy-slope constant mu = 2*lambda_min+(A): symmetric eigensolver.
-nalgebra = "0.33"
+nalgebra = "0.35"
 
 # Serialization for ledgerable records.
 serde = { version = "1.0", features = ["derive"] }
