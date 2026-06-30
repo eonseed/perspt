@@ -43,10 +43,10 @@ def _post_build(app: Sphinx, exception: Exception | None) -> None:
         build_directory = Path(app.outdir)
         builder_name = app.builder.name
         if builder_name == "dirhtml":
-            psp_zero_file = build_directory / "psp-0000" / "index.html"
+            psp_zero_file = build_directory / "psp-000000" / "index.html"
             index_file = build_directory / "index.html"
         else:
-            psp_zero_file = build_directory / "psp-0000.html"
+            psp_zero_file = build_directory / "psp-000000.html"
             index_file = build_directory / "index.html"
 
         if psp_zero_file.exists():
