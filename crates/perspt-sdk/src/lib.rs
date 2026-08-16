@@ -50,6 +50,7 @@ pub mod kernel;
 pub mod ledger;
 pub mod model;
 pub mod observability;
+pub mod recovery;
 pub mod residual;
 pub mod routing;
 pub mod scheduler;
@@ -112,6 +113,9 @@ pub use model::{
 pub use observability::{
     backlog_gauge, phi, residual_heatmap, CapabilityAudit, ResidualHeatmap, TrajectoryProjection,
     WorkflowPotential,
+};
+pub use recovery::{
+    classify_failure, CascadeClass, CascadeLevel, FailureKind, GrantedControl, RecoveryCascade,
 };
 pub use residual::{
     CorrectionDirection, EnergyComponent, EvidencePayload, IndependenceRoute, ResidualClass,
