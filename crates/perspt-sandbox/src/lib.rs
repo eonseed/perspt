@@ -4,4 +4,7 @@
 
 pub mod command;
 
-pub use command::{BasicSandbox, CommandResult, SandboxedCommand};
+pub use command::{
+    BasicSandbox, CommandResult, FilesystemAccess, IsolationMode, PreparedProcess, ProcessPolicy,
+    ProcessSandbox, SandboxedCommand,
+};

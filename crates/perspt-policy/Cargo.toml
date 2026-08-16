@@ -16,6 +16,8 @@ categories = ["command-line-utilities", "development-tools"]
 perspt-core = { workspace = true }
 # Starlark policy engine
 starlark = "0.14"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # Shell parsing
 shell-words = "1.1"

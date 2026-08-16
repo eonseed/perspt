@@ -3,7 +3,7 @@
 //! Evaluates Starlark rules from ~/.perspt/rules to control command execution.
 
 use anyhow::{Context, Result};
-use starlark::environment::{FrozenModule, Globals, GlobalsBuilder, Module};
+use starlark::environment::{Globals, GlobalsBuilder, Module};
 use starlark::eval::Evaluator;
 use starlark::starlark_module;
 use starlark::syntax::{AstModule, Dialect};
@@ -24,7 +24,7 @@ pub enum PolicyDecision {
 /// Policy engine that evaluates Starlark rules
 pub struct PolicyEngine {
     /// Loaded policy modules
-    policies: Vec<FrozenModule>,
+    policies: Vec<String>,
     /// Path to policy directory
     policy_dir: PathBuf,
 }
@@ -87,12 +87,17 @@ impl PolicyEngine {
     }
 
     /// Load a single policy file
-    fn load_policy_file(&self, path: &Path) -> Result<FrozenModule> {
+    fn load_policy_file(&self, path: &Path) -> Result<String> {
         let content = std::fs::read_to_string(path)
             .context(format!("Failed to read policy file: {:?}", path))?;
 
-        let ast = AstModule::parse(path.to_string_lossy().as_ref(), content, &Dialect::Standard)
-            .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+        let executable = format!("{content}\nevaluate\n");
+        let ast = AstModule::parse(
+            path.to_string_lossy().as_ref(),
+            executable,
+            &Dialect::Standard,
+        )
+        .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
         let globals = Self::create_globals();
 
@@ -103,7 +108,7 @@ impl PolicyEngine {
                     .map_err(|e| anyhow::anyhow!("Eval error: {}", e))?;
             }
 
-            Ok(module.freeze()?)
+            Ok(content)
         })
     }
 
@@ -132,10 +137,59 @@ impl PolicyEngine {
         if self.policies.is_empty() {
             return self.default_policy(command);
         }
-
-        // For now, use default policy logic
-        // Full Starlark policy evaluation can be implemented later
-        self.default_policy(command)
+        let mut decision = self.default_policy(command);
+        for policy in &self.policies {
+            let evaluated: anyhow::Result<PolicyDecision> = Module::with_temp_heap(|module| {
+                let mut evaluator = Evaluator::new(&module);
+                evaluator.set_max_callstack_size(32)?;
+                evaluator.set_max_heap_size(8 * 1024 * 1024)?;
+                evaluator.set_max_tick_count(25_000)?;
+                let ast = AstModule::parse(
+                    "policy.star",
+                    format!("{policy}\nevaluate\n"),
+                    &Dialect::Standard,
+                )
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let function = evaluator
+                    .eval_module(ast, &Self::create_globals())
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let argument = module.heap().alloc(command);
+                let value = evaluator
+                    .eval_function(function, &[argument], &[])
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                match value.unpack_str() {
+                    Some("allow") => Ok(PolicyDecision::Allow),
+                    Some("prompt") => Ok(PolicyDecision::Prompt(
+                        "Starlark policy requires approval".into(),
+                    )),
+                    Some("deny") => Ok(PolicyDecision::Deny(
+                        "Starlark policy denied command".into(),
+                    )),
+                    Some(other) => {
+                        anyhow::bail!("Starlark policy returned unknown decision {other:?}")
+                    }
+                    None => match value.unpack_bool() {
+                        Some(true) => Ok(PolicyDecision::Allow),
+                        Some(false) => Ok(PolicyDecision::Deny(
+                            "Starlark policy denied command".into(),
+                        )),
+                        None => anyhow::bail!(
+                            "Starlark policy must return allow, prompt, deny, or bool"
+                        ),
+                    },
+                }
+            });
+            let policy_decision = match evaluated {
+                Ok(decision) => decision,
+                Err(error) => {
+                    return PolicyDecision::Deny(format!(
+                        "Starlark policy evaluation failed: {error}"
+                    ));
+                }
+            };
+            decision = stricter_decision(decision, policy_decision);
+        }
+        decision
     }
 
     /// Default policy when no rules are loaded
@@ -174,6 +228,18 @@ impl PolicyEngine {
     /// Check if a command is allowed without prompting
     pub fn is_safe(&self, command: &str) -> bool {
         matches!(self.evaluate(command), PolicyDecision::Allow)
+    }
+}
+
+fn stricter_decision(left: PolicyDecision, right: PolicyDecision) -> PolicyDecision {
+    match (left, right) {
+        (decision @ PolicyDecision::Deny(_), _) | (_, decision @ PolicyDecision::Deny(_)) => {
+            decision
+        }
+        (decision @ PolicyDecision::Prompt(_), _) | (_, decision @ PolicyDecision::Prompt(_)) => {
+            decision
+        }
+        _ => PolicyDecision::Allow,
     }
 }
 
@@ -220,5 +286,28 @@ mod tests {
             engine.evaluate("curl https://example.com"),
             PolicyDecision::Prompt(_)
         ));
+    }
+
+    #[test]
+    fn loaded_starlark_policy_is_actually_evaluated() {
+        let directory = std::env::temp_dir().join(format!("perspt-policy-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("deny.star");
+        std::fs::write(
+            &path,
+            "def evaluate(command):\n    return 'deny' if 'forbidden' in command else 'allow'\n",
+        )
+        .unwrap();
+        let mut engine = PolicyEngine {
+            policies: Vec::new(),
+            policy_dir: directory.clone(),
+        };
+        engine.load_policies().unwrap();
+        assert_eq!(engine.evaluate("ls"), PolicyDecision::Allow);
+        assert!(matches!(
+            engine.evaluate("forbidden operation"),
+            PolicyDecision::Deny(_)
+        ));
+        let _ = std::fs::remove_dir_all(directory);
     }
 }
