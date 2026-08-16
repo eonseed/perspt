@@ -718,6 +718,111 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         "#,
         [],
     )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_authority_epochs (
+            session_id VARCHAR PRIMARY KEY,
+            epoch BIGINT NOT NULL
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_grant_policies (
+            policy_id VARCHAR PRIMARY KEY,
+            session_id VARCHAR NOT NULL,
+            policy_json TEXT NOT NULL,
+            revoked BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_external_effects (
+            session_id VARCHAR NOT NULL,
+            idempotency_key VARCHAR NOT NULL,
+            intent_hash VARCHAR NOT NULL,
+            intent_json TEXT NOT NULL,
+            result_json TEXT,
+            status VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            PRIMARY KEY (session_id, idempotency_key)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_artifacts (
+            content_hash VARCHAR PRIMARY KEY,
+            content BLOB NOT NULL,
+            byte_len BIGINT NOT NULL,
+            media_type VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_context_checkpoints (
+            session_id VARCHAR NOT NULL,
+            covered_event_root VARCHAR NOT NULL,
+            checkpoint_json TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (session_id, covered_event_root)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_verdicts (
+            session_id VARCHAR NOT NULL,
+            candidate_id VARCHAR NOT NULL,
+            validator_id VARCHAR NOT NULL,
+            stratum VARCHAR NOT NULL,
+            missed BOOLEAN NOT NULL,
+            unsafe_label BOOLEAN,
+            evidence_hash VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (session_id, candidate_id, validator_id)
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_calibration_epochs (
+            epoch_id VARCHAR PRIMARY KEY,
+            stratum VARCHAR NOT NULL,
+            target_rho DOUBLE NOT NULL,
+            threshold DOUBLE,
+            state VARCHAR NOT NULL,
+            sample_count BIGINT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        "#,
+        [],
+    )?;
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_calibration_samples (
+            epoch_id VARCHAR NOT NULL,
+            sample_id VARCHAR NOT NULL,
+            score DOUBLE NOT NULL,
+            unsafe_label BOOLEAN NOT NULL,
+            audit_selected BOOLEAN NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (epoch_id, sample_id)
+        )
+        "#,
+        [],
+    )?;
 
     log::info!("DuckDB schema initialized successfully");
     Ok(())
