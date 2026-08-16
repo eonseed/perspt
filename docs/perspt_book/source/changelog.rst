@@ -31,10 +31,22 @@ This release implements PSP-9's governed agentic platform: every stochastic acti
 - **Conformal Feasibility Floor** - A declared budget ``ρ`` fixes ``n ≥ 1/ρ − 1`` labeled samples before anything can be autonomously accepted; reject-all is reported as *insufficient calibration*, never as a satisfied budget. Calibration is keyed by full exchangeability strata with shadow/active/stale readiness epochs.
 - **Audit Replay** - ``perspt replay <session>`` folds the durable event stream deterministically with tamper detection and no provider credentials; context compaction preserves an exact ``ControlFrame`` and unresolved tool calls, and a stale checkpoint is rebuilt, never patched.
 
+**Recovery, Resume & Calibration:**
+
+- **Recovery Ladder** - The runtime now holds Theorem 6's higher rungs live: level 2 revises the work graph with the exhausted attempt's evidence and re-runs at a new generation, level 3 hands the node to the configured architect route, and level 4 durably revokes the session's authority epoch — also wired to ``perspt abort`` and the TUI quit path.
+- **Exact Mid-Loop Resume** - Every gate acceptance writes a durable candidate checkpoint (control frame plus content-addressed file artifacts). ``perspt resume`` rebuilds the accepted candidate from it, re-mints a fresh capability from the grant intersection at the current durable epoch, and re-enters the loop with exactly the remaining budgets; a bumped epoch refuses the resume.
+- **Delayed Audit Labels & Conformal Activation** - Every promotion persists an audit-selected, unlabeled calibration sample; ``perspt audit`` ingests delayed labels (single-assignment) and recomputes the stratum threshold over labeled samples only. At the finite sample floor a new immutable epoch activates, after which hard-pass candidates above ``theta`` commit without a prompt with the certified accept ledgered; any other state backs off to approval.
+- **Grant Ceilings Enforced** - ``GrantPolicy::mint`` intersects every live capability with the grant ceilings (effects, paths, commands, deny-by-default network, approval strictness) and fails closed; persisted grant intent is signed over canonical bytes and verified against a local trust anchor on resume, never the embedded key.
+- **Behavioral Provider Probes** - ``perspt providers --probe`` observes each configured route on a live two-tool round trip (tool calling, multi-tool selection, parallel batching, schema validity) with evidence labelled ``behavioral``; all three configured routes passed live.
+- **Exploration-Only Mode** - ``perspt agent --exploration-only`` runs an interactive explorer tool loop under a strictly read-only capability: every call passes the kernel and mutation attempts are recorded denials.
+- **Parity Gate Passed** - The ``parity_bench`` harness ran the governed tool loop against the ungoverned whole-file ablation baseline live: 100% hard-pass with zero false stability, failures preserved. No measurement justifies a typed whole-file tool yet; PSP-9 status moves to Final.
+- **Governance Surfaces** - A dashboard Governance page shows authority epochs, signed grant intent, calibration epochs, pending delayed audits, and validator verdicts; ``perspt status``, ``perspt ledger``, and ``perspt abort`` now read and act on the PSP-9 surfaces instead of printing placeholders.
+
 **Engineering Discipline:**
 
 - **PSP Code Check** - New ``xtask`` checker enforces file ≤ 1408 lines, function ≤ 70 code lines (measured with ``syn``, not brace counting), and line ≤ 108 columns, with a shrink-only baseline ratchet wired into CI (``./check-rules.sh``).
 - **Workspace Decomposition** - The 5,889-line orchestrator, ``types.rs``, ``plugin.rs``, ``store.rs``, ``tools.rs``, ``ledger.rs``, and ``verification.rs`` split into focused submodules; workspace version fields now inherit from ``[workspace.package]`` with ``rust-version = 1.85``.
+- **Audit-Driven Hardening** - A full-code audit closed a candidate-restore gap (files created after a checkpoint now roll back exactly via a pre-image journal), separated read paths from the promotable mutated set, routed promotion itself through the five-clause kernel, made the policy engine consume canonical command lines, inverted network-scope delegation to deny-by-default, and made ledger appends O(1) via stage-then-commit.
 
 Version 0.6.2 - "Hózhó"
 -----------------------
