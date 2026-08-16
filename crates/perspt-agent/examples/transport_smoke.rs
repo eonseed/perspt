@@ -14,18 +14,32 @@ use perspt_agent::GenAiTransport;
 use perspt_sdk::{Conversation, ModelId, ModelTransport, ToolChoicePolicy, ToolSpec, TurnOutput};
 
 fn tool_specs() -> Vec<ToolSpec> {
-    vec![ToolSpec {
-        name: "read_file".into(),
-        description: "Read the contents of a workspace file".into(),
-        schema: serde_json::json!({
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Workspace-relative path"}
-            },
-            "required": ["path"],
-        }),
-        strict: false,
-    }]
+    vec![
+        ToolSpec {
+            name: "read_file".into(),
+            description: "Read the contents of a workspace file".into(),
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Workspace-relative path"}
+                },
+                "required": ["path"],
+            }),
+            strict: false,
+        },
+        ToolSpec {
+            name: "list_files".into(),
+            description: "List files in a workspace directory".into(),
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Directory to list"}
+                },
+                "required": ["path"],
+            }),
+            strict: false,
+        },
+    ]
 }
 
 /// One two-tool round trip; returns (turns, tool calls observed, latencies).
@@ -34,11 +48,12 @@ async fn round_trip(
     model: &ModelId,
 ) -> anyhow::Result<(u32, u32, Vec<f64>)> {
     let mut conversation = Conversation::with_system(
-        "You are a coding agent. Use the read_file tool to inspect files before answering. \
-         Keep answers to one sentence.",
+        "You are a coding agent. Use list_files to see the workspace and read_file to \
+         inspect files before answering. Keep answers to one sentence.",
     );
-    conversation
-        .push_user("What does src/lib.rs contain? Read it first, then summarize in one sentence.");
+    conversation.push_user(
+        "List the files under src, then read src/lib.rs, then summarize it in one sentence.",
+    );
 
     let specs = tool_specs();
     let mut latencies = Vec::new();
@@ -61,10 +76,11 @@ async fn round_trip(
                 for call in &calls {
                     // Scripted tool result: the transport contract is what is
                     // under test, not the executor.
-                    conversation.push_tool_response(
-                        call.call_id.clone(),
-                        "pub fn add(a: i32, b: i32) -> i32 { a + b }",
-                    );
+                    let result = match call.name.as_str() {
+                        "list_files" => "src/lib.rs",
+                        _ => "pub fn add(a: i32, b: i32) -> i32 { a + b }",
+                    };
+                    conversation.push_tool_response(call.call_id.clone(), result);
                 }
             }
             TurnOutput::Text(text) => {
