@@ -37,6 +37,10 @@ pub enum SdkError {
     /// A domain package produced an inconsistent contract.
     #[error("domain error: {0}")]
     Domain(String),
+
+    /// A grant signature failed to encode, decode, or verify.
+    #[error("grant signature error: {0}")]
+    Signature(String),
 }
 
 impl From<srbn::Error> for SdkError {

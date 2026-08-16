@@ -73,18 +73,18 @@ pub use admissibility::{
 };
 pub use benchmark::{BenchmarkCase, BenchmarkOutcome, BenchmarkReport, BenchmarkResult};
 pub use capability::{
-    check_admissibility, ActorId, AdmissibilityDecision, AdmissibilityWitness, ApprovalPolicy,
-    Capability, CapabilityRole, DenyReason, EffectKind, EffectProposal, GrantPolicy, KernelState,
-    RecoveryClass, RiskBudget, RiskClass, SignedGrantPolicy, StateWitness,
+    check_admissibility, grant_public_key, hex_decode, hex_encode, ActorId, AdmissibilityDecision,
+    AdmissibilityWitness, ApprovalPolicy, Capability, CapabilityRole, DenyReason, EffectKind,
+    EffectProposal, GrantPolicy, KernelState, RecoveryClass, RiskBudget, RiskClass,
+    SignedGrantPolicy, StateWitness,
 };
 pub use certificate::{BudgetRef, ResidualCertificate};
 pub use checkpoint::{ContextCheckpoint, ControlFrame};
 pub use command::{canonicalize, classify_tier, CommandInvocation, CommandTier};
 pub use conformal::{
-    accepted_unsafe_rate, conformal_threshold, conformal_threshold_checked, decide,
-    decide as conformal_decide, is_drifted, ks_statistic, readiness, sample_floor, AcceptOutcome,
-    CalibrationReadiness, CalibrationSample, CalibrationState, CalibrationStratum,
-    ThresholdOutcome,
+    accepted_unsafe_rate, conformal_threshold_checked, decide, decide as conformal_decide,
+    is_drifted, ks_statistic, readiness, sample_floor, AcceptOutcome, CalibrationReadiness,
+    CalibrationSample, CalibrationState, CalibrationStratum, ThresholdOutcome,
 };
 pub use domain::{
     AdjudicationBrief, AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId,

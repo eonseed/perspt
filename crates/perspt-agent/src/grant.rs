@@ -21,6 +21,11 @@ pub struct GrantSigningKey {
 }
 
 impl GrantSigningKey {
+    /// The Ed25519 public key persisted grants must verify against.
+    pub fn public_key(&self) -> [u8; 32] {
+        perspt_sdk::grant_public_key(&self.bytes)
+    }
+
     pub fn resolve() -> Result<Self> {
         if let Ok(value) = std::env::var("PERSPT_GRANT_SIGNING_KEY") {
             return Ok(Self {
@@ -131,21 +136,14 @@ fn decode_key(value: &str) -> Result<[u8; 32]> {
         value.len() == 64,
         "grant signing key must be 64 hex characters"
     );
-    let mut bytes = [0u8; 32];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
-            .context("grant signing key contains invalid hex")?;
-    }
-    Ok(bytes)
+    perspt_sdk::hex_decode(value)
+        .map_err(|error| anyhow::anyhow!("grant signing key contains invalid hex: {error}"))?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("grant signing key must decode to 32 bytes"))
 }
 
 fn encode_key(bytes: &[u8; 32]) -> String {
-    use std::fmt::Write as _;
-    let mut value = String::with_capacity(64);
-    for byte in bytes {
-        let _ = write!(&mut value, "{byte:02x}");
-    }
-    value
+    perspt_sdk::hex_encode(bytes)
 }
 
 #[cfg(test)]
