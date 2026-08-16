@@ -428,7 +428,11 @@ different transport and never links ``genai``.
 
 The SRBN kernel has moved with Papers I and II, and ``perspt-sdk`` is a release
 behind. Upgrading is a prerequisite for this PSP rather than a chore, because
-the new surface is exactly what a tool loop needs.
+the new surface is exactly what a tool loop needs. The 0.3.0 family is built on
+edition 2024 with ``rust-version = 1.85``, and Perspt currently declares no
+MSRV at all; this PSP therefore sets ``rust-version = "1.85"`` in
+``[workspace.package]`` so the toolchain floor is stated where Cargo enforces
+it rather than discovered as a build failure.
 
 .. list-table::
    :header-rows: 1
@@ -460,8 +464,12 @@ the new surface is exactly what a tool loop needs.
        required for hard pass, declared floor, and escalation (system 10).
    * - ``srbn-ledger``
      - SHA-256 hash-chain helpers with generic ``commit`` and ``verify``.
-       Paper I's Merkle-ized sheaf (Def. 7.1, Thm C.1) gets one implementation
-       instead of two. The crate explicitly provides no durable storage, which
+       Despite its ``MerkleLedger`` name the crate is a *linear* hash chain —
+       no inclusion proofs, no sibling paths, no root type — so it supplies
+       the chain half of Paper I's Merkle-ized sheaf (Def. 7.1, Thm C.1)
+       while per-artifact content addressing stays in
+       ``perspt-sdk::ledger::content_hash``. Gate O needs only the chain.
+       The crate explicitly provides no durable storage, which
        is the correct seam: ``perspt-store`` keeps durability, the kernel keeps
        the chain.
    * - ``srbn-regex``
@@ -477,6 +485,24 @@ additions; the ``Realizer`` is new surface that ``perspt-agent`` implements.
 **The rule is unchanged and restated because it will be tempting to break it
 under deadline: Perspt does not fork the kernel.** If a Paper I mechanism is
 missing, it is added upstream in ``srbn`` and consumed here.
+
+Three properties of the 0.3.0 surface constrain how it is consumed, and each
+is absorbed at the seam rather than worked around downstream:
+
+* **The kernel is synchronous.** ``srbn::Realizer::realize`` is a blocking
+  call and ``stabilize_realized`` is a synchronous loop, while Perspt's
+  realization re-reads an overlay and runs verifiers — async I/O on a tokio
+  runtime. The live tool loop therefore performs realization asynchronously in
+  ``perspt-agent`` and hands the *already-realized* value to a pure sync
+  ``srbn::Realizer`` adapter; ``stabilize_realized`` is used as the
+  conformance parity oracle, never as the live async path (system 10).
+* **State must be ``Clone``.** The kernel clones every attempt into its trace,
+  so ``WorkspaceState`` is a cheap content-addressed handle — hashes and ids,
+  never file contents.
+* **Traces are export-only.** ``srbn-serde`` serializes but does not
+  deserialize, so Theorem 7's deterministic fold cannot round-trip kernel
+  types. ``perspt-store`` owns its own versioned, deserializable transition
+  envelope and embeds the kernel's trace JSON as an opaque, hash-checked blob.
 
 .. rubric:: Theory → Mechanism → Consumer
 
@@ -2904,7 +2930,10 @@ to be rediscovered in review.
 
 .. rubric:: Technical Specification
 
-**Architecture.** No new crates. The work lands in existing boundaries:
+**Architecture.** No new shipped crates. The work lands in existing
+boundaries. (The repository additionally carries ``xtask``, a
+``publish = false`` dev-only workspace member that enforces the project's
+coding-rule limits; it is not part of the crate set specified here.)
 
 .. list-table::
    :header-rows: 1
@@ -2989,6 +3018,14 @@ to be rediscovered in review.
        and :math:`\Phi(W)` gauges, calibration readiness/audit coverage,
        persistent-grant/revocation controls, context-checkpoint inspection, and
        replay view.
+   * - Crate graph
+     - Three dependency edges are added and stated here because nothing else
+       in this PSP implies them: ``perspt-cli``, ``perspt-tui``, and
+       ``perspt-dashboard`` gain a ``perspt-sdk`` dependency, since systems
+       17–18 have them render SDK types (:math:`\rho_{\text{eff}}`,
+       :math:`\mu`, :math:`\Phi(W)`, residual vectors, catalog entries,
+       calibration readiness). The reverse edges remain forbidden;
+       ``perspt-core`` still does not depend on the SDK.
 
 **Performance.** The tool loop trades one large generation for several small
 ones: more requests and lower total tokens per node on edit work, higher latency
@@ -3188,6 +3225,15 @@ gate lands with the code it constrains.
      - Work
      - Gates
      - Exit criterion
+   * - P
+     - Kernel prerequisite: ``srbn``/``srbn-serde`` 0.1.1 → 0.3.0 plus
+       ``srbn-ledger`` (and optionally ``srbn-regex``); ``perspt-sdk::kernel``
+       adapter absorbs the ``Policy``/``Status``/``Realizer`` API changes;
+       workspace MSRV set to 1.85. The Abstract names this a prerequisite, so
+       it precedes every numbered phase rather than hiding inside Phase 3.
+     - —
+     - Workspace builds against 0.3.0; existing SDK tests and serialization
+       fixtures pass; no numbered phase begins on 0.1.1.
    * - 0
      - ``ModelPortfolio``, ``ModelId``, ``[providers]`` config, capability
        matrix and degradation ladder.
@@ -3211,8 +3257,7 @@ gate lands with the code it constrains.
        test; the catalog for a fixed capability set is provider-invariant; a
        fixture language registers without editing ``perspt-agent``.
    * - 3
-     - ``srbn`` 0.1.1 → 0.3.0 and ``perspt-sdk::kernel`` adapter update;
-       ``WorkspaceRealizer`` using ``Realization::unmeasured`` for coding;
+     - ``WorkspaceRealizer`` using ``Realization::unmeasured`` for coding;
        SDK turn-state machine using ``AcceptedTrajectory`` plus
        ``OnNoDescent::Reject`` restore-best conformance; residuals, energy,
        gate, optional ``ProxyGeometry``, and certificates. This phase uses
@@ -3318,7 +3363,12 @@ gate lands with the code it constrains.
 
 **Mechanism checks.** Following the trilogy's discipline, each gate ships with a
 deterministic check that falsifies a *named theorem* rather than "the
-framework", extending ``perspt-sdk/tests/mechanism_checks.rs``:
+framework". Placement follows the crate graph: checks provable from SDK types
+alone (MC-K/L, MC-M, MC-P, MC-Q, MC-R, MC-T) extend the
+``perspt-sdk/tests/`` mechanism-check suite, while checks that need a
+transport, a live loop, or replay (MC-J, MC-N, MC-O, MC-S, MC-U, MC-V) live in
+``perspt-agent/tests/`` against a synthetic in-process ``ModelTransport`` —
+the SDK may not depend on I/O, so it cannot host them:
 
 * MC-J: a recorded tool-loop session in which every executed effect traces to a
   model-issued call and every returned call, including calls above ``M``, has a
@@ -3401,6 +3451,89 @@ escaped-defect outcomes against arm 2. Proposal diversity and adjudication may
 default on only where they improve the declared objective. Mechanism checks are
 labelled as mechanism checks and never reported as evidence about model
 capability.
+
+Implementation Status
+=====================
+
+.. note::
+
+   This table tracks what is actually wired into the live execution path, in
+   the same discipline PSP-8 used: **SDK contract implemented** (a module
+   exists and is unit-tested) is distinct from **wired** (invoked during a
+   real run). It is updated as each phase lands on the ``psp9`` branch.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 10 14 46
+
+   * - Phase
+     - Gates
+     - Status
+     - Notes
+   * - P — Kernel 0.3.0 upgrade
+     - —
+     - Not started
+     -
+   * - 0 — Portfolio and capability matrix
+     - U
+     - Not started
+     -
+   * - 1 — Tool transport
+     - S, U
+     - Not started
+     -
+   * - 2 — Typed tool catalog
+     - J
+     - Not started
+     -
+   * - 3 — Realizability, gate, certificates
+     - M, V
+     - Not started
+     -
+   * - 4 — Live tool loop and kernel
+     - J, K, L, M
+     - Not started
+     -
+   * - 5 — Recovery lattice
+     - N, V
+     - Not started
+     -
+   * - 6 — Ledger and replay
+     - L, O
+     - Not started
+     -
+   * - 7 — Routing and exploration
+     - S
+     - Not started
+     -
+   * - 8 — Verdicts and independence
+     - R, T
+     - Not started
+     -
+   * - 9 — Proposal ensembles
+     - M, T
+     - Not started
+     -
+   * - 10 — Scheduler and parallelism
+     - P
+     - Not started
+     -
+   * - 11 — Conformal calibration
+     - Q
+     - Not started
+     -
+   * - 12 — External tools
+     - K, L, U
+     - Not started
+     -
+   * - 13 — Diagnostics and surfaces
+     - R
+     - Not started
+     -
+   * - 14 — Parity and ablation
+     - —
+     - Not started
+     -
 
 =========================
 Resolved Design Decisions
