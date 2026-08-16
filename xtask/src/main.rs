@@ -1,19 +1,19 @@
 //! Perspt repository automation.
 //!
-//! Perspt is held to NASA coding rules. This tool encodes them so they can be
+//! Perspt is held to the PSP code check rules. This tool encodes them so they can be
 //! measured rather than remembered:
 //!
 //! | Rule | Limit |
 //! |---|---|
-//! | `NASA-1` file length | 1408 lines |
-//! | `NASA-2` function length | 70 code lines |
-//! | `NASA-3` line width | 108 columns |
+//! | `PSP-1` file length | 1408 lines |
+//! | `PSP-2` function length | 70 code lines |
+//! | `PSP-3` line width | 108 columns |
 //!
 //! ```text
 //! ./check-rules.sh check                # CI gate; fails on any new violation
 //! ./check-rules.sh report               # every offending file, function, line
 //! ./check-rules.sh report --format json # for dashboards and scripts
-//! ./check-rules.sh report --rule NASA-2 # one rule
+//! ./check-rules.sh report --rule PSP-2 # one rule
 //! ./check-rules.sh baseline --shrink    # ratchet accepted debt downward
 //! ```
 //!
@@ -49,7 +49,7 @@ struct Cli {
 enum Command {
     /// Fail if any file breaks a rule beyond what the baseline accepts.
     Check {
-        /// Restrict to one rule, e.g. `NASA-2`.
+        /// Restrict to one rule, e.g. `PSP-2`.
         #[arg(long, value_name = "CODE")]
         rule: Option<String>,
     },
@@ -57,7 +57,7 @@ enum Command {
     Report {
         #[arg(long, value_enum, default_value_t = Format::Table)]
         format: Format,
-        /// Restrict to one rule, e.g. `NASA-2`.
+        /// Restrict to one rule, e.g. `PSP-2`.
         #[arg(long, value_name = "CODE")]
         rule: Option<String>,
     },
@@ -100,7 +100,7 @@ fn cmd_check(root: &Path, only: Option<RuleId>) -> Result<ExitCode> {
     }
 
     emit(&format!(
-        "NASA coding rules: {} regression(s).\n\n",
+        "PSP code check: {} regression(s).\n\n",
         regressions.len()
     ))?;
     for regression in &regressions {
@@ -187,10 +187,10 @@ fn report_clean(
     accepted: &Baseline,
 ) -> Result<()> {
     if violations.is_empty() && accepted.is_clean() {
-        emit("NASA coding rules: all Rust sources pass.\n")?;
+        emit("PSP code check: all Rust sources pass.\n")?;
     } else {
         emit(&format!(
-            "NASA coding rules: pass. {} violation(s), all within the accepted baseline.\n",
+            "PSP code check: pass. {} violation(s), all within the accepted baseline.\n",
             violations.len()
         ))?;
     }
@@ -219,7 +219,7 @@ fn parse_rule(code: Option<&str>) -> Result<Option<RuleId>> {
     };
     RuleId::parse(code)
         .map(Some)
-        .with_context(|| format!("unknown rule {code:?}; expected NASA-1, NASA-2, or NASA-3"))
+        .with_context(|| format!("unknown rule {code:?}; expected PSP-1, PSP-2, or PSP-3"))
 }
 
 /// The workspace root, one level above this crate.
@@ -264,11 +264,8 @@ mod tests {
     #[test]
     fn rule_filters_are_parsed_case_insensitively() {
         assert_eq!(parse_rule(None).unwrap(), None);
-        assert_eq!(
-            parse_rule(Some("nasa-1")).unwrap(),
-            Some(RuleId::FileLength)
-        );
-        assert!(parse_rule(Some("NASA-4")).is_err());
+        assert_eq!(parse_rule(Some("psp-1")).unwrap(), Some(RuleId::FileLength));
+        assert!(parse_rule(Some("PSP-4")).is_err());
     }
 
     #[test]

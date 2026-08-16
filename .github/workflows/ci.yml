@@ -145,8 +145,8 @@ jobs:
             docs/perspt_book/build/latex/*.pdf
           retention-days: 30
 
-  nasa-rules:
-    name: NASA Coding Rules
+  psp-code-check:
+    name: PSP Code Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -165,11 +165,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-xtask-
 
-      # NASA-1 file length <= 1408, NASA-2 function length <= 70,
-      # NASA-3 line width <= 108. Rust sources only; docs/ is out of scope.
-      # Fails only when a count grows past .nasa-baseline.toml, so legacy debt
+      # PSP-1 file length <= 1408, PSP-2 function length <= 70,
+      # PSP-3 line width <= 108. Rust sources only; docs/ is out of scope.
+      # Fails only when a count grows past .psp-baseline.toml, so legacy debt
       # is visible and cannot deepen.
-      - name: Check NASA coding rules
+      - name: Run the PSP code check
         run: cargo run --quiet --package xtask -- check
 
       - name: Report violations

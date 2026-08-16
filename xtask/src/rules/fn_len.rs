@@ -1,8 +1,7 @@
-//! `NASA-2` — a function must not exceed 70 code lines.
+//! `PSP-2` — a function must not exceed 70 code lines.
 //!
-//! NASA/JPL *Power of Ten* Rule 4: no function longer than what fits on a
-//! single sheet of paper. The limit is relaxed from the original 60 to this
-//! project's 70.
+//! No function longer than what fits on a single sheet of paper — the
+//! TigerBeetle-style ceiling Perspt adopted, set at 70 code lines.
 //!
 //! # Why this rule parses instead of counting braces
 //!

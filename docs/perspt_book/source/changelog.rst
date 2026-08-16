@@ -33,7 +33,7 @@ This release implements PSP-9's governed agentic platform: every stochastic acti
 
 **Engineering Discipline:**
 
-- **NASA Coding Rules** - New ``xtask`` checker enforces file ≤ 1408 lines, function ≤ 70 code lines (*Power of Ten* Rule 4, measured with ``syn``, not brace counting), and line ≤ 108 columns, with a shrink-only baseline ratchet wired into CI (``./check-rules.sh``).
+- **PSP Code Check** - New ``xtask`` checker enforces file ≤ 1408 lines, function ≤ 70 code lines (measured with ``syn``, not brace counting), and line ≤ 108 columns, with a shrink-only baseline ratchet wired into CI (``./check-rules.sh``).
 - **Workspace Decomposition** - The 5,889-line orchestrator, ``types.rs``, ``plugin.rs``, ``store.rs``, ``tools.rs``, ``ledger.rs``, and ``verification.rs`` split into focused submodules; workspace version fields now inherit from ``[workspace.package]`` with ``rust-version = 1.85``.
 
 Version 0.6.2 - "Hózhó"

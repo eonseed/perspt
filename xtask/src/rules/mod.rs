@@ -1,9 +1,9 @@
-//! The NASA coding rules Perspt is held to, and the vocabulary for reporting
+//! The PSP code check rules Perspt is held to, and the vocabulary for reporting
 //! where they are broken.
 //!
-//! Rule `NASA-2` is NASA/JPL *Power of Ten* Rule 4 — "no function longer than
+//! Rule `PSP-2` follows the engineering style Perspt adopted (as popularized by TigerBeetle) — "no function longer than
 //! what can be printed on a single sheet of paper" — relaxed from 60 lines to
-//! this project's 70. `NASA-1` and `NASA-3` are Perspt constants.
+//! this project's 70. `PSP-1` and `PSP-3` are Perspt constants.
 //!
 //! The rules apply to **Rust sources only**. Documentation, PSPs, and the
 //! changelog are out of scope; see [`crate::scan`].
@@ -21,24 +21,24 @@ use serde::{Deserialize, Serialize};
 /// in the baseline file, and in CI output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum RuleId {
-    /// `NASA-1` — a source file must not exceed [`FILE_LINE_LIMIT`] lines.
-    #[serde(rename = "NASA-1")]
+    /// `PSP-1` — a source file must not exceed [`FILE_LINE_LIMIT`] lines.
+    #[serde(rename = "PSP-1")]
     FileLength,
-    /// `NASA-2` — a function must not exceed [`FUNCTION_LINE_LIMIT`] code lines.
-    #[serde(rename = "NASA-2")]
+    /// `PSP-2` — a function must not exceed [`FUNCTION_LINE_LIMIT`] code lines.
+    #[serde(rename = "PSP-2")]
     FunctionLength,
-    /// `NASA-3` — a line must not exceed [`LINE_WIDTH_LIMIT`] columns.
-    #[serde(rename = "NASA-3")]
+    /// `PSP-3` — a line must not exceed [`LINE_WIDTH_LIMIT`] columns.
+    #[serde(rename = "PSP-3")]
     LineWidth,
 }
 
-/// `NASA-1`: maximum physical lines in one Rust source file.
+/// `PSP-1`: maximum physical lines in one Rust source file.
 pub const FILE_LINE_LIMIT: usize = 1408;
 
-/// `NASA-2`: maximum code lines in one function, excluding comments and blanks.
+/// `PSP-2`: maximum code lines in one function, excluding comments and blanks.
 pub const FUNCTION_LINE_LIMIT: usize = 70;
 
-/// `NASA-3`: maximum columns in one line, counted in Unicode scalar values.
+/// `PSP-3`: maximum columns in one line, counted in Unicode scalar values.
 pub const LINE_WIDTH_LIMIT: usize = 108;
 
 /// Every rule, in report order.
@@ -52,9 +52,9 @@ impl RuleId {
     /// The stable code used in reports, CI output, and the baseline file.
     pub fn code(self) -> &'static str {
         match self {
-            RuleId::FileLength => "NASA-1",
-            RuleId::FunctionLength => "NASA-2",
-            RuleId::LineWidth => "NASA-3",
+            RuleId::FileLength => "PSP-1",
+            RuleId::FunctionLength => "PSP-2",
+            RuleId::LineWidth => "PSP-3",
         }
     }
 
@@ -84,7 +84,7 @@ impl RuleId {
         }
     }
 
-    /// Parse a rule code such as `NASA-2`, case-insensitively.
+    /// Parse a rule code such as `PSP-2`, case-insensitively.
     pub fn parse(code: &str) -> Option<Self> {
         ALL.into_iter()
             .find(|r| r.code().eq_ignore_ascii_case(code))
@@ -100,15 +100,15 @@ impl fmt::Display for RuleId {
 /// One place where the standard is broken.
 ///
 /// `line` anchors the violation for editor navigation: the first line of the
-/// file for `NASA-1`, the `fn` keyword for `NASA-2`, and the offending line
-/// itself for `NASA-3`.
+/// file for `PSP-1`, the `fn` keyword for `PSP-2`, and the offending line
+/// itself for `PSP-3`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Violation {
     pub rule: RuleId,
     /// Repository-relative path, always with `/` separators.
     pub file: PathBuf,
     pub line: usize,
-    /// The function name for `NASA-2`; `None` for file- and line-scoped rules.
+    /// The function name for `PSP-2`; `None` for file- and line-scoped rules.
     pub item: Option<String>,
     pub measured: usize,
     pub limit: usize,
@@ -120,7 +120,7 @@ impl Violation {
         self.measured.saturating_sub(self.limit)
     }
 
-    /// `path:line` for `NASA-1`/`NASA-3`, `path:line fn name` for `NASA-2`.
+    /// `path:line` for `PSP-1`/`PSP-3`, `path:line fn name` for `PSP-2`.
     pub fn location(&self) -> String {
         let path = self.file.display();
         match &self.item {
@@ -140,8 +140,8 @@ mod tests {
         for rule in ALL {
             assert_eq!(RuleId::parse(rule.code()), Some(rule));
         }
-        assert_eq!(RuleId::parse("nasa-2"), Some(RuleId::FunctionLength));
-        assert_eq!(RuleId::parse("NASA-9"), None);
+        assert_eq!(RuleId::parse("psp-2"), Some(RuleId::FunctionLength));
+        assert_eq!(RuleId::parse("PSP-9"), None);
     }
 
     #[test]

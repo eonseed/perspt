@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# 🛰️  Perspt NASA Coding Rules
+# 🛰️  Perspt PSP Code Check
 # Reports and enforces the coding rules Perspt is held to.
 #
-#   NASA-1  file length     <= 1408 lines
-#   NASA-2  function length <= 70 code lines   (Power of Ten Rule 4, relaxed)
-#   NASA-3  line width      <= 108 columns
+#   PSP-1  file length     <= 1408 lines
+#   PSP-2  function length <= 70 code lines   (Power of Ten Rule 4, relaxed)
+#   PSP-3  line width      <= 108 columns
 #
 # Rust sources only. docs/ — the PSPs and the Sphinx book — is out of scope.
 #
 # Usage:
 #   ./check-rules.sh check                 # gate: fails on any new violation
 #   ./check-rules.sh report                # every offending file, function, line
-#   ./check-rules.sh report --rule NASA-2  # one rule
+#   ./check-rules.sh report --rule PSP-2  # one rule
 #   ./check-rules.sh report --format json  # machine-readable
 #   ./check-rules.sh baseline --shrink     # ratchet accepted debt downward
 #
