@@ -20,9 +20,11 @@
 #![forbid(unsafe_code)]
 
 pub mod lang;
+pub mod registry;
 pub mod runtime;
 pub mod symbols;
 
+pub use registry::{CodingAdapterRegistry, LanguageId};
 pub use runtime::{crash_marker, SmokeInvocation};
 pub use symbols::{defined_symbols, expected_symbols};
 

@@ -71,6 +71,9 @@ impl AgentTools {
             "list_files" => self.list_files(call),
             "write_file" => self.write_file(call),
             "apply_diff" => self.apply_diff(call),
+            "edit_file" => self.edit_file(call),
+            "glob" => self.glob(call),
+            "git_read" => self.git_read(call),
             "delete_file" => self.delete_file(call),
             "move_file" => self.move_file(call),
             // Power Tools (OS-level)
@@ -213,6 +216,96 @@ impl AgentTools {
                 ),
             },
             Err(e) => ToolResult::failure("apply_diff", format!("Failed to apply patch: {}", e)),
+        }
+    }
+
+    /// Exact-string replace with a uniqueness check (PSP-9 system 5).
+    ///
+    /// Fails closed on ambiguity: zero matches means the model edited a
+    /// stale view; more than one means the anchor is not unique. Both are
+    /// returned as errors the harness converts into directed corrections.
+    pub(crate) fn edit_file(&self, call: &ToolCall) -> ToolResult {
+        let (path, old, new) = match (
+            call.arguments.get("path"),
+            call.arguments.get("old_string"),
+            call.arguments.get("new_string"),
+        ) {
+            (Some(p), Some(o), Some(n)) => (self.resolve_path(p), o, n),
+            _ => {
+                return ToolResult::failure(
+                    "edit_file",
+                    "Missing required arguments: path, old_string, new_string".to_string(),
+                )
+            }
+        };
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                return ToolResult::failure("edit_file", format!("Failed to read {path:?}: {e}"))
+            }
+        };
+        match content.matches(old.as_str()).count() {
+            0 => ToolResult::failure(
+                "edit_file",
+                "old_string not found; re-read the file — it may have changed".to_string(),
+            ),
+            1 => {
+                let updated = content.replacen(old.as_str(), new, 1);
+                match fs::write(&path, updated) {
+                    Ok(_) => ToolResult::success("edit_file", format!("Edited {path:?}")),
+                    Err(e) => {
+                        ToolResult::failure("edit_file", format!("Failed to write {path:?}: {e}"))
+                    }
+                }
+            }
+            n => ToolResult::failure(
+                "edit_file",
+                format!("old_string matches {n} locations; provide a unique anchor"),
+            ),
+        }
+    }
+
+    /// Match files by glob pattern, newest first.
+    pub(crate) fn glob(&self, call: &ToolCall) -> ToolResult {
+        let Some(pattern) = call.arguments.get("pattern") else {
+            return ToolResult::failure("glob", "Missing 'pattern' argument".to_string());
+        };
+        let mut matches: Vec<(std::time::SystemTime, String)> = Vec::new();
+        collect_glob_matches(&self.working_dir, &self.working_dir, pattern, &mut matches);
+        matches.sort_by_key(|(mtime, _)| std::cmp::Reverse(*mtime));
+        let listing: Vec<String> = matches.into_iter().map(|(_, p)| p).collect();
+        ToolResult::success("glob", listing.join("\n"))
+    }
+
+    /// Read repository state through git's read-only subcommands.
+    pub(crate) fn git_read(&self, call: &ToolCall) -> ToolResult {
+        let Some(subcommand) = call.arguments.get("subcommand") else {
+            return ToolResult::failure("git_read", "Missing 'subcommand' argument".to_string());
+        };
+        if !matches!(subcommand.as_str(), "status" | "diff" | "log" | "show") {
+            return ToolResult::failure(
+                "git_read",
+                format!(
+                    "Subcommand {subcommand:?} is not read-only; allowed: status, diff, log, show"
+                ),
+            );
+        }
+        let mut args = vec![subcommand.clone()];
+        if let Some(extra) = call.arguments.get("args") {
+            args.extend(extra.split_whitespace().map(str::to_string));
+        }
+        match Command::new("git")
+            .args(&args)
+            .current_dir(&self.working_dir)
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                ToolResult::success("git_read", String::from_utf8_lossy(&out.stdout).to_string())
+            }
+            Ok(out) => {
+                ToolResult::failure("git_read", String::from_utf8_lossy(&out.stderr).to_string())
+            }
+            Err(e) => ToolResult::failure("git_read", format!("git failed to start: {e}")),
         }
     }
 
@@ -582,4 +675,36 @@ where
         }
         output
     })
+}
+
+/// Walk the workspace collecting files whose relative path matches `pattern`
+/// (via the plan-validation glob), with modification times for sorting.
+fn collect_glob_matches(
+    root: &Path,
+    dir: &Path,
+    pattern: &str,
+    matches: &mut Vec<(std::time::SystemTime, String)>,
+) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || name == "target" || name == "node_modules" {
+            continue;
+        }
+        if path.is_dir() {
+            collect_glob_matches(root, &path, pattern, matches);
+        } else if let Ok(rel) = path.strip_prefix(root) {
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            if perspt_core::types::glob_matches(pattern, &rel) {
+                let mtime = entry
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                matches.push((mtime, rel));
+            }
+        }
+    }
 }

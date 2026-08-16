@@ -39,6 +39,16 @@ pub enum Resource {
     FreshIdAllocator,
     /// The ledger root (Merkle head).
     LedgerRoot,
+    /// The mutable work graph (PSP-9 system 15).
+    WorkGraph,
+    /// One provider's rate limit — a *throughput* resource, not a component
+    /// of the semantic durable state. Contention on it is a scheduling delay
+    /// and is never recorded as a required serialization (Gate P).
+    ProviderRateLimit(String),
+    /// Fallback for tools whose touched state cannot be described: conflicts
+    /// with everything, so an undeclared footprint serializes rather than
+    /// races (PSP-9 system 5).
+    OpaqueWorkspace,
 }
 
 /// The read/write footprint of a turn.
@@ -66,6 +76,13 @@ impl Footprint {
     /// Whether this turn commutes with `other`: write/read and write/write
     /// footprints must be disjoint in both directions.
     pub fn commutes_with(&self, other: &Footprint) -> bool {
+        // An opaque workspace footprint conflicts with everything mutating:
+        // an undeclared footprint serializes rather than races (PSP-9).
+        let opaque = |f: &Footprint| f.writes.contains(&Resource::OpaqueWorkspace);
+        let touches = |f: &Footprint| !f.writes.is_empty();
+        if (opaque(self) && touches(other)) || (opaque(other) && touches(self)) {
+            return false;
+        }
         self.writes.is_disjoint(&other.reads)
             && other.writes.is_disjoint(&self.reads)
             && self.writes.is_disjoint(&other.writes)

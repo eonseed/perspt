@@ -54,6 +54,7 @@ pub mod routing;
 pub mod scheduler;
 pub mod spectral;
 pub mod stability;
+pub mod toolset;
 pub mod workgraph;
 
 // Re-export the published kernel crates so consumers depend on one SRBN source.
@@ -115,6 +116,10 @@ pub use scheduler::{
 };
 pub use spectral::{VerificationEdge, VerificationGraph};
 pub use stability::{StabilityClaim, StabilityParameters};
+pub use toolset::{
+    base_entries, AccessMode, FootprintSpec, ResourceSelector, StaticCatalog, ToolCatalog,
+    ToolEntry, ToolOrigin,
+};
 pub use workgraph::{
     EdgeKind, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge, WorkGraphRevision,
     WorkNode, WorkNodeState,
