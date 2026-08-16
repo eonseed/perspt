@@ -51,6 +51,22 @@ pub fn backlog_gauge(workflows: &[WorkflowPotential]) -> f64 {
     workflows.iter().map(|w| w.potential).sum()
 }
 
+/// Theorem 9's sub-criticality load `α`, computed from arriving **potential**
+/// per step, not arrival count (PSP-9 system 17): a single arriving workflow
+/// with a large `V_a/ρ_gate` can exceed the bound on its own. The gauge is
+/// labeled as arriving potential wherever it is displayed; positive
+/// recurrence is reported only when every Theorem 9 hypothesis is evidenced.
+pub fn arriving_potential_per_step(arrivals_per_step: &[Vec<WorkflowPotential>]) -> f64 {
+    if arrivals_per_step.is_empty() {
+        return 0.0;
+    }
+    let total: f64 = arrivals_per_step
+        .iter()
+        .map(|arrivals| backlog_gauge(arrivals))
+        .sum();
+    total / arrivals_per_step.len() as f64
+}
+
 /// Observed-vs-accepted trajectory projection over the ledger.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TrajectoryProjection {
@@ -245,5 +261,21 @@ mod tests {
         let audit = CapabilityAudit::from_ledger(&ledger);
         assert_eq!(audit.grants, 1);
         assert_eq!(audit.denials, 2);
+    }
+
+    #[test]
+    fn alpha_is_arriving_potential_not_arrival_count() {
+        // Step 1: three trivial arrivals. Step 2: one heavy arrival whose
+        // potential alone exceeds the three combined — a count-based gauge
+        // would rank the steps backwards.
+        let light = vec![
+            WorkflowPotential::new("a", 0.0, 0.5, 0),
+            WorkflowPotential::new("b", 0.0, 0.5, 0),
+            WorkflowPotential::new("c", 0.0, 0.5, 0),
+        ];
+        let heavy = vec![WorkflowPotential::new("d", 50.0, 0.5, 3)];
+        assert!(backlog_gauge(&heavy) > backlog_gauge(&light));
+        let alpha = arriving_potential_per_step(&[light, heavy]);
+        assert!((alpha - (3.0 + 104.0) / 2.0).abs() < 1e-9, "{alpha}");
     }
 }

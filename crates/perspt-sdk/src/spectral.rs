@@ -132,11 +132,62 @@ impl VerificationGraph {
         weight: f64,
         tol: f64,
     ) -> Result<f64> {
-        let before = self.mu(tol)?.unwrap_or(0.0);
+        Ok(self.edge_sensitivity(src, dst, weight, tol)?.gap_delta)
+    }
+
+    /// Both of Lemma 2's levers for a candidate verifier edge (PSP-9
+    /// system 17): a new check helps insofar as it **raises**
+    /// `λ⁺_min(A)` *or shrinks* `ker(A)` — the safe set is exactly
+    /// `ker(A)`. For a coding workspace the second lever is the common
+    /// case: a verifier for a property nothing previously constrained
+    /// removes an unverified direction from the nominal safe set without
+    /// moving the gap at all. A verifier that changes neither is redundancy
+    /// in the exact sense Corollary 5.2 prices probabilistically.
+    pub fn edge_sensitivity(
+        &self,
+        src: usize,
+        dst: usize,
+        weight: f64,
+        tol: f64,
+    ) -> Result<EdgeSensitivity> {
+        let gap_before = self.mu(tol)?.unwrap_or(0.0);
+        let nullity_before = self.nullity(tol)?;
         let mut candidate = self.clone();
         candidate.add_edge(src, dst, weight);
-        let after = candidate.mu(tol)?.unwrap_or(0.0);
-        Ok(after - before)
+        let gap_after = candidate.mu(tol)?.unwrap_or(0.0);
+        let nullity_after = candidate.nullity(tol)?;
+        Ok(EdgeSensitivity {
+            gap_delta: gap_after - gap_before,
+            nullity_before,
+            nullity_after,
+        })
+    }
+
+    /// Dimension of `ker(L)` — the unverified directions of the nominal
+    /// safe set. Eigenvalues within `tol` of zero count as zero.
+    pub fn nullity(&self, tol: f64) -> Result<usize> {
+        Ok(self
+            .eigenvalues_sorted()?
+            .into_iter()
+            .filter(|e| e.abs() <= tol)
+            .count())
+    }
+}
+
+/// Both deltas for one candidate edge (Paper II Lemma 2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EdgeSensitivity {
+    /// Change in the spectral gap `λ⁺_min`.
+    pub gap_delta: f64,
+    /// `dim ker(A)` before and after: a shrink is Lemma 2's second lever.
+    pub nullity_before: usize,
+    pub nullity_after: usize,
+}
+
+impl EdgeSensitivity {
+    /// Whether the candidate verifier earns its cost by either lever.
+    pub fn earns_cost(&self, tol: f64) -> bool {
+        self.gap_delta > tol || self.nullity_after < self.nullity_before
     }
 }
 
@@ -223,5 +274,29 @@ mod tests {
             .with_edge(0, 5, 1.0)
             .mu(TOL)
             .is_err());
+    }
+
+    #[test]
+    fn a_connecting_verifier_shrinks_the_nullspace_even_without_moving_mu() {
+        // Two disconnected components: nullity 2. Connecting them removes an
+        // unverified direction — Lemma 2's second lever.
+        let g = VerificationGraph::new(4)
+            .with_edge(0, 1, 1.0)
+            .with_edge(2, 3, 1.0);
+        assert_eq!(g.nullity(TOL).unwrap(), 2);
+        let sensitivity = g.edge_sensitivity(1, 2, 1.0, TOL).unwrap();
+        assert_eq!(sensitivity.nullity_before, 2);
+        assert_eq!(sensitivity.nullity_after, 1);
+        assert!(sensitivity.earns_cost(TOL));
+    }
+
+    #[test]
+    fn a_redundant_verifier_changes_neither_lever() {
+        // Doubling an existing edge with negligible weight: no rank change,
+        // negligible gap change — redundancy in the Corollary 5.2 sense.
+        let g = VerificationGraph::new(2).with_edge(0, 1, 1.0);
+        let sensitivity = g.edge_sensitivity(0, 1, 1e-12, TOL).unwrap();
+        assert_eq!(sensitivity.nullity_before, sensitivity.nullity_after);
+        assert!(!sensitivity.earns_cost(1e-6));
     }
 }
