@@ -99,6 +99,28 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Per-validator verdict history for one session, in insertion order.
+    pub fn get_psp9_verdicts(&self, session_id: &str) -> Result<Vec<Psp9VerdictRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT session_id, candidate_id, validator_id, stratum, missed, \
+             unsafe_label, evidence_hash FROM psp9_verdicts WHERE session_id = ?",
+        )?;
+        let rows = statement.query_map([session_id], |row| {
+            Ok(Psp9VerdictRow {
+                session_id: row.get(0)?,
+                candidate_id: row.get(1)?,
+                validator_id: row.get(2)?,
+                stratum: row.get(3)?,
+                missed: row.get(4)?,
+                unsafe_label: row.get(5)?,
+                evidence_hash: row.get(6)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     pub fn record_psp9_calibration_epoch(&self, row: &Psp9CalibrationEpochRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             "INSERT INTO psp9_calibration_epochs \
