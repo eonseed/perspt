@@ -9,6 +9,7 @@ pub mod path;
 pub mod paths;
 pub mod plugin;
 pub mod portfolio;
+pub mod tools_driver;
 pub mod types;
 
 pub use config::{Config, ModelsConfig, ProviderEntry};
@@ -21,6 +22,7 @@ pub use plugin::{
     InitOptions, JsPlugin, LanguagePlugin, LspConfig, PluginRegistry, PythonPlugin, RustPlugin,
 };
 pub use portfolio::{declared_caps, ModelPortfolio, ProviderCaps, ProviderHandle};
+pub use tools_driver::{CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec, CoreTurnOutput};
 
 // Re-export commonly used types
 pub use types::{
