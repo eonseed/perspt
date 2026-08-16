@@ -118,6 +118,7 @@ pub use model::{
     ModelId, ModelTransport, ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall,
     ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,
 };
+pub use observability::arriving_potential_per_step;
 pub use observability::{
     backlog_gauge, phi, residual_heatmap, CapabilityAudit, ResidualHeatmap, TrajectoryProjection,
     WorkflowPotential,
