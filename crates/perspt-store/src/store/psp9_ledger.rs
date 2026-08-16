@@ -338,6 +338,17 @@ impl SessionStore {
         Ok(())
     }
 
+    /// The newest persisted grant-policy JSON for a session, if any.
+    pub fn get_grant_policy(&self, session_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT policy_json FROM psp9_grant_policies WHERE session_id = ? \
+             ORDER BY created_at DESC, policy_id DESC LIMIT 1",
+        )?;
+        let mut rows = statement.query([session_id])?;
+        Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
+    }
+
     /// R1/R5: durably single-assign an external-effect intent before the
     /// filesystem or network is touched. Redelivery with identical bytes is
     /// idempotent; key reuse with different content is rejected.

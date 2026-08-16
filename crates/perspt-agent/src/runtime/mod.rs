@@ -524,11 +524,15 @@ impl Psp9AgentRuntime {
         let catalog = StaticCatalog::with_base(domain.tool_entries(&scope))
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         let grant_policy = self.mint_grant(recorder, &running_graph.revision_id)?;
-        let capability = worker_capability(
-            session_id,
-            &running_graph.revision_id,
-            grant_policy.authority_epoch,
-        );
+        // Every live capability is the intersection of the worker template
+        // with the grant ceilings — the ceilings are enforced, not decorative.
+        let capability = grant_policy
+            .mint(worker_capability(
+                session_id,
+                &running_graph.revision_id,
+                grant_policy.authority_epoch,
+            ))
+            .map_err(|e| anyhow::anyhow!("grant intersection: {e}"))?;
         let contract = CodingContract {
             graph_revision: running_graph.revision_id.clone(),
             node_id: node_id.to_string(),

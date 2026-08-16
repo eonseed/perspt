@@ -295,6 +295,7 @@ async fn resume_psp9(
         return Ok(());
     }
     let current_epoch = store.authority_epoch(&session.session_id)?;
+    verify_persistent_grant(store, &session.session_id, current_epoch)?;
     for effect in pending {
         let intent: serde_json::Value = serde_json::from_str(&effect.intent_json)?;
         let epoch = intent
@@ -343,6 +344,39 @@ async fn resume_psp9(
     } else {
         println!("Preserved terminal status {}.", session.status);
     }
+    Ok(())
+}
+
+/// PSP-9 resolved decision 6: a persisted grant is *intent*, never a live
+/// capability. Before resume completes any durable effect it verifies the
+/// stored signature against the locally resolved trust anchor and checks the
+/// grant's authority epoch against the durable epoch, so a revoked or
+/// tampered grant invalidates the resume.
+fn verify_persistent_grant(
+    store: &perspt_store::SessionStore,
+    session_id: &str,
+    current_epoch: u64,
+) -> Result<()> {
+    let Some(policy_json) = store.get_grant_policy(session_id)? else {
+        return Ok(());
+    };
+    let Ok(signed) = serde_json::from_str::<perspt_sdk::SignedGrantPolicy>(&policy_json) else {
+        // Session-only (unsigned) grant intent: nothing durable to verify.
+        return Ok(());
+    };
+    let key = perspt_agent::grant::GrantSigningKey::resolve()
+        .context("resolving the grant signing key for resume verification")?;
+    signed
+        .verify_against(&key.public_key())
+        .map_err(|error| anyhow::anyhow!("persisted grant failed verification: {error}"))?;
+    anyhow::ensure!(
+        signed.policy.authority_epoch == current_epoch,
+        "persisted grant is bound to authority epoch {} but the durable epoch is {}; \
+         the grant was revoked",
+        signed.policy.authority_epoch,
+        current_epoch
+    );
+    println!("Verified persisted grant intent (signed, epoch {current_epoch}).");
     Ok(())
 }
 

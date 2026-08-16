@@ -202,7 +202,101 @@ pub struct GrantPolicy {
     pub integrity_binding: String,
 }
 
+/// Scope intersection for `GrantPolicy::mint`. An empty ceiling means
+/// unbounded for allow-when-empty scopes (paths, commands) and *no authority*
+/// for deny-when-empty scopes (network). A `*` on either side defers to the
+/// other side's bound.
+fn intersect_scope(
+    requested: Vec<String>,
+    ceiling: &[String],
+    deny_when_empty_ceiling: bool,
+) -> Vec<String> {
+    if ceiling.is_empty() {
+        return if deny_when_empty_ceiling {
+            Vec::new()
+        } else {
+            requested
+        };
+    }
+    if ceiling.iter().any(|pattern| pattern == "*") {
+        return requested;
+    }
+    if requested.is_empty() || requested.iter().any(|pattern| pattern == "*") {
+        return ceiling.to_vec();
+    }
+    requested
+        .into_iter()
+        .filter(|pattern| ceiling.iter().any(|allowed| allowed == pattern))
+        .collect()
+}
+
 impl GrantPolicy {
+    /// Mint a live capability as the intersection of a requested template
+    /// with this policy's ceilings (PSP-9 resolved decision 6). Fails closed:
+    /// an empty effect intersection is an error, never an unlimited grant.
+    ///
+    /// The approval ceiling governs durable delivery. A `Worker`-role request
+    /// confined to the reversible candidate overlay may keep `Auto` inside an
+    /// `Ask` ceiling, because nothing it does becomes durable without the
+    /// separate promotion approval; every other role is clamped to the
+    /// stricter policy.
+    pub fn mint(&self, mut requested: Capability) -> crate::error::Result<Capability> {
+        requested
+            .effects
+            .retain(|effect| self.effect_ceiling.contains(effect));
+        if requested.effects.is_empty() {
+            return Err(SdkError::Domain(
+                "grant intersection authorizes no effects".into(),
+            ));
+        }
+        let unwrap_paths = |patterns: Vec<PathPattern>| -> Vec<String> {
+            patterns.into_iter().map(|p| p.0).collect()
+        };
+        requested.path_scope = intersect_scope(
+            unwrap_paths(requested.path_scope),
+            &self
+                .path_ceiling
+                .iter()
+                .map(|p| p.0.clone())
+                .collect::<Vec<_>>(),
+            false,
+        )
+        .into_iter()
+        .map(PathPattern)
+        .collect();
+        requested.command_scope = intersect_scope(
+            requested.command_scope.into_iter().map(|p| p.0).collect(),
+            &self
+                .command_ceiling
+                .iter()
+                .map(|p| p.0.clone())
+                .collect::<Vec<_>>(),
+            false,
+        )
+        .into_iter()
+        .map(CommandPattern)
+        .collect();
+        requested.network_scope = intersect_scope(
+            requested.network_scope.into_iter().map(|p| p.0).collect(),
+            &self
+                .network_ceiling
+                .iter()
+                .map(|p| p.0.clone())
+                .collect::<Vec<_>>(),
+            true,
+        )
+        .into_iter()
+        .map(NetworkPattern)
+        .collect();
+        if requested.role != CapabilityRole::Worker
+            && requested.approval_policy.strictness() < self.approval_ceiling.strictness()
+        {
+            requested.approval_policy = self.approval_ceiling;
+        }
+        requested.authority_epoch = self.authority_epoch;
+        Ok(requested)
+    }
+
     /// The deterministic byte encoding the grant signature commits to.
     ///
     /// serde output is not canonical (field order, float and escape formatting
@@ -1233,6 +1327,47 @@ mod tests {
                 reason: DenyReason::PrivilegeEscalation
             }
         ));
+    }
+
+    #[test]
+    fn mint_intersects_the_grant_ceiling_and_fails_closed() {
+        let policy = GrantPolicy {
+            policy_id: "p1".into(),
+            workspace_root: "/workspace".into(),
+            effect_ceiling: vec![EffectKind::ReadFile, EffectKind::WriteArtifact],
+            path_ceiling: vec![PathPattern("src/*".into())],
+            command_ceiling: vec![CommandPattern("rg".into())],
+            network_ceiling: vec![],
+            approval_ceiling: ApprovalPolicy::Ask,
+            authority_epoch: 3,
+            persistent: false,
+            integrity_binding: "ledger:abc".into(),
+        };
+        // A widening request is clamped in every dimension.
+        let mut requested = Capability::new(
+            ActorId::new("worker"),
+            vec![EffectKind::ReadFile, EffectKind::RunShell],
+        );
+        requested.role = CapabilityRole::Worker;
+        requested.path_scope = vec![PathPattern("*".into())];
+        requested.network_scope = vec![NetworkPattern("*".into())];
+        let minted = policy.mint(requested).unwrap();
+        assert_eq!(minted.effects, vec![EffectKind::ReadFile]);
+        assert_eq!(minted.path_scope, vec![PathPattern("src/*".into())]);
+        assert!(minted.network_scope.is_empty(), "no-network ceiling holds");
+        assert_eq!(minted.authority_epoch, 3);
+        // Worker role keeps Auto inside an Ask ceiling (candidate-only
+        // authority); a session role is clamped to the stricter policy.
+        assert_eq!(minted.approval_policy, ApprovalPolicy::Auto);
+        let mut session = Capability::new(ActorId::new("session"), vec![EffectKind::ReadFile]);
+        session.role = CapabilityRole::Session;
+        assert_eq!(
+            policy.mint(session).unwrap().approval_policy,
+            ApprovalPolicy::Ask
+        );
+        // An empty effect intersection is an error, not an unlimited grant.
+        let ghost = Capability::new(ActorId::new("worker"), vec![EffectKind::RunShell]);
+        assert!(policy.mint(ghost).is_err());
     }
 
     #[test]
