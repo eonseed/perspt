@@ -22,6 +22,7 @@ pub async fn run(
     rejection_budget: u32,
     max_parallel: usize,
     persistent_grants: bool,
+    exploration_only: bool,
     dashboard: bool,
     dashboard_port: u16,
     config_override: Option<PathBuf>,
@@ -58,9 +59,10 @@ pub async fn run(
     };
     let interactive = std::io::stdout().is_terminal();
     // Fail fast: with Ask approval and no terminal, promotion could never be
-    // approved and a fully verified run would silently escalate.
+    // approved and a fully verified run would silently escalate. Exploration
+    // never prompts, so it is exempt.
     anyhow::ensure!(
-        interactive || auto_approve,
+        interactive || auto_approve || exploration_only,
         "non-interactive run requires --yes: promotion approval cannot be \
          prompted without a terminal"
     );
@@ -90,6 +92,15 @@ pub async fn run(
     println!("PSP-9 agent starting");
     println!("Task: {task}");
     println!("Workspace: {}", working_dir.display());
+
+    if exploration_only {
+        let summary = runtime.run_exploration(task).await?;
+        println!();
+        println!("Exploration session: {}", summary.session_id);
+        println!("Ledger head: {}", summary.ledger_head);
+        println!("Nothing was mutated or promoted (read-only authority).");
+        return Ok(());
+    }
 
     let summary = if interactive && !auto_approve {
         perspt_tui::run_agent_tui_with_runtime(runtime, task.clone()).await?
