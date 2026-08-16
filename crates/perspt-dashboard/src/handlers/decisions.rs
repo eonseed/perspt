@@ -5,8 +5,8 @@ use axum::response::{Html, IntoResponse};
 use crate::error::DashboardError;
 use crate::state::AppState;
 use crate::views::decisions::{
-    CorrectionRow, DecisionsViewModel, EscalationRow, PlanRow, RepairRow, RewriteRow, SheafRow,
-    VerificationRow,
+    CorrectionRow, DecisionsViewModel, EscalationRow, PlanRow, Psp9EventRow, RepairRow, RewriteRow,
+    SheafRow, VerificationRow,
 };
 use crate::views::friendly_name;
 
@@ -24,6 +24,7 @@ struct DecisionsTemplate {
     repair_footprints: Vec<RepairRow>,
     verifications: Vec<VerificationRow>,
     correction_attempts: Vec<CorrectionRow>,
+    psp9_events: Vec<Psp9EventRow>,
     total_decisions: usize,
 }
 
@@ -61,6 +62,7 @@ pub async fn decisions_handler(
         .store
         .get_session_correction_attempts(&session_id)
         .unwrap_or_default();
+    let psp9_events = state.store.get_psp9_events(&session_id).unwrap_or_default();
 
     let vm = DecisionsViewModel::from_store(
         session_id.clone(),
@@ -71,6 +73,7 @@ pub async fn decisions_handler(
         repair_footprints,
         verifications,
         correction_attempts,
+        psp9_events,
     );
 
     let total_decisions = vm.escalations.len()
@@ -80,6 +83,7 @@ pub async fn decisions_handler(
         + vm.repair_footprints.len()
         + vm.verifications.len()
         + vm.correction_attempts.len();
+    let total_decisions = total_decisions + vm.psp9_events.len();
 
     let tmpl = DecisionsTemplate {
         display_name: friendly_name(&vm.session_id),
@@ -93,6 +97,7 @@ pub async fn decisions_handler(
         repair_footprints: vm.repair_footprints,
         verifications: vm.verifications,
         correction_attempts: vm.correction_attempts,
+        psp9_events: vm.psp9_events,
         total_decisions,
     };
     Ok(Html(tmpl.render()?))
