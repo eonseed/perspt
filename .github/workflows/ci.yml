@@ -145,6 +145,37 @@ jobs:
             docs/perspt_book/build/latex/*.pdf
           retention-days: 30
 
+  nasa-rules:
+    name: NASA Coding Rules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-xtask-${{ hashFiles('xtask/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-xtask-
+
+      # NASA-1 file length <= 1408, NASA-2 function length <= 70,
+      # NASA-3 line width <= 108. Rust sources only; docs/ is out of scope.
+      # Fails only when a count grows past .nasa-baseline.toml, so legacy debt
+      # is visible and cannot deepen.
+      - name: Check NASA coding rules
+        run: cargo run --quiet --package xtask -- check
+
+      - name: Report violations
+        if: always()
+        run: cargo run --quiet --package xtask -- report --format markdown >> "$GITHUB_STEP_SUMMARY"
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
