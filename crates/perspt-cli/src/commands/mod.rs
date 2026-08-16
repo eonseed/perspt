@@ -2,6 +2,7 @@
 
 pub mod abort;
 pub mod agent;
+pub mod audit;
 pub mod chat;
 pub mod config;
 pub mod dashboard;
