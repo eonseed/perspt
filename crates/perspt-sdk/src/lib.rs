@@ -80,8 +80,10 @@ pub use certificate::{BudgetRef, ResidualCertificate};
 pub use checkpoint::{ContextCheckpoint, ControlFrame};
 pub use command::{canonicalize, classify_tier, CommandInvocation, CommandTier};
 pub use conformal::{
-    conformal_threshold, decide as conformal_decide, is_drifted, ks_statistic, AcceptOutcome,
-    CalibrationSample, CalibrationState,
+    accepted_unsafe_rate, conformal_threshold, conformal_threshold_checked, decide,
+    decide as conformal_decide, is_drifted, ks_statistic, readiness, sample_floor, AcceptOutcome,
+    CalibrationReadiness, CalibrationSample, CalibrationState, CalibrationStratum,
+    ThresholdOutcome,
 };
 pub use domain::{
     AdjudicationBrief, AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId,
