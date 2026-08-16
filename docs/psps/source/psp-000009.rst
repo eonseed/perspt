@@ -1,0 +1,2601 @@
+PSP: 000009
+Title: Multi-Model Agentic Platform: SRBN Tool Harness and Platform Contract
+Author: Vikrant Rathore (@vikrantrathore), Ronak Rathore (@ronakrathore)
+Status: Draft
+Type: Enhancement
+Created: 2026-07-26
+Discussion-To: https://github.com/eonseed/perspt/discussions/PSP-9
+Extends: 000005, 000007, 000008
+
+========
+Abstract
+========
+
+This PSP turns Perspt into a complete agentic coding platform whose distinctive
+property is that it is **not built on one model from one vendor**.
+
+Two things are missing today, and they are missing together. First, the model
+cannot choose a tool: ``perspt-core::llm_provider`` exposes only text-in /
+text-out completion, ``perspt-agent::tools::get_tool_definitions()`` has no
+callers, and every one of the twelve implemented tools is invoked by
+orchestrator code after parsing a text bundle. Second, Perspt cannot hold more
+than one provider at a time: the orchestrator owns a single
+``Arc<GenAIProvider>`` bound to a single ``genai`` adapter and a single
+credential, so the four configured model tiers are four *model names* served by
+one vendor.
+
+This PSP adds a model-driven tool loop **and** a model plane that holds a
+portfolio of providers, and it governs both with the SRBN trilogy's contracts.
+Every model-issued tool call becomes a Paper III **proposal**; a deterministic
+**admissibility kernel** decides whether it becomes an effect; verifier evidence
+becomes a Paper II **residual vector** scored into the quadratic energy already
+authoritative in Perspt; and an **acceptance gate** admits a turn into a
+hash-chained ledger only on hard pass or measured descent. Following Paper I's
+realizability interface (§12), the gate is evaluated on the workspace state that
+was *actually committed* rather than on the model's account of it, and the gap
+between the two is measured — which also makes "this loop cannot converge, split
+the node" a computed verdict rather than a hunch.
+
+The work is placed to respect Perspt's existing layering rather than to bypass
+it: the published ``srbn`` kernel keeps implementing Paper I, ``perspt-sdk``
+keeps owning the domain-neutral Paper II/III contracts, ``perspt-coding`` and
+``perspt-research`` extend it as domain packages, and ``perspt-core``'s language
+plugins keep supplying the runtime verifier bindings. Upgrading ``srbn`` from
+0.1.1 to 0.3.0 is a prerequisite, because that is where the realizability
+interface, the gate policy, and the Merkle helpers now live.
+
+The multi-model plane is not a convenience feature; it is where the platform's
+technical claim lives. Paper III Lemma 5.1 gives the joint miss probability of
+two validators exactly as :math:`q_1 q_2 + \kappa\sigma_1\sigma_2`, and
+Corollary 5.2 turns pairwise ledger statistics into a certified ensemble bound
+:math:`\rho_{\text{eff}}`. When a harness's proposer, reviewer, and
+critic-of-last-resort are the same model family, :math:`\kappa \to 1` and
+:math:`\rho_{\text{eff}} \to q`: the second opinion is worth nothing, and no
+increase in model quality removes that structural ceiling. A harness that can
+route different vendors into different roles, and that **measures**
+:math:`\kappa` from its own ledger rather than assuming independence, has a
+ceiling it can both lower and certify. That is the property this PSP builds and
+the property against which it asks to be falsified.
+
+Because the tool loop is the natural consumer of the Paper III machinery that
+:psp:`000008` implemented in ``perspt-sdk`` but never wired to the live path,
+this PSP also closes PSP-8 Phases 2, 3, 4, 5, 7, 8, and 9. Where this PSP and
+PSP-8 describe the same object, this PSP supersedes PSP-8's roadmap for that
+object; PSP-8's SDK contracts are consumed, not replaced.
+
+The existing bundle pipeline is retained. Node execution gains an execution
+mode; the tool loop is opt-in, becomes the default once it passes a declared
+fixture-parity gate, and the bundle path remains available as a fallback for
+providers without tool support and for cheap structured nodes.
+
+==========
+Motivation
+==========
+
+The Competitive Situation
+=========================
+
+``codex-cli`` and Claude Code are strong tools, and their strength comes from a
+model-driven tool loop over a typed tool surface. They also share an
+architectural property that is rarely stated: they are **single-vendor
+harnesses**. The proposer, the self-critique, the plan reviewer, and any
+"double-check this" step are drawn from one model family trained on overlapping
+data by one organization with one set of inductive biases. Competing with them
+by copying that design and hoping for a better prompt is not a strategy, because
+the resulting quality is bounded by the vendor's model, which Perspt does not
+control.
+
+The trilogy identifies the place where a harness can beat a stronger model: the
+*harness contract*, not the model. Two results make the point precisely.
+
+* **Paper III Lemma 5.1 / Corollary 5.2.** For two validators with marginal miss
+  rates :math:`q_i` and miss correlation :math:`\kappa`, the probability both
+  miss is exactly :math:`q_1 q_2 + \kappa\sigma_1\sigma_2`, and the conjunctive
+  ensemble's certified risk is :math:`\rho_{\text{eff}} = \min_{i<j} u_{ij}`.
+  The paper states the consequence in words: *"duplication is worthless in the
+  limit: :math:`\kappa = 1` with :math:`q_1=q_2=q` gives
+  :math:`\rho_{\text{eff}} = q`, exactly one validator's worth."* A model
+  reviewing its own output is the :math:`\kappa \to 1` case. A same-family model
+  reviewing it is close behind.
+* **Paper II Lemma 2 (spectral energy-slope).** The same fact in its
+  deterministic form: a check that adds no new transverse information adds
+  rank-deficient redundancy and does not raise the spectral gap :math:`\mu`.
+  Adding a ninth self-critique pass to a single-vendor loop does not improve the
+  certificate; it only costs tokens.
+
+So the competitive claim Perspt can defend is not "our model is better." It is:
+*given any portfolio of models, Perspt converts it into an accepted trajectory
+with a measured, falsifiable reliability certificate, and that certificate
+strictly improves when the portfolio contains genuinely decorrelated models —
+which a single-vendor harness cannot obtain at any price.* It also improves
+along axes proprietary harnesses cannot follow at all: a locally hosted model
+for confidential code, a cheap model for exploration and an expensive one for
+adjudication, and continuity when one vendor degrades, deprecates a model, or
+changes its terms.
+
+This claim is only worth making if it is falsifiable, so this PSP attaches it to
+conformance gates (S, T, U) and to a benchmark whose single-vendor ablation arm
+is allowed to win.
+
+Perspt Cannot Use Its Own Tools
+===============================
+
+Perspt ships twelve workspace tools in ``perspt-agent::tools`` — ``read_file``,
+``search_code``, ``list_files``, ``write_file``, ``apply_patch``,
+``apply_diff``, ``delete_file``, ``move_file``, ``sed_replace``,
+``awk_filter``, ``diff_files``, ``run_command`` — and a
+``get_tool_definitions()`` function that describes them in a
+provider-agnostic schema. That function has **no callers anywhere in the
+workspace**. The definitions are never sent to a model.
+
+The reason is one level down. ``perspt-core::llm_provider::GenAIProvider``
+exposes exactly three generation entry points —
+``generate_response_simple``, ``generate_response_with_retry``, and
+``generate_response_stream_to_channel`` — and none of them accepts a tool
+list or returns tool calls. The underlying ``genai`` 0.6.5 client supports
+tool calling (``ChatRequest::with_tools``, ``Tool``, ``ToolCall``,
+``ToolResponse``, ``ToolChoice``, and ``ChatOptions::with_capture_tool_calls``
+for streaming), but Perspt does not use any of it.
+
+The consequence is that Perspt's agent is a *closed pipeline*, not an agent
+loop:
+
+.. code-block:: text
+
+   architect  → task plan (JSON)
+   actuator   → ONE text bundle containing whole file contents
+   orchestrator → parses the bundle, calls tools itself
+   verifier   → build/test/lint/LSP
+   correction → new prompt, regenerate the bundle
+
+Every arrow above is Perspt's code deciding. The model contributes text at two
+points and never observes a tool result mid-turn. This produces three failure
+modes that are visible in real runs and are structural, not model-quality
+problems:
+
+* **Blind editing.** The actuator must emit whole files without first reading
+  neighbouring code, so on an existing repository it guesses APIs, import
+  paths, and module layout. PSP-8 added a goal-presence sensor and directed
+  corrections to catch the resulting damage *after* the fact; a tool loop lets
+  the model avoid producing it.
+* **No incremental evidence.** A failing build is only observed at the end of a
+  generation. The model cannot run one test, read one error, and edit one
+  function; it regenerates the bundle. This is expensive and it is why
+  correction rounds dominate cost in existing traces.
+* **Fixed tool repertoire per node type.** Which tools run is decided by the
+  orchestrator's node type, so the model cannot decide that this particular
+  task needs ``git log``, a dependency addition, or a targeted grep.
+
+Perspt Cannot Hold More Than One Provider
+=========================================
+
+Perspt already advertises many providers — ``openai``, ``anthropic``,
+``gemini``, ``vertex``, ``groq``, ``cohere``, ``ollama``, ``xai``, ``deepseek``
+— but only one *per process*:
+
+* ``Config`` carries a single ``provider``, a single ``model``, and a single
+  ``api_key``.
+* ``GenAIProvider::from_config`` resolves exactly one ``AdapterKind``, builds
+  one bound ``genai::Client``, and returns one ``ResolvedProvider``.
+* ``Orchestrator`` stores one ``Arc<GenAIProvider>`` and hands the *same* handle
+  to ``ArchitectAgent``, ``ActuatorAgent``, and the verifier agents, varying
+  only the model-name string.
+* ``perspt-sdk::routing::ModelTierConfig`` therefore types its four tiers as
+  ``String`` model names, and ``resolve_route`` returns a ``ModelRoute`` whose
+  ``model`` and ``fallback_model`` are names resolved against that one client.
+
+So the existing tier architecture — ``Speculator``, ``Verifier``, ``Actuator``,
+``Architect`` — is a *within-vendor* routing scheme. Its shape is right and its
+plumbing is one type away from being right, but as built it cannot express
+"explore with a local model, implement with vendor A, adjudicate with vendor B,"
+and it cannot survive one vendor's outage. It also cannot supply the thing
+Corollary 5.2 needs most: verdicts from validators whose errors are not
+mechanically the same errors.
+
+``residual::IndependenceRoute`` already anticipates this. It distinguishes
+``SeparateModel`` from ``SameModelCritique``, and
+``is_full_weight_eligible()`` already refuses full descent weight to same-model
+critique. Today Perspt can only ever produce the route it refuses to credit.
+
+PSP-8 Left the Platform Contract Unwired
+========================================
+
+:psp:`000008` implemented the Paper III platform machinery in ``perspt-sdk``
+and unit-tested it, but its own *Implementation Status* table records that
+much of it is never invoked during a real run:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 12 68
+
+   * - PSP-8 Phase
+     - Status
+     - SDK contract that exists but has no live consumer
+   * - 2 — Scheduler
+     - Partial
+     - ``scheduler::{Footprint, Resource, LeaseTable, Scheduler}`` has no
+       footprint source, because nothing declares what an action touches.
+   * - 3 — Capability kernel
+     - Partial
+     - ``capability::{Capability, EffectProposal, check_admissibility,
+       AdmissibilityWitness, KernelState}`` and ``command::{canonicalize,
+       classify_tier}`` are not routed for all effects.
+   * - 4 — Replay ledger
+     - Partial
+     - ``ledger::{LedgerEvent, Ledger, IdempotencyLog, ExternalEffectLog,
+       replay_accepted_trajectory}`` is not the live persistence model.
+   * - 5 — Spectral / independence
+     - Not wired
+     - ``spectral::VerificationGraph`` and ``independence::compute`` are never
+       invoked in the orchestrator.
+   * - 7 — Exploration + routing
+     - Not started
+     - ``exploration`` and ``routing`` modules are unused by the agent.
+   * - 8 — Conformal budgets
+     - Not wired
+     - ``conformal`` has no consumer outside ``perspt-sdk``.
+   * - 9 — Observability
+     - Partial
+     - ``observability::{phi, backlog_gauge, CapabilityAudit,
+       TrajectoryProjection}`` is only partly surfaced.
+
+These are not coincidentally unwired. Each is a *contract about effects*, and
+Perspt currently has no effect proposals — the orchestrator performs effects
+directly. A capability kernel with nothing to mediate, a replay ledger with no
+recorded proposals, a scheduler with no footprints, and a conformal threshold
+with no acceptance decision to calibrate all have the same cause. Introducing
+the tool loop supplies the missing subject, which is why this PSP fuses the
+work instead of sequencing it.
+
+``independence::compute`` is unwired for a second, independent reason: it needs
+``VerdictRecord``\ s from validators that can actually disagree. That is the
+model plane's job.
+
+What the Papers Require
+=======================
+
+**Paper I** supplies the state model and, in its §12, the piece a tool loop
+needs most. Its realizability interface (Definition 12.2) prices the fact that a
+model proposes in an idealized space while a system commits discrete artifacts:
+every proposal is projected to a realizable artifact and re-embedded *before*
+the barrier evaluates it, and the mismatch is the realizability residual
+:math:`r_k`. Assumption 6 bounds it by :math:`\delta_r`; Theorem 12.4 converts
+asymptotic decay into practical stability with a floor of order
+:math:`\delta_r^2`; Corollary 12.5 makes commit feasibility and the retry budget
+explicit, and states that when the floor exceeds the tolerance *no amount of
+retrying converges* and the correct action is task refinement. Paper I names
+Perspt's exact deployment regime — Regime B, black-box APIs with artifact
+revision — and says of it that "the effective :math:`\delta_r` must be measured,
+not assumed."
+
+**Paper II** gives the harness contract: measure residuals ``r_t`` from
+independent verifiers, aggregate to energy
+:math:`V=\sum_e w_e\lVert r_e\rVert^2`, direct correction at the dominant
+residual, and accept a candidate only on hard pass or measured descent
+:math:`V \le V_{\text{best}} - \rho`. Its Lemma 1 gives the property this PSP
+most needs: a gate over a nonnegative energy with a descent tolerance and a
+finite correction budget makes at most
+:math:`\lfloor V_0/\rho\rfloor + B + 1` decisions and always reaches a
+classified terminal state. Its Theorem 3 states the converse: a harness that
+admits arbitrarily long unchecked intervals has no horizon-independent
+reliability certificate at all, however good its repairs are. An ungoverned tool
+loop is exactly such a harness.
+
+**Paper III** governs the effects and the ensemble. Stochastic components emit
+proposals, never effects; a deterministic admissibility kernel checks authority,
+contract, effect scope, barrier increment, and risk budget before commitment;
+delegation can only attenuate authority (Theorem 1), and that survives
+self-modification (Theorem 2). Corollary 4.2 is the security claim that matters
+for a coding agent reading untrusted repository content: prompt injection can
+corrupt *what the model proposes*, never *what it is authorized to do*.
+Lemma 5.1 and Corollary 5.2 govern redundancy — *"correlation among redundant
+validators is measured, never assumed away"*. Theorem 5 calibrates risk budgets
+distribution-free from the platform's own ledger. Theorem 6 makes recovery
+terminate; Theorem 7 makes replay exact; Theorem 8 says only conflicting commits
+need ordering; Theorem 9 lifts the per-loop gate to platform backlog stability.
+
+Perspt has the mathematics implemented, the loop missing, and the model plane
+single-threaded. This PSP supplies the loop and the plane, and connects both to
+the mathematics.
+
+================
+Proposed Changes
+================
+
+.. rubric:: Where This Lands: Foundations, SDK, Domains, Plugins
+
+Perspt already has the layering this PSP needs, and the first requirement on
+every system below is that it lands in the layer that owns it rather than in the
+orchestrator. The existing stack, verified against the crate graph:
+
+.. code-block:: text
+
+   srbn 0.3.0  srbn-serde 0.3.0         Paper I kernel: stabilize /
+   srbn-ledger 0.3.0  srbn-regex 0.3.0  stabilize_realized, Realizer,
+     (published crates, not forked)     Policy, BarrierResult, Status,
+            ^                           attempt traces, Merkle helpers
+            |  perspt-sdk::kernel  (narrow adapter)
+            |
+   perspt-sdk                           Papers II + III as executable
+     depends on: srbn only              contracts. Domain-neutral, publishable,
+                                        no transport, no vendor, no I/O.
+            ^                    ^
+            |                    |
+   perspt-coding          perspt-research        Domain packages:
+   perspt-<next>                                 AgentDomainPackage impls.
+     depend on: perspt-sdk only                  Residual schema, energy model,
+                                                 correction directions,
+                                                 verifier-suite adapters.
+            ^
+            |
+   perspt-agent  (composition root)     Runtime: orchestrator, tool loop,
+     depends on: core, sdk, coding,     adapters between ports and drivers.
+                 policy, sandbox, store
+
+   perspt-core                          Process host: config, provider
+     depends on: genai; NOT on the SDK  transport, plugin registry, events.
+
+Two facts about this graph constrain the whole PSP and were confirmed in the
+manifests rather than assumed:
+
+* ``perspt-sdk`` depends on ``srbn`` and ``srbn-serde`` and on **no** Perspt
+  crate. It is a standalone, publishable SDK. Nothing in this PSP may give it a
+  dependency on ``perspt-core``, ``genai``, the filesystem, or a network client.
+  It is currently pinned at ``srbn 0.1.1``; this PSP requires the upgrade to
+  ``0.3.0`` described below, which is where the realizability interface lives.
+* ``perspt-core`` does **not** depend on ``perspt-sdk``. It hosts ``genai`` and
+  the language plugin registry, and it must keep serving plain chat mode without
+  pulling in the agent control plane.
+
+The consequence for the model plane is decided here rather than discovered
+during implementation: **the SDK declares the port, ``perspt-core`` provides the
+driver, and ``perspt-agent`` supplies the adapter.**
+
+.. code-block:: rust
+
+   // perspt-sdk::model — pure data, no transport, no vendor.
+   pub trait ModelTransport: Send + Sync {
+       async fn chat_turn(
+           &self,
+           model: &ModelId,
+           conversation: &Conversation,
+           tools: &[ToolSpec],
+           choice: ToolChoicePolicy,
+       ) -> Result<TurnOutput>;
+
+       fn capabilities(&self, model: &ModelId) -> ProviderCapabilities;
+       fn family_of(&self, model: &ModelId) -> ModelFamily;
+   }
+
+   // perspt-core::llm_provider — genai driver, SDK-free.
+   // perspt-agent::transport — impl ModelTransport for GenAiTransport.
+
+This is not architectural bookkeeping. It makes **Gate S structural rather than
+aspirational**: ``perspt-agent::toolloop`` is written against
+``dyn ModelTransport`` and therefore *cannot* branch on a vendor, because no
+vendor name is reachable from its types. A conformance gate that the type system
+enforces is worth more than one a reviewer must remember, and it also keeps the
+SDK usable by a consumer who brings their own client and never links ``genai``.
+
+.. rubric:: Kernel Upgrade: ``srbn`` 0.1.1 → 0.3.0
+
+The SRBN kernel has moved with Papers I and II, and ``perspt-sdk`` is a release
+behind. Upgrading is a prerequisite for this PSP rather than a chore, because
+the new surface is exactly what a tool loop needs.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - New in ``srbn`` 0.3.0
+     - Why this PSP requires it
+   * - ``stabilize_realized``,
+       ``Realizer``, ``Realization``
+     - Paper I Definition 12.2. Every proposed state is realized before the
+       barrier evaluates it, so "a candidate cannot pass the gate on evidence
+       about an artifact that would not actually be committed." This is the
+       single most important correctness property of a tool loop, and it now
+       has a kernel interface instead of an orchestrator convention
+       (system 10).
+   * - ``Realization::measured``,
+       ``max_realizability_residual``
+     - Assumption 6's :math:`\delta_r` becomes a measured deployment quantity,
+       reported in every residual certificate.
+   * - ``Policy``, ``OnNoDescent``
+     - ``OnNoDescent::Reject`` *is* the restore-best gate rule. Perspt adopts
+       it rather than re-implementing it in the orchestrator.
+   * - ``Status``
+     - ``Stable`` / ``Stopped`` / ``Exhausted`` are the three terminal
+       classifications Perspt already promises; they stop being a parallel
+       enumeration.
+   * - ``srbn-ledger``
+     - SHA-256 hash-chain helpers with ``commit_run_result`` and ``verify``.
+       Paper I's Merkle-ized sheaf (Def. 7.1, Thm C.1) gets one implementation
+       instead of two. The crate explicitly provides no durable storage, which
+       is the correct seam: ``perspt-store`` keeps durability, the kernel keeps
+       the chain.
+   * - ``srbn-regex``
+     - Regex-backed ``Check`` implementations, usable directly by cheap
+       pattern sensors without adding a bespoke check type to the SDK.
+
+Migration cost is confined to ``perspt-sdk::kernel``, the adapter that already
+exists for precisely this reason: it converts Perspt's ``AgentBarrierResult``
+into the kernel's ``BarrierResult`` and keeps Perspt's WorkGraph, residual, and
+capability types out of the kernel crate. The adapter absorbs the ``Policy`` and
+``Status`` additions; the ``Realizer`` is new surface that ``perspt-agent``
+implements. **The rule is unchanged and restated because it will be tempting to
+break it under deadline: Perspt does not fork the kernel.** If a Paper I
+mechanism is missing, it is added upstream in ``srbn`` and consumed here.
+
+.. rubric:: Theory → Mechanism → Consumer
+
+Each result in the trilogy is already an artifact in the tree; this PSP's job is
+mostly to give those artifacts a live consumer. Stating the mapping explicitly is
+the trilogy's own discipline — every certificate names the predicate that would
+falsify it, and the predicate runs.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 32 42
+
+   * - Paper result
+     - Implementing mechanism
+     - Consumer added or completed here
+   * - I: Lyapunov energy
+       :math:`V=\sum_e w_e\lVert r_e\rVert^2`
+     - ``energy::score_candidate``, ``EnergyModel``
+     - System 9 scores turn boundaries; domain packages own the weights
+   * - I: stabilization loop, barrier result
+     - ``srbn::stabilize``, ``perspt-sdk::kernel`` adapter
+     - System 6 is the tool-loop instantiation of the same loop
+   * - I: Def. 12.2 realizability interface
+       (Regime B)
+     - ``srbn::{stabilize_realized, Realizer,
+       Realization}``
+     - System 10 — the gate reads the committed workspace, never the
+       model's claim (Gate V)
+   * - I: Assumption 6, bounded
+       :math:`\delta_r`
+     - ``Realization::measured``,
+       ``max_realizability_residual``
+     - System 10 measures it per node; reported in every certificate
+   * - I: Thm 12.4 practical stability
+     - floor of order :math:`\delta_r^2`
+     - System 10's *Floor-stopped* terminal state is this floor, reported
+       as such
+   * - I: Cor. 12.5 commit feasibility
+     - floor vs. tolerance inequality
+     - System 10 checks it before spending budget; failure routes to
+       Topological Escalation at recovery level 2
+   * - I/II: restore-best gate rule
+     - ``srbn::{Policy, OnNoDescent::Reject}``
+     - System 10 adopts the kernel policy instead of re-implementing it
+   * - I: Merkle-ized state (Def. 7.1, Thm C.1)
+     - ``srbn-ledger::MerkleLedger``,
+       ``ledger::content_hash``
+     - System 14 makes it the live persistence model, with durability in
+       ``perspt-store``
+   * - II: acceptance gate
+     - ``gate::evaluate_gate``
+     - System 10; candidate becomes a turn boundary
+   * - II: Lemma 1 finite decisions
+     - ``gate::finite_decision_bound``,
+       ``AcceptedTrajectory::decision_bound``
+     - System 6 logs and enforces it; ensembles consume it (Gate M)
+   * - II: Theorem 3 sparse feedback
+     - turn budget ``N`` + mandatory verifier sweep
+     - System 6 startup rejection of unbounded-unverified configs
+   * - II: Lemma 2 spectral slope
+     - ``spectral::VerificationGraph::mu``,
+       ``edge_mu_sensitivity``
+     - System 17 answers "does this new verifier earn its cost"
+   * - II: residual-directed correction
+     - ``AgentDomainPackage::correction_directions``,
+       ``LanguageAdapter::correction_for``
+     - System 10 gains tool- and route-naming corrections
+   * - III: Def. 3.2 admissibility
+     - ``capability::check_admissibility``,
+       ``AdmissibilityWitness``
+     - System 12 routes every model-issued call through it
+   * - III: Thm 1–2 confinement
+     - ``Capability::{grants, attenuates, delegate}``
+     - Systems 12–13, including external tool registration
+   * - III: Cor. 4.2 blast radius
+     - kernel tables outside proposal reach
+     - Systems 12–13; the ``yolo`` mode redefinition
+   * - III: Lemma 5.1 / Cor. 5.2
+     - ``independence::{compute, miss_std,
+       attenuate_weight}``, ``VerdictRecord``
+     - System 8 — first live consumer; Gates R and T
+   * - III: Thm 5 conformal budgets
+     - ``conformal::{conformal_threshold, decide,
+       is_drifted, CalibrationState}``
+     - System 16, keyed per route
+   * - III: Thm 6 recovery termination
+     - ``scheduler::{recovery_is_total,
+       repair_to_effects, RepairAction}``
+     - System 11, extended to transport failures
+   * - III: Thm 7 replay determinism
+     - ``ledger::{record_observation,
+       replay_accepted_trajectory}``
+     - System 14; credential-free replay
+   * - III: Thm 8 commuting commits
+     - ``scheduler::{Footprint, Resource, LeaseTable}``
+     - System 15; footprints finally have a source
+   * - III: Def. 9.1 R1–R6
+     - ``IdempotencyLog``, ``ExternalEffectLog``,
+       ``KernelState``
+     - System 14's obligation table
+   * - III: Thm 9 platform stability
+     - ``observability::{phi, backlog_gauge}``
+     - System 17's :math:`\Phi(W)` gauge
+
+**What is deliberately not claimed.** ``perspt-coding`` today returns
+``StabilityClaim`` with the continuous constants :math:`\alpha, \beta, \delta,
+L, \eta` marked ``NotClaimed``, because a coding workspace exposes no continuous
+embedding coordinate: only the *measured* discrete gate and the spectral
+:math:`\mu` apply. This PSP does not change that. A tool loop does not turn
+Paper I's Theorems 5.1/5.2 continuous-time decay into a coding-domain claim, and
+any implementation that starts reporting an exponential-decay rate for a coding
+node is wrong.
+
+The realizability interface needs the same care. ``srbn`` measures
+:math:`\lVert r_k\rVert` as a norm in the analysis space, and a coding workspace
+has no such space, so what Perspt measures is a **domain-defined surrogate** —
+the weighted fraction of a turn's proposed edits that did not survive
+projection: denied proposals, failed-closed matches, stale witnesses, formatter
+rewrites. Consequently:
+
+* :math:`\max_k\lVert r_k\rVert` is reported as a *measured deployment
+  quantity* with its surrogate definition attached, never as a validated
+  :math:`\delta_r` in the sense of Assumption 6.
+* Corollary 12.5's feasibility inequality is used as a **diagnostic and a
+  routing rule**, not as a certificate. It is allowed to say "stop retrying,
+  split the node"; it is not allowed to appear in a reliability claim.
+* Remark 12.3's third caveat applies with full force here: near semantic
+  discontinuities a one-token change moves the realized state arbitrarily far,
+  so in that regime the system relies on the discrete escalation path
+  (system 11), which is exactly what the recovery lattice provides.
+
+The honest claims therefore remain: finite decisions (Lemma 1), classified
+termination (Thm 6), gating on the realized state (Def. 12.2 — a construction,
+not an estimate), confinement (Thm 1–2), exact replay (Thm 7), calibrated
+budgets where a calibration set exists (Thm 5), and measured ensemble risk
+(Cor. 5.2).
+
+.. rubric:: How Domains and Plugins Extend This
+
+The eighteen systems are domain-neutral. A domain package extends them through
+the existing trait, with additive default methods so ``perspt-coding`` and
+``perspt-research`` continue to compile unchanged:
+
+.. code-block:: rust
+
+   pub trait AgentDomainPackage: Send + Sync {
+       // existing, unchanged
+       fn domain_id(&self) -> DomainId;
+       fn detect(&self, workspace: &WorkspaceSnapshot) -> DomainDetection;
+       fn residual_schema(&self, scope: &DomainScope) -> ResidualSchema;
+       fn energy_model(&self, scope: &DomainScope) -> EnergyModel;
+       fn correction_directions(&self, r: &[ResidualEvent]) -> Vec<CorrectionDirection>;
+
+       // added by this PSP, defaulted so existing impls are unaffected
+       fn tool_entries(&self, _scope: &DomainScope) -> Vec<ToolEntry> { Vec::new() }
+       fn adjudication_brief(&self, _c: &CandidateRef) -> Option<AdjudicationBrief> { None }
+   }
+
+The division of labour, using the two domains that exist:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Layer
+     - Owns
+   * - ``perspt-sdk``
+     - Tool *contract*: schema shape, ``EffectKind`` mapping, ``RiskClass``,
+       footprint signature, catalog assembly, ``specs_for`` capability
+       filtering. The turn loop's rules, the gate, the kernel, the ledger.
+       Nothing language-specific, nothing vendor-specific.
+   * - ``perspt-coding``
+     - Coding tool entries (``run_test``, ``run_build``, ``run_formatter``
+       argument shapes), the coding residual schema and energy weights, and
+       ``lang::LanguageAdapter`` implementations that normalize raw diagnostic
+       text into typed ``ResidualEvent``\ s with the correct
+       ``IndependenceRoute`` — which is precisely the input System 8 needs to
+       measure :math:`\kappa` against model validators.
+   * - ``perspt-research``
+     - The second-domain conformance check. It inherits the tool loop, kernel,
+       ledger, portfolio, ensembles, and adjudication *for free*; it supplies
+       its own tool entries (source discovery, citation fetch), its residual
+       classes (unsupported claim, stale evidence, source mismatch, citation
+       gap), and its correction directions. If adding a research tool loop
+       requires editing ``perspt-agent``, the SDK boundary has been broken.
+   * - ``perspt-core::plugin``
+     - The *runtime* half of language knowledge: ``LanguagePlugin``,
+       ``PluginRegistry``, ``VerifierProfile``, ``VerifierCapability``,
+       ``LspConfig`` — which binary to invoke, whether it is installed, which
+       LSP to start. Tool entries declare *what* a verifier effect is; the
+       plugin supplies *how to run it here*.
+
+The seam between ``perspt-coding::lang::LanguageAdapter`` and
+``perspt-core::plugin::LanguagePlugin`` is deliberate and this PSP preserves it:
+the adapter parses output into residuals and never shells out, the plugin knows
+commands and availability and never parses diagnostics, and the runtime joins
+them. Tool entries are bound at catalog-assembly time by asking the plugin
+registry for the profile, so a workspace with no ``cargo`` on ``PATH`` simply
+does not offer ``run_build`` — and says why.
+
+That last behaviour is not new, which is the point: ``VerifierProfile`` already
+carries ``any_available()`` and ``fully_degraded()``, and Perspt already records
+a degraded verifier rather than pretending. System 2's provider degradation
+ladder is the same discipline applied to the model plane, and it should look
+familiar to a reviewer of the plugin code because it is deliberately the same
+shape.
+
+.. rubric:: Functional Specification
+
+Perspt gains eighteen load-bearing systems in four layers. Layer A is the model
+plane and is new in this revision. Layer B is the Paper II harness. Layer C is
+the Paper III platform contract. Layer D is the product surface. Each system
+below names the layer of the crate graph that owns it.
+
+.. rubric:: Layer A — Model Plane
+
+1. Provider Abstraction and the Model Portfolio
+===============================================
+
+*Owner: identity types in* ``perspt-sdk::model``\ *; transport in*
+``perspt-core::llm_provider``\ *.*
+
+Perspt gains a **portfolio**: several concurrently live provider handles,
+addressed by a typed model identifier rather than a bare string. The identity
+half is pure data and belongs to the SDK, because ``routing``, ``toolset``, and
+``independence`` all need to name a model and none of them may know what a
+client is:
+
+.. code-block:: rust
+
+   // perspt-sdk::model
+   /// A fully qualified model: which provider serves it, and which model.
+   pub struct ModelId {
+       pub provider: String,   // "anthropic", "openai", "ollama", "vertex"
+       pub model: String,      // provider-native model name
+   }
+
+   /// A model's training lineage, used only as a routing *prior*.
+   pub enum ModelFamily {
+       OpenAiGpt, AnthropicClaude, GoogleGemini, XaiGrok,
+       DeepSeek, CohereCommand, Llama, Qwen, Mistral, Other(String),
+   }
+
+The transport half owns the credentials, the ``genai`` clients, and the rate
+limiters, and stays SDK-free:
+
+.. code-block:: rust
+
+   // perspt-core::llm_provider
+   pub struct ProviderHandle {
+       pub id: String,
+       pub adapter: AdapterKind,
+       pub client: Arc<genai::Client>,
+       pub caps: ProviderCapabilities,   // system 2
+       pub limits: RateLimits,
+   }
+
+   pub struct ModelPortfolio { /* provider id -> handle */ }
+
+   impl ModelPortfolio {
+       pub fn from_config(config: &Config) -> Result<Self>;
+       pub fn resolve(&self, provider: &str) -> Result<&ProviderHandle>;
+       pub fn available(&self) -> Vec<(String, String)>;
+       pub fn family_of(&self, provider: &str, model: &str) -> &'static str;
+   }
+
+``perspt-agent::transport::GenAiTransport`` wraps the portfolio and implements
+``perspt_sdk::ModelTransport``, translating the SDK's ``ModelId`` and
+``ModelFamily`` to and from the core representation. Everything above the
+transport — the turn loop, routing, adjudication, calibration — sees only the
+SDK types.
+
+Two distinctions carry weight and must not be collapsed:
+
+* **Provider ≠ family.** ``groq``, ``vertex``, ``ollama``, and several
+  OpenAI-compatible gateways are *hosts*, not model families. Llama served by
+  Groq and Llama served by Ollama are the same lineage and will miss the same
+  defects; two different endpoints are not two opinions. ``family_of`` exists so
+  routing never mistakes an endpoint for a viewpoint.
+* **Family is a prior, not a measurement.** Even a different family is not
+  guaranteed decorrelated — training corpora overlap. ``ModelFamily`` therefore
+  only seeds defaults and the cold-start :math:`\kappa` prior; the credited
+  independence always comes from measured ledger statistics (system 8). This
+  follows the paper's own discipline: *point estimates are diagnostics;
+  publication-grade budgets use conservative estimates.*
+
+``Config`` gains a ``[providers]`` table so several credentials coexist, and the
+existing single-provider keys remain valid and become the default entry. Model
+tiers change from ``String`` to ``ModelId``:
+
+.. code-block:: toml
+
+   [providers.anthropic]
+   api_key_env = "ANTHROPIC_API_KEY"
+
+   [providers.openai]
+   api_key_env = "OPENAI_API_KEY"
+
+   [providers.local]
+   adapter  = "ollama"
+   base_url = "http://localhost:11434"
+
+   [models]
+   architect  = "anthropic::<model>"
+   actuator   = "openai::<model>"
+   verifier   = "anthropic::<model>"
+   speculator = "local::<model>"
+   adjudicator = "openai::<model>"     # system 8
+
+A bare model name keeps its current meaning: the default provider serves it. A
+portfolio with one entry behaves exactly like Perspt does today, which is what
+keeps this change backwards compatible.
+
+2. Provider Capability Matrix and Honest Degradation
+====================================================
+
+*Owner: the record type in* ``perspt-sdk::model``\ *; probing and the ladder in*
+``perspt-core``\ *.*
+
+Providers differ in what they support, and a platform that hides those
+differences will silently violate its own contracts. Each handle carries a
+declared and probed capability record:
+
+.. code-block:: rust
+
+   pub struct ProviderCapabilities {
+       pub tool_calling: bool,
+       pub strict_schema: bool,
+       pub parallel_tool_calls: bool,
+       pub streaming_tool_calls: bool,
+       pub prompt_caching: bool,
+       pub structured_output: bool,
+       pub max_context_tokens: u32,
+   }
+
+The degradation ladder is explicit, ordered, and **recorded**:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Missing capability
+     - Degradation
+   * - ``strict_schema``
+     - Send non-strict schemas; validate arguments locally; a violation is a
+       ``ToolArgumentInvalid`` residual with a directed correction.
+   * - ``parallel_tool_calls``
+     - Issue one tool call per turn. Costs turns, changes no invariant.
+   * - ``streaming_tool_calls``
+     - Non-streaming turn; the TUI shows turn-granular rather than
+       token-granular progress.
+   * - ``prompt_caching``
+     - Route accounting marks the route as cache-cold; portfolio routing
+       (system 3) weights it accordingly.
+   * - ``tool_calling``
+     - Node falls back to ``Bundle`` execution mode with the reason recorded.
+   * - context shorter than the node's packed context
+     - Route is ineligible for that node; routing selects another or the node
+       is split.
+
+Every degradation emits a ``ProviderDegraded`` ledger event and is visible in
+``perspt providers``. **Silent emulation is prohibited.** A provider without
+tool calling SHALL NOT be given a text protocol that imitates tool calls,
+because emulated calls are not recorded structured observations and would break
+the recording obligation (R2) that Theorem 7 depends on. This rule is Gate U.
+
+3. Portfolio Routing, Failover, and Exploration
+===============================================
+
+*Owner:* ``perspt-sdk::routing``\ *, entirely. Routing is a decision, not a
+call, so it stays in the SDK and is unit-testable without a network.*
+
+``routing::resolve_route`` is extended to resolve a ``ModelId`` rather than a
+name, and to carry the objective it optimized:
+
+.. code-block:: rust
+
+   pub struct RouteObjective {
+       pub max_cost_per_node: Option<Cents>,
+       pub max_latency: Option<Duration>,
+       pub require: ProviderCapabilityMask,
+       /// Prefer a family decorrelated from `decorrelate_from` (system 8).
+       pub decorrelate_from: Option<ModelId>,
+   }
+
+   pub struct ModelRoute {
+       pub phase: AgentPhase,
+       pub resolved_tier: ModelTier,
+       pub model: ModelId,                 // was: String
+       pub fallback: Vec<ModelId>,         // was: Option<String>
+       pub budget: ModelBudget,
+       pub reason: String,
+   }
+
+Routing policy, with defaults chosen to be cheap before they are clever:
+
+* ``Explore`` and ``Research`` → cheapest capable route, local model preferred
+  when one is configured. Exploration is read-only (system 12), so a weaker
+  model is a cost decision, not a safety decision.
+* ``Implement`` and ``Repair`` → strongest configured actuator route.
+* ``Verify`` and ``Review`` → a route whose family differs from the actuator's
+  whenever the portfolio permits, because that is the verdict worth recording.
+* ``Plan`` → architect route.
+
+Two engineering realities are specified rather than discovered later:
+
+* **Cache locality.** Prompt caching is per-provider and per-conversation.
+  Switching vendors mid-node discards the cache and can cost more than the
+  better model saves. Routing is therefore *sticky within a node* by default;
+  cross-vendor moves happen at node and role boundaries, not per turn. The
+  exception is the adjudication call of system 8, which is a separate short
+  conversation by construction.
+* **Failover is recovery, not retry.** A provider error, rate limit, or
+  capability mismatch escalates to recovery level 1 (system 11) and selects
+  ``fallback``, which is preferentially a *different provider*. The switch, its
+  cause, and the substituted ``ModelId`` are ledger events, and any residual
+  produced after the switch is attributed to the new route so calibration
+  (system 16) is not contaminated.
+
+.. rubric:: Layer B — Harness (Paper II)
+
+4. Provider Tool-Calling Surface
+================================
+
+*Owner: contract types and the* ``ModelTransport`` *port in*
+``perspt-sdk::model``\ *; the* ``genai`` *driver in* ``perspt-core``\ *; the
+adapter in* ``perspt-agent``\ *.*
+
+The wire-neutral types are SDK types, because ``ToolCatalog::specs_for``
+produces them and the turn loop consumes them:
+
+.. code-block:: rust
+
+   // perspt-sdk::model
+   /// A provider-agnostic tool declaration sent with a chat request.
+   pub struct ToolSpec {
+       pub name: String,
+       pub description: String,
+       /// JSON Schema for the tool's arguments.
+       pub schema: serde_json::Value,
+       pub strict: bool,
+   }
+
+   /// One tool call requested by the model.
+   pub struct ProviderToolCall {
+       pub call_id: String,
+       pub name: String,
+       pub arguments: serde_json::Value,
+   }
+
+   /// The result of one assistant turn.
+   pub enum TurnOutput {
+       ToolCalls(Vec<ProviderToolCall>),
+       Text(String),
+   }
+
+   /// The message log the harness owns: system, user, assistant,
+   /// assistant-tool-calls, tool-response. Never a vendor type.
+   pub struct Conversation { /* … */ }
+
+``perspt-core`` implements the driver against ``genai`` with its own mirror of
+these shapes, and ``perspt-agent::transport`` performs the one translation:
+
+* ``ToolSpec`` maps to ``genai::chat::Tool::new(name).with_description(..)
+  .with_schema(..).with_strict(..)``; ``ProviderToolCall`` maps to
+  ``genai::chat::ToolCall``; tool results are returned as
+  ``genai::chat::ToolResponse::from_tool_call(..)``. Streaming uses
+  ``ChatOptions::with_capture_tool_calls(true)`` and reads
+  ``StreamEnd::captured_tool_calls``.
+* Streaming adds ``ModelTransport::chat_turn_stream_to_channel`` with the same
+  signature plus an ``EventSender``, so the TUI path and the headless path share
+  one contract.
+* Because ``Conversation`` is Perspt's own log rather than a vendor type, it is
+  re-rendered per provider on each turn. That is what makes a mid-run provider
+  swap possible at all, and it is why no vendor's wire format reaches the
+  harness.
+* Malformed tool arguments are **not** retried blindly. They are a
+  ``ToolArgumentInvalid`` residual with a directed correction naming the
+  offending field, consistent with :psp:`000007`'s fail-closed parse-validate
+  discipline.
+
+The duplication between the SDK's ``ToolSpec`` and the core driver's mirror is
+accepted deliberately; see *Practical Decisions*.
+
+5. Typed Tool Catalog
+=====================
+
+*Owner:* ``perspt-sdk::toolset`` *for the contract;* ``perspt-coding`` */*
+``perspt-research`` *for domain entries;* ``perspt-core::plugin`` *for the
+command bindings.*
+
+A new ``perspt-sdk::toolset`` module owns the domain-neutral catalog. Each entry
+binds a tool name to its argument schema, its PSP-8 ``EffectKind``, its
+``RiskClass``, and its scheduler ``Footprint``. The catalog is data, so a domain
+package — or an external tool server (system 13) — can extend it without forking
+the harness.
+
+.. code-block:: rust
+
+   pub struct ToolEntry {
+       pub name: String,
+       pub effect: EffectKind,
+       pub risk: RiskClass,
+       pub schema: serde_json::Value,
+       /// Resources this tool reads and writes (Theorem 8 commutativity).
+       pub footprint: fn(&serde_json::Value) -> Footprint,
+       /// Whether the tool mutates durable state (gates R5 bracketing).
+       pub durable: bool,
+       pub origin: ToolOrigin,   // Builtin | Domain | External(ServerId)
+   }
+
+   pub trait ToolCatalog {
+       fn entries(&self) -> &[ToolEntry];
+       fn specs_for(&self, caps: &[Capability]) -> Vec<ToolSpec>;
+   }
+
+The base catalog reaches parity with contemporary coding CLIs and maps onto the
+``EffectKind`` variants PSP-8 already declares. The Risk column holds
+``capability::RiskClass`` values (``None``/``Low``/``Medium``/``High``/
+``Critical``); "privileged" is the separate ``EffectKind::is_privileged()``
+property, not a risk level.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 20 12 46
+
+   * - Tool
+     - ``EffectKind``
+     - Risk
+     - Notes
+   * - ``read_file``
+     - ``ReadFile``
+     - Low
+     - Offset/limit windows; returns line-numbered content.
+   * - ``list_files``
+     - ``List``
+     - Low
+     - Respects ignore files.
+   * - ``glob``
+     - ``Search``
+     - Low
+     - Pattern → paths, sorted by mtime.
+   * - ``grep``
+     - ``Search``
+     - Low
+     - Replaces ``search_code``; regex, path filter, context lines.
+   * - ``lsp_query``
+     - ``LspQuery``
+     - Low
+     - Definitions, references, hover, diagnostics via ``perspt-agent::lsp``.
+   * - ``git_read``
+     - ``GitRead``
+     - Low
+     - ``status``, ``diff``, ``log``, ``show``.
+   * - ``write_file``
+     - ``WriteArtifact``
+     - Medium
+     - Whole-file creation; the bundle path's effect, now model-issued.
+   * - ``edit_file``
+     - ``ApplyPatch``
+     - Medium
+     - Exact-string replace with uniqueness check; **fails closed** on
+       ambiguity. This is the tool the current pipeline most lacks.
+   * - ``apply_diff``
+     - ``ApplyPatch``
+     - Medium
+     - Unified diff, existing implementation.
+   * - ``move_file`` / ``delete_file``
+     - ``MoveFile`` / ``DeleteFile``
+     - Medium
+     - Existing implementations.
+   * - ``run_test`` / ``run_build`` / ``run_formatter``
+     - ``RunTest`` / ``RunBuild`` / ``RunFormatter``
+     - Medium
+     - Domain-package commands, not free-form shell. Output is parsed into
+       residuals by the ``perspt-coding`` language adapters.
+   * - ``run_repo_script``
+     - ``RunRepoScript``
+     - Medium
+     - Scripts declared in the project profile.
+   * - ``mutate_dependencies``
+     - ``MutateDependencies``
+     - High
+     - ``cargo add``, ``uv add``, ``npm i`` via the domain package.
+   * - ``run_shell``
+     - ``RunShell``
+     - High
+     - Requires an explicit ``RunShell`` capability. Not an implicit fallback.
+   * - ``git_write``
+     - ``GitWrite``
+     - High
+     - ``add``/``commit`` only; never ``push``/``reset --hard`` by default.
+   * - ``fetch_url``
+     - ``NetworkFetch``
+     - High
+     - Defaults to ask; domain allow-lists permitted.
+   * - ``ask_user``
+     - ``AskUser``
+     - Low
+     - The model's escalation channel (Theorem 6, level 3).
+   * - ``update_graph``
+     - ``UpdateGraph``
+     - Critical
+     - Privileged effect. Split/add/retire work-graph nodes; validated against
+       PSP-8 revision rules.
+   * - ``spawn_agent``
+     - ``SpawnAgent``
+     - Critical
+     - Privileged effect. Delegation; capability MUST attenuate (Theorem 1).
+       The child may be routed to a different provider.
+
+``sed_replace`` and ``awk_filter`` are **removed from the model-facing
+catalog**. They are unconstrained text rewriters whose footprint cannot be
+computed from arguments, which makes them incompatible with the commutativity
+rule of system 15; ``edit_file`` and ``apply_diff`` cover their uses. They remain
+available to orchestrator-internal code paths during the migration window.
+
+**Catalog assembly is a three-way join, and each side keeps its existing job.**
+The SDK contributes the base entries and the effect/risk/footprint contract; the
+active ``AgentDomainPackage`` contributes ``tool_entries`` for its domain; and
+``perspt-core::plugin::PluginRegistry`` supplies the ``VerifierProfile`` that
+binds ``run_test`` / ``run_build`` / ``run_formatter`` / ``lsp_query`` to actual
+commands for this workspace. A workspace whose profile reports
+``any_available() == false`` for a stage does not get that tool in the catalog,
+and the omission is reported with its reason rather than silently swallowed —
+the same rule ``VerifierProfile::fully_degraded()`` already expresses today.
+Nothing about this join requires ``perspt-agent`` to learn a language: adding
+Go means a ``LanguagePlugin`` plus a ``LanguageAdapter``, exactly as it does now.
+
+The catalog offered to the model is then derived from the actor's *held
+capabilities*, via ``specs_for``. A model that holds no ``RunShell`` capability
+never sees ``run_shell`` in its tool list. This is defence in depth, not the
+security boundary — the kernel is. It also normalizes across providers: the same
+capability set yields the same tool list whichever vendor is serving the turn,
+which is half of Gate S.
+
+6. The Agentic Turn Loop
+========================
+
+*Owner: rules in* ``perspt-sdk`` *(gate, energy, budgets, certificates);
+execution in* ``perspt-agent::toolloop``\ *.*
+
+A new ``perspt-agent::toolloop`` module implements the SRBN harness contract of
+Paper II §"Engineering Pattern" as an executable loop — the direct analogue of
+Paper II Appendix A Algorithm 1, with tool calls substituted for bundle
+generation.
+
+.. code-block:: text
+
+   Algorithm: SRBN tool turn (one node, one generation)
+   Input:  goal G, conversation T, capabilities C, catalog K, verifier suite Q,
+           route R, descent tolerance rho, correction budget B, turn budget N
+   Output: accepted state committed to ledger, or residual certificate
+
+   1.  x_best <- baseline accepted state;  V_best <- V(x_best)
+   2.  for turn = 1..N:
+   3.      out <- transport.chat_turn(R.model, T, K.specs_for(C), choice)
+   4.      if out is Text and model declares completion: goto 12
+   5.      for each tool call tc in out:                  # PROPOSE
+   6.          p  <- proposal_from(tc)                     # Paper III eq. 3.1
+   7.          w  <- kernel.check_admissibility(p, C, S)   # deterministic
+   8.          ledger.append(ProposalObserved | AdmissibilityChecked)
+   9.          r  <- if w.allowed { execute(p) } else { deny_residual(w) }
+   10.         ledger.record_observation(r); T <- T + tool_response(tc, r)
+   11.     continue                                        # next turn
+   12.     x_real, r_k <- realize(workspace)                # REALIZE (Def. 12.2)
+   13.     evidence <- Q.run(x_real)                        # MEASURE
+   14.     evidence <- evidence + adjudicate(x_real, R)     # system 8
+   15.     residuals <- typed_residuals(evidence, turn_outcomes)
+   16.     V <- score_candidate(residuals, energy_model)    # SCORE
+   17.     if hard_pass(evidence) or V <= V_best - rho:     # GATE
+   18.         commit(x_real, residuals, V); return Accepted
+   19.     else:
+   20.         reject(x_real); restore(x_best); B <- B - 1
+   21.         T <- T + directed_correction(dominant(residuals))  # CORRECT
+   22.         if B == 0: break
+   23. return ResidualCertificate(residuals, V, routes, rejected,
+                                  max_k ||r_k||, ledger_head)
+
+Line 12 is not bookkeeping. It is Paper I's realizability interface
+(Definition 12.2), and it is the reason the loop is built on the ``srbn``
+crate's ``stabilize_realized`` rather than its plain ``stabilize``: the barrier
+is evaluated on the state that would actually be committed, never on the model's
+account of it. System 10 specifies what ``realize`` is for a coding workspace.
+
+Properties the implementation must preserve:
+
+* **Gating on the realized state (Paper I Def. 12.2).** No gate decision may
+  read the model's claimed diff. Measurement runs against the workspace after
+  admissibility filtering and effect application, and the difference between the
+  two is recorded as :math:`\lVert r_k\rVert`.
+* **Finite decisions (Paper II Lemma 1).** Line 17 decreases accepted energy by
+  at least ``rho``; line 19 decreases a finite budget. The loop makes at most
+  :math:`\lfloor V_0/\rho\rfloor + B + 1` gate decisions. The SDK exposes this
+  as ``gate::finite_decision_bound`` and ``AcceptedTrajectory::decision_bound``;
+  the tool loop SHALL log the bound at node entry and SHALL fail the run if the
+  realised decision count exceeds it.
+* **Bounded unchecked interval (Paper II Theorem 3).** The turn budget ``N`` and
+  the mandatory verifier sweep at line 12 bound how long the loop runs without
+  measurement. A configuration permitting unbounded turns without verification
+  is rejected at startup, because it is exactly the harness class for which no
+  horizon-independent certificate exists.
+* **Observed vs accepted trajectory.** Every tool call, every route switch, and
+  every rejected candidate stays in the ledger for audit, learning, and
+  threshold tuning; only gate-accepted states enter the accepted trajectory.
+  Perspt's stability claims attach to the latter and must be reported as such.
+* **Route-invariance.** None of the above mentions a vendor. Changing ``R.model``
+  changes cost, latency, and success probability — never the bound, the gate,
+  or the terminal classification. This is Gate S.
+
+An interleaved-verification refinement is permitted and recommended for coding
+work: cheap sensors (syntax parse, LSP diagnostics on touched files) may run
+after any mutating tool call, so ``V`` is re-measured mid-turn and a large
+regression triggers correction without waiting for the full suite. Expensive
+sensors (build, test, runtime smoke) run at the turn boundary. Both paths emit
+the same residual types, so the energy is comparable across them.
+
+7. Heterogeneous Proposal Ensembles
+===================================
+
+*Owner:* ``EnsemblePolicy`` *in* ``perspt-sdk::model``\ *; execution in*
+``perspt-agent::ensemble``\ *.*
+
+For nodes that have already failed a gate, or that carry a high-risk effect
+class, the harness may draw **N candidates from N different model families**
+instead of correcting one candidate N times.
+
+.. code-block:: rust
+
+   pub struct EnsemblePolicy {
+       pub trigger: EnsembleTrigger,   // AfterGateFailure | RiskAtLeast(RiskClass) | Never
+       pub width: u8,                  // default 2, hard max 4
+       pub require_distinct_family: bool,   // default true
+       pub budget: ModelBudget,
+   }
+
+Rules that keep this an SRBN mechanism rather than a lottery:
+
+* **Ensembles propose; they never decide.** Each candidate is scored by the same
+  deterministic verifier suite and admitted only through the ordinary gate
+  (``hard_pass`` or :math:`V \le V_{\text{best}} - \rho`). Paper III's rule —
+  stochastic components emit proposals, deterministic admissibility earns
+  commitment — is preserved exactly.
+* **Each candidate costs one gate decision.** N candidates consume N of the
+  finite budget of Lemma 1. The bound is not weakened, and the loop is not
+  allowed to "try more models" to escape it.
+* **No majority voting.** Voting over correlated proposers is precisely the
+  fallacy Corollary 5.2 corrects; three models from overlapping lineages
+  agreeing is weak evidence, and the ledger will say so. Selection is by
+  measured energy, which is a compiler-and-test quantity, not a popularity one.
+* **Distinct family required by default.** Two samples from one model at
+  different temperatures are a re-roll, not an ensemble, and the config must say
+  so out loud to disable the requirement.
+
+The expected win is concrete and testable: different lineages fail differently
+on unfamiliar APIs, so the probability that *at least one* candidate achieves
+descent is higher for a decorrelated pair than for two samples of one model — at
+comparable token cost, since one wide attempt replaces two sequential correction
+rounds. The benchmark arm in *Reference Implementation* is designed to falsify
+this if it is false.
+
+8. Cross-Vendor Adjudication and Measured Independence
+======================================================
+
+*Owner:* ``perspt-sdk::independence`` *(already implemented, first live
+consumer); the adjudicator brief comes from the domain package.*
+
+This is the system that turns "we support many providers" into a certificate.
+
+**Adjudication.** After the deterministic verifiers run and before the gate, an
+optional *adjudicator* route reviews the candidate diff together with the
+verifier evidence and emits a structured verdict — not prose. The adjudicator is
+routed to a family different from the actuator's whenever the portfolio permits.
+Its verdict is a residual like any other, subject to two hard rules:
+
+* It **cannot** create a hard pass. Hard checks are deterministic (build, tests,
+  policy). A model may lower the confidence of a candidate; it may never certify
+  one.
+* Its energy weight is attenuated by measured correlation (below), so a same
+  family adjudicator contributes nearly nothing and is reported as contributing
+  nearly nothing.
+
+**Measurement.** Every validator — compiler, LSP, test oracle, formal check,
+repo script, and each model-validator route — writes an
+``independence::VerdictRecord { validator_id, candidate_id, missed }`` to the
+ledger. ``missed`` is a *delayed* label supplied by the rollback boundary and by
+regression-class residuals observed on later nodes: a validator that passed a
+candidate later rolled back or later found to have caused a regression missed.
+``independence::compute`` then produces per-validator miss rates :math:`q_i`,
+pairwise correlations :math:`\kappa_{ij}`, and
+:math:`\rho_{\text{eff}} = \min_{i<j}\bigl(q_i q_j + \kappa_{ij}\sigma_i\sigma_j\bigr)`.
+
+**Crediting.** The energy model's weight for a model-validator is passed through
+``independence::attenuate_weight(weight, correlation_with_counted)``, so
+redundancy is discounted automatically and by measurement rather than by
+declaration. ``IndependenceRoute`` supplies the prior:
+``SameModelCritique`` is never full-weight eligible
+(``is_full_weight_eligible()`` already enforces this), ``SeparateModel`` is
+eligible but still attenuated by its measured :math:`\kappa`, and deterministic
+routes (``Compiler``, ``TestOracle``, ``Lsp``, ``FormalSolver``) are the
+backbone that model routes only supplement.
+
+**Cold start is conservative.** Before a route pair has enough joint verdicts,
+Perspt assumes :math:`\kappa = 1` within a family and a conservative
+:math:`\kappa_0` (configurable, default 0.5, matching the paper's worked
+example) across families. Assuming independence would understate risk by
+:math:`\kappa\sigma_1\sigma_2` — at :math:`q=0.1, \kappa=0.5` that is more than
+five times the independent product, the error the paper's MC3 measures — so the
+platform errs toward correlation until it has evidence otherwise.
+
+**Reporting.** ``perspt status`` reports :math:`\rho_{\text{eff}}` and the
+measured :math:`\kappa` matrix. Perspt SHALL NOT display a validator count, a
+provider count, or an "N models checked this" badge as a safety signal. Two
+correlated validators are worth close to one, and saying otherwise is the exact
+mistake Corollary 5.2 exists to prevent. This is Gates R and T.
+
+9. Turn Residuals and Energy
+============================
+
+*Owner: classes in* ``perspt-sdk::residual``\ *; weights and correction
+directions in the domain package;* ``V`` *in* ``perspt-sdk::energy``\ *.*
+
+The tool loop reuses PSP-8's quadratic energy unchanged —
+:math:`V=\sum_e w_e\lVert r_e\rVert^2` via ``energy::score_candidate`` — and
+adds residual classes for tool-loop and model-plane evidence:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 18 52
+
+   * - Residual
+     - Component
+     - Emitted when
+   * - ``ToolArgumentInvalid``
+     - ``Str``
+     - Arguments violate the tool schema.
+   * - ``WitnessStale``
+     - ``Str``
+     - A precondition hash no longer matches; the model edited a stale view.
+   * - ``ToolThrash``
+     - ``Str``
+     - Same proposal (identical idempotency key) repeated without intervening
+       evidence change — the tool-loop analogue of livelock.
+   * - ``UnreadEdit``
+     - ``Str``
+     - A file was mutated in this turn that was never read in this turn.
+   * - ``BudgetPressure``
+     - ``Str``
+     - Turn/token/capability budget consumed past a declared fraction.
+   * - ``AdjudicatorObjection``
+     - ``Log``
+     - A model-validator route rejected the candidate; weight attenuated by
+       measured :math:`\kappa` (system 8).
+   * - ``ProviderUnavailable``
+     - ``Boot``
+     - A configured route failed and failover was taken; sensor-availability
+       class, matching ``SensorUnavailable``'s existing treatment.
+
+Kernel denials do **not** get a new class. They reuse
+``ResidualClass::CapabilityDenied`` and ``ResidualClass::BudgetExhausted``,
+which ``perspt-sdk::residual`` already flags via ``is_admissibility_outcome()``
+and which are **recorded on a separate blocked channel and never summed into**
+:math:`V` (PSP-8 System 6). That separation is load-bearing: an admissibility
+outcome says the harness refused, not that the artifact is inconsistent, and
+folding the two together would let a well-behaved refusal look like a broken
+build. Repeated denial still reaches the energy — through ``ToolThrash`` and
+``BudgetPressure``, which are genuine harness-progress failures — so a turn that
+spends its budget re-proposing a denied effect is rejected without corrupting
+the blocked-channel accounting.
+
+The realizability residual :math:`\lVert r_k\rVert` (system 10) is **measured
+and recorded but not summed into** :math:`V`. Paper I Theorem 12.4 charges it as
+a bounded *disturbance* that sets the energy floor, not as a component of the
+energy being descended; adding it to :math:`V` would double-count it and corrupt
+the descent test that Lemma 1's bound rests on. It travels with the turn as a
+first-class measurement, alongside the blocked channel and distinct from it.
+
+Existing residual sensors (syntax, build, type, test failure, runtime smoke,
+goal presence, sheaf consistency) are unchanged and continue to dominate the
+energy. The new classes exist so that *harness* and *model-plane* failures are
+measured in the same currency as *task* failures.
+
+10. Realizability, Gate, and Certified Termination
+==================================================
+
+*Owner:* ``perspt-sdk::{kernel, gate, certificate}``\ *; the realizer is a*
+``perspt-agent`` *implementation of the* ``srbn::Realizer`` *interface;
+correction content from the domain package.*
+
+**Perspt is a Regime B deployment.** Paper I §12 names two instantiations of the
+realizability interface, and Perspt is unambiguously the second: closed
+provider APIs, correction projected into text, the artifact regenerated or
+edited, and the proxy state *re-embedded from the realized artifact after every
+generation or tool step*. The paper is explicit that in this regime the residual
+:math:`r_k` absorbs both projection error and generation noise and that "the
+effective :math:`\delta_r` must be measured, not assumed." This PSP measures it.
+
+For a coding workspace the two maps of Definition 12.2 have concrete identities:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 30 56
+
+   * - Map
+     - Paper I
+     - Perspt realization
+   * - :math:`\pi`
+     - projection onto realizable artifacts
+     - The kernel and the filesystem: admissibility filtering, effect
+       application, patch application with uniqueness checks, formatter
+       normalization. What the model asked for minus what was denied, failed,
+       or rewritten.
+   * - :math:`E`
+     - re-embedding of artifact and environment
+     - Re-reading the touched files and re-running the sensor suite against
+       them — the domain package's verifier suite plus LSP state.
+   * - :math:`r_k`
+     - realizability residual
+     - The measured gap between the turn's proposed edit set and the committed
+       workspace: denied proposals, ambiguous ``edit_file`` matches that failed
+       closed, stale witnesses, formatter rewrites, partial application.
+
+.. code-block:: rust
+
+   // perspt-agent: the Perspt realizer, installed into stabilize_realized.
+   impl srbn::Realizer<WorkspaceState> for WorkspaceRealizer {
+       fn realize(&mut self, proposed: WorkspaceState)
+           -> srbn::SrbnResult<srbn::Realization<WorkspaceState>>
+       {
+           let committed = self.apply_admitted_effects(proposed)?;
+           let r_k = self.realizability_residual(&committed);
+           Ok(srbn::Realization::measured(committed, r_k))
+       }
+   }
+
+The gate itself is unchanged — ``gate::evaluate_gate`` against the best accepted
+energy, exactly as PSP-8 wired it for bundle nodes — but what a "candidate" is
+changes twice over: it is the *realized* workspace state at a turn boundary
+together with its residual vector, rather than a parsed bundle and rather than
+the model's claimed result.
+
+**Commit feasibility is checked, not hoped for.** Paper I Corollary 12.5 turns
+the retry budget into a computed quantity: the loop reaches the gate rather than
+exhausting its budget exactly when the quantized floor lies below the commit
+tolerance, and *"if the inequality fails, no amount of retrying converges — the
+loop livelocks by construction and the correct action is Topological
+Escalation."* Perspt therefore:
+
+* records :math:`\max_k\lVert r_k\rVert` per node, via
+  ``StabilizationResult::max_realizability_residual``, as the deployment's
+  running estimate of :math:`\delta_r`;
+* compares the resulting floor estimate against the node's declared tolerance
+  before spending the correction budget;
+* on failure routes to **node refinement rather than retry** — a smaller node
+  has a smaller effective :math:`\delta_r`, which is precisely Topological
+  Escalation, and Perspt already has the mechanism for it in PSP-8's mutable
+  work graph (``update_graph``, a privileged effect under system 12).
+
+This is the diagnosis competing harnesses cannot make. "The agent kept editing
+and never converged" becomes a measured inequality with a prescribed action.
+
+**Policy comes from the kernel.** The loop's control parameters map onto
+``srbn::Policy`` rather than being re-implemented:
+``max_attempts`` = correction budget ``B``; ``min_descent`` =
+:math:`\rho_{\text{gate}}`; ``score_tolerance`` = the declared energy floor;
+``require_descent`` = true; and ``on_no_descent`` = ``OnNoDescent::Reject``,
+which is the kernel's own name for the restore-best rule at line 20 of the
+algorithm — the non-descending attempt stays in the trace, the next correction
+is issued from the best accepted attempt, and descent is measured against the
+best accepted score.
+
+Correction is residual-directed (:psp:`000007`, PSP-8): the dominant residual
+class selects a ``CorrectionDirection`` from the domain package, injected into
+the conversation as a user message before the next turn. The tool loop improves
+on the bundle path here because the correction can name a *tool* — "run ``grep``
+for the trait definition before editing" is a legal directed correction that the
+bundle path could not express — and, in the multi-model plane, it can also name
+a *route*: a correction may carry the node to a different family when the
+dominant residual has recurred under the current one.
+
+Termination is total, and the three classifications are the kernel's own
+``srbn::Status`` values rather than a parallel enumeration:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 16 62
+
+   * - Perspt terminal state
+     - ``srbn::Status``
+     - Meaning
+   * - Committed
+     - ``Stable``
+     - Hard checks passed on the realized state; committed to the ledger.
+   * - Floor-stopped
+     - ``Stopped``
+     - Energy reached the declared floor without hard pass. Committed with the
+       floor recorded, never reported as verified success. Paper I Theorem 12.4
+       identifies this floor as being of order :math:`\delta_r^2`, so the
+       recorded floor is reported together with
+       :math:`\max_k\lVert r_k\rVert`.
+   * - Certified escalation
+     - ``Exhausted``
+     - Budgets exhausted; a ``certificate::ResidualCertificate`` is issued.
+
+The certificate carries final residuals, energy, budget references, verifier
+routes, **the model routes used and their measured**
+:math:`\rho_{\text{eff}}`, **the measured** :math:`\max_k\lVert r_k\rVert`
+**and the Corollary 12.5 feasibility verdict**, rejected attempts, correction
+directions, and the ledger head.
+
+11. Recovery Lattice
+====================
+
+*Owner:* ``perspt-sdk::scheduler`` *(*\ ``RepairAction``\ *,*
+``recovery_is_total``\ *,* ``repair_to_effects``\ *), already implemented.*
+
+Rejection is the steady state of a stochastic proposer, so recovery must
+terminate by construction (Paper III Theorem 6). The tool loop implements a
+finite escalation chain with a single shared, non-replenishing cascade budget
+``b``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 20 72
+
+   * - Level
+     - Control
+     - Tool-loop meaning
+   * - 0
+     - retry
+     - Re-propose after a directed correction; consumes one unit of ``b``.
+   * - 1
+     - fallback
+     - Switch route: alternate tool, **alternate provider or model family**,
+       or bundle mode for this node. This is where multi-provider pays for
+       itself operationally — a vendor outage, rate limit, or capability
+       mismatch is a route change, not a run failure.
+   * - 2
+     - refine
+     - **Topological Escalation.** When the Corollary 12.5 feasibility check
+       fails — the measured :math:`\delta_r` puts the floor above the node's
+       commit tolerance — retrying provably cannot converge. The control is to
+       split the node through the mutable work graph, lowering the effective
+       :math:`\delta_r`, rather than to spend the remaining budget.
+   * - 3
+     - escalate
+     - ``ask_user`` for approval, capability grant, or decision; or hand the
+       node to a higher-capability route.
+   * - 4
+     - contain
+     - Revoke the actor's mutating capabilities, freeze the node, restore the
+       best accepted state, issue the residual certificate. Unconditionally
+       terminating.
+
+Every failure class produced anywhere in the loop — including unmodelled ones,
+and including provider-transport failures — maps totally to a control; unknown
+classes map to level 4. With escalation depth ``k = 4``, every cascade
+terminates within ``b + k`` steps regardless of whether any forward action ever
+succeeds. Level 2 is finite for the same reason the rest is: a node may be
+refined only while its refinement depth budget lasts, after which the
+infeasibility becomes an escalation rather than another split. The classifier and mapping are deterministic kernel code, not
+model-selected, and ``b`` is shared across route switches so that failover
+cannot be used to buy unbounded retries.
+
+.. rubric:: Layer C — Platform Contract (Paper III)
+
+12. Proposal → Admissibility → Effect
+=====================================
+
+*Owner:* ``perspt-sdk::{capability, command}`` *for the decision;*
+``perspt-policy`` *for the contract clause;* ``perspt-sandbox`` *for the process
+boundary;* ``perspt-agent`` *for the routing of every call through them.*
+
+This system replaces direct tool execution with Paper III Definition 3.2 and
+closes PSP-8 Phase 3 / Gate E.
+
+Each ``ProviderToolCall`` is canonicalized into an ``EffectProposal``. The
+implemented struct carries ``path``, ``command``, ``network_target``, ``risk``,
+``risk_cost``, ``generation``, ``idempotency_key``, and ``preconditions``, but
+today exposes only ``with_path`` and ``with_command`` builders; this PSP adds
+the remaining builders as a purely additive change:
+
+.. code-block:: rust
+
+   fn proposal_from(tc: &ProviderToolCall, ctx: &TurnContext)
+       -> Result<EffectProposal>
+   {
+       let entry = ctx.catalog.lookup(&tc.name)?;
+       let mut p = EffectProposal::new(
+           ctx.actor.clone(), ctx.node_id.clone(), entry.effect,
+       )
+       .with_generation(ctx.generation)          // new builder
+       .with_risk(entry.risk, risk_cost(entry))  // new builder
+       .with_idempotency_key(idempotency_key(ctx, tc))          // new builder
+       .with_preconditions(state_witnesses(entry, &tc.arguments)); // new builder
+
+       // Scope is expressed through the existing typed fields, so the kernel's
+       // path / command / network clauses stay checkable.
+       if let Some(path) = arg_path(entry, &tc.arguments) {
+           p = p.with_path(ctx.workspace.canonicalize_bounded(path)?);
+       }
+       if let Some(raw) = arg_command(entry, &tc.arguments) {
+           p = p.with_command(command::canonicalize(raw, ctx.cwd()));
+       }
+       Ok(p)
+   }
+
+The proposal deliberately does **not** carry which model produced it. Provenance
+is recorded in the ledger, not in the kernel's input, so no admissibility
+decision can depend on a vendor's identity — a kernel that trusted proposals
+more because they came from a particular provider would forfeit Gate S and
+weaken Theorem 1's confinement argument to a trust argument. The residual
+evidence that motivated the proposal is likewise linked through the turn's
+``ResidualEmitted`` events rather than added to ``EffectProposal``.
+
+The kernel then evaluates ``capability::check_admissibility`` — already
+implemented and tested in ``perspt-sdk`` — producing an ``AdmissibilityWitness``
+that records each clause (authority, contract, effect, barrier increment, risk
+budget) and the decision. **No durable effect may occur without a witness.**
+``perspt-policy`` remains the deterministic trusted base and is invoked inside
+the contract clause; ``perspt-sandbox`` enforces the process boundary for
+``RunShell``, ``RunTest``, ``RunBuild``, and ``RunRepoScript``.
+
+Three requirements make the confinement theorems mean something in practice:
+
+* **Command IR, not strings.** Shell-composed commands are canonicalized by
+  ``command::canonicalize`` and classified by ``command::classify_tier``. A
+  command containing shell composition (``|``, ``&&``, ``;``, backticks,
+  substitution) is a ``RunShell`` effect regardless of which tool requested it.
+  ``sh -c`` SHALL NOT remain an implicit path inside ``run_test`` or
+  ``run_build``.
+* **State witnesses.** ``edit_file`` and ``apply_diff`` proposals carry the
+  content hash of the target file read earlier in the turn. If the file changed
+  between read and write, the witness fails, the effect is denied with
+  ``RecoveryClass``, and the model is told to re-read. This prevents the "model
+  edits a file it remembers rather than the file that exists" class of state
+  misreporting that Paper II names as failure mode 2, and it is what makes
+  parallel nodes (system 15) safe.
+* **Attenuation on delegation.** ``spawn_agent`` mints a child capability via
+  ``Capability::delegate``, which returns ``None`` unless the child attenuates
+  the parent. A subagent can never hold authority its parent lacked (Theorem 1)
+  — including a subagent routed to a different provider — and no prompt rewrite,
+  tool registration, or policy update by the agent can change that (Theorem 2),
+  because all of those are themselves capability-mediated privileged effects.
+
+**Denials are evidence, not errors.** A denied proposal produces a typed
+residual — ``ResidualClass::CapabilityDenied`` or
+``ResidualClass::BudgetExhausted`` for admissibility outcomes,
+``ResidualClass::Policy`` for a ``perspt-policy`` rule — with a directed
+correction telling the model what capability or scope it lacks. It is returned
+to the model as the tool response so the loop can adapt, and it is recorded via
+``LedgerEvent::EffectDenied``.
+
+13. External Tool Providers Under the Kernel
+============================================
+
+*Owner:* ``perspt-sdk::toolset`` *for registration and* ``ToolOrigin``\ *;*
+``perspt-agent`` *for the client. New work — nothing of this exists today.*
+
+A platform must accept tools it did not write. Perspt has no external tool
+protocol today; this PSP specifies how one is admitted, because doing it *after*
+the kernel exists is the difference between an extension point and a hole.
+
+An external tool server (an MCP-style server, a company-internal tool daemon)
+registers ``ToolEntry`` records with ``origin: External(ServerId)``. Registration
+requires, and does not infer:
+
+* a declared ``EffectKind`` and ``RiskClass``;
+* a declared footprint function, or else the tool is classified as ``RunShell``
+  with an opaque footprint, which makes it serialize against everything and
+  require an explicit capability;
+* a capability that the *session* already holds — registering a tool never mints
+  authority, so an external server can never exceed the user's own grant
+  (Theorem 1, and Theorem 2 for a server that rewrites its own manifest).
+
+Three properties are stated because external tools break them by default in
+naive implementations:
+
+* **Tool descriptions are untrusted text.** A server's tool descriptions and
+  results are attacker-controllable in the same way repository content is. They
+  enter the conversation as observations, never as instructions, and they cannot
+  alter capabilities, policy, or the catalog's effect mapping. Corollary 4.2 is
+  what makes this survivable: injection changes what the model proposes, never
+  what it may do.
+* **External results are recorded observations.** They go through
+  ``record_observation`` before use, so replay does not re-invoke a remote
+  server (R2, Theorem 7).
+* **External calls are external effects.** They are bracketed in
+  ``ExternalEffectLog`` with intent, result, and compensation records (R5).
+
+14. Event-Sourced Ledger and Replay
+===================================
+
+*Owner:* ``perspt-sdk::ledger`` *for the event model and replay;*
+``perspt-store`` *for durability.*
+
+This closes PSP-8 Phase 4 / Gate F. ``perspt-sdk::ledger::LedgerEvent`` becomes
+the live event model, persisted through ``perspt-store``. The tool loop emits,
+per turn: ``ProposalObserved``, ``AdmissibilityChecked``, ``EffectApplied`` or
+``EffectDenied``, ``ObservationRecorded``, ``VerifierCompleted``,
+``ResidualEmitted``, ``EnergyScored``, ``GateDecisionRecorded``, and
+``CandidateAccepted`` or ``CandidateRejected``. The model plane adds
+``RouteResolved``, ``ProviderDegraded``, ``RouteFailover``, and
+``VerdictRecorded``.
+
+Theorem 7's hypothesis is a **recording obligation on the kernel**, adopted
+literally: *the kernel refuses to commit any transition that depends on an
+unrecorded observation.* Model outputs, tool results, timer reads, external tool
+responses, and user approvals are written to the ledger via
+``record_observation`` before they are used, and replay reads recorded data
+rather than re-invoking a model. This is what makes multi-provider auditable:
+**replay is provider-free**, so a session run against three vendors replays
+identically on a machine with no credentials at all.
+``ledger::replay_accepted_trajectory`` plus a new ``perspt replay <session>``
+command reconstruct the accepted trajectory and compare the replayed head hash
+against the recorded one; divergence is a bug report, not a warning.
+
+The six durable-execution obligations of Paper III Definition 9.1 map to
+concrete Perspt surfaces:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 34 56
+
+   * - Obl.
+     - Requirement
+     - Perspt realization
+   * - R1
+     - Durable single-assignment outcomes
+     - ``perspt-store`` transactional write per proposal outcome;
+       ``IdempotencyLog`` keyed by proposal idempotency key. Redelivery of the
+       same key with equivalent content returns the prior result; reuse with
+       different content is an error.
+   * - R2
+     - Recorded nondeterminism
+     - ``Ledger::record_observation`` before use, for model output, tool
+       results, external tool responses, clocks, and human input.
+   * - R3
+     - Deterministic transition
+     - Workspace mutation is a pure function of the prior state and the
+       recorded event; no tool reads ambient state outside its declared
+       footprint.
+   * - R4
+     - Unforgeable capability transport
+     - Capabilities are kernel-minted records in ``KernelState``; proposal
+       payloads cannot denote authority. Delegation applies
+       ``Capability::delegate``'s attenuation check.
+   * - R5
+     - Write-ahead external effects
+     - ``ExternalEffectLog`` intent/result/compensation records around
+       ``RunShell``, ``GitWrite``, ``NetworkFetch``, ``MutateDependencies``,
+       and external tool calls.
+   * - R6
+     - Ordered noncommuting durable turns
+     - Scheduler serializes conflicting footprints (system 15).
+
+15. Coordination and Bounded Parallelism
+========================================
+
+*Owner:* ``perspt-sdk::scheduler``\ *; the worker pool in* ``perspt-agent``\ *.*
+
+This closes PSP-8 Phase 2 / Gate C, which the tool loop makes tractable because
+tool proposals declare footprints. Theorem 8 states the rule: **serialize
+semantic commitments, not activity.** Two durable turns whose footprints are
+read/write-disjoint may proceed concurrently and in either order.
+
+``scheduler::{Footprint, Resource, LeaseTable, Scheduler}`` becomes live. The
+resource set includes file paths, the capability table, risk budgets, the
+fresh-id allocator, the work-graph revision, and the ledger root — the last five
+are why a delegation, a budget spend, or a graph edit conflicts with everything
+touching them and must serialize. A worker pool executes ready nodes up to
+``--max-parallel``, each holding leases for its write footprint; cancellation
+releases leases; a lost lease invalidates the turn's state witnesses, which the
+kernel then denies.
+
+Parallelism interacts well with the portfolio: concurrent nodes can occupy
+*different providers*, so wall-clock parallelism is not bounded by one vendor's
+rate limit, and a single vendor's throttling degrades throughput instead of
+stopping the run. Rate limits are portfolio state, so ``RateLimits`` is a
+scheduler resource: two nodes on the same provider contend, two nodes on
+different providers do not.
+
+The default remains conservative: parallelism is opt-in via ``--max-parallel``
+(default 1, preserving today's sequential behaviour) until fixture benchmarks
+show no regression in accepted-trajectory quality.
+
+16. Calibrated Risk Budgets
+===========================
+
+*Owner:* ``perspt-sdk::conformal``\ *; calibration sets persisted by*
+``perspt-store``\ *.*
+
+This closes PSP-8 Phase 8 / Gate I. It is required only when Perspt commits
+mutating effects autonomously without per-effect approval — that is, in ``yolo``
+mode and in ``balanced`` mode for medium-risk effects.
+
+The kernel holds a calibration set of ``(score, unsafe)`` pairs drawn from the
+deployment's own ledger. The score is the validator's safety evidence for the
+proposal; the delayed unsafe label comes from the undo/rollback boundary and
+regression residuals already recorded. For target budget ``rho``,
+``conformal::conformal_threshold`` computes
+
+.. math::
+
+   \hat{\theta} = \inf\left\{
+      \theta \in [0,1] :
+      \frac{n\,\hat{R}_n(\theta) + 1}{n + 1} \le \rho
+   \right\},
+
+and the kernel accepts autonomously only when ``s(p) > theta_hat``, bounding the
+marginal accepted-unsafe rate by ``rho`` with a distribution-free, finite-sample
+certificate.
+
+**Multi-provider makes exchangeability a first-class concern, and this PSP does
+not paper over it.** Theorem 5's guarantee rests on exchangeability between
+calibration and deployment. Different models fail differently, so a calibration
+set gathered under route A does not certify commitments made under route B.
+Therefore:
+
+* Calibration sets are keyed by ``(capability, ModelId)``, not globally.
+* Changing a route's model — including an automatic failover — invalidates that
+  route's calibration and marks it stale via ``CalibrationState::mark_stale``.
+* ``conformal::{ks_statistic, is_drifted}`` runs as a per-route drift monitor.
+* On drift or staleness the kernel does **not** hard-halt (PSP-8's
+  graceful-degradation rule): it inflates the threshold, continues autonomous
+  commitment for low-risk effects, routes higher-risk effects to the approval
+  policy, and recalibrates in the background. During the stale window
+  ``bound_is_asserted()`` is false and the UI SHALL report the window as
+  uncertified.
+
+This is a real cost of the multi-provider design and is stated as one: a
+portfolio that switches routes frequently will spend more time uncertified than
+a fixed single-route deployment. The mitigation is route stickiness (system 3),
+not a weaker claim.
+
+17. Spectral Diagnostics and Platform Stability
+===============================================
+
+*Owner:* ``perspt-sdk::{spectral, observability, stability}``\ *; surfaced by*
+``perspt-tui`` */* ``perspt-dashboard``\ *.*
+
+These close PSP-8 Gate G and Phase 9's remaining items. Both are **diagnostics
+computed off the critical path**; neither may gate dispatch or acceptance.
+
+* **Spectral gap.** On each graph-revision commit, residual sensors (tagged with
+  ``IndependenceRoute``) are assembled into a ``spectral::VerificationGraph``
+  weighted by the energy model's class weights. ``graph.mu(tol)`` yields
+  :math:`\mu = 2\lambda^+_{\min}(A)`, persisted with its source revision in
+  ``StabilityClaim.mu``; ``edge_mu_sensitivity`` distinguishes a verifier that
+  raises the spectral gap from a redundant one. This is Paper II Lemma 2 used as
+  an engineering instrument, and in the multi-model setting it answers a
+  purchasing question directly: *does adding vendor C's review raise* :math:`\mu`
+  *, or is it paying for rank-deficient redundancy?* The deterministic
+  (:math:`\mu`) and probabilistic (:math:`\kappa`) answers should agree; when
+  they disagree, that is a finding, not a rounding error.
+* **Backlog stability.** ``observability::{phi, backlog_gauge}`` computes the
+  per-workflow potential :math:`\phi_i = 1 + V_i/\rho_{\text{gate}} + B_i` and
+  the platform potential :math:`\Phi(W)`. Paper III Theorem 9 gives negative
+  drift and positive recurrence under a work-conserving scheduler and
+  sub-critical arrival load :math:`\alpha < 1`. ``perspt status`` and the
+  dashboard report :math:`\Phi(W)`, its drift, and the estimated :math:`\alpha`,
+  so sub-criticality is monitorable rather than assumed.
+
+.. rubric:: Layer D — Product Surface
+
+18. User Experience, Portfolio Control, and Local Operation
+===========================================================
+
+*Owner:* ``perspt-cli``\ *,* ``perspt-tui``\ *,* ``perspt-dashboard``\ *. The*
+``confidential`` *rule is a* ``perspt-policy`` *predicate evaluated inside the
+kernel's contract clause.*
+
+The platform is visible, interruptible, auditable, and controllable.
+
+* **Streaming tool activity.** The TUI and dashboard stream each proposal with
+  its tool name, scope, risk class, serving route, and kernel decision as it
+  happens — including denials, which are informative. Perspt shows the residual
+  vector and energy per turn, not just a spinner.
+* **Portfolio surfaces.** ``perspt providers`` prints the capability matrix and
+  every recorded degradation. ``perspt portfolio`` prints resolved routes per
+  phase with cost and latency accounting per vendor. ``perspt tools`` prints the
+  catalog and the capabilities granting each tool. ``perspt status`` adds
+  :math:`\rho_{\text{eff}}`, the :math:`\kappa` matrix, :math:`\mu`, and
+  :math:`\Phi(W)`.
+* **Approval modes bound to the kernel.** ``--mode cautious|balanced|yolo``
+  become ``ApprovalPolicy`` presets rather than ad-hoc branches:
+
+  .. list-table::
+     :header-rows: 1
+     :widths: 16 84
+
+     * - Mode
+       - Approval policy
+     * - ``cautious``
+       - Auto-approve read-class effects only. Every mutating effect asks.
+     * - ``balanced``
+       - Auto-approve read and workspace-scoped medium-risk effects under a
+         calibrated budget; ask for high-risk and privileged effects.
+     * - ``yolo``
+       - Auto-approve everything the *capability set* permits. This bounds
+         damage by Corollary 4.2 rather than by trust: ``yolo`` never grants
+         out-of-workspace, network, or privileged capabilities implicitly.
+
+* **Local and sovereign operation.** A portfolio consisting only of local
+  providers (``ollama``, an OpenAI-compatible local server) is a supported,
+  tested configuration, not an afterthought. In that configuration no code, diff,
+  or repository content leaves the machine, and the harness's guarantees are
+  unchanged — weaker models mean higher :math:`V_0` and more correction rounds,
+  not a weaker contract. Mixed portfolios support a per-path
+  ``confidential = true`` marker that restricts matching content to local routes;
+  a proposal that would send marked content to a remote route is denied by the
+  contract clause with a ``Policy`` residual. This is a capability no
+  single-vendor cloud harness can offer.
+* **Undo/redo over the ledger.** Because effects are recorded with idempotency
+  keys and compensations, ``perspt ledger rollback`` operates on accepted turns,
+  and the rollback boundary doubles as the delayed unsafe-label source for
+  systems 8 and 16.
+* **New commands.** ``perspt replay <session>`` (deterministic, credential-free
+  replay and head comparison), ``perspt providers``, ``perspt portfolio``,
+  ``perspt tools``.
+
+.. rubric:: Execution Mode Coexistence
+
+Node execution gains a mode, selected per node and overridable per session:
+
+.. code-block:: rust
+
+   pub enum ExecutionMode {
+       /// Model-driven tool loop (this PSP).
+       ToolLoop,
+       /// Single-shot bundle generation (PSP-5 / PSP-7 path).
+       Bundle,
+       /// Domain package chooses per node type.
+       Auto,
+   }
+
+Selection policy while the tool loop matures:
+
+1. Ship ``ToolLoop`` behind ``--execution-mode tool-loop``; default ``Bundle``.
+2. Promote ``Auto`` to the default once the parity gate below passes, with
+   ``Auto`` choosing ``ToolLoop`` for edit/repair/exploration work on existing
+   repositories and ``Bundle`` for greenfield scaffold nodes, where whole-file
+   emission is genuinely cheaper.
+3. ``Bundle`` remains permanently supported as a fallback for providers without
+   tool support and as the recovery-level-1 route.
+
+**Parity gate.** ``ToolLoop`` becomes the ``Auto`` default only when, on the
+declared fixture set, it is at least as good as ``Bundle`` on accepted-state
+correctness and strictly better on at least one of cost or correction rounds,
+with failures preserved and reported.
+
+.. rubric:: Competitive Position
+
+The comparison below is a set of claims, each attached to the gate or benchmark
+that can falsify it. "Single-vendor harness" means the architecture, not any
+particular product's roadmap.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 34 42
+
+   * - Property
+     - Single-vendor harness
+     - Perspt after this PSP
+   * - Redundancy value
+     - Self-critique and same-family review; :math:`\kappa \to 1`, so
+       :math:`\rho_{\text{eff}} \to q` (Cor. 5.2)
+     - Cross-family adjudication with :math:`\kappa` measured from the ledger
+       and weights attenuated accordingly (Gate T)
+   * - Reliability claim
+     - Reported as benchmark scores of a model
+     - Reported as a certificate over the accepted trajectory: energy,
+       :math:`\rho_{\text{eff}}`, decision bound, ledger head (Gates M, R)
+   * - Effect safety
+     - Approval prompts and allow-lists over model output
+     - Capability kernel; injection cannot change authority (Cor. 4.2,
+       Gates K, L)
+   * - Auditability
+     - Transcript
+     - Hash-chained ledger with credential-free deterministic replay
+       (Thm 7, Gate O)
+   * - Vendor risk
+     - Outage, deprecation, price or terms change stops work
+     - Failover is recovery level 1; portfolio survives one vendor
+       (Gate S)
+   * - Confidential code
+     - Must leave the machine
+     - Local-only portfolio is a supported configuration; ``confidential``
+       paths are kernel-restricted to local routes
+   * - Cost control
+     - One model for every phase
+     - Per-phase routing: cheap or local exploration, expensive adjudication
+       only where it changes a decision
+   * - Progress reporting
+     - The model's account of what it changed
+     - The gate reads the re-measured workspace; the gap between claim and
+       commit is measured as :math:`\lVert r_k\rVert` (Def. 12.2; Gate V)
+   * - Stuck loops
+     - Retry until a budget or the user stops it
+     - Corollary 12.5 decides whether retrying *can* converge; if not, the node
+       is split instead
+   * - Termination
+     - Loop until the user stops it
+     - Every node exits Committed, Floor-stopped, or Certified escalation
+       (Lemma 1, Thm 6; Gates M, N)
+
+**What this PSP does not claim.** It does not claim Perspt will out-generate a
+frontier model. It claims the harness converts whatever portfolio it is given
+into a certified accepted trajectory, and that the certificate improves with
+genuine model diversity. Multi-model operation costs money and latency; if the
+benchmark's single-vendor ablation matches the portfolio arm on escaped-defect
+rate at lower cost, then systems 7 and 8 are not earning their place and should
+be defaulted off. That outcome is a permitted result of the experiment, not a
+failure of the PSP.
+
+.. rubric:: Conformance Gates
+
+Each gate names the theorem it discharges and the predicate whose failure
+falsifies it. Gates continue PSP-8's lettering.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 6 26 68
+
+   * - Gate
+     - Requirement
+     - Falsifying predicate
+   * - J
+     - Model-driven tool use
+     - A run in ``ToolLoop`` mode in which no model-issued tool call reached
+       the kernel, or in which a tool executed without a
+       ``ProviderToolCall`` origin.
+   * - K
+     - No unmediated effects
+     - Any durable effect in the ledger without a preceding
+       ``AdmissibilityChecked`` witness for its proposal.
+   * - L
+     - Authority confinement (Thm 1, 2)
+     - A committed effect outside the initial effect closure
+       :math:`\text{Eff}^*`, or a delegated capability that does not attenuate
+       its parent, or a capability minted from proposal payload data, or an
+       external tool registration that widens authority.
+   * - M
+     - Bounded harness (Paper II Lemma 1, Thm 3)
+     - Gate decisions exceeding :math:`\lfloor V_0/\rho\rfloor + B + 1`, or a
+       configuration accepted at startup that permits unbounded unverified
+       turns, or an ensemble candidate that did not consume a gate decision.
+   * - N
+     - Terminating recovery (Thm 6)
+     - A cascade exceeding ``b + k`` steps, a failure observation with no
+       mapped control, a node exiting unclassified, or a provider failover
+       that replenishes ``b``.
+   * - O
+     - Exact replay (Thm 7)
+     - A committed transition depending on an unrecorded observation, a
+       replayed head hash differing from the recorded head, or a replay that
+       requires provider credentials.
+   * - P
+     - Coordination minimality (Thm 8)
+     - Two concurrently executed turns with conflicting footprints, or a
+       serialization of two provably commuting turns reported as required.
+   * - Q
+     - Calibrated autonomy (Thm 5)
+     - Autonomous commitment of a mutating effect while
+       ``bound_is_asserted()`` is false and the effect is not routed to the
+       approval policy; a claimed ``rho`` not backed by a calibration set; or
+       a calibration set applied across ``ModelId``\ s.
+   * - R
+     - Honest diagnostics (Lemma 2, Cor. 5.2)
+     - A displayed validator, model, or provider count presented as a safety
+       signal without :math:`\rho_{\text{eff}}`; or a :math:`\mu` value
+       influencing dispatch or the acceptance gate.
+   * - S
+     - Provider portability
+     - Any harness invariant — decision bound, gate rule, terminal
+       classification, catalog contents for a fixed capability set, or replay
+       determinism — whose behaviour differs by provider; or an admissibility
+       decision that reads the proposing model's identity.
+   * - T
+     - Measured ensemble credit
+     - Ensemble or second-opinion benefit claimed, displayed, or credited in
+       the energy without a ledger-measured :math:`\kappa` for the pair; or a
+       same-family validator credited at full weight; or an ensemble whose
+       members are not distinct families while ``require_distinct_family`` is
+       set.
+   * - U
+     - Honest degradation
+     - A provider capability emulated rather than degraded-and-recorded; a
+       degradation not surfaced in ``perspt providers``; or a tool-calling
+       fallback to bundle mode without a recorded reason.
+   * - V
+     - Realized-state gating (Paper I
+       Def. 12.2, Assum. 6, Cor. 12.5)
+     - A gate decision computed from a model-claimed diff rather than from the
+       re-measured workspace; a committed node whose certificate lacks
+       :math:`\max_k\lVert r_k\rVert`; a floor-stopped node reported as
+       verified success; or a node that consumed its full correction budget
+       while its Corollary 12.5 feasibility check was failing and no
+       refinement was attempted.
+
+.. rubric:: Practical Decisions
+
+The trilogy specifies contracts; an SDK has to ship. Where the two pull against
+each other, this PSP records the decision and its price rather than leaving it
+to be rediscovered in review.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Decision
+     - Reasoning and price
+   * - Port in the SDK, driver in
+       ``perspt-core``, adapter in
+       ``perspt-agent``
+     - Keeps ``perspt-sdk`` publishable and I/O-free and keeps
+       ``perspt-core`` usable for plain chat. Makes Gate S structural. **Price:**
+       ``ToolSpec`` and friends exist twice — once as SDK contract, once as a
+       core-native mirror — plus one translation layer. Accepted; a shared
+       third crate would be a worse trade at this size.
+   * - Do not fork ``srbn``
+     - Paper I's mechanisms have one implementation, upstream, and Perspt is a
+       consumer. **Price:** Perspt is blocked on upstream releases for kernel
+       changes, and the 0.1.1 → 0.3.0 upgrade is a prerequisite of this PSP
+       rather than optional work.
+   * - Additive, defaulted trait methods
+       on ``AgentDomainPackage``
+     - ``perspt-coding`` and ``perspt-research`` compile unchanged; a domain
+       opts into tools when it has them. **Price:** a domain can silently ship
+       no tools; the parity benchmark, not the type system, catches that.
+   * - Kernel is in-process and
+       synchronous
+     - Admissibility must be deterministic and on the path of every effect; a
+       network hop would add a failure mode to the trusted base. **Price:** the
+       kernel cannot be shared across machines, so multi-machine operation is
+       out of scope here.
+   * - Diagnostics strictly off the
+       critical path
+     - :math:`\mu`, :math:`\rho_{\text{eff}}`, and :math:`\Phi(W)` are
+       computed from the ledger after the fact. **Price:** they lag the run by
+       one revision, which is why Gate R forbids them from influencing
+       dispatch — a lagging signal must not steer.
+   * - Conservative defaults everywhere
+     - ``execution_mode = bundle``, ``max_parallel = 1``, ensembles off,
+       adjudication triggered rather than always-on, :math:`\kappa` assumed 1
+       within a family. **Price:** out of the box Perspt looks like today's
+       Perspt, and the new machinery has to be opted into and then earned by
+       benchmark before a default flips.
+   * - Surrogate :math:`\delta_r` rather
+       than no :math:`\delta_r`
+     - A measured surrogate that drives node splitting beats an unmeasured
+       constant. **Price:** it cannot appear in a reliability claim, and the
+       PSP says so in three places because it is the easiest overclaim in the
+       document.
+   * - Pre-1.0 breaking changes taken now
+     - ``ModelRoute``/``ModelTierConfig`` move from ``String`` to ``ModelId``
+       while the SDK is at 0.6.x and has two known consumers. **Price:** a
+       coordinated bump; deferring it would mean shipping the model plane
+       through a stringly-typed side channel.
+
+.. rubric:: Technical Specification
+
+**Architecture.** No new crates. The work lands in existing boundaries:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Crate
+     - Change
+   * - ``srbn`` / ``srbn-serde`` /
+       ``srbn-ledger`` / ``srbn-regex``
+     - Upgraded from 0.1.1 to 0.3.0 and extended with the two new companion
+       crates; not forked. Supplies ``stabilize_realized``, ``Realizer``,
+       ``Policy``/``OnNoDescent``, ``Status``, and the Merkle chain.
+       ``perspt-sdk::kernel`` remains the narrow adapter and absorbs the API
+       change. No local reimplementation of Paper I.
+   * - ``perspt-sdk``
+     - New ``model`` module: ``ModelId``, ``ModelFamily``,
+       ``ProviderCapabilities``, ``RouteObjective``, ``EnsemblePolicy``,
+       ``ToolSpec``, ``ProviderToolCall``, ``TurnOutput``, ``Conversation``,
+       and the ``ModelTransport`` port. New ``toolset`` module (catalog,
+       footprints, effect mapping, external registration). ``routing``
+       extended to ``ModelId`` and fallback chains. New residual classes
+       (system 9). Two defaulted methods on ``AgentDomainPackage``. Existing
+       ``capability``, ``command``, ``ledger``, ``conformal``, ``spectral``,
+       ``independence``, ``exploration``, ``scheduler``, ``observability``
+       gain live consumers; ``independence`` gains the weighting path. **No new
+       dependency on any Perspt crate, on** ``genai``\ **, or on I/O.**
+   * - ``perspt-core``
+     - ``llm_provider``: ``ProviderHandle``, ``ModelPortfolio``, capability
+       probing, and the ``genai`` tool-calling driver over core-native mirror
+       types. ``config``: ``[providers]`` table and per-tier model ids.
+       ``plugin``: unchanged contract, now also consulted during catalog
+       assembly. Stays free of a ``perspt-sdk`` dependency.
+   * - ``perspt-agent``
+     - New ``transport`` module implementing ``perspt_sdk::ModelTransport``
+       over ``perspt_core::ModelPortfolio`` — the only place both worlds are
+       in scope. New ``toolloop`` (system 6) and ``ensemble``/``adjudicate``
+       (systems 7–8). ``tools.rs`` becomes the executor *behind* the kernel;
+       ``get_tool_definitions`` is replaced by the SDK catalog.
+       ``orchestrator`` holds a transport and a portfolio instead of one
+       ``Arc<GenAIProvider>``, gains ``ExecutionMode`` dispatch, kernel routing
+       for all effects, the scheduler/lease worker pool, and the ledger
+       emitter.
+   * - ``perspt-coding``
+     - ``tool_entries`` for the coding domain; ``lang::LanguageAdapter``
+       implementations gain the residual parsing for the new tool outputs.
+       Correction directions for the new residual classes. Still depends on
+       ``perspt-sdk`` alone.
+   * - ``perspt-research``
+     - No required change. It is the conformance check: if the research domain
+       cannot obtain a governed tool loop by supplying ``tool_entries`` and its
+       existing residual schema, the SDK boundary has been drawn wrongly.
+   * - ``perspt-policy``
+     - Invoked from the kernel's contract clause; owns the ``confidential``
+       path rule. Remains the deterministic trusted base.
+   * - ``perspt-sandbox``
+     - Real process-boundary enforcement for command effects: workspace-bound
+       cwd, environment scrubbing, timeout, output capture.
+   * - ``perspt-store``
+     - Ledger event tables, idempotency log, external-effect log, verdict
+       records, per-route calibration sets.
+   * - ``perspt-tui`` / ``perspt-dashboard``
+     - Live proposal stream with serving route, per-turn residual vector and
+       energy, capability audit, provider matrix, :math:`\rho_{\text{eff}}`
+       and :math:`\Phi(W)` gauges, replay view.
+
+**Performance.** The tool loop trades one large generation for several small
+ones: more requests and lower total tokens per node on edit work, higher latency
+per node on trivial work — which is why ``Auto`` keeps ``Bundle`` for scaffold
+nodes. Prompt caching across turns is essential and SHALL be used where the
+provider supports it, which is why routing is sticky within a node. Ensembles
+and adjudication are opt-in and triggered, not always-on; their cost is bounded
+by ``EnsemblePolicy::budget``. Kernel admissibility is in-process and
+deterministic; its cost is negligible against a tool call. Spectral,
+independence, and calibration computation runs off the critical path.
+
+**Dependencies.** One version bump and two additions, all first-party:
+``srbn`` and ``srbn-serde`` move 0.1.1 → 0.3.0, and ``srbn-ledger`` 0.3.0 joins
+(``srbn-regex`` is optional, for pattern sensors). No new third-party crates are
+required: ``genai`` 0.6.5 already provides tool calling and every adapter listed
+in ``str_to_adapter_kind``, and ``nalgebra`` (spectral) is already in tree.
+Multiple concurrent ``genai::Client`` instances are already possible; only
+Perspt's single-handle assumption prevents it.
+
+**Configuration.** New keys, all with conservative defaults: ``[providers]``,
+per-tier ``ModelId``, ``adjudicator_model``, ``ensemble`` policy block (default
+off), ``execution_mode`` (default ``bundle`` at first release, ``auto`` after
+the parity gate), ``max_turns_per_node``, ``descent_tolerance``,
+``cascade_budget``, ``max_parallel`` (default 1), ``kappa_prior`` (default 0.5),
+``risk_budget`` per capability, ``calibration_target_rho``, and ``confidential``
+path patterns.
+
+**Data structures.** Additions are the ``perspt-core`` model-plane and provider
+types, ``perspt-sdk::toolset::{ToolEntry, ToolCatalog, ToolOrigin}``,
+``RouteObjective``, ``EnsemblePolicy``, new ``ResidualClass`` variants, and
+``ExecutionMode``. ``ModelRoute`` and ``ModelTierConfig`` change their model
+fields from ``String`` to ``ModelId``. All other PSP-8 SDK types are consumed
+as-is.
+
+=========
+Rationale
+=========
+
+**Why the tool loop, the model plane, and the platform contract in one PSP.**
+They are one change viewed from three ends. The kernel, replay ledger, scheduler,
+and conformal budgets have been unwired since PSP-8 precisely because Perspt has
+no effect *proposals*; ``independence::compute`` has been unwired because Perspt
+has no validators that can disagree. Model-issued tool calls supply the first,
+and a portfolio supplies the second. Splitting the work would ship an ungoverned
+tool loop first — the harness class Paper II Theorem 3 says carries no
+horizon-independent certificate, which is the exact property Perspt exists to
+provide.
+
+**Why multi-model is a mathematical claim and not a feature list.** "Supports 9
+providers" is a configuration fact and worth little; every gateway offers it.
+The claim worth defending is Corollary 5.2's: a conjunctive ensemble's certified
+risk is :math:`\min_{i<j}(q_iq_j + \kappa_{ij}\sigma_i\sigma_j)`, so redundancy
+pays exactly to the extent that :math:`\kappa` is below 1, and a single-vendor
+harness cannot buy a low :math:`\kappa` at any price. Perspt's contribution is
+not that it can call several vendors; it is that it *measures* :math:`\kappa`
+from its own ledger, discounts correlated evidence automatically, and refuses to
+display a model count as a safety signal. That is a property a competitor cannot
+match by adding a second model — they would also have to add the ledger, the
+verdict records, and the willingness to report a disappointing number.
+
+**Why not majority voting across models.** Voting is the intuitive multi-model
+design and it is the one Corollary 5.2 warns against: correlated proposers agree
+for correlated reasons, and the vote is confidence without information. Perspt
+selects by measured energy — compiler, tests, LSP — and uses model diversity only
+where it provably helps: generating structurally different candidates (system 7)
+and supplying decorrelated verdicts whose weight is measured (system 8).
+
+**Why capabilities rather than an allow-list.** A coding agent reads repository
+content, issue text, dependency documentation, and now third-party tool
+descriptions, all attacker-controllable in realistic settings. An allow-list
+checked against model output is a check on *what was proposed*. Corollary 4.2
+gives the stronger property: authority lives in kernel tables that proposals
+cannot write, so injection changes what is proposed and never what is permitted.
+This is also what makes ``yolo`` mode defensible — it removes the approval
+prompt, not the capability bound.
+
+**Why residual-scored turns rather than a tool loop with retries.** Contemporary
+agent loops retry on failure. Paper II Lemma 1 is what a retry loop lacks: with a
+nonnegative energy, a descent tolerance, and a finite budget, the loop provably
+makes finitely many decisions and always lands in a classified terminal state.
+It also converts "the agent kept trying" into named residuals a maintainer can
+act on. The measured gate composes with the analytic bounds: even where the
+modelling assumptions fail, the gate's monotonicity on accepted states still
+holds, because it is a measurement, not an assumption.
+
+**Why coexistence rather than replacement.** Bundle generation is genuinely
+better for greenfield scaffolding, where there is nothing to read and whole-file
+emission is one request instead of ten. It is also the only path for providers
+without tool support and a useful recovery route. Deleting it would be a large
+breaking change to the PSP-5/PSP-7 prompt contracts for no gain.
+
+**Why removing** ``sed_replace`` **and** ``awk_filter`` **from the model
+catalog.** Their footprint is not computable from their arguments, so they cannot
+participate in the commutativity rule of system 15, and their effect scope cannot
+be bounded for the kernel's effect clause. ``edit_file`` and ``apply_diff`` cover
+the same use with checkable preconditions.
+
+**Alternatives considered.**
+
+* *Single-provider with a stronger model.* Simplest, and it is what the
+  competition does. Rejected as a strategy because it makes Perspt's ceiling a
+  vendor's roadmap, and because Corollary 5.2 shows the resulting self-review is
+  worth :math:`\rho_{\text{eff}} \to q`. Note it remains a fully supported
+  *configuration* — a one-entry portfolio — which is what keeps the migration
+  free.
+* *A provider gateway (proxy) instead of an in-process portfolio.* Would give
+  multi-provider access with less code, but the harness needs the capability
+  matrix, per-route calibration, family attribution, and failover attribution in
+  the ledger; a gateway hides exactly those and would put an unaudited component
+  inside the path that Theorem 7 requires be recorded.
+* *Text-protocol tool emulation* (model emits ``<tool>`` blocks Perspt parses).
+  Works on any provider and needs no transport change, but reintroduces the
+  fragile parsing :psp:`000007` removed and cannot produce the recorded,
+  structured observations Theorem 7 requires. Rejected as the primary mechanism;
+  providers without tool support fall back to bundle mode with the limitation
+  recorded (Gate U).
+* *Adopt an external agent framework.* Would supply a tool loop quickly but not
+  the admissibility kernel, the residual/energy contract, the measured
+  independence path, or the replay ledger — the parts that make Perspt's claims
+  falsifiable — and would put a third party inside the trusted base that
+  Theorems 1–2 require Perspt to control.
+* *Gate on the barrier only, skip conformal calibration.* Acceptable for
+  ``cautious`` and ``balanced``, and Gate Q is scoped to autonomous commitment
+  only. But asserting a risk budget without calibration would make ``yolo``
+  mode's safety claim an assumption rather than a measurement, which the trilogy
+  explicitly refuses.
+* *Ship parallelism first.* Rejected: without footprints from tool proposals, the
+  commutativity rule has nothing to compute over, and parallel unmediated effects
+  are strictly worse than sequential ones.
+
+=======================
+Backwards Compatibility
+=======================
+
+**User impact.** Default behaviour is unchanged at first release:
+``execution_mode`` defaults to ``bundle``, ``max_parallel`` to 1, and a
+configuration with a single ``provider`` key produces a one-entry portfolio that
+behaves exactly as today. Ensembles and adjudication default to off. Users opt in
+with ``--execution-mode tool-loop`` and a ``[providers]`` block. When ``Auto``
+later becomes the default, node execution changes observably — more, smaller
+model requests, and visible tool activity — which is announced in release notes
+and reversible with ``--execution-mode bundle``.
+
+**Breaking changes.** Five, all deliberate:
+
+1. ``perspt-agent::tools::get_tool_definitions`` is removed; the SDK catalog
+   replaces it. It currently has no callers, so the break is nominal.
+2. ``sed_replace`` and ``awk_filter`` leave the model-facing catalog.
+3. Direct tool execution paths inside the orchestrator are routed through the
+   kernel. Any code path that performed an effect without a witness is changed,
+   by design — that is Gate K.
+4. ``perspt-sdk`` moves from ``srbn`` 0.1.1 to 0.3.0. The change is absorbed by
+   ``perspt-sdk::kernel``; downstream crates see it only as new capability
+   (``Realizer``, ``Policy``, ``Status``) rather than as a changed SDK surface.
+5. ``routing::ModelRoute::model``, ``ModelRoute::fallback_model``, and
+   ``ModelTierConfig``'s tier fields change from ``String`` to ``ModelId`` (and
+   ``fallback_model`` to a ``fallback`` chain). ``perspt-sdk`` is pre-1.0;
+   deserialization accepts a bare string and resolves it against the default
+   provider, so existing configuration files keep working.
+
+**Configuration impact.** All new keys have defaults; existing configuration
+files remain valid. ``--mode cautious|balanced|yolo`` keeps its spelling and
+gains a precise meaning as an ``ApprovalPolicy`` preset, which may make ``yolo``
+*more* restrictive than today in one respect: it will not perform network or
+out-of-workspace effects without an explicit capability.
+
+**Ledger and session compatibility.** Sessions recorded before this PSP lack
+proposal and observation events and therefore cannot be replayed under Theorem 7.
+``perspt replay`` SHALL report such sessions as ``pre-PSP-9, not replayable``
+rather than attempting a partial reconstruction. Resume of old sessions continues
+to work through the existing mechanism.
+
+**Migration.** No user action required. Projects that want the new behaviour set
+``execution_mode = "tool-loop"`` and add a ``[providers]`` table. Projects that
+want the old behaviour after the default flips set ``execution_mode = "bundle"``.
+
+========================
+Reference Implementation
+========================
+
+Implementation is phased so that each phase is independently testable and each
+gate lands with the code it constrains.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 34 12 46
+
+   * - Phase
+     - Work
+     - Gates
+     - Exit criterion
+   * - 0
+     - ``ModelPortfolio``, ``ModelId``, ``[providers]`` config, capability
+       matrix and degradation ladder.
+     - U
+     - Three providers live in one process; every degradation is recorded and
+       printed by ``perspt providers``; a single-provider config is
+       byte-identical in behaviour to today.
+   * - 1
+     - Provider tool transport; ``Conversation``; bundle fallback for
+       tool-less providers.
+     - S, U
+     - A model completes a two-tool round trip on at least three provider
+       families from one binary; the same conversation replays across
+       providers without harness changes.
+   * - 2
+     - SDK ``toolset`` catalog; ``tools.rs`` refactor to executor;
+       ``edit_file``; ``glob``; ``lsp_query``; ``git_read``.
+     - J
+     - Every catalog entry has a schema, footprint, effect, and round-trip
+       test; the catalog for a fixed capability set is provider-invariant.
+   * - 3
+     - ``srbn`` 0.1.1 → 0.3.0 and ``perspt-sdk::kernel`` adapter update;
+       ``WorkspaceRealizer``; ``toolloop`` module built on
+       ``stabilize_realized`` with ``Policy``/``OnNoDescent::Reject``; residuals,
+       energy, gate, directed correction, certificates.
+     - J, M, V
+     - Decision count never exceeds the finite bound on fixtures; every node
+       exits with an ``srbn::Status``; every gate decision is computed from the
+       re-measured workspace; every certificate carries
+       :math:`\max_k\lVert r_k\rVert`.
+   * - 4
+     - Kernel routing for all effects; command IR; state witnesses;
+       ``perspt-sandbox`` enforcement; denial residuals.
+     - K, L
+     - No durable effect without a witness; attenuation and payload-minting
+       adversarial tests pass; no admissibility decision reads model identity.
+   * - 5
+     - Recovery lattice; total classification; provider failover at level 1;
+       Corollary 12.5 feasibility check driving Topological Escalation at
+       level 2; capability revocation at level 4.
+     - N, V
+     - All failure classes, including transport failures, terminate within
+       ``b + k`` under an always-failing adversary; failover does not replenish
+       ``b``; an infeasible node is split rather than retried to exhaustion.
+   * - 6
+     - Event-sourced ledger; ``record_observation`` refusal rule; idempotency
+       and external-effect logs; ``perspt replay``.
+     - O
+     - Replayed head equals recorded head on fixtures, with credentials
+       removed from the environment; a tampered event is detected by both
+       chain verification and replay divergence.
+   * - 7
+     - Portfolio routing with objectives; sticky routes; exploration phase;
+       ``--exploration-only``.
+     - S
+     - Explorer holds only read capabilities; a mutation attempt during
+       exploration is denied and recorded; route switches are ledger events.
+   * - 8
+     - Verdict records; ``independence::compute`` wired; weight attenuation;
+       adjudicator route; :math:`\rho_{\text{eff}}` reporting.
+     - R, T
+     - A duplicated same-family validator measurably fails to lower
+       :math:`\rho_{\text{eff}}` and receives near-zero additional weight; no
+       count-based safety display exists in TUI or dashboard.
+   * - 9
+     - Heterogeneous ensembles behind ``EnsemblePolicy``.
+     - M, T
+     - Each candidate consumes a gate decision; distinct-family requirement
+       enforced; ensemble arm measured against the single-model arm.
+   * - 10
+     - Scheduler, leases, bounded parallelism, rate limits as resources.
+     - P
+     - Conflicting footprints never run concurrently; commuting ones do;
+       per-provider limits contend only within a provider.
+   * - 11
+     - Per-route conformal calibration; drift monitor; graceful back-off.
+     - Q
+     - Realized accepted-unsafe rate ≤ declared ``rho`` on held-out fixtures;
+       stale and cross-route windows reported uncertified.
+   * - 12
+     - External tool registration under the kernel.
+     - K, L, U
+     - An external server cannot register a tool exceeding session authority;
+       undeclared footprints classify as ``RunShell``.
+   * - 13
+     - Spectral :math:`\mu`; :math:`\Phi(W)` gauge; TUI/dashboard surfaces;
+       undo/redo over the ledger.
+     - R
+     - Diagnostics never appear in any dispatch or gate decision path.
+   * - 14
+     - Parity and competitive benchmarks; ``Auto`` default flip; ensemble
+       defaults decided by measurement.
+     - —
+     - Parity gate passes with failures preserved and reported.
+
+**Mechanism checks.** Following the trilogy's discipline, each gate ships with a
+deterministic check that falsifies a *named theorem* rather than "the
+framework", extending ``perspt-sdk/tests/mechanism_checks.rs``:
+
+* MC-J: a recorded tool-loop session in which every executed effect traces to a
+  model-issued call.
+* MC-K/L: adversarial suite — unauthorized invocation, amplified delegation,
+  payload-minted capability, exhausted call budget, out-of-workspace path,
+  hidden shell composition inside ``run_test``, external tool registration
+  claiming an effect the session lacks. All denied; committed scopes remain
+  inside :math:`\text{Eff}^*`.
+* MC-M: synthetic energy trace confirming the decision bound, including an
+  ensemble round.
+* MC-N: all failure classes under an always-failing adversary, with a provider
+  that always errors, terminate within ``b + k``.
+* MC-O: replay equality plus tamper detection, executed with all provider
+  credentials removed.
+* MC-P: footprint conflict matrix, including per-provider rate-limit resources.
+* MC-Q: conformal calibration on synthetic and ledger-derived samples; realized
+  risk against declared budget; drift injection triggers back-off; a calibration
+  set is refused for a different ``ModelId``.
+* MC-R: a duplicated validator does not raise :math:`\mu` and does not lower
+  :math:`\rho_{\text{eff}}`.
+* MC-S: a fixture session executed under three portfolios produces identical
+  decision bounds, terminal classifications, and catalog contents; only cost,
+  latency, and success rate differ.
+* MC-T: the Paper III MC3 scenario reproduced on Perspt's own path — a
+  correlated validator pair with ground truth :math:`q = 0.1, \kappa = 0.5`
+  must yield a measured joint miss near 0.055, not the independence product
+  0.01, and Perspt's displayed :math:`\rho_{\text{eff}}` must match the measured
+  value.
+* MC-U: a provider with each capability disabled in turn degrades along the
+  declared ladder and records every degradation.
+* MC-V: an adversarial model that reports successful edits while every effect is
+  denied must never reach a hard pass, and the run's
+  :math:`\max_k\lVert r_k\rVert` must be maximal. A second fixture holds the
+  Corollary 12.5 inequality false by construction and checks that the node is
+  refined rather than retried to exhaustion.
+
+**Benchmarks.** Fixture tasks per first-party language adapter, run in four arms:
+
+1. ``Bundle`` mode, single provider — today's Perspt.
+2. ``ToolLoop``, single provider — isolates the tool loop.
+3. ``ToolLoop``, multi-vendor portfolio with adjudication and ensembles —
+   isolates the model plane.
+4. An external single-vendor coding CLI on the same fixtures — the competitive
+   reference.
+
+Reported per arm: task success, accepted-state correctness, **escaped-defect
+rate** measured by a held-out verifier the harness never sees, correction
+rounds, energy trace and final energy, denied-proposal counts, escalation
+frequency, :math:`\rho_{\text{eff}}` and the :math:`\kappa` matrix where
+applicable, cost, and latency. Per Paper II's threshold list, failures are
+preserved and reported rather than filtered.
+
+The decisive comparison is arm 3 against arm 2: **the model plane is justified
+only if it lowers escaped-defect rate at comparable or lower cost.** If it does
+not, systems 7 and 8 default to off and the PSP's competitive claim is reduced
+to portability, failover, sovereignty, and cost routing — which are real but
+smaller. Mechanism checks are labelled as mechanism checks and never reported as
+evidence about model capability.
+
+============
+Open Issues
+============
+
+* **Where the adjudicator earns its cost.** Adjudication on every turn is
+  affordable only with a cheap route, and a cheap route has a high :math:`q`. The
+  right trigger — gate failure only, risk class, energy plateau — should be
+  measured rather than guessed.
+* **Cold-start** :math:`\kappa` **prior.** 0.5 matches the paper's worked
+  example, but the true cross-family correlation for coding defects is unknown
+  and probably task-dependent. Perspt should publish measured :math:`\kappa`
+  matrices from its own fixtures as they accumulate.
+* **Delayed unsafe labels are sparse.** Conformal calibration and :math:`\kappa`
+  estimation both need ``missed`` labels, which arrive only from rollbacks and
+  later regressions. A deployment that never rolls back produces no negative
+  labels, and the estimates stay conservative by default. Whether an explicit
+  audit sampling mechanism is worth its cost is unresolved.
+* **Calibration data volume and cold start.** A fresh installation has no
+  calibration set, and per-route keying makes each route's set smaller. Options
+  are a conservative shipped prior, deferring autonomous commitment until ``n``
+  samples exist, or importing calibration across projects — the last of which
+  likely violates exchangeability.
+* **What** :math:`\lVert r_k\rVert` **should actually be for code.** The
+  surrogate proposed in system 10 — the weighted fraction of proposed edits that
+  did not survive projection — is defensible and cheap, but it is not the only
+  candidate, and it is not a norm in any analysis space. Alternatives worth
+  measuring against it include AST-level edit distance between proposed and
+  committed trees, and the change in :math:`V` attributable to projection alone.
+  Until one is validated, Corollary 12.5 stays a routing rule rather than a
+  certificate.
+* **Interleaved verification cadence.** Running cheap sensors after every
+  mutating call gives the tightest energy signal but multiplies LSP and parse
+  work. The right cadence is likely per-language and should be measured.
+* **Barrier-increment budgets for tool proposals.** Paper III's admissibility
+  clause includes an expected barrier increment
+  :math:`\mathbb{E}[h(x')\mid x,p] \le h(x) + c_c`. For a coding workspace a
+  usable ``h`` is not obvious. This PSP relies on the contract and risk-budget
+  clauses and treats the barrier clause as satisfied trivially (``c_c = 0``,
+  deterministic transition) until a defensible ``h`` exists. That limitation
+  must be stated wherever the kernel's guarantees are described.
+* **Conversation compaction across providers.** Long tool loops exceed context
+  windows, and portfolios contain models with different limits. Compaction must
+  not drop observations the ledger relies on; the likely rule is that compaction
+  summarizes the *conversation* while the ledger retains the observations, but
+  the boundary — and whether a compacted conversation may cross providers —
+  needs specification.
+* **Subagent capability and route defaults.** What a ``spawn_agent`` child holds,
+  and which provider it is routed to, are policy questions. Attenuation is
+  enforced; the defaults are not yet chosen.
+* **Cross-session capability persistence.** Whether granted capabilities survive
+  a session, and how revocation propagates to a resumed session, is unspecified.
+* **External tool protocol choice.** System 13 specifies the kernel-side
+  contract, not the wire protocol. Whether to implement MCP directly or a
+  narrower internal protocol first is open.
+
+==========
+References
+==========
+
+* Vikrant R. and Ronak R., *Stability is All You Need: Lyapunov-Guided
+  Hierarchies for Long-Horizon LLM Reliability* (Paper I). Sheaf consistency,
+  Lyapunov energy, flow barriers, Merkle-ized state (Def. 7.1, Thm C.1),
+  Theorems 5.1/5.2/12.1, and §12's realizability interface: Definition 12.2
+  (hybrid state, Regimes A and B), Assumption 6 and Remark 12.3 (bounded
+  realizability residual :math:`\delta_r`, and its caveats), Theorem 12.4
+  (practical stability, floor of order :math:`\delta_r^2`), Corollary 12.5
+  (commit feasibility, retry budget, and Topological Escalation).
+* ``srbn`` 0.3.0, ``srbn-serde`` 0.3.0, ``srbn-ledger`` 0.3.0, ``srbn-regex``
+  0.3.0 — the published Rust kernel implementing Paper I, and the source of
+  ``stabilize_realized``, ``Realizer``, ``Policy``, ``Status``, and the Merkle
+  chain this PSP consumes.
+* Vikrant R. and Ronak R., *Stability is All You Need II: The SRBN Harness
+  Contract* (Paper II). Harness contract, acceptance gate, Lemma 1 (finite
+  acceptance and guaranteed termination), Theorem 1 (ISS energy tube),
+  Theorem 2 and Corollary 2.1 (discrete descent), Theorem 3 (sparse feedback
+  admits no horizon-independent certificate), Lemma 2 (spectral energy-slope).
+* Vikrant R. and Ronak R., *Stability is All You Need III: The SRBN Platform
+  Contract* (Paper III). Admissibility kernel (Def. 3.2), Theorems 1–2
+  (confinement, self-modification), Corollary 4.2 (blast radius), Theorem 3
+  (workflow chance safety), Lemma 5.1 and Corollary 5.2 (correlated validators,
+  certified ensemble risk), Theorem 4 (supermartingale barrier), Theorem 5
+  (conformal risk budgets), Theorem 6 (recovery termination), Theorem 7 (replay
+  determinism), Theorem 8 (commuting commits), Definition 9.1 (six
+  durable-execution obligations), Theorem 9 (Foster–Lyapunov platform
+  stability), MC3 (measured correlated redundancy).
+* :psp:`000005` — SRBN implementation continuation; multi-file coding UX and
+  repo-native verification.
+* :psp:`000007` — typed correction loops and plugin-aware prompt contracts; the
+  fail-closed parse-validate discipline this PSP applies to tool arguments.
+* :psp:`000008` — SRBN agent SDK, coding domain package, and mutable work graph;
+  supplies every SDK contract this PSP wires to the live path.
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal
+license, whichever is more permissive.
