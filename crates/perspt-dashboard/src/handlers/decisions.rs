@@ -82,8 +82,8 @@ pub async fn decisions_handler(
         + vm.plan_revisions.len()
         + vm.repair_footprints.len()
         + vm.verifications.len()
-        + vm.correction_attempts.len();
-    let total_decisions = total_decisions + vm.psp9_events.len();
+        + vm.correction_attempts.len()
+        + vm.psp9_events.len();
 
     let tmpl = DecisionsTemplate {
         display_name: friendly_name(&vm.session_id),

@@ -189,7 +189,13 @@ fn psp9_event_row(row: Psp9LedgerRow) -> Psp9EventRow {
         .join(" / ");
     let mut summary = value.get("payload").cloned().unwrap_or(value).to_string();
     if summary.len() > 280 {
-        summary.truncate(277);
+        // Walk back to a char boundary: ledger payloads carry model text and
+        // paths, and truncating inside a multibyte char panics.
+        let mut boundary = 277;
+        while !summary.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        summary.truncate(boundary);
         summary.push_str("...");
     }
     Psp9EventRow {
