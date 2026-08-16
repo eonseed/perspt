@@ -344,11 +344,16 @@ impl SessionStore {
 mod tests {
     use super::*;
 
-    #[test]
-    fn psp9_events_round_trip_in_order() {
+    fn scratch_store() -> (std::path::PathBuf, SessionStore) {
         let dir = std::env::temp_dir().join(format!("perspt_p9_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let store = SessionStore::open(&dir.join("t.db")).unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn psp9_events_round_trip_in_order() {
+        let (dir, store) = scratch_store();
         for sequence in 0..3i64 {
             store
                 .record_psp9_event(&Psp9LedgerRow {
@@ -364,6 +369,12 @@ mod tests {
         assert_eq!(rows.len(), 3);
         assert_eq!(rows[2].hash, "h2");
         assert!(store.get_psp9_events("other").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn external_effects_are_single_assignment() {
+        let (dir, store) = scratch_store();
         store
             .record_external_effect_intent("s1", "promote:n1", "h1", "{\"a\":1}")
             .unwrap();
@@ -377,6 +388,12 @@ mod tests {
             .complete_external_effect("s1", "promote:n1", "{\"ok\":true}")
             .unwrap();
         assert!(store.pending_external_effects("s1").unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn artifacts_verdicts_and_calibration_rows_persist() {
+        let (dir, store) = scratch_store();
         let bytes = b"complete compiler output";
         let hash = "artifact-hash".to_string();
         store.put_psp9_artifact(&hash, bytes, "text/plain").unwrap();

@@ -1,9 +1,10 @@
 //! The PSP code check rules Perspt is held to, and the vocabulary for reporting
 //! where they are broken.
 //!
-//! Rule `PSP-2` follows the engineering style Perspt adopted (as popularized by TigerBeetle) — "no function longer than
-//! what can be printed on a single sheet of paper" — relaxed from 60 lines to
-//! this project's 70. `PSP-1` and `PSP-3` are Perspt constants.
+//! Rule `PSP-2` follows the engineering style Perspt adopted (as popularized
+//! by TigerBeetle) — "no function longer than what can be printed on a single
+//! sheet of paper" — relaxed from 60 lines to this project's 70. `PSP-1` and
+//! `PSP-3` are Perspt constants.
 //!
 //! The rules apply to **Rust sources only**. Documentation, PSPs, and the
 //! changelog are out of scope; see [`crate::scan`].

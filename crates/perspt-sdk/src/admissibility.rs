@@ -202,36 +202,13 @@ pub fn check_full_admissibility(
     };
 
     let barrier_witness = match barrier {
-        Some(evaluator) => {
-            let witness = evaluator.evaluate(transition)?;
-            base.barrier_increment_ok = witness.clause_holds(c_c_max);
-            if !base.barrier_increment_ok {
-                base.decision = AdmissibilityDecision::Deny {
-                    reason: crate::capability::DenyReason::RiskBudgetExhausted,
-                };
-            }
-
-            // Definition 3.2 has one c_c: the barrier's certified increment is
-            // also the amount tested against the cumulative risk budget. The
-            // legacy scope checker sees proposal.risk_cost (always zero on the
-            // governed path), so its risk verdict must be replaced here.
-            base.risk_budget_ok = base
-                .capability_id
-                .as_ref()
-                .and_then(|id| capabilities.iter().find(|cap| &cap.capability_id == id))
-                .map(|cap| {
-                    cap.risk_budget
-                        .as_ref()
-                        .is_none_or(|budget| budget.admits(witness.certified_increment))
-                })
-                .unwrap_or(false);
-            if !base.risk_budget_ok {
-                base.decision = AdmissibilityDecision::Deny {
-                    reason: crate::capability::DenyReason::RiskBudgetExhausted,
-                };
-            }
-            Some(witness)
-        }
+        Some(evaluator) => Some(evaluate_barrier_clauses(
+            evaluator,
+            transition,
+            capabilities,
+            c_c_max,
+            &mut base,
+        )?),
         None => {
             missing.push(ClauseId::BarrierIncrement);
             // Without c_c the risk clause cannot be evaluated. Recording it as
@@ -260,6 +237,43 @@ pub fn check_full_admissibility(
         barrier: barrier_witness,
         profile,
     })
+}
+
+/// Evaluate the barrier-increment and risk-budget clauses against one
+/// witness. Definition 3.2 has one `c_c`: the barrier's certified increment
+/// is also the amount tested against the cumulative risk budget (the legacy
+/// scope checker sees `proposal.risk_cost`, always zero on the governed
+/// path, so its risk verdict is replaced here).
+fn evaluate_barrier_clauses(
+    evaluator: &dyn BarrierEvaluator,
+    transition: &CandidateTransition,
+    capabilities: &[Capability],
+    c_c_max: f64,
+    base: &mut AdmissibilityWitness,
+) -> Result<BarrierWitness> {
+    let witness = evaluator.evaluate(transition)?;
+    base.barrier_increment_ok = witness.clause_holds(c_c_max);
+    if !base.barrier_increment_ok {
+        base.decision = AdmissibilityDecision::Deny {
+            reason: crate::capability::DenyReason::RiskBudgetExhausted,
+        };
+    }
+    base.risk_budget_ok = base
+        .capability_id
+        .as_ref()
+        .and_then(|id| capabilities.iter().find(|cap| &cap.capability_id == id))
+        .map(|cap| {
+            cap.risk_budget
+                .as_ref()
+                .is_none_or(|budget| budget.admits(witness.certified_increment))
+        })
+        .unwrap_or(false);
+    if !base.risk_budget_ok {
+        base.decision = AdmissibilityDecision::Deny {
+            reason: crate::capability::DenyReason::RiskBudgetExhausted,
+        };
+    }
+    Ok(witness)
 }
 
 /// Promote an allowed transition: one kernel transaction that decrements the
