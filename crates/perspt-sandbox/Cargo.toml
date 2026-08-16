@@ -13,7 +13,6 @@ categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 # Shell parsing for command string
-shell-words = "1.1"
 
 # Utilities
 anyhow = "1.0"

@@ -43,6 +43,23 @@ impl CommandInvocation {
             CommandInvocation::Shell { .. } => "sh",
         }
     }
+
+    /// The canonical single-line rendering of this invocation — the stable
+    /// input contract for text-matching policy layers. `Program` renders as
+    /// the shell-quoted argv; `Shell` renders its script verbatim. Never feed
+    /// a policy the Rust `Debug` form: its field syntax defeats every
+    /// substring pattern written against real command lines.
+    pub fn command_line(&self) -> String {
+        match self {
+            CommandInvocation::Program { program, args, .. } => {
+                let mut parts = Vec::with_capacity(args.len() + 1);
+                parts.push(program.clone());
+                parts.extend(args.iter().cloned());
+                shell_words::join(parts.iter().map(String::as_str))
+            }
+            CommandInvocation::Shell { script, .. } => script.clone(),
+        }
+    }
 }
 
 /// Shell metacharacters that force the `Shell` form. Their presence means the

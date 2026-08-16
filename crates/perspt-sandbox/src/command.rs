@@ -251,16 +251,6 @@ impl BasicSandbox {
         self.environment.insert(key, value);
         self
     }
-
-    /// Parse a command string into program and args
-    pub fn from_command_string(cmd: &str) -> Result<Self> {
-        let parts = shell_words::split(cmd)?;
-        if parts.is_empty() {
-            anyhow::bail!("Empty command");
-        }
-
-        Ok(Self::new(parts[0].clone(), parts[1..].to_vec()))
-    }
 }
 
 impl SandboxedCommand for BasicSandbox {
@@ -349,35 +339,17 @@ impl SandboxedCommand for BasicSandbox {
     }
 
     fn is_read_only(&self) -> bool {
-        // Commands that are generally read-only
+        // Exact program-name match only. A prefix match over the rendered
+        // command line classified `catastrophe` as read-only (starts with
+        // `cat`) and ignored mutating flags entirely. Programs with mutating
+        // modes (`find -delete`, `git push`, `sed -i`) are excluded outright;
+        // the governed path uses `perspt_sdk::classify_tier`, which models
+        // those argument forms — this heuristic stays conservative instead.
         let read_only_programs = [
-            "ls",
-            "cat",
-            "head",
-            "tail",
-            "grep",
-            "find",
-            "which",
-            "echo",
-            "pwd",
-            "whoami",
-            "date",
-            "env",
-            "printenv",
-            "file",
-            "stat",
-            "cargo check",
-            "cargo build",
-            "cargo test",
-            "cargo clippy",
-            "git status",
-            "git log",
-            "git diff",
-            "git show",
+            "ls", "cat", "head", "tail", "grep", "rg", "which", "pwd", "whoami", "date",
+            "printenv", "file", "stat", "wc",
         ];
-
-        let full_cmd = self.display();
-        read_only_programs.iter().any(|p| full_cmd.starts_with(p))
+        read_only_programs.contains(&self.program.as_str())
     }
 }
 
@@ -494,9 +466,16 @@ fn platform_command(
         }
     }
     wrapped.extend(["--tmpfs".into(), "/tmp".into()]);
-    if policy.filesystem == FilesystemAccess::WorkspaceWrite {
-        wrapped.extend(["--bind".into(), root.clone(), root.clone()]);
-    }
+    // The tmpfs mounts above can mask the workspace root itself: candidate
+    // overlays live under /tmp, and a workspace may sit under /home. Re-bind
+    // the root after the masks so the sandboxed process always sees its own
+    // tree — read-only unless the policy grants workspace writes.
+    let root_bind = if policy.filesystem == FilesystemAccess::WorkspaceWrite {
+        "--bind"
+    } else {
+        "--ro-bind"
+    };
+    wrapped.extend([root_bind.into(), root.clone(), root.clone()]);
     if !policy.allow_network {
         wrapped.push("--unshare-net".into());
     }
@@ -524,13 +503,6 @@ mod tests {
         let result = sandbox.execute().unwrap();
         assert!(result.success());
         assert_eq!(result.stdout.trim(), "hello");
-    }
-
-    #[test]
-    fn test_from_command_string() {
-        let sandbox = BasicSandbox::from_command_string("ls -la /tmp").unwrap();
-        assert_eq!(sandbox.program, "ls");
-        assert_eq!(sandbox.args, vec!["-la", "/tmp"]);
     }
 
     #[test]
@@ -630,40 +602,23 @@ mod tests {
     }
 
     #[test]
-    fn test_from_command_string_empty_rejected() {
-        let result = BasicSandbox::from_command_string("");
-        assert!(result.is_err(), "Empty command should be rejected");
-    }
-
-    #[test]
-    fn test_from_command_string_with_quotes() {
-        let sandbox = BasicSandbox::from_command_string(r#"echo "hello world""#).unwrap();
-        assert_eq!(sandbox.program, "echo");
-        assert_eq!(sandbox.args, vec!["hello world"]);
-    }
-
-    #[test]
     fn test_display_no_args() {
         let sandbox = BasicSandbox::new("pwd".to_string(), vec![]);
         assert_eq!(sandbox.display(), "pwd");
     }
 
     #[test]
-    fn test_is_read_only_compound_commands() {
-        // cargo check should be read-only
-        let sandbox = BasicSandbox::new("cargo".to_string(), vec!["check".to_string()]);
-        assert!(sandbox.is_read_only());
-
-        // cargo test should be read-only
-        let sandbox = BasicSandbox::new("cargo".to_string(), vec!["test".to_string()]);
-        assert!(sandbox.is_read_only());
-
-        // git status should be read-only
-        let sandbox = BasicSandbox::new("git".to_string(), vec!["status".to_string()]);
-        assert!(sandbox.is_read_only());
-
-        // git push should NOT be read-only
-        let sandbox = BasicSandbox::new("git".to_string(), vec!["push".to_string()]);
+    fn test_is_read_only_is_conservative() {
+        // Programs with mutating modes are never classified read-only here,
+        // whatever their subcommand: `cargo test` runs build scripts and
+        // `git status` takes index locks. Tiered classification lives in
+        // `perspt_sdk::classify_tier`.
+        for (program, arg) in [("cargo", "check"), ("cargo", "test"), ("git", "status")] {
+            let sandbox = BasicSandbox::new(program.to_string(), vec![arg.to_string()]);
+            assert!(!sandbox.is_read_only(), "{program} {arg}");
+        }
+        // A prefix of a read-only name is not read-only.
+        let sandbox = BasicSandbox::new("catastrophe".to_string(), vec![]);
         assert!(!sandbox.is_read_only());
     }
 
