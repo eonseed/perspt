@@ -6,10 +6,68 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 /// Placeholder shown instead of a real API key in `config --show`.
 const MASKED_API_KEY: &str = "***";
+
+/// One entry of the `[providers.<id>]` table (PSP-9 system 1).
+///
+/// A provider record describes *resolution policy*, not embedded secrets:
+/// `api_key_env` names an environment variable; a literal `api_key` is
+/// accepted for local development but masked on display. Vertex entries may
+/// omit a static key entirely and use the per-request ADC token resolver.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ProviderEntry {
+    /// genai adapter kind. Defaults to the table key, so
+    /// `[providers.anthropic]` needs no explicit adapter while
+    /// `[providers.local]` can say `adapter = "ollama"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
+    /// Environment variable holding the API key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    /// Literal API key. Prefer `api_key_env`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Base URL override for OpenAI-compatible / local endpoints.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Google Cloud project id (Vertex only; ADC discovery when absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Vertex location; defaults to `global` via the existing resolver.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+}
+
+impl ProviderEntry {
+    /// The adapter this entry binds, defaulting to the table key.
+    pub fn adapter_or<'a>(&'a self, key: &'a str) -> &'a str {
+        self.adapter.as_deref().unwrap_or(key)
+    }
+}
+
+/// The `[models]` table: fully qualified `provider::model` route values per
+/// tier (PSP-9 system 1). Values stay fully qualified so identity,
+/// calibration, and replay never depend on an ambient default provider.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelsConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub architect: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actuator: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verifier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speculator: Option<String>,
+    /// Optional adjudication route (PSP-9 system 8).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adjudicator: Option<String>,
+}
 
 /// Main configuration struct.
 ///
@@ -74,6 +132,18 @@ pub struct Config {
     /// Agent Speculator-tier model override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speculator_model: Option<String>,
+
+    /// The `[providers.<id>]` table: several credentials coexisting in one
+    /// process (PSP-9 system 1). Empty for single-provider configurations,
+    /// which continue to use the flat fields above.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub providers: BTreeMap<String, ProviderEntry>,
+
+    /// The `[models]` table: per-tier fully qualified `provider::model`
+    /// routes. When present it takes precedence over the flat
+    /// `*_model` fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<ModelsConfig>,
 }
 
 impl Config {
@@ -103,6 +173,11 @@ impl Config {
         let mut clone = self.clone();
         if clone.api_key.is_some() {
             clone.api_key = Some(MASKED_API_KEY.to_string());
+        }
+        for entry in clone.providers.values_mut() {
+            if entry.api_key.is_some() {
+                entry.api_key = Some(MASKED_API_KEY.to_string());
+            }
         }
         clone
     }
@@ -203,6 +278,59 @@ mod tests {
         cfg.set_value("vertex_location", "test-location").unwrap();
         assert_eq!(cfg.vertex_project_id.as_deref(), Some("test-project"));
         assert_eq!(cfg.vertex_location.as_deref(), Some("test-location"));
+    }
+
+    #[test]
+    fn providers_table_parses_with_defaulted_adapter() {
+        let cfg = Config::from_toml_str(
+            r#"
+            [providers.anthropic]
+            api_key_env = "ANTHROPIC_API_KEY"
+
+            [providers.local]
+            adapter  = "ollama"
+            base_url = "http://localhost:11434"
+
+            [models]
+            architect = "anthropic::claude-opus-5"
+            speculator = "local::qwen2.5-coder"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.providers.len(), 2);
+        let anthropic = &cfg.providers["anthropic"];
+        assert_eq!(anthropic.adapter_or("anthropic"), "anthropic");
+        assert_eq!(anthropic.api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
+        let local = &cfg.providers["local"];
+        assert_eq!(local.adapter_or("local"), "ollama");
+        let models = cfg.models.unwrap();
+        assert_eq!(
+            models.architect.as_deref(),
+            Some("anthropic::claude-opus-5")
+        );
+        assert_eq!(models.adjudicator, None);
+    }
+
+    #[test]
+    fn masked_hides_provider_table_keys_too() {
+        let cfg = Config::from_toml_str(
+            r#"
+            [providers.openai]
+            api_key = "sk-super-secret"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.masked().providers["openai"].api_key.as_deref(),
+            Some("***")
+        );
+    }
+
+    #[test]
+    fn flat_config_still_parses_without_tables() {
+        let cfg = Config::from_toml_str("provider = \"openai\"\n").unwrap();
+        assert!(cfg.providers.is_empty());
+        assert!(cfg.models.is_none());
     }
 
     #[test]

@@ -47,6 +47,7 @@ pub mod goal;
 pub mod independence;
 pub mod kernel;
 pub mod ledger;
+pub mod model;
 pub mod observability;
 pub mod residual;
 pub mod routing;
@@ -93,6 +94,9 @@ pub use kernel::{AgentBarrierResult, AgentStabilizationStatus, CorrectionDirecti
 pub use ledger::{
     content_hash, replay_accepted_trajectory, ExternalEffectLog, IdempotencyLog, Ledger,
     LedgerEvent, LedgerRecord,
+};
+pub use model::{
+    CapabilityDegradation, ModelFamily, ModelId, ProviderCapabilities, ProviderCapabilityMask,
 };
 pub use observability::{
     backlog_gauge, phi, residual_heatmap, CapabilityAudit, ResidualHeatmap, TrajectoryProjection,
