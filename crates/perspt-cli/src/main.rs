@@ -196,6 +196,12 @@ enum Commands {
     /// Print the provider capability matrix (PSP-9)
     Providers,
 
+    /// Deterministic, credential-free audit replay of a session (PSP-9)
+    Replay {
+        /// The session id to replay
+        session_id: String,
+    },
+
     /// Abort the current agent session
     Abort {
         /// Force abort without confirmation
@@ -353,6 +359,7 @@ async fn main() -> Result<()> {
         }) => commands::ledger::run(recent, rollback, stats).await,
         Some(Commands::Status) => commands::status::run().await,
         Some(Commands::Providers) => commands::providers::run(config_override).await,
+        Some(Commands::Replay { session_id }) => commands::replay::run(session_id).await,
         Some(Commands::Abort { force }) => commands::abort::run(force).await,
         Some(Commands::Resume { session_id }) => commands::resume::run(session_id).await,
         Some(Commands::Logs {

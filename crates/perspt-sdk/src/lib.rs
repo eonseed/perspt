@@ -37,6 +37,7 @@ pub mod admissibility;
 pub mod benchmark;
 pub mod capability;
 pub mod certificate;
+pub mod checkpoint;
 pub mod command;
 pub mod conformal;
 pub mod domain;
@@ -76,6 +77,7 @@ pub use capability::{
     RiskClass, StateWitness,
 };
 pub use certificate::{BudgetRef, ResidualCertificate};
+pub use checkpoint::{ContextCheckpoint, ControlFrame};
 pub use command::{canonicalize, classify_tier, CommandInvocation, CommandTier};
 pub use conformal::{
     conformal_threshold, decide as conformal_decide, is_drifted, ks_statistic, AcceptOutcome,
@@ -101,6 +103,7 @@ pub use goal::{goal_presence_residual, goal_presence_sensor, missing_symbols, Go
 pub use independence::{compute as compute_independence, IndependenceStats, VerdictRecord};
 pub use kernel::{policy_restore_best, stabilize_realized};
 pub use kernel::{AgentBarrierResult, AgentStabilizationStatus, CorrectionDirectionSet, Evidence};
+pub use ledger::{audit_replay, require_recorded, AuditReport};
 pub use ledger::{
     content_hash, replay_accepted_trajectory, ExternalEffectLog, IdempotencyLog, Ledger,
     LedgerEvent, LedgerRecord,
