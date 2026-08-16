@@ -271,12 +271,12 @@ pub fn resolve_portfolio_route(
                     .copied()
             });
             decorrelated
-                .or_else(|| models.for_tier(tier).filter(|m| capable(&m)))
+                .or_else(|| models.for_tier(tier).filter(|m| capable(m)))
                 .or_else(|| candidates.first().copied())?
         }
         _ => models
             .for_tier(tier)
-            .filter(|m| capable(&m))
+            .filter(|m| capable(m))
             .or_else(|| models.all().into_iter().find(capable))?,
     };
 
