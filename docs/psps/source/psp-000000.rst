@@ -127,7 +127,7 @@ The numerical index contains a table of all PSPs, ordered by number.
      - Final
    * - :psp:`000009`
      - Enhancement
-     - :doc:`Multi-Model Agentic Platform: SRBN Tool Harness and Platform Contract <psp-000009>`
+     - :doc:`Governed Agentic Platform: SRBN Tool Harness and Model Portfolio <psp-000009>`
      - Vikrant Rathore
      - Draft
 
@@ -221,7 +221,7 @@ Enhancement PSPs improve existing Perspt functionality.
      - Final
    * - :psp:`000009`
      - Enhancement
-     - :doc:`Multi-Model Agentic Platform: SRBN Tool Harness and Platform Contract <psp-000009>`
+     - :doc:`Governed Agentic Platform: SRBN Tool Harness and Model Portfolio <psp-000009>`
      - Vikrant Rathore
      - Draft
 
@@ -276,7 +276,7 @@ Draft PSPs (under development)
      - Draft
    * - :psp:`000009`
      - Enhancement
-     - :doc:`Multi-Model Agentic Platform: SRBN Tool Harness and Platform Contract <psp-000009>`
+     - :doc:`Governed Agentic Platform: SRBN Tool Harness and Model Portfolio <psp-000009>`
      - Vikrant Rathore
      - Draft
 
