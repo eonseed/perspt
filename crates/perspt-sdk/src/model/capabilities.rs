@@ -91,7 +91,8 @@ pub enum CapabilityDegradation {
     /// Route accounting marks the route cache-cold; routing weights it
     /// accordingly.
     PromptCaching,
-    /// Node falls back to `Bundle` execution mode, with the reason recorded.
+    /// Route is ineligible as an actuator; an explicit tool-capable fallback
+    /// must be selected or the session must stop.
     ToolCalling,
     /// The route's context window is smaller than the node's packed context;
     /// the route is ineligible for that node.

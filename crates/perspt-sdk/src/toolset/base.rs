@@ -66,6 +66,32 @@ fn entry(
 fn read_entries() -> Vec<ToolEntry> {
     vec![
         entry(
+            "tool_search",
+            "Find governed tools by capability, name, and description; matching schemas become available on the next turn",
+            EffectKind::ToolSearch,
+            RiskClass::Low,
+            schema(&[
+                ("query", "string", "Capability or operation to find", true),
+                ("limit", "integer", "Maximum matches, from 1 to 12", false),
+            ]),
+            FootprintSpec::default(),
+            false,
+        ),
+        entry(
+            "tool_program",
+            "Run a bounded pure Starlark program that returns nested tool proposals; each nested call is mediated separately",
+            EffectKind::ToolProgram,
+            RiskClass::Low,
+            schema(&[(
+                "source",
+                "string",
+                "Starlark whose final expression is main and whose main() returns call JSON",
+                true,
+            )]),
+            FootprintSpec::default(),
+            false,
+        ),
+        entry(
             "read_file",
             "Read a file's contents with optional offset/limit windows; returns line-numbered text",
             EffectKind::ReadFile,
@@ -259,6 +285,20 @@ fn relocation_entries() -> Vec<ToolEntry> {
 /// state depends on the workspace, so they serialize rather than race.
 fn command_entries() -> Vec<ToolEntry> {
     vec![
+        entry(
+            "exec",
+            "Run one shell-free, read-only OS program in the workspace sandbox; use rg, git diff/status/log/show, awk, sed -n, or coreutils",
+            EffectKind::Search,
+            RiskClass::Low,
+            schema(&[(
+                "command",
+                "string",
+                "One direct program invocation; pipes, redirects, expansion, and mutation commands are denied",
+                true,
+            )]),
+            FootprintSpec::opaque(),
+            false,
+        ),
         entry(
             "run_test",
             "Run the domain's declared test command; output is parsed into residuals",

@@ -59,9 +59,11 @@ pub fn has_shell_composition(raw: &str) -> bool {
 /// Canonicalize a raw command string. A command free of shell composition is
 /// parsed into the `Program` form; otherwise it is a `Shell` invocation that
 /// requires a shell capability. Parsing is intentionally simple and
-/// whitespace-based; quoting beyond simple tokens forces the `Shell` form.
+/// shell-free: quoting is parsed as argv syntax, while composition operators
+/// still force the `Shell` form. Invalid argv syntax also fails closed to the
+/// shell form and therefore requires explicit shell authority.
 pub fn canonicalize(raw: &str, cwd: &str) -> CommandInvocation {
-    if has_shell_composition(raw) || raw.contains('\'') || raw.contains('"') {
+    if has_shell_composition(raw) {
         return CommandInvocation::Shell {
             script: raw.to_string(),
             cwd: cwd.to_string(),
@@ -69,11 +71,21 @@ pub fn canonicalize(raw: &str, cwd: &str) -> CommandInvocation {
             declared_writes: Vec::new(),
         };
     }
-    let mut tokens = raw.split_whitespace();
+    let mut tokens = match shell_words::split(raw) {
+        Ok(tokens) => tokens.into_iter(),
+        Err(_) => {
+            return CommandInvocation::Shell {
+                script: raw.to_string(),
+                cwd: cwd.to_string(),
+                declared_reads: Vec::new(),
+                declared_writes: Vec::new(),
+            };
+        }
+    };
     match tokens.next() {
         Some(program) => CommandInvocation::Program {
-            program: program.to_string(),
-            args: tokens.map(|s| s.to_string()).collect(),
+            program,
+            args: tokens.collect(),
             cwd: cwd.to_string(),
             env: BTreeMap::new(),
         },
@@ -104,17 +116,10 @@ pub enum CommandTier {
 pub fn classify_tier(invocation: &CommandInvocation) -> CommandTier {
     let (program, args) = match invocation {
         CommandInvocation::Program { program, args, .. } => (program.as_str(), args.as_slice()),
-        // A shell script is treated as mutation unless an explicit declaration
-        // proves otherwise; the kernel still requires a shell capability.
-        CommandInvocation::Shell {
-            declared_writes, ..
-        } => {
-            return if declared_writes.is_empty() {
-                CommandTier::Inspection
-            } else {
-                CommandTier::Mutation
-            };
-        }
+        // A declaration is an assertion, not proof. Shell composition is
+        // always mutation-tier; a process sandbox may still enforce a
+        // read-only filesystem for explicitly approved inspection scripts.
+        CommandInvocation::Shell { .. } => return CommandTier::Mutation,
     };
 
     let base = program.rsplit('/').next().unwrap_or(program);
@@ -164,6 +169,31 @@ mod tests {
     fn piped_command_is_shell_form() {
         let cmd = canonicalize("cat x | grep y", "/repo");
         assert!(cmd.requires_shell());
+    }
+
+    #[test]
+    fn quotes_preserve_a_direct_program_invocation() {
+        let cmd = canonicalize(r#"rg "hello world" src"#, "/repo");
+        assert_eq!(
+            cmd,
+            CommandInvocation::Program {
+                program: "rg".into(),
+                args: vec!["hello world".into(), "src".into()],
+                cwd: "/repo".into(),
+                env: BTreeMap::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_shell_write_declaration_is_not_read_only_proof() {
+        let command = CommandInvocation::Shell {
+            script: "cat x | rg y".into(),
+            cwd: "/repo".into(),
+            declared_reads: vec!["x".into()],
+            declared_writes: Vec::new(),
+        };
+        assert_eq!(classify_tier(&command), CommandTier::Mutation);
     }
 
     #[test]
