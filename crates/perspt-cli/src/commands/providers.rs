@@ -9,7 +9,9 @@ use anyhow::Result;
 use perspt_core::{Config, ModelPortfolio, ProviderCaps};
 
 /// Print the provider capability matrix for the effective configuration.
-pub async fn run(config_path: Option<std::path::PathBuf>) -> Result<()> {
+/// With `--probe`, additionally run a live behavioral probe per configured
+/// model route and print what each route was *observed* to do.
+pub async fn run(config_path: Option<std::path::PathBuf>, probe: bool) -> Result<()> {
     let path = config_path.or_else(perspt_core::paths::resolve_config_file);
     let config = match path {
         Some(p) => Config::load_from_path(&p)?,
@@ -52,7 +54,69 @@ pub async fn run(config_path: Option<std::path::PathBuf>) -> Result<()> {
         );
     }
     println!();
-    println!("A route without tool support falls back to bundle mode with the reason recorded.");
+    println!("A route without native tool calling is ineligible as an actuator (Gate U).");
+
+    if probe {
+        probe_routes(&config).await?;
+    }
+    Ok(())
+}
+
+/// Live behavioral probes: one scripted two-tool round trip per configured
+/// model route, with evidence labelled `behavioral`.
+async fn probe_routes(config: &Config) -> Result<()> {
+    let Some(models) = config.models.clone() else {
+        println!();
+        println!("No [models] routes configured; nothing to probe.");
+        return Ok(());
+    };
+    let portfolio = std::sync::Arc::new(ModelPortfolio::from_config(config)?);
+    let transport = perspt_agent::GenAiTransport::new(portfolio);
+    let mut routes: Vec<(&str, String)> = Vec::new();
+    for (role, model) in [
+        ("architect", models.architect),
+        ("verifier", models.verifier),
+        ("speculator", models.speculator),
+        ("actuator", models.actuator),
+        ("adjudicator", models.adjudicator),
+    ] {
+        if let Some(model) = model {
+            if !routes.iter().any(|(_, existing)| existing == &model) {
+                routes.push((role, model));
+            }
+        }
+    }
+    anyhow::ensure!(!routes.is_empty(), "no [models] routes configured to probe");
+
+    println!();
+    println!("Behavioral probes (live, two-tool round trip per route):");
+    println!();
+    println!(
+        "  {:<12} {:<28} {:>6} {:>6} {:>9} {:>7} {:>6} {:>8}",
+        "role", "model", "tools", "both", "parallel", "schema", "turns", "seconds",
+    );
+    for (role, model) in routes {
+        let model: perspt_sdk::ModelId = model
+            .parse()
+            .map_err(|e| anyhow::anyhow!("route {role}: {e}"))?;
+        let report = perspt_agent::probe_route(&transport, &model).await;
+        println!(
+            "  {:<12} {:<28} {:>6} {:>6} {:>9} {:>7} {:>6} {:>7.2}s",
+            role,
+            report.model,
+            mark(report.tool_call_round_trip),
+            mark(report.multi_tool_selection),
+            mark(report.parallel_tool_calls),
+            mark(report.schema_arguments_valid),
+            report.turns,
+            report.total_seconds,
+        );
+        if let Some(error) = &report.error {
+            println!("    error: {error}");
+        }
+    }
+    println!();
+    println!("Evidence source: behavioral (observed on live round trips, not declared).");
     Ok(())
 }
 

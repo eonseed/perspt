@@ -152,7 +152,11 @@ enum Commands {
     Status,
 
     /// Print the provider capability matrix (PSP-9)
-    Providers,
+    Providers {
+        /// Run live behavioral probes against every configured model route
+        #[arg(long)]
+        probe: bool,
+    },
 
     /// Deterministic, credential-free audit replay of a session (PSP-9)
     Replay {
@@ -312,7 +316,9 @@ async fn main() -> Result<()> {
             stats,
         }) => commands::ledger::run(recent, rollback, stats).await,
         Some(Commands::Status) => commands::status::run().await,
-        Some(Commands::Providers) => commands::providers::run(config_override).await,
+        Some(Commands::Providers { probe }) => {
+            commands::providers::run(config_override, probe).await
+        }
         Some(Commands::Replay {
             session_id,
             db_path,

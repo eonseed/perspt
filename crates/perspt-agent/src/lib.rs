@@ -10,6 +10,7 @@ pub mod grant;
 pub mod ledger;
 pub mod lsp;
 pub mod orchestrator;
+pub mod probe;
 pub mod prompt_compiler;
 pub mod prompts;
 pub mod realize;
@@ -29,6 +30,7 @@ pub use ledger::{
 };
 pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use orchestrator::SRBNOrchestrator;
+pub use probe::{probe_route, ProbeReport};
 pub use realize::{snapshot_workspace, ProjectionMismatch, SnapshotRealizer, WorkspaceState};
 pub use runtime::{Psp9AgentRuntime, Psp9ModelRoutes, Psp9Recorder, Psp9RunConfig, Psp9RunSummary};
 pub use test_runner::{PythonTestRunner, TestFailure, TestResults, TestRunner};
