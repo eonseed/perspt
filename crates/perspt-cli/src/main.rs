@@ -158,19 +158,34 @@ enum Commands {
     Replay {
         /// The session id to replay
         session_id: String,
+
+        /// Database file to inspect (defaults to the standard store)
+        #[arg(long)]
+        db_path: Option<std::path::PathBuf>,
     },
 
-    /// Abort the current agent session
+    /// Abort a PSP-9 session by revoking its authority epoch
     Abort {
         /// Force abort without confirmation
         #[arg(short, long)]
         force: bool,
+
+        /// Session to abort (defaults to the newest running PSP-9 session)
+        session_id: Option<String>,
     },
 
     /// Resume a paused or crashed session
     Resume {
-        /// Session ID to resume (or --last for most recent)
+        /// Session ID to resume
         session_id: Option<String>,
+
+        /// Resume the most recent session
+        #[arg(long)]
+        last: bool,
+
+        /// Database file to inspect (defaults to the standard store)
+        #[arg(long)]
+        db_path: Option<std::path::PathBuf>,
     },
 
     /// View LLM request/response logs
@@ -298,9 +313,18 @@ async fn main() -> Result<()> {
         }) => commands::ledger::run(recent, rollback, stats).await,
         Some(Commands::Status) => commands::status::run().await,
         Some(Commands::Providers) => commands::providers::run(config_override).await,
-        Some(Commands::Replay { session_id }) => commands::replay::run(session_id).await,
-        Some(Commands::Abort { force }) => commands::abort::run(force).await,
-        Some(Commands::Resume { session_id }) => commands::resume::run(session_id).await,
+        Some(Commands::Replay {
+            session_id,
+            db_path,
+        }) => commands::replay::run(session_id, db_path).await,
+        Some(Commands::Abort { force, session_id }) => {
+            commands::abort::run(force, session_id).await
+        }
+        Some(Commands::Resume {
+            session_id,
+            last,
+            db_path,
+        }) => commands::resume::run(session_id, last, db_path).await,
         Some(Commands::Logs {
             session_id,
             last,

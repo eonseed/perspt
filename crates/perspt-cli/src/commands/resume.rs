@@ -4,10 +4,17 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 /// Resume a paused or crashed session
-pub async fn run(session_id: Option<String>) -> Result<()> {
-    let store = perspt_store::SessionStore::new().context("Failed to open session store")?;
+pub async fn run(session_id: Option<String>, last: bool, db_path: Option<PathBuf>) -> Result<()> {
+    let store = super::psp9_chain::open_store(db_path.as_deref(), false)?;
 
-    match session_id {
+    let target = if last {
+        let sessions = store.list_recent_sessions(1)?;
+        anyhow::ensure!(!sessions.is_empty(), "no sessions found to resume");
+        Some(sessions[0].session_id.clone())
+    } else {
+        session_id
+    };
+    match target {
         Some(id) => resume_session(&store, &id).await,
         None => list_sessions(&store).await,
     }
@@ -68,16 +75,7 @@ async fn list_sessions(store: &perspt_store::SessionStore) -> Result<()> {
 
 /// Resume a specific session
 async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) -> Result<()> {
-    // Handle --last flag
-    let actual_id = if session_id == "--last" {
-        let sessions = store.list_recent_sessions(1)?;
-        if sessions.is_empty() {
-            anyhow::bail!("No sessions found to resume");
-        }
-        sessions[0].session_id.clone()
-    } else {
-        session_id.to_string()
-    };
+    let actual_id = session_id.to_string();
 
     // Get the session
     let session = store
@@ -336,30 +334,28 @@ async fn resume_psp9(
             files.len()
         );
     }
-    store.update_session_status(&session.session_id, "COMPLETED_PSP9")?;
+    // Finishing an interrupted promotion completes only sessions that were
+    // still running; a FAILED/ESCALATED/ABORTED terminal status is evidence
+    // and must never be relabelled as success.
+    if session.status == "RUNNING_PSP9" {
+        store.update_session_status(&session.session_id, "COMPLETED_PSP9")?;
+        println!("Session marked COMPLETED_PSP9.");
+    } else {
+        println!("Preserved terminal status {}.", session.status);
+    }
     Ok(())
 }
 
 fn verify_psp9_chain(store: &perspt_store::SessionStore, session_id: &str) -> Result<()> {
-    let rows = store.get_psp9_events(session_id)?;
+    let (ledger, tampered) = super::psp9_chain::rebuild_and_verify(store, session_id)?;
     anyhow::ensure!(
-        !rows.is_empty(),
+        !ledger.is_empty(),
         "PSP-9 session has no durable ledger events"
     );
-    let mut ledger = perspt_sdk::Ledger::new();
-    for (sequence, row) in rows.iter().enumerate() {
-        anyhow::ensure!(row.sequence == sequence as i64, "ledger sequence mismatch");
-        anyhow::ensure!(
-            row.prev_hash == ledger.head(),
-            "ledger predecessor mismatch"
-        );
-        let event: perspt_sdk::LedgerEvent = serde_json::from_str(&row.event_json)?;
-        let head = ledger.append(event)?;
-        anyhow::ensure!(
-            head == row.hash,
-            "ledger hash mismatch at sequence {sequence}"
-        );
-    }
+    anyhow::ensure!(
+        tampered.is_empty(),
+        "PSP-9 ledger diverges from its stored hashes at sequences {tampered:?}"
+    );
     Ok(())
 }
 
