@@ -165,6 +165,33 @@ pub(crate) fn certify_promotion(
     Ok(true)
 }
 
+/// Uniform delayed-audit funding (resolved decision 4): at cold start every
+/// promoted candidate is audit-selected. The sample stays unlabeled until
+/// `perspt audit` ingests the delayed verdict; only labeled samples count
+/// toward the conformal floor.
+pub(crate) fn record_promotion_sample(
+    recorder: &Psp9Recorder,
+    calibration: &CalibrationBinding,
+    sample_id: &str,
+) -> Result<()> {
+    recorder.store.record_psp9_calibration_sample(
+        &calibration.epoch_id,
+        sample_id,
+        1.0, // score definition v1: hard pass ⇒ V = 0 ⇒ 1/(1+V)
+        None,
+        true,
+    )?;
+    recorder.record_custom(
+        "calibration_sample_recorded",
+        serde_json::json!({
+            "epoch_id": calibration.epoch_id,
+            "sample_id": sample_id,
+            "audit_selected": true,
+            "labeled": false,
+        }),
+    )
+}
+
 /// The kernel's durable witnesses for one loop: authority epoch, graph
 /// revision, and the wall clock (capability expiry fails closed without a
 /// `__now` witness, so `expires_at`-bearing capabilities stay enforceable).

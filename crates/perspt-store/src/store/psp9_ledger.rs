@@ -33,6 +33,9 @@ pub struct Psp9CalibrationEpochRow {
     pub sample_count: i64,
 }
 
+/// (sample_id, score, delayed unsafe label, audit_selected).
+pub type Psp9SampleRow = (String, f64, Option<bool>, bool);
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Psp9ExternalEffectRow {
     pub idempotency_key: String,
@@ -165,10 +168,7 @@ impl SessionStore {
             .transpose()
     }
 
-    pub fn psp9_calibration_samples(
-        &self,
-        epoch_id: &str,
-    ) -> Result<Vec<(String, f64, bool, bool)>> {
+    pub fn psp9_calibration_samples(&self, epoch_id: &str) -> Result<Vec<Psp9SampleRow>> {
         let conn = self.conn.lock().unwrap();
         let mut statement = conn.prepare(
             "SELECT sample_id, score, unsafe_label, audit_selected \
@@ -186,7 +186,7 @@ impl SessionStore {
         epoch_id: &str,
         sample_id: &str,
         score: f64,
-        unsafe_label: bool,
+        unsafe_label: Option<bool>,
         audit_selected: bool,
     ) -> Result<()> {
         self.conn.lock().unwrap().execute(
@@ -196,6 +196,58 @@ impl SessionStore {
             duckdb::params![epoch_id, sample_id, score, unsafe_label, audit_selected],
         )?;
         Ok(())
+    }
+
+    /// Ingest one delayed audit label. Returns how many rows were labeled
+    /// (0 when the sample is unknown or already labeled — labels are
+    /// single-assignment, matching the ledger's write-once discipline).
+    pub fn label_psp9_calibration_sample(&self, sample_id: &str, is_unsafe: bool) -> Result<usize> {
+        let updated = self.conn.lock().unwrap().execute(
+            "UPDATE psp9_calibration_samples SET unsafe_label = ? \
+             WHERE sample_id = ? AND unsafe_label IS NULL",
+            duckdb::params![is_unsafe, sample_id],
+        )?;
+        Ok(updated)
+    }
+
+    /// Audit-selected samples still waiting for their delayed label.
+    pub fn pending_psp9_audit_samples(&self, limit: usize) -> Result<Vec<(String, String, f64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT epoch_id, sample_id, score FROM psp9_calibration_samples \
+             WHERE audit_selected AND unsafe_label IS NULL \
+             ORDER BY created_at LIMIT ?",
+        )?;
+        let rows =
+            statement.query_map([limit], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Every labeled sample across all epochs of one serialized stratum, for
+    /// threshold recomputation. Unlabeled samples never count toward the
+    /// conformal floor.
+    pub fn labeled_psp9_samples_for_stratum(&self, stratum: &str) -> Result<Vec<(f64, bool)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT s.score, s.unsafe_label \
+             FROM psp9_calibration_samples s \
+             JOIN psp9_calibration_epochs e ON e.epoch_id = s.epoch_id \
+             WHERE e.stratum = ? AND s.unsafe_label IS NOT NULL \
+             ORDER BY s.created_at, s.sample_id",
+        )?;
+        let rows = statement.query_map([stratum], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// The stratum an epoch belongs to.
+    pub fn psp9_epoch_stratum(&self, epoch_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement =
+            conn.prepare("SELECT stratum FROM psp9_calibration_epochs WHERE epoch_id = ?")?;
+        let mut rows = statement.query([epoch_id])?;
+        Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
     }
 
     /// Append one PSP-9 ledger record durably.
@@ -445,7 +497,7 @@ mod tests {
             })
             .unwrap();
         store
-            .record_psp9_calibration_sample("e1", "sample-1", 0.2, false, true)
+            .record_psp9_calibration_sample("e1", "sample-1", 0.2, None, true)
             .unwrap();
         assert_eq!(
             store
@@ -457,7 +509,53 @@ mod tests {
         );
         assert_eq!(
             store.psp9_calibration_samples("e1").unwrap(),
-            vec![("sample-1".into(), 0.2, false, true)]
+            vec![("sample-1".into(), 0.2, None, true)]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn delayed_audit_labels_are_single_assignment() {
+        let (dir, store) = scratch_store();
+        store
+            .record_psp9_calibration_epoch(&Psp9CalibrationEpochRow {
+                epoch_id: "e1".into(),
+                stratum: "rust:test:v1".into(),
+                target_rho: 0.1,
+                threshold: None,
+                state: "insufficient_samples".into(),
+                sample_count: 0,
+            })
+            .unwrap();
+        store
+            .record_psp9_calibration_sample("e1", "sample-1", 0.2, None, true)
+            .unwrap();
+        assert_eq!(
+            store.pending_psp9_audit_samples(10).unwrap(),
+            vec![("e1".into(), "sample-1".into(), 0.2)]
+        );
+        assert_eq!(
+            store
+                .label_psp9_calibration_sample("sample-1", false)
+                .unwrap(),
+            1
+        );
+        // A second label never overwrites the first.
+        assert_eq!(
+            store
+                .label_psp9_calibration_sample("sample-1", true)
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            store
+                .labeled_psp9_samples_for_stratum("rust:test:v1")
+                .unwrap(),
+            vec![(0.2, false)]
+        );
+        assert_eq!(
+            store.psp9_epoch_stratum("e1").unwrap().as_deref(),
+            Some("rust:test:v1")
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -84,6 +84,16 @@ struct NodeAssembly {
     barrier: OperationalSafetyBarrier,
     cadence: perspt_sdk::VerificationCadence,
     energy: perspt_sdk::EnergyModel,
+    calibration: CalibrationBinding,
+}
+
+/// The immutable calibration epoch this run is bound to.
+#[derive(Debug, Clone)]
+struct CalibrationBinding {
+    epoch_id: String,
+    stratum: String,
+    state: String,
+    threshold: Option<f64>,
 }
 
 /// Everything `conclude_run` needs to decide a node's terminal fate.
@@ -98,6 +108,7 @@ struct ConcludeContext<'a> {
     barrier: &'a OperationalSafetyBarrier,
     kernel_state: &'a perspt_sdk::KernelState,
     loop_outcome: &'a NodeTerminalOutcome,
+    calibration: &'a CalibrationBinding,
 }
 
 mod node;
@@ -374,6 +385,7 @@ impl Psp9AgentRuntime {
             barrier,
             cadence,
             energy,
+            calibration,
         } = self.assemble_node(&recorder, &session_id, &running_graph, &node_id)?;
         let kernel_state = loop_kernel_state(&grant_policy, &running_graph.revision_id);
         let tool_loop = ToolLoop {
@@ -412,6 +424,7 @@ impl Psp9AgentRuntime {
                 barrier: &barrier,
                 kernel_state: &kernel_state,
                 loop_outcome: &outcome.outcome,
+                calibration: &calibration,
             })
             .await?;
         let (final_outcome, status, promoted_paths) = verdict;
@@ -525,7 +538,8 @@ impl Psp9AgentRuntime {
         let barrier = OperationalSafetyBarrier::default();
         let cadence = domain.verifier_suite(&scope).cadence;
         let energy = domain.energy_model(&scope);
-        self.record_calibration_readiness(recorder, &catalog, &capability, &cadence)?;
+        let calibration =
+            self.record_calibration_readiness(recorder, &catalog, &capability, &cadence)?;
         Ok(NodeAssembly {
             catalog,
             grant_policy,
@@ -534,6 +548,7 @@ impl Psp9AgentRuntime {
             barrier,
             cadence,
             energy,
+            calibration,
         })
     }
 
@@ -546,16 +561,15 @@ impl Psp9AgentRuntime {
     ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
         let hard_pass = matches!(ctx.loop_outcome, NodeTerminalOutcome::HardPass);
         let promotion_approved = if hard_pass {
-            self.adjudicate_candidate(ctx.recorder, ctx.candidate, ctx.task, ctx.node_id)
-                .await?
-                && self
-                    .approve_promotion(
-                        ctx.recorder,
-                        ctx.node_id,
-                        ctx.candidate.touched_paths(),
-                        ctx.candidate.realized_diff().ok(),
-                    )
-                    .await?
+            let adjudicated = self
+                .adjudicate_candidate(
+                    ctx.recorder,
+                    ctx.candidate,
+                    ctx.task,
+                    &ctx.calibration.stratum,
+                )
+                .await?;
+            adjudicated && self.conformal_or_human_approval(&ctx).await?
         } else {
             false
         };
@@ -578,6 +592,7 @@ impl Psp9AgentRuntime {
                     ctx.contract,
                     ctx.barrier,
                     ctx.kernel_state,
+                    ctx.calibration,
                 )
                 .await?;
             match certified {
@@ -610,6 +625,42 @@ impl Psp9AgentRuntime {
         Ok((final_outcome, status, promoted_paths))
     }
 
+    /// Autonomous commitment (PSP-9 Gate Q): with an *activated* calibration
+    /// epoch for this exact stratum — reached only at the finite sample floor
+    /// through delayed audit labels — a hard-pass candidate above the
+    /// conformal threshold commits without a human prompt, and the certified
+    /// accept is ledgered. Any other state (shadow, insufficient samples,
+    /// stale) backs off to the configured approval policy.
+    async fn conformal_or_human_approval(&mut self, ctx: &ConcludeContext<'_>) -> Result<bool> {
+        // Score definition v1: hard pass ⇒ V = 0 ⇒ score 1/(1+V) = 1.0.
+        const HARD_PASS_SCORE: f64 = 1.0;
+        let certified = self.config.approval_policy == ApprovalPolicy::Ask
+            && ctx.calibration.state == "active"
+            && ctx
+                .calibration
+                .threshold
+                .is_some_and(|theta| HARD_PASS_SCORE > theta);
+        if certified {
+            ctx.recorder.record_custom(
+                "conformal_certified_accept",
+                serde_json::json!({
+                    "epoch_id": ctx.calibration.epoch_id,
+                    "threshold": ctx.calibration.threshold,
+                    "score": HARD_PASS_SCORE,
+                    "node_id": ctx.node_id,
+                }),
+            )?;
+            return Ok(true);
+        }
+        self.approve_promotion(
+            ctx.recorder,
+            ctx.node_id,
+            ctx.candidate.touched_paths(),
+            ctx.candidate.realized_diff().ok(),
+        )
+        .await
+    }
+
     /// Certify and perform the run's one durable effect. Promotion passes
     /// through the same five-clause kernel as every candidate mutation: a
     /// `WriteArtifact` proposal over the realized mutated paths, evaluated
@@ -626,6 +677,7 @@ impl Psp9AgentRuntime {
         contract: &CodingContract,
         barrier: &OperationalSafetyBarrier,
         kernel_state: &perspt_sdk::KernelState,
+        calibration: &CalibrationBinding,
     ) -> Result<Option<Vec<String>>> {
         anyhow::ensure!(
             recorder.authority_epoch()? == grant_policy.authority_epoch,
@@ -681,6 +733,7 @@ impl Psp9AgentRuntime {
             "candidate_promoted",
             serde_json::json!({"node_id": node_id, "paths": promoted_paths}),
         )?;
+        record_promotion_sample(recorder, calibration, &realized.state_root)?;
         Ok(Some(promoted_paths))
     }
 
@@ -720,14 +773,14 @@ impl Psp9AgentRuntime {
         Ok(())
     }
 
-    fn record_calibration_readiness(
+    /// The exact fingerprinted stratum this run calibrates under: model
+    /// route, verifier suite, catalog, policy, and score definition.
+    fn calibration_stratum(
         &self,
-        recorder: &Psp9Recorder,
         catalog: &StaticCatalog,
         capability: &Capability,
         cadence: &perspt_sdk::VerificationCadence,
-    ) -> Result<()> {
-        const TARGET_RHO: f64 = 0.05;
+    ) -> Result<perspt_sdk::CalibrationStratum> {
         let verifier_suite_fingerprint =
             perspt_sdk::content_hash(&serde_json::to_vec(&serde_json::json!({
                 "cadence": cadence,
@@ -740,7 +793,7 @@ impl Psp9AgentRuntime {
         let tool_catalog_fingerprint = perspt_sdk::content_hash(&serde_json::to_vec(
             &catalog.specs_for(std::slice::from_ref(capability), true),
         )?);
-        let stratum = perspt_sdk::CalibrationStratum {
+        Ok(perspt_sdk::CalibrationStratum {
             domain_package: "perspt-coding".into(),
             domain_version: env!("CARGO_PKG_VERSION").into(),
             effect_kind: "candidate_promotion".into(),
@@ -750,7 +803,18 @@ impl Psp9AgentRuntime {
             tool_catalog_fingerprint,
             policy_version: "coding-contract-v1".into(),
             score_definition: "hard-gate-plus-quadratic-energy-v1".into(),
-        };
+        })
+    }
+
+    fn record_calibration_readiness(
+        &self,
+        recorder: &Psp9Recorder,
+        catalog: &StaticCatalog,
+        capability: &Capability,
+        cadence: &perspt_sdk::VerificationCadence,
+    ) -> Result<CalibrationBinding> {
+        const TARGET_RHO: f64 = 0.05;
+        let stratum = self.calibration_stratum(catalog, capability, cadence)?;
         let serialized = serde_json::to_string(&stratum)?;
         let epoch = match recorder.store.latest_psp9_calibration_epoch(&serialized)? {
             Some(epoch) => epoch,
@@ -769,6 +833,7 @@ impl Psp9AgentRuntime {
         };
         let need = perspt_sdk::sample_floor(epoch.target_rho)
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let certified = epoch.state == "active" && epoch.threshold.is_some();
         recorder.record_custom(
             "calibration_readiness",
             serde_json::json!({
@@ -779,11 +844,22 @@ impl Psp9AgentRuntime {
                 "sample_floor": need,
                 "target_rho": epoch.target_rho,
                 "threshold": epoch.threshold,
-                "certified_for_promotion": false,
-                "reason": "coding promotion currently relies on deterministic contract, \
-                            barrier, and verifier evidence; no probabilistic claim is used",
+                "certified_for_promotion": certified,
+                "reason": if certified {
+                    "an activated epoch at the finite sample floor backs the \
+                     conformal accepted-unsafe bound for this stratum"
+                } else {
+                    "coding promotion currently relies on deterministic contract, \
+                     barrier, and verifier evidence; no probabilistic claim is used"
+                },
             }),
-        )
+        )?;
+        Ok(CalibrationBinding {
+            epoch_id: epoch.epoch_id,
+            stratum: epoch.stratum,
+            state: epoch.state,
+            threshold: epoch.threshold,
+        })
     }
 
     async fn explore(&self, recorder: &Psp9Recorder, task: &str) -> Result<String> {
@@ -855,7 +931,7 @@ impl Psp9AgentRuntime {
         recorder: &Psp9Recorder,
         candidate: &CandidateWorkspace,
         task: &str,
-        node_id: &str,
+        stratum: &str,
     ) -> Result<bool> {
         let Some(model) = &self.adjudicator_model else {
             return Ok(true);
@@ -896,11 +972,13 @@ impl Psp9AgentRuntime {
             .context("adjudicator did not return strict verdict JSON")?;
         let evidence_hash = recorder.record_artifact(text.as_bytes(), "application/json")?;
         let candidate_id = candidate.checkpoint(&[]).await?.witness.state_root;
+        // The verdict shares the epoch's serialized stratum so verdicts and
+        // calibration samples can be joined during delayed-label ingestion.
         recorder.store.record_psp9_verdict(&Psp9VerdictRow {
             session_id: recorder.session_id.clone(),
             candidate_id,
             validator_id: model.to_string(),
-            stratum: format!("coding:{node_id}:adjudicator:{model}:uncalibrated"),
+            stratum: stratum.to_string(),
             missed: !verdict.pass,
             unsafe_label: None,
             evidence_hash,

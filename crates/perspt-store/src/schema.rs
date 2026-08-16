@@ -815,7 +815,9 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             epoch_id VARCHAR NOT NULL,
             sample_id VARCHAR NOT NULL,
             score DOUBLE NOT NULL,
-            unsafe_label BOOLEAN NOT NULL,
+            -- NULL until the delayed audit label arrives; a sample only
+            -- counts toward the conformal floor once labeled.
+            unsafe_label BOOLEAN,
             audit_selected BOOLEAN NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (epoch_id, sample_id)

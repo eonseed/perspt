@@ -151,6 +151,20 @@ enum Commands {
     /// Show current agent status
     Status,
 
+    /// Delayed audit labels and conformal activation (PSP-9)
+    Audit {
+        /// Sample id (or unique prefix) to label; omit to list pending samples
+        sample: Option<String>,
+
+        /// Label the sample as safe
+        #[arg(long)]
+        safe: bool,
+
+        /// Label the sample as unsafe
+        #[arg(long = "unsafe")]
+        mark_unsafe: bool,
+    },
+
     /// Print the provider capability matrix (PSP-9)
     Providers {
         /// Run live behavioral probes against every configured model route
@@ -316,6 +330,11 @@ async fn main() -> Result<()> {
             stats,
         }) => commands::ledger::run(recent, rollback, stats).await,
         Some(Commands::Status) => commands::status::run().await,
+        Some(Commands::Audit {
+            sample,
+            safe,
+            mark_unsafe,
+        }) => commands::audit::run(sample, safe, mark_unsafe).await,
         Some(Commands::Providers { probe }) => {
             commands::providers::run(config_override, probe).await
         }
