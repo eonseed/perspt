@@ -570,10 +570,12 @@ runs.
      - ``conformal::{conformal_threshold, decide,
        is_drifted, CalibrationState}``
      - System 16, keyed per route
-   * - III: Thm 6 recovery termination
+   * - III: Def. 8.1, Thm 6 recovery
+       termination
      - ``scheduler::{recovery_is_total,
        repair_to_effects, RepairAction}``
-     - System 11, extended to transport failures
+     - System 11, extended to transport failures; one shared cascade pool and
+       the four Theorem 6 terminal classes
    * - III: Thm 7 replay determinism
      - ``ledger::{record_observation,
        replay_accepted_trajectory}``
@@ -619,6 +621,75 @@ effects are mediated; exact replay (Theorem 7) once full transition inputs and
 observations are durable; calibrated budgets (Theorem 5) only for a valid
 calibration stratum; and ensemble risk (Corollary 5.2) only for a labeled
 conjunctive validator gate with conservative estimates.
+
+.. rubric:: Notation: Budgets and Tolerances That Are Not Interchangeable
+
+Paper III states the hazard in its own words — the platform's budgets "are
+related accounting devices, not interchangeable assumptions" — and the trilogy
+reuses :math:`\rho` and :math:`\delta` for several distinct quantities. This
+PSP is the first document to wire all of them into one runtime, so it fixes the
+names here. An implementation that stores two of these in one configuration
+field has already lost the corresponding theorem.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 20 66
+
+   * - Symbol
+     - Source
+     - What it is, and what it is not
+   * - :math:`\rho_{\text{gate}}`
+     - Paper II gate, Lemma 1
+     - The measured descent tolerance (``descent_tolerance``). It sets the
+       Lemma 1 decision bound and Theorem 9's :math:`\phi_i`. It is not a
+       probability and is never calibrated from outcome data.
+   * - :math:`B`
+     - Paper II Lemma 1
+     - The correction budget, consumed by rejections and *not* by
+       descent-acceptances.
+   * - :math:`b`, :math:`k`
+     - Paper III Def. 8.1, Thm 6
+     - The shared non-replenishing cascade budget and the escalation depth
+       (``cascade_budget``). Distinct from :math:`B`: a node may exhaust
+       :math:`B` without ever entering a recovery cascade.
+   * - :math:`c_c`
+     - Paper III Def. 3.2, Thm 4
+     - A capability's certified barrier increment. It is simultaneously the
+       barrier-clause allowance and the exact risk-clause debit (system 12).
+   * - :math:`\rho_{\text{cap}}`
+     - Paper III Def. 3.2, risk clause
+     - The per-capability risk budget satisfying
+       :math:`\text{spent}(x)+c_c\le\rho_{\text{cap}}` (``risk_budget``). It
+       bounds accumulated certified increment. It is asserted by policy, not
+       measured.
+   * - :math:`\rho_t`
+     - Paper III Thm 3
+     - A *conditional* per-step chance bound along the ledger filtration,
+       giving the horizon-linear bound :math:`\sum_t\rho_t`. Perspt does not
+       assert it directly; where a ``BarrierEvaluator`` is registered it is
+       obtained from :math:`c_c` via Theorem 4, and :math:`\rho_{\text{cap}}`
+       is what keeps the horizon sum finite within a session.
+   * - :math:`\rho_c`
+     - Paper III Thm 5
+     - The *marginal* accepted-unsafe budget calibrated conformally
+       (``calibration_target_rho``). Theorem 5's own text is explicit that this
+       "is not, by itself, the conditional workflow bound assumed in
+       Theorem 3."
+   * - :math:`\rho_{\text{eff}}`
+     - Paper III Cor. 5.2
+     - An upper bound on a conjunctive validator ensemble's joint miss
+       probability. Not a budget, not configurable, and reportable only under
+       system 8's evidence conditions.
+   * - :math:`\delta`
+     - Papers I–II
+     - The exogenous disturbance bound in the ISS tube
+       :math:`V_\infty=\delta^2/(2(\alpha-\beta)^2\mu)`; present today as
+       ``StabilityClaim.delta``.
+   * - :math:`\delta_r`
+     - Paper I Assumption 6
+     - The realizability residual bound — a property of :math:`\pi` and
+       :math:`E`, not of the environment. It lives in ``RealizabilityClaim``
+       and never in ``StabilityClaim.delta`` (system 10).
 
 .. rubric:: How Domains and Plugins Extend This
 
@@ -1165,7 +1236,7 @@ generation.
 
    Algorithm: SRBN tool loop (one node generation)
    Input:  goal G, conversation T, capabilities C, catalog K, verifier suite Q,
-           route R, descent tolerance rho, correction budget B, turn budget N,
+           route R, descent tolerance rho_gate, correction budget B, turn budget N,
            max tool calls per turn M, max unverified mutations H
    Output: terminal checkpoint eligible for delivery, or residual certificate
 
@@ -1193,7 +1264,7 @@ generation.
    15.     evidence <- Q.run(c_real)                        # MEASURE
    16.     residuals <- typed_residuals(evidence, turn_outcomes)
    17.     V <- score_candidate(residuals, fixed_energy_model)
-   18.     decision <- gate(hard_pass(evidence), V, V_best, rho,
+   18.     decision <- gate(hard_pass(evidence), V, V_best, rho_gate,
                             declared_energy_floor)
    19.     if decision is hard pass:
    20.         checkpoint(c_real); finalize_delivery(c_real); return HardPass
@@ -1239,10 +1310,11 @@ Properties the implementation must preserve:
   recorded as :math:`\lVert r_k\rVert` only when a domain provides the paper's
   normed proxy geometry.
 * **Finite decisions (Paper II Lemma 1).** Every accepted descent at line 23
-  decreases accepted energy by at least ``rho``; every non-terminal rejection
-  at line 27 decreases a finite budget. The loop makes at most
-  :math:`\lfloor V_0/\rho\rfloor + B + 1` gate decisions. The SDK exposes this
-  as ``gate::finite_decision_bound`` and ``AcceptedTrajectory::decision_bound``;
+  decreases accepted energy by at least :math:`\rho_{\text{gate}}`; every
+  non-terminal rejection at line 27 decreases a finite budget. The loop makes at
+  most :math:`\lfloor V_0/\rho_{\text{gate}}\rfloor + B + 1` gate decisions.
+  The SDK exposes this as ``gate::finite_decision_bound`` and
+  ``AcceptedTrajectory::decision_bound``;
   the tool loop SHALL log the bound at node entry and SHALL fail the run if the
   realised decision count exceeds it.
 * **Bounded unchecked interval (Paper II Theorem 3).** ``N`` bounds model turns,
@@ -1352,6 +1424,16 @@ joint miss directly, as Lemma 5.1 requires; they are never assigned
 :math:`\kappa=0`.  Point estimates are diagnostics.  A reported certificate
 uses conservative upper confidence bounds for pairwise joint misses and records
 sample count, stratum, label source, and interval method.
+
+**The bound is exact only for a pair.** Corollary 5.2 is exact at
+:math:`n=2` and deliberately conservative for :math:`n>2`, where the minimum
+pairwise joint miss can be far larger than the true :math:`n`-way joint miss.
+Perspt therefore reports :math:`\rho_{\text{eff}}` as an upper bound and
+:math:`n` alongside it, and SHALL NOT tighten it by inferring higher-order
+joint statistics from pairwise correlations — the paper rules that inference out
+explicitly, and a finite ledger cannot estimate the higher-order terms that
+would license it. A three-validator ensemble whose reported bound improved on
+its best pair would be a defect, not a better certificate.
 
 **Crediting.** Correlation controls the reported risk bound of a conjunctive
 validator ensemble. It does not attenuate :math:`V` through
@@ -1515,6 +1597,11 @@ An optional domain extension may activate the analytic path:
        pub norm_id: String,
        /// Assumption 6's uniform bound, not a maximum fitted on this run.
        pub delta_r_bound: CertifiedBound<f64>,
+       /// Assumption 6 admits deterministic, in-expectation, and
+       /// high-probability instantiations, and Theorem 12.4's conclusion
+       /// weakens to match. The mode is recorded so a certificate cannot be
+       /// read as deterministic when the bound was only in expectation.
+       pub delta_r_mode: BoundMode,   // Deterministic | InExpectation | WithProbability(f64)
        pub analysis_domain: AnalysisDomainRef,
        pub invariant_domain_evidence: Vec<EvidenceRef>,
    }
@@ -1530,9 +1617,23 @@ An optional domain extension may activate the analytic path:
 The runtime may use ``Realization::measured`` and evaluate Theorem 12.4 or
 Corollary 12.5 only when the vectors have equal declared semantics, the norm is
 fixed, ``RealizabilityClaim`` supplies Assumption 6's certified uniform
-:math:`\delta_r` bound and forward-invariance evidence, and ``StabilityClaim``
-supplies validated :math:`\alpha,\beta,L,\eta,\mu` on the same active analysis
-domain. The existing ``StabilityClaim.delta`` is the Papers I–II exogenous
+:math:`\delta_r` bound, its instantiation mode, and forward-invariance evidence,
+and ``StabilityClaim`` supplies validated :math:`\alpha,\beta,L,\eta,\mu` on the
+same active analysis domain. One further hypothesis is easy to omit and is
+required: Theorem 12.4 inherits Theorem 12.1's step-size bounds,
+
+.. math::
+
+   0 < \eta < \min\left\{
+      \frac{2(\alpha-\beta)}{L(\alpha+\beta)^2},\;
+      \frac{1}{2\mu(\alpha-\beta)}
+   \right\},
+
+which is what makes :math:`c>0` and places the contraction factor
+:math:`q = 1-\eta c\mu` in :math:`(1/2,1)`. The runtime SHALL check this
+inequality from the claim's own constants and refuse the analytic path when it
+fails, rather than reporting a floor computed from an inadmissible step size.
+The existing ``StabilityClaim.delta`` is the Papers I–II exogenous
 disturbance parameter; it SHALL NOT be silently reused as :math:`\delta_r`.
 The maximum residual observed in one run is useful validation telemetry, not a
 uniform future bound. ``perspt-coding`` initially returns ``None`` for this
@@ -1565,12 +1666,16 @@ Paper I gives
    = \frac{C\delta_r^2}{\eta c\mu} < \epsilon,
    \qquad
    k^* = \left\lceil\frac{1}{\eta c\mu}
-   \log\frac{V(x_0)}{\epsilon-V_\infty^{\mathrm{disc}}}\right\rceil.
+   \ln\frac{V(x_0)}{\epsilon-V_\infty^{\mathrm{disc}}}\right\rceil.
 
 where :math:`c=(\alpha-\beta)-L\eta(\alpha+\beta)^2/2` and
 :math:`C=(1+L\eta(\alpha+\beta))^2/(2\eta c)+L/2`; both are derived and
 validated rather than configured independently. The implementation treats
 :math:`k^*=0` when the initial realized state already satisfies the tolerance.
+The retry budget is defined only on the strict feasible branch
+:math:`V_\infty^{\mathrm{disc}} < \epsilon`; on the infeasible branch there is
+no :math:`k^*` to clamp or extend, and emitting a finite retry budget there
+would invert the corollary's actual content.
 Only that path may call node refinement a Corollary 12.5 design rule. The
 default coding path instead refines when the measured Paper II gate plateaus,
 the same dominant residual recurs, or the finite budget is exhausted. Splitting
@@ -1651,7 +1756,7 @@ finite escalation chain with a single shared, non-replenishing cascade budget
      - Tool-loop meaning
    * - 0
      - retry
-     - Re-propose after a directed correction; consumes one unit of ``b``.
+     - Re-propose after a directed correction.
    * - 1
      - fallback
      - Switch route: alternate tool, **alternate provider or model family**,
@@ -1665,6 +1770,13 @@ finite escalation chain with a single shared, non-replenishing cascade budget
        domain with certified ``ProxyGeometry``, a failed Corollary 12.5
        feasibility inequality is an additional trigger. Without that geometry,
        refinement is empirical recovery and carries no convergence proof.
+       Paper I Remark 12.3's third caveat is the qualitative reason to keep this
+       level even for uncertified domains: near a semantic discontinuity a
+       one-token change can move the re-embedded state arbitrarily far, so the
+       system must fall back to the discrete escalation path rather than to more
+       correction. Remark 12.3 also states that the analogy between task
+       refinement and quantizer zooming is motivation, not a theorem, which is
+       why this level never reports a convergence claim.
    * - 3
      - escalate
      - ``ask_user`` for approval, capability grant, or decision; or hand the
@@ -1677,13 +1789,60 @@ finite escalation chain with a single shared, non-replenishing cascade budget
 
 Every failure class produced anywhere in the loop — including unmodelled ones,
 and including provider-transport failures — maps totally to a control; unknown
-classes map to level 4. With escalation depth ``k = 4``, every cascade
-terminates within ``b + k`` steps regardless of whether any forward action ever
-succeeds. Level 2 is finite for the same reason the rest is: a node may be
-refined only while its refinement depth budget lasts, after which the
-infeasibility becomes an escalation rather than another split. The classifier and mapping are deterministic kernel code, not
-model-selected, and ``b`` is shared across route switches so that failover
-cannot be used to buy unbounded retries.
+classes map to level 4. The classifier and mapping are deterministic kernel
+code, not model-selected.
+
+Definition 8.1's well-formedness conditions are adopted literally, because the
+``b + k`` count is a consequence of them rather than of the table above:
+
+* **One pool, every level.** ``b`` is a single non-replenishing budget shared
+  across the whole cascade. *Every* horizontal repetition consumes one unit of
+  it, not only a level-0 retry — a second fallback route, a second refinement,
+  and a second escalation each cost one unit exactly as a re-proposal does.
+  A per-level budget, including a separate "refinement depth" counter, would
+  give a bound of :math:`\sum_\lambda b_\lambda + k` rather than ``b + k``, so
+  refinement depth is expressed as a *cap* on level-2 repetitions within the
+  shared pool, never as its own pool.
+* **Exhaustion forbids repetition.** Whenever the remaining budget is zero and
+  the current level is below ``k``, the next non-terminal control MUST strictly
+  escalate. This is what makes budget exhaustion a well-founded descent rather
+  than a stall.
+* **The top level is unconditionally terminating.** Level 4 never returns
+  control to the loop.
+
+With escalation depth ``k = 4``, every cascade therefore terminates within
+``b + k`` steps regardless of whether any forward action ever succeeds, and
+``b`` being shared across route switches is what stops failover from buying
+unbounded retries.
+
+Theorem 6 also requires the terminal state to be *classified*, and names four
+classes. Perspt maps them without inventing a fifth:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Theorem 6 class
+     - Perspt cascade outcome
+   * - ``Committed``
+     - A recovery control succeeded and the node re-entered the gate, which then
+       reached ``HardPass`` or ``DeclaredFloor``.
+   * - ``Compensated``
+     - An irreversible external effect was rolled back through its
+       ``ExternalEffectLog`` compensation record (R5). Compensations are
+       declared forward actions, so a compensating cascade is itself covered by
+       the theorem and consumes the same ``b``.
+   * - ``HumanEscalation``
+     - Level 3 handed the node to the user and the user's decision terminated
+       it.
+   * - ``Contained``
+     - Level 4: capabilities revoked, node frozen, best accepted state restored,
+       residual certificate issued.
+
+These are cascade classifications and are recorded alongside — not in place of —
+the node's Paper II ``NodeTerminalOutcome`` from system 10. A cascade that ends
+``Committed`` still exits the node through the gate's three-way classification;
+``Contained`` and ``HumanEscalation`` produce ``Escalated``.
 
 .. rubric:: Layer C — Platform Contract (Paper III)
 
@@ -1803,6 +1962,19 @@ trusted base and is invoked inside the contract evaluator;
 once authority/effect mediation is complete even when no probabilistic barrier
 certificate is claimed; chance-safety Theorems 3–5 require the additional risk
 evidence and their own statistical hypotheses.
+
+**The barrier allowance and the risk debit are the same number.** Definition
+3.2's two numeric clauses are :math:`\mathbb{E}[h(x')\mid x,p]\le h(x)+c_c` and
+:math:`\text{spent}(x)+c_c\le\rho_{\text{cap}}`, and the :math:`c_c` in the
+second is the :math:`c_c` in the first. An implementation with a separate
+``risk_cost`` field alongside a barrier increment has two numbers where the
+definition has one, and can debit a budget for an increment it never certified —
+which is precisely the shortcut this system removes. ``BarrierWitness``
+therefore supplies :math:`c_c` and the kernel debits exactly that.
+:math:`\rho_{\text{cap}}` is what keeps Theorem 3's horizon-linear sum
+:math:`\sum_t\rho_t` finite within a session: the per-capability budget bounds
+accumulated certified increment, so a long session cannot buy unbounded risk one
+admissible step at a time.
 
 Allowance and budget consumption are one kernel transaction. Promoting a
 candidate transition atomically decrements the capability call budget and risk
@@ -1976,7 +2148,25 @@ read/write-disjoint may proceed concurrently and in either order.
 ``scheduler::{Footprint, Resource, LeaseTable, Scheduler}`` becomes live. The
 resource set is extended with ``WorkGraph``, ``ProviderRateLimit``, and an
 ``OpaqueWorkspace`` fallback in addition to the existing file, interface,
-manifest, capability, risk-budget, fresh-id, and ledger resources. A worker pool
+manifest, capability, risk-budget, fresh-id, and ledger resources.
+
+Theorem 8 carries a structural hypothesis on footprints that a declarative
+``FootprintSpec`` can violate silently: the theorem is stated for events with
+:math:`\text{writes}(e)\subseteq\text{reads}(e)`. A tool that writes a resource
+it did not read is outside the commutation lemma, so footprint validation SHALL
+reject such a spec at catalog-assembly time rather than at execution. In
+practice this is the declarative form of the state-witness rule — an effect that
+mutates a file must also have that file among the components its admissibility
+clauses evaluate.
+
+A second distinction keeps Gate P honest. Theorem 8 is about the *semantic
+durable state* :math:`X=\prod_j X_j`; ``ProviderRateLimit`` is a throughput
+resource, not a component of that product. Two turns contending on one
+provider's limit are still provably commuting turns, so the lease is a
+scheduling delay and SHALL NOT be recorded as a required serialization. Gate P's
+falsifying predicate reads semantic footprints only.
+
+A worker pool
 may explore, call models, run read-only tools, and prepare candidate overlays in
 parallel. It acquires leases before the first effect whose declared footprint
 can conflict; cancellation releases leases, and a lost lease invalidates the
@@ -2045,7 +2235,7 @@ mode and in ``balanced`` mode for medium-risk effects.
 The kernel holds a calibration set of ``(score, unsafe)`` pairs drawn from the
 deployment's own ledger. The score is the validator's safety evidence for the
 proposal; the delayed unsafe label comes from the undo/rollback boundary and
-regression residuals already recorded. For target budget ``rho``,
+regression residuals already recorded. For target budget :math:`\rho_c`,
 ``conformal::conformal_threshold`` computes
 
 .. math::
@@ -2055,9 +2245,33 @@ regression residuals already recorded. For target budget ``rho``,
       \frac{n\,\hat{R}_n(\theta) + 1}{n + 1} \le \rho
    \right\},
 
-and the kernel accepts autonomously only when ``s(p) > theta_hat``, bounding the
-marginal accepted-unsafe rate by ``rho`` with a distribution-free, finite-sample
-certificate.
+and the kernel accepts autonomously only when ``s(p) > theta_hat`` — strictly,
+with ties at the threshold rejected, because right-continuity of the strict loss
+is what makes the infimum attained. This bounds the *marginal* accepted-unsafe
+rate by :math:`\rho_c` with a distribution-free, finite-sample certificate. It
+is not the conditional per-step bound of Theorem 3; see the notation table.
+
+Two properties of the theorem are implementation requirements rather than
+commentary:
+
+* **A minimum sample count is implied by the target.** The feasible set is empty
+  exactly when :math:`\rho_c < 1/(n+1)`, in which case
+  :math:`\hat\theta=\infty` and *everything* is rejected. So a declared budget
+  fixes a floor on calibration size: :math:`n \ge 1/\rho_c - 1`, which for the
+  common :math:`\rho_c = 0.05` means at least 19 labeled samples before any
+  proposal can be autonomously accepted at all. Perspt SHALL compute this floor
+  from the configured target, report ``insufficient calibration`` until it is
+  met, and route mutating effects to approval in the meantime. Reporting a
+  reject-all threshold as a satisfied budget is prohibited: it is technically
+  true and operationally a lie.
+* **Dominance licenses the grid, not the drift response.** Theorem 5 extends the
+  bound to any :math:`\tilde\theta \ge \hat\theta` almost surely, which is what
+  makes a threshold selected from the finite grid of calibration scores
+  certificate-preserving. That clause is conditioned on exchangeability like the
+  rest of the theorem, so raising the threshold during a drift window is
+  *conservative behaviour under a broken hypothesis*, not an inherited
+  certificate — which is why the stale-window rule below reports uncertified
+  rather than "certified at a stricter budget."
 
 **Multi-provider makes exchangeability a first-class concern, and this PSP does
 not paper over it.** Theorem 5's guarantee rests on exchangeability between
@@ -2102,11 +2316,27 @@ computed off the critical path**; neither may gate dispatch or acceptance.
   domain provides the coordinate map, restriction matrices, weights, and
   nullspace interpretation used to construct :math:`A`. Otherwise the value is
   labeled ``topology_gap`` and has no convergence-rate meaning.
+
+  The lemma gives a verifier *two* ways to earn its cost, and reporting only the
+  first would misdirect the very decision this diagnostic exists to inform: a
+  new check helps insofar as it raises :math:`\lambda^+_{\min}(A)` **or shrinks**
+  :math:`\ker(A)`, since the safe set is exactly :math:`\ker(A)=\ker(W^{1/2}B)`.
+  For a coding workspace the second is the common case — adding a verifier for a
+  property nothing previously constrained removes an unverified direction from
+  the nominal safe set without moving the gap at all. ``edge_mu_sensitivity``
+  SHALL therefore report a rank/nullspace delta beside the gap delta, and a
+  verifier that changes neither is redundancy in the exact sense Corollary 5.2
+  prices probabilistically.
 * **Backlog stability.** ``observability::{phi, backlog_gauge}`` computes the
   per-workflow potential :math:`\phi_i = 1 + V_i/\rho_{\text{gate}} + B_i` and
   the platform potential :math:`\Phi(W)`. Paper III Theorem 9 gives negative
   drift and positive recurrence under a work-conserving scheduler and
-  sub-critical arrival load :math:`\alpha < 1`. ``perspt status`` and the
+  sub-critical arrival load :math:`\alpha < 1`. That load bounds the expected
+  arriving *potential* per step, :math:`\mathbb{E}[\sum_{a\in A_t}\phi_a\mid
+  \mathcal{F}_t]\le\alpha`, not the arrival count — a single arriving workflow
+  with a large :math:`V_a/\rho_{\text{gate}}` can exceed the bound on its own,
+  so the gauge SHALL be computed from arriving potential and labeled as such.
+  ``perspt status`` and the
   dashboard report :math:`\Phi(W)`, its empirical drift, and the estimated
   :math:`\alpha`. Positive recurrence is reported only when gate discipline,
   work-conservation, the conditional arrival-load bound, finite initial
@@ -2293,14 +2523,18 @@ falsifies it. Gates continue PSP-8's lettering.
        external tool registration that widens authority.
    * - M
      - Bounded harness (Paper II Lemma 1, Thm 3)
-     - Gate decisions exceeding :math:`\lfloor V_0/\rho\rfloor + B + 1`, or a
+     - Gate decisions exceeding :math:`\lfloor V_0/\rho_{\text{gate}}\rfloor + B + 1`, or a
        configuration accepted at startup that permits unbounded unverified
        turns, or an ensemble candidate that did not consume a gate decision.
    * - N
      - Terminating recovery (Thm 6)
-     - A cascade exceeding ``b + k`` steps, a failure observation with no
-       mapped control, a node exiting unclassified, or a provider failover
-       that replenishes ``b``.
+     - A cascade exceeding ``b + k`` steps; a failure observation with no
+       mapped control; a cascade ending outside the four Theorem 6 classes, or a
+       node exiting without a ``NodeTerminalOutcome``; a horizontal repetition
+       at any level that does not consume one unit of the shared ``b``; a
+       non-terminal control that fails to strictly escalate when ``b`` is
+       exhausted below level ``k``; or a provider failover, refinement counter,
+       or per-level pool that replenishes or bypasses ``b``.
    * - O
      - Exact replay (Thm 7)
      - A committed transition depending on an unrecorded observation, a
@@ -2308,14 +2542,19 @@ falsifies it. Gates continue PSP-8's lettering.
        requires provider credentials.
    * - P
      - Coordination minimality (Thm 8)
-     - Two concurrently executed turns with conflicting footprints, or a
-       serialization of two provably commuting turns reported as required.
+     - Two concurrently executed turns with conflicting semantic footprints; a
+       serialization of two provably commuting turns reported as required (a
+       rate-limit delay is not such a serialization); or a registered footprint
+       whose writes are not contained in its reads.
    * - Q
      - Calibrated autonomy (Thm 5)
      - Autonomous commitment of a mutating effect while
        ``bound_is_asserted()`` is false and the effect is not routed to the
-       approval policy; a claimed ``rho`` not backed by a calibration set; or
-       a calibration set applied across ``CalibrationStratum`` values.
+       approval policy; a claimed :math:`\rho_c` not backed by a calibration
+       set; a calibration set applied across ``CalibrationStratum`` values; a
+       target :math:`\rho_c < 1/(n+1)` reported as a satisfied budget rather
+       than as reject-all; or a non-strict acceptance rule that admits ties at
+       the threshold.
    * - R
      - Honest diagnostics (Lemma 2, Cor. 5.2)
      - A displayed validator, model, or provider count presented as a safety
@@ -2560,9 +2799,15 @@ agent loops retry on failure. Paper II Lemma 1 is what a retry loop lacks: with 
 nonnegative energy, a descent tolerance, and a finite budget, the loop provably
 makes finitely many decisions and always lands in a classified terminal state.
 It also converts "the agent kept trying" into named residuals a maintainer can
-act on. The measured gate composes with the analytic bounds: even where the
-modelling assumptions fail, the gate's monotonicity on accepted states still
-holds, because it is a measurement, not an assumption.
+act on. The measured gate composes with the analytic bounds, and Paper II states
+that composition as its own result — the *Remark on gate composition* following
+Corollary 2.1: the accepted trajectory satisfies the better of the two
+certificates, the analytic decay where the modelled assumptions hold and the
+measured monotonicity of the acceptance gate even where they fail. This is why
+this PSP can leave so many analytic claims ``not_claimed`` without leaving the
+harness uncertified: assumption failure weakens semantic interpretation and
+slows progress, but it does not break the gate invariant on accepted states,
+because that invariant is a measurement rather than an assumption.
 
 **Why retain bundle execution as a strategy.** Bundle generation can be
 better for greenfield scaffolding, where there is nothing to read and whole-file
@@ -2719,8 +2964,10 @@ gate lands with the code it constrains.
        ``ProxyGeometry`` analytic path; capability revocation at level 4.
      - N, V
      - All failure classes, including transport failures, terminate within
-       ``b + k`` under an always-failing adversary; failover does not replenish
-       ``b``; graph refinement consumes a finite revision-depth budget.
+       ``b + k`` under an always-failing adversary in one of the four Theorem 6
+       classes; every horizontal repetition at every level draws on the one
+       shared pool; failover and graph refinement neither replenish nor bypass
+       it; exhausting ``b`` below level ``k`` forces strict escalation.
    * - 6
      - Event-sourced ledger; ``record_observation`` refusal rule; idempotency
        and external-effect logs; ``perspt replay``.
@@ -2758,8 +3005,11 @@ gate lands with the code it constrains.
      - Per-``CalibrationStratum`` conformal calibration; drift monitor;
        approval back-off.
      - Q
-     - Realized accepted-unsafe rate ≤ declared ``rho`` on held-out fixtures;
-       stale and cross-route windows reported uncertified.
+     - Realized accepted-unsafe rate is within the reported confidence interval
+       of the declared :math:`\rho_c` on held-out fixtures — Theorem 5 bounds a
+       marginal expectation, so a single run's realized rate is an estimate, not
+       the guarantee; the sub-feasible target :math:`\rho_c<1/(n+1)` rejects
+       everything; stale and cross-route windows reported uncertified.
    * - 12
      - External tool registration under the kernel.
      - K, L, U
@@ -2793,13 +3043,21 @@ framework", extending ``perspt-sdk/tests/mechanism_checks.rs``:
 * MC-M: synthetic energy trace confirming the decision bound, including an
   ensemble round.
 * MC-N: all failure classes under an always-failing adversary, with a provider
-  that always errors, terminate within ``b + k``.
+  that always errors, terminate within ``b + k`` in one of the four Theorem 6
+  classes. A companion fixture drives repeated fallback and refinement to prove
+  they draw on the same pool: :math:`b` horizontal steps distributed across
+  levels must exhaust the budget exactly as :math:`b` retries at level 0 do.
 * MC-O: replay equality plus tamper detection, executed with all provider
   credentials removed.
-* MC-P: footprint conflict matrix, including per-provider rate-limit resources.
+* MC-P: footprint conflict matrix, including per-provider rate-limit resources,
+  which must delay but never be reported as a required serialization; a
+  registered footprint whose writes exceed its reads is rejected at assembly.
 * MC-Q: conformal calibration on synthetic and ledger-derived samples; realized
   risk against declared budget; drift injection routes uncertified mutation to
-  approval; a calibration set is refused for any different stratum fingerprint.
+  approval; a calibration set is refused for any different stratum fingerprint;
+  a target below :math:`1/(n+1)` yields reject-all and is reported as
+  insufficient calibration rather than as a satisfied budget; a score exactly at
+  the threshold is rejected.
 * MC-R: a sensor-name graph cannot populate ``StabilityClaim.mu``; a supplied
   linear :math:`B,W` fixture reproduces :math:`2\lambda^+_{\min}(B^TWB)`.
 * MC-S: a fixture session executed under three portfolios produces identical
@@ -2811,7 +3069,8 @@ framework", extending ``perspt-sdk/tests/mechanism_checks.rs``:
   0.01. Additional fixtures use unmatched candidate populations and
   zero-variance validators; both must use matched direct joint misses, and the
   displayed certificate must be a conservative upper bound rather than the
-  point estimate.
+  point estimate. A three-validator fixture must report a bound no tighter than
+  its best pair, since Corollary 5.2 is exact only at :math:`n=2`.
 * MC-U: a provider with each capability disabled in turn degrades along the
   declared ladder and records every degradation.
 * MC-V: an adversarial model that reports successful edits while every effect is
@@ -2861,10 +3120,15 @@ Open Issues
   labels, and the estimates stay conservative by default. Whether an explicit
   audit sampling mechanism is worth its cost is unresolved.
 * **Calibration data volume and cold start.** A fresh installation has no
-  calibration set, and per-route keying makes each route's set smaller. Options
-  are a conservative shipped prior, deferring autonomous commitment until ``n``
-  samples exist, or importing calibration across projects — the last of which
-  likely violates exchangeability.
+  calibration set, and per-route keying makes each route's set smaller. Theorem
+  5 fixes the hard floor — :math:`n \ge 1/\rho_c - 1`, below which the threshold
+  is reject-all — so "defer autonomous commitment until ``n`` samples exist" is
+  the only option that is not a choice. What remains open is everything above
+  that floor: how much margin over the floor to require before the certificate
+  is worth acting on, whether a conservative shipped prior is useful at all
+  given that it carries no certificate, and whether calibration can ever be
+  imported across projects — the last of which likely violates exchangeability
+  and would silently void the theorem rather than loosen it.
 * **Whether coding can define a useful proxy geometry.** AST edit distance or
   verifier-vector distance can be useful metrics, but neither becomes Paper I's
   :math:`\lVert r_k\rVert` unless the proposed and realized states inhabit the
