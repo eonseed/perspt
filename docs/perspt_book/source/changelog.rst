@@ -3,6 +3,39 @@
 Changelog
 =========
 
+Version 0.6.6 - "沈黛君 (Shen DaiJun)"
+--------------------------------------
+
+*In memory of a mother who always gave and never asked anything in return.*
+
+This release implements PSP-9's governed agentic platform: every stochastic action is a proposal, every effect is mediated by a deterministic kernel, every accepted state is measured on the realized candidate, and every reliability claim is conditional on recorded evidence — following the *Stability is All You Need* papers I, II, and III.
+
+**Governed Tool Loop & Admissibility Kernel (PSP-9):**
+
+- **SRBN Tool Loop** - New ``perspt-agent::toolloop`` implements Paper II's harness contract as an executable loop: model-issued tool calls become Paper III proposals, the five-clause admissibility kernel (Definition 3.2) decides each one, and the acceptance gate reads the re-measured candidate — never the model's account of it. An adversarial "lying model" fixture proves a model claiming success while every effect is denied can never reach a hard pass.
+- **Five-Clause Kernel** - ``check_full_admissibility`` replaces hardcoded contract/barrier passes with registered evaluators; an absent clause is recorded absent, never true. Promotion is one transaction debiting exactly the barrier's certified increment ``c_t`` — the allowance and the debit are the same number.
+- **Operational Safety Barrier** - ``perspt-coding`` registers six versioned policy channels (protected paths, sandbox escape, secret exposure, network reachability, dependency policy, resource limits) with exact deterministic increments; correctness evidence stays in ``V``.
+- **Recovery Lattice** - One shared, non-replenishing cascade budget across all five levels (Definition 8.1): exhaustion forces strict escalation, containment is unconditional, and every cascade terminates within ``b + k`` steps in one of Theorem 6's four terminal classes.
+
+**Model Portfolio & Transport:**
+
+- **Multi-Provider Portfolio** - The ``[providers]`` table holds several credentialed routes in one process; ``perspt providers`` prints the capability matrix with declared-vs-probed honesty. A one-entry portfolio keeps single-provider setups unchanged.
+- **ModelTransport Port** - The SDK declares the object-safe transport port; ``perspt-core`` provides the ``genai`` tool-calling driver; ``perspt-agent::transport`` is the single adapter — the tool loop cannot name a vendor type or credential (Gate S).
+- **Portfolio Routing** - Fully qualified ``provider::model`` routes with capability objectives, decorrelated-family review preference, and cross-provider failover chains. Failover is recovery, not retry, and draws on the shared cascade pool.
+- **Typed Tool Catalog** - Declarative footprints (``writes ⊆ reads`` by construction), capability-filtered tool specs, and an open ``LanguageId`` adapter registry. ``sed_replace``/``awk_filter`` leave the model-facing catalog; ``edit_file`` fails closed on ambiguity. External tool servers register under the kernel and can never exceed session authority.
+
+**Measured Certificates:**
+
+- **Realizability Interface** - ``srbn`` upgraded 0.1.1 → 0.3.0 (``stabilize_realized``, restore-best policy, hash-chain ledger). Coding uses unmeasured realization with ``projection_mismatch`` telemetry; the analytic Theorem 12.4 path is admitted only when every hypothesis — including Theorem 12.1's step-size bounds — is represented by evidence.
+- **Independence Statistics** - Matched-stratum pairwise misses, degenerate marginals using direct joint misses, conservative Hoeffding upper bounds, and certification gating; ``ρ_eff`` reports ``n`` beside it and the correlation-driven energy attenuation helper is removed.
+- **Conformal Feasibility Floor** - A declared budget ``ρ`` fixes ``n ≥ 1/ρ − 1`` labeled samples before anything can be autonomously accepted; reject-all is reported as *insufficient calibration*, never as a satisfied budget. Calibration is keyed by full exchangeability strata with shadow/active/stale readiness epochs.
+- **Audit Replay** - ``perspt replay <session>`` folds the durable event stream deterministically with tamper detection and no provider credentials; context compaction preserves an exact ``ControlFrame`` and unresolved tool calls, and a stale checkpoint is rebuilt, never patched.
+
+**Engineering Discipline:**
+
+- **NASA Coding Rules** - New ``xtask`` checker enforces file ≤ 1408 lines, function ≤ 70 code lines (*Power of Ten* Rule 4, measured with ``syn``, not brace counting), and line ≤ 108 columns, with a shrink-only baseline ratchet wired into CI (``./check-rules.sh``).
+- **Workspace Decomposition** - The 5,889-line orchestrator, ``types.rs``, ``plugin.rs``, ``store.rs``, ``tools.rs``, ``ledger.rs``, and ``verification.rs`` split into focused submodules; workspace version fields now inherit from ``[workspace.package]`` with ``rust-version = 1.85``.
+
 Version 0.6.2 - "Hózhó"
 -----------------------
 
