@@ -14,6 +14,8 @@ members = [
     "crates/perspt-store",
     "crates/perspt-dashboard",
     "crates/perspt",
+    # Dev-only repository automation (NASA coding-rule checks). Never published.
+    "xtask",
 ]
 
 [workspace.package]

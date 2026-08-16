@@ -48,9 +48,35 @@ Concise, repo-specific guidance for the current multi-crate workspace.
   - `cargo build --verbose --all-features`
   - `cargo test --verbose --all-features -- --test-threads=1`
   - `cargo doc --no-deps --all-features`
+  - `./check-rules.sh check`
 - CI runs formatting on stable Ubuntu only, clippy on stable across the OS matrix, and build/tests on all configured matrix entries. Avoid OS-specific assumptions.
-- CI also runs a separate `cargo audit` job and a Sphinx documentation build stage. If you change dependencies or docs, validate the relevant parts locally when practical.
+- CI also runs a separate `cargo audit` job, the `NASA Coding Rules` job, and a Sphinx documentation build stage. If you change dependencies or docs, validate the relevant parts locally when practical.
 - Clippy warnings are CI failures. Keep Rust test modules at the end of files, and prefer arrays/slices over unnecessary `vec![]` allocations in tests.
+
+## NASA coding rules (enforced)
+Perspt is held to NASA coding guidelines. Three of them are measured by `xtask`, and they apply to **Rust sources only** — `docs/` (PSPs, the Sphinx book) is out of scope.
+
+| Rule | Limit | Measured as |
+| --- | --- | --- |
+| `NASA-1` file length | 1408 lines | every physical line, comments and blanks included |
+| `NASA-2` function length | 70 lines | lines in the function that carry a token and are not comments; nested `fn` items are measured separately and subtracted, closures count toward their enclosing function |
+| `NASA-3` line width | 108 columns | Unicode scalar values, not bytes |
+
+`NASA-2` is NASA/JPL *Power of Ten* Rule 4 relaxed from 60 to 70. rustfmt stays at its default width of 100, so `NASA-3` in practice only catches long string literals and trailing comments rustfmt cannot break.
+
+```bash
+./check-rules.sh check                    # PR gate; fails on any new violation
+./check-rules.sh report                   # every offending file, function, and line
+./check-rules.sh report --rule NASA-2     # one rule
+./check-rules.sh report --format json     # machine-readable
+./check-rules.sh baseline --shrink        # ratchet accepted debt downward
+```
+
+`.cargo/config.toml` is gitignored, so `cargo xtask` is not available from a fresh clone — `./check-rules.sh` is the portable entry point and the one CI uses. Add `[alias] xtask = "run --quiet --package xtask --"` to your own `.cargo/config.toml` if you want the shorter form.
+
+`.nasa-baseline.toml` records the debt that existed when the rules were adopted. **Counts may only shrink.** `check` fails when a count grows or an untracked file appears; fix that by decomposing the file or shortening the function, never by raising the baseline. When a file improves, `check` says so and `baseline --shrink` records it. The target state is an empty baseline.
+
+`NASA-2` is measured with `syn` rather than by counting braces, because braces inside string literals (`"\\mathbf{"` in `perspt-tui`) make text-based counting wrong by two orders of magnitude. If you extend the tool, keep it parsing.
 
 ## DuckDB build: bundled vs system
 - DuckDB is pinned in the workspace root `Cargo.toml` (`duckdb = "=1.10501.0"`) **without** the `bundled` feature by default.
