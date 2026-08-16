@@ -8,12 +8,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use perspt_agent::toolloop::{
-    CandidateMeasurer, EffectExecutor, EffectOutcome, LoopBudgets, LoopEvent, Measured, ToolLoop,
+    CandidateCheckpoint, CandidateMeasurer, EffectExecutor, EffectOutcome, LoopBudgets, LoopEvent,
+    Measured, ToolLoop,
 };
 use perspt_sdk::{
-    ActorId, Capability, Conversation, EffectKind, ModelFamily, ModelId, ModelTransport,
-    NodeTerminalOutcome, ProviderCapabilities, ProviderToolCall, RiskBudget, StaticCatalog,
-    ToolChoicePolicy, ToolEntry, ToolSpec, TransportFuture, TurnOutput, VerificationCadence,
+    ActorId, BarrierEvaluator, BarrierWitness, CandidateStateWitness, CandidateTransition,
+    Capability, ContractEvaluator, ContractWitness, Conversation, EffectKind, ModelFamily, ModelId,
+    ModelTransport, NodeTerminalOutcome, ProviderCapabilities, ProviderToolCall, RiskBudget,
+    SdkError, StaticCatalog, ToolChoicePolicy, ToolEntry, ToolSpec, TransportFuture, TurnOutput,
+    VerificationCadence,
 };
 
 /// A transport that replays a fixed script of turns.
@@ -58,20 +61,47 @@ impl ModelTransport for Scripted {
 /// Executor that applies everything and reports mutation.
 struct ApplyAll {
     applied: AtomicU32,
+    state: AtomicU32,
 }
 
 #[async_trait::async_trait]
 impl EffectExecutor for ApplyAll {
+    async fn checkpoint(&self, _scope: &[String]) -> anyhow::Result<CandidateCheckpoint> {
+        let state = self.state.load(Ordering::SeqCst);
+        Ok(CandidateCheckpoint {
+            id: state.to_string(),
+            witness: CandidateStateWitness {
+                state_root: state.to_string(),
+                node_id: "toolloop".into(),
+                canonical_scope: vec!["src/lib.rs".into()],
+                ..CandidateStateWitness::default()
+            },
+        })
+    }
+
     async fn apply(
         &self,
         _call: &ProviderToolCall,
         entry: &ToolEntry,
     ) -> anyhow::Result<EffectOutcome> {
         self.applied.fetch_add(1, Ordering::SeqCst);
+        if !entry.effect.is_read_only() {
+            self.state.fetch_add(1, Ordering::SeqCst);
+        }
         Ok(EffectOutcome {
             output: "ok".into(),
             mutated: !entry.effect.is_read_only(),
         })
+    }
+
+    async fn restore(&self, checkpoint: &CandidateCheckpoint) -> anyhow::Result<()> {
+        self.state
+            .store(checkpoint.id.parse().unwrap(), Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn state_witness(&self) -> anyhow::Result<CandidateStateWitness> {
+        Ok(self.checkpoint(&[]).await?.witness)
     }
 }
 
@@ -104,6 +134,17 @@ impl CandidateMeasurer for EnergyScript {
             correction: None,
         })
     }
+
+    async fn measure_incremental(&self) -> anyhow::Result<Measured> {
+        let readings = self.readings.lock().unwrap();
+        let (hard_pass, energy) = readings.first().copied().unwrap_or((false, 10.0));
+        Ok(Measured {
+            hard_pass,
+            energy,
+            residuals: vec![],
+            correction: None,
+        })
+    }
 }
 
 fn call(id: &str, name: &str, args: serde_json::Value) -> ProviderToolCall {
@@ -119,6 +160,7 @@ fn worker_capability() -> Capability {
         ActorId::new("toolloop"),
         vec![
             EffectKind::ReadFile,
+            EffectKind::ToolProgram,
             EffectKind::Search,
             EffectKind::List,
             EffectKind::ApplyPatch,
@@ -141,11 +183,42 @@ fn budgets() -> LoopBudgets {
         rejection_budget: 2,
         rho_gate: 0.5,
         declared_energy_floor: None,
+        context_soft_limit_chars: 240_000,
+        recovery_budget: 2,
     }
 }
 
+struct PassContract;
+
+impl ContractEvaluator for PassContract {
+    fn evaluate(&self, _transition: &CandidateTransition) -> ContractWitness {
+        ContractWitness {
+            ok: true,
+            policy_version: "test-policy-v1".into(),
+            evidence_refs: vec!["test-contract".into()],
+        }
+    }
+}
+
+struct ZeroBarrier;
+
+impl BarrierEvaluator for ZeroBarrier {
+    fn evaluate(&self, _transition: &CandidateTransition) -> Result<BarrierWitness, SdkError> {
+        Ok(BarrierWitness {
+            h_before: 0.0,
+            expected_h_after_upper: 0.0,
+            certified_increment: 0.0,
+            unsafe_threshold: 1.0,
+            evidence_refs: vec!["test-barrier".into()],
+        })
+    }
+}
+
+static PASS_CONTRACT: PassContract = PassContract;
+static ZERO_BARRIER: ZeroBarrier = ZeroBarrier;
+
 fn loop_with<'a>(
-    transport: &'a Scripted,
+    transport: &'a dyn ModelTransport,
     catalog: &'a StaticCatalog,
     executor: &'a ApplyAll,
     measurer: &'a EnergyScript,
@@ -153,16 +226,120 @@ fn loop_with<'a>(
     ToolLoop {
         transport,
         model: ModelId::new("test", "scripted"),
+        fallback_models: Vec::new(),
         catalog,
         capabilities: vec![worker_capability()],
-        contract: None,
-        barrier: None,
+        contract: Some(&PASS_CONTRACT),
+        barrier: Some(&ZERO_BARRIER),
         c_c_max: 0.0,
         executor,
         measurer,
         budgets: budgets(),
         cadence: VerificationCadence::default(),
+        kernel_state: perspt_sdk::KernelState::new(),
+        node_id: "toolloop".into(),
+        generation: 0,
+        recorder: None,
     }
+}
+
+struct FailPrimary {
+    calls: Mutex<Vec<ModelId>>,
+}
+
+impl ModelTransport for FailPrimary {
+    fn chat_turn<'a>(
+        &'a self,
+        model: &'a ModelId,
+        _conversation: &'a Conversation,
+        _tools: &'a [ToolSpec],
+        _choice: ToolChoicePolicy,
+    ) -> TransportFuture<'a, TurnOutput> {
+        self.calls.lock().unwrap().push(model.clone());
+        let is_primary = model.provider == "primary";
+        Box::pin(async move {
+            if is_primary {
+                Err(SdkError::Domain("primary unavailable".into()))
+            } else {
+                Ok(TurnOutput::Text("recovered".into()))
+            }
+        })
+    }
+
+    fn capabilities(&self, _model: &ModelId) -> ProviderCapabilities {
+        ProviderCapabilities::text_only(100_000)
+    }
+
+    fn family_of(&self, model: &ModelId) -> ModelFamily {
+        ModelFamily::from_model_name(&model.model)
+    }
+}
+
+#[tokio::test]
+async fn provider_failure_uses_recorded_sticky_failover() {
+    let transport = FailPrimary {
+        calls: Mutex::new(Vec::new()),
+    };
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 1.0), (true, 0.0)]);
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.model = ModelId::new("primary", "one");
+    tool_loop.fallback_models = vec![ModelId::new("fallback", "two")];
+
+    let outcome = tool_loop.run("recover").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    assert!(outcome.events.iter().any(|event| matches!(
+        event,
+        LoopEvent::RouteFailover { from_model, to_model, .. }
+            if from_model.provider == "primary" && to_model.provider == "fallback"
+    )));
+    assert_eq!(
+        transport
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|model| model.provider.as_str())
+            .collect::<Vec<_>>(),
+        ["primary", "fallback"]
+    );
+}
+
+#[tokio::test]
+async fn context_projection_records_control_frame_before_reuse() {
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![call(
+            "edit",
+            "edit_file",
+            serde_json::json!({
+                "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+            }),
+        )]),
+        TurnOutput::Text("done".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (false, 9.0), (true, 0.0)]);
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.budgets.context_soft_limit_chars = 1;
+
+    let outcome = tool_loop.run("edit the file").await.unwrap();
+    let checkpoint = outcome.events.iter().find_map(|event| match event {
+        LoopEvent::ContextCheckpointCreated { checkpoint } => Some(checkpoint),
+        _ => None,
+    });
+    let checkpoint = checkpoint.expect("context limit must create a checkpoint");
+    assert_eq!(checkpoint.control.goal, "edit the file");
+    assert_eq!(checkpoint.control.accepted_state_root, "1");
+    assert!(checkpoint.control.unresolved_call_ids.is_empty());
+    assert!(checkpoint.narrative_observation.is_none());
 }
 
 /// MC-J: every executed effect traces to a model-issued call, and every
@@ -185,6 +362,7 @@ async fn mc_j_every_effect_traces_to_a_recorded_model_call() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     let measurer = EnergyScript::new(vec![(false, 10.0), (false, 9.0), (true, 0.0)]);
 
@@ -219,6 +397,49 @@ async fn mc_j_every_effect_traces_to_a_recorded_model_call() {
     );
 }
 
+/// A tool program is only a compact proposal generator. Its emitted calls are
+/// independently observed and checked by the ordinary kernel path.
+#[tokio::test]
+async fn tool_program_nested_calls_return_to_the_five_clause_kernel() {
+    let source = r#"
+def main():
+    return '[{"tool":"read_file","arguments":{"path":"src/lib.rs"}}]'
+main
+"#;
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![call(
+            "program",
+            "tool_program",
+            serde_json::json!({"source": source}),
+        )]),
+        TurnOutput::Text("done".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 1.0), (true, 0.0)]);
+
+    let outcome = loop_with(&transport, &catalog, &executor, &measurer)
+        .run("inspect through a bounded program")
+        .await
+        .unwrap();
+
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 1);
+    for call_id in ["program", "program:0"] {
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            LoopEvent::ToolCallObserved { call } if call.call_id == call_id
+        )));
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            LoopEvent::ProposalChecked { call_id: checked, witness, .. }
+                if checked == call_id && witness.allows()
+        )));
+    }
+}
+
 /// MC-J (budget half): a call above `M` is denied with a recorded pair, not
 /// silently dropped.
 #[tokio::test]
@@ -236,6 +457,7 @@ async fn mc_j_calls_above_m_are_denied_and_recorded() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
 
@@ -271,6 +493,7 @@ async fn mc_m_decision_count_respects_the_finite_bound() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     // Energy never improves: every submission is a rejection.
     let measurer = EnergyScript::new(vec![(false, 2.0); 30]);
@@ -315,6 +538,7 @@ async fn mc_v_a_lying_model_never_reaches_hard_pass() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     // The overlay never changes, so measurement never improves.
     let measurer = EnergyScript::new(vec![(false, 10.0); 20]);
@@ -342,6 +566,7 @@ async fn a_passing_baseline_costs_no_turns() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     let measurer = EnergyScript::new(vec![(true, 0.0)]);
 
@@ -363,6 +588,7 @@ async fn descent_is_a_non_terminal_decision() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     // Baseline 10, then descent to 8 (accepted, continues), then hard pass.
     let measurer = EnergyScript::new(vec![(false, 10.0), (false, 8.0), (true, 0.0)]);
@@ -382,10 +608,113 @@ async fn unbounded_configurations_are_rejected_at_startup() {
     let catalog = StaticCatalog::with_base(vec![]).unwrap();
     let executor = ApplyAll {
         applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
     };
     let measurer = EnergyScript::new(vec![]);
 
     let mut toolloop = loop_with(&transport, &catalog, &executor, &measurer);
     toolloop.budgets.max_turns = 0;
     assert!(toolloop.run("anything").await.is_err());
+}
+
+/// MC-M: H counts admitted mutations across turns, not independently inside
+/// each provider response.
+#[tokio::test]
+async fn cadence_accumulates_mutations_across_turns() {
+    let edit = |id: &str| {
+        TurnOutput::ToolCalls(vec![call(
+            id,
+            "edit_file",
+            serde_json::json!({
+                "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+            }),
+        )])
+    };
+    let transport = Scripted::new(vec![edit("c1"), edit("c2"), edit("c3")]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+
+    let mut toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+    toolloop.cadence.max_mutations_between_checks = 2;
+    let outcome = toolloop.run("edit twice").await.unwrap();
+
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    assert_eq!(outcome.turns_used, 2);
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn rejected_candidate_restores_the_last_accepted_workspace_state() {
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![call(
+            "c1",
+            "edit_file",
+            serde_json::json!({
+                "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+            }),
+        )]),
+        TurnOutput::Text("done".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (false, 10.0)]);
+    let mut toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+    toolloop.budgets.rejection_budget = 0;
+
+    let outcome = toolloop.run("attempt a bad edit").await.unwrap();
+    assert!(matches!(
+        outcome.outcome,
+        NodeTerminalOutcome::Escalated { .. }
+    ));
+    assert_eq!(executor.state.load(Ordering::SeqCst), 0);
+    assert!(outcome
+        .events
+        .iter()
+        .any(|event| matches!(event, LoopEvent::CandidateRestored { .. })));
+}
+
+#[tokio::test]
+async fn one_provider_turn_cannot_exceed_the_cadence_bound() {
+    let calls = (0..3)
+        .map(|index| {
+            call(
+                &format!("c{index}"),
+                "edit_file",
+                serde_json::json!({
+                    "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+                }),
+            )
+        })
+        .collect();
+    let transport = Scripted::new(vec![TurnOutput::ToolCalls(calls)]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let mut toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+    toolloop.cadence.max_mutations_between_checks = 1;
+
+    let outcome = toolloop.run("bounded edits").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 1);
+    let boundary_denials = outcome
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                LoopEvent::EffectDenied { reason, .. } if reason == "EvidenceBoundaryRequired"
+            )
+        })
+        .count();
+    assert_eq!(boundary_denials, 2);
 }

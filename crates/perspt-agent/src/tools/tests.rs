@@ -115,9 +115,8 @@ async fn test_move_file() {
 
     let tools = AgentTools::new(dir.clone(), false);
     let mut args = HashMap::new();
-    args.insert("from".to_string(), src.to_string_lossy().to_string());
     args.insert("to".to_string(), dst.to_string_lossy().to_string());
-    // move_file also needs "path" in args (set by bundle handler)
+    // The governed catalog names the source argument `path`.
     args.insert("path".to_string(), src.to_string_lossy().to_string());
     let call = ToolCall {
         name: "move_file".to_string(),

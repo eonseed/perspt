@@ -480,9 +480,13 @@ impl AgentTools {
 
     /// Move/rename a file within the workspace
     fn move_file(&self, call: &ToolCall) -> ToolResult {
-        let from = match call.arguments.get("from") {
+        let from = match call
+            .arguments
+            .get("path")
+            .or_else(|| call.arguments.get("from"))
+        {
             Some(p) => self.resolve_path(p),
-            None => return ToolResult::failure("move_file", "Missing 'from' argument".to_string()),
+            None => return ToolResult::failure("move_file", "Missing 'path' argument".to_string()),
         };
         let to = match call.arguments.get("to") {
             Some(p) => self.resolve_path(p),
