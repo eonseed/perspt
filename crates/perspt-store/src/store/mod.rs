@@ -13,6 +13,7 @@ mod branches;
 mod evidence;
 mod handle;
 mod planning;
+mod psp9_ledger;
 mod reviews;
 mod rows;
 mod sessions;
@@ -22,4 +23,5 @@ mod telemetry;
 mod tests;
 
 pub use handle::*;
+pub use psp9_ledger::Psp9LedgerRow;
 pub use rows::*;

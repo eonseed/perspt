@@ -11,7 +11,7 @@ pub use store::{
     ArtifactBundleRow, BranchFlushRow, BranchLineageRow, BudgetEnvelopeRow,
     ContextProvenanceRecord, CorrectionAttemptRow, EnergyRecord, EscalationReportRecord,
     FeatureCharterRow, InterfaceSealRow, LlmRequestRecord, NodeStateRecord, PlanRevisionRow,
-    ProvisionalBranchRow, RepairFootprintRow, ReviewOutcomeRow, RewriteRecordRow, SessionRecord,
-    SessionStore, SheafValidationRow, SrbnStepRecord, StructuralDigestRecord, TaskGraphEdgeRow,
-    VerificationResultRow,
+    ProvisionalBranchRow, Psp9LedgerRow, RepairFootprintRow, ReviewOutcomeRow, RewriteRecordRow,
+    SessionRecord, SessionStore, SheafValidationRow, SrbnStepRecord, StructuralDigestRecord,
+    TaskGraphEdgeRow, VerificationResultRow,
 };

@@ -98,6 +98,27 @@ pub enum LedgerEvent {
         handle: String,
         content_hash: String,
     },
+    // --- PSP-9 model-plane events (system 14) ---
+    RouteResolved {
+        phase: String,
+        model: String,
+        reason: String,
+    },
+    ProviderDegraded {
+        provider: String,
+        missing: String,
+        fallback: String,
+    },
+    RouteFailover {
+        from_model: String,
+        to_model: String,
+        cause: String,
+    },
+    VerdictRecorded {
+        validator: String,
+        candidate_id: String,
+        passed: bool,
+    },
     Custom {
         kind: String,
         payload: serde_json::Value,
@@ -214,6 +235,11 @@ impl Ledger {
         self.observations.contains_key(handle)
     }
 
+    /// The recorded content hash for an observation handle, if any.
+    pub fn observation_hash(&self, handle: &str) -> Option<&str> {
+        self.observations.get(handle).map(String::as_str)
+    }
+
     /// The kernel-refusal rule: refuse to commit a transition that references an
     /// observation lacking a ledger record (PSP-8 System 11). Returns an error
     /// naming the first unrecorded handle.
@@ -311,6 +337,53 @@ impl IdempotencyLog {
                 Ok(outcome.to_string())
             }
         }
+    }
+}
+
+/// Theorem 7's recording obligation, adopted literally (PSP-9 system 14):
+/// the kernel refuses to commit any transition that depends on an unrecorded
+/// observation. Returns the observation hashes on success so the transition
+/// record can content-address them.
+pub fn require_recorded(ledger: &Ledger, handles: &[String]) -> Result<Vec<String>> {
+    let mut hashes = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match ledger.observation_hash(handle) {
+            Some(hash) => hashes.push(hash.to_string()),
+            None => {
+                return Err(SdkError::Domain(format!(
+                    "transition depends on unrecorded observation {handle:?}; \
+                     record it before use (R2)"
+                )))
+            }
+        }
+    }
+    Ok(hashes)
+}
+
+/// The result of a provider-free audit replay (PSP-9 system 14).
+///
+/// Audit replay does not re-run tools: it folds recorded records and
+/// verifies the event chain, head, and accepted trajectory. Verification
+/// replay (re-running deterministic verifiers) is a separate mode whose
+/// result is a *new* observation, never a substitute for the original.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AuditReport {
+    pub chain_ok: bool,
+    pub head: String,
+    pub records: u64,
+    /// The accepted trajectory folded from the chain.
+    pub accepted: Vec<(String, u32, f64)>,
+}
+
+/// Fold the ledger deterministically with credentials absent by construction
+/// (nothing in the chain stores one), verifying every link.
+pub fn audit_replay(ledger: &Ledger) -> AuditReport {
+    let chain_ok = ledger.verify_chain().is_ok();
+    AuditReport {
+        chain_ok,
+        head: ledger.head(),
+        records: ledger.records().len() as u64,
+        accepted: replay_accepted_trajectory(ledger),
     }
 }
 

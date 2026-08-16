@@ -703,6 +703,22 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // PSP-9 system 14: the durable canonical event stream. The SDK keeps the
+    // chain semantics; this table keeps the bytes.
+    conn.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS psp9_ledger_events (
+            session_id VARCHAR NOT NULL,
+            sequence BIGINT NOT NULL,
+            event_json TEXT NOT NULL,
+            prev_hash VARCHAR NOT NULL,
+            hash VARCHAR NOT NULL,
+            PRIMARY KEY (session_id, sequence)
+        )
+        "#,
+        [],
+    )?;
+
     log::info!("DuckDB schema initialized successfully");
     Ok(())
 }

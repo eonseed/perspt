@@ -27,6 +27,7 @@ bundled = [
 
 [dependencies]
 perspt-core = { workspace = true }
+perspt-sdk = { workspace = true }
 perspt-tui = { workspace = true }
 perspt-agent = { workspace = true }
 perspt-store = { workspace = true }
