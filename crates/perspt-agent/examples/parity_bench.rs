@@ -33,12 +33,15 @@ fn fixtures() -> Vec<Fixture> {
         Fixture {
             case_id: "fix-failing-test",
             task: "Make the existing test pass by fixing answer() in src/lib.rs.",
-            lib_rs: "pub fn answer() -> u32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn answer_is_two() { assert_eq!(super::answer(), 2); }\n}\n",
+            lib_rs: "pub fn answer() -> u32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    \
+                     #[test]\n    fn answer_is_two() { assert_eq!(super::answer(), 2); }\n}\n",
         },
         Fixture {
             case_id: "implement-missing-fn",
-            task: "Implement the missing double() function in src/lib.rs so the crate compiles and its test passes.",
-            lib_rs: "#[cfg(test)]\nmod tests {\n    #[test]\n    fn doubles() { assert_eq!(crate::double(21), 42); }\n}\n",
+            task: "Implement the missing double() function in src/lib.rs so the \
+                   crate compiles and its test passes.",
+            lib_rs: "#[cfg(test)]\nmod tests {\n    #[test]\n    \
+                     fn doubles() { assert_eq!(crate::double(21), 42); }\n}\n",
         },
     ]
 }
@@ -187,8 +190,8 @@ async fn main() -> anyhow::Result<()> {
     let mut whole_file_report = BenchmarkReport::new();
     println!("Parity benchmark: governed tool loop vs whole-file ablation baseline\n");
     println!(
-        "  {:<24} {:<12} {:>9} {:>9}  {}",
-        "case", "arm", "outcome", "seconds", "detail"
+        "  {:<24} {:<12} {:>9} {:>9}  detail",
+        "case", "arm", "outcome", "seconds",
     );
     for fixture in fixtures() {
         let governed = tool_loop_arm(&config, &fixture).await?;
