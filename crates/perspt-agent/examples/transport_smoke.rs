@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     let portfolio = Arc::new(perspt_core::ModelPortfolio::from_config(&config)?);
     let transport = GenAiTransport::new(portfolio);
 
-    let routes: Vec<ModelId> = [models.architect, models.actuator]
+    let routes: Vec<ModelId> = [models.architect, models.speculator, models.actuator]
         .into_iter()
         .flatten()
         .map(|s| s.parse())
