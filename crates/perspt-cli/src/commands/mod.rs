@@ -9,6 +9,7 @@ pub mod init;
 pub mod ledger;
 pub mod logs;
 pub mod providers;
+pub mod psp9_chain;
 pub mod replay;
 pub mod resume;
 pub mod simple_chat;
