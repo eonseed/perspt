@@ -166,6 +166,18 @@ pub enum ApprovalPolicy {
     Deny,
 }
 
+impl ApprovalPolicy {
+    /// Ordering for the attenuation preorder: a child's policy must be at
+    /// least as strict as its parent's (PSP-9 system 12).
+    pub fn strictness(self) -> u8 {
+        match self {
+            ApprovalPolicy::Auto | ApprovalPolicy::SessionApproved => 0,
+            ApprovalPolicy::Ask => 1,
+            ApprovalPolicy::Deny => 2,
+        }
+    }
+}
+
 /// A capability: an explicit, attenuable grant of authority (PSP-8 System 7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Capability {
@@ -227,11 +239,35 @@ impl Capability {
             return false;
         }
         // Path/command/network scope subset (each pattern must be covered).
-        let scope_subset = self.path_scope.iter().all(|p| {
-            source.path_scope.iter().any(|sp| sp == p)
-                || source.path_scope.iter().any(|sp| sp.0 == "*")
-        });
-        if !source.path_scope.is_empty() && !scope_subset {
+        // All three scopes are part of Perspt's effective `E_c` and MUST
+        // participate in the Def. 4.1 preorder (PSP-9 system 12, Gate L).
+        // Empty child scope means unbounded only when the parent is also
+        // unbounded; it must never widen a bounded parent.
+        fn scope_attenuates<T: PartialEq>(
+            child: &[T],
+            parent: &[T],
+            parent_has_wildcard: bool,
+        ) -> bool {
+            if parent.is_empty() {
+                return true; // unbounded parent admits any child scope
+            }
+            if child.is_empty() {
+                return false; // bounded parent, unbounded child: widening
+            }
+            child
+                .iter()
+                .all(|c| parent_has_wildcard || parent.contains(c))
+        }
+        let path_wild = source.path_scope.iter().any(|sp| sp.0 == "*");
+        if !scope_attenuates(&self.path_scope, &source.path_scope, path_wild) {
+            return false;
+        }
+        let cmd_wild = source.command_scope.iter().any(|sp| sp.0 == "*");
+        if !scope_attenuates(&self.command_scope, &source.command_scope, cmd_wild) {
+            return false;
+        }
+        let net_wild = source.network_scope.iter().any(|sp| sp.0 == "*");
+        if !scope_attenuates(&self.network_scope, &source.network_scope, net_wild) {
             return false;
         }
         // Call budget no greater.
@@ -254,6 +290,20 @@ impl Capability {
         }
         // Delegability no greater.
         if self.may_delegate && !source.may_delegate {
+            return false;
+        }
+        // Risk budget no larger (PSP-9): a bounded parent bounds the child.
+        match (&self.risk_budget, &source.risk_budget) {
+            (Some(child), Some(parent))
+                if child.limit - child.spent > parent.limit - parent.spent =>
+            {
+                return false;
+            }
+            (None, Some(_)) => return false, // child unbounded, parent bounded
+            _ => {}
+        }
+        // Approval policy at least as strict.
+        if self.approval_policy.strictness() < source.approval_policy.strictness() {
             return false;
         }
         true
@@ -328,6 +378,36 @@ impl EffectProposal {
 
     pub fn with_command(mut self, command: CommandInvocation) -> Self {
         self.command = Some(command);
+        self
+    }
+
+    // --- PSP-9 system 12 builders. The certified increment `c_c` and the
+    // budget debit come from the registered capability contract and
+    // `BarrierWitness`, never from model arguments, so there is no
+    // `with_risk_cost` builder. ---
+
+    pub fn with_generation(mut self, generation: u32) -> Self {
+        self.generation = generation;
+        self
+    }
+
+    pub fn with_risk_class(mut self, risk: RiskClass) -> Self {
+        self.risk = risk;
+        self
+    }
+
+    pub fn with_network_target(mut self, target: impl Into<String>) -> Self {
+        self.network_target = Some(target.into());
+        self
+    }
+
+    pub fn with_idempotency_key(mut self, key: impl Into<String>) -> Self {
+        self.idempotency_key = key.into();
+        self
+    }
+
+    pub fn with_preconditions(mut self, preconditions: Vec<StateWitness>) -> Self {
+        self.preconditions = preconditions;
         self
     }
 }
