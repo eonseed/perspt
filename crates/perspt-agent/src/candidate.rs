@@ -31,7 +31,17 @@ pub struct CandidateWorkspace {
     _temp: TempDir,
     overlay_tools: AgentTools,
     source_tools: AgentTools,
+    /// Checkpoint scope: every path a proposal has *named*, including pure
+    /// reads. Used for state-witness hashing, never for promotion.
     tracked: Mutex<BTreeSet<String>>,
+    /// Paths an admitted effect actually mutated. Promotion, diffs, and the
+    /// approval file list read this set — a merely-read file must never be
+    /// copied back into the source workspace.
+    mutated_paths: Mutex<BTreeSet<String>>,
+    /// Pre-images of every mutation, in order. Restoring a checkpoint replays
+    /// the suffix recorded after it in reverse, so files first touched after
+    /// the checkpoint are restored (or removed) exactly.
+    journal: Mutex<Vec<JournalEntry>>,
     snapshots: Mutex<HashMap<String, CandidateSnapshot>>,
     lsp_sessions: tokio::sync::Mutex<HashMap<String, LspSession>>,
     mutations: AtomicU32,
@@ -86,6 +96,8 @@ impl CandidateWorkspace {
             overlay_root,
             _temp: temp,
             tracked: Mutex::new(BTreeSet::new()),
+            mutated_paths: Mutex::new(BTreeSet::new()),
+            journal: Mutex::new(Vec::new()),
             snapshots: Mutex::new(HashMap::new()),
             lsp_sessions: tokio::sync::Mutex::new(HashMap::new()),
             mutations: AtomicU32::new(0),
@@ -104,8 +116,9 @@ impl CandidateWorkspace {
         self.mutations.load(Ordering::SeqCst) > 0
     }
 
+    /// Paths mutated by admitted effects — the only promotable set.
     pub fn touched_paths(&self) -> Vec<String> {
-        self.tracked.lock().unwrap().iter().cloned().collect()
+        self.mutated_paths.lock().unwrap().iter().cloned().collect()
     }
 
     /// Diff the realized candidate against the source workspace. This is an
@@ -128,9 +141,9 @@ impl CandidateWorkspace {
         Ok(output)
     }
 
-    /// Promote only paths named by governed proposals.
+    /// Promote only paths mutated by admitted governed proposals.
     pub fn promote(&self) -> Result<Vec<String>> {
-        let paths: Vec<String> = self.tracked.lock().unwrap().iter().cloned().collect();
+        let paths: Vec<String> = self.mutated_paths.lock().unwrap().iter().cloned().collect();
         let mut source_before = BTreeMap::new();
         for rel in &paths {
             let rel = validate_relative_path(rel)?;
@@ -189,59 +202,99 @@ impl CandidateWorkspace {
         let scope: Vec<String> = tracked.iter().cloned().collect();
         drop(tracked);
 
-        let mut contents = BTreeMap::new();
-        for rel in &scope {
-            let path = self.overlay_root.join(rel);
-            let value = match std::fs::read(&path) {
-                Ok(bytes) => Some(bytes),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-                Err(e) => return Err(e).with_context(|| format!("checkpointing {rel}")),
-            };
-            contents.insert(rel.clone(), value);
-        }
-        let state = snapshot_workspace(&self.overlay_root, &scope)?;
+        let witness = self.witness_for(scope)?;
         let id = uuid::Uuid::new_v4().to_string();
         self.snapshots.lock().unwrap().insert(
             id.clone(),
             CandidateSnapshot {
-                contents,
+                journal_len: self.journal.lock().unwrap().len(),
                 mutations: self.mutations.load(Ordering::SeqCst),
+                mutated: self.mutated_paths.lock().unwrap().clone(),
             },
         );
-        Ok(CandidateCheckpoint {
-            id,
-            witness: CandidateStateWitness {
-                state_root: state.root_hash(),
-                graph_revision: self.graph_revision.clone(),
-                node_id: self.node_id.clone(),
-                node_generation: self.generation,
-                canonical_scope: scope,
-                barrier_channels: BTreeMap::new(),
-            },
-        })
+        Ok(CandidateCheckpoint { id, witness })
     }
 
     fn current_witness(&self) -> Result<CandidateStateWitness> {
         let scope: Vec<String> = self.tracked.lock().unwrap().iter().cloned().collect();
+        self.witness_for(scope)
+    }
+
+    /// Build the state witness for a scope from the realized overlay: the
+    /// content hash re-reads disk, and the barrier channels are measured over
+    /// the actually-mutated paths, so the barrier clause observes the
+    /// materialized candidate rather than only the declared proposal.
+    fn witness_for(&self, scope: Vec<String>) -> Result<CandidateStateWitness> {
         let state = snapshot_workspace(&self.overlay_root, &scope)?;
+        let mutated = self.mutated_paths.lock().unwrap();
+        let barrier_channels = perspt_coding::OperationalSafetyBarrier::default()
+            .measure_channels(mutated.iter().map(String::as_str));
         Ok(CandidateStateWitness {
             state_root: state.root_hash(),
             graph_revision: self.graph_revision.clone(),
             node_id: self.node_id.clone(),
             node_generation: self.generation,
             canonical_scope: scope,
-            barrier_channels: BTreeMap::new(),
+            barrier_channels,
         })
     }
 
+    /// Validate every proposal-named path and, for a mutating effect, record
+    /// pre-images first: restore must be exact even for paths first touched
+    /// after the accepted checkpoint.
+    fn admit_named_paths(
+        &self,
+        call: &perspt_sdk::ProviderToolCall,
+        entry: &ToolEntry,
+        mutating: bool,
+    ) -> Result<Vec<String>> {
+        let named_paths: Vec<String> = ["path", "to", "from"]
+            .iter()
+            .filter_map(|field| call.arguments.get(*field).and_then(|v| v.as_str()))
+            .map(str::to_string)
+            .collect();
+        for rel in &named_paths {
+            validate_relative_path(rel)?;
+            if !entry.effect.is_read_only() {
+                reject_symlink_ancestor(&self.overlay_root, rel)?;
+            }
+        }
+        if mutating {
+            for rel in &named_paths {
+                self.journal_pre_image(rel)?;
+            }
+        }
+        Ok(named_paths)
+    }
+
+    /// Record the pre-image of a path before a mutating effect touches it.
+    fn journal_pre_image(&self, rel: &str) -> Result<()> {
+        let path = self.overlay_root.join(rel);
+        let prior = match std::fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e).with_context(|| format!("journaling {rel}")),
+        };
+        self.journal.lock().unwrap().push(JournalEntry {
+            path: rel.to_string(),
+            prior,
+        });
+        Ok(())
+    }
+
+    /// Replay the journal suffix recorded after the checkpoint, in reverse.
+    /// A file first created after the checkpoint has a `None` pre-image and
+    /// is removed; a file modified after it is rewritten to its exact bytes.
     fn restore_snapshot(&self, checkpoint: &CandidateCheckpoint) -> Result<()> {
         let snapshots = self.snapshots.lock().unwrap();
         let snapshot = snapshots
             .get(&checkpoint.id)
             .with_context(|| format!("unknown candidate checkpoint {}", checkpoint.id))?;
-        for (rel, content) in &snapshot.contents {
-            let path = self.overlay_root.join(rel);
-            match content {
+        let mut journal = self.journal.lock().unwrap();
+        while journal.len() > snapshot.journal_len {
+            let entry = journal.pop().expect("journal length checked");
+            let path = self.overlay_root.join(&entry.path);
+            match entry.prior {
                 Some(bytes) => {
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -253,6 +306,7 @@ impl CandidateWorkspace {
             }
         }
         self.mutations.store(snapshot.mutations, Ordering::SeqCst);
+        *self.mutated_paths.lock().unwrap() = snapshot.mutated.clone();
         Ok(())
     }
 
@@ -293,15 +347,8 @@ impl EffectExecutor for CandidateWorkspace {
         call: &perspt_sdk::ProviderToolCall,
         entry: &ToolEntry,
     ) -> Result<EffectOutcome> {
-        for rel in ["path", "to", "from"]
-            .iter()
-            .filter_map(|field| call.arguments.get(*field).and_then(|v| v.as_str()))
-        {
-            validate_relative_path(rel)?;
-            if !entry.effect.is_read_only() {
-                reject_symlink_ancestor(&self.overlay_root, rel)?;
-            }
-        }
+        let mutating = crate::toolloop::candidate_mutating_effect(entry.effect);
+        let named_paths = self.admit_named_paths(call, entry, mutating)?;
 
         if matches!(
             call.name.as_str(),
@@ -320,38 +367,7 @@ impl EffectExecutor for CandidateWorkspace {
         }
 
         if call.name == "exec" {
-            let raw = call
-                .arguments
-                .get("command")
-                .and_then(serde_json::Value::as_str)
-                .context("exec requires a command string")?;
-            let invocation = perspt_sdk::canonicalize(raw, ".");
-            anyhow::ensure!(
-                perspt_sdk::classify_tier(&invocation) == perspt_sdk::CommandTier::Inspection,
-                "exec only admits commands classified as inspection"
-            );
-            let perspt_sdk::CommandInvocation::Program { program, args, .. } = invocation else {
-                anyhow::bail!("exec does not admit shell composition");
-            };
-            validate_inspection_args(&args)?;
-            let policy = if self.allow_unisolated_verifiers {
-                ProcessPolicy::inspection(&self.overlay_root).best_effort()
-            } else {
-                ProcessPolicy::inspection(&self.overlay_root)
-            };
-            let sandbox = ProcessSandbox::new(program, args, policy)?;
-            let execution = tokio::task::spawn_blocking(move || sandbox.execute())
-                .await
-                .context("inspection process worker panicked")??;
-            let output = format!("{}{}", execution.stdout, execution.stderr);
-            return Ok(EffectOutcome {
-                output: if execution.success() {
-                    output
-                } else {
-                    format!("tool failed (exit {:?}): {output}", execution.exit_code)
-                },
-                mutated: false,
-            });
+            return self.run_inspection_exec(call).await;
         }
 
         if call.name == "lsp_query" {
@@ -379,17 +395,13 @@ impl EffectExecutor for CandidateWorkspace {
         } else {
             format!("tool failed: {}", result.error.unwrap_or_default())
         };
-        let mutates_source = result.success
-            && matches!(
-                entry.effect,
-                perspt_sdk::EffectKind::WriteArtifact
-                    | perspt_sdk::EffectKind::ApplyPatch
-                    | perspt_sdk::EffectKind::MoveFile
-                    | perspt_sdk::EffectKind::DeleteFile
-                    | perspt_sdk::EffectKind::MutateDependencies
-            );
+        let mutates_source = result.success && mutating;
         if mutates_source {
             self.mutations.fetch_add(1, Ordering::SeqCst);
+            let mut mutated = self.mutated_paths.lock().unwrap();
+            for rel in &named_paths {
+                mutated.insert(rel.clone());
+            }
         }
         Ok(EffectOutcome {
             output,
@@ -407,6 +419,45 @@ impl EffectExecutor for CandidateWorkspace {
 }
 
 impl CandidateWorkspace {
+    /// Governed direct-program execution for read-only inspection tools.
+    async fn run_inspection_exec(
+        &self,
+        call: &perspt_sdk::ProviderToolCall,
+    ) -> Result<EffectOutcome> {
+        let raw = call
+            .arguments
+            .get("command")
+            .and_then(serde_json::Value::as_str)
+            .context("exec requires a command string")?;
+        let invocation = perspt_sdk::canonicalize(raw, ".");
+        anyhow::ensure!(
+            perspt_sdk::classify_tier(&invocation) == perspt_sdk::CommandTier::Inspection,
+            "exec only admits commands classified as inspection"
+        );
+        let perspt_sdk::CommandInvocation::Program { program, args, .. } = invocation else {
+            anyhow::bail!("exec does not admit shell composition");
+        };
+        validate_inspection_args(&args)?;
+        let policy = if self.allow_unisolated_verifiers {
+            ProcessPolicy::inspection(&self.overlay_root).best_effort()
+        } else {
+            ProcessPolicy::inspection(&self.overlay_root)
+        };
+        let sandbox = ProcessSandbox::new(program, args, policy)?;
+        let execution = tokio::task::spawn_blocking(move || sandbox.execute())
+            .await
+            .context("inspection process worker panicked")??;
+        let output = format!("{}{}", execution.stdout, execution.stderr);
+        Ok(EffectOutcome {
+            output: if execution.success() {
+                output
+            } else {
+                format!("tool failed (exit {:?}): {output}", execution.exit_code)
+            },
+            mutated: false,
+        })
+    }
+
     async fn run_lsp_query(&self, call: &perspt_sdk::ProviderToolCall) -> Result<EffectOutcome> {
         let relative = call
             .arguments
@@ -453,38 +504,48 @@ impl CandidateWorkspace {
             .get("kind")
             .and_then(serde_json::Value::as_str)
             .context("lsp_query requires kind")?;
-        let output = if kind == "diagnostics" {
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-            serde_json::to_string(&session.client.get_diagnostics(&relative).await)?
-        } else {
-            let symbol = call
-                .arguments
-                .get("symbol")
-                .and_then(serde_json::Value::as_str)
-                .context("definition, references, and hover queries require symbol")?;
-            let (line, character) = symbol_position(&content, symbol)
-                .with_context(|| format!("symbol {symbol:?} not found in {relative}"))?;
-            match kind {
-                "definition" => serde_json::to_string(
-                    &session.client.goto_definition(&path, line, character).await,
-                )?,
-                "references" => serde_json::to_string(
-                    &session
-                        .client
-                        .find_references(&path, line, character, true)
-                        .await,
-                )?,
-                "hover" => {
-                    serde_json::to_string(&session.client.hover(&path, line, character).await)?
-                }
-                other => anyhow::bail!("unknown lsp_query kind {other:?}"),
-            }
-        };
+        let output = dispatch_lsp_query(session, kind, call, &path, &relative, &content).await?;
         Ok(EffectOutcome {
             output,
             mutated: false,
         })
     }
+}
+
+async fn dispatch_lsp_query(
+    session: &mut LspSession,
+    kind: &str,
+    call: &perspt_sdk::ProviderToolCall,
+    path: &Path,
+    relative: &str,
+    content: &str,
+) -> Result<String> {
+    if kind == "diagnostics" {
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        return Ok(serde_json::to_string(
+            &session.client.get_diagnostics(relative).await,
+        )?);
+    }
+    let symbol = call
+        .arguments
+        .get("symbol")
+        .and_then(serde_json::Value::as_str)
+        .context("definition, references, and hover queries require symbol")?;
+    let (line, character) = symbol_position(content, symbol)
+        .with_context(|| format!("symbol {symbol:?} not found in {relative}"))?;
+    Ok(match kind {
+        "definition" => {
+            serde_json::to_string(&session.client.goto_definition(path, line, character).await)?
+        }
+        "references" => serde_json::to_string(
+            &session
+                .client
+                .find_references(path, line, character, true)
+                .await,
+        )?,
+        "hover" => serde_json::to_string(&session.client.hover(path, line, character).await)?,
+        other => anyhow::bail!("unknown lsp_query kind {other:?}"),
+    })
 }
 
 struct LspSession {
@@ -563,22 +624,27 @@ impl<'a> CodingCandidateMeasurer<'a> {
         self.max_parallel = max_parallel.max(1);
         self
     }
-}
 
-#[async_trait::async_trait]
-impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
-    async fn measure(&self) -> Result<Measured> {
+    fn adapter_for(plugin_name: &str) -> LanguageId {
+        match plugin_name.to_ascii_lowercase().as_str() {
+            "js" | "javascript" | "typescript" => LanguageId::new("typescript"),
+            other => LanguageId::new(other),
+        }
+    }
+
+    /// Enumerate every declared verifier capability as a runnable job; a
+    /// capability with no effective command is a blocking sensor residual.
+    fn collect_jobs(
+        &self,
+        residuals: &mut Vec<ResidualEvent>,
+        all_passed: &mut bool,
+    ) -> Result<Vec<VerifierJob>> {
         let registry = perspt_core::PluginRegistry::new();
-        let plugins = registry.detect_all(self.candidate.overlay_root());
-        let mut residuals = Vec::new();
-        let mut all_passed = !plugins.is_empty();
         let mut jobs = Vec::new();
-
+        let plugins = registry.detect_all(self.candidate.overlay_root());
+        *all_passed = !plugins.is_empty();
         for plugin in plugins {
-            let adapter_id = match plugin.name().to_ascii_lowercase().as_str() {
-                "js" | "javascript" | "typescript" => LanguageId::new("typescript"),
-                other => LanguageId::new(other),
-            };
+            let adapter_id = Self::adapter_for(plugin.name());
             for capability in plugin.verifier_profile().capabilities {
                 let Some(command) = capability.effective_command() else {
                     residuals.push(sensor_unavailable(
@@ -586,7 +652,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                         self.generation,
                         &format!("{}:{}", plugin.name(), capability.stage),
                     )?);
-                    all_passed = false;
+                    *all_passed = false;
                     continue;
                 };
                 jobs.push(VerifierJob {
@@ -597,6 +663,64 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                 });
             }
         }
+        Ok(jobs)
+    }
+
+    fn fold_execution(
+        &self,
+        job: &VerifierJob,
+        execution: VerifierExecution,
+        residuals: &mut Vec<ResidualEvent>,
+        all_passed: &mut bool,
+    ) -> Result<()> {
+        if let Some(adapter) = self.adapters.get(&job.adapter_id) {
+            residuals.extend(adapter.parse_diagnostics(
+                &self.node_id,
+                self.generation,
+                &execution.output,
+            ));
+        }
+        if !execution.success {
+            *all_passed = false;
+            let class = match job.stage {
+                perspt_core::plugin::VerifierStage::Test => ResidualClass::TestFailure,
+                perspt_core::plugin::VerifierStage::Lint => ResidualClass::Lint,
+                _ => ResidualClass::Build,
+            };
+            if !residuals.iter().any(|r| r.class == class) {
+                residuals.push(tool_residual(
+                    &self.node_id,
+                    self.generation,
+                    class,
+                    &format!("{} failed: {}", job.stage, concise(&execution.output)),
+                )?);
+            }
+        }
+        Ok(())
+    }
+
+    fn score(&self, residuals: &[ResidualEvent]) -> Result<(f64, Option<CorrectionDirection>)> {
+        let scope = DomainScope {
+            label: self.node_id.clone(),
+            paths: Vec::new(),
+        };
+        let score = score_candidate(&self.domain.energy_model(&scope), residuals)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let correction = self
+            .domain
+            .correction_directions(residuals)
+            .into_iter()
+            .next();
+        Ok((score.total, correction))
+    }
+}
+
+#[async_trait::async_trait]
+impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
+    async fn measure(&self) -> Result<Measured> {
+        let mut residuals = Vec::new();
+        let mut all_passed = false;
+        let jobs = self.collect_jobs(&mut residuals, &mut all_passed)?;
 
         let ran = jobs.len();
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel));
@@ -620,8 +744,10 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
 
         while let Some(result) = workers.join_next().await {
             let (job, execution) = result.context("verifier worker panicked")?;
-            let execution = match execution {
-                Ok(execution) => execution,
+            match execution {
+                Ok(execution) => {
+                    self.fold_execution(&job, execution, &mut residuals, &mut all_passed)?
+                }
                 Err(error) => {
                     residuals.push(sensor_unavailable(
                         &self.node_id,
@@ -629,31 +755,6 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                         &format!("{}:{} ({error})", job.plugin, job.stage),
                     )?);
                     all_passed = false;
-                    continue;
-                }
-            };
-            let combined = execution.output;
-            if let Some(adapter) = self.adapters.get(&job.adapter_id) {
-                residuals.extend(adapter.parse_diagnostics(
-                    &self.node_id,
-                    self.generation,
-                    &combined,
-                ));
-            }
-            if !execution.success {
-                all_passed = false;
-                let class = match job.stage {
-                    perspt_core::plugin::VerifierStage::Test => ResidualClass::TestFailure,
-                    perspt_core::plugin::VerifierStage::Lint => ResidualClass::Lint,
-                    _ => ResidualClass::Build,
-                };
-                if !residuals.iter().any(|r| r.class == class) {
-                    residuals.push(tool_residual(
-                        &self.node_id,
-                        self.generation,
-                        class,
-                        &format!("{} failed: {}", job.stage, concise(&combined)),
-                    )?);
                 }
             }
         }
@@ -661,20 +762,56 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         if ran == 0 {
             all_passed = false;
         }
-        let scope = DomainScope {
-            label: self.node_id.clone(),
-            paths: Vec::new(),
-        };
-        let score = score_candidate(&self.domain.energy_model(&scope), &residuals)
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let correction: Option<CorrectionDirection> = self
-            .domain
-            .correction_directions(&residuals)
-            .into_iter()
-            .next();
+        let (energy, correction) = self.score(&residuals)?;
         Ok(Measured {
             hard_pass: self.candidate.has_mutated() && all_passed && residuals.is_empty(),
-            energy: score.total,
+            energy,
+            residuals,
+            correction,
+        })
+    }
+
+    /// Per-mutation boundary: a syntax-only pass. The complete suite — every
+    /// build and test, each with its own timeout — belongs to the gate
+    /// boundary (`measure`); running it after every single admitted mutation
+    /// multiplies a turn's cost by its edit count for no additional gate
+    /// evidence. `hard_pass` is never claimed from this cheap pass.
+    async fn measure_incremental(&self) -> Result<Measured> {
+        let registry = perspt_core::PluginRegistry::new();
+        let plugins = registry.detect_all(self.candidate.overlay_root());
+        let mut residuals = Vec::new();
+        for plugin in plugins {
+            let Some(command) = plugin.syntax_check_command() else {
+                continue;
+            };
+            let adapter_id = Self::adapter_for(plugin.name());
+            let execution = run_governed_verifier(
+                self.candidate.overlay_root().to_path_buf(),
+                command,
+                self.candidate.allow_unisolated_verifiers,
+                "incremental-syntax".into(),
+            )
+            .await?;
+            if let Some(adapter) = self.adapters.get(&adapter_id) {
+                residuals.extend(adapter.parse_diagnostics(
+                    &self.node_id,
+                    self.generation,
+                    &execution.output,
+                ));
+            }
+            if !execution.success && !residuals.iter().any(|r| r.class == ResidualClass::Build) {
+                residuals.push(tool_residual(
+                    &self.node_id,
+                    self.generation,
+                    ResidualClass::Build,
+                    &format!("syntax check failed: {}", concise(&execution.output)),
+                )?);
+            }
+        }
+        let (energy, correction) = self.score(&residuals)?;
+        Ok(Measured {
+            hard_pass: false,
+            energy,
             residuals,
             correction,
         })
@@ -682,8 +819,16 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
 }
 
 struct CandidateSnapshot {
-    contents: BTreeMap<String, Option<Vec<u8>>>,
+    /// Journal position at snapshot time; restore replays everything after it.
+    journal_len: usize,
     mutations: u32,
+    mutated: BTreeSet<String>,
+}
+
+/// The pre-image of one path recorded immediately before a mutation.
+struct JournalEntry {
+    path: String,
+    prior: Option<Vec<u8>>,
 }
 
 struct VerifierExecution {
@@ -967,23 +1112,88 @@ mod tests {
         assert!(reject_symlink_ancestor(overlay.path(), "src/file.rs").is_ok());
     }
 
+    fn write_call(path: &str, content: &str) -> perspt_sdk::ProviderToolCall {
+        perspt_sdk::ProviderToolCall {
+            call_id: uuid::Uuid::new_v4().to_string(),
+            name: "write_file".into(),
+            arguments: serde_json::json!({"path": path, "content": content}),
+        }
+    }
+
+    fn write_entry() -> ToolEntry {
+        perspt_sdk::base_entries()
+            .into_iter()
+            .find(|entry| entry.name == "write_file")
+            .expect("base catalog has write_file")
+    }
+
     #[tokio::test]
     async fn checkpoint_restore_and_promotion_use_touched_paths() {
         let source = tempfile::tempdir().unwrap();
         std::fs::write(source.path().join("a.txt"), "old").unwrap();
         let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
         let before = candidate.checkpoint(&["a.txt".into()]).await.unwrap();
-        std::fs::write(candidate.overlay_root().join("a.txt"), "new").unwrap();
+        let entry = write_entry();
+        candidate
+            .apply(&write_call("a.txt", "new"), &entry)
+            .await
+            .unwrap();
         candidate.restore(&before).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(candidate.overlay_root().join("a.txt")).unwrap(),
             "old"
         );
-        std::fs::write(candidate.overlay_root().join("a.txt"), "accepted").unwrap();
+        assert!(!candidate.has_mutated());
+        candidate
+            .apply(&write_call("a.txt", "accepted"), &entry)
+            .await
+            .unwrap();
         candidate.promote().unwrap();
         assert_eq!(
             std::fs::read_to_string(source.path().join("a.txt")).unwrap(),
             "accepted"
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_removes_files_first_created_after_the_checkpoint() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("a.txt"), "old").unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        let accepted = candidate.checkpoint(&[]).await.unwrap();
+        let entry = write_entry();
+        // A file first touched *after* the accepted checkpoint must be gone
+        // after a gate rejection, on disk and in the promotable set.
+        candidate
+            .apply(&write_call("fresh.rs", "fn injected() {}"), &entry)
+            .await
+            .unwrap();
+        assert!(candidate.overlay_root().join("fresh.rs").is_file());
+        assert!(candidate.touched_paths().contains(&"fresh.rs".to_string()));
+        candidate.restore(&accepted).await.unwrap();
+        assert!(!candidate.overlay_root().join("fresh.rs").exists());
+        assert!(candidate.touched_paths().is_empty());
+        assert!(!candidate.has_mutated());
+    }
+
+    #[tokio::test]
+    async fn read_paths_are_never_promoted() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("read-only.txt"), "user edit kept").unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        // The checkpoint scope names the read path; the user then edits the
+        // source file while the agent merely read it. Promotion must not
+        // rewrite it from the stale overlay copy.
+        candidate
+            .checkpoint(&["read-only.txt".into()])
+            .await
+            .unwrap();
+        std::fs::write(source.path().join("read-only.txt"), "user edit v2").unwrap();
+        assert!(candidate.touched_paths().is_empty());
+        candidate.promote().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(source.path().join("read-only.txt")).unwrap(),
+            "user edit v2"
         );
     }
 }
