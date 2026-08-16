@@ -128,3 +128,6 @@ docs/custom.css.bak
 # Temporary documentation files
 docs/temp/
 *.tmp.md
+
+# Local AI provider config (never commit credentials)
+config.local.toml
