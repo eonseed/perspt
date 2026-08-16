@@ -40,22 +40,23 @@ impl ModelTransport for ScriptedTransport {
     }
 }
 
-#[tokio::test]
-async fn production_runtime_edits_verifies_promotes_and_records() {
-    let project = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(project.path().join("src")).unwrap();
+fn write_fixture_project(project: &std::path::Path) {
+    std::fs::create_dir_all(project.join("src")).unwrap();
     std::fs::write(
-        project.path().join("Cargo.toml"),
+        project.join("Cargo.toml"),
         "[package]\nname='runtime-fixture'\nversion='0.1.0'\nedition='2021'\n",
     )
     .unwrap();
     std::fs::write(
-        project.path().join("src/lib.rs"),
-        "pub fn answer() -> u32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn answer_is_two() { assert_eq!(super::answer(), 2); }\n}\n",
+        project.join("src/lib.rs"),
+        "pub fn answer() -> u32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    \
+         fn answer_is_two() { assert_eq!(super::answer(), 2); }\n}\n",
     )
     .unwrap();
+}
 
-    let transport = Arc::new(ScriptedTransport {
+fn scripted_edit_transport() -> Arc<ScriptedTransport> {
+    Arc::new(ScriptedTransport {
         turns: Mutex::new(vec![
             TurnOutput::ToolCalls(vec![ProviderToolCall {
                 call_id: "edit-1".into(),
@@ -68,11 +69,17 @@ async fn production_runtime_edits_verifies_promotes_and_records() {
             }]),
             TurnOutput::Text("verification requested".into()),
         ]),
-    });
+    })
+}
+
+#[tokio::test]
+async fn production_runtime_edits_verifies_promotes_and_records() {
+    let project = tempfile::tempdir().unwrap();
+    write_fixture_project(project.path());
     let database = project.path().join("runtime.db");
     let runtime = Psp9AgentRuntime::with_transport(
         project.path().to_path_buf(),
-        transport,
+        scripted_edit_transport(),
         ModelId::new("test", "scripted"),
         Psp9RunConfig {
             approval_policy: ApprovalPolicy::Auto,
