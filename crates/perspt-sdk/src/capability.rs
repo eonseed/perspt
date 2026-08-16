@@ -15,6 +15,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 use crate::command::{classify_tier, CommandInvocation, CommandTier};
+use crate::error::SdkError;
 
 /// An actor that can hold capabilities and emit proposals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -201,9 +202,50 @@ pub struct GrantPolicy {
     pub integrity_binding: String,
 }
 
+impl GrantPolicy {
+    /// The deterministic byte encoding the grant signature commits to.
+    ///
+    /// serde output is not canonical (field order, float and escape formatting
+    /// may change across versions), so the signature covers this fixed,
+    /// length-prefixed encoding instead. Every field participates; list fields
+    /// are count-prefixed so no concatenation can alias two policies.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        fn field(out: &mut Vec<u8>, bytes: &[u8]) {
+            out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+            out.extend_from_slice(bytes);
+        }
+        fn list(out: &mut Vec<u8>, entries: impl ExactSizeIterator<Item = String>) {
+            out.extend_from_slice(&(entries.len() as u64).to_be_bytes());
+            for entry in entries {
+                field(out, entry.as_bytes());
+            }
+        }
+        let mut out = Vec::new();
+        field(&mut out, b"perspt-grant-policy-v1");
+        field(&mut out, self.policy_id.as_bytes());
+        field(&mut out, self.workspace_root.as_bytes());
+        list(
+            &mut out,
+            self.effect_ceiling.iter().map(|e| format!("{e:?}")),
+        );
+        list(&mut out, self.path_ceiling.iter().map(|p| p.0.clone()));
+        list(&mut out, self.command_ceiling.iter().map(|p| p.0.clone()));
+        list(&mut out, self.network_ceiling.iter().map(|p| p.0.clone()));
+        field(&mut out, format!("{:?}", self.approval_ceiling).as_bytes());
+        out.extend_from_slice(&self.authority_epoch.to_be_bytes());
+        out.push(u8::from(self.persistent));
+        field(&mut out, self.integrity_binding.as_bytes());
+        out
+    }
+}
+
 /// Signed durable grant intent. Verification authenticates policy bytes only;
 /// resume must still intersect the policy with the current authority epoch,
 /// workspace facts, and configured ceilings before minting a new capability.
+///
+/// The embedded public key is *not* a trust anchor — anyone can re-sign a
+/// rewritten policy with their own key. Callers MUST verify against the key
+/// they trust via [`SignedGrantPolicy::verify_against`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SignedGrantPolicy {
     pub policy: GrantPolicy,
@@ -212,10 +254,9 @@ pub struct SignedGrantPolicy {
 }
 
 impl SignedGrantPolicy {
-    pub fn sign(policy: GrantPolicy, secret_key: &[u8; 32]) -> Result<Self, String> {
+    pub fn sign(policy: GrantPolicy, secret_key: &[u8; 32]) -> crate::error::Result<Self> {
         let signing_key = SigningKey::from_bytes(secret_key);
-        let message = serde_json::to_vec(&policy).map_err(|error| error.to_string())?;
-        let signature = signing_key.sign(&message);
+        let signature = signing_key.sign(&policy.canonical_bytes());
         Ok(Self {
             policy,
             public_key: hex_encode(signing_key.verifying_key().as_bytes()),
@@ -223,23 +264,44 @@ impl SignedGrantPolicy {
         })
     }
 
-    pub fn verify(&self) -> Result<(), String> {
-        let public_key: [u8; 32] = hex_decode(&self.public_key)?
+    /// Verify the signature against a caller-supplied trusted public key.
+    ///
+    /// This is the only verification that authenticates the policy: it fails
+    /// both on a bad signature and on a signer other than `trusted_public_key`.
+    pub fn verify_against(&self, trusted_public_key: &[u8; 32]) -> crate::error::Result<()> {
+        let embedded: [u8; 32] = hex_decode(&self.public_key)?
             .try_into()
-            .map_err(|_| "grant public key must be 32 bytes".to_string())?;
+            .map_err(|_| SdkError::Signature("grant public key must be 32 bytes".into()))?;
+        if &embedded != trusted_public_key {
+            return Err(SdkError::Signature(
+                "grant signed by an untrusted key".into(),
+            ));
+        }
         let signature: [u8; 64] = hex_decode(&self.signature)?
             .try_into()
-            .map_err(|_| "grant signature must be 64 bytes".to_string())?;
-        let verifying_key =
-            VerifyingKey::from_bytes(&public_key).map_err(|error| error.to_string())?;
-        let message = serde_json::to_vec(&self.policy).map_err(|error| error.to_string())?;
+            .map_err(|_| SdkError::Signature("grant signature must be 64 bytes".into()))?;
+        let verifying_key = VerifyingKey::from_bytes(&embedded)
+            .map_err(|error| SdkError::Signature(error.to_string()))?;
         verifying_key
-            .verify(&message, &Signature::from_bytes(&signature))
-            .map_err(|error| error.to_string())
+            .verify(
+                &self.policy.canonical_bytes(),
+                &Signature::from_bytes(&signature),
+            )
+            .map_err(|error| SdkError::Signature(error.to_string()))
     }
 }
 
-fn hex_encode(bytes: &[u8]) -> String {
+/// Derive the Ed25519 public key for a grant signing key, so callers can
+/// anchor [`SignedGrantPolicy::verify_against`] to the key they resolved
+/// without taking their own dependency on the signature crate.
+pub fn grant_public_key(secret_key: &[u8; 32]) -> [u8; 32] {
+    SigningKey::from_bytes(secret_key)
+        .verifying_key()
+        .to_bytes()
+}
+
+/// Lowercase hex encoding, shared by grant signing and key persistence.
+pub fn hex_encode(bytes: &[u8]) -> String {
     use std::fmt::Write;
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -248,15 +310,16 @@ fn hex_encode(bytes: &[u8]) -> String {
     output
 }
 
-fn hex_decode(value: &str) -> Result<Vec<u8>, String> {
+/// Inverse of [`hex_encode`].
+pub fn hex_decode(value: &str) -> crate::error::Result<Vec<u8>> {
     if value.len() & 1 != 0 {
-        return Err("hex value has odd length".into());
+        return Err(SdkError::Signature("hex value has odd length".into()));
     }
     (0..value.len())
         .step_by(2)
         .map(|index| {
             u8::from_str_radix(&value[index..index + 2], 16)
-                .map_err(|error| format!("invalid hex value: {error}"))
+                .map_err(|error| SdkError::Signature(format!("invalid hex value: {error}")))
         })
         .collect()
 }
@@ -373,9 +436,24 @@ impl Capability {
         if !scope_attenuates(&self.command_scope, &source.command_scope, cmd_wild) {
             return false;
         }
-        let net_wild = source.network_scope.iter().any(|sp| sp.0 == "*");
-        if !scope_attenuates(&self.network_scope, &source.network_scope, net_wild) {
-            return false;
+        // Network scope is deny-by-default at admissibility time (an empty
+        // scope grants no network authority), so its preorder must invert:
+        // an empty parent scope bounds the child to empty, and a non-empty
+        // child must be covered by the parent. Reusing the allow-by-default
+        // rule here would let a no-network parent delegate `*` (widening).
+        if source.network_scope.is_empty() {
+            if !self.network_scope.is_empty() {
+                return false;
+            }
+        } else {
+            let net_wild = source.network_scope.iter().any(|sp| sp.0 == "*");
+            if !self
+                .network_scope
+                .iter()
+                .all(|c| net_wild || source.network_scope.contains(c))
+            {
+                return false;
+            }
         }
         // Call budget no greater.
         if let (Some(child), Some(parent)) = (self.max_calls, source.max_calls) {
@@ -642,35 +720,73 @@ pub fn check_admissibility(
     capabilities: &[Capability],
     state: &KernelState,
 ) -> AdmissibilityWitness {
-    // Self-modifying agents cannot grant themselves privileged effects: a
-    // privileged effect requires a capability whose holder is *not* the
-    // proposing actor, or an explicitly user-granted privileged capability.
-    // Find a capability held by the actor that grants the effect.
+    let cap = match find_authorized_capability(proposal, capabilities) {
+        Ok(cap) => cap,
+        Err(witness) => return *witness,
+    };
+    if let Some(denied) = check_binding(proposal, cap, state) {
+        return denied;
+    }
+    if let Some(denied) = check_lifetime(proposal, cap, state) {
+        return denied;
+    }
+    if let Some(denied) = check_scope(proposal, cap) {
+        return denied;
+    }
+    if let Some(denied) = check_state_witnesses(proposal, cap, state) {
+        return denied;
+    }
+    finalize_decision(proposal, cap)
+}
+
+/// Authority clause: a capability held by the proposing actor that grants the
+/// effect. Privileged effects additionally require root, user-minted authority:
+/// a delegated or non-session capability cannot carry them, so a self-modifying
+/// agent can never launder `UpdateGraph`/`UpdatePolicy` through a child grant.
+fn find_authorized_capability<'a>(
+    proposal: &EffectProposal,
+    capabilities: &'a [Capability],
+) -> Result<&'a Capability, Box<AdmissibilityWitness>> {
     let cap = capabilities
         .iter()
-        .find(|c| c.holder == proposal.actor && c.grants(proposal.effect));
-
-    let cap = match cap {
-        Some(c) => c,
-        None => {
-            return deny(
+        .find(|c| c.holder == proposal.actor && c.grants(proposal.effect))
+        .ok_or_else(|| {
+            Box::new(deny(
                 proposal,
                 None,
                 DenyReason::NoCapability,
                 RecoveryClass::NeedsCapability,
-            )
-        }
-    };
+            ))
+        })?;
+    if proposal.effect.is_privileged()
+        && (cap.role != CapabilityRole::Session || cap.parent_capability_id.is_some())
+    {
+        return Err(Box::new(deny(
+            proposal,
+            Some(cap),
+            DenyReason::PrivilegeEscalation,
+            RecoveryClass::Fatal,
+        )));
+    }
+    Ok(cap)
+}
 
+/// Binding clause: the capability is bound to the live graph revision,
+/// authority epoch, and node generation it was minted for.
+fn check_binding(
+    proposal: &EffectProposal,
+    cap: &Capability,
+    state: &KernelState,
+) -> Option<AdmissibilityWitness> {
     if !cap.graph_revision.is_empty()
         && state.witnesses.get("__graph_revision") != Some(&cap.graph_revision)
     {
-        return deny(
+        return Some(deny(
             proposal,
             Some(cap),
             DenyReason::StateWitnessMismatch,
             RecoveryClass::NeedsCapability,
-        );
+        ));
     }
     if !cap.session_id.is_empty()
         && state
@@ -679,76 +795,82 @@ pub fn check_admissibility(
             .and_then(|value| value.parse::<u64>().ok())
             != Some(cap.authority_epoch)
     {
-        return deny(
+        return Some(deny(
             proposal,
             Some(cap),
             DenyReason::StateWitnessMismatch,
             RecoveryClass::NeedsCapability,
-        );
+        ));
     }
     if proposal.generation != cap.node_generation {
-        return deny(
+        return Some(deny(
             proposal,
             Some(cap),
             DenyReason::StateWitnessMismatch,
             RecoveryClass::Retryable,
-        );
+        ));
     }
+    None
+}
 
-    // Expiry.
+/// Lifetime clause: expiry `τ_c` and call budget `q_c`. An expiry with no
+/// `__now` witness fails closed — the kernel cannot certify "not expired"
+/// without a clock it trusts, and defaulting to open would make `expires_at`
+/// decorative on any path that forgets to supply time.
+fn check_lifetime(
+    proposal: &EffectProposal,
+    cap: &Capability,
+    state: &KernelState,
+) -> Option<AdmissibilityWitness> {
     if let Some(expiry) = cap.expires_at {
-        // A timestamp of 0 in preconditions is treated as "now unknown"; callers
-        // pass the real clock through the witness resource. Here we only reject
-        // when an explicit `__now` witness exceeds expiry.
-        if let Some(now) = state
+        match state
             .witnesses
             .get("__now")
             .and_then(|s| s.parse::<i64>().ok())
         {
-            if now > expiry {
-                return deny(
+            Some(now) if now <= expiry => {}
+            _ => {
+                return Some(deny(
                     proposal,
                     Some(cap),
                     DenyReason::Expired,
                     RecoveryClass::NeedsCapability,
-                );
+                ));
             }
         }
     }
-
-    // Call budget.
     if cap.max_calls == Some(0) {
-        return deny(
+        return Some(deny(
             proposal,
             Some(cap),
             DenyReason::CallBudgetExhausted,
             RecoveryClass::NeedsCapability,
-        );
+        ));
     }
+    None
+}
 
-    // Effect scope: path.
+/// Scope clause: path, command, and network scope of the effective `E_c`.
+fn check_scope(proposal: &EffectProposal, cap: &Capability) -> Option<AdmissibilityWitness> {
     for path in proposal.path.iter().chain(proposal.additional_paths.iter()) {
         if !cap.path_scope.is_empty() && !cap.path_scope.iter().any(|p| p.matches(path)) {
-            return deny(
+            return Some(deny(
                 proposal,
                 Some(cap),
                 DenyReason::PathOutOfScope,
                 RecoveryClass::NeedsApproval,
-            );
+            ));
         }
     }
-
-    // Command governance.
     if let Some(command) = &proposal.command {
         if command.requires_shell() && !cap.grants(EffectKind::RunShell) {
-            return deny(
+            return Some(deny(
                 proposal,
                 Some(cap),
                 DenyReason::ShellNotPermitted,
                 RecoveryClass::NeedsApproval,
-            );
+            ));
         }
-        let tier = classify_tier(command);
         let mutation_effect = matches!(
             proposal.effect,
             EffectKind::WriteArtifact
@@ -757,13 +879,16 @@ pub fn check_admissibility(
                 | EffectKind::DeleteFile
                 | EffectKind::MutateDependencies
         );
-        if tier == CommandTier::Mutation && !mutation_effect && proposal.effect.is_read_only() {
-            return deny(
+        if classify_tier(command) == CommandTier::Mutation
+            && !mutation_effect
+            && proposal.effect.is_read_only()
+        {
+            return Some(deny(
                 proposal,
                 Some(cap),
                 DenyReason::MutationNotPermitted,
                 RecoveryClass::NeedsApproval,
-            );
+            ));
         }
         if !cap.command_scope.is_empty()
             && !cap
@@ -771,43 +896,51 @@ pub fn check_admissibility(
                 .iter()
                 .any(|p| p.matches(command.program_name()))
         {
-            return deny(
+            return Some(deny(
                 proposal,
                 Some(cap),
                 DenyReason::CommandOutOfScope,
                 RecoveryClass::NeedsApproval,
-            );
+            ));
         }
     }
-
-    // Network scope.
     if let Some(target) = &proposal.network_target {
         if !cap.network_scope.iter().any(|p| p.matches(target)) {
-            return deny(
+            return Some(deny(
                 proposal,
                 Some(cap),
                 DenyReason::NetworkOutOfScope,
                 RecoveryClass::NeedsApproval,
-            );
+            ));
         }
     }
+    None
+}
 
-    // State witnesses still match.
+/// State-witness clause: every recorded precondition hash still holds.
+fn check_state_witnesses(
+    proposal: &EffectProposal,
+    cap: &Capability,
+    state: &KernelState,
+) -> Option<AdmissibilityWitness> {
     for w in &proposal.preconditions {
         match state.witnesses.get(&w.resource) {
             Some(current) if current == &w.content_hash => {}
             _ => {
-                return deny(
+                return Some(deny(
                     proposal,
                     Some(cap),
                     DenyReason::StateWitnessMismatch,
                     RecoveryClass::Retryable,
-                )
+                ));
             }
         }
     }
+    None
+}
 
-    // Risk budget: spent + cost <= limit.
+/// Risk-budget and approval clauses, then the final witness.
+fn finalize_decision(proposal: &EffectProposal, cap: &Capability) -> AdmissibilityWitness {
     let risk_ok = cap
         .risk_budget
         .as_ref()
@@ -821,8 +954,6 @@ pub fn check_admissibility(
             RecoveryClass::NeedsApproval,
         );
     }
-
-    // Approval policy.
     let decision = match cap.approval_policy {
         ApprovalPolicy::Deny => {
             return deny(
@@ -839,7 +970,6 @@ pub fn check_admissibility(
         AdmissibilityDecision::NeedsApproval => Some(RecoveryClass::NeedsApproval),
         _ => None,
     };
-
     AdmissibilityWitness {
         proposal_id: proposal.proposal_id.clone(),
         actor: proposal.actor.clone(),
@@ -1048,8 +1178,78 @@ mod tests {
             integrity_binding: "ledger:abc".into(),
         };
         let mut signed = SignedGrantPolicy::sign(policy, &[7u8; 32]).unwrap();
-        signed.verify().unwrap();
+        let trusted: [u8; 32] = hex_decode(&signed.public_key).unwrap().try_into().unwrap();
+        signed.verify_against(&trusted).unwrap();
         signed.policy.authority_epoch += 1;
-        assert!(signed.verify().is_err());
+        assert!(signed.verify_against(&trusted).is_err());
+    }
+
+    #[test]
+    fn grant_signature_rejects_an_untrusted_signer() {
+        // Re-signing a rewritten policy with a different key must not verify:
+        // the embedded public key is not a trust anchor.
+        let policy = GrantPolicy {
+            policy_id: "p1".into(),
+            workspace_root: "/workspace".into(),
+            effect_ceiling: vec![EffectKind::ReadFile],
+            path_ceiling: vec![],
+            command_ceiling: vec![],
+            network_ceiling: vec![],
+            approval_ceiling: ApprovalPolicy::Ask,
+            authority_epoch: 0,
+            persistent: true,
+            integrity_binding: "ledger:abc".into(),
+        };
+        let trusted = SignedGrantPolicy::sign(policy.clone(), &[7u8; 32]).unwrap();
+        let trusted_key: [u8; 32] = hex_decode(&trusted.public_key).unwrap().try_into().unwrap();
+        let mut widened = policy;
+        widened.effect_ceiling.push(EffectKind::RunShell);
+        let attacker = SignedGrantPolicy::sign(widened, &[9u8; 32]).unwrap();
+        assert!(attacker.verify_against(&trusted_key).is_err());
+    }
+
+    #[test]
+    fn no_network_parent_cannot_delegate_network_authority() {
+        let parent = Capability::new(actor(), vec![EffectKind::NetworkFetch]).delegable();
+        let mut child = Capability::new(ActorId::new("child"), vec![EffectKind::NetworkFetch]);
+        child.parent_capability_id = Some(parent.capability_id.clone());
+        child.role = CapabilityRole::Worker;
+        child.network_scope = vec![NetworkPattern("*".into())];
+        assert!(parent.delegate(child).is_none());
+    }
+
+    #[test]
+    fn privileged_effect_requires_root_session_authority() {
+        // A delegated (child) capability carrying a privileged effect is
+        // rejected even though it nominally grants it.
+        let mut cap = Capability::new(actor(), vec![EffectKind::UpdatePolicy]);
+        cap.role = CapabilityRole::Worker;
+        cap.parent_capability_id = Some("parent".into());
+        let proposal = EffectProposal::new(actor(), "n1", EffectKind::UpdatePolicy);
+        let w = check_admissibility(&proposal, &[cap], &KernelState::new());
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::PrivilegeEscalation
+            }
+        ));
+    }
+
+    #[test]
+    fn expiry_without_a_now_witness_fails_closed() {
+        let mut cap = Capability::new(actor(), vec![EffectKind::ReadFile]);
+        cap.expires_at = Some(1_700_000_000);
+        let proposal = EffectProposal::new(actor(), "n1", EffectKind::ReadFile);
+        let w = check_admissibility(&proposal, std::slice::from_ref(&cap), &KernelState::new());
+        assert!(matches!(
+            w.decision,
+            AdmissibilityDecision::Deny {
+                reason: DenyReason::Expired
+            }
+        ));
+        let mut state = KernelState::new();
+        state.set_witness("__now", "1699999999");
+        let w = check_admissibility(&proposal, &[cap], &state);
+        assert_eq!(w.decision, AdmissibilityDecision::Allow);
     }
 }

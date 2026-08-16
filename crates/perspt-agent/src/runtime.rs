@@ -483,9 +483,8 @@ impl Psp9AgentRuntime {
         )?;
         let signed_grant = if self.config.persistent_grants {
             let key = crate::grant::GrantSigningKey::resolve()?;
-            let signed = perspt_sdk::SignedGrantPolicy::sign(grant_policy.clone(), &key.bytes)
-                .map_err(anyhow::Error::msg)?;
-            signed.verify().map_err(anyhow::Error::msg)?;
+            let signed = perspt_sdk::SignedGrantPolicy::sign(grant_policy.clone(), &key.bytes)?;
+            signed.verify_against(&perspt_sdk::grant_public_key(&key.bytes))?;
             recorder.record_custom(
                 "grant_signing_key_resolved",
                 serde_json::json!({"source": format!("{:?}", key.source)}),
@@ -517,6 +516,13 @@ impl Psp9AgentRuntime {
             grant_policy.authority_epoch.to_string(),
         );
         kernel_state.set_witness("__graph_revision", running_graph.revision_id.clone());
+        // Capability expiry fails closed without a `__now` witness; supply the
+        // wall clock so `expires_at`-bearing capabilities stay enforceable.
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        kernel_state.set_witness("__now", now_unix.to_string());
         let tool_loop = ToolLoop {
             transport: self.transport.as_ref(),
             model: self.model.clone(),
