@@ -90,6 +90,11 @@ enum Commands {
         #[arg(long)]
         persistent_grants: bool,
 
+        /// Run only the read-only exploration phase: deterministic map plus
+        /// an interactive explorer tool loop; nothing is mutated or promoted
+        #[arg(long)]
+        exploration_only: bool,
+
         /// Ordered sticky actuator fallback route; repeat to add routes
         #[arg(long = "fallback-model")]
         fallback_models: Vec<String>,
@@ -293,6 +298,7 @@ async fn main() -> Result<()> {
             rejection_budget,
             max_parallel,
             persistent_grants,
+            exploration_only,
             fallback_models,
             output_summary,
             dashboard,
@@ -314,6 +320,7 @@ async fn main() -> Result<()> {
                 rejection_budget,
                 max_parallel,
                 persistent_grants,
+                exploration_only,
                 dashboard,
                 dashboard_port,
                 config_override,
