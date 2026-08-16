@@ -185,7 +185,7 @@ count = 1
 [[allow]]
 file = "crates/perspt-tui/src/agent_app.rs"
 rule = "PSP-2"
-count = 2
+count = 1
 
 [[allow]]
 file = "crates/perspt-tui/src/chat_app.rs"
