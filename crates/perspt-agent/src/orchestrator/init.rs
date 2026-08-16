@@ -88,7 +88,11 @@ impl SRBNOrchestrator {
             }
             true
         } else {
-            self.emit_log("❌ Cannot proceed with project initialization — install missing critical tools first.".to_string());
+            self.emit_log(
+                "❌ Cannot proceed with project initialization — install missing critical tools \
+                first."
+                    .to_string(),
+            );
             false
         }
     }
@@ -307,11 +311,13 @@ impl SRBNOrchestrator {
                                     if !plugin.detect(&self.context.working_dir) {
                                         let expected: Vec<&str> = plugin.key_files().to_vec();
                                         log::error!(
-                                            "Project init succeeded but no key files detected (expected: {:?})",
+                                            "Project init succeeded but no key files detected (expected: \
+                                                {:?})",
                                             expected
                                         );
                                         self.emit_log(format!(
-                                            "❌ Init command ran but project files are missing (expected: {}). \
+                                            "❌ Init command ran but project files are missing (expected: \
+                                                {}). \
                                              Cannot proceed.",
                                             expected.join(", ")
                                         ));
@@ -439,16 +445,19 @@ impl SRBNOrchestrator {
                                         if !plugin.detect(&self.context.working_dir) {
                                             let expected: Vec<&str> = plugin.key_files().to_vec();
                                             log::error!(
-                                                "Project init succeeded but no key files detected (expected: {:?})",
+                                                "Project init succeeded but no key files detected \
+                                                    (expected: {:?})",
                                                 expected
                                             );
                                             self.emit_log(format!(
-                                                "❌ Init command ran but project files are missing (expected: {}). \
+                                                "❌ Init command ran but project files are missing \
+                                                    (expected: {}). \
                                                  Cannot proceed.",
                                                 expected.join(", ")
                                             ));
                                             anyhow::bail!(
-                                                "Project initialization did not produce expected files: {:?}",
+                                                "Project initialization did not produce expected files: \
+                                                    {:?}",
                                                 expected
                                             );
                                         }

@@ -310,7 +310,8 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_provisional_branches_parent ON provisional_branches(parent_node_id)",
+        "CREATE INDEX IF NOT EXISTS idx_provisional_branches_parent ON \
+         provisional_branches(parent_node_id)",
         [],
     )?;
 
@@ -697,7 +698,8 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_correction_attempts_node ON correction_attempts(session_id, node_id)",
+        "CREATE INDEX IF NOT EXISTS idx_correction_attempts_node ON correction_attempts(session_id, \
+         node_id)",
         [],
     )?;
 

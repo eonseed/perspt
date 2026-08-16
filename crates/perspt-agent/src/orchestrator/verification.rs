@@ -528,7 +528,8 @@ impl SRBNOrchestrator {
         }
 
         log::info!(
-            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, V_boot={:.2}, V_sheaf={:.2}, Total={:.2}",
+            "Energy for {}: V_syn={:.2}, V_str={:.2}, V_log={:.2}, V_boot={:.2}, V_sheaf={:.2}, \
+                Total={:.2}",
             node.node_id,
             energy.v_syn,
             energy.v_str,

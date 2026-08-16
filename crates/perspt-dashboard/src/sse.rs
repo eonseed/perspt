@@ -27,10 +27,33 @@ pub async fn sse_handler(
                     .iter()
                     .filter(|n| normalize_state(&n.state) == "completed")
                     .count();
-                let failed = nodes.iter().filter(|n| normalize_state(&n.state) == "failed").count();
-                let running = nodes.iter().filter(|n| normalize_state(&n.state) == "running").count();
+                let failed = nodes
+                    .iter()
+                    .filter(|n| normalize_state(&n.state) == "failed")
+                    .count();
+                let running = nodes
+                    .iter()
+                    .filter(|n| normalize_state(&n.state) == "running")
+                    .count();
+                // concat! keeps the payload a single line: SSE `data:` frames
+                // must not contain raw newlines.
                 format!(
-                    r#"<div class="stats shadow"><div class="stat"><div class="stat-title">Total</div><div class="stat-value text-lg">{total}</div></div><div class="stat"><div class="stat-title">Done</div><div class="stat-value text-lg">{committed}</div></div><div class="stat"><div class="stat-title">Running</div><div class="stat-value text-lg">{running}</div></div><div class="stat"><div class="stat-title">Failed</div><div class="stat-value text-lg text-error">{failed}</div></div></div>"#
+                    concat!(
+                        r#"<div class="stats shadow">"#,
+                        r#"<div class="stat"><div class="stat-title">Total</div>"#,
+                        r#"<div class="stat-value text-lg">{total}</div></div>"#,
+                        r#"<div class="stat"><div class="stat-title">Done</div>"#,
+                        r#"<div class="stat-value text-lg">{committed}</div></div>"#,
+                        r#"<div class="stat"><div class="stat-title">Running</div>"#,
+                        r#"<div class="stat-value text-lg">{running}</div></div>"#,
+                        r#"<div class="stat"><div class="stat-title">Failed</div>"#,
+                        r#"<div class="stat-value text-lg text-error">{failed}</div></div>"#,
+                        r#"</div>"#
+                    ),
+                    total = total,
+                    committed = committed,
+                    running = running,
+                    failed = failed
                 )
             }
             Err(_) => String::from("<span>DB unavailable</span>"),

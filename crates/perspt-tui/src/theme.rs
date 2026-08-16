@@ -162,7 +162,8 @@ impl Theme {
             tab_inactive: Style::default().fg(palette.on_surface_muted),
 
             // User message background (subtle tint)
-            user_message_bg: Style::default().bg(Color::Rgb(30, 35, 40)), // Slightly lighter than terminal bg
+            // Slightly lighter than terminal bg
+            user_message_bg: Style::default().bg(Color::Rgb(30, 35, 40)),
         }
     }
 

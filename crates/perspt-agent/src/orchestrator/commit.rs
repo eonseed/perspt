@@ -155,7 +155,8 @@ impl SRBNOrchestrator {
         // build graph consistency.
         if let Some(ref vr) = self.last_verification_result {
             log::debug!(
-                "select_validators for {}: build_ok={}, tests_ok={}, tests_failed={}, tests_passed={}, degraded={}",
+                "select_validators for {}: build_ok={}, tests_ok={}, tests_failed={}, tests_passed={}, \
+                    degraded={}",
                 node.node_id, vr.build_ok, vr.tests_ok, vr.tests_failed, vr.tests_passed, vr.degraded
             );
             // Only check build-graph consistency when the Build stage actually

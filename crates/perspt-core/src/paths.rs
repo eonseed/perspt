@@ -7,7 +7,8 @@
 
 use std::path::PathBuf;
 
-/// Platform config directory: `~/.config/perspt/` (Linux) or `~/Library/Application Support/perspt/` (macOS).
+/// Platform config directory: `~/.config/perspt/` (Linux) or `~/Library/Application Support/perspt/`
+/// (macOS).
 pub fn config_dir() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("perspt"))
 }
@@ -22,7 +23,8 @@ pub fn policy_dir() -> Option<PathBuf> {
     config_dir().map(|d| d.join("rules"))
 }
 
-/// Platform data directory: `~/.local/share/perspt/` (Linux) or `~/Library/Application Support/perspt/` (macOS).
+/// Platform data directory: `~/.local/share/perspt/` (Linux) or `~/Library/Application Support/perspt/`
+/// (macOS).
 pub fn data_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("perspt"))
 }
