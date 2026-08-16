@@ -175,6 +175,132 @@ pub fn resolve_route(
     }
 }
 
+// ---------------------------------------------------------------------------
+// PSP-9 system 3: portfolio routing over fully qualified ModelIds
+// ---------------------------------------------------------------------------
+
+use crate::model::{ModelFamily, ModelId, ProviderCapabilities, ProviderCapabilityMask};
+
+/// What a route resolution optimizes (PSP-9 system 3).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RouteObjective {
+    /// Hard capability requirements for the route.
+    pub require: ProviderCapabilityMask,
+    /// Prefer a family decorrelated from this route's family (system 8's
+    /// review preference). Family is a routing prior, never a measurement.
+    pub decorrelate_from: Option<ModelId>,
+}
+
+/// The per-tier fully qualified routes from the `[models]` table.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PortfolioModels {
+    pub architect: Option<ModelId>,
+    pub actuator: Option<ModelId>,
+    pub verifier: Option<ModelId>,
+    pub speculator: Option<ModelId>,
+    pub adjudicator: Option<ModelId>,
+}
+
+impl PortfolioModels {
+    fn for_tier(&self, tier: ModelTier) -> Option<&ModelId> {
+        match tier {
+            ModelTier::Speculator => self.speculator.as_ref(),
+            ModelTier::Verifier => self.verifier.as_ref(),
+            ModelTier::Actuator => self.actuator.as_ref(),
+            ModelTier::Architect => self.architect.as_ref(),
+        }
+    }
+
+    fn all(&self) -> Vec<&ModelId> {
+        [
+            self.speculator.as_ref(),
+            self.verifier.as_ref(),
+            self.actuator.as_ref(),
+            self.architect.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+}
+
+/// A resolved portfolio route: fully qualified, with a failover chain.
+///
+/// Routing is *sticky within a node* by default — cross-vendor moves happen
+/// at node and role boundaries, not per turn, because switching vendors
+/// mid-node discards the prompt cache. Failover to `fallback` is recovery
+/// level 1, not a retry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortfolioRoute {
+    pub phase: AgentPhase,
+    pub resolved_tier: ModelTier,
+    pub model: ModelId,
+    /// Failover chain, preferentially on *different providers*.
+    pub fallback: Vec<ModelId>,
+    pub budget: ModelBudget,
+    pub reason: String,
+}
+
+/// Resolve a portfolio route for a phase (PSP-9 system 3).
+///
+/// `caps_of` reports each candidate route's capability record; a route that
+/// fails `objective.require` is ineligible. `family_of` classifies by model
+/// name. Routing policy: Explore/Research take the cheapest capable route;
+/// Verify/Review prefer a family different from `decorrelate_from` whenever
+/// the portfolio permits; Implement/Repair take the strongest actuator.
+pub fn resolve_portfolio_route(
+    phase: AgentPhase,
+    models: &PortfolioModels,
+    objective: &RouteObjective,
+    budget: ModelBudget,
+    caps_of: &dyn Fn(&ModelId) -> ProviderCapabilities,
+    family_of: &dyn Fn(&ModelId) -> ModelFamily,
+) -> Option<PortfolioRoute> {
+    let tier = phase.default_tier();
+    let capable = |m: &&ModelId| caps_of(m).satisfies(&objective.require);
+
+    let primary: &ModelId = match phase {
+        AgentPhase::Verify | AgentPhase::Review => {
+            // Prefer a decorrelated family among capable routes.
+            let preferred = objective.decorrelate_from.as_ref().map(family_of);
+            let candidates: Vec<&ModelId> = models.all().into_iter().filter(capable).collect();
+            let decorrelated = preferred.as_ref().and_then(|from| {
+                candidates
+                    .iter()
+                    .find(|m| family_of(m).is_distinct_from(from))
+                    .copied()
+            });
+            decorrelated
+                .or_else(|| models.for_tier(tier).filter(|m| capable(&m)))
+                .or_else(|| candidates.first().copied())?
+        }
+        _ => models
+            .for_tier(tier)
+            .filter(|m| capable(&m))
+            .or_else(|| models.all().into_iter().find(capable))?,
+    };
+
+    // Failover chain: every other capable route, different providers first.
+    let mut fallback: Vec<ModelId> = models
+        .all()
+        .into_iter()
+        .filter(capable)
+        .filter(|m| *m != primary)
+        .cloned()
+        .collect();
+    fallback.sort_by_key(|m| (m.provider == primary.provider, m.to_string()));
+    fallback.dedup();
+
+    Some(PortfolioRoute {
+        phase,
+        resolved_tier: tier,
+        model: primary.clone(),
+        fallback,
+        budget,
+        reason: format!("{phase:?} default tier {tier:?} under objective"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +371,118 @@ mod tests {
             let route = resolve_route(phase, &config, None, ModelBudget::default());
             assert_eq!(route.model, "one-model");
         }
+    }
+
+    fn qualified(models: &[(&str, &str)]) -> PortfolioModels {
+        let id = |i: usize| ModelId::new(models[i].0, models[i].1);
+        PortfolioModels {
+            architect: Some(id(0)),
+            actuator: Some(id(1)),
+            verifier: Some(id(2)),
+            speculator: Some(id(3)),
+            adjudicator: None,
+        }
+    }
+
+    fn full_caps(_m: &ModelId) -> crate::model::ProviderCapabilities {
+        crate::model::ProviderCapabilities {
+            tool_calling: true,
+            strict_schema: false,
+            parallel_tool_calls: true,
+            streaming_tool_calls: true,
+            prompt_caching: false,
+            structured_output: true,
+            max_context_tokens: 200_000,
+        }
+    }
+
+    fn by_name(m: &ModelId) -> crate::model::ModelFamily {
+        crate::model::ModelFamily::from_model_name(&m.model)
+    }
+
+    #[test]
+    fn review_prefers_a_decorrelated_family_when_the_portfolio_permits() {
+        let models = qualified(&[
+            ("anthropic", "claude-opus-5"),
+            ("openai", "gpt-5.5"),
+            ("anthropic", "claude-sonnet-5"),
+            ("local", "qwen2.5-coder"),
+        ]);
+        let objective = RouteObjective {
+            decorrelate_from: Some(ModelId::new("openai", "gpt-5.5")),
+            ..RouteObjective::default()
+        };
+        let route = resolve_portfolio_route(
+            AgentPhase::Review,
+            &models,
+            &objective,
+            ModelBudget::default(),
+            &full_caps,
+            &by_name,
+        )
+        .unwrap();
+        assert!(
+            by_name(&route.model).is_distinct_from(&crate::model::ModelFamily::OpenAiGpt),
+            "review route {} shares the actuator family",
+            route.model
+        );
+    }
+
+    #[test]
+    fn failover_chain_prefers_a_different_provider_first() {
+        let models = qualified(&[
+            ("anthropic", "claude-opus-5"),
+            ("openai", "gpt-5.5"),
+            ("anthropic", "claude-sonnet-5"),
+            ("local", "qwen2.5-coder"),
+        ]);
+        let route = resolve_portfolio_route(
+            AgentPhase::Implement,
+            &models,
+            &RouteObjective::default(),
+            ModelBudget::default(),
+            &full_caps,
+            &by_name,
+        )
+        .unwrap();
+        assert_eq!(route.model, ModelId::new("openai", "gpt-5.5"));
+        let first = route.fallback.first().expect("has fallback");
+        assert_ne!(
+            first.provider, route.model.provider,
+            "failover crosses providers first"
+        );
+    }
+
+    #[test]
+    fn a_capability_requirement_excludes_incapable_routes() {
+        let models = qualified(&[
+            ("anthropic", "claude-opus-5"),
+            ("openai", "gpt-5.5"),
+            ("anthropic", "claude-sonnet-5"),
+            ("local", "tiny-text-model"),
+        ]);
+        let text_only = |m: &ModelId| {
+            if m.provider == "local" {
+                crate::model::ProviderCapabilities::text_only(8_192)
+            } else {
+                full_caps(m)
+            }
+        };
+        let objective = RouteObjective {
+            require: crate::model::ProviderCapabilityMask::tool_loop(),
+            ..RouteObjective::default()
+        };
+        // Explore defaults to the speculator, but the local route lacks tool
+        // calling: routing selects another capable route instead.
+        let route = resolve_portfolio_route(
+            AgentPhase::Explore,
+            &models,
+            &objective,
+            ModelBudget::default(),
+            &text_only,
+            &by_name,
+        )
+        .unwrap();
+        assert_ne!(route.model.provider, "local");
     }
 }
