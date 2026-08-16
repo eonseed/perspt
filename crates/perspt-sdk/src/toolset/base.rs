@@ -62,12 +62,13 @@ fn entry(
     }
 }
 
-/// The read-only half of the base catalog.
-fn read_entries() -> Vec<ToolEntry> {
+/// Host-side tool-surface entries (deferred discovery and composition).
+fn surface_entries() -> Vec<ToolEntry> {
     vec![
         entry(
             "tool_search",
-            "Find governed tools by capability, name, and description; matching schemas become available on the next turn",
+            "Find governed tools by capability, name, and description; matching \
+             schemas become available on the next turn",
             EffectKind::ToolSearch,
             RiskClass::Low,
             schema(&[
@@ -79,7 +80,8 @@ fn read_entries() -> Vec<ToolEntry> {
         ),
         entry(
             "tool_program",
-            "Run a bounded pure Starlark program that returns nested tool proposals; each nested call is mediated separately",
+            "Run a bounded pure Starlark program that returns nested tool \
+             proposals; each nested call is mediated separately",
             EffectKind::ToolProgram,
             RiskClass::Low,
             schema(&[(
@@ -91,6 +93,13 @@ fn read_entries() -> Vec<ToolEntry> {
             FootprintSpec::default(),
             false,
         ),
+    ]
+}
+
+/// The read-only half of the base catalog.
+fn read_entries() -> Vec<ToolEntry> {
+    let mut entries = surface_entries();
+    entries.extend([
         entry(
             "read_file",
             "Read a file's contents with optional offset/limit windows; returns line-numbered text",
@@ -145,7 +154,8 @@ fn read_entries() -> Vec<ToolEntry> {
             path_read(),
             false,
         ),
-    ]
+    ]);
+    entries
 }
 
 /// Language-intelligence read entries.
@@ -287,13 +297,15 @@ fn command_entries() -> Vec<ToolEntry> {
     vec![
         entry(
             "exec",
-            "Run one shell-free, read-only OS program in the workspace sandbox; use rg, git diff/status/log/show, awk, sed -n, or coreutils",
+            "Run one shell-free, read-only OS program in the workspace sandbox; \
+             use rg, git diff/status/log/show, awk, sed -n, or coreutils",
             EffectKind::Search,
             RiskClass::Low,
             schema(&[(
                 "command",
                 "string",
-                "One direct program invocation; pipes, redirects, expansion, and mutation commands are denied",
+                "One direct program invocation; pipes, redirects, expansion, and \
+                 mutation commands are denied",
                 true,
             )]),
             FootprintSpec::opaque(),

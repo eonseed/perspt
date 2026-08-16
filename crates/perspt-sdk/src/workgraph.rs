@@ -281,18 +281,7 @@ impl WorkGraphRevision {
         let mut edges = self.edges.clone();
         for edit in edits {
             match edit {
-                GraphEdit::AddNode { node } => {
-                    if nodes
-                        .iter()
-                        .any(|existing| existing.node_id == node.node_id)
-                    {
-                        return Err(SdkError::Domain(format!(
-                            "graph already contains node {:?}",
-                            node.node_id
-                        )));
-                    }
-                    nodes.push(node.clone());
-                }
+                GraphEdit::AddNode { node } => add_node(&mut nodes, node)?,
                 GraphEdit::ReplaceNode { node } => {
                     let existing = nodes
                         .iter_mut()
@@ -349,6 +338,20 @@ impl WorkGraphRevision {
         revision.evidence = evidence;
         Ok(revision)
     }
+}
+
+fn add_node(nodes: &mut Vec<WorkNode>, node: &WorkNode) -> Result<()> {
+    if nodes
+        .iter()
+        .any(|existing| existing.node_id == node.node_id)
+    {
+        return Err(SdkError::Domain(format!(
+            "graph already contains node {:?}",
+            node.node_id
+        )));
+    }
+    nodes.push(node.clone());
+    Ok(())
 }
 
 /// Validate a node/edge set: check that all edge endpoints exist and that the
