@@ -118,6 +118,7 @@ pub struct Psp9AgentRuntime {
     event_sender: Option<perspt_core::events::channel::EventSender>,
     action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
     database_path: Option<PathBuf>,
+    shared_store: Option<Arc<SessionStore>>,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -194,6 +195,7 @@ impl Psp9AgentRuntime {
             event_sender: None,
             action_receiver: None,
             database_path: None,
+            shared_store: None,
         })
     }
 
@@ -216,11 +218,20 @@ impl Psp9AgentRuntime {
             event_sender: None,
             action_receiver: None,
             database_path: None,
+            shared_store: None,
         }
     }
 
     pub fn with_database_path(mut self, path: PathBuf) -> Self {
         self.database_path = Some(path);
+        self
+    }
+
+    /// Record into an existing store handle instead of opening a second live
+    /// handle on the same database file (used when an in-process dashboard
+    /// already holds one).
+    pub fn with_session_store(mut self, store: Arc<SessionStore>) -> Self {
+        self.shared_store = Some(store);
         self
     }
 
@@ -263,6 +274,7 @@ impl Psp9AgentRuntime {
             task,
             &self.working_dir,
             self.database_path.as_deref(),
+            self.shared_store.clone(),
             self.event_sender.clone(),
         )?;
         recorder.record_custom(
