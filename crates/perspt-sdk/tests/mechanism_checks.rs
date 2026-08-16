@@ -283,3 +283,66 @@ fn idempotency_and_write_ahead_obligations_hold() {
     effects.intent("k2");
     assert!(effects.result("k2").is_ok());
 }
+
+// --- MC-P: coordination minimality (PSP-9 Gate P, Paper III Theorem 8) ------
+
+#[test]
+fn mc_p_footprint_conflict_matrix() {
+    use perspt_sdk::scheduler::{Footprint, Resource};
+
+    let write_a = Footprint::new()
+        .read(Resource::File("src/a.rs".into()))
+        .write(Resource::File("src/a.rs".into()));
+    let write_b = Footprint::new()
+        .read(Resource::File("src/b.rs".into()))
+        .write(Resource::File("src/b.rs".into()));
+    let read_a = Footprint::new().read(Resource::File("src/a.rs".into()));
+
+    // Disjoint writers commute; writer conflicts with reader of the same file.
+    assert!(write_a.commutes_with(&write_b));
+    assert!(write_a.conflicts_with(&read_a));
+
+    // Rate limits are throughput resources: two turns contending on one
+    // provider's limit still commute — the delay is scheduling, never a
+    // required serialization.
+    let limited_1 = Footprint::new().read(Resource::ProviderRateLimit("anthropic".into()));
+    let limited_2 = Footprint::new().read(Resource::ProviderRateLimit("anthropic".into()));
+    assert!(limited_1.commutes_with(&limited_2));
+
+    // An opaque footprint serializes against every mutation (fail closed).
+    let opaque = Footprint::new()
+        .read(Resource::OpaqueWorkspace)
+        .write(Resource::OpaqueWorkspace);
+    assert!(opaque.conflicts_with(&write_b));
+    assert!(
+        opaque.commutes_with(&read_a),
+        "reads still commute with opaque"
+    );
+}
+
+#[test]
+fn mc_p_writes_outside_reads_are_rejected_at_assembly() {
+    use perspt_sdk::{AccessMode, FootprintSpec, ResourceSelector};
+
+    // A selector referencing an argument the schema does not declare cannot
+    // be assembled: the writes-within-reads discipline is checked at catalog
+    // assembly, not discovered at execution.
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {"path": {"type": "string"}},
+    });
+    let bad = FootprintSpec::new(vec![ResourceSelector::PathArgument {
+        field: "undeclared".into(),
+        access: AccessMode::Write,
+    }]);
+    assert!(bad.validate(&schema, true).is_err());
+
+    // And a resolved write always carries its read (writes ⊆ reads holds by
+    // construction — the declarative state-witness rule).
+    let good = FootprintSpec::new(vec![ResourceSelector::PathArgument {
+        field: "path".into(),
+        access: AccessMode::Write,
+    }]);
+    let footprint = good.resolve(&serde_json::json!({"path": "src/a.rs"}), "p");
+    assert!(footprint.writes.iter().all(|w| footprint.reads.contains(w)));
+}
