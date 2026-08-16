@@ -3,6 +3,7 @@
 pub mod config;
 pub mod events;
 pub mod llm_provider;
+pub mod local_command;
 pub mod memory;
 pub mod normalize;
 pub mod path;
