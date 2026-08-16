@@ -431,3 +431,66 @@ impl ContractEvaluator for CodingContract {
         }
     }
 }
+
+/// Load the newest durable candidate checkpoint: its control frame and the
+/// seed files fetched from content-addressed artifacts. Refuses when the
+/// session's durable authority epoch no longer matches the checkpoint's
+/// (revocation invalidates resumed sessions).
+pub(crate) fn load_candidate_checkpoint(
+    recorder: &Psp9Recorder,
+    session_id: &str,
+) -> Result<(perspt_sdk::ControlFrame, Vec<crate::toolloop::SeedFile>)> {
+    let checkpoint_json = recorder
+        .store
+        .latest_psp9_checkpoint(session_id)?
+        .context("session has no durable candidate checkpoint to resume from")?;
+    let value: serde_json::Value = serde_json::from_str(&checkpoint_json)?;
+    anyhow::ensure!(
+        value.get("kind").and_then(|v| v.as_str()) == Some("candidate"),
+        "newest checkpoint is not a candidate checkpoint; exact continuation is unavailable"
+    );
+    let control: perspt_sdk::ControlFrame = serde_json::from_value(
+        value
+            .get("control")
+            .cloned()
+            .context("checkpoint control")?,
+    )?;
+    let file_handles: Vec<(String, Option<String>)> =
+        serde_json::from_value(value.get("files").cloned().context("checkpoint files")?)?;
+    let current_epoch = recorder.store.authority_epoch(session_id)?;
+    anyhow::ensure!(
+        control.authority_epoch == current_epoch,
+        "checkpoint is bound to authority epoch {} but the durable epoch is {}; \
+         the session's authority was revoked",
+        control.authority_epoch,
+        current_epoch
+    );
+    let mut seed = Vec::with_capacity(file_handles.len());
+    for (path, handle) in file_handles {
+        let bytes = match handle {
+            Some(handle) => Some(
+                recorder
+                    .store
+                    .get_psp9_artifact(&handle)?
+                    .with_context(|| format!("missing checkpoint artifact {handle}"))?,
+            ),
+            None => None,
+        };
+        seed.push((path, bytes));
+    }
+    Ok((control, seed))
+}
+
+/// Rebuild a running single-node graph for a resumed session, recording both
+/// revisions in the resumed ledger.
+pub(crate) fn resumed_running_graph(
+    recorder: &Psp9Recorder,
+    node_id: &str,
+    task: &str,
+) -> Result<WorkGraphRevision> {
+    let graph = initial_graph(node_id, task)?;
+    recorder.record_custom("graph_revision", serde_json::to_value(&graph)?)?;
+    let running_graph = execution_revision(&graph, node_id, WorkNodeState::Running)?;
+    recorder.record_custom("graph_revision", serde_json::to_value(&running_graph)?)?;
+    Ok(running_graph)
+}

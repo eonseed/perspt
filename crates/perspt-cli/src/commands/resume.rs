@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 /// Resume a paused or crashed session
 pub async fn run(session_id: Option<String>, last: bool, db_path: Option<PathBuf>) -> Result<()> {
-    let store = super::psp9_chain::open_store(db_path.as_deref(), false)?;
+    let store = std::sync::Arc::new(super::psp9_chain::open_store(db_path.as_deref(), false)?);
 
     let target = if last {
         let sessions = store.list_recent_sessions(1)?;
@@ -15,7 +15,7 @@ pub async fn run(session_id: Option<String>, last: bool, db_path: Option<PathBuf
         session_id
     };
     match target {
-        Some(id) => resume_session(&store, &id).await,
+        Some(id) => resume_session(store, &id).await,
         None => list_sessions(&store).await,
     }
 }
@@ -74,7 +74,10 @@ async fn list_sessions(store: &perspt_store::SessionStore) -> Result<()> {
 }
 
 /// Resume a specific session
-async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) -> Result<()> {
+async fn resume_session(
+    store: std::sync::Arc<perspt_store::SessionStore>,
+    session_id: &str,
+) -> Result<()> {
     let actual_id = session_id.to_string();
 
     // Get the session
@@ -90,6 +93,7 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
     if session.status.ends_with("_PSP9") {
         return resume_psp9(store, &session).await;
     }
+    let store = &*store;
 
     // Get completed nodes
     let node_states = store.get_node_states(&actual_id)?;
@@ -279,23 +283,29 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
 /// intents from content-addressed artifacts. A new model loop is started as a
 /// new session because live capabilities are intentionally not serialized.
 async fn resume_psp9(
-    store: &perspt_store::SessionStore,
+    store: std::sync::Arc<perspt_store::SessionStore>,
     session: &perspt_store::SessionRecord,
 ) -> Result<()> {
-    verify_psp9_chain(store, &session.session_id)?;
+    verify_psp9_chain(&store, &session.session_id)?;
     let pending = store.pending_external_effects(&session.session_id)?;
     if pending.is_empty() {
         println!("PSP-9 ledger is valid and has no incomplete external effects.");
-        anyhow::ensure!(
-            session.status != "RUNNING_PSP9",
-            "the process stopped inside a model/tool loop without a durable candidate checkpoint; \
-             exact continuation is unavailable, and Perspt will not silently restart the task"
-        );
+        if session.status == "RUNNING_PSP9" {
+            // Mid-loop continuation: only from a durable candidate checkpoint;
+            // Perspt never silently restarts an interrupted task.
+            anyhow::ensure!(
+                has_candidate_checkpoint(&store, &session.session_id)?,
+                "the process stopped inside a model/tool loop without a durable candidate \
+                 checkpoint; exact continuation is unavailable, and Perspt will not silently \
+                 restart the task"
+            );
+            return resume_mid_loop(store, session).await;
+        }
         println!("This session is terminal; start a new agent session for additional work.");
         return Ok(());
     }
     let current_epoch = store.authority_epoch(&session.session_id)?;
-    verify_persistent_grant(store, &session.session_id, current_epoch)?;
+    verify_persistent_grant(&store, &session.session_id, current_epoch)?;
     for effect in pending {
         let intent: serde_json::Value = serde_json::from_str(&effect.intent_json)?;
         let epoch = intent
@@ -322,7 +332,7 @@ async fn resume_psp9(
             .and_then(serde_json::Value::as_array)
             .context("promotion intent has no file manifest")?;
         for file in files {
-            recover_promoted_file(store, &workspace, file)?;
+            recover_promoted_file(&store, &workspace, file)?;
         }
         store.complete_external_effect(
             &session.session_id,
@@ -343,6 +353,51 @@ async fn resume_psp9(
         println!("Session marked COMPLETED_PSP9.");
     } else {
         println!("Preserved terminal status {}.", session.status);
+    }
+    Ok(())
+}
+
+fn has_candidate_checkpoint(store: &perspt_store::SessionStore, session_id: &str) -> Result<bool> {
+    Ok(store
+        .latest_psp9_checkpoint(session_id)?
+        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+        .is_some_and(|value| value.get("kind").and_then(|kind| kind.as_str()) == Some("candidate")))
+}
+
+/// Continue an interrupted model loop from its durable candidate checkpoint:
+/// fresh transport from the effective config, fresh epoch-bound capability,
+/// exactly the remaining budgets.
+async fn resume_mid_loop(
+    store: std::sync::Arc<perspt_store::SessionStore>,
+    session: &perspt_store::SessionRecord,
+) -> Result<()> {
+    let config_path = perspt_core::paths::resolve_config_file();
+    let config = match config_path {
+        Some(path) => perspt_core::Config::load_from_path(&path)?,
+        None => perspt_core::Config::default(),
+    };
+    let working_dir = PathBuf::from(&session.working_dir);
+    anyhow::ensure!(
+        working_dir.exists(),
+        "working directory no longer exists: {}",
+        session.working_dir
+    );
+    let runtime = perspt_agent::Psp9AgentRuntime::from_config(
+        working_dir,
+        &config,
+        perspt_agent::Psp9ModelRoutes::default(),
+        perspt_agent::Psp9RunConfig {
+            approval_policy: perspt_sdk::ApprovalPolicy::Ask,
+            ..perspt_agent::Psp9RunConfig::default()
+        },
+    )?
+    .with_session_store(store);
+    println!("Continuing the interrupted loop from its durable candidate checkpoint...");
+    let summary = runtime.resume_session(session.session_id.clone()).await?;
+    println!("Outcome: {:?}", summary.outcome);
+    println!("Ledger head: {}", summary.ledger_head);
+    if !summary.promoted_paths.is_empty() {
+        println!("Promoted paths: {}", summary.promoted_paths.join(", "));
     }
     Ok(())
 }
