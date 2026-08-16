@@ -1,6 +1,7 @@
 pub mod dag;
 pub mod decisions;
 pub mod energy;
+pub mod governance;
 pub mod llm;
 pub mod overview;
 pub mod sandbox;

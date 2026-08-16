@@ -1,0 +1,110 @@
+{% extends "session_base.html" %}
+{% block title %}{{ title }} — Perspt Dashboard{% endblock %}
+{% block session_content %}
+<h2 class="text-xl font-bold mb-4">{{ title }}</h2>
+
+{# ── Authority ── #}
+<div class="grid grid-cols-2 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Authority epoch</div>
+        <div class="stat-value text-xl text-primary">{{ authority_epoch }}</div>
+        <div class="stat-desc text-xs">A bumped epoch revokes every capability minted before it.</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Grant intent</div>
+        <div class="stat-value text-xl {% if grant_signed %}text-success{% else %}text-warning{% endif %}">
+            {% if grant_signed %}signed{% else %}session-only{% endif %}
+        </div>
+        <div class="stat-desc text-xs">Persistent grants are Ed25519-signed intent, never live capabilities.</div>
+    </div>
+</div>
+
+{# ── Calibration epochs ── #}
+<h3 class="text-lg font-semibold mb-2">Calibration epochs</h3>
+{% if epochs.is_empty() %}
+<div class="alert alert-info mb-6"><span>No calibration epochs recorded.</span></div>
+{% else %}
+<div class="overflow-x-auto mb-6">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr>
+                <th>Epoch</th>
+                <th>Model route</th>
+                <th>State</th>
+                <th>ρ target</th>
+                <th>θ threshold</th>
+                <th>Labeled samples</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for epoch in epochs %}
+            <tr>
+                <td class="font-mono text-xs">{{ epoch.epoch_id_short }}</td>
+                <td class="font-mono text-xs">{{ epoch.model_route }}</td>
+                <td>
+                    <span class="badge badge-sm {% if epoch.state == "active" %}badge-success{% else %}badge-warning{% endif %}">
+                        {{ epoch.state }}
+                    </span>
+                </td>
+                <td>{{ epoch.target_rho }}</td>
+                <td>{{ epoch.threshold }}</td>
+                <td>{{ epoch.sample_count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ── Pending delayed audits ── #}
+<h3 class="text-lg font-semibold mb-2">Pending delayed audits</h3>
+{% if pending_audits.is_empty() %}
+<div class="alert alert-info mb-6"><span>No promoted candidates are waiting for an audit label.</span></div>
+{% else %}
+<div class="overflow-x-auto mb-6">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr><th>Sample</th><th>Score</th><th>Epoch</th></tr>
+        </thead>
+        <tbody>
+            {% for row in pending_audits %}
+            <tr>
+                <td class="font-mono text-xs">{{ row.sample_short }}</td>
+                <td>{{ row.score }}</td>
+                <td class="font-mono text-xs">{{ row.epoch_short }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<p class="text-xs opacity-70 mb-6">Label with <code>perspt audit &lt;sample&gt; --safe | --unsafe</code>.</p>
+{% endif %}
+
+{# ── Verdicts ── #}
+<h3 class="text-lg font-semibold mb-2">Validator verdicts</h3>
+{% if verdicts.is_empty() %}
+<div class="alert alert-info"><span>No adjudication verdicts recorded for this session.</span></div>
+{% else %}
+<div class="overflow-x-auto">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr><th>Validator</th><th>Candidate</th><th>Verdict</th><th>Delayed label</th></tr>
+        </thead>
+        <tbody>
+            {% for verdict in verdicts %}
+            <tr>
+                <td class="font-mono text-xs">{{ verdict.validator_id }}</td>
+                <td class="font-mono text-xs">{{ verdict.candidate_short }}</td>
+                <td>
+                    <span class="badge badge-sm {% if verdict.missed %}badge-error{% else %}badge-success{% endif %}">
+                        {% if verdict.missed %}miss{% else %}pass{% endif %}
+                    </span>
+                </td>
+                <td>{{ verdict.label }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
