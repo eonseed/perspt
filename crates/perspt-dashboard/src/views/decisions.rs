@@ -1,6 +1,6 @@
 use perspt_store::{
-    CorrectionAttemptRow, EscalationReportRecord, PlanRevisionRow, RepairFootprintRow,
-    RewriteRecordRow, SheafValidationRow, VerificationResultRow,
+    CorrectionAttemptRow, EscalationReportRecord, PlanRevisionRow, Psp9LedgerRow,
+    RepairFootprintRow, RewriteRecordRow, SheafValidationRow, VerificationResultRow,
 };
 
 /// View model for the decisions trace page
@@ -13,6 +13,7 @@ pub struct DecisionsViewModel {
     pub repair_footprints: Vec<RepairRow>,
     pub verifications: Vec<VerificationRow>,
     pub correction_attempts: Vec<CorrectionRow>,
+    pub psp9_events: Vec<Psp9EventRow>,
 }
 
 pub struct EscalationRow {
@@ -72,6 +73,13 @@ pub struct CorrectionRow {
     pub rejection_reason: String,
 }
 
+pub struct Psp9EventRow {
+    pub sequence: i64,
+    pub kind: String,
+    pub summary: String,
+    pub hash_short: String,
+}
+
 impl DecisionsViewModel {
     #[allow(clippy::too_many_arguments)]
     pub fn from_store(
@@ -83,6 +91,7 @@ impl DecisionsViewModel {
         repair_footprints: Vec<RepairFootprintRow>,
         verifications: Vec<VerificationResultRow>,
         correction_attempts: Vec<CorrectionAttemptRow>,
+        psp9_events: Vec<Psp9LedgerRow>,
     ) -> Self {
         Self {
             session_id,
@@ -157,6 +166,36 @@ impl DecisionsViewModel {
                     rejection_reason: c.rejection_reason.unwrap_or_default(),
                 })
                 .collect(),
+            psp9_events: psp9_events.into_iter().map(psp9_event_row).collect(),
         }
+    }
+}
+
+fn psp9_event_row(row: Psp9LedgerRow) -> Psp9EventRow {
+    let value: serde_json::Value = serde_json::from_str(&row.event_json).unwrap_or_default();
+    let outer = value
+        .get("event")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let custom = value.get("kind").and_then(|value| value.as_str());
+    let nested = value
+        .get("payload")
+        .and_then(|payload| payload.get("event"))
+        .and_then(|value| value.as_str());
+    let kind = [Some(outer), custom, nested]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let mut summary = value.get("payload").cloned().unwrap_or(value).to_string();
+    if summary.len() > 280 {
+        summary.truncate(277);
+        summary.push_str("...");
+    }
+    Psp9EventRow {
+        sequence: row.sequence,
+        kind,
+        summary,
+        hash_short: row.hash.chars().take(12).collect(),
     }
 }

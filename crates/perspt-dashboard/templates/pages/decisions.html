@@ -4,6 +4,31 @@
 <h2 class="text-xl font-bold mb-2">{{ title }}</h2>
 <p class="text-sm text-base-content/60 mb-6">{{ total_decisions }} total decision records</p>
 
+<details class="collapse collapse-arrow bg-base-200 mb-4" open>
+    <summary class="collapse-title text-lg font-medium">PSP-9 Canonical Events ({{ psp9_events.len() }})</summary>
+    <div class="collapse-content">
+    {% if psp9_events.is_empty() %}
+        <p class="text-sm text-base-content/60">None recorded.</p>
+    {% else %}
+        <div class="overflow-x-auto max-h-96 overflow-y-auto">
+        <table class="table table-xs table-pin-rows">
+            <thead><tr><th>Seq</th><th>Event</th><th>Observation</th><th>Hash</th></tr></thead>
+            <tbody>
+            {% for e in psp9_events %}
+            <tr>
+                <td class="font-mono text-xs">{{ e.sequence }}</td>
+                <td class="font-mono text-xs whitespace-nowrap">{{ e.kind }}</td>
+                <td class="font-mono text-xs max-w-xl break-words">{{ e.summary }}</td>
+                <td class="font-mono text-xs">{{ e.hash_short }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    {% endif %}
+    </div>
+</details>
+
 {# ── Escalation Reports ── #}
 <details class="collapse collapse-arrow bg-base-200 mb-4" open>
     <summary class="collapse-title text-lg font-medium">Escalation Reports ({{ escalations.len() }})</summary>
