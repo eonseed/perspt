@@ -129,7 +129,8 @@ impl SRBNOrchestrator {
         // PSP-7: Budget ceiling check before LLM call
         if self.budget.any_exhausted() {
             log::warn!(
-                "Budget exhausted before correction (steps {}/{:?}, revisions {}/{:?}, cost ${:.2} / {:?}) — escalating node '{}'",
+                "Budget exhausted before correction (steps {}/{:?}, revisions {}/{:?}, cost ${:.2} / {:?}) \
+                    — escalating node '{}'",
                 self.budget.steps_used,
                 self.budget.max_steps,
                 self.budget.revisions_used,
@@ -580,7 +581,8 @@ impl SRBNOrchestrator {
 
         if msg.contains("undefined") || msg.contains("unresolved") || msg.contains("not defined") {
             if msg.contains("crate") || msg.contains("module") {
-                "The crate may not be in Cargo.toml. Add it with `cargo add <crate>` in the Commands section, or use `crate::` for intra-crate imports".into()
+                "The crate may not be in Cargo.toml. Add it with `cargo add <crate>` in the Commands \
+                    section, or use `crate::` for intra-crate imports".into()
             } else {
                 "Define the missing variable/function, or import it from the correct module".into()
             }
@@ -588,7 +590,9 @@ impl SRBNOrchestrator {
         {
             "Change the value or add a type conversion to match the expected type".into()
         } else if msg.contains("import") || msg.contains("no module named") {
-            "Add the correct import statement at the top of the file. For Python: use `uv add <pkg>` for external packages; use relative imports (`from . import mod`) inside package modules.".into()
+            "Add the correct import statement at the top of the file. For Python: use `uv add <pkg>` for \
+                external packages; use relative imports (`from . import mod`) \
+                inside package modules.".into()
         } else if msg.contains("argument") && (msg.contains("missing") || msg.contains("expected"))
         {
             "Provide all required arguments to the function call".into()

@@ -169,7 +169,8 @@ impl ActuatorAgent {
 
         if let Some(package_name) = Self::detect_python_package_name(working_dir) {
             hints.push(format!(
-                "Python package import root: {}. Tests and entry points must import `{}` and never `src.{}`.",
+                "Python package import root: {}. Tests and entry points must import `{}` and never \
+                    `src.{}`.",
                 package_name, package_name, package_name
             ));
         }

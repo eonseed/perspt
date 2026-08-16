@@ -187,7 +187,8 @@ impl LanguageAdapter for RustAdapter {
             )),
             ResidualClass::OwnershipViolation => Some(CorrectionDirection::new(
                 ResidualClass::OwnershipViolation,
-                format!("fix the borrow/ownership error ({summary}); clone, borrow, or restructure lifetimes"),
+                format!("fix the borrow/ownership error ({summary}); clone, borrow, or restructure \
+                    lifetimes"),
             )),
             ResidualClass::InterfaceMismatch => Some(CorrectionDirection::new(
                 ResidualClass::InterfaceMismatch,
@@ -335,7 +336,10 @@ impl LanguageAdapter for PythonAdapter {
         match residual.class {
             ResidualClass::ImportGraph => Some(CorrectionDirection::new(
                 ResidualClass::ImportGraph,
-                format!("add the missing import or install/declare the package ({summary}); sync the environment"),
+                format!(
+                    "add the missing import or install/declare the package ({summary}); sync the \
+                    environment"
+                ),
             )),
             ResidualClass::SymbolMismatch => Some(CorrectionDirection::new(
                 ResidualClass::SymbolMismatch,
@@ -343,7 +347,9 @@ impl LanguageAdapter for PythonAdapter {
             )),
             ResidualClass::Type => Some(CorrectionDirection::new(
                 ResidualClass::Type,
-                format!("reconcile the type mismatch ({summary}); adjust the value or the annotation"),
+                format!(
+                    "reconcile the type mismatch ({summary}); adjust the value or the annotation"
+                ),
             )),
             ResidualClass::TestFailure => Some(CorrectionDirection::new(
                 ResidualClass::TestFailure,
@@ -453,7 +459,10 @@ impl LanguageAdapter for TypeScriptAdapter {
         match residual.class {
             ResidualClass::ImportGraph => Some(CorrectionDirection::new(
                 ResidualClass::ImportGraph,
-                format!("fix the module path or add the dependency ({summary}); check tsconfig path aliases"),
+                format!(
+                    "fix the module path or add the dependency ({summary}); check tsconfig path \
+                    aliases"
+                ),
             )),
             ResidualClass::SymbolMismatch => Some(CorrectionDirection::new(
                 ResidualClass::SymbolMismatch,
@@ -518,7 +527,8 @@ mod tests {
     #[test]
     fn python_import_and_type_classified() {
         let adapter = PythonAdapter;
-        let raw = "x.py:1: error: Import \"requests\" could not be resolved\nx.py:2: error: Argument 1 has incompatible type \"str\"";
+        let raw = "x.py:1: error: Import \"requests\" could not be resolved\nx.py:2: error: Argument 1 has \
+            incompatible type \"str\"";
         let residuals = adapter.parse_diagnostics("n1", 0, raw);
         assert_eq!(residuals.len(), 2);
         assert_eq!(residuals[0].class, ResidualClass::ImportGraph);
@@ -528,7 +538,8 @@ mod tests {
     #[test]
     fn typescript_codes_classified_and_directed() {
         let adapter = TypeScriptAdapter;
-        let raw = "src/a.ts(3,10): error TS2307: Cannot find module 'foo'.\nsrc/b.ts(4,2): error TS2322: Type 'string' is not assignable to type 'number'.";
+        let raw = "src/a.ts(3,10): error TS2307: Cannot find module 'foo'.\nsrc/b.ts(4,2): error TS2322: \
+            Type 'string' is not assignable to type 'number'.";
         let residuals = adapter.parse_diagnostics("n1", 0, raw);
         assert_eq!(residuals.len(), 2);
         assert_eq!(residuals[0].class, ResidualClass::ImportGraph);

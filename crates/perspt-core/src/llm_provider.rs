@@ -416,7 +416,8 @@ impl GenAIProvider {
                     }
                 }
                 Ok(ChatStreamEvent::End(_)) => {
-                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, {total_content_length} chars, {elapsed:?} elapsed");
+                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, \
+                        {total_content_length} chars, {elapsed:?} elapsed");
                     stream_ended_explicitly = true;
                     break;
                 }
@@ -439,11 +440,15 @@ impl GenAIProvider {
 
         let final_elapsed = start_time.elapsed();
         if !stream_ended_explicitly {
-            log::warn!("!!! STREAM ENDED IMPLICITLY (exhausted) for model: {model} after {chunk_count} chunks, {total_content_length} chars, {final_elapsed:?} elapsed !!!");
+            log::warn!(
+                "!!! STREAM ENDED IMPLICITLY (exhausted) for model: {model} after {chunk_count} \
+                chunks, {total_content_length} chars, {final_elapsed:?} elapsed !!!"
+            );
         }
 
         log::info!(
-            "=== STREAM COMPLETE === Model: {model}, Final: {chunk_count} chunks, {total_content_length} chars, {final_elapsed:?} elapsed"
+            "=== STREAM COMPLETE === Model: {model}, Final: {chunk_count} chunks, {total_content_length} \
+                chars, {final_elapsed:?} elapsed"
         );
 
         // Add approximate token count
@@ -1009,7 +1014,8 @@ mod tests {
         );
         assert_eq!(
             vertex_endpoint_base("test-project", "test-location"),
-            "https://test-location-aiplatform.googleapis.com/v1/projects/test-project/locations/test-location/"
+            "https://test-location-aiplatform.googleapis.com/v1/\
+             projects/test-project/locations/test-location/"
         );
     }
 

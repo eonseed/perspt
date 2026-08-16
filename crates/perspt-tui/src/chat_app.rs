@@ -1768,7 +1768,9 @@ impl ChatApp {
                                         ));
                                         self.input.clear();
                                         self.scroll_offset = 0;
-                                        let _ = terminal.clear(); // Explicitly clear terminal screen buffer to remove residual artifacts
+                                        // Explicitly clear terminal screen buffer to
+                                        // remove residual artifacts
+                                        let _ = terminal.clear();
                                     } else if cmd.starts_with("/model") {
                                         let parts: Vec<&str> = text.split_whitespace().collect();
                                         if parts.len() > 1 {
@@ -1814,7 +1816,13 @@ impl ChatApp {
                                         self.input.clear();
                                     } else if cmd == "/help" {
                                         self.push_message(ChatMessage::system(
-                                            "Available Slash Commands:\n  /exit, /quit      - Exit the chat session\n  /clear            - Reset the conversation history\n  /model <name>     - Switch the active model on the fly\n  /save <path>      - Export conversation history to a file\n  /help             - Show this help menu",
+                                            "Available Slash Commands:\n\
+                                             \x20 /exit, /quit      - Exit the chat session\n\
+                                             \x20 /clear            - Reset the conversation history\n\
+                                             \x20 /model <name>     - Switch the active model on the fly\n\
+                                             \x20 /save <path>      - Export conversation history to a \
+                                             file\n\
+                                             \x20 /help             - Show this help menu",
                                         ));
                                         self.input.clear();
                                     } else {
@@ -2068,7 +2076,12 @@ impl ChatApp {
                                 self.input.clear();
                             } else if cmd == "/help" {
                                 self.push_message(ChatMessage::system(
-                                    "Available Slash Commands:\n  /exit, /quit      - Exit the chat session\n  /clear            - Reset the conversation history\n  /model <name>     - Switch the active model on the fly\n  /save <path>      - Export conversation history to a file\n  /help             - Show this help menu",
+                                    "Available Slash Commands:\n\
+                                     \x20 /exit, /quit      - Exit the chat session\n\
+                                     \x20 /clear            - Reset the conversation history\n\
+                                     \x20 /model <name>     - Switch the active model on the fly\n\
+                                     \x20 /save <path>      - Export conversation history to a file\n\
+                                     \x20 /help             - Show this help menu",
                                 ));
                                 self.input.clear();
                             } else {

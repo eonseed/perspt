@@ -450,7 +450,8 @@ impl SessionStore {
         self.conn.lock().unwrap().execute(
             r#"
             INSERT INTO node_states (node_id, session_id, state, v_total, merkle_hash, attempt_count,
-                                     node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at)
+                                     node_class, owner_plugin, goal, parent_id, children, last_error_type,
+                                         committed_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -497,7 +498,8 @@ impl SessionStore {
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status FROM sessions WHERE session_id = ?"
+            "SELECT session_id, task, working_dir, merkle_root, detected_toolchain, status FROM sessions \
+             WHERE session_id = ?"
         )?;
 
         let mut rows = stmt.query([session_id])?;
@@ -542,7 +544,8 @@ impl SessionStore {
     pub fn get_energy_history(&self, session_id: &str, node_id: &str) -> Result<Vec<EnergyRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM energy_history WHERE session_id = ? AND node_id = ? ORDER BY timestamp"
+            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM \
+             energy_history WHERE session_id = ? AND node_id = ? ORDER BY timestamp",
         )?;
 
         let mut rows = stmt.query([session_id, node_id])?;
@@ -568,7 +571,8 @@ impl SessionStore {
     pub fn get_session_energy_history(&self, session_id: &str) -> Result<Vec<EnergyRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM energy_history WHERE session_id = ? ORDER BY timestamp"
+            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM \
+             energy_history WHERE session_id = ? ORDER BY timestamp",
         )?;
 
         let mut rows = stmt.query([session_id])?;
@@ -688,7 +692,8 @@ impl SessionStore {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             r#"
-            INSERT INTO llm_requests (session_id, node_id, model, prompt, response, tokens_in, tokens_out, latency_ms)
+            INSERT INTO llm_requests (session_id, node_id, model, prompt, response, tokens_in, tokens_out,
+                latency_ms)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -743,7 +748,8 @@ impl SessionStore {
         let mut stmt = conn.prepare(
             "SELECT COUNT(*), \
              COALESCE(SUM(CASE WHEN tokens_in > 0 THEN tokens_in ELSE (LENGTH(prompt) + 3) / 4 END), 0), \
-             COALESCE(SUM(CASE WHEN tokens_out > 0 THEN tokens_out ELSE (LENGTH(response) + 3) / 4 END), 0), \
+             COALESCE(SUM(CASE WHEN tokens_out > 0 THEN tokens_out ELSE (LENGTH(response) + 3) / 4 END),
+                 0), \
              COALESCE(MEDIAN(latency_ms), 0) \
              FROM llm_requests",
         )?;
@@ -761,7 +767,8 @@ impl SessionStore {
     pub fn record_structural_digest(&self, record: &StructuralDigestRecord) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO structural_digests (digest_id, session_id, node_id, source_path, artifact_kind, hash, version)
+            INSERT INTO structural_digests (digest_id, session_id, node_id, source_path, artifact_kind,
+                hash, version)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -815,7 +822,8 @@ impl SessionStore {
     pub fn record_context_provenance(&self, record: &ContextProvenanceRecord) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO context_provenance (session_id, node_id, context_package_id, structural_hashes, summary_hashes, dependency_hashes, included_file_count, total_bytes)
+            INSERT INTO context_provenance (session_id, node_id, context_package_id, structural_hashes,
+                summary_hashes, dependency_hashes, included_file_count, total_bytes)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -840,7 +848,8 @@ impl SessionStore {
     ) -> Result<Option<ContextProvenanceRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, context_package_id, structural_hashes, summary_hashes, dependency_hashes, included_file_count, total_bytes
+            "SELECT session_id, node_id, context_package_id, structural_hashes, summary_hashes, \
+             dependency_hashes, included_file_count, total_bytes
              FROM context_provenance WHERE session_id = ? AND node_id = ? ORDER BY created_at DESC LIMIT 1",
         )?;
 
@@ -869,7 +878,8 @@ impl SessionStore {
     pub fn record_escalation_report(&self, record: &EscalationReportRecord) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO escalation_reports (session_id, node_id, category, action, energy_snapshot, stage_outcomes, evidence, affected_node_ids)
+            INSERT INTO escalation_reports (session_id, node_id, category, action, energy_snapshot,
+                stage_outcomes, evidence, affected_node_ids)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -890,7 +900,8 @@ impl SessionStore {
     pub fn get_escalation_reports(&self, session_id: &str) -> Result<Vec<EscalationReportRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, category, action, energy_snapshot, stage_outcomes, evidence, affected_node_ids
+            "SELECT session_id, node_id, category, action, energy_snapshot, stage_outcomes, evidence, \
+             affected_node_ids
              FROM escalation_reports WHERE session_id = ? ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -914,7 +925,8 @@ impl SessionStore {
     pub fn record_rewrite(&self, record: &RewriteRecordRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO rewrite_records (session_id, node_id, action, category, requeued_nodes, inserted_nodes)
+            INSERT INTO rewrite_records (session_id, node_id, action, category, requeued_nodes,
+                inserted_nodes)
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -955,7 +967,8 @@ impl SessionStore {
     pub fn record_sheaf_validation(&self, record: &SheafValidationRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO sheaf_validations (session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets)
+            INSERT INTO sheaf_validations (session_id, node_id, validator_class, plugin_source, passed,
+                evidence_summary, affected_files, v_sheaf_contribution, requeue_targets)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -981,7 +994,8 @@ impl SessionStore {
     ) -> Result<Vec<SheafValidationRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets
+            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, \
+             affected_files, v_sheaf_contribution, requeue_targets
              FROM sheaf_validations WHERE session_id = ? AND node_id = ? ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id, node_id])?;
@@ -1006,7 +1020,8 @@ impl SessionStore {
     pub fn get_all_sheaf_validations(&self, session_id: &str) -> Result<Vec<SheafValidationRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, affected_files, v_sheaf_contribution, requeue_targets
+            "SELECT session_id, node_id, validator_class, plugin_source, passed, evidence_summary, \
+             affected_files, v_sheaf_contribution, requeue_targets
              FROM sheaf_validations WHERE session_id = ? ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -1035,7 +1050,8 @@ impl SessionStore {
     pub fn record_provisional_branch(&self, record: &ProvisionalBranchRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO provisional_branches (branch_id, session_id, node_id, parent_node_id, state, parent_seal_hash, sandbox_dir)
+            INSERT INTO provisional_branches (branch_id, session_id, node_id, parent_node_id, state,
+                parent_seal_hash, sandbox_dir)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -1044,7 +1060,11 @@ impl SessionStore {
                 &record.node_id,
                 &record.parent_node_id,
                 &record.state,
-                &record.parent_seal_hash.as_ref().map(hex::encode).unwrap_or_default(),
+                &record
+                    .parent_seal_hash
+                    .as_ref()
+                    .map(hex::encode)
+                    .unwrap_or_default(),
                 &record.sandbox_dir.clone().unwrap_or_default(),
             ],
         )?;
@@ -1172,7 +1192,8 @@ impl SessionStore {
     pub fn record_interface_seal(&self, record: &InterfaceSealRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO interface_seals (seal_id, session_id, node_id, sealed_path, artifact_kind, seal_hash, version)
+            INSERT INTO interface_seals (seal_id, session_id, node_id, sealed_path, artifact_kind,
+                seal_hash, version)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -1238,7 +1259,8 @@ impl SessionStore {
     pub fn record_branch_flush(&self, record: &BranchFlushRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             r#"
-            INSERT INTO branch_flushes (flush_id, session_id, parent_node_id, flushed_branch_ids, requeue_node_ids, reason)
+            INSERT INTO branch_flushes (flush_id, session_id, parent_node_id, flushed_branch_ids,
+                requeue_node_ids, reason)
             VALUES (?, ?, ?, ?, ?, ?)
             "#,
             [
@@ -1511,8 +1533,10 @@ impl SessionStore {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT session_id, node_id, result_json, \
-                    CAST(syntax_ok AS VARCHAR), CAST(build_ok AS VARCHAR), CAST(tests_ok AS VARCHAR), CAST(lint_ok AS VARCHAR), \
-                    diagnostics_count, tests_passed, tests_failed, CAST(degraded AS VARCHAR), degraded_reason \
+                    CAST(syntax_ok AS VARCHAR), CAST(build_ok AS VARCHAR), CAST(tests_ok AS VARCHAR),
+                        CAST(lint_ok AS VARCHAR), \
+                    diagnostics_count, tests_passed, tests_failed, CAST(degraded AS VARCHAR),
+                        degraded_reason \
              FROM verification_results \
              WHERE session_id = ? AND node_id = ? \
              ORDER BY created_at DESC LIMIT 1",
@@ -1550,8 +1574,10 @@ impl SessionStore {
                  FROM verification_results WHERE session_id = ? \
              ) \
              SELECT session_id, node_id, result_json, \
-                    CAST(syntax_ok AS VARCHAR), CAST(build_ok AS VARCHAR), CAST(tests_ok AS VARCHAR), CAST(lint_ok AS VARCHAR), \
-                    diagnostics_count, tests_passed, tests_failed, CAST(degraded AS VARCHAR), degraded_reason \
+                    CAST(syntax_ok AS VARCHAR), CAST(build_ok AS VARCHAR), CAST(tests_ok AS VARCHAR),
+                        CAST(lint_ok AS VARCHAR), \
+                    diagnostics_count, tests_passed, tests_failed, CAST(degraded AS VARCHAR),
+                        degraded_reason \
              FROM ranked WHERE rn = 1 ORDER BY created_at",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -1636,7 +1662,8 @@ impl SessionStore {
     pub fn record_feature_charter(&self, row: &FeatureCharterRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO feature_charters (charter_id, session_id, scope_description, max_modules, max_files, max_revisions, language_constraint) \
+            "INSERT INTO feature_charters (charter_id, session_id, scope_description, max_modules, \
+             max_files, max_revisions, language_constraint) \
              VALUES (?, ?, ?, ?, ?, ?, ?)",
             duckdb::params![
                 row.charter_id,
@@ -1655,7 +1682,8 @@ impl SessionStore {
     pub fn get_feature_charter(&self, session_id: &str) -> Result<Option<FeatureCharterRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT charter_id, session_id, scope_description, max_modules, max_files, max_revisions, language_constraint \
+            "SELECT charter_id, session_id, scope_description, max_modules, max_files, max_revisions, \
+             language_constraint \
              FROM feature_charters WHERE session_id = ? LIMIT 1",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -1678,7 +1706,8 @@ impl SessionStore {
     pub fn record_plan_revision(&self, row: &PlanRevisionRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO plan_revisions (revision_id, session_id, sequence, plan_json, reason, supersedes, status) \
+            "INSERT INTO plan_revisions (revision_id, session_id, sequence, plan_json, reason, \
+             supersedes, status) \
              VALUES (?, ?, ?, ?, ?, ?, ?)",
             duckdb::params![
                 row.revision_id,
@@ -1754,7 +1783,8 @@ impl SessionStore {
     pub fn record_repair_footprint(&self, row: &RepairFootprintRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO repair_footprints (footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved) \
+            "INSERT INTO repair_footprints (footprint_id, session_id, node_id, revision_id, attempt, \
+             affected_files, bundle_json, diagnosis, resolved) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             duckdb::params![
                 row.footprint_id,
@@ -1779,7 +1809,8 @@ impl SessionStore {
     ) -> Result<Vec<RepairFootprintRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved \
+            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, \
+             diagnosis, resolved \
              FROM repair_footprints WHERE session_id = ? AND node_id = ? ORDER BY attempt ASC",
         )?;
         let mut rows = stmt.query([session_id, node_id])?;
@@ -1804,7 +1835,8 @@ impl SessionStore {
     pub fn get_all_repair_footprints(&self, session_id: &str) -> Result<Vec<RepairFootprintRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, diagnosis, resolved \
+            "SELECT footprint_id, session_id, node_id, revision_id, attempt, affected_files, bundle_json, \
+             diagnosis, resolved \
              FROM repair_footprints WHERE session_id = ? ORDER BY attempt ASC",
         )?;
         let mut rows = stmt.query([session_id])?;
@@ -1840,7 +1872,8 @@ impl SessionStore {
         let conn = self.conn.lock().unwrap();
         // Try insert first, update on conflict
         conn.execute(
-            "INSERT INTO budget_envelopes (session_id, max_steps, steps_used, max_revisions, revisions_used, max_cost_usd, cost_used_usd) \
+            "INSERT INTO budget_envelopes (session_id, max_steps, steps_used, max_revisions, \
+             revisions_used, max_cost_usd, cost_used_usd) \
              VALUES (?, ?, ?, ?, ?, ?, ?) \
              ON CONFLICT (session_id) DO UPDATE SET \
              max_steps = EXCLUDED.max_steps, steps_used = EXCLUDED.steps_used, \
@@ -1863,7 +1896,8 @@ impl SessionStore {
     pub fn get_budget_envelope(&self, session_id: &str) -> Result<Option<BudgetEnvelopeRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT session_id, max_steps, steps_used, max_revisions, revisions_used, max_cost_usd, cost_used_usd \
+            "SELECT session_id, max_steps, steps_used, max_revisions, revisions_used, max_cost_usd, \
+             cost_used_usd \
              FROM budget_envelopes WHERE session_id = ?",
         )?;
         let mut rows = stmt.query([session_id])?;

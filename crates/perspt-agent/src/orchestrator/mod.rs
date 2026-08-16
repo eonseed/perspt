@@ -2039,7 +2039,8 @@ impl SRBNOrchestrator {
                     self.emit_log(format!("⚠️ Sheaf pre-check: {}", evidence));
                     // Inject sheaf evidence so the correction LLM sees it
                     self.context.last_test_output = Some(format!(
-                    "Structural pre-check failure: {}\nEnsure all declared output files are generated correctly.",
+                    "Structural pre-check failure: {}\nEnsure all declared output files are generated \
+                        correctly.",
                     evidence
                 ));
                     // Re-verify and add sheaf penalty to force correction loop entry
@@ -2229,7 +2230,8 @@ impl SRBNOrchestrator {
                 let dep_names: Vec<&str> =
                     prose_only_deps.iter().map(|(id, _)| id.as_str()).collect();
                 let block_reason = format!(
-                    "Required structural dependencies lack machine-verifiable digests (only prose summaries): [{}]",
+                    "Required structural dependencies lack machine-verifiable digests (only prose \
+                        summaries): [{}]",
                     dep_names.join(", ")
                 );
                 eprintln!(
@@ -3301,7 +3303,8 @@ impl SRBNOrchestrator {
                 prose_only.push((
                     parent.node_id.clone(),
                     format!(
-                        "Interface node '{}' has no Signature/Schema/InterfaceSeal digest in the restriction map",
+                        "Interface node '{}' has no Signature/Schema/InterfaceSeal digest in the \
+                            restriction map",
                         parent.node_id
                     ),
                 ));
@@ -5832,7 +5835,9 @@ fn modulo(a: i32, b: i32) -> i32 { todo!() }
     fn test_detect_stub_python_real_code_not_flagged() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("main.py");
-        let code = "import os\n\ndef run():\n    data = os.listdir('.')\n    filtered = [f for f in data if f.endswith('.py')]\n    for f in filtered:\n        print(f)\n    return filtered\n";
+        let code =
+            "import os\n\ndef run():\n    data = os.listdir('.')\n    filtered = [f for f in data \
+            if f.endswith('.py')]\n    for f in filtered:\n        print(f)\n    return filtered\n";
         std::fs::write(&path, code).unwrap();
         let result = detect_stub_content(&path, "python");
         assert!(result.is_none(), "Real Python code should not be flagged");

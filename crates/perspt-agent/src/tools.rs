@@ -787,7 +787,9 @@ mod tests {
         let tools = AgentTools::new(temp_dir.clone(), true);
 
         // Exact string with newlines
-        let diff = "--- test_diff.txt\n+++ test_diff.txt\n@@ -1,2 +1,2 @@\n-Hello world\n+Hello diffy\n This is a test\n";
+        let diff =
+            "--- test_diff.txt\n+++ test_diff.txt\n@@ -1,2 +1,2 @@\n-Hello world\n+Hello diffy\n \
+            This is a test\n";
 
         let mut args = HashMap::new();
         args.insert("path".to_string(), "test_diff.txt".to_string());

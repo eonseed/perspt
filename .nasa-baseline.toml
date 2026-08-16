@@ -13,19 +13,9 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-agent/src/agent.rs"
-rule = "NASA-3"
-count = 1
-
-[[allow]]
 file = "crates/perspt-agent/src/context_retriever.rs"
 rule = "NASA-2"
 count = 2
-
-[[allow]]
-file = "crates/perspt-agent/src/context_retriever.rs"
-rule = "NASA-3"
-count = 1
 
 [[allow]]
 file = "crates/perspt-agent/src/ledger.rs"
@@ -48,19 +38,9 @@ rule = "NASA-2"
 count = 3
 
 [[allow]]
-file = "crates/perspt-agent/src/orchestrator/bundle.rs"
-rule = "NASA-3"
-count = 2
-
-[[allow]]
 file = "crates/perspt-agent/src/orchestrator/commit.rs"
 rule = "NASA-2"
 count = 3
-
-[[allow]]
-file = "crates/perspt-agent/src/orchestrator/commit.rs"
-rule = "NASA-3"
-count = 1
 
 [[allow]]
 file = "crates/perspt-agent/src/orchestrator/convergence.rs"
@@ -68,19 +48,9 @@ rule = "NASA-2"
 count = 2
 
 [[allow]]
-file = "crates/perspt-agent/src/orchestrator/convergence.rs"
-rule = "NASA-3"
-count = 3
-
-[[allow]]
 file = "crates/perspt-agent/src/orchestrator/init.rs"
 rule = "NASA-2"
 count = 2
-
-[[allow]]
-file = "crates/perspt-agent/src/orchestrator/init.rs"
-rule = "NASA-3"
-count = 6
 
 [[allow]]
 file = "crates/perspt-agent/src/orchestrator/mod.rs"
@@ -93,11 +63,6 @@ rule = "NASA-2"
 count = 9
 
 [[allow]]
-file = "crates/perspt-agent/src/orchestrator/mod.rs"
-rule = "NASA-3"
-count = 4
-
-[[allow]]
 file = "crates/perspt-agent/src/orchestrator/planning.rs"
 rule = "NASA-2"
 count = 4
@@ -105,11 +70,6 @@ count = 4
 [[allow]]
 file = "crates/perspt-agent/src/orchestrator/repair.rs"
 rule = "NASA-2"
-count = 2
-
-[[allow]]
-file = "crates/perspt-agent/src/orchestrator/sdk_bridge.rs"
-rule = "NASA-3"
 count = 2
 
 [[allow]]
@@ -128,24 +88,9 @@ rule = "NASA-2"
 count = 3
 
 [[allow]]
-file = "crates/perspt-agent/src/orchestrator/verification.rs"
-rule = "NASA-3"
-count = 1
-
-[[allow]]
 file = "crates/perspt-agent/src/prompt_compiler.rs"
 rule = "NASA-2"
 count = 2
-
-[[allow]]
-file = "crates/perspt-agent/src/prompt_compiler.rs"
-rule = "NASA-3"
-count = 7
-
-[[allow]]
-file = "crates/perspt-agent/src/prompts.rs"
-rule = "NASA-3"
-count = 31
 
 [[allow]]
 file = "crates/perspt-agent/src/tools.rs"
@@ -158,18 +103,8 @@ rule = "NASA-2"
 count = 3
 
 [[allow]]
-file = "crates/perspt-agent/src/tools.rs"
-rule = "NASA-3"
-count = 1
-
-[[allow]]
 file = "crates/perspt-cli/src/commands/agent.rs"
 rule = "NASA-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-cli/src/commands/agent.rs"
-rule = "NASA-3"
 count = 1
 
 [[allow]]
@@ -198,11 +133,6 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-coding/src/lang.rs"
-rule = "NASA-3"
-count = 5
-
-[[allow]]
 file = "crates/perspt-coding/src/symbols.rs"
 rule = "NASA-2"
 count = 1
@@ -213,24 +143,9 @@ rule = "NASA-2"
 count = 2
 
 [[allow]]
-file = "crates/perspt-core/src/llm_provider.rs"
-rule = "NASA-3"
-count = 4
-
-[[allow]]
 file = "crates/perspt-core/src/normalize.rs"
 rule = "NASA-2"
 count = 1
-
-[[allow]]
-file = "crates/perspt-core/src/normalize.rs"
-rule = "NASA-3"
-count = 1
-
-[[allow]]
-file = "crates/perspt-core/src/paths.rs"
-rule = "NASA-3"
-count = 2
 
 [[allow]]
 file = "crates/perspt-core/src/plugin.rs"
@@ -248,23 +163,8 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-core/src/types.rs"
-rule = "NASA-3"
-count = 1
-
-[[allow]]
 file = "crates/perspt-dashboard/build.rs"
 rule = "NASA-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-dashboard/src/error.rs"
-rule = "NASA-3"
-count = 1
-
-[[allow]]
-file = "crates/perspt-dashboard/src/sse.rs"
-rule = "NASA-3"
 count = 1
 
 [[allow]]
@@ -293,19 +193,9 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-store/src/schema.rs"
-rule = "NASA-3"
-count = 2
-
-[[allow]]
 file = "crates/perspt-store/src/store.rs"
 rule = "NASA-1"
 count = 1
-
-[[allow]]
-file = "crates/perspt-store/src/store.rs"
-rule = "NASA-3"
-count = 30
 
 [[allow]]
 file = "crates/perspt-tui/src/agent_app.rs"
@@ -321,11 +211,6 @@ count = 1
 file = "crates/perspt-tui/src/chat_app.rs"
 rule = "NASA-2"
 count = 8
-
-[[allow]]
-file = "crates/perspt-tui/src/chat_app.rs"
-rule = "NASA-3"
-count = 3
 
 [[allow]]
 file = "crates/perspt-tui/src/dashboard.rs"
@@ -345,9 +230,4 @@ count = 2
 [[allow]]
 file = "crates/perspt-tui/src/review_modal.rs"
 rule = "NASA-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-tui/src/theme.rs"
-rule = "NASA-3"
 count = 1

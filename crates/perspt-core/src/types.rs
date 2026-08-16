@@ -978,7 +978,8 @@ impl TaskPlan {
                 for &src_id in &source_task_ids {
                     if src_id != task.id && !task.dependencies.iter().any(|d| d == src_id) {
                         return Err(format!(
-                            "Test task '{}' produces only test files but does not depend on source task '{}'",
+                            "Test task '{}' produces only test files but does not depend on source task \
+                                '{}'",
                             task.id, src_id
                         ));
                     }

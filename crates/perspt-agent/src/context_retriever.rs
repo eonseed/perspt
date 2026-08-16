@@ -851,7 +851,8 @@ mod tests {
         .unwrap();
         fs::write(
             dir.path().join("src/math.rs"),
-            "pub fn add(a: i32, b: i32) -> i32 { a + b }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn test_add() { assert_eq!(super::add(1, 2), 3); }\n}\n",
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn \
+                test_add() { assert_eq!(super::add(1, 2), 3); }\n}\n",
         )
         .unwrap();
         fs::write(

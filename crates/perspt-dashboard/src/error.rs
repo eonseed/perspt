@@ -51,7 +51,8 @@ impl IntoResponse for DashboardError {
         };
         let escaped = html_escape(user_message);
         let body = format!(
-            r#"<!DOCTYPE html><html data-theme="dark"><head><meta charset="utf-8"><title>Error — Perspt Dashboard</title>
+            r#"<!DOCTYPE html><html data-theme="dark"><head><meta charset="utf-8">
+<title>Error — Perspt Dashboard</title>
 <link rel="stylesheet" href="/static/dashboard.css"></head>
 <body class="min-h-screen flex items-center justify-center bg-base-300">
 <div class="card bg-base-100 shadow-xl max-w-lg"><div class="card-body">

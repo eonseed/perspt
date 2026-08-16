@@ -225,7 +225,8 @@ fn compile_goal_completion(ev: &PromptEvidence) -> String {
          Decide whether the user's goal is FULLY achieved by what was delivered. \
          Be strict: a stub, placeholder, or missing public API means NOT achieved. \
          Respond with ONLY a JSON object, no prose:\n\
-         {{\n  \"achieved\": true|false,\n  \"missing\": [\"...\"],\n  \"next_steps\": [\"...\"],\n  \"rationale\": \"one line\"\n}}\n"
+         {{\n  \"achieved\": true|false,\n  \"missing\": [\"...\"],\n  \"next_steps\": [\"...\"],\n  \
+             \"rationale\": \"one line\"\n}}\n"
     )
 }
 
@@ -263,7 +264,9 @@ fn compile_plan_amendment(ev: &PromptEvidence) -> String {
          - A test-only task must depend on every source task whose files it tests.\n\
          - Use distinct task ids not already used above.\n\n\
          Respond with ONLY a JSON object, no prose:\n\
-         {{\n  \"tasks\": [\n    {{\"id\": \"...\", \"goal\": \"...\", \"output_files\": [\"...\"], \"context_files\": [\"...\"], \"dependencies\": [\"...\"], \"task_type\": \"code\"}}\n  ]\n}}\n"
+         {{\n  \"tasks\": [\n    {{\"id\": \"...\", \"goal\": \"...\", \"output_files\": [\"...\"], \
+             \"context_files\": [\"...\"], \"dependencies\": [\"...\"], \
+             \"task_type\": \"code\"}}\n  ]\n}}\n"
     )
 }
 
@@ -375,8 +378,10 @@ fn compile_correction(ev: &PromptEvidence) -> String {
     if let Some(ref output) = ev.build_test_output {
         if !output.is_empty() {
             prompt.push_str(&format!(
-                "\n### Build / Test Output\nThe following is the raw output from the build toolchain (e.g. `cargo check` / `cargo build`). \
-                 Use this to identify missing dependencies, unresolved imports, or type errors:\n```\n{}\n```\n",
+                "\n### Build / Test Output\nThe following is the raw output from the build toolchain (e.g. \
+                    `cargo check` / `cargo build`). \
+                 Use this to identify missing dependencies, unresolved imports, or \
+                 type errors:\n```\n{}\n```\n",
                 output
             ));
         }
@@ -405,10 +410,12 @@ fn compile_correction(ev: &PromptEvidence) -> String {
 3. Follow {} language conventions and idioms
 4. Import any missing modules or dependencies
 5. Return a JSON artifact bundle targeting these exact path(s): {}
-6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external dependency, "ModuleNotFoundError", "No module named"), list the required install commands
+6. If errors mention missing crates/packages (e.g. "can't find crate", "unresolved import" for an external \
+    dependency, "ModuleNotFoundError", "No module named"), list the required install commands
 
 ### Output Format
-Return only this JSON object shape. Do not wrap it in markdown unless the provider requires a fenced json block.
+Return only this JSON object shape. Do not wrap it in markdown unless the provider requires a fenced json \
+    block.
 
 ```json
 {{
@@ -505,7 +512,8 @@ fn render_architect(
         String::new()
     } else {
         format!(
-            "\n## Detected Toolchain\nActive language plugins: {}\nPlan verification-aware nodes that align with these plugins' build/test capabilities.\n",
+            "\n## Detected Toolchain\nActive language plugins: {}\nPlan verification-aware nodes that \
+                align with these plugins' build/test capabilities.\n",
             active_plugins.join(", ")
         )
     };

@@ -58,7 +58,8 @@ impl SdkGateReport {
             GateDecision::ExhaustedWithCertificate { .. } => "exhausted".to_string(),
         };
         format!(
-            "SDK V=Σwₑrₑ²={:.3} [syn {:.2}|str {:.2}|log {:.2}|boot {:.2}|sheaf {:.2}] gate={} ρ={} bound≤{} ({} residuals)",
+            "SDK V=Σwₑrₑ²={:.3} [syn {:.2}|str {:.2}|log {:.2}|boot {:.2}|sheaf {:.2}] gate={} ρ={} \
+                bound≤{} ({} residuals)",
             self.energy,
             self.v_syn,
             self.v_str,
@@ -643,7 +644,8 @@ mod tests {
     fn directed_corrections_detects_runtime_crash() {
         // A panic in the (runtime-smoke) output must yield a Runtime fix even
         // though it is not a compiler/test diagnostic.
-        let raw = "Running `target/debug/cli predict`\nthread 'main' panicked at src/main.rs:42:9:\nInput tensor size does not match model weights";
+        let raw = "Running `target/debug/cli predict`\nthread 'main' panicked at src/main.rs:42:9:\nInput \
+            tensor size does not match model weights";
         let dirs = directed_corrections("rust", "n1", raw);
         assert!(dirs.iter().any(|(c, _)| *c == ResidualClass::Runtime));
         assert!(dirs.iter().any(|(_, i)| i.contains("runtime")));

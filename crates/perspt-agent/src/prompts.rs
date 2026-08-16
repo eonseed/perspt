@@ -65,25 +65,35 @@ Your plan MUST create a COMPLETE, RUNNABLE project with proper modularity:
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
 ## CRITICAL CONSTRAINTS — MANIFEST FILES
-- DO NOT create the ROOT project manifest (`Cargo.toml` at workspace root, `pyproject.toml` at project root, `package.json` at project root) — the system manages it automatically.
-- For **multi-crate Rust workspaces** (when you plan `crates/<name>/` sub-directories), you MUST include each sub-crate's `Cargo.toml` in the owning task's `output_files` (e.g., `crates/my-lib/Cargo.toml`). The system will automatically convert the root manifest to a `[workspace]`.
+- DO NOT create the ROOT project manifest (`Cargo.toml` at workspace root, `pyproject.toml` at project
+  root, `package.json` at project root) — the system manages it automatically.
+- For **multi-crate Rust workspaces** (when you plan `crates/<name>/` sub-directories), you MUST include
+  each sub-crate's `Cargo.toml` in the owning task's `output_files` (e.g., `crates/my-lib/Cargo.toml`). The
+  system will automatically convert the root manifest to a `[workspace]`.
 - For **Python** projects, DO NOT create `pyproject.toml` — the system handles it.
-- For **Node.js** projects, DO NOT create the root `package.json` — the system handles it. Sub-package `package.json` files in `packages/*/` are allowed.
+- For **Node.js** projects, DO NOT create the root `package.json` — the system handles it. Sub-package
+  `package.json` files in `packages/*/` are allowed.
 - If you need to add dependencies, include them in `dependency_expectations.required_packages`.
 
 ### WORKSPACE / MULTI-CRATE PROJECTS
 When the task asks for multiple crates, packages, or modules in subdirectories:
-- **Rust**: Put each crate under `crates/<name>/` with its own `Cargo.toml` and `src/lib.rs` (or `src/main.rs` for binaries). The root `Cargo.toml` will be auto-converted to `[workspace]` with `members = ["crates/*"]`.
-- **Python**: Keep all code under `src/<package_name>/` with submodules. Multiple top-level packages are not standard in Python — use submodules instead.
+- **Rust**: Put each crate under `crates/<name>/` with its own `Cargo.toml` and `src/lib.rs` (or
+  `src/main.rs` for binaries). The root `Cargo.toml` will be auto-converted to `[workspace]`
+  with `members = ["crates/*"]`.
+- **Python**: Keep all code under `src/<package_name>/` with submodules. Multiple top-level packages are
+  not standard in Python — use submodules instead.
 - **Node.js**: Put each package under `packages/<name>/` with its own `package.json`.
 
-Do NOT place source files directly in the root `src/` directory when planning sub-crates under `crates/` — each crate must be self-contained.
+Do NOT place source files directly in the root `src/` directory when planning sub-crates under `crates/` —
+  each crate must be self-contained.
 
 ### DEPENDENCY EXPECTATIONS
 For each task, declare the packages/crates the generated code will import under `dependency_expectations`:
-- `required_packages`: list of third-party packages the task's code imports (e.g., `["requests", "pydantic"]` or `["serde", "tokio"]`)
+- `required_packages`: list of third-party packages the task's code imports (e.g., `["requests",
+  "pydantic"]` or `["serde", "tokio"]`)
 - `setup_commands`: commands that must succeed before this task runs (e.g., `["cargo fetch"]`)
-- `min_toolchain_version`: optional minimum toolchain version string (e.g., `"1.75"` for Rust, `"3.11"` for Python)
+- `min_toolchain_version`: optional minimum toolchain version string (e.g., `"1.75"` for Rust, `"3.11"` for
+  Python)
 Only include EXTERNAL / third-party dependencies, not standard-library modules.
 
 ## Output Format
@@ -159,7 +169,8 @@ IMPORTANT: Output ONLY the JSON, no other text."#;
 /// section and adjusts framing for empty-workspace contexts.
 /// Placeholders: `{task}`, `{working_dir}`, `{project_context}`,
 /// `{error_feedback}`.
-pub(crate) const ARCHITECT_GREENFIELD: &str = r#"You are an Architect agent in a multi-agent coding system planning a NEW project from scratch.
+pub(crate) const ARCHITECT_GREENFIELD: &str = r#"You are an Architect agent in a multi-agent coding system
+planning a NEW project from scratch.
 
 ## Task
 {task}
@@ -211,25 +222,35 @@ Since this is a new project, design the file structure from scratch:
 - [ ] All functions must have type hints (Python) or type annotations (Rust/TS)
 
 ## CRITICAL CONSTRAINTS — MANIFEST FILES
-- DO NOT create the ROOT project manifest (`Cargo.toml` at workspace root, `pyproject.toml` at project root, `package.json` at project root) — the system manages it automatically.
-- For **multi-crate Rust workspaces** (when you plan `crates/<name>/` sub-directories), you MUST include each sub-crate's `Cargo.toml` in the owning task's `output_files` (e.g., `crates/my-lib/Cargo.toml`). The system will automatically convert the root manifest to a `[workspace]`.
+- DO NOT create the ROOT project manifest (`Cargo.toml` at workspace root, `pyproject.toml` at project
+  root, `package.json` at project root) — the system manages it automatically.
+- For **multi-crate Rust workspaces** (when you plan `crates/<name>/` sub-directories), you MUST include
+  each sub-crate's `Cargo.toml` in the owning task's `output_files` (e.g., `crates/my-lib/Cargo.toml`). The
+  system will automatically convert the root manifest to a `[workspace]`.
 - For **Python** projects, DO NOT create `pyproject.toml` — the system handles it.
-- For **Node.js** projects, DO NOT create the root `package.json` — the system handles it. Sub-package `package.json` files in `packages/*/` are allowed.
+- For **Node.js** projects, DO NOT create the root `package.json` — the system handles it. Sub-package
+  `package.json` files in `packages/*/` are allowed.
 - If you need to add dependencies, include them in `dependency_expectations.required_packages`.
 
 ### WORKSPACE / MULTI-CRATE PROJECTS
 When the task asks for multiple crates, packages, or modules in subdirectories:
-- **Rust**: Put each crate under `crates/<name>/` with its own `Cargo.toml` and `src/lib.rs` (or `src/main.rs` for binaries). The root `Cargo.toml` will be auto-converted to `[workspace]` with `members = ["crates/*"]`.
-- **Python**: Keep all code under `src/<package_name>/` with submodules. Multiple top-level packages are not standard in Python — use submodules instead.
+- **Rust**: Put each crate under `crates/<name>/` with its own `Cargo.toml` and `src/lib.rs` (or
+  `src/main.rs` for binaries). The root `Cargo.toml` will be auto-converted to `[workspace]`
+  with `members = ["crates/*"]`.
+- **Python**: Keep all code under `src/<package_name>/` with submodules. Multiple top-level packages are
+  not standard in Python — use submodules instead.
 - **Node.js**: Put each package under `packages/<name>/` with its own `package.json`.
 
-Do NOT place source files directly in the root `src/` directory when planning sub-crates under `crates/` — each crate must be self-contained.
+Do NOT place source files directly in the root `src/` directory when planning sub-crates under `crates/` —
+  each crate must be self-contained.
 
 ### DEPENDENCY EXPECTATIONS
 For each task, declare the packages/crates the generated code will import under `dependency_expectations`:
-- `required_packages`: list of third-party packages the task's code imports (e.g., `["requests", "pydantic"]` or `["serde", "tokio"]`)
+- `required_packages`: list of third-party packages the task's code imports (e.g., `["requests",
+  "pydantic"]` or `["serde", "tokio"]`)
 - `setup_commands`: commands that must succeed before this task runs (e.g., `["cargo fetch"]`)
-- `min_toolchain_version`: optional minimum toolchain version string (e.g., `"1.75"` for Rust, `"3.11"` for Python)
+- `min_toolchain_version`: optional minimum toolchain version string (e.g., `"1.75"` for Rust, `"3.11"` for
+  Python)
 Only include EXTERNAL / third-party dependencies, not standard-library modules.
 
 ## Output Format
@@ -319,18 +340,29 @@ Workspace Import Hints: {workspace_import_hints}
 7. Add type annotations if missing
 8. Import any missing modules
 9. Restrict all file edits to `Allowed Output Paths` only
-10. If another file needs changes, do not modify it in this node; keep that need implicit for its owning node
-11. Use `Workspace Import Hints` exactly for crate/package imports in tests, entry points, and cross-file references
-12. For library source modules (e.g. `src/*.rs` in Rust), use `crate::` for intra-crate imports, never the package name. Only use the package name in `tests/`, `examples/`, or `main.rs`.
-13. When your code uses external crates/packages not already listed in the project manifest (e.g. `Cargo.toml`, `pyproject.toml`, `package.json`), you MUST include the install commands in the `commands` array. For Rust: `cargo add <crate>` (with `--features <f>` if needed). For Python: `uv add <pkg>`. For Node.js: `npm install <pkg>`. Without these commands, the build will fail due to missing dependencies.
+10. If another file needs changes, do not modify it in this node; keep that need implicit for its owning
+  node
+11. Use `Workspace Import Hints` exactly for crate/package imports in tests, entry points, and cross-file
+  references
+12. For library source modules (e.g. `src/*.rs` in Rust), use `crate::` for intra-crate imports, never the
+  package name. Only use the package name in `tests/`, `examples/`, or `main.rs`.
+13. When your code uses external crates/packages not already listed in the project manifest (e.g.
+  `Cargo.toml`, `pyproject.toml`, `package.json`), you MUST include the install commands in the `commands`
+  array. For Rust: `cargo add <crate>` (with `--features <f>` if needed). For Python:
+  `uv add <pkg>`. For Node.js: `npm install <pkg>`. Without these commands, the build
+  will fail due to missing dependencies.
 14. For Python projects:
     - Prefer src-layout: put all library code under `src/<package_name>/` with an `__init__.py`.
-    - Keep ALL modules inside the declared package directory — never mix top-level .py files with `src/<pkg>/` modules.
+    - Keep ALL modules inside the declared package directory — never mix top-level .py files with
+  `src/<pkg>/` modules.
     - Use relative imports (`from . import utils`, `from .core import Pipeline`) inside the package.
-    - Use the package name for imports from tests and entry points (`from mypackage.core import Foo`), never `src.mypackage`.
+    - Use the package name for imports from tests and entry points (`from mypackage.core import Foo`),
+  never `src.mypackage`.
     - Put tests in a top-level `tests/` directory (not inside `src/`), using `test_*.py` naming.
-    - Use `uv add <pkg>` (not `pip install`) for dependency commands. Use `uv add --dev <pkg>` for test/dev-only tools like `pytest` or `ruff`.
-    - Ensure test files import real symbols that actually exist in the generated code — do not invent class or function names that are not defined.
+    - Use `uv add <pkg>` (not `pip install`) for dependency commands. Use `uv add --dev <pkg>` for
+  test/dev-only tools like `pytest` or `ruff`.
+    - Ensure test files import real symbols that actually exist in the generated code — do not invent class
+  or function names that are not defined.
 
 {output_format}"#;
 
@@ -350,7 +382,9 @@ When producing multi-file output, use this JSON format wrapped in a ```json code
 {CLOSE_BRACE}
 ```
 
-The `commands` array should contain dependency install commands (e.g. `cargo add <crate>`, `pip install <pkg>`) that must run BEFORE the code can compile. Leave it empty `[]` only if no new dependencies are needed.
+The `commands` array should contain dependency install commands (e.g. `cargo add <crate>`, `pip install
+  <pkg>`) that must run BEFORE the code can compile. Leave it empty `[]` only if no new dependencies are
+  needed.
 
 Each artifact entry must have:
 - `path`: Relative path within the workspace
@@ -400,7 +434,8 @@ IMPORTANT:
 ///
 /// Placeholders: `{interface}`, `{invariants}`, `{forbidden}`,
 /// `{weighted_tests}`, `{implementation}`.
-pub(crate) const VERIFIER_CHECK: &str = r#"You are a Verifier agent responsible for checking code correctness.
+pub(crate) const VERIFIER_CHECK: &str = r#"You are a Verifier agent
+responsible for checking code correctness.
 
 ## Task
 Verify the implementation satisfies the behavioral contract.
@@ -456,13 +491,15 @@ Be concise. No code.";
 /// Solo-mode prompt for single-file Python generation.
 ///
 /// Placeholder: `{task}`.
-pub(crate) const SOLO_GENERATE: &str = r#"You are an expert Python developer. Complete this task with a SINGLE, self-contained Python file.
+pub(crate) const SOLO_GENERATE: &str = r#"You are an expert Python developer.
+Complete this task with a SINGLE, self-contained Python file.
 
 ## Task
 {task}
 
 ## Requirements
-1. Choose a DESCRIPTIVE filename based on the task (e.g., `fibonacci.py` for a fibonacci script, `prime_checker.py` for checking primes)
+1. Choose a DESCRIPTIVE filename based on the task (e.g., `fibonacci.py` for a fibonacci script,
+  `prime_checker.py` for checking primes)
 2. Write ONE Python file that accomplishes the task
 3. Include docstrings with doctest examples for all functions
 4. Make the file directly runnable with `if __name__ == "__main__":` block
@@ -537,7 +574,9 @@ Project name:"#;
 ///
 /// Placeholders: `{goal}`, `{expected_files}`, `{dropped_files}`,
 /// `{original_prompt}`.
-pub(crate) const BUNDLE_RETARGET: &str = r#"Your previous response was REJECTED because every artifact targeted a file path outside this node's declared outputs.
+pub(crate) const BUNDLE_RETARGET: &str = r#"Your previous response was REJECTED
+because every artifact targeted a file path
+outside this node's declared outputs.
 
 ## What went wrong
 You produced files for: {dropped_files}
@@ -550,4 +589,5 @@ Re-read the original task and generate code for the correct paths.
 ## Original Task
 {original_prompt}
 
-IMPORTANT: Your response MUST contain ONLY the declared output files. Do NOT produce files outside the list above."#;
+IMPORTANT: Your response MUST contain ONLY the declared output files. Do NOT produce files outside the list
+  above."#;

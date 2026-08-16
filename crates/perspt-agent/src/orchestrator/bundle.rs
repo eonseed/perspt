@@ -732,7 +732,8 @@ mod tests {
     #[test]
     fn test_strict_json_layer_c_valid_bundle() {
         // Layer C: strict JSON parse succeeds for a well-formed bundle
-        let json = r#"{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],"commands":[]}"#;
+        let json = r#"{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],
+                       "commands":[]}"#;
         let result = perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(json);
         assert!(result.is_ok());
         let (bundle, _method) = result.unwrap();
@@ -808,7 +809,8 @@ pub fn greet() -> &'static str { "Hello" }
 
     #[test]
     fn test_bundle_with_commands() {
-        let json = r#"{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],"commands":["cargo add serde"]}"#;
+        let json = r#"{"artifacts":[{"operation":"write","path":"src/main.rs","content":"fn main() {}"}],
+                       "commands":["cargo add serde"]}"#;
         let result = perspt_core::normalize::extract_and_deserialize::<ArtifactBundle>(json);
         assert!(result.is_ok());
         let (bundle, _) = result.unwrap();

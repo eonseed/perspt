@@ -520,7 +520,9 @@ mod tests {
 
     #[test]
     fn test_embedded_json_with_wrapper_text() {
-        let raw = "Sure! Here is the bundle:\n{\"artifacts\": [{\"path\": \"main.rs\", \"operation\": \"write\", \"content\": \"fn main() {}\"}]}\nLet me know if you need changes.";
+        let raw =
+            "Sure! Here is the bundle:\n{\"artifacts\": [{\"path\": \"main.rs\", \"operation\": \
+            \"write\", \"content\": \"fn main() {}\"}]}\nLet me know if you need changes.";
         let out = extract_json(raw).unwrap();
         assert_eq!(out.method, ExtractionMethod::EmbeddedJson);
         assert!(out.json_body.starts_with('{'));

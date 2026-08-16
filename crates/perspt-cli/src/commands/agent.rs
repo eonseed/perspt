@@ -354,7 +354,8 @@ pub async fn run(
                         if let Some(latest) = nodes.last() {
                             if let Ok(history) = store.get_energy_history(&sid, &latest.node_id) {
                                 if let Some(e) = history.last() {
-                                    println!("[ENERGY] V(x)={:.3} syn={:.2} str={:.2} log={:.2} boot={:.2} sheaf={:.2}",
+                                    println!("[ENERGY] V(x)={:.3} syn={:.2} str={:.2} log={:.2} boot={:.2} \
+                                        sheaf={:.2}",
                                         e.v_total, e.v_syn, e.v_str, e.v_log, e.v_boot, e.v_sheaf);
                                 }
                             }
