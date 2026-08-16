@@ -825,6 +825,13 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         "#,
         [],
     )?;
+    // Migration for databases created before delayed audit labels existed,
+    // where `unsafe_label` was NOT NULL. Best-effort: a fresh table already
+    // matches and some engines may not support the clause.
+    let _ = conn.execute(
+        "ALTER TABLE psp9_calibration_samples ALTER COLUMN unsafe_label DROP NOT NULL",
+        [],
+    );
 
     log::info!("DuckDB schema initialized successfully");
     Ok(())
