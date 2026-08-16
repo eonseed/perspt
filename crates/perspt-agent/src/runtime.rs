@@ -1141,9 +1141,11 @@ struct CodingContract {
 impl ContractEvaluator for CodingContract {
     fn evaluate(&self, transition: &CandidateTransition) -> ContractWitness {
         let proposal = &transition.proposal;
+        // The policy engine matches text patterns against real command lines,
+        // so it must see the canonical rendering, never the Debug form.
         let policy_ok = proposal.command.as_ref().is_none_or(|command| {
             matches!(
-                self.policy.evaluate(&format!("{command:?}")),
+                self.policy.evaluate(&command.command_line()),
                 perspt_policy::engine::PolicyDecision::Allow
             )
         });

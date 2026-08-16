@@ -86,7 +86,10 @@ impl PolicyEngine {
         Ok(())
     }
 
-    /// Load a single policy file
+    /// Load a single policy file. The stored form is the wrapped executable
+    /// (`<content>\nevaluate\n`) built exactly once here; `evaluate` re-parses
+    /// it per command because a Starlark `AstModule` is consumed by
+    /// evaluation, but it never re-wraps or re-validates.
     fn load_policy_file(&self, path: &Path) -> Result<String> {
         let content = std::fs::read_to_string(path)
             .context(format!("Failed to read policy file: {:?}", path))?;
@@ -94,7 +97,7 @@ impl PolicyEngine {
         let executable = format!("{content}\nevaluate\n");
         let ast = AstModule::parse(
             path.to_string_lossy().as_ref(),
-            executable,
+            executable.clone(),
             &Dialect::Standard,
         )
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
@@ -108,7 +111,7 @@ impl PolicyEngine {
                     .map_err(|e| anyhow::anyhow!("Eval error: {}", e))?;
             }
 
-            Ok(content)
+            Ok(executable)
         })
     }
 
@@ -144,12 +147,8 @@ impl PolicyEngine {
                 evaluator.set_max_callstack_size(32)?;
                 evaluator.set_max_heap_size(8 * 1024 * 1024)?;
                 evaluator.set_max_tick_count(25_000)?;
-                let ast = AstModule::parse(
-                    "policy.star",
-                    format!("{policy}\nevaluate\n"),
-                    &Dialect::Standard,
-                )
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+                let ast = AstModule::parse("policy.star", policy.clone(), &Dialect::Standard)
+                    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
                 let function = evaluator
                     .eval_module(ast, &Self::create_globals())
                     .map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -192,7 +191,15 @@ impl PolicyEngine {
         decision
     }
 
-    /// Default policy when no rules are loaded
+    /// Default policy when no rules are loaded.
+    ///
+    /// Input is the canonical command line (`CommandInvocation::command_line`),
+    /// so these substring patterns match real invocations. The `Allow`
+    /// fallthrough is deliberate: deny-by-default already lives in the layers
+    /// below — `classify_tier` treats unknown programs as mutations, the OS
+    /// process sandbox denies by default, and the capability kernel bounds
+    /// command scope. This layer exists to let operators *restrict further*
+    /// via Starlark, not to be the only gate.
     fn default_policy(&self, command: &str) -> PolicyDecision {
         // Always prompt for potentially dangerous commands
         let dangerous_patterns = ["rm -rf", "sudo", "chmod 777", "> /dev/", "mkfs", "dd if="];
@@ -290,9 +297,8 @@ mod tests {
 
     #[test]
     fn loaded_starlark_policy_is_actually_evaluated() {
-        let directory = std::env::temp_dir().join(format!("perspt-policy-{}", std::process::id()));
-        std::fs::create_dir_all(&directory).unwrap();
-        let path = directory.join("deny.star");
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("deny.star");
         std::fs::write(
             &path,
             "def evaluate(command):\n    return 'deny' if 'forbidden' in command else 'allow'\n",
@@ -300,7 +306,7 @@ mod tests {
         .unwrap();
         let mut engine = PolicyEngine {
             policies: Vec::new(),
-            policy_dir: directory.clone(),
+            policy_dir: directory.path().to_path_buf(),
         };
         engine.load_policies().unwrap();
         assert_eq!(engine.evaluate("ls"), PolicyDecision::Allow);
@@ -308,6 +314,5 @@ mod tests {
             engine.evaluate("forbidden operation"),
             PolicyDecision::Deny(_)
         ));
-        let _ = std::fs::remove_dir_all(directory);
     }
 }
