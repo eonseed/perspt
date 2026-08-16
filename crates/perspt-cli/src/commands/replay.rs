@@ -27,7 +27,10 @@ pub async fn run(session_id: String) -> Result<()> {
     // hash, so tampering with any stored record changes the head.
     let mut ledger = Ledger::new();
     let mut tampered = Vec::new();
-    for row in &rows {
+    for (expected_sequence, row) in rows.iter().enumerate() {
+        if row.sequence != expected_sequence as i64 || row.prev_hash != ledger.head() {
+            tampered.push(row.sequence);
+        }
         let event: LedgerEvent = serde_json::from_str(&row.event_json)
             .with_context(|| format!("decoding event at sequence {}", row.sequence))?;
         let head = ledger.append(event)?;

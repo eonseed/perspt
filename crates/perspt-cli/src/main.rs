@@ -50,89 +50,53 @@ enum Commands {
         #[arg(short, long)]
         yes: bool,
 
-        /// Auto-approve only safe (read-only) operations
-        #[arg(long)]
-        auto_approve_safe: bool,
-
-        /// Maximum complexity K for sub-graph approval
-        #[arg(short = 'k', long, default_value = "5")]
-        complexity: usize,
-
-        /// Execution mode: cautious, balanced, or yolo
-        #[arg(short, long, default_value = "balanced")]
-        mode: String,
-
-        /// Model to use for ALL agent tiers (overrides per-tier settings)
+        /// Primary actuator model (alias for --actuator-model)
         #[arg(long)]
         model: Option<String>,
 
-        /// Model for Architect tier (deep reasoning/planning)
-        #[arg(long)]
-        architect_model: Option<String>,
-
-        /// Model for Actuator tier (code generation)
+        /// Model that proposes governed coding tool calls
         #[arg(long)]
         actuator_model: Option<String>,
 
-        /// Model for Verifier tier (stability checking)
+        /// Optional cheaper read-only repository exploration model
         #[arg(long)]
-        verifier_model: Option<String>,
+        explorer_model: Option<String>,
 
-        /// Model for Speculator tier (fast lookahead/exploration)
+        /// Optional no-tool conjunctive diff adjudicator model
         #[arg(long)]
-        speculator_model: Option<String>,
+        adjudicator_model: Option<String>,
 
-        /// Energy weights α,β,γ (comma-separated, e.g., "1.0,0.5,2.0")
-        #[arg(long, default_value = "1.0,0.5,2.0")]
-        energy_weights: String,
+        /// Required measured energy descent per accepted checkpoint
+        #[arg(long, default_value = "0.5")]
+        rho_gate: f64,
 
-        /// Stability threshold ε (default: 0.1)
-        #[arg(long, default_value = "0.1")]
-        stability_threshold: f32,
+        /// Maximum model turns per node
+        #[arg(long, default_value = "12")]
+        max_turns: u32,
 
-        /// Maximum cost in USD (0 = unlimited)
-        #[arg(long, default_value = "0")]
-        max_cost: f32,
+        /// Maximum model-issued and nested tool calls per turn
+        #[arg(long, default_value = "8")]
+        max_calls_per_turn: u32,
 
-        /// Maximum steps/iterations (0 = unlimited)
-        #[arg(long, default_value = "0")]
-        max_steps: usize,
+        /// Shared non-descending and recovery budget
+        #[arg(long, default_value = "4")]
+        rejection_budget: u32,
 
-        /// Defer tests until sheaf validation (faster iteration, tests run at end)
+        /// Maximum compiler/test/lint sensors run concurrently
+        #[arg(long, default_value = "4")]
+        max_parallel: usize,
+
+        /// Persist signed grant intent for resume; fresh capabilities are still re-minted
         #[arg(long)]
-        defer_tests: bool,
+        persistent_grants: bool,
 
-        /// Log all LLM requests/responses to database for debugging
+        /// Ordered sticky actuator fallback route; repeat to add routes
+        #[arg(long = "fallback-model")]
+        fallback_models: Vec<String>,
+
+        /// Write the terminal session summary as JSON
         #[arg(long)]
-        log_llm: bool,
-
-        /// Force single-file execution (Solo Mode) instead of project-first planning
-        #[arg(long)]
-        single_file: bool,
-
-        /// Verifier strictness: default, strict, or minimal
-        #[arg(long, default_value = "default")]
-        verifier_strictness: String,
-
-        /// Fallback model for Architect tier (used when primary fails structured-output)
-        #[arg(long)]
-        architect_fallback_model: Option<String>,
-
-        /// Fallback model for Actuator tier (used when primary fails structured-output)
-        #[arg(long)]
-        actuator_fallback_model: Option<String>,
-
-        /// Fallback model for Verifier tier (used when primary fails structured-output)
-        #[arg(long)]
-        verifier_fallback_model: Option<String>,
-
-        /// Fallback model for Speculator tier (used when primary fails structured-output)
-        #[arg(long)]
-        speculator_fallback_model: Option<String>,
-
-        /// Export the task graph as JSON to a file after planning (before execution)
-        #[arg(long)]
-        output_plan: Option<PathBuf>,
+        output_summary: Option<PathBuf>,
 
         /// Start the web monitoring dashboard alongside the agent
         #[arg(long)]
@@ -141,12 +105,6 @@ enum Commands {
         /// Port for the embedded dashboard server (default: 3000)
         #[arg(long, default_value = "3000")]
         dashboard_port: u16,
-
-        /// Package manager for greenfield project init, interpreted by the
-        /// language plugin: Python → uv (default), poetry, pdm, pipenv;
-        /// JS → npm (default), pnpm, yarn. Unknown values use the plugin default.
-        #[arg(long, visible_alias = "python-package-manager")]
-        package_manager: Option<String>,
     },
 
     /// Initialize project memory and policy rules
@@ -292,58 +250,39 @@ async fn main() -> Result<()> {
             task,
             workdir,
             yes,
-            auto_approve_safe: _,
-            complexity,
-            mode,
             model,
-            architect_model,
             actuator_model,
-            verifier_model,
-            speculator_model,
-            energy_weights,
-            stability_threshold,
-            max_cost,
-            max_steps,
-            defer_tests,
-            log_llm,
-            single_file,
-            verifier_strictness,
-            architect_fallback_model,
-            actuator_fallback_model,
-            verifier_fallback_model,
-            speculator_fallback_model,
-            output_plan,
+            explorer_model,
+            adjudicator_model,
+            rho_gate,
+            max_turns,
+            max_calls_per_turn,
+            rejection_budget,
+            max_parallel,
+            persistent_grants,
+            fallback_models,
+            output_summary,
             dashboard,
             dashboard_port,
-            package_manager,
         }) => {
             commands::agent::run(
                 task,
                 workdir,
                 yes,
-                complexity,
-                mode,
                 model,
-                architect_model,
                 actuator_model,
-                verifier_model,
-                speculator_model,
-                defer_tests,
-                log_llm,
-                single_file,
-                verifier_strictness,
-                architect_fallback_model,
-                actuator_fallback_model,
-                verifier_fallback_model,
-                speculator_fallback_model,
-                output_plan,
-                energy_weights,
-                stability_threshold,
-                max_cost,
-                max_steps,
+                explorer_model,
+                adjudicator_model,
+                fallback_models,
+                output_summary,
+                rho_gate,
+                max_turns,
+                max_calls_per_turn,
+                rejection_budget,
+                max_parallel,
+                persistent_grants,
                 dashboard,
                 dashboard_port,
-                package_manager,
                 config_override,
             )
             .await

@@ -1,436 +1,134 @@
-//! Agent command - SRBN agent execution mode
+//! Agent command backed exclusively by the PSP-9 runtime.
 
 use anyhow::{Context, Result};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 
-/// Execution mode
-#[derive(Debug, Clone, Copy)]
-pub enum ExecutionMode {
-    /// Maximum user involvement, approve every change
-    Cautious,
-    /// Balanced - approve sub-graphs based on complexity K
-    Balanced,
-    /// Minimal prompts, auto-approve most changes
-    Yolo,
-}
-
-impl ExecutionMode {
-    fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "cautious" => ExecutionMode::Cautious,
-            "yolo" => ExecutionMode::Yolo,
-            _ => ExecutionMode::Balanced,
-        }
-    }
-}
-
-/// Run the SRBN agent on a task
+/// Run the governed coding agent.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     task: String,
     workdir: Option<PathBuf>,
     auto_approve: bool,
-    complexity_k: usize,
-    mode: String,
     model: Option<String>,
-    architect_model: Option<String>,
     actuator_model: Option<String>,
-    verifier_model: Option<String>,
-    speculator_model: Option<String>,
-    defer_tests: bool,
-    log_llm: bool,
-    single_file: bool,
-    verifier_strictness: String,
-    architect_fallback_model: Option<String>,
-    actuator_fallback_model: Option<String>,
-    verifier_fallback_model: Option<String>,
-    speculator_fallback_model: Option<String>,
-    output_plan: Option<PathBuf>,
-    energy_weights: String,
-    stability_threshold: f32,
-    max_cost: f32,
-    max_steps: usize,
+    explorer_model: Option<String>,
+    adjudicator_model: Option<String>,
+    fallback_models: Vec<String>,
+    output_summary: Option<PathBuf>,
+    rho_gate: f64,
+    max_turns: u32,
+    max_calls_per_turn: u32,
+    rejection_budget: u32,
+    max_parallel: usize,
+    persistent_grants: bool,
     dashboard: bool,
     dashboard_port: u16,
-    package_manager: Option<String>,
     config_override: Option<PathBuf>,
 ) -> Result<()> {
-    let working_dir = workdir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-    let exec_mode = ExecutionMode::from_str(&mode);
+    if perspt_core::local_command::parse_local_command(&task).is_some() {
+        println!();
+        println!("{}", perspt_core::local_command::dedication_text());
+        println!();
+        return Ok(());
+    }
 
-    // Load configuration (explicit --config wins; missing file is fine).
+    let working_dir = workdir.unwrap_or(std::env::current_dir()?);
     let config_path = config_override
         .or_else(perspt_core::paths::resolve_config_file)
         .or_else(perspt_core::paths::config_file);
     let config = match config_path {
-        Some(ref path) => perspt_core::Config::load_from_path(path)?,
+        Some(path) => perspt_core::Config::load_from_path(&path)?,
         None => perspt_core::Config::default(),
     };
-
-    // Resolve per-tier models. Precedence:
-    //   --model (all tiers) > explicit tier flag > config tier field > config model
-    //   > hardcoded tier default (applied inside the orchestrator when None).
-    let architect = model
-        .clone()
-        .or(architect_model)
-        .or_else(|| config.architect_model.clone())
-        .or_else(|| config.model.clone());
-    let actuator = model
-        .clone()
-        .or(actuator_model)
-        .or_else(|| config.actuator_model.clone())
-        .or_else(|| config.model.clone());
-    let verifier = model
-        .clone()
-        .or(verifier_model)
-        .or_else(|| config.verifier_model.clone())
-        .or_else(|| config.model.clone());
-    let speculator = model
-        .clone()
-        .or(speculator_model)
-        .or_else(|| config.speculator_model.clone())
-        .or_else(|| config.model.clone());
-
-    // Build a shared, bound provider from config + env so custom/local model
-    // names and config api_key/base_url are applied. The --model override (if any)
-    // is passed through for provider resolution.
-    let (provider, resolved) =
-        perspt_core::GenAIProvider::from_config(&config, model.as_deref())
-            .context("Failed to create LLM provider. Ensure an API key or config is set.")?;
-    let provider = std::sync::Arc::new(provider);
-    log::info!("Agent provider: {}", resolved.provider);
-
-    // Get default model name for logging
-    let default_model = perspt_agent::ModelTier::default_model_name();
-
-    log::info!("Starting SRBN agent");
-    log::info!("  Task: {}", task);
-    log::info!("  Working directory: {:?}", working_dir);
-    log::info!("  Auto-approve: {}", auto_approve);
-    log::info!("  Complexity K: {}", complexity_k);
-    log::info!("  Defer tests: {}", defer_tests);
-    log::info!("  Log LLM: {}", log_llm);
-    log::info!("  Mode: {:?}", exec_mode);
-    log::info!(
-        "  Architect model: {}",
-        architect.as_deref().unwrap_or_else(|| {
-            log::debug!("Using default");
-            default_model
-        })
-    );
-    log::info!(
-        "  Actuator model: {}",
-        actuator.as_deref().unwrap_or(default_model)
-    );
-    log::info!(
-        "  Verifier model: {}",
-        verifier.as_deref().unwrap_or(default_model)
-    );
-    log::info!(
-        "  Speculator model: {}",
-        speculator.as_deref().unwrap_or(default_model)
-    );
-
-    // Create the orchestrator with model configuration and the bound provider
-    let mut orchestrator = perspt_agent::SRBNOrchestrator::new_with_models_and_provider(
+    let approval_policy = if auto_approve {
+        perspt_sdk::ApprovalPolicy::Auto
+    } else {
+        perspt_sdk::ApprovalPolicy::Ask
+    };
+    let run_config = perspt_agent::Psp9RunConfig {
+        max_turns,
+        max_calls_per_turn,
+        rejection_budget,
+        rho_gate: rho_gate.max(0.000_001),
+        approval_policy,
+        max_parallel_verifiers: max_parallel.max(1),
+        persistent_grants,
+        ..perspt_agent::Psp9RunConfig::default()
+    };
+    let runtime = perspt_agent::Psp9AgentRuntime::from_config(
         working_dir.clone(),
-        auto_approve,
-        provider,
-        architect,
-        actuator,
-        verifier,
-        speculator,
-        architect_fallback_model,
-        actuator_fallback_model,
-        verifier_fallback_model,
-        speculator_fallback_model,
-    );
+        &config,
+        perspt_agent::Psp9ModelRoutes {
+            primary: model,
+            actuator: actuator_model,
+            explorer: explorer_model,
+            adjudicator: adjudicator_model,
+            fallbacks: fallback_models,
+        },
+        run_config,
+    )?;
 
-    // Set complexity threshold, defer_tests, and log_llm
-    orchestrator.context.complexity_k = complexity_k;
-    orchestrator.context.defer_tests = defer_tests;
-    orchestrator.context.log_llm = log_llm;
-
-    // PSP-5: Set explicit single-file mode if --single-file flag was provided
-    if single_file {
-        orchestrator.context.execution_mode = perspt_core::types::ExecutionMode::Solo;
+    if dashboard {
+        start_dashboard(&working_dir, dashboard_port).await?;
     }
 
-    // PSP-5: Set verifier strictness from CLI flag
-    orchestrator.context.verifier_strictness = match verifier_strictness.to_lowercase().as_str() {
-        "strict" => perspt_core::types::VerifierStrictness::Strict,
-        "minimal" => perspt_core::types::VerifierStrictness::Minimal,
-        _ => perspt_core::types::VerifierStrictness::Default,
+    println!("PSP-9 agent starting");
+    println!("Task: {task}");
+    println!("Workspace: {}", working_dir.display());
+
+    let summary = if std::io::stdout().is_terminal() && !auto_approve {
+        perspt_tui::run_agent_tui_with_runtime(runtime, task.clone()).await?
+    } else {
+        runtime.run(task.clone()).await?
     };
 
-    // PSP-5 Phase 8: Wire budget envelope from CLI flags
-    {
-        let max_s = if max_steps > 0 {
-            Some(max_steps as u32)
-        } else {
-            None
-        };
-        let max_c = if max_cost > 0.0 {
-            Some(max_cost as f64)
-        } else {
-            None
-        };
-        orchestrator.set_budget(max_s, None, max_c);
-    }
-
-    // Greenfield package manager: CLI flag wins, else config; the active
-    // language plugin maps it (default uv for Python, npm for JS).
-    orchestrator.set_package_manager(package_manager.or_else(|| config.package_manager.clone()));
-
-    // PSP-5 Phase 8: Wire stability threshold from CLI flag
-    orchestrator.stability_epsilon = stability_threshold;
-
-    // PSP-5 Phase 8: Parse and wire energy weights (format: "alpha,beta,gamma")
-    {
-        let parts: Vec<f32> = energy_weights
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
-        if parts.len() == 3 {
-            orchestrator.set_energy_weights(parts[0], parts[1], parts[2]);
-        }
-    }
-
-    println!("🚀 SRBN Agent starting...");
-    println!("   Session: {}", orchestrator.session_id());
-    println!("   Task: {}", task);
-
-    // PSP-5: Provisional plugin scan for user feedback only.
-    // Authoritative detection happens inside orchestrator.run() after
-    // workspace classification and potential greenfield init.
-    {
-        let registry = perspt_core::plugin::PluginRegistry::new();
-        let detected = registry.detect_all(&working_dir);
-        if detected.is_empty() {
-            println!("   Plugins: none detected yet (will re-detect after init)");
-        } else {
-            let names: Vec<&str> = detected.iter().map(|p| p.name()).collect();
-            println!("   Plugins (provisional): {}", names.join(", "));
-        }
-    }
-
     println!();
-
-    // Start embedded dashboard server if --dashboard flag was provided
-    if dashboard {
-        let db_path = perspt_store::SessionStore::default_db_path()
-            .context("Could not determine database path for dashboard")?;
-
-        // The agent's SessionStore (created inside the orchestrator) opens the DB
-        // in read-write mode. The dashboard opens a separate read-only connection
-        // to the same file — DuckDB supports one writer + concurrent readers.
-        let dash_store = perspt_store::SessionStore::open_read_only(&db_path)
-            .context("Failed to open read-only database for dashboard")?;
-
-        let dash_state = perspt_dashboard::state::AppState {
-            store: std::sync::Arc::new(dash_store),
-            password: None,
-            session_token: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-            working_dir: working_dir.clone(),
-            is_localhost: true,
-        };
-
-        let app = perspt_dashboard::build_router(dash_state);
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], dashboard_port));
-
-        let listener = tokio::net::TcpListener::bind(addr)
-            .await
-            .context(format!("Failed to bind dashboard to port {dashboard_port}"))?;
-
-        println!("📊 Dashboard listening on http://{addr}");
-        println!();
-
-        // Spawn dashboard as a background task — it will be dropped when the
-        // agent process exits.
-        tokio::spawn(async move {
-            if let Err(e) = axum::serve(listener, app).await {
-                eprintln!("⚠️  Dashboard server error: {e}");
-            }
-        });
+    println!("Outcome: {:?}", summary.outcome);
+    println!("Session: {}", summary.session_id);
+    println!("Turns: {}", summary.turns_used);
+    println!("Ledger head: {}", summary.ledger_head);
+    if !summary.promoted_paths.is_empty() {
+        println!("Promoted paths: {}", summary.promoted_paths.join(", "));
     }
 
-    // Check if we should run in TUI mode or headless mode
-    let is_tty = std::io::stdout().is_terminal();
+    if let Some(path) = output_summary {
+        let output = serde_json::to_string_pretty(&serde_json::json!({
+            "session_id": summary.session_id,
+            "node_id": summary.node_id,
+            "outcome": summary.outcome,
+            "turns_used": summary.turns_used,
+            "ledger_head": summary.ledger_head,
+            "promoted_paths": summary.promoted_paths,
+        }))?;
+        std::fs::write(&path, output)
+            .with_context(|| format!("writing run summary to {}", path.display()))?;
+    }
+    Ok(())
+}
 
-    if is_tty && !auto_approve {
-        // Interactive mode with TUI - run orchestrator with TUI integration
-        println!("Running in interactive TUI mode...");
-        println!("(Use --yes flag to run headlessly)");
-        println!();
-
-        // Run with TUI integration (orchestrator starts LSP internally after classification)
-        perspt_tui::run_agent_tui_with_orchestrator(orchestrator, task).await?;
-    } else {
-        // Headless mode - run orchestrator directly
-        println!(
-            "Running in headless mode (auto-approve={})...",
-            auto_approve
-        );
-        println!();
-
-        // Set up Ctrl+C handler for graceful abort
-        let abort_flag = orchestrator.abort_flag();
-        tokio::spawn(async move {
-            // First Ctrl+C: request graceful abort
-            tokio::signal::ctrl_c().await.ok();
-            eprintln!(
-                "\n⚠️  Interrupt received. Aborting gracefully... (Ctrl+C again to force quit)"
-            );
-            abort_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-
-            // Second Ctrl+C: force exit
-            tokio::signal::ctrl_c().await.ok();
-            eprintln!("\nForce quitting...");
-            std::process::exit(130);
-        });
-
-        // Run the SRBN control loop (orchestrator starts LSP internally after classification)
-        match orchestrator.run(task.clone()).await {
-            Ok(()) => {
-                println!();
-                println!("✅ Task completed successfully!");
-                println!("   Nodes processed: {}", orchestrator.node_count());
-
-                // PSP-5: Export structured plan as JSON if --output-plan was given
-                if let Some(ref plan_path) = output_plan {
-                    let nodes: Vec<_> = orchestrator
-                        .graph
-                        .node_indices()
-                        .map(|idx| &orchestrator.graph[idx])
-                        .collect();
-                    match serde_json::to_string_pretty(&nodes) {
-                        Ok(json) => {
-                            if let Err(e) = std::fs::write(plan_path, &json) {
-                                eprintln!(
-                                    "⚠️  Failed to write plan to {}: {}",
-                                    plan_path.display(),
-                                    e
-                                );
-                            } else {
-                                println!("   Plan exported to {}", plan_path.display());
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("⚠️  Failed to serialize plan: {}", e);
-                        }
-                    }
-                }
-
-                // PSP-5 Phase 7: Structured headless summary
-                let sid = orchestrator.session_id().to_string();
-                if let Ok(store) = perspt_store::SessionStore::new() {
-                    use perspt_core::types::NodeState;
-
-                    // VERIFY summary
-                    if let Ok(nodes) = store.get_node_states(&sid) {
-                        let completed = nodes
-                            .iter()
-                            .filter(|n| NodeState::from_display_str(&n.state).is_success())
-                            .count();
-                        let failed = nodes
-                            .iter()
-                            .filter(|n| {
-                                let s = NodeState::from_display_str(&n.state);
-                                s == NodeState::Failed || s == NodeState::Escalated
-                            })
-                            .count();
-                        let retries: i32 = nodes.iter().map(|n| n.attempt_count.max(0)).sum();
-                        println!();
-                        println!(
-                            "[VERIFY] {}/{} nodes completed, {} failed, {} retries",
-                            completed,
-                            nodes.len(),
-                            failed,
-                            retries
-                        );
-
-                        // ENERGY summary from latest node
-                        if let Some(latest) = nodes.last() {
-                            if let Ok(history) = store.get_energy_history(&sid, &latest.node_id) {
-                                if let Some(e) = history.last() {
-                                    println!("[ENERGY] V(x)={:.3} syn={:.2} str={:.2} log={:.2} boot={:.2} \
-                                        sheaf={:.2}",
-                                        e.v_total, e.v_syn, e.v_str, e.v_log, e.v_boot, e.v_sheaf);
-                                }
-                            }
-                        }
-                    }
-                    // Escalation summary
-                    if let Ok(escalations) = store.get_escalation_reports(&sid) {
-                        if !escalations.is_empty() {
-                            println!("[ESCALATE] {} escalation(s) recorded", escalations.len());
-                        }
-                    }
-                    // Branch summary
-                    if let Ok(branches) = store.get_provisional_branches(&sid) {
-                        if !branches.is_empty() {
-                            let merged = branches.iter().filter(|b| b.state == "merged").count();
-                            let flushed = branches.iter().filter(|b| b.state == "flushed").count();
-                            println!(
-                                "[BRANCH] {} total, {} merged, {} flushed",
-                                branches.len(),
-                                merged,
-                                flushed
-                            );
-                        }
-                    }
-                    // Budget summary
-                    if let Ok(Some(budget)) = store.get_budget_envelope(&sid) {
-                        let steps_str = budget
-                            .max_steps
-                            .map(|m| format!("{}/{}", budget.steps_used, m))
-                            .unwrap_or_else(|| format!("{}", budget.steps_used));
-                        let cost_str = budget
-                            .max_cost_usd
-                            .map(|m| format!("${:.2}/${:.2}", budget.cost_used_usd, m))
-                            .unwrap_or_else(|| format!("${:.2}", budget.cost_used_usd));
-                        println!(
-                            "[BUDGET] steps={} cost={} revisions={}",
-                            steps_str, cost_str, budget.revisions_used
-                        );
-                    }
-                    // Step timeline summary
-                    if let Ok(steps) = store.get_session_steps(&sid) {
-                        if !steps.is_empty() {
-                            let total_ms: i64 = steps.iter().map(|s| s.duration_ms as i64).sum();
-                            let corrections: Vec<_> = steps
-                                .iter()
-                                .filter(|s| s.step == "converge" && s.attempt_count > 0)
-                                .collect();
-                            println!(
-                                "[STEPS] {} records, {:.1}s total",
-                                steps.len(),
-                                total_ms as f64 / 1000.0
-                            );
-                            if !corrections.is_empty() {
-                                let total_attempts: i32 =
-                                    corrections.iter().map(|s| s.attempt_count).sum();
-                                println!(
-                                    "[CORRECTIONS] {} node(s) needed correction, {} total attempts",
-                                    corrections.len(),
-                                    total_attempts
-                                );
-                            }
-                        }
-                    }
-                    println!("[COMMIT] Session {} complete", &sid[..sid.len().min(16)]);
-                }
-            }
-            Err(e) => {
-                println!();
-                println!("❌ Task failed: {}", e);
-                return Err(e);
-            }
+async fn start_dashboard(working_dir: &std::path::Path, port: u16) -> Result<()> {
+    // Ensure the schema exists before opening the dashboard's read-only handle.
+    drop(perspt_store::SessionStore::new()?);
+    let db_path = perspt_store::SessionStore::default_db_path()?;
+    let store = perspt_store::SessionStore::open_read_only(&db_path)?;
+    let state = perspt_dashboard::state::AppState {
+        store: std::sync::Arc::new(store),
+        password: None,
+        session_token: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+        working_dir: working_dir.to_path_buf(),
+        is_localhost: true,
+    };
+    let app = perspt_dashboard::build_router(state);
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
+        .with_context(|| format!("binding dashboard to {address}"))?;
+    println!("Dashboard: http://{address}");
+    tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, app).await {
+            log::error!("dashboard server failed: {error}");
         }
-    }
-
-    println!();
-    println!("✓ Agent session completed");
+    });
     Ok(())
 }

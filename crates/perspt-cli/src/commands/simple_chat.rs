@@ -315,7 +315,7 @@ fn check_easter_egg(input: &str, triggered: &mut bool) -> bool {
         return false;
     }
 
-    if input.eq_ignore_ascii_case("l-o-v-e") {
+    if perspt_core::local_command::parse_local_command(input).is_some() {
         *triggered = true;
         return true;
     }
@@ -325,14 +325,19 @@ fn check_easter_egg(input: &str, triggered: &mut bool) -> bool {
 
 /// Display the Easter egg dedication message
 fn display_easter_egg() {
+    use perspt_core::local_command::{
+        DEDICATION_CLOSING, DEDICATION_FAMILY, DEDICATION_PREAMBLE, DEDICATION_THANKS,
+        DEDICATION_TITLE,
+    };
+
     println!();
-    println!("\x1b[35;1mSpecial Dedication\x1b[0m");
+    println!("\x1b[35;1m{DEDICATION_TITLE}\x1b[0m");
     println!();
-    println!("\x1b[36mThis application is lovingly dedicated to\x1b[0m");
-    println!("   \x1b[36;3mmy wonderful mother and grandma\x1b[0m");
+    println!("\x1b[36m{DEDICATION_PREAMBLE}\x1b[0m");
+    println!("   \x1b[36;3m{DEDICATION_FAMILY}\x1b[0m");
     println!();
-    println!("\x1b[32mThank you for your endless love, wisdom, and support\x1b[0m");
+    println!("\x1b[32m{DEDICATION_THANKS}\x1b[0m");
     println!();
-    println!("\x1b[35;3mWith all my love and gratitude\x1b[0m");
+    println!("\x1b[35;3m{DEDICATION_CLOSING}\x1b[0m");
     println!();
 }
