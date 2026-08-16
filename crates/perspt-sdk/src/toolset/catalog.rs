@@ -12,6 +12,21 @@ use crate::capability::Capability;
 use crate::error::{Result, SdkError};
 use crate::model::ToolSpec;
 
+/// Small schemas that remain visible without discovery. This is a context
+/// optimization, not an authority boundary; the kernel still checks every
+/// call against the complete catalog and held capabilities.
+const ALWAYS_VISIBLE: &[&str] = &[
+    "tool_search",
+    "tool_program",
+    "read_file",
+    "grep",
+    "glob",
+    "edit_file",
+    "apply_diff",
+    "exec",
+    "ask_user",
+];
+
 /// The catalog port.
 pub trait ToolCatalog: Send + Sync {
     /// Every registered entry.
@@ -36,6 +51,74 @@ pub trait ToolCatalog: Send + Sync {
                     .any(|c| c.effects.contains(&entry.effect))
             })
             .map(|entry| entry.to_spec(strict))
+            .collect()
+    }
+
+    /// Specs for the small stable surface plus tools activated by a previous
+    /// host-side search. Names without authority are omitted.
+    fn deferred_specs_for(
+        &self,
+        capabilities: &[Capability],
+        activated: &std::collections::BTreeSet<String>,
+        strict: bool,
+    ) -> Vec<ToolSpec> {
+        self.entries()
+            .iter()
+            .filter(|entry| {
+                (ALWAYS_VISIBLE.contains(&entry.name.as_str()) || activated.contains(&entry.name))
+                    && capabilities
+                        .iter()
+                        .any(|capability| capability.effects.contains(&entry.effect))
+            })
+            .map(|entry| entry.to_spec(strict))
+            .collect()
+    }
+
+    /// Deterministic lexical search over entries the actor is authorized to
+    /// discover. External schemas stay deferred until this method selects
+    /// them, avoiding eager MCP/schema token cost.
+    fn search_specs(
+        &self,
+        capabilities: &[Capability],
+        query: &str,
+        limit: usize,
+        strict: bool,
+    ) -> Vec<ToolSpec> {
+        let terms: Vec<String> = query
+            .split(|character: char| !character.is_alphanumeric() && character != '_')
+            .filter(|term| !term.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect();
+        let mut matches: Vec<(usize, &ToolEntry)> = self
+            .entries()
+            .iter()
+            .filter(|entry| {
+                entry.name != "tool_search"
+                    && capabilities
+                        .iter()
+                        .any(|capability| capability.effects.contains(&entry.effect))
+            })
+            .filter_map(|entry| {
+                let name = entry.name.to_ascii_lowercase();
+                let haystack = format!("{} {}", name, entry.description.to_ascii_lowercase());
+                let score = terms.iter().fold(0usize, |score, term| {
+                    score
+                        + usize::from(name == *term) * 8
+                        + usize::from(name.contains(term)) * 4
+                        + usize::from(haystack.contains(term))
+                });
+                (score > 0 || terms.is_empty()).then_some((score, entry))
+            })
+            .collect();
+        matches.sort_by(|(left_score, left), (right_score, right)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        matches
+            .into_iter()
+            .take(limit.clamp(1, 12))
+            .map(|(_, entry)| entry.to_spec(strict))
             .collect()
     }
 }
@@ -133,5 +216,25 @@ mod tests {
         let strict_names: Vec<&str> = strict.iter().map(|s| s.name.as_str()).collect();
         let lax_names: Vec<&str> = lax.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(strict_names, lax_names);
+    }
+
+    #[test]
+    fn deferred_catalog_exposes_core_then_discovers_verifiers() {
+        let catalog = StaticCatalog::with_base(Vec::new()).unwrap();
+        let capability = Capability::new(
+            actor(),
+            vec![
+                EffectKind::ToolSearch,
+                EffectKind::ReadFile,
+                EffectKind::RunTest,
+            ],
+        );
+        let activated = std::collections::BTreeSet::new();
+        let initial =
+            catalog.deferred_specs_for(std::slice::from_ref(&capability), &activated, false);
+        assert!(initial.iter().any(|spec| spec.name == "tool_search"));
+        assert!(!initial.iter().any(|spec| spec.name == "run_test"));
+        let found = catalog.search_specs(&[capability], "test verifier", 4, false);
+        assert!(found.iter().any(|spec| spec.name == "run_test"));
     }
 }
