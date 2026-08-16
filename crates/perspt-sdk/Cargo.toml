@@ -1,12 +1,12 @@
 [package]
 name = "perspt-sdk"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Domain-neutral SRBN agent SDK for Perspt: residual energy, measured acceptance gate, spectral diagnostics, and stabilization-kernel adapter (PSP-8)"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-sdk"
 keywords = ["srbn", "agent", "stability", "lyapunov", "sdk"]
 categories = ["development-tools", "science"]

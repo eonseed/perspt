@@ -1,12 +1,12 @@
 [package]
 name = "perspt-cli"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "CLI entry point for Perspt - A stability-aware AI coding assistant"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-cli"
 keywords = ["cli", "ai", "llm", "coding", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
@@ -26,11 +26,11 @@ bundled = [
 ]
 
 [dependencies]
-perspt-core = { version = "0.6.2", path = "../perspt-core" }
-perspt-tui = { version = "0.6.2", path = "../perspt-tui" }
-perspt-agent = { version = "0.6.2", path = "../perspt-agent" }
-perspt-store = { version = "0.6.2", path = "../perspt-store" }
-perspt-dashboard = { version = "0.6.2", path = "../perspt-dashboard" }
+perspt-core = { workspace = true }
+perspt-tui = { workspace = true }
+perspt-agent = { workspace = true }
+perspt-store = { workspace = true }
+perspt-dashboard = { workspace = true }
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }

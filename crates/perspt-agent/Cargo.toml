@@ -1,12 +1,12 @@
 [package]
 name = "perspt-agent"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "SRBN Orchestrator and Agent logic for Perspt"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-agent"
 keywords = ["agent", "srbn", "llm", "coding"]
 categories = ["command-line-utilities", "development-tools"]
@@ -16,12 +16,12 @@ default = []
 bundled = ["perspt-store/bundled"]
 
 [dependencies]
-perspt-core = { version = "0.6.2", path = "../perspt-core" }
-perspt-sdk = { version = "0.6.2", path = "../perspt-sdk" }
-perspt-coding = { version = "0.6.2", path = "../perspt-coding" }
-perspt-policy = { version = "0.6.2", path = "../perspt-policy" }
-perspt-sandbox = { version = "0.6.2", path = "../perspt-sandbox" }
-perspt-store = { version = "0.6.2", path = "../perspt-store" }
+perspt-core = { workspace = true }
+perspt-sdk = { workspace = true }
+perspt-coding = { workspace = true }
+perspt-policy = { workspace = true }
+perspt-sandbox = { workspace = true }
+perspt-store = { workspace = true }
 
 # Graph management
 petgraph = "0.8"

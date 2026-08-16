@@ -1,12 +1,12 @@
 [package]
 name = "perspt-core"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Core types and LLM provider abstraction for Perspt"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-core"
 keywords = ["llm", "ai", "chat", "terminal"]
 categories = ["command-line-utilities", "development-tools"]

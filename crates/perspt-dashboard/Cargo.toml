@@ -1,12 +1,12 @@
 [package]
 name = "perspt-dashboard"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Real-time web dashboard for Perspt agent monitoring"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-dashboard"
 keywords = ["dashboard", "monitoring", "web", "agent"]
 categories = ["web-programming::http-server", "visualization"]
@@ -16,8 +16,8 @@ default = []
 bundled = ["perspt-store/bundled"]
 
 [dependencies]
-perspt-store = { version = "0.6.2", path = "../perspt-store" }
-perspt-core = { version = "0.6.2", path = "../perspt-core" }
+perspt-store = { workspace = true }
+perspt-core = { workspace = true }
 
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.12", features = ["cookie"] }
