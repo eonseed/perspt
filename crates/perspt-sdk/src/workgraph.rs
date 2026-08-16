@@ -159,6 +159,7 @@ impl WorkNode {
 #[serde(rename_all = "snake_case")]
 pub enum GraphRevisionReason {
     InitialPlan,
+    ExecutionUpdate,
     LocalRepair,
     ScopeExpansion,
     UserEdit,
@@ -185,6 +186,19 @@ pub struct WorkGraphRevision {
     pub edges: Vec<WorkEdge>,
     pub validation: GraphValidationReport,
     pub evidence: Vec<ResidualEventRef>,
+}
+
+/// One deterministic edit applied to an immutable graph revision. Coding work
+/// is represented by an evolving sequence of acyclic snapshots, not by the
+/// fiction that the initial DAG is complete.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "edit", rename_all = "snake_case")]
+pub enum GraphEdit {
+    AddNode { node: WorkNode },
+    ReplaceNode { node: WorkNode },
+    RetireNode { node_id: String, reason: String },
+    AddEdge { edge: WorkEdge },
+    RemoveEdge { edge: WorkEdge },
 }
 
 impl WorkGraphRevision {
@@ -248,6 +262,80 @@ impl WorkGraphRevision {
                 }
             })
             .collect()
+    }
+
+    /// Apply evidence-backed edits and validate the complete next snapshot
+    /// before returning it. The current revision remains usable if any edit
+    /// would introduce a dangling edge, duplicate node, stale generation, or
+    /// dependency cycle.
+    pub fn revise(
+        &self,
+        reason: GraphRevisionReason,
+        edits: &[GraphEdit],
+        evidence: Vec<ResidualEventRef>,
+    ) -> Result<Self> {
+        if edits.is_empty() {
+            return Err(SdkError::Domain("graph revision has no edits".into()));
+        }
+        let mut nodes = self.nodes.clone();
+        let mut edges = self.edges.clone();
+        for edit in edits {
+            match edit {
+                GraphEdit::AddNode { node } => {
+                    if nodes
+                        .iter()
+                        .any(|existing| existing.node_id == node.node_id)
+                    {
+                        return Err(SdkError::Domain(format!(
+                            "graph already contains node {:?}",
+                            node.node_id
+                        )));
+                    }
+                    nodes.push(node.clone());
+                }
+                GraphEdit::ReplaceNode { node } => {
+                    let existing = nodes
+                        .iter_mut()
+                        .find(|existing| existing.node_id == node.node_id)
+                        .ok_or_else(|| {
+                            SdkError::Domain(format!("unknown graph node {:?}", node.node_id))
+                        })?;
+                    if node.generation < existing.generation {
+                        return Err(SdkError::Domain(format!(
+                            "stale generation {} for node {:?} at generation {}",
+                            node.generation, node.node_id, existing.generation
+                        )));
+                    }
+                    *existing = node.clone();
+                }
+                GraphEdit::RetireNode { node_id, reason } => {
+                    let node = nodes
+                        .iter_mut()
+                        .find(|node| &node.node_id == node_id)
+                        .ok_or_else(|| {
+                            SdkError::Domain(format!("unknown graph node {node_id:?}"))
+                        })?;
+                    node.state = WorkNodeState::Retired {
+                        reason: reason.clone(),
+                    };
+                }
+                GraphEdit::AddEdge { edge } => {
+                    if !edges.contains(edge) {
+                        edges.push(edge.clone());
+                    }
+                }
+                GraphEdit::RemoveEdge { edge } => edges.retain(|existing| existing != edge),
+            }
+        }
+        let mut revision = Self::build(
+            self.sequence.saturating_add(1),
+            Some(self.revision_id.clone()),
+            reason,
+            nodes,
+            edges,
+        )?;
+        revision.evidence = evidence;
+        Ok(revision)
     }
 }
 
@@ -376,5 +464,53 @@ mod tests {
         let rev = WorkGraphRevision::build(0, None, GraphRevisionReason::LocalRepair, nodes, edges)
             .unwrap();
         assert!(rev.dependencies_of("b").is_empty());
+    }
+
+    #[test]
+    fn evolving_revisions_can_add_work_after_execution_starts() {
+        let original = WorkGraphRevision::build(
+            0,
+            None,
+            GraphRevisionReason::InitialPlan,
+            vec![node("a")],
+            vec![],
+        )
+        .unwrap();
+        let revised = original
+            .revise(
+                GraphRevisionReason::LocalRepair,
+                &[
+                    GraphEdit::AddNode { node: node("b") },
+                    GraphEdit::AddEdge {
+                        edge: WorkEdge::new("a", "b", EdgeKind::RequiresArtifact),
+                    },
+                ],
+                vec![],
+            )
+            .unwrap();
+        assert_eq!(revised.parent_revision_id, Some(original.revision_id));
+        assert_eq!(revised.sequence, 1);
+        assert_eq!(revised.validation.topo_order, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_failed_dynamic_revision_leaves_the_parent_valid() {
+        let original = WorkGraphRevision::build(
+            0,
+            None,
+            GraphRevisionReason::InitialPlan,
+            vec![node("a"), node("b")],
+            vec![WorkEdge::new("a", "b", EdgeKind::RequiresArtifact)],
+        )
+        .unwrap();
+        let result = original.revise(
+            GraphRevisionReason::LocalRepair,
+            &[GraphEdit::AddEdge {
+                edge: WorkEdge::new("b", "a", EdgeKind::RequiresArtifact),
+            }],
+            vec![],
+        );
+        assert!(result.is_err());
+        assert!(original.validation.acyclic);
     }
 }

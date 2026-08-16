@@ -68,13 +68,14 @@ pub use srbn_serde;
 // Convenience re-exports of the most-used SDK types.
 pub use admissibility::{
     check_full_admissibility, promote, AdmissibilityProfile, BarrierEvaluator, BarrierWitness,
-    ClauseId, ContractEvaluator, ContractWitness, FullAdmissibilityWitness,
+    CandidateStateWitness, CandidateTransition, ClauseId, ContractEvaluator, ContractWitness,
+    FullAdmissibilityWitness,
 };
 pub use benchmark::{BenchmarkCase, BenchmarkOutcome, BenchmarkReport, BenchmarkResult};
 pub use capability::{
     check_admissibility, ActorId, AdmissibilityDecision, AdmissibilityWitness, ApprovalPolicy,
-    Capability, DenyReason, EffectKind, EffectProposal, KernelState, RecoveryClass, RiskBudget,
-    RiskClass, StateWitness,
+    Capability, CapabilityRole, DenyReason, EffectKind, EffectProposal, GrantPolicy, KernelState,
+    RecoveryClass, RiskBudget, RiskClass, SignedGrantPolicy, StateWitness,
 };
 pub use certificate::{BudgetRef, ResidualCertificate};
 pub use checkpoint::{ContextCheckpoint, ControlFrame};
@@ -148,6 +149,6 @@ pub use toolset::{
     ResourceSelector, StaticCatalog, ToolCatalog, ToolEntry, ToolOrigin,
 };
 pub use workgraph::{
-    EdgeKind, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge, WorkGraphRevision,
-    WorkNode, WorkNodeState,
+    EdgeKind, GraphEdit, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge,
+    WorkGraphRevision, WorkNode, WorkNodeState,
 };

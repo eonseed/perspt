@@ -16,6 +16,8 @@
 //! `HumanApproved` activate only the named authority and deterministic
 //! contract claims and never Theorems 3–5.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::capability::{
@@ -23,6 +25,49 @@ use crate::capability::{
     KernelState,
 };
 use crate::error::{Result, SdkError};
+
+/// A content-addressed, provider-neutral witness of one candidate state.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CandidateStateWitness {
+    pub state_root: String,
+    pub graph_revision: String,
+    pub node_id: String,
+    pub node_generation: u32,
+    pub canonical_scope: Vec<String>,
+    /// Versioned operational barrier channel values measured in this state.
+    pub barrier_channels: BTreeMap<String, f64>,
+}
+
+/// A fully materialized candidate transition `Adm(x, p, x')`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CandidateTransition {
+    pub proposal: EffectProposal,
+    pub before: CandidateStateWitness,
+    pub after: CandidateStateWitness,
+}
+
+impl CandidateTransition {
+    pub fn new(
+        proposal: EffectProposal,
+        before: CandidateStateWitness,
+        after: CandidateStateWitness,
+    ) -> Self {
+        Self {
+            proposal,
+            before,
+            after,
+        }
+    }
+
+    /// Test and read-only helper for transitions without a workspace driver.
+    pub fn unmeasured(proposal: EffectProposal) -> Self {
+        Self::new(
+            proposal,
+            CandidateStateWitness::default(),
+            CandidateStateWitness::default(),
+        )
+    }
+}
 
 /// The five clauses of Definition 3.2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,7 +108,16 @@ pub struct BarrierWitness {
 impl BarrierWitness {
     /// Whether the numeric barrier clause holds.
     pub fn clause_holds(&self, c_c_max: f64) -> bool {
-        self.h_before < self.unsafe_threshold
+        self.h_before.is_finite()
+            && self.expected_h_after_upper.is_finite()
+            && self.certified_increment.is_finite()
+            && self.unsafe_threshold.is_finite()
+            && c_c_max.is_finite()
+            && self.h_before >= 0.0
+            && self.expected_h_after_upper >= 0.0
+            && self.unsafe_threshold > 0.0
+            && c_c_max >= 0.0
+            && self.h_before < self.unsafe_threshold
             && self.expected_h_after_upper < self.unsafe_threshold
             && self.expected_h_after_upper <= self.h_before + self.certified_increment
             && self.certified_increment >= 0.0
@@ -73,12 +127,12 @@ impl BarrierWitness {
 
 /// Evaluates the contract clause for a candidate transition.
 pub trait ContractEvaluator: Send + Sync {
-    fn evaluate(&self, proposal: &EffectProposal) -> ContractWitness;
+    fn evaluate(&self, transition: &CandidateTransition) -> ContractWitness;
 }
 
 /// Evaluates the barrier clause for a candidate transition.
 pub trait BarrierEvaluator: Send + Sync {
-    fn evaluate(&self, proposal: &EffectProposal) -> Result<BarrierWitness>;
+    fn evaluate(&self, transition: &CandidateTransition) -> Result<BarrierWitness>;
 }
 
 /// Which claims the completed witness activates.
@@ -115,13 +169,14 @@ impl FullAdmissibilityWitness {
 /// increment. An absent evaluator leaves its clause **absent** — recorded as
 /// missing in the profile, never defaulted to true (Gate K).
 pub fn check_full_admissibility(
-    proposal: &EffectProposal,
+    transition: &CandidateTransition,
     capabilities: &[Capability],
     state: &KernelState,
     contract: Option<&dyn ContractEvaluator>,
     barrier: Option<&dyn BarrierEvaluator>,
     c_c_max: f64,
 ) -> Result<FullAdmissibilityWitness> {
+    let proposal = &transition.proposal;
     let mut base = check_admissibility(proposal, capabilities, state);
     // The legacy checker hardcodes these true; they are decided here.
     base.contract_ok = false;
@@ -131,7 +186,7 @@ pub fn check_full_admissibility(
 
     let contract_witness = match contract {
         Some(evaluator) => {
-            let witness = evaluator.evaluate(proposal);
+            let witness = evaluator.evaluate(transition);
             base.contract_ok = witness.ok;
             if !witness.ok {
                 base.decision = AdmissibilityDecision::Deny {
@@ -148,9 +203,29 @@ pub fn check_full_admissibility(
 
     let barrier_witness = match barrier {
         Some(evaluator) => {
-            let witness = evaluator.evaluate(proposal)?;
+            let witness = evaluator.evaluate(transition)?;
             base.barrier_increment_ok = witness.clause_holds(c_c_max);
             if !base.barrier_increment_ok {
+                base.decision = AdmissibilityDecision::Deny {
+                    reason: crate::capability::DenyReason::RiskBudgetExhausted,
+                };
+            }
+
+            // Definition 3.2 has one c_c: the barrier's certified increment is
+            // also the amount tested against the cumulative risk budget. The
+            // legacy scope checker sees proposal.risk_cost (always zero on the
+            // governed path), so its risk verdict must be replaced here.
+            base.risk_budget_ok = base
+                .capability_id
+                .as_ref()
+                .and_then(|id| capabilities.iter().find(|cap| &cap.capability_id == id))
+                .map(|cap| {
+                    cap.risk_budget
+                        .as_ref()
+                        .is_none_or(|budget| budget.admits(witness.certified_increment))
+                })
+                .unwrap_or(false);
+            if !base.risk_budget_ok {
                 base.decision = AdmissibilityDecision::Deny {
                     reason: crate::capability::DenyReason::RiskBudgetExhausted,
                 };
@@ -159,6 +234,10 @@ pub fn check_full_admissibility(
         }
         None => {
             missing.push(ClauseId::BarrierIncrement);
+            // Without c_c the risk clause cannot be evaluated. Recording it as
+            // true would create a certificate with an unbound budget debit.
+            missing.push(ClauseId::RiskBudget);
+            base.risk_budget_ok = false;
             None
         }
     };
@@ -193,6 +272,11 @@ pub fn promote(capability: &mut Capability, witness: &FullAdmissibilityWitness) 
     if !witness.allows() {
         return Err(SdkError::Domain(
             "promotion requires an Allow decision".into(),
+        ));
+    }
+    if witness.profile != AdmissibilityProfile::SrbnCertified {
+        return Err(SdkError::Domain(
+            "certified promotion requires all five admissibility clauses".into(),
         ));
     }
     // The debit is the barrier's certified increment — Definition 3.2 has one
@@ -233,7 +317,7 @@ mod tests {
 
     struct PassContract;
     impl ContractEvaluator for PassContract {
-        fn evaluate(&self, _p: &EffectProposal) -> ContractWitness {
+        fn evaluate(&self, _transition: &CandidateTransition) -> ContractWitness {
             ContractWitness {
                 ok: true,
                 policy_version: "1".into(),
@@ -247,7 +331,7 @@ mod tests {
         c_t: f64,
     }
     impl BarrierEvaluator for FixedBarrier {
-        fn evaluate(&self, _p: &EffectProposal) -> Result<BarrierWitness> {
+        fn evaluate(&self, _transition: &CandidateTransition) -> Result<BarrierWitness> {
             Ok(BarrierWitness {
                 h_before: 0.0,
                 expected_h_after_upper: self.c_t,
@@ -271,11 +355,15 @@ mod tests {
         (proposal, vec![capability], KernelState::new())
     }
 
+    fn transition(proposal: &EffectProposal) -> CandidateTransition {
+        CandidateTransition::unmeasured(proposal.clone())
+    }
+
     #[test]
     fn all_five_clauses_yield_srbn_certified() {
         let (proposal, caps, state) = setup();
         let witness = check_full_admissibility(
-            &proposal,
+            &transition(&proposal),
             &caps,
             &state,
             Some(&PassContract),
@@ -290,9 +378,15 @@ mod tests {
     #[test]
     fn an_absent_barrier_evaluator_is_recorded_absent_never_true() {
         let (proposal, caps, state) = setup();
-        let witness =
-            check_full_admissibility(&proposal, &caps, &state, Some(&PassContract), None, 0.2)
-                .unwrap();
+        let witness = check_full_admissibility(
+            &transition(&proposal),
+            &caps,
+            &state,
+            Some(&PassContract),
+            None,
+            0.2,
+        )
+        .unwrap();
         assert!(!witness.base.barrier_increment_ok, "absent is not true");
         assert!(matches!(
             &witness.profile,
@@ -305,7 +399,7 @@ mod tests {
     fn an_increment_above_the_ceiling_denies() {
         let (proposal, caps, state) = setup();
         let witness = check_full_admissibility(
-            &proposal,
+            &transition(&proposal),
             &caps,
             &state,
             Some(&PassContract),
@@ -320,7 +414,7 @@ mod tests {
     fn promotion_debits_exactly_the_certified_increment() {
         let (proposal, mut caps, state) = setup();
         let witness = check_full_admissibility(
-            &proposal,
+            &transition(&proposal),
             &caps,
             &state,
             Some(&PassContract),
@@ -342,7 +436,7 @@ mod tests {
         let (proposal, mut caps, state) = setup();
         for _ in 0..2 {
             let witness = check_full_admissibility(
-                &proposal,
+                &transition(&proposal),
                 &caps,
                 &state,
                 Some(&PassContract),
@@ -354,7 +448,7 @@ mod tests {
         }
         // Budget 0.5, two promotions of 0.2: a third would need 0.2 more.
         let witness = check_full_admissibility(
-            &proposal,
+            &transition(&proposal),
             &caps,
             &state,
             Some(&PassContract),
@@ -362,6 +456,29 @@ mod tests {
             0.3,
         )
         .unwrap();
+        assert!(!witness.base.risk_budget_ok);
+        assert!(!witness.allows());
+        assert_ne!(witness.profile, AdmissibilityProfile::SrbnCertified);
         assert!(promote(&mut caps[0], &witness).is_err(), "0.4 + 0.2 > 0.5");
+    }
+
+    #[test]
+    fn missing_barrier_cannot_be_promoted_as_a_zero_cost_fallback() {
+        let (proposal, mut caps, state) = setup();
+        let witness = check_full_admissibility(
+            &transition(&proposal),
+            &caps,
+            &state,
+            Some(&PassContract),
+            None,
+            0.2,
+        )
+        .unwrap();
+        assert!(
+            witness.allows(),
+            "scope policy alone still permits the proposal"
+        );
+        assert!(!witness.base.risk_budget_ok);
+        assert!(promote(&mut caps[0], &witness).is_err());
     }
 }

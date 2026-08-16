@@ -288,18 +288,49 @@ impl Ledger {
 /// events (R3). Replay reads recorded observations rather than re-running
 /// nondeterministic sources.
 pub fn replay_accepted_trajectory(ledger: &Ledger) -> Vec<(String, u32, f64)> {
-    ledger
-        .records()
-        .iter()
-        .filter_map(|r| match &r.event {
+    let mut accepted = Vec::new();
+    let mut latest = HashMap::<(String, u32), f64>::new();
+    for record in ledger.records() {
+        match &record.event {
             LedgerEvent::CandidateAccepted {
                 node_id,
                 generation,
                 energy,
-            } => Some((node_id.clone(), *generation, *energy)),
-            _ => None,
-        })
-        .collect()
+            } => accepted.push((node_id.clone(), *generation, *energy)),
+            LedgerEvent::Custom { kind, payload } if kind == "tool_loop" => {
+                let event = payload.get("event").and_then(|value| value.as_str());
+                let node = payload.get("node_id").and_then(|value| value.as_str());
+                let generation = payload
+                    .get("generation")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|value| u32::try_from(value).ok());
+                if let (Some("candidate_measured"), Some(node), Some(generation), Some(energy)) = (
+                    event,
+                    node,
+                    generation,
+                    payload.get("energy").and_then(|value| value.as_f64()),
+                ) {
+                    latest.insert((node.to_string(), generation), energy);
+                }
+                if let (Some("gate_decision_recorded"), Some(node), Some(generation)) =
+                    (event, node, generation)
+                {
+                    let accepted_decision = payload
+                        .get("decision")
+                        .and_then(|decision| decision.get("kind"))
+                        .and_then(|value| value.as_str())
+                        .is_some_and(|kind| matches!(kind, "hard_pass" | "accepted_by_descent"));
+                    if accepted_decision {
+                        if let Some(energy) = latest.get(&(node.to_string(), generation)) {
+                            accepted.push((node.to_string(), generation, *energy));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    accepted
 }
 
 /// R1 durable single-assignment outcomes. Every proposal/commit outcome is

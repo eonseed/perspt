@@ -81,6 +81,55 @@ impl Conversation {
         &self.messages
     }
 
+    /// Approximate serialized context size without relying on a provider
+    /// tokenizer. Runtime thresholds apply a conservative chars-per-token
+    /// conversion before calling this method.
+    pub fn estimated_chars(&self) -> usize {
+        self.messages
+            .iter()
+            .map(|message| serde_json::to_string(message).map_or(0, |value| value.len()))
+            .sum()
+    }
+
+    /// Replace closed history with a deterministic control projection while
+    /// preserving every unresolved provider call exactly. Full closed history
+    /// remains in the event ledger; this only changes the next model request.
+    pub fn compact_with_control(&mut self, control: impl Into<String>) {
+        let unresolved = self.unresolved_call_ids();
+        let mut projected = Vec::new();
+        if let Some(system) = self
+            .messages
+            .iter()
+            .find(|message| matches!(message, Message::System { .. }))
+        {
+            projected.push(system.clone());
+        }
+        projected.push(Message::System {
+            content: control.into(),
+        });
+        if let Some(user) = self
+            .messages
+            .iter()
+            .rev()
+            .find(|message| matches!(message, Message::User { .. }))
+        {
+            projected.push(user.clone());
+        }
+        for message in &self.messages {
+            if let Message::AssistantToolCalls { calls } = message {
+                let calls: Vec<_> = calls
+                    .iter()
+                    .filter(|call| unresolved.contains(&call.call_id))
+                    .cloned()
+                    .collect();
+                if !calls.is_empty() {
+                    projected.push(Message::AssistantToolCalls { calls });
+                }
+            }
+        }
+        self.messages = projected;
+    }
+
     /// Tool calls that have no recorded response yet. A checkpoint must
     /// preserve these exactly (system 14's `ControlFrame`).
     pub fn unresolved_call_ids(&self) -> Vec<String> {
@@ -139,5 +188,21 @@ mod tests {
         let json = serde_json::to_string(&conversation).unwrap();
         let back: Conversation = serde_json::from_str(&json).unwrap();
         assert_eq!(back, conversation);
+    }
+
+    #[test]
+    fn compaction_drops_closed_history_but_preserves_open_calls() {
+        let mut conversation = Conversation::with_system("harness");
+        conversation.push_user("large goal");
+        conversation.push_tool_calls(vec![call("closed"), call("open")]);
+        conversation.push_tool_response("closed", "contents");
+        conversation.compact_with_control("CONTROL");
+
+        assert_eq!(conversation.unresolved_call_ids(), ["open"]);
+        assert_eq!(conversation.len(), 4);
+        assert!(matches!(
+            &conversation.messages()[3],
+            Message::AssistantToolCalls { calls } if calls == &vec![call("open")]
+        ));
     }
 }

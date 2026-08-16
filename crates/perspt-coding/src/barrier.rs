@@ -10,7 +10,9 @@
 //! prohibited: read-only effects get `c_t = 0` by *measurement* (no channel
 //! moves), not by declaration.
 
-use perspt_sdk::{BarrierEvaluator, BarrierWitness, EffectKind, EffectProposal, SdkError};
+use perspt_sdk::{
+    BarrierEvaluator, BarrierWitness, CandidateTransition, EffectKind, EffectProposal, SdkError,
+};
 
 /// Channel verdict: the channel's value for a candidate transition.
 #[derive(Debug, Clone, PartialEq)]
@@ -103,12 +105,25 @@ impl OperationalSafetyBarrier {
 }
 
 impl BarrierEvaluator for OperationalSafetyBarrier {
-    fn evaluate(&self, proposal: &EffectProposal) -> Result<BarrierWitness, SdkError> {
+    fn evaluate(&self, transition: &CandidateTransition) -> Result<BarrierWitness, SdkError> {
+        let proposal = &transition.proposal;
         let readings = self.readings(proposal);
-        // The committed pre-state is below the boundary by invariant: every
-        // prior promotion required h(x') < 1.
-        let h_before = 0.0;
-        let h_after = readings.iter().map(|r| r.h_after).fold(0.0, f64::max);
+        let h_before = transition
+            .before
+            .barrier_channels
+            .values()
+            .copied()
+            .fold(0.0, f64::max);
+        let measured_after = transition
+            .after
+            .barrier_channels
+            .values()
+            .copied()
+            .fold(0.0, f64::max);
+        let h_after = readings
+            .iter()
+            .map(|r| r.h_after)
+            .fold(measured_after, f64::max);
         let c_t = (h_after - h_before).max(0.0);
         Ok(BarrierWitness {
             h_before,
@@ -118,6 +133,10 @@ impl BarrierEvaluator for OperationalSafetyBarrier {
             evidence_refs: readings
                 .iter()
                 .map(|r| format!("channel:{}@1={}", r.name, r.h_after))
+                .chain([
+                    format!("state-before:{}", transition.before.state_root),
+                    format!("state-after:{}", transition.after.state_root),
+                ])
                 .collect(),
         })
     }
@@ -136,11 +155,15 @@ mod tests {
         p
     }
 
+    fn transition(effect: EffectKind, path: Option<&str>) -> CandidateTransition {
+        CandidateTransition::unmeasured(proposal(effect, path))
+    }
+
     #[test]
     fn a_workspace_edit_has_zero_increment_by_measurement() {
         let barrier = OperationalSafetyBarrier::default();
         let witness = barrier
-            .evaluate(&proposal(EffectKind::ApplyPatch, Some("src/lib.rs")))
+            .evaluate(&transition(EffectKind::ApplyPatch, Some("src/lib.rs")))
             .unwrap();
         assert_eq!(witness.certified_increment, 0.0);
         assert!(witness.clause_holds(0.0));
@@ -150,7 +173,7 @@ mod tests {
     fn protected_path_modification_crosses_the_boundary() {
         let barrier = OperationalSafetyBarrier::default();
         let witness = barrier
-            .evaluate(&proposal(EffectKind::ApplyPatch, Some(".git/config")))
+            .evaluate(&transition(EffectKind::ApplyPatch, Some(".git/config")))
             .unwrap();
         // h(x') = 1 is at the unsafe boundary: the clause fails whatever the
         // budget, because promotion requires h(x') < 1.
@@ -161,7 +184,7 @@ mod tests {
     fn reading_a_protected_path_is_not_a_barrier_event() {
         let barrier = OperationalSafetyBarrier::default();
         let witness = barrier
-            .evaluate(&proposal(EffectKind::ReadFile, Some(".git/config")))
+            .evaluate(&transition(EffectKind::ReadFile, Some(".git/config")))
             .unwrap();
         assert_eq!(witness.certified_increment, 0.0);
     }
@@ -170,7 +193,10 @@ mod tests {
     fn parent_traversal_is_a_sandbox_escape() {
         let barrier = OperationalSafetyBarrier::default();
         let witness = barrier
-            .evaluate(&proposal(EffectKind::WriteArtifact, Some("../outside.rs")))
+            .evaluate(&transition(
+                EffectKind::WriteArtifact,
+                Some("../outside.rs"),
+            ))
             .unwrap();
         assert!(!witness.clause_holds(1.0));
     }
@@ -179,7 +205,7 @@ mod tests {
     fn secret_material_is_a_channel_violation() {
         let barrier = OperationalSafetyBarrier::default();
         let witness = barrier
-            .evaluate(&proposal(EffectKind::WriteArtifact, Some(".env")))
+            .evaluate(&transition(EffectKind::WriteArtifact, Some(".env")))
             .unwrap();
         assert!(!witness.clause_holds(1.0));
     }
@@ -189,7 +215,9 @@ mod tests {
         let barrier = OperationalSafetyBarrier::default();
         let mut p = proposal(EffectKind::NetworkFetch, None);
         p = p.with_network_target("https://example.com/payload");
-        let witness = barrier.evaluate(&p).unwrap();
+        let witness = barrier
+            .evaluate(&CandidateTransition::unmeasured(p))
+            .unwrap();
         assert!(!witness.clause_holds(1.0));
     }
 }

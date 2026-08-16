@@ -250,7 +250,7 @@ fn conformal_bound_asserted_when_calibrated_not_when_stale() {
     // Stale window does not hard-halt low-risk work.
     assert_eq!(
         conformal_decide(&stale, 0.99, RiskClass::Low),
-        AcceptOutcome::UncertifiedAccept
+        AcceptOutcome::RouteToApproval
     );
     assert_eq!(
         conformal_decide(&stale, 0.99, RiskClass::High),

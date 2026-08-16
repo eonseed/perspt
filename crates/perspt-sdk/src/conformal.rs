@@ -13,9 +13,10 @@
 //! where `R_n(theta)` is the empirical accepted-unsafe rate on the calibration
 //! set. A drift monitor compares the live score distribution to the calibration
 //! distribution; on divergence the calibration is flagged stale. A stale flag
-//! does **not** hard-halt: the kernel applies a conservative back-off and routes
-//! high-risk effects to approval, and — crucially — does **not** assert the
-//! conformal bound during the stale window, because exchangeability is broken.
+//! does **not** assert the conformal bound during the stale window, because
+//! exchangeability is broken. Scores below the conservative back-off reject;
+//! scores above it route mutations to approval. Read-only or independently
+//! deterministic-safe effects are handled before this risk-calibration gate.
 
 use serde::{Deserialize, Serialize};
 
@@ -125,8 +126,14 @@ pub enum CalibrationState {
 impl CalibrationState {
     /// Build a calibrated state from samples.
     pub fn calibrate(samples: &[CalibrationSample], rho: f64) -> Result<Self> {
-        let theta_hat = conformal_threshold(samples, rho)?;
-        Ok(CalibrationState::Calibrated { theta_hat, rho })
+        match conformal_threshold_checked(samples, rho)? {
+            ThresholdOutcome::Feasible { theta_hat } => {
+                Ok(CalibrationState::Calibrated { theta_hat, rho })
+            }
+            ThresholdOutcome::InsufficientCalibration { have, need } => Err(SdkError::Domain(
+                format!("insufficient calibration: have {have} labeled samples, need {need}"),
+            )),
+        }
     }
 
     /// Transition to a stale state with a conservative back-off (the threshold
@@ -164,10 +171,7 @@ impl CalibrationState {
 pub enum AcceptOutcome {
     /// Accepted under the asserted conformal bound (certified).
     CertifiedAccept,
-    /// Accepted during a stale window under back-off (uncertified — the bound is
-    /// not asserted; acceptance rests on the measured gate + risk-class policy).
-    UncertifiedAccept,
-    /// Routed to the risk-class approval policy (high-risk during stale window).
+    /// Routed to approval because the calibration bound is unavailable.
     RouteToApproval,
     /// Rejected: score below the active threshold.
     Reject,
@@ -176,10 +180,11 @@ pub enum AcceptOutcome {
 /// Decide autonomous acceptance for a validator score under the current
 /// calibration state and the proposed effect's risk class.
 ///
-/// During a stale window, low-risk effects continue autonomously under back-off
-/// (uncertified), while high-risk effects route to approval; the conformal bound
-/// is never asserted in that window (PSP-8 System 7).
-pub fn decide(state: &CalibrationState, score: f64, risk: RiskClass) -> AcceptOutcome {
+/// During a stale window the backed-off threshold remains useful for routing,
+/// but no score alone authorizes a mutation: passing proposals route to
+/// approval and failing proposals reject. The conformal bound is never asserted
+/// in that window (PSP-9 Gate Q).
+pub fn decide(state: &CalibrationState, score: f64, _risk: RiskClass) -> AcceptOutcome {
     let threshold = state.active_threshold();
     match state {
         CalibrationState::Calibrated { .. } => {
@@ -190,12 +195,11 @@ pub fn decide(state: &CalibrationState, score: f64, risk: RiskClass) -> AcceptOu
             }
         }
         CalibrationState::Stale { .. } => {
-            // High-risk effects always route to approval during the stale window.
-            if matches!(risk, RiskClass::High | RiskClass::Critical) {
-                return AcceptOutcome::RouteToApproval;
-            }
             if score > threshold {
-                AcceptOutcome::UncertifiedAccept
+                // Exchangeability is broken, so no mutation may commit from
+                // this score alone. Read-only and separately certified
+                // deterministic effects are admitted before this risk gate.
+                AcceptOutcome::RouteToApproval
             } else {
                 AcceptOutcome::Reject
             }
@@ -362,20 +366,26 @@ mod tests {
     }
 
     #[test]
-    fn stale_window_backs_off_and_does_not_hard_halt() {
+    fn stale_window_backs_off_to_approval_instead_of_claiming_a_bound() {
         let state = CalibrationState::calibrate(&samples(), 0.3)
             .unwrap()
             .mark_stale();
-        // Low-risk effect with a high score still commits, but uncertified.
+        // A stale score can still route a proposal, but cannot commit it.
         assert_eq!(
             decide(&state, 0.99, RiskClass::Low),
-            AcceptOutcome::UncertifiedAccept
+            AcceptOutcome::RouteToApproval
         );
         // High-risk effect routes to approval rather than halting.
         assert_eq!(
             decide(&state, 0.99, RiskClass::High),
             AcceptOutcome::RouteToApproval
         );
+    }
+
+    #[test]
+    fn calibrated_state_cannot_bypass_the_finite_sample_floor() {
+        let too_small = &samples()[..2];
+        assert!(CalibrationState::calibrate(too_small, 0.2).is_err());
     }
 
     #[test]

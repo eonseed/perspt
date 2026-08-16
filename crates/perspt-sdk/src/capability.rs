@@ -11,6 +11,7 @@
 //! preorder `c' ⪯ c`). Payload data, model text, or generated code cannot mint
 //! authority (PSP-8 R4).
 
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 use crate::command::{classify_tier, CommandInvocation, CommandTier};
@@ -30,6 +31,8 @@ impl ActorId {
 #[serde(rename_all = "snake_case")]
 pub enum EffectKind {
     ReadFile,
+    ToolSearch,
+    ToolProgram,
     Search,
     List,
     LspQuery,
@@ -59,6 +62,8 @@ impl EffectKind {
         matches!(
             self,
             EffectKind::ReadFile
+                | EffectKind::ToolSearch
+                | EffectKind::ToolProgram
                 | EffectKind::Search
                 | EffectKind::List
                 | EffectKind::LspQuery
@@ -166,6 +171,96 @@ pub enum ApprovalPolicy {
     Deny,
 }
 
+/// Role-scoped authority template. Role is part of attenuation and cannot be
+/// changed by proposal payload data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityRole {
+    Session,
+    Explorer,
+    Worker,
+    Reviewer,
+}
+
+/// Durable authorization intent. A resume re-mints a fresh live capability
+/// from this policy and current workspace facts; the capability itself is
+/// deliberately not serializable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GrantPolicy {
+    pub policy_id: String,
+    pub workspace_root: String,
+    pub effect_ceiling: Vec<EffectKind>,
+    pub path_ceiling: Vec<PathPattern>,
+    pub command_ceiling: Vec<CommandPattern>,
+    pub network_ceiling: Vec<NetworkPattern>,
+    pub approval_ceiling: ApprovalPolicy,
+    pub authority_epoch: u64,
+    pub persistent: bool,
+    /// Content binding recorded in the session ledger. Persistent policies
+    /// require a separate cryptographic signature before cross-session use.
+    pub integrity_binding: String,
+}
+
+/// Signed durable grant intent. Verification authenticates policy bytes only;
+/// resume must still intersect the policy with the current authority epoch,
+/// workspace facts, and configured ceilings before minting a new capability.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SignedGrantPolicy {
+    pub policy: GrantPolicy,
+    pub public_key: String,
+    pub signature: String,
+}
+
+impl SignedGrantPolicy {
+    pub fn sign(policy: GrantPolicy, secret_key: &[u8; 32]) -> Result<Self, String> {
+        let signing_key = SigningKey::from_bytes(secret_key);
+        let message = serde_json::to_vec(&policy).map_err(|error| error.to_string())?;
+        let signature = signing_key.sign(&message);
+        Ok(Self {
+            policy,
+            public_key: hex_encode(signing_key.verifying_key().as_bytes()),
+            signature: hex_encode(&signature.to_bytes()),
+        })
+    }
+
+    pub fn verify(&self) -> Result<(), String> {
+        let public_key: [u8; 32] = hex_decode(&self.public_key)?
+            .try_into()
+            .map_err(|_| "grant public key must be 32 bytes".to_string())?;
+        let signature: [u8; 64] = hex_decode(&self.signature)?
+            .try_into()
+            .map_err(|_| "grant signature must be 64 bytes".to_string())?;
+        let verifying_key =
+            VerifyingKey::from_bytes(&public_key).map_err(|error| error.to_string())?;
+        let message = serde_json::to_vec(&self.policy).map_err(|error| error.to_string())?;
+        verifying_key
+            .verify(&message, &Signature::from_bytes(&signature))
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
+fn hex_decode(value: &str) -> Result<Vec<u8>, String> {
+    if value.len() & 1 != 0 {
+        return Err("hex value has odd length".into());
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&value[index..index + 2], 16)
+                .map_err(|error| format!("invalid hex value: {error}"))
+        })
+        .collect()
+}
+
 impl ApprovalPolicy {
     /// Ordering for the attenuation preorder: a child's policy must be at
     /// least as strict as its parent's (PSP-9 system 12).
@@ -179,7 +274,7 @@ impl ApprovalPolicy {
 }
 
 /// A capability: an explicit, attenuable grant of authority (PSP-8 System 7).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Capability {
     pub capability_id: String,
     pub holder: ActorId,
@@ -195,6 +290,12 @@ pub struct Capability {
     pub may_delegate: bool,
     pub risk_budget: Option<RiskBudget>,
     pub approval_policy: ApprovalPolicy,
+    pub session_id: String,
+    pub authority_epoch: u64,
+    pub graph_revision: String,
+    pub node_generation: u32,
+    pub role: CapabilityRole,
+    pub parent_capability_id: Option<String>,
 }
 
 impl Capability {
@@ -211,6 +312,12 @@ impl Capability {
             may_delegate: false,
             risk_budget: None,
             approval_policy: ApprovalPolicy::Auto,
+            session_id: String::new(),
+            authority_epoch: 0,
+            graph_revision: String::new(),
+            node_generation: 0,
+            role: CapabilityRole::Session,
+            parent_capability_id: None,
         }
     }
 
@@ -306,6 +413,19 @@ impl Capability {
         if self.approval_policy.strictness() < source.approval_policy.strictness() {
             return false;
         }
+        if self.session_id != source.session_id
+            || self.authority_epoch != source.authority_epoch
+            || self.graph_revision != source.graph_revision
+            || self.node_generation != source.node_generation
+        {
+            return false;
+        }
+        if self.role == CapabilityRole::Session && source.role != CapabilityRole::Session {
+            return false;
+        }
+        if self.parent_capability_id.as_deref() != Some(source.capability_id.as_str()) {
+            return false;
+        }
         true
     }
 
@@ -342,6 +462,9 @@ pub struct EffectProposal {
     pub effect: EffectKind,
     /// The path the effect touches, if any.
     pub path: Option<String>,
+    /// Additional paths touched by a multi-path effect such as a move.
+    #[serde(default)]
+    pub additional_paths: Vec<String>,
     /// The command, if this is an execution effect.
     pub command: Option<CommandInvocation>,
     /// The network target, if any.
@@ -362,6 +485,7 @@ impl EffectProposal {
             generation: 0,
             effect,
             path: None,
+            additional_paths: Vec::new(),
             command: None,
             network_target: None,
             risk: RiskClass::Low,
@@ -373,6 +497,11 @@ impl EffectProposal {
 
     pub fn with_path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
+        self
+    }
+
+    pub fn with_additional_paths(mut self, paths: Vec<String>) -> Self {
+        self.additional_paths = paths;
         self
     }
 
@@ -533,6 +662,39 @@ pub fn check_admissibility(
         }
     };
 
+    if !cap.graph_revision.is_empty()
+        && state.witnesses.get("__graph_revision") != Some(&cap.graph_revision)
+    {
+        return deny(
+            proposal,
+            Some(cap),
+            DenyReason::StateWitnessMismatch,
+            RecoveryClass::NeedsCapability,
+        );
+    }
+    if !cap.session_id.is_empty()
+        && state
+            .witnesses
+            .get("__authority_epoch")
+            .and_then(|value| value.parse::<u64>().ok())
+            != Some(cap.authority_epoch)
+    {
+        return deny(
+            proposal,
+            Some(cap),
+            DenyReason::StateWitnessMismatch,
+            RecoveryClass::NeedsCapability,
+        );
+    }
+    if proposal.generation != cap.node_generation {
+        return deny(
+            proposal,
+            Some(cap),
+            DenyReason::StateWitnessMismatch,
+            RecoveryClass::Retryable,
+        );
+    }
+
     // Expiry.
     if let Some(expiry) = cap.expires_at {
         // A timestamp of 0 in preconditions is treated as "now unknown"; callers
@@ -565,7 +727,7 @@ pub fn check_admissibility(
     }
 
     // Effect scope: path.
-    if let Some(path) = &proposal.path {
+    for path in proposal.path.iter().chain(proposal.additional_paths.iter()) {
         if !cap.path_scope.is_empty() && !cap.path_scope.iter().any(|p| p.matches(path)) {
             return deny(
                 proposal,
@@ -839,11 +1001,13 @@ mod tests {
         let mut child = Capability::new(ActorId::new("sub"), vec![EffectKind::ReadFile])
             .with_paths(vec!["src/*"]);
         child.max_calls = Some(3);
+        child.parent_capability_id = Some(parent.capability_id.clone());
         assert!(child.attenuates(&parent));
         assert!(parent.delegate(child).is_some());
 
         // Invalid child: tries to add an effect the parent lacks.
-        let bad = Capability::new(ActorId::new("sub"), vec![EffectKind::UpdatePolicy]);
+        let mut bad = Capability::new(ActorId::new("sub"), vec![EffectKind::UpdatePolicy]);
+        bad.parent_capability_id = Some(parent.capability_id.clone());
         assert!(!bad.attenuates(&parent));
         assert!(parent.delegate(bad).is_none());
     }
@@ -867,5 +1031,25 @@ mod tests {
                 reason: DenyReason::NoCapability
             }
         ));
+    }
+
+    #[test]
+    fn persistent_grant_signature_detects_policy_tampering() {
+        let policy = GrantPolicy {
+            policy_id: "p1".into(),
+            workspace_root: "/workspace".into(),
+            effect_ceiling: vec![EffectKind::ReadFile],
+            path_ceiling: vec![PathPattern("src/*".into())],
+            command_ceiling: vec![],
+            network_ceiling: vec![],
+            approval_ceiling: ApprovalPolicy::Ask,
+            authority_epoch: 3,
+            persistent: true,
+            integrity_binding: "ledger:abc".into(),
+        };
+        let mut signed = SignedGrantPolicy::sign(policy, &[7u8; 32]).unwrap();
+        signed.verify().unwrap();
+        signed.policy.authority_epoch += 1;
+        assert!(signed.verify().is_err());
     }
 }
