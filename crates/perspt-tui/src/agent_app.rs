@@ -931,3 +931,76 @@ pub async fn run_agent_tui_with_orchestrator(
     }
     Ok(())
 }
+
+/// Run the agent TUI against the authoritative PSP-9 runtime.
+pub async fn run_agent_tui_with_runtime(
+    runtime: perspt_agent::Psp9AgentRuntime,
+    task: String,
+) -> anyhow::Result<perspt_agent::Psp9RunSummary> {
+    use crate::app_event::AppEvent;
+    use perspt_core::events::channel;
+
+    let (event_sender, mut event_receiver) = channel::event_channel();
+    let (action_sender, action_receiver) = channel::action_channel();
+    let runtime = runtime.connect_tui(event_sender, action_receiver);
+    let mut terminal = ratatui::init();
+    let mut app = AgentApp::new();
+    app.set_action_sender(action_sender);
+    let runtime_handle = tokio::spawn(async move { runtime.run(task).await });
+
+    loop {
+        terminal.draw(|frame| app.render(frame))?;
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                if crossterm::event::poll(std::time::Duration::from_millis(0))? {
+                    if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                        if key.kind == crossterm::event::KeyEventKind::Press {
+                            if app.review_modal.visible {
+                                match key.code {
+                                    KeyCode::Left => app.review_modal.select_left(),
+                                    KeyCode::Right => app.review_modal.select_right(),
+                                    KeyCode::Char(c) => {
+                                        if let Some(decision) = app.review_modal.handle_key(c) {
+                                            app.handle_review_decision(decision);
+                                            app.review_modal.hide();
+                                        }
+                                    }
+                                    KeyCode::Enter => {
+                                        let decision = app.review_modal.get_decision();
+                                        app.handle_review_decision(decision);
+                                        app.review_modal.hide();
+                                    }
+                                    KeyCode::Esc => app.review_modal.hide(),
+                                    _ => {}
+                                }
+                            } else { match key.code {
+                                KeyCode::Char('q') => app.should_quit = true,
+                                KeyCode::Tab => app.next_tab(),
+                                KeyCode::Char('1') => app.active_tab = ActiveTab::Dashboard,
+                                KeyCode::Char('2') => app.active_tab = ActiveTab::Tasks,
+                                KeyCode::Char('3') => app.active_tab = ActiveTab::Diff,
+                                KeyCode::Up | KeyCode::Char('k') => app.handle_up(),
+                                KeyCode::Down | KeyCode::Char('j') => app.handle_down(),
+                                _ => {}
+                            }}
+                        }
+                    }
+                }
+            }
+            Some(event) = event_receiver.recv() => {
+                app.handle_app_event(AppEvent::CoreEvent(event));
+            }
+        }
+
+        if app.should_quit || runtime_handle.is_finished() {
+            break;
+        }
+    }
+
+    ratatui::restore();
+    if app.should_quit && !runtime_handle.is_finished() {
+        runtime_handle.abort();
+        anyhow::bail!("agent run aborted from TUI");
+    }
+    runtime_handle.await?
+}
