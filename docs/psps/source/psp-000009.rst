@@ -3472,68 +3472,101 @@ Implementation Status
      - Notes
    * - P — Kernel 0.3.0 upgrade
      - —
-     - Not started
-     -
+     - **Done**
+     - ``srbn``/``srbn-serde`` 0.3.0 + ``srbn-ledger``; ``kernel`` adapter
+       gains ``stabilize_realized`` and the restore-best policy; workspace
+       MSRV 1.85.
    * - 0 — Portfolio and capability matrix
      - U
-     - Not started
-     -
+     - **Done**
+     - ``[providers]`` table, ``ModelPortfolio``, declared capability matrix
+       (probing pending live transport use), ``perspt providers``.
    * - 1 — Tool transport
      - S, U
-     - Not started
-     -
+     - **Done**
+     - SDK ``ModelTransport`` port + ``Conversation``; ``genai`` driver in
+       ``perspt-core``; ``perspt-agent::transport`` adapter. Multi-provider
+       round-trip exercised against scripted transports; live three-family
+       run pending credentials.
    * - 2 — Typed tool catalog
      - J
-     - Not started
-     -
+     - **Done**
+     - ``toolset`` catalog with declarative footprints and capability
+       filtering; ``edit_file``/``glob``/``git_read`` executors;
+       ``LanguageId`` registry (fixture language registers without editing
+       ``perspt-agent``). ``sed_replace``/``awk_filter`` are out of the
+       model-facing catalog.
    * - 3 — Realizability, gate, certificates
      - M, V
-     - Not started
-     -
+     - **Done**
+     - ``StoppedAtDeclaredFloor`` emitted; ``RealizabilityClaim`` +
+       ``BoundMode`` + step-size admission (``admit_analytic_path``);
+       ``WorkspaceRealizer`` snapshots; PSP-9 residual classes; domain trait
+       break implemented by both domains.
    * - 4 — Live tool loop and kernel
      - J, K, L, M
-     - Not started
-     -
+     - **Partial**
+     - Five-clause kernel (evaluators, profiles, atomic ``promote``),
+       completed attenuation preorder, coding safety barrier, and the
+       ``toolloop`` engine with MC-J/M/V checks against scripted transports.
+       Orchestrator ``ExecutionMode`` dispatch and live-path cutover pending.
    * - 5 — Recovery lattice
      - N, V
-     - Not started
-     -
+     - **Done**
+     - One shared non-replenishing pool; forced strict escalation on
+       exhaustion; unconditional containment; four Theorem 6 classes; MC-N
+       fixtures including the distributed-exhaustion companion.
    * - 6 — Ledger and replay
      - L, O
-     - Not started
-     -
+     - **Partial**
+     - Recording-obligation refusal, audit replay with tamper detection,
+       ``ControlFrame``/``ContextCheckpoint`` with staleness validation,
+       durable ``psp9_ledger_events`` table, ``perspt replay``. Grant
+       policies and authority epochs are typed but not yet enforced on a
+       live resume path.
    * - 7 — Routing and exploration
      - S
-     - Not started
-     -
+     - **Done**
+     - ``PortfolioRoute`` with capability objectives, decorrelated review
+       preference, and cross-provider failover chains.
    * - 8 — Verdicts and independence
      - R, T
-     - Not started
-     -
+     - **Done**
+     - Matched strata, degenerate-pair direct joint misses, Hoeffding upper
+       bounds, certification gating, ``n`` reported beside the bound;
+       ``attenuate_weight`` removed.
    * - 9 — Proposal ensembles
      - M, T
-     - Not started
-     -
+     - **Done**
+     - ``EnsemblePolicy`` charges each candidate one gate decision; distinct
+       family enforced by lineage, not host; refuses rather than re-rolls.
    * - 10 — Scheduler and parallelism
      - P
-     - Not started
-     -
+     - **Partial**
+     - Footprint commutation with rate-limit and opaque resources; MC-P
+       matrix. Live worker pool and ``WorkGraphRevision`` authority await
+       the orchestrator cutover.
    * - 11 — Conformal calibration
      - Q
-     - Not started
-     -
+     - **Done**
+     - Feasibility floor ``n >= 1/rho - 1`` reported as insufficient
+       calibration; strict tie rejection; ``CalibrationStratum``;
+       readiness epochs.
    * - 12 — External tools
      - K, L, U
-     - Not started
-     -
+     - **Done**
+     - ``admit_external_tool``: registration never mints authority;
+       undeclared footprints classify as ``RunShell`` + opaque.
    * - 13 — Diagnostics and surfaces
      - R
-     - Not started
-     -
+     - **Partial**
+     - Both Lemma 2 levers in ``edge_sensitivity`` (gap + nullspace delta);
+       arriving-*potential* load gauge. TUI/dashboard surfacing pending.
    * - 14 — Parity and ablation
      - —
-     - Not started
-     -
+     - **Not started**
+     - Requires live provider runs; the ``Auto`` default flip waits on the
+       declared fixture-parity gate.
 
 =========================
 Resolved Design Decisions
