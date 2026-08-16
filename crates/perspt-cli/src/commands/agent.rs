@@ -56,7 +56,16 @@ pub async fn run(
         persistent_grants,
         ..perspt_agent::Psp9RunConfig::default()
     };
-    let runtime = perspt_agent::Psp9AgentRuntime::from_config(
+    let interactive = std::io::stdout().is_terminal();
+    // Fail fast: with Ask approval and no terminal, promotion could never be
+    // approved and a fully verified run would silently escalate.
+    anyhow::ensure!(
+        interactive || auto_approve,
+        "non-interactive run requires --yes: promotion approval cannot be \
+         prompted without a terminal"
+    );
+
+    let mut runtime = perspt_agent::Psp9AgentRuntime::from_config(
         working_dir.clone(),
         &config,
         perspt_agent::Psp9ModelRoutes {
@@ -70,14 +79,19 @@ pub async fn run(
     )?;
 
     if dashboard {
-        start_dashboard(&working_dir, dashboard_port).await?;
+        // One live handle: the dashboard reads through the same connection
+        // the runtime writes, so no second DuckDB handle contends on the
+        // database file.
+        let store = std::sync::Arc::new(perspt_store::SessionStore::new()?);
+        start_dashboard(&working_dir, dashboard_port, store.clone()).await?;
+        runtime = runtime.with_session_store(store);
     }
 
     println!("PSP-9 agent starting");
     println!("Task: {task}");
     println!("Workspace: {}", working_dir.display());
 
-    let summary = if std::io::stdout().is_terminal() && !auto_approve {
+    let summary = if interactive && !auto_approve {
         perspt_tui::run_agent_tui_with_runtime(runtime, task.clone()).await?
     } else {
         runtime.run(task.clone()).await?
@@ -107,13 +121,13 @@ pub async fn run(
     Ok(())
 }
 
-async fn start_dashboard(working_dir: &std::path::Path, port: u16) -> Result<()> {
-    // Ensure the schema exists before opening the dashboard's read-only handle.
-    drop(perspt_store::SessionStore::new()?);
-    let db_path = perspt_store::SessionStore::default_db_path()?;
-    let store = perspt_store::SessionStore::open_read_only(&db_path)?;
+async fn start_dashboard(
+    working_dir: &std::path::Path,
+    port: u16,
+    store: std::sync::Arc<perspt_store::SessionStore>,
+) -> Result<()> {
     let state = perspt_dashboard::state::AppState {
-        store: std::sync::Arc::new(store),
+        store,
         password: None,
         session_token: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         working_dir: working_dir.to_path_buf(),
