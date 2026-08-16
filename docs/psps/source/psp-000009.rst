@@ -3478,24 +3478,27 @@ Implementation Status
        MSRV 1.85.
    * - 0 — Portfolio and capability matrix
      - U
-     - **Done**
+     - **Partial**
      - ``[providers]`` table, ``ModelPortfolio``, declared capability matrix
-       (probing pending live transport use), ``perspt providers``.
+       and ``perspt providers`` are live. Startup/runtime capability probes and
+       durable probe evidence remain; current route filtering relies on the
+       declared matrix.
    * - 1 — Tool transport
      - S, U
-     - **Done**
+     - **Partial**
      - SDK ``ModelTransport`` port + ``Conversation``; ``genai`` driver in
-       ``perspt-core``; ``perspt-agent::transport`` adapter. Multi-provider
-       round-trip exercised against scripted transports; live three-family
-       run pending credentials.
+       ``perspt-core``; ``perspt-agent::transport`` adapter; provider-neutral
+       failover and replay are live. Vertex ADC has completed a real tool-loop
+       run. The required live three-family two-tool conformance run remains.
    * - 2 — Typed tool catalog
      - J
-     - **Done**
+     - **Partial**
      - ``toolset`` catalog with declarative footprints and capability
        filtering; ``edit_file``/``glob``/``git_read`` executors;
-       ``LanguageId`` registry (fixture language registers without editing
-       ``perspt-agent``). ``sed_replace``/``awk_filter`` are out of the
-       model-facing catalog.
+       ``LanguageId`` registry. The authoritative candidate hides tools without
+       executors and keeps ``sed_replace``/``awk_filter`` out of the model-facing
+       catalog. ``lsp_query``, governed dependency mutation, and eliminating the
+       remaining runtime plugin-name normalization match remain.
    * - 3 — Realizability, gate, certificates
      - M, V
      - **Done**
@@ -3505,63 +3508,85 @@ Implementation Status
        break implemented by both domains.
    * - 4 — Live tool loop and kernel
      - J, K, L, M
-     - **Partial**
-     - Five-clause kernel (evaluators, profiles, atomic ``promote``),
-       completed attenuation preorder, coding safety barrier, and the
-       ``toolloop`` engine with MC-J/M/V checks against scripted transports.
-       Orchestrator ``ExecutionMode`` dispatch and live-path cutover pending.
+     - **Done**
+     - ``perspt agent`` now dispatches exclusively through the PSP-9
+       ``ToolLoop``. Every model call is materialized in a reversible candidate,
+       checked against all five clauses, measured after each admitted mutation,
+       and restored on rejection. Compiler/test processes require an OS process
+       sandbox; unavailable isolation is a blocking sensor residual. MC-J/M/V,
+       cadence, restore-best, and symlink-escape fixtures cover the live engine.
    * - 5 — Recovery lattice
      - N, V
-     - **Done**
-     - One shared non-replenishing pool; forced strict escalation on
-       exhaustion; unconditional containment; four Theorem 6 classes; MC-N
-       fixtures including the distributed-exhaustion companion.
+     - **Partial**
+     - One shared non-replenishing pool is live for gate rejection and provider
+       transport failure. Sticky portfolio failover and restore-best
+       containment are ledgered and MC-N is retained. Level-2 graph refinement,
+       level-3 higher-role handoff, and live level-4 epoch revocation remain.
    * - 6 — Ledger and replay
      - L, O
      - **Partial**
-     - Recording-obligation refusal, audit replay with tamper detection,
-       ``ControlFrame``/``ContextCheckpoint`` with staleness validation,
-       durable ``psp9_ledger_events`` table, ``perspt replay``. Grant
-       policies and authority epochs are typed but not yet enforced on a
-       live resume path.
+     - Every live loop observation is durably appended before use;
+       ``perspt replay`` verifies sequence, predecessor, hash, and accepted
+       trajectory. Context compaction now records and validates exact
+       ``ControlFrame`` values, and durable promotion has a single-assignment
+       write-ahead effect journal. Session grant intent and authority epochs are
+       enforced at promotion. Signed persistent grant re-minting on resume and
+       process-crash completion of an interrupted multi-file promotion remain.
    * - 7 — Routing and exploration
      - S
-     - **Done**
-     - ``PortfolioRoute`` with capability objectives, decorrelated review
-       preference, and cross-provider failover chains.
+     - **Partial**
+     - The live runtime builds a deterministic, content-witnessed repository
+       map before mutation and may send it to the configured Speculator route
+       with no tools or authority. The Actuator receives the report as advisory
+       context, while configured tier/fallback routes form the sticky recovery
+       chain. ``--exploration-only`` and interactive explorer tool loops remain.
    * - 8 — Verdicts and independence
      - R, T
-     - **Done**
+     - **Partial**
      - Matched strata, degenerate-pair direct joint misses, Hoeffding upper
        bounds, certification gating, ``n`` reported beside the bound;
-       ``attenuate_weight`` removed.
+       ``attenuate_weight`` removed. The SDK path is tested; the authoritative
+       runtime does not yet dispatch contemporaneous adjudicator verdicts or
+       attach delayed labels.
    * - 9 — Proposal ensembles
      - M, T
-     - **Done**
+     - **Partial**
      - ``EnsemblePolicy`` charges each candidate one gate decision; distinct
-       family enforced by lineage, not host; refuses rather than re-rolls.
+       family enforced by lineage, not host; refuses rather than re-rolls. The
+       policy is not yet invoked by the live coding loop, so no production
+       ensemble claim is made.
    * - 10 — Scheduler and parallelism
      - P
      - **Partial**
-     - Footprint commutation with rate-limit and opaque resources; MC-P
-       matrix. Live worker pool and ``WorkGraphRevision`` authority await
-       the orchestrator cutover.
+     - ``WorkGraphRevision`` is now the live scheduler authority and every
+       running capability is revision/generation-bound. Independent
+       compiler/test/lint sensors run concurrently under ``--max-parallel``
+       with isolated target directories. Multi-node worker dispatch, commuting
+       tool-call batches, and evidence-driven level-2 graph rewrites remain.
    * - 11 — Conformal calibration
      - Q
-     - **Done**
-     - Feasibility floor ``n >= 1/rho - 1`` reported as insufficient
-       calibration; strict tie rejection; ``CalibrationStratum``;
-       readiness epochs.
+     - **Partial**
+     - SDK mechanism is complete: feasibility floor
+       ``n >= 1/rho - 1``, strict tie rejection, complete
+       ``CalibrationStratum``, readiness and stale states. Durable per-stratum
+       samples, uniform delayed-audit selection, immutable activation epochs,
+       and live approval back-off are not wired. The current coding path relies
+       only on deterministic contract/barrier evidence and makes no conformal
+       claim.
    * - 12 — External tools
      - K, L, U
-     - **Done**
-     - ``admit_external_tool``: registration never mints authority;
-       undeclared footprints classify as ``RunShell`` + opaque.
+     - **Partial**
+     - SDK ``admit_external_tool`` prevents authority minting and maps
+       undeclared footprints to ``RunShell`` plus opaque scope. No external wire
+       protocol is registered in the authoritative runtime yet.
    * - 13 — Diagnostics and surfaces
      - R
      - **Partial**
      - Both Lemma 2 levers in ``edge_sensitivity`` (gap + nullspace delta);
-       arriving-*potential* load gauge. TUI/dashboard surfacing pending.
+       arriving-*potential* load gauge. The TUI streams live measurements,
+       gates, denials, failover and checkpoint events; the dashboard decision
+       trace reads the canonical PSP-9 hash chain. Dedicated topology,
+       calibration, authority and backlog visualizations remain.
    * - 14 — Parity and ablation
      - —
      - **Not started**
