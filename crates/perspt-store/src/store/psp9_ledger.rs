@@ -83,6 +83,17 @@ impl SessionStore {
         Ok(())
     }
 
+    /// The newest checkpoint JSON for a session, if any.
+    pub fn latest_psp9_checkpoint(&self, session_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT checkpoint_json FROM psp9_context_checkpoints WHERE session_id = ? \
+             ORDER BY created_at DESC, covered_event_root DESC LIMIT 1",
+        )?;
+        let mut rows = statement.query([session_id])?;
+        Ok(rows.next()?.map(|row| row.get(0)).transpose()?)
+    }
+
     pub fn record_psp9_verdict(&self, row: &Psp9VerdictRow) -> Result<()> {
         self.conn.lock().unwrap().execute(
             "INSERT INTO psp9_verdicts (session_id, candidate_id, validator_id, stratum, \

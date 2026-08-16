@@ -26,6 +26,9 @@ use std::collections::BTreeSet;
 
 use crate::realize::ProjectionMismatch;
 
+mod contract;
+pub use contract::*;
+
 /// The loop's finite budgets (PSP-9 system 6).
 #[derive(Debug, Clone)]
 pub struct LoopBudgets {
@@ -66,215 +69,6 @@ impl LoopBudgets {
         cadence.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
-}
-
-/// What applying one admitted call did to the candidate overlay.
-#[derive(Debug, Clone)]
-pub struct EffectOutcome {
-    /// Tool output returned to the model as the tool response.
-    pub output: String,
-    /// Whether the overlay was mutated.
-    pub mutated: bool,
-}
-
-/// Opaque executor checkpoint plus its measured state witness.
-#[derive(Debug, Clone)]
-pub struct CandidateCheckpoint {
-    pub id: String,
-    pub witness: CandidateStateWitness,
-}
-
-/// Applies admitted calls to the candidate overlay (the existing sandboxed
-/// executors are the first driver).
-#[async_trait::async_trait]
-pub trait EffectExecutor: Send + Sync {
-    /// Snapshot the reversible candidate overlay.
-    async fn checkpoint(&self, scope: &[String]) -> Result<CandidateCheckpoint>;
-
-    async fn apply(&self, call: &ProviderToolCall, entry: &ToolEntry) -> Result<EffectOutcome>;
-
-    /// Restore an earlier candidate snapshot exactly.
-    async fn restore(&self, checkpoint: &CandidateCheckpoint) -> Result<()>;
-
-    /// Re-read the materialized candidate after an effect.
-    async fn state_witness(&self) -> Result<CandidateStateWitness>;
-}
-
-/// One measured evaluation of the realized candidate.
-#[derive(Debug, Clone)]
-pub struct Measured {
-    pub hard_pass: bool,
-    pub energy: f64,
-    pub residuals: Vec<ResidualEvent>,
-    /// The domain's directed correction for the dominant residual.
-    pub correction: Option<CorrectionDirection>,
-}
-
-/// Re-reads the candidate overlay and runs the declared verifier suite
-/// against it (Paper I Def. 12.2: measurement runs on the realized state).
-#[async_trait::async_trait]
-pub trait CandidateMeasurer: Send + Sync {
-    async fn measure(&self) -> Result<Measured>;
-
-    /// Cheapest realized-state boundary available after one mutation. The
-    /// default is the complete suite, which is conservative; domain drivers
-    /// may provide an incremental parser without weakening the gate suite.
-    async fn measure_incremental(&self) -> Result<Measured> {
-        self.measure().await
-    }
-}
-
-/// Recorded loop events (the ledger consumes these in system 14).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "event", rename_all = "snake_case")]
-pub enum LoopEvent {
-    TurnObserved {
-        turn: u32,
-        output: TurnOutput,
-    },
-    ToolCallObserved {
-        call: ProviderToolCall,
-    },
-    ProposalObserved {
-        call_id: String,
-        proposal: EffectProposal,
-    },
-    ProposalChecked {
-        call_id: String,
-        proposal: EffectProposal,
-        witness: Box<FullAdmissibilityWitness>,
-    },
-    EffectApplied {
-        call_id: String,
-        mutated: bool,
-        output: String,
-    },
-    EffectDenied {
-        call_id: String,
-        reason: String,
-        /// Typed admissibility residual (PSP-9 system 9): `CapabilityDenied`
-        /// for kernel denials, `BudgetExhausted` for budget boundaries.
-        #[serde(default = "default_denial_class")]
-        class: perspt_sdk::ResidualClass,
-    },
-    CandidateMeasured {
-        node_id: String,
-        generation: u32,
-        energy: f64,
-        hard_pass: bool,
-        residuals: Vec<ResidualEvent>,
-    },
-    GateDecisionRecorded {
-        node_id: String,
-        generation: u32,
-        decision: GateDecision,
-    },
-    CandidateRestored {
-        checkpoint_id: String,
-    },
-    EffectBoundaryMeasured {
-        call_id: String,
-        node_id: String,
-        generation: u32,
-        energy: f64,
-        hard_pass: bool,
-        residuals: Vec<ResidualEvent>,
-    },
-    ContextCheckpointCreated {
-        checkpoint: ContextCheckpoint,
-    },
-    RecoveryControlGranted {
-        failure: FailureKind,
-        level: perspt_sdk::CascadeLevel,
-        forced_escalation: bool,
-        model: ModelId,
-    },
-    RouteFailover {
-        from_model: ModelId,
-        to_model: ModelId,
-        cause: String,
-    },
-    RecoveryContained {
-        reason: String,
-        restored_checkpoint_id: String,
-    },
-}
-
-fn default_denial_class() -> perspt_sdk::ResidualClass {
-    perspt_sdk::ResidualClass::CapabilityDenied
-}
-
-/// In-loop event log. With a durable recorder attached every event is already
-/// persisted before use, so only a rolling count and chain root are kept in
-/// memory; without one (conformance fixtures) the events are retained so
-/// tests can inspect them. This keeps long runs O(1) in event memory and
-/// makes each compaction O(1) instead of re-serializing the whole history.
-#[derive(Debug, Default)]
-pub struct EventLog {
-    retained: Vec<LoopEvent>,
-    retain: bool,
-    count: u64,
-    chain_root: String,
-}
-
-impl EventLog {
-    fn new(retain: bool) -> Self {
-        Self {
-            retain,
-            ..Self::default()
-        }
-    }
-
-    fn push(&mut self, event: &LoopEvent) -> Result<()> {
-        let hashed = perspt_sdk::ledger::content_hash(&serde_json::to_vec(event)?);
-        self.chain_root =
-            perspt_sdk::ledger::content_hash(format!("{}:{hashed}", self.chain_root).as_bytes());
-        self.count += 1;
-        if self.retain {
-            self.retained.push(event.clone());
-        }
-        Ok(())
-    }
-
-    pub fn count(&self) -> u64 {
-        self.count
-    }
-
-    /// Rolling chain root over every event pushed so far.
-    pub fn chain_root(&self) -> &str {
-        &self.chain_root
-    }
-
-    pub fn events(&self) -> &[LoopEvent] {
-        &self.retained
-    }
-
-    fn into_events(self) -> Vec<LoopEvent> {
-        self.retained
-    }
-}
-
-/// Synchronous write-ahead event sink. Implementations must durably append
-/// before returning; the loop records observations before inspecting them.
-pub trait LoopRecorder: Send + Sync {
-    fn record(&self, event: &LoopEvent) -> Result<()>;
-
-    /// Persist exact observation bytes and return their content handle. The
-    /// default supports in-memory conformance fixtures; production recorders
-    /// override it with durable content-addressed storage.
-    fn record_artifact(&self, content: &[u8], _media_type: &str) -> Result<String> {
-        Ok(perspt_sdk::ledger::content_hash(content))
-    }
-}
-
-/// The loop's terminal report.
-#[derive(Debug)]
-pub struct LoopOutcome {
-    pub outcome: NodeTerminalOutcome,
-    pub trajectory: AcceptedTrajectory,
-    pub events: Vec<LoopEvent>,
-    pub projection: ProjectionMismatch,
-    pub turns_used: u32,
 }
 
 /// The assembled tool loop for one node generation.
@@ -478,6 +272,16 @@ impl ToolLoop<'_> {
 
         if decision.is_accepted() {
             *accepted_checkpoint = self.executor.checkpoint(&[]).await?;
+            self.durable_checkpoint(
+                goal,
+                turn,
+                accepted_checkpoint,
+                &measured,
+                trajectory,
+                conversation,
+                log,
+            )
+            .await?;
         } else if !matches!(decision, GateDecision::StoppedAtDeclaredFloor) {
             self.executor.restore(accepted_checkpoint).await?;
             emit(
@@ -646,6 +450,60 @@ impl ToolLoop<'_> {
             )
             .await?;
         Ok((output, mutations, immediate_boundary))
+    }
+
+    /// Make a gate acceptance durably resumable (PSP-9 phase 6): export the
+    /// accepted candidate's mutated contents as content-addressed artifacts
+    /// and ledger them with the exact control frame, so a crashed loop can be
+    /// continued from this acceptance instead of restarted.
+    #[allow(clippy::too_many_arguments)]
+    async fn durable_checkpoint(
+        &self,
+        goal: &str,
+        turn: u32,
+        accepted_checkpoint: &CandidateCheckpoint,
+        measured: &Measured,
+        trajectory: &AcceptedTrajectory,
+        conversation: &Conversation,
+        log: &mut EventLog,
+    ) -> Result<()> {
+        let Some(recorder) = self.recorder else {
+            return Ok(());
+        };
+        let authority_epoch = self
+            .kernel_state
+            .witnesses
+            .get("__authority_epoch")
+            .map(String::as_str)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let control = self.control_frame(
+            goal,
+            turn,
+            accepted_checkpoint,
+            measured,
+            trajectory,
+            conversation,
+            authority_epoch,
+        );
+        let exported = self.executor.export_accepted().await?;
+        let mut files = Vec::new();
+        for (path, bytes) in exported {
+            let handle = bytes
+                .as_deref()
+                .map(|bytes| recorder.record_artifact(bytes, "application/octet-stream"))
+                .transpose()?;
+            files.push((path, handle));
+        }
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::DurableCandidateCheckpoint {
+                state_root: accepted_checkpoint.witness.state_root.clone(),
+                control,
+                files,
+            },
+        )
     }
 
     /// The verbatim control frame a compaction must preserve (resolved

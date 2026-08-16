@@ -267,6 +267,32 @@ impl CandidateWorkspace {
         Ok(named_paths)
     }
 
+    /// Rebuild an accepted candidate state from a durable checkpoint's
+    /// exported files (mid-loop resume): each file is journaled and written
+    /// into the overlay, and re-enters the mutated (promotable) set.
+    pub fn restore_exported(&self, files: &[crate::toolloop::SeedFile]) -> Result<()> {
+        for (rel, bytes) in files {
+            let rel = validate_relative_path(rel)?;
+            reject_symlink_ancestor(&self.overlay_root, &rel)?;
+            self.journal_pre_image(&rel)?;
+            let path = self.overlay_root.join(&rel);
+            match bytes {
+                Some(bytes) => {
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&path, bytes)?;
+                }
+                None if path.is_file() => std::fs::remove_file(&path)?,
+                None => {}
+            }
+            self.tracked.lock().unwrap().insert(rel.clone());
+            self.mutated_paths.lock().unwrap().insert(rel);
+            self.mutations.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
     /// Record the pre-image of a path before a mutating effect touches it.
     fn journal_pre_image(&self, rel: &str) -> Result<()> {
         let path = self.overlay_root.join(rel);
@@ -415,6 +441,21 @@ impl EffectExecutor for CandidateWorkspace {
 
     async fn state_witness(&self) -> Result<CandidateStateWitness> {
         self.current_witness()
+    }
+
+    async fn export_accepted(&self) -> Result<Vec<crate::toolloop::SeedFile>> {
+        let mutated = self.touched_paths();
+        let mut exported = Vec::with_capacity(mutated.len());
+        for rel in mutated {
+            let path = self.overlay_root.join(&rel);
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => return Err(e).with_context(|| format!("exporting {rel}")),
+            };
+            exported.push((rel, bytes));
+        }
+        Ok(exported)
     }
 }
 

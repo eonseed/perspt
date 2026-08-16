@@ -52,6 +52,43 @@ impl Psp9Recorder {
         })
     }
 
+    /// Attach to an existing session for mid-loop resume: rebuild the
+    /// in-memory chain from the durable rows (verifying it in the process),
+    /// so subsequent appends extend the same ledger head.
+    pub(crate) fn attach(
+        session_id: &str,
+        database_path: Option<&Path>,
+        shared_store: Option<Arc<SessionStore>>,
+        event_sender: Option<perspt_core::events::channel::EventSender>,
+    ) -> Result<Self> {
+        let store = match (shared_store, database_path) {
+            (Some(store), _) => store,
+            (None, Some(path)) => Arc::new(SessionStore::open(&path.to_path_buf())?),
+            (None, None) => Arc::new(SessionStore::new()?),
+        };
+        let rows = store.get_psp9_events(session_id)?;
+        anyhow::ensure!(!rows.is_empty(), "session has no durable ledger to resume");
+        let mut ledger = Ledger::new();
+        for row in &rows {
+            let event: LedgerEvent = serde_json::from_str(&row.event_json)?;
+            let head = ledger
+                .append(event)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            anyhow::ensure!(
+                head == row.hash,
+                "ledger hash mismatch at sequence {}; refusing to resume",
+                row.sequence
+            );
+        }
+        store.update_session_status(session_id, "RUNNING_PSP9")?;
+        Ok(Self {
+            session_id: session_id.into(),
+            store,
+            ledger: Mutex::new(ledger),
+            event_sender,
+        })
+    }
+
     pub fn record_custom(&self, kind: &str, payload: serde_json::Value) -> Result<()> {
         self.append(LedgerEvent::Custom {
             kind: kind.into(),
@@ -152,6 +189,25 @@ impl LoopRecorder for Psp9Recorder {
                 &serde_json::to_string(checkpoint)?,
             )?;
         }
+        if let LoopEvent::DurableCandidateCheckpoint {
+            state_root,
+            control,
+            files,
+        } = event
+        {
+            // The durable resume point: `perspt resume` rebuilds the
+            // accepted candidate from these rows.
+            self.store.record_psp9_checkpoint(
+                &self.session_id,
+                state_root,
+                &serde_json::to_string(&serde_json::json!({
+                    "kind": "candidate",
+                    "state_root": state_root,
+                    "control": control,
+                    "files": files,
+                }))?,
+            )?;
+        }
         if let Some(sender) = &self.event_sender {
             // Structured surfaces first: the TUI's energy panel consumes the
             // typed event, not the narration line.
@@ -164,51 +220,7 @@ impl LoopRecorder for Psp9Recorder {
                     energy: *energy as f32,
                 });
             }
-            let message = match event {
-                LoopEvent::CandidateMeasured {
-                    node_id,
-                    generation,
-                    energy,
-                    hard_pass,
-                    residuals,
-                } => Some(format!(
-                    "Measured {node_id} generation {generation}: V={energy:.3}, \
-                         hard_pass={hard_pass}, residuals={}",
-                    residuals.len()
-                )),
-                LoopEvent::GateDecisionRecorded {
-                    node_id,
-                    generation,
-                    decision,
-                } => Some(format!(
-                    "Gate {node_id} generation {generation}: {decision:?}"
-                )),
-                LoopEvent::EffectDenied {
-                    call_id, reason, ..
-                } => Some(format!("Effect {call_id} denied: {reason}")),
-                LoopEvent::EffectApplied {
-                    call_id, mutated, ..
-                } => Some(format!(
-                    "Effect {call_id} applied to candidate (mutated={mutated})"
-                )),
-                LoopEvent::RouteFailover {
-                    from_model,
-                    to_model,
-                    cause,
-                } => Some(format!(
-                    "Route failover {from_model} -> {to_model}: {cause}"
-                )),
-                LoopEvent::ContextCheckpointCreated { checkpoint } => Some(format!(
-                    "Context checkpoint {} covers events {}..{}",
-                    &checkpoint.covered_event_root[..12.min(checkpoint.covered_event_root.len())],
-                    checkpoint.covered_from,
-                    checkpoint.covered_to
-                )),
-                LoopEvent::RecoveryContained { reason, .. } => {
-                    Some(format!("Recovery contained the node: {reason}"))
-                }
-                _ => None,
-            };
+            let message = narration(event);
             if let Some(message) = message {
                 let _ = sender.send(perspt_core::AgentEvent::Log(message));
             }
@@ -220,5 +232,54 @@ impl LoopRecorder for Psp9Recorder {
         let handle = perspt_sdk::ledger::content_hash(content);
         self.store.put_psp9_artifact(&handle, content, media_type)?;
         Ok(handle)
+    }
+}
+
+/// The one-line human narration for a loop event, if any.
+fn narration(event: &LoopEvent) -> Option<String> {
+    match event {
+        LoopEvent::CandidateMeasured {
+            node_id,
+            generation,
+            energy,
+            hard_pass,
+            residuals,
+        } => Some(format!(
+            "Measured {node_id} generation {generation}: V={energy:.3}, \
+                 hard_pass={hard_pass}, residuals={}",
+            residuals.len()
+        )),
+        LoopEvent::GateDecisionRecorded {
+            node_id,
+            generation,
+            decision,
+        } => Some(format!(
+            "Gate {node_id} generation {generation}: {decision:?}"
+        )),
+        LoopEvent::EffectDenied {
+            call_id, reason, ..
+        } => Some(format!("Effect {call_id} denied: {reason}")),
+        LoopEvent::EffectApplied {
+            call_id, mutated, ..
+        } => Some(format!(
+            "Effect {call_id} applied to candidate (mutated={mutated})"
+        )),
+        LoopEvent::RouteFailover {
+            from_model,
+            to_model,
+            cause,
+        } => Some(format!(
+            "Route failover {from_model} -> {to_model}: {cause}"
+        )),
+        LoopEvent::ContextCheckpointCreated { checkpoint } => Some(format!(
+            "Context checkpoint {} covers events {}..{}",
+            &checkpoint.covered_event_root[..12.min(checkpoint.covered_event_root.len())],
+            checkpoint.covered_from,
+            checkpoint.covered_to
+        )),
+        LoopEvent::RecoveryContained { reason, .. } => {
+            Some(format!("Recovery contained the node: {reason}"))
+        }
+        _ => None,
     }
 }
