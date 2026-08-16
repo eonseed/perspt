@@ -229,6 +229,12 @@ impl TaskPlan {
 ///
 /// Supports `*` (any within component) and `**` (any path segment).
 /// This is intentionally minimal — only used for plan validation heuristics.
+/// Public wrapper: minimal glob matching (`*` within a component, `**`
+/// across segments), shared with the agent's `glob` tool.
+pub fn glob_matches(pattern: &str, path: &str) -> bool {
+    glob_matches_simple(pattern, path)
+}
+
 pub(crate) fn glob_matches_simple(pattern: &str, path: &str) -> bool {
     let pat_parts: Vec<&str> = pattern.split('/').collect();
     let path_parts: Vec<&str> = path.split('/').collect();

@@ -1,0 +1,437 @@
+//! The base tool catalog (PSP-9 system 5).
+//!
+//! Domain-neutral entries mapping onto the `EffectKind` variants PSP-8
+//! declares. `sed_replace` and `awk_filter` are deliberately absent: their
+//! argument contracts lack the exact-match and state-witness preconditions
+//! governed mutation requires, and `edit_file` / `apply_diff` cover their
+//! uses. They are removed rather than retained through an internal bypass,
+//! because this PSP preserves no unmediated effect path.
+
+use super::entry::{ToolEntry, ToolOrigin};
+use super::footprint::{AccessMode, FootprintSpec, ResourceSelector};
+use crate::capability::{EffectKind, RiskClass};
+
+/// Shorthand: an object schema from `(name, type, description, required)`.
+fn schema(fields: &[(&str, &str, &str, bool)]) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+    for (name, kind, description, is_required) in fields {
+        properties.insert(
+            (*name).to_string(),
+            serde_json::json!({"type": kind, "description": description}),
+        );
+        if *is_required {
+            required.push(serde_json::Value::String((*name).to_string()));
+        }
+    }
+    serde_json::json!({"type": "object", "properties": properties, "required": required})
+}
+
+fn path_read() -> FootprintSpec {
+    FootprintSpec::new(vec![ResourceSelector::PathArgument {
+        field: "path".into(),
+        access: AccessMode::Read,
+    }])
+}
+
+fn path_write() -> FootprintSpec {
+    FootprintSpec::new(vec![ResourceSelector::PathArgument {
+        field: "path".into(),
+        access: AccessMode::Write,
+    }])
+}
+
+fn entry(
+    name: &str,
+    description: &str,
+    effect: EffectKind,
+    risk: RiskClass,
+    arg_schema: serde_json::Value,
+    footprint: FootprintSpec,
+    durable: bool,
+) -> ToolEntry {
+    ToolEntry {
+        name: name.into(),
+        description: description.into(),
+        effect,
+        risk,
+        schema: arg_schema,
+        footprint,
+        durable,
+        origin: ToolOrigin::Builtin,
+    }
+}
+
+/// The read-only half of the base catalog.
+fn read_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "read_file",
+            "Read a file's contents with optional offset/limit windows; returns line-numbered text",
+            EffectKind::ReadFile,
+            RiskClass::Low,
+            schema(&[
+                ("path", "string", "Workspace-relative file path", true),
+                ("offset", "integer", "1-based first line to read", false),
+                ("limit", "integer", "Maximum number of lines", false),
+            ]),
+            path_read(),
+            false,
+        ),
+        entry(
+            "list_files",
+            "List files in a directory, respecting ignore files",
+            EffectKind::List,
+            RiskClass::Low,
+            schema(&[(
+                "path",
+                "string",
+                "Directory to list (default workspace root)",
+                false,
+            )]),
+            path_read(),
+            false,
+        ),
+        entry(
+            "glob",
+            "Match files by glob pattern, sorted by modification time",
+            EffectKind::Search,
+            RiskClass::Low,
+            schema(&[("pattern", "string", "Glob pattern, e.g. src/**/*.rs", true)]),
+            FootprintSpec::default(),
+            false,
+        ),
+        entry(
+            "grep",
+            "Search file contents by regex with optional path filter and context lines",
+            EffectKind::Search,
+            RiskClass::Low,
+            schema(&[
+                ("query", "string", "Regex to search for", true),
+                ("path", "string", "Directory or file to search in", false),
+                (
+                    "context",
+                    "integer",
+                    "Context lines around each match",
+                    false,
+                ),
+            ]),
+            path_read(),
+            false,
+        ),
+    ]
+}
+
+/// Language-intelligence read entries.
+fn intel_entries() -> Vec<ToolEntry> {
+    vec![entry(
+        "lsp_query",
+        "Query language intelligence: definitions, references, hover, diagnostics",
+        EffectKind::LspQuery,
+        RiskClass::Low,
+        schema(&[
+            (
+                "kind",
+                "string",
+                "definition | references | hover | diagnostics",
+                true,
+            ),
+            ("path", "string", "File the query targets", true),
+            ("symbol", "string", "Symbol name, when applicable", false),
+        ]),
+        path_read(),
+        false,
+    )]
+}
+
+/// Repository and escalation entries.
+fn context_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "git_read",
+            "Read repository state: status, diff, log, show",
+            EffectKind::GitRead,
+            RiskClass::Low,
+            schema(&[
+                ("subcommand", "string", "status | diff | log | show", true),
+                ("args", "string", "Additional read-only arguments", false),
+            ]),
+            FootprintSpec::default(),
+            false,
+        ),
+        entry(
+            "ask_user",
+            "Escalate to the user for approval, a capability grant, or a decision",
+            EffectKind::AskUser,
+            RiskClass::Low,
+            schema(&[("question", "string", "The question or request", true)]),
+            FootprintSpec::default(),
+            false,
+        ),
+    ]
+}
+
+/// The mutating half of the base catalog.
+fn write_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "write_file",
+            "Create or replace a whole file",
+            EffectKind::WriteArtifact,
+            RiskClass::Medium,
+            schema(&[
+                ("path", "string", "Workspace-relative file path", true),
+                ("content", "string", "Complete new file contents", true),
+            ]),
+            path_write(),
+            false,
+        ),
+        entry(
+            "edit_file",
+            "Exact-string replace with a uniqueness check; fails closed on ambiguity",
+            EffectKind::ApplyPatch,
+            RiskClass::Medium,
+            schema(&[
+                ("path", "string", "File to edit", true),
+                (
+                    "old_string",
+                    "string",
+                    "Exact text to replace (must be unique)",
+                    true,
+                ),
+                ("new_string", "string", "Replacement text", true),
+            ]),
+            path_write(),
+            false,
+        ),
+        entry(
+            "apply_diff",
+            "Apply a unified diff to a file",
+            EffectKind::ApplyPatch,
+            RiskClass::Medium,
+            schema(&[
+                ("path", "string", "File to patch", true),
+                ("diff", "string", "Unified diff content", true),
+            ]),
+            path_write(),
+            false,
+        ),
+    ]
+}
+
+/// File relocation entries.
+fn relocation_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "move_file",
+            "Move or rename a file",
+            EffectKind::MoveFile,
+            RiskClass::Medium,
+            schema(&[
+                ("path", "string", "Source path", true),
+                ("to", "string", "Destination path", true),
+            ]),
+            FootprintSpec::new(vec![
+                ResourceSelector::PathArgument {
+                    field: "path".into(),
+                    access: AccessMode::Write,
+                },
+                ResourceSelector::PathArgument {
+                    field: "to".into(),
+                    access: AccessMode::Write,
+                },
+            ]),
+            false,
+        ),
+        entry(
+            "delete_file",
+            "Delete a file",
+            EffectKind::DeleteFile,
+            RiskClass::Medium,
+            schema(&[("path", "string", "File to delete", true)]),
+            path_write(),
+            false,
+        ),
+    ]
+}
+
+/// Verifier and command entries; footprints are opaque because their touched
+/// state depends on the workspace, so they serialize rather than race.
+fn command_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "run_test",
+            "Run the domain's declared test command; output is parsed into residuals",
+            EffectKind::RunTest,
+            RiskClass::Medium,
+            schema(&[("filter", "string", "Optional test name filter", false)]),
+            FootprintSpec::opaque(),
+            false,
+        ),
+        entry(
+            "run_build",
+            "Run the domain's declared build command",
+            EffectKind::RunBuild,
+            RiskClass::Medium,
+            schema(&[]),
+            FootprintSpec::opaque(),
+            false,
+        ),
+        entry(
+            "run_formatter",
+            "Run the domain's declared formatter",
+            EffectKind::RunFormatter,
+            RiskClass::Medium,
+            schema(&[]),
+            FootprintSpec::opaque(),
+            false,
+        ),
+        entry(
+            "run_repo_script",
+            "Run a script declared in the project profile",
+            EffectKind::RunRepoScript,
+            RiskClass::Medium,
+            schema(&[("name", "string", "Declared script name", true)]),
+            FootprintSpec::opaque(),
+            false,
+        ),
+        entry(
+            "mutate_dependencies",
+            "Add or update dependencies via the domain package manager",
+            EffectKind::MutateDependencies,
+            RiskClass::High,
+            schema(&[(
+                "packages",
+                "string",
+                "Space-separated packages to add",
+                true,
+            )]),
+            FootprintSpec::opaque(),
+            true,
+        ),
+    ]
+}
+
+/// High-risk command and network entries.
+fn high_risk_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "run_shell",
+            "Run a shell command; requires an explicit RunShell capability",
+            EffectKind::RunShell,
+            RiskClass::High,
+            schema(&[("command", "string", "The command line", true)]),
+            FootprintSpec::opaque(),
+            true,
+        ),
+        entry(
+            "git_write",
+            "Stage and commit; never push or hard-reset by default",
+            EffectKind::GitWrite,
+            RiskClass::High,
+            schema(&[
+                ("subcommand", "string", "add | commit", true),
+                ("args", "string", "Arguments", false),
+            ]),
+            FootprintSpec::opaque(),
+            true,
+        ),
+        entry(
+            "fetch_url",
+            "Fetch a URL; defaults to ask, domain allow-lists permitted",
+            EffectKind::NetworkFetch,
+            RiskClass::High,
+            schema(&[("url", "string", "The URL to fetch", true)]),
+            FootprintSpec::opaque(),
+            true,
+        ),
+    ]
+}
+
+/// Privileged and delegation entries.
+fn privileged_entries() -> Vec<ToolEntry> {
+    vec![
+        entry(
+            "update_graph",
+            "Split, add, or retire work-graph nodes under PSP-8 revision rules",
+            EffectKind::UpdateGraph,
+            RiskClass::Critical,
+            schema(&[(
+                "revision",
+                "string",
+                "Serialized graph revision request",
+                true,
+            )]),
+            FootprintSpec::new(vec![ResourceSelector::Literal {
+                resource: crate::scheduler::Resource::WorkGraph,
+                access: AccessMode::Write,
+            }]),
+            true,
+        ),
+        entry(
+            "spawn_agent",
+            "Delegate to a child agent; the child capability MUST attenuate (Theorem 1)",
+            EffectKind::SpawnAgent,
+            RiskClass::Critical,
+            schema(&[
+                ("role", "string", "explorer | worker | reviewer", true),
+                ("goal", "string", "The child's goal", true),
+            ]),
+            FootprintSpec::opaque(),
+            true,
+        ),
+    ]
+}
+
+/// Every builtin entry.
+pub fn base_entries() -> Vec<ToolEntry> {
+    let mut entries = read_entries();
+    entries.extend(intel_entries());
+    entries.extend(context_entries());
+    entries.extend(write_entries());
+    entries.extend(relocation_entries());
+    entries.extend(command_entries());
+    entries.extend(high_risk_entries());
+    entries.extend(privileged_entries());
+    entries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_base_entry_validates_at_assembly() {
+        for entry in base_entries() {
+            entry
+                .validate()
+                .unwrap_or_else(|e| panic!("{}: {e}", entry.name));
+        }
+    }
+
+    #[test]
+    fn the_governed_catalog_omits_sed_and_awk() {
+        let names: Vec<String> = base_entries().into_iter().map(|e| e.name).collect();
+        assert!(!names.contains(&"sed_replace".to_string()));
+        assert!(!names.contains(&"awk_filter".to_string()));
+        assert!(names.contains(&"edit_file".to_string()));
+    }
+
+    #[test]
+    fn privileged_effects_are_critical_risk() {
+        for entry in base_entries() {
+            if entry.effect.is_privileged() {
+                assert_eq!(entry.risk, RiskClass::Critical, "{}", entry.name);
+            }
+        }
+    }
+
+    #[test]
+    fn read_only_entries_never_mark_durable() {
+        for entry in base_entries() {
+            if entry.effect.is_read_only() {
+                assert!(!entry.durable, "{}", entry.name);
+            }
+        }
+    }
+}
