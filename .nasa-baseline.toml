@@ -148,11 +148,6 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-core/src/plugin.rs"
-rule = "NASA-1"
-count = 1
-
-[[allow]]
 file = "crates/perspt-dashboard/build.rs"
 rule = "NASA-2"
 count = 1
@@ -180,11 +175,6 @@ count = 1
 [[allow]]
 file = "crates/perspt-store/src/schema.rs"
 rule = "NASA-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-store/src/store.rs"
-rule = "NASA-1"
 count = 1
 
 [[allow]]
