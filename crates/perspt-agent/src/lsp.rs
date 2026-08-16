@@ -17,6 +17,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 
 use perspt_core::plugin::LspConfig;
+use perspt_sandbox::{ProcessPolicy, ProcessSandbox};
 
 /// Type alias for pending LSP requests map
 type PendingRequests = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value>>>>>;
@@ -132,14 +133,22 @@ impl LspClient {
     ) -> Result<()> {
         log::info!("Starting LSP server: {} {:?}", cmd, args);
 
-        let mut child = Command::new(cmd)
-            .args(args)
-            .current_dir(workspace_root)
+        let prepared = ProcessSandbox::new(
+            cmd,
+            args.to_vec(),
+            ProcessPolicy::inspection(workspace_root),
+        )?
+        .prepare_invocation()?;
+        let mut child = Command::new(&prepared.program);
+        child
+            .args(&prepared.args)
+            .current_dir(&prepared.working_dir)
+            .env_clear()
+            .envs(&prepared.environment)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context(format!("Failed to start {}", cmd))?;
+            .stderr(Stdio::piped());
+        let mut child = child.spawn().context(format!("Failed to start {}", cmd))?;
 
         let stdin = child.stdin.take().context("No stdin")?;
         let stdout = child.stdout.take().context("No stdout")?;
@@ -831,7 +840,7 @@ impl LspClient {
 impl Drop for LspClient {
     fn drop(&mut self) {
         if let Some(ref mut process) = self.process {
-            drop(process.kill());
+            let _ = process.start_kill();
         }
     }
 }

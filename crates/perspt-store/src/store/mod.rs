@@ -23,5 +23,7 @@ mod telemetry;
 mod tests;
 
 pub use handle::*;
-pub use psp9_ledger::Psp9LedgerRow;
+pub use psp9_ledger::{
+    Psp9CalibrationEpochRow, Psp9ExternalEffectRow, Psp9LedgerRow, Psp9VerdictRow,
+};
 pub use rows::*;
