@@ -50,6 +50,35 @@ impl Default for OperationalSafetyBarrier {
 }
 
 impl OperationalSafetyBarrier {
+    /// Measure the path-derived channels over the *realized* mutated paths of
+    /// a candidate, for `CandidateStateWitness::barrier_channels`. This is
+    /// what lets `evaluate` observe the materialized candidate instead of
+    /// only the declared proposal (Paper I Def. 12.2): a witness built from
+    /// these readings carries `h(x)` as measured on disk.
+    pub fn measure_channels<'a>(
+        &self,
+        mutated_paths: impl IntoIterator<Item = &'a str>,
+    ) -> std::collections::BTreeMap<String, f64> {
+        let mut protected = false;
+        let mut secret = false;
+        let mut escape = false;
+        for path in mutated_paths {
+            let touches = |marker: &str| path.contains(marker.trim_end_matches('/'));
+            protected |= self.protected_paths.iter().any(|p| touches(p));
+            secret |= self.secret_markers.iter().any(|m| touches(m));
+            escape |= path.starts_with('/') || path.split('/').any(|c| c == "..");
+        }
+        let boolean = |unsafe_now: bool| if unsafe_now { 1.0 } else { 0.0 };
+        std::collections::BTreeMap::from([
+            (
+                "protected-path-modification".to_string(),
+                boolean(protected),
+            ),
+            ("secret-exposure".to_string(), boolean(secret)),
+            ("sandbox-escape".to_string(), boolean(escape)),
+        ])
+    }
+
     /// Evaluate every channel against the proposal's candidate transition.
     fn readings(&self, proposal: &EffectProposal) -> Vec<ChannelReading> {
         let path = proposal.path.as_deref().unwrap_or("");
