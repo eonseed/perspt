@@ -541,8 +541,8 @@ runs.
        ``AcceptedTrajectory::decision_bound``
      - System 6 logs and enforces it; ensembles consume it (Gate M)
    * - II: Theorem 3 sparse feedback
-     - turn budget ``N`` + mandatory verifier sweep
-     - System 6 startup rejection of unbounded-unverified configs
+     - turn budget ``N`` + bounded ``VerificationCadence`` + mandatory gate sweep
+     - System 6 rejects unbounded-unverified configs and enforces ``H``
    * - II: Lemma 2 spectral slope
      - ``spectral::VerificationGraph::mu``,
        ``edge_mu_sensitivity``
@@ -557,7 +557,8 @@ runs.
      - System 12 routes every model-issued call through it
    * - III: Thm 1–2 confinement
      - ``Capability::{grants, attenuates, delegate}``
-     - Systems 12–13, including external tool registration
+     - Systems 12–13, including child-role leases, authority epochs, durable
+       grant ceilings, and external tool registration
    * - III: Cor. 4.2 blast radius
      - kernel tables outside proposal reach
      - Systems 12–13; the ``yolo`` mode redefinition
@@ -569,7 +570,7 @@ runs.
    * - III: Thm 5 conformal budgets
      - ``conformal::{conformal_threshold, decide,
        is_drifted, CalibrationState}``
-     - System 16, keyed per route
+     - System 16, keyed per complete stratum with shadow/audit epochs
    * - III: Def. 8.1, Thm 6 recovery
        termination
      - ``scheduler::{recovery_is_total,
@@ -579,7 +580,7 @@ runs.
    * - III: Thm 7 replay determinism
      - ``ledger::{record_observation,
        replay_accepted_trajectory}``
-     - System 14; credential-free replay
+     - System 14; credential-free replay and recorded context compaction
    * - III: Thm 8 commuting commits
      - ``scheduler::{Footprint, Resource, LeaseTable}``
      - System 15; footprints finally have a source
@@ -709,10 +710,16 @@ claiming agent support while exposing no governed tools or hard-gate policy:
        fn tool_entries(&self, scope: &DomainScope) -> Vec<ToolEntry>;
        fn hard_gate_policy(&self, scope: &DomainScope) -> HardGatePolicy;
        fn verifier_suite(&self, scope: &DomainScope) -> VerifierSuiteSpec;
+       fn safety_barrier(&self, scope: &DomainScope) -> SafetyBarrierDisposition;
        fn adjudication_brief(&self, _c: &CandidateRef) -> Option<AdjudicationBrief> { None }
        fn proxy_geometry(&self, _scope: &DomainScope)
            -> Option<&dyn ProxyGeometry> { None }
    }
+
+``SafetyBarrierDisposition`` is required even when it contains
+``NotClaimed(reason)``. This prevents a domain from inheriting a vacuous barrier
+default; autonomous certification requires ``Registered(BarrierSpec)`` and the
+runtime evidence specified by system 12.
 
 The division of labour, using the two domains that exist:
 
@@ -732,8 +739,10 @@ The division of labour, using the two domains that exist:
        argument shapes), the coding residual schema and energy weights, and
        a registry of ``lang::LanguageAdapter`` implementations that normalize
        raw diagnostic text into typed ``ResidualEvent``\ s with explicit
-       ``IndependenceRoute`` provenance. The verifier-suite boundary, not the
-       adapter alone, emits matched ``VerdictRecord``\ s for system 8.
+       ``IndependenceRoute`` provenance. It also declares the bounded
+       verification cadence and versioned operational safety channels. The
+       verifier-suite boundary, not the adapter alone, emits matched
+       ``VerdictRecord``\ s for system 8.
    * - ``perspt-research``
      - The second-domain conformance check. It inherits the tool loop, kernel,
        ledger, portfolio, ensembles, and adjudication *for free*; it supplies
@@ -1331,11 +1340,33 @@ Properties the implementation must preserve:
   the gate formula, capability predicate, budget accounting, or terminal-state
   definitions. This is Gate S.
 
-Coding sets a finite ``H`` and may set ``H=1`` for high-risk mutations. Cheap
-sensors (syntax parse, LSP diagnostics on touched files) run at that interleaved
-boundary; expensive sensors (build, test, runtime smoke) run at a candidate gate
-boundary. Both paths emit the same versioned residual schema so energy remains
-comparable.
+Coding uses a **bounded adaptive verification cadence**, not a fixed choice
+between "after every call" and "only at the end." Three boundaries are
+normative:
+
+* **Effect boundary, every mutation.** Re-read changed artifacts, verify state
+  witnesses and exact postconditions, recompute the operational safety barrier,
+  and incrementally parse every touched source file. This boundary is part of
+  realization/admissibility and is never debounced.
+* **Interleaved evidence boundary.** Run touched-file LSP/type diagnostics after
+  at most ``H`` admitted mutations, and immediately after a manifest or exported
+  interface change, a high/critical-risk effect, a hand-off/spawn, or an
+  explicit verifier request. ``H=1`` for high/critical risk. A domain may choose
+  a smaller bound; runtime tuning may never raise it above the declared maximum.
+* **Gate boundary.** Before every descent/hard-pass decision, checkpoint,
+  delivery, or graph-revision decision, run the complete verifier suite required
+  by ``HardGatePolicy``. Builds, tests, and runtime smoke normally live here.
+
+``perspt-sdk`` adds a serializable ``VerificationCadence`` to
+``VerifierSuiteSpec``; ``perspt-coding`` supplies the language default and
+``perspt-core::plugin::VerifierProfile`` supplies available commands. LSP
+servers are long-lived and receive incremental document changes; commuting
+edits from one tool batch may share one LSP flush, but the batch counts each
+mutation against ``H``. Cadence telemetry records verifier latency, cache hits,
+residuals discovered per boundary, and escaped defects. These measurements may
+optimize work *within* the bounds; they cannot create an unbounded unchecked
+interval. All boundaries emit the same versioned residual schema so energy
+remains comparable.
 
 7. Heterogeneous Proposal Ensembles
 ===================================
@@ -1923,7 +1954,7 @@ amount. This PSP replaces that shortcut with explicit evaluators:
    pub struct BarrierWitness {
        pub h_before: f64,
        pub expected_h_after_upper: f64,
-       pub certified_increment: f64, // c_c
+       pub certified_increment: f64, // invocation c_t, bounded by capability c_c^max
        pub unsafe_threshold: f64,    // 1 in Paper III
        pub evidence_refs: Vec<String>,
    }
@@ -1948,6 +1979,54 @@ declared and the evaluator proves the candidate remains below 1. Setting
 Human approval is evidence of authorization, not evidence that the barrier
 inequality holds.
 
+The coding domain supplies a narrow, useful **operational safety barrier**
+rather than pretending to solve semantic correctness with :math:`h`. Let
+:math:`h_j(x)\in[0,\infty)` be versioned policy channels whose unsafe boundary
+is 1, covering at least protected-path modification, sandbox escape, secret
+exposure, unapproved network reachability, dependency-policy violation, and
+repository-size/resource limits. Define
+
+.. math::
+
+   h(x)=\max_j h_j(x),
+   \qquad
+   c_t=\max\{0,h(x')-h(x)\}.
+
+Correctness evidence such as compiler errors and test failures remains in
+:math:`V`; it is not duplicated into :math:`h`. For a fully materialized
+deterministic candidate, :math:`c_t` is the exact conditional increment. The
+kernel requires :math:`h(x_0)<1`, :math:`h(x')<1`,
+:math:`c_t\le c_c^{\max}` from the registered capability contract, and
+``spent + c_t <= rho_h`` before promotion. Spending is monotone: later barrier
+decrease does not refund budget and therefore cannot finance oscillation.
+Read-only effects that leave all channels unchanged have :math:`c_t=0` by
+measurement, not by declaration.
+
+The ledger reports the Paper III bound in its complete form,
+
+.. math::
+
+   \Pr[\exists t\le T:x_t\in\mathcal U]
+   \le \min\left\{1,h(x_0)+\sum_{t<T}c_t\right\}
+   \le \min\{1,h(x_0)+\rho_h\}.
+
+Thus :math:`\rho_h` is an increment budget, not by itself a total-risk target.
+A policy targeting total bound :math:`\rho_{\mathrm{total}}` must require
+:math:`\rho_h\le\rho_{\mathrm{total}}-h(x_0)`. For exact deterministic Boolean
+channels, the stronger direct invariant :math:`h(x_t)<1` holds for every
+committed state; the probability bound matters when a registered channel has
+certified residual randomness.
+
+Each channel records its policy version, evaluator version, inputs, value before
+and after, and evidence references. Boolean invariants are the special case
+:math:`h_j\in\{0,1\}`. A stochastic channel may use an expected upper bound only
+when its registered certificate supplies that bound over the active calibration
+domain; otherwise the effect is ``ConfinementOnly``, ``HumanApproved``, or
+denied. This barrier certifies only the declared operational unsafe set. It
+does not claim that code below the boundary is correct, secure against every
+vulnerability, or free of escaped defects. The old shortcut "deterministic
+transition, therefore :math:`c_c=0`" is explicitly prohibited.
+
 The full kernel produces an ``AdmissibilityWitness`` that records authority,
 contract, effect, barrier, and risk clauses plus their certification states.
 **No durable effect may occur without a complete witness; an absent clause is
@@ -1966,11 +2045,14 @@ evidence and their own statistical hypotheses.
 **The barrier allowance and the risk debit are the same number.** Definition
 3.2's two numeric clauses are :math:`\mathbb{E}[h(x')\mid x,p]\le h(x)+c_c` and
 :math:`\text{spent}(x)+c_c\le\rho_{\text{cap}}`, and the :math:`c_c` in the
-second is the :math:`c_c` in the first. An implementation with a separate
+second is the :math:`c_c` in the first. For the event-specific deterministic
+specialization above, ``BarrierWitness.certified_increment`` is :math:`c_t` and
+the capability declares its ceiling :math:`c_c^{\max}`; the invocation uses
+:math:`c_t` as Definition 3.2's certified increment. An implementation with a separate
 ``risk_cost`` field alongside a barrier increment has two numbers where the
 definition has one, and can debit a budget for an increment it never certified —
 which is precisely the shortcut this system removes. ``BarrierWitness``
-therefore supplies :math:`c_c` and the kernel debits exactly that.
+therefore supplies the invocation's increment and the kernel debits exactly that.
 :math:`\rho_{\text{cap}}` is what keeps Theorem 3's horizon-linear sum
 :math:`\sum_t\rho_t` finite within a session: the per-capability budget bounds
 accumulated certified increment, so a long session cannot buy unbounded risk one
@@ -2011,6 +2093,75 @@ Three requirements make the confinement theorems mean something in practice:
   Those fields are part of Perspt's effective :math:`E_c` and MUST participate
   in the preorder before Gate L can pass. Empty child scope means unbounded only
   when the parent is also unbounded; it must never widen a bounded parent.
+
+**Subagents receive role templates intersected with parent authority, never a
+copy of the parent capability.** The scheduler chooses one of three defaults:
+
+.. list-table:: Default child authority
+   :header-rows: 1
+   :widths: 18 40 42
+
+   * - Role
+     - Default effects
+     - Explicitly absent
+   * - ``Explorer``
+     - ``ReadFile``, ``Search``, ``List``, ``GitRead``, and read-only LSP over
+       the node footprint
+     - Every mutation, network, shell, approval, graph update, and delegation
+   * - ``Worker``
+     - Explorer rights plus candidate-overlay writes to named paths and the
+       exact verifier commands declared by the active language profile
+     - Durable delivery, arbitrary shell, network, dependency mutation,
+       ``GitWrite``, policy/graph update, approval, and delegation
+   * - ``Reviewer``
+     - Read-only candidate, diff, ledger evidence, and verifier results
+     - All mutation and delegation
+
+Every child grant is non-delegable, finite in calls/tokens/time, scoped to a
+workspace id plus node revision/generation, and expires no later than the parent.
+Its approval policy is at least as strict and its risk budget no larger. A
+worker writes only to a disposable candidate overlay and returns a proposal;
+the parent does not gain the ability to bypass the ordinary realization and
+gate. A child needing more authority returns ``NeedsCapability``. It cannot
+approve its own request, and the model cannot select a more privileged role.
+
+The route is chosen independently from authority. ``Explorer`` defaults to the
+cheapest capable route, preferring a configured local model; ``Worker`` uses the
+node's implementation route; ``Reviewer`` prefers a separately measured review
+route. Route failure may change the model but never the child capability. Only
+the trusted scheduler/root actor receives ``SpawnAgent`` by default, which
+prevents recursive fan-out while still supporting parallel exploration and
+implementation.
+
+**Live capabilities are session-epoch leases and never survive serialization.**
+A ledger may record a capability id and its historical witness, but it never
+stores a reusable capability or provider credential. ``Capability`` gains
+``session_id``, ``workspace_id``, ``authority_epoch``, and optional
+``revision_id``/``generation`` bindings. The kernel checks all bindings and the
+current durable epoch atomically with every effect promotion.
+
+Replay still needs the authority facts used by the decision, so each witness
+content-addresses a canonical **non-authoritative capability descriptor**
+(effects, scopes, budgets, approval policy, lineage, bindings, and epoch). The
+replay reducer may inspect that descriptor but the live kernel never accepts a
+deserialized descriptor as authority; only a handle minted into the current
+``KernelState`` can authorize an effect.
+
+Durable user intent is represented separately as a signed ``GrantPolicy``:
+effect/path/command/network ceilings, maximum risk and call budgets, expiry,
+approval strength, repository identity, and revocation epoch. On resume Perspt
+re-authenticates as required, loads current organization/user policy, and mints
+new capability ids from the **intersection** of that policy, the saved grant,
+and current workspace facts. Session approvals are not durable grants. If the
+policy store or workspace identity cannot be verified, resume is read-only or
+fails closed for durable effects.
+
+Revocation increments the relevant durable ``authority_epoch`` and cancels
+matching worker leases. In-flight preparation may finish, but promotion fails
+when its stale epoch is compared transactionally at the ledger sequencer. This
+gives resumed and parallel sessions one revocation boundary without relying on
+best-effort process notification. Persistent grants are opt-in, visible, timed,
+and revocable; the secure default is session-only authority.
 
 **Denials are evidence, not errors.** A denied proposal produces a typed
 residual — ``ResidualClass::CapabilityDenied`` or
@@ -2135,6 +2286,54 @@ concrete Perspt surfaces:
      - Ordered noncommuting durable turns
      - Scheduler serializes conflicting footprints (system 15).
 
+**Conversation compaction is a recorded context projection, never ledger
+deletion.** ``Conversation`` is rebuilt for each model turn from the immutable
+ledger and artifact store. A deterministic ``ControlFrame`` is always inserted
+verbatim and is never summarized: active goal and node generation, accepted
+checkpoint/root, work-graph revision, capability ids and authority epoch,
+remaining budgets, tool schemas, hard-gate policy, current residual vector, and
+all unresolved tool calls. Closed tool-call/result pairs may be replaced in the
+model context by content-addressed references; their complete arguments and
+results remain in the ledger.
+
+When packed context reaches a configurable fraction of a route's context window
+(default 70%, leaving output and emergency-verification reserve), a
+provider-neutral ``ContextCheckpoint`` records:
+
+.. code-block:: rust
+
+   pub struct ContextCheckpoint {
+       pub parent: Option<CheckpointId>,
+       pub covered_event_range: EventRange,
+       pub covered_event_root: ContentHash,
+       pub accepted_state_root: ContentHash,
+       pub graph_revision: RevisionId,
+       pub authority_epoch: u64,
+       pub artifact_refs: Vec<ContentHash>,
+       pub unresolved_call_ids: Vec<String>,
+       pub deterministic_digest: ContextDigest,
+       pub narrative_summary: Option<RecordedObservation>,
+   }
+
+The deterministic digest carries decisions, residual changes, accepted/rejected
+candidate ids, file/symbol references, and outstanding obligations. An optional
+cheap-model narrative improves recall but is an untrusted recorded observation;
+it cannot supply a state witness, authority, tool result, or verifier verdict.
+Before use, a structural validator checks event-range coverage, hashes, open
+call/result pairing, artifact existence, and equality of the current accepted
+root, graph revision, and authority epoch. A stale checkpoint is rebuilt, not
+patched by a model.
+
+Compacted context is provider-neutral, but it may cross providers only when the
+destination route's confidentiality contract authorizes every projected item
+and the optional summary. The compactor itself is routed under the same content
+policy, with a local route preferred for confidential work. Audit replay
+consumes the exact recorded checkpoint and summary and performs no new model
+call. Hierarchical
+checkpoints allow old narrative detail to age out while preserving the control
+frame and exact evidence on demand. This gives long-running agents bounded
+prompt cost without weakening Theorem 7's recording obligation.
+
 15. Coordination and Bounded Parallelism
 ========================================
 
@@ -2228,9 +2427,12 @@ not bypass readiness, leases, provider limits, or capability attenuation.
 *Owner:* ``perspt-sdk::conformal``\ *; calibration sets persisted by*
 ``perspt-store``\ *.*
 
-This closes PSP-8 Phase 8 / Gate I. It is required only when Perspt commits
-mutating effects autonomously without per-effect approval — that is, in ``yolo``
-mode and in ``balanced`` mode for medium-risk effects.
+This closes PSP-8 Phase 8 / Gate I. It is required when Perspt autonomously
+commits a mutating effect whose declared unsafe event is not completely
+discharged by a deterministic contract/barrier — normally ``yolo`` and
+``balanced`` medium-risk operation. Deterministic proof and calibrated
+statistical evidence are distinct admissibility profiles, not two names for the
+same claim.
 
 The kernel holds a calibration set of ``(score, unsafe)`` pairs drawn from the
 deployment's own ledger. The score is the validator's safety evidence for the
@@ -2294,6 +2496,42 @@ Therefore:
   inflated threshold without exchangeability is conservative behavior, not a
   conformal certificate. During the stale window ``bound_is_asserted()`` is
   false and the UI SHALL report the window as uncertified.
+
+**Cold start is resolved as approval plus active local calibration, not a
+shipped safety prior.** ``CalibrationReadiness`` has four explicit states:
+``InsufficientSamples``, ``Shadow``, ``Active``, and ``Stale``. Before
+``Active``, read-only work and effects proved safe by a separate deterministic
+contract/barrier continue automatically; other mutations require approval. The
+candidate score, counterfactual threshold decision, route, and later outcome are
+still recorded in shadow mode, so normal work builds the local set instead of
+blocking the agent.
+
+Perspt reserves a configurable audit budget for a uniformly sampled subset of
+*all* proposals in each stratum, selected before their outcome is known. Those
+proposals receive a stronger delayed oracle (full tests, later regression
+window, security scan, or human audit) whether the current policy would accept
+or reject them. Uniform sampling preserves the proposal population needed by
+Theorem 5. Risk-targeted extra audits are useful diagnostics but do not enter
+the conformal certificate unless a separately proved weighted method is
+implemented. Human approval alone is not an ``unsafe`` label.
+
+Calibration operates in immutable epochs. One epoch's labeled records fit the
+next threshold; deployment records do not retroactively change the threshold
+under which they were decided. At the theorem's sample floor, Perspt may activate
+the exact finite-sample certificate — no arbitrary larger ``n`` is presented as
+mathematically necessary — but the UI also reports threshold granularity,
+acceptance rate, audit coverage, label source, and drift state so an operationally
+useless certificate is visible as such.
+
+Bundled or organization-wide records are never certificates by default. They
+may seed routing and shadow thresholds only. Cross-project data may enter a
+certificate solely when the organization predeclares a calibration population
+that includes those projects, gives it a signed ``CalibrationDomainId``, and
+the complete ``CalibrationStratum`` (including that id) remains unchanged.
+Post-hoc pooling because one project lacks samples is prohibited. An unlabeled
+validator pair is likewise excluded from conjunctive certification and treated
+as fully dependent only for conservative route planning; it receives no numeric
+:math:`\rho_{\text{eff}}` claim.
 
 This is a real cost of the multi-provider design and is stated as one: a
 portfolio that switches routes frequently will spend more time uncertified than
@@ -2378,11 +2616,15 @@ The platform is visible, interruptible, auditable, and controllable.
        - Auto-approve read-class effects only. Every mutating effect asks.
      * - ``balanced``
        - Auto-approve read and workspace-scoped medium-risk effects under a
-         calibrated budget; ask for high-risk and privileged effects.
+         calibrated budget or a complete deterministic safety contract; ask
+         for high-risk, privileged, and cold-start uncertified effects.
      * - ``yolo``
-       - Auto-approve everything the *capability set* permits. This bounds
-         damage by Corollary 4.2 rather than by trust: ``yolo`` never grants
-         out-of-workspace, network, or privileged capabilities implicitly.
+       - Remove prompts, not predicates: auto-commit effects that both the
+         *capability set* permits and the configured certified/deterministic
+         profile admits. An uncertified effect is denied or queued, never
+         silently accepted. This bounds damage by Corollary 4.2 rather than by
+         trust: ``yolo`` never grants out-of-workspace, network, or privileged
+         capabilities implicitly.
 
 * **Local and sovereign operation.** A portfolio consisting only of local
   providers (``ollama``, an OpenAI-compatible local server) is a supported,
@@ -2398,9 +2640,15 @@ The platform is visible, interruptible, auditable, and controllable.
   keys and compensations, ``perspt ledger rollback`` operates on accepted turns,
   and the rollback boundary doubles as the delayed unsafe-label source for
   systems 8 and 16.
+* **Operational controls.** Status surfaces show the active verification
+  cadence, mutations since the last evidence boundary, context-window reserve,
+  checkpoint lineage, calibration readiness/audit coverage, child leases, and
+  authority epoch. Persistent grants are explicit records with owner, scope,
+  expiry, and revoke action; there is no generic "remember approval" checkbox.
 * **New commands.** ``perspt replay <session>`` (deterministic, credential-free
   replay and head comparison), ``perspt providers``, ``perspt portfolio``,
-  ``perspt tools``.
+  ``perspt tools``, ``perspt grants list|create|revoke``, and
+  ``perspt context inspect``.
 
 .. rubric:: Execution Mode Coexistence
 
@@ -2514,18 +2762,24 @@ falsifies it. Gates continue PSP-8's lettering.
      - Any durable effect in the ledger without a preceding
        complete ``AdmissibilityChecked`` witness and explicit
        ``AdmissibilityProfile``; any absent clause defaulted to true; or any
-       ``SrbnCertified`` decision whose five clauses are not all satisfied.
+       ``SrbnCertified`` decision whose five clauses are not all satisfied or
+       whose :math:`c_t` differs from the recorded barrier increase.
    * - L
      - Authority confinement (Thm 1, 2)
      - A committed effect outside the initial effect closure
        :math:`\text{Eff}^*`, or a delegated capability that does not attenuate
        its parent, or a capability minted from proposal payload data, or an
-       external tool registration that widens authority.
+       external tool registration that widens authority; a child that can
+       self-approve/delegate or write outside its candidate overlay; a live
+       capability serialized for resume; or an effect promoted under a stale
+       authority epoch.
    * - M
      - Bounded harness (Paper II Lemma 1, Thm 3)
      - Gate decisions exceeding :math:`\lfloor V_0/\rho_{\text{gate}}\rfloor + B + 1`, or a
        configuration accepted at startup that permits unbounded unverified
-       turns, or an ensemble candidate that did not consume a gate decision.
+       turns, a mutation count exceeding ``H`` without the interleaved evidence
+       boundary, a required risk/semantic boundary skipped, or an ensemble
+       candidate that did not consume a gate decision.
    * - N
      - Terminating recovery (Thm 6)
      - A cascade exceeding ``b + k`` steps; a failure observation with no
@@ -2539,7 +2793,10 @@ falsifies it. Gates continue PSP-8's lettering.
      - Exact replay (Thm 7)
      - A committed transition depending on an unrecorded observation, a
        replayed head hash differing from the recorded head, or a replay that
-       requires provider credentials.
+       requires provider credentials; a compacted turn whose ``ControlFrame``
+       or unresolved calls cannot be reconstructed exactly; or a stale
+       ``ContextCheckpoint`` used after its state root, graph revision, or
+       authority epoch changed.
    * - P
      - Coordination minimality (Thm 8)
      - Two concurrently executed turns with conflicting semantic footprints; a
@@ -2549,12 +2806,14 @@ falsifies it. Gates continue PSP-8's lettering.
    * - Q
      - Calibrated autonomy (Thm 5)
      - Autonomous commitment of a mutating effect while
-       ``bound_is_asserted()`` is false and the effect is not routed to the
-       approval policy; a claimed :math:`\rho_c` not backed by a calibration
+       ``bound_is_asserted()`` is false, no complete deterministic safety
+       contract applies, and the effect is not routed to the approval policy;
+       a claimed :math:`\rho_c` not backed by a calibration
        set; a calibration set applied across ``CalibrationStratum`` values; a
        target :math:`\rho_c < 1/(n+1)` reported as a satisfied budget rather
-       than as reject-all; or a non-strict acceptance rule that admits ties at
-       the threshold.
+       than as reject-all; a non-strict acceptance rule that admits ties at the
+       threshold; post-hoc cross-project pooling; or a shadow/stale epoch
+       presented as ``Active``.
    * - R
      - Honest diagnostics (Lemma 2, Cor. 5.2)
      - A displayed validator, model, or provider count presented as a safety
@@ -2673,8 +2932,11 @@ to be rediscovered in review.
        ``capability``, ``command``, ``ledger``, ``conformal``, ``spectral``,
        ``independence``, ``exploration``, ``scheduler``, ``observability``
        gain live consumers; ``independence`` gains matched-stratum estimates and
-       confidence bounds and removes ``attenuate_weight``. ``capability`` gains explicit contract/barrier
-       evaluators, and ``domain`` gains optional ``ProxyGeometry`` plus a
+       confidence bounds and removes ``attenuate_weight``. ``capability`` gains
+       explicit contract/barrier evaluators, child-role leases, authority
+       epochs, and grant-policy ceilings. ``ledger`` gains provider-neutral
+       context checkpoints. ``domain`` gains ``VerificationCadence``, an
+       operational safety barrier, optional ``ProxyGeometry``, and a
        theorem-specific ``RealizabilityClaim``. **No new
        dependency on any Perspt crate, on** ``genai``\ **, or on I/O.**
    * - ``perspt-core``
@@ -2695,13 +2957,16 @@ to be rediscovered in review.
        for all effects, candidate-overlay checkpoints, the scheduler/lease
        worker pool, and the ledger emitter. The existing ``petgraph::DiGraph``
        remains a compatibility-free implementation detail until execution is
-       moved to SDK ``WorkGraphRevision`` snapshots.
+       moved to SDK ``WorkGraphRevision`` snapshots. A context compiler rebuilds
+       provider-neutral turns from ledger checkpoints; a child supervisor mints
+       role-scoped capability leases.
    * - ``perspt-coding``
      - ``tool_entries`` for the coding domain; replace closed
        ``CodingLanguage``/``adapter_for`` dispatch with a ``LanguageId``-keyed
        adapter registry; adapters gain hard-gate classification and residual
-       parsing for new tool outputs. Correction directions for the new residual
-       classes. Still depends on ``perspt-sdk`` alone.
+       parsing for new tool outputs, verification cadence, and operational
+       safety channels. Correction directions for the new residual classes.
+       Still depends on ``perspt-sdk`` alone.
    * - ``perspt-research``
      - Implements the new required tool, verifier-suite, and hard-gate methods.
        It is the second-domain conformance check: if this requires
@@ -2715,11 +2980,15 @@ to be rediscovered in review.
        cwd, environment scrubbing, timeout, output capture.
    * - ``perspt-store``
      - Ledger event tables, idempotency log, external-effect log, verdict
-       records, per-route calibration sets.
+       records, context checkpoints, calibration/audit epochs, signed grant
+       policies, and durable authority epochs. Live capabilities and provider
+       credentials are never stored.
    * - ``perspt-tui`` / ``perspt-dashboard``
      - Live proposal stream with serving route, per-turn residual vector and
        energy, capability audit, provider matrix, :math:`\rho_{\text{eff}}`
-       and :math:`\Phi(W)` gauges, replay view.
+       and :math:`\Phi(W)` gauges, calibration readiness/audit coverage,
+       persistent-grant/revocation controls, context-checkpoint inspection, and
+       replay view.
 
 **Performance.** The tool loop trades one large generation for several small
 ones: more requests and lower total tokens per node on edit work, higher latency
@@ -2729,7 +2998,10 @@ provider supports it, which is why routing is sticky within a node. Ensembles
 and adjudication are opt-in and triggered, not always-on; their cost is bounded
 by ``EnsemblePolicy::budget``. Kernel admissibility is in-process and
 deterministic; its cost is negligible against a tool call. Spectral,
-independence, and calibration computation runs off the critical path.
+independence, and calibration computation runs off the critical path. Long-lived
+incremental LSP sessions, bounded adaptive verifier flushes, and hierarchical
+context checkpoints are the primary latency/token controls; none changes a
+gate, authority decision, or recorded observation.
 
 **Dependencies.** One version bump and two additions, all first-party:
 ``srbn`` and ``srbn-serde`` move 0.1.1 → 0.3.0, and ``srbn-ledger`` 0.3.0 joins
@@ -2747,13 +3019,20 @@ off), ``execution_mode`` (default ``bundle`` at first release, ``auto`` after
 the parity gate), ``max_turns_per_node``, ``descent_tolerance``,
 ``cascade_budget``, ``max_parallel`` (default 1), an unlabeled-validator policy
 (default ``uncertified``), ``risk_budget`` per capability,
-``calibration_target_rho``, and ``confidential`` path patterns.
+``calibration_target_rho``, per-stratum ``audit_rate``, context-checkpoint
+threshold/reserve, ``persistent_grants`` (default false), and ``confidential``
+path patterns. Per-language ``VerificationCadence`` defaults come from the
+domain/plugin join and may be tightened by configuration, never loosened beyond
+the registered maximum.
 
 **Data structures.** Additions are the ``perspt-core`` model-plane and provider
 types, ``perspt-sdk::toolset::{ToolEntry, ToolCatalog, ToolOrigin}``,
 ``RouteObjective``, ``EnsemblePolicy``, new ``ResidualClass`` variants, and
 ``ExecutionMode``, ``NodeTerminalOutcome``, ``CalibrationStratum``,
-``ContractEvaluator``, ``BarrierEvaluator``, and optional ``ProxyGeometry``.
+``CalibrationReadiness``, ``VerificationCadence``, ``ContextCheckpoint``,
+``ControlFrame``, ``ContractEvaluator``, ``OperationalSafetyBarrier``,
+``BarrierEvaluator``, ``ChildRole``, ``CapabilityLease``, ``GrantPolicy``, and
+optional ``ProxyGeometry``.
 ``ModelRoute`` and ``ModelTierConfig`` change their model fields from ``String``
 to ``ModelId``. PSP-8 ledger, graph, capability, and independence types are
 revised where the code audit above found their current contracts insufficient.
@@ -2844,10 +3123,11 @@ computable, but safe effect preconditions are not. ``edit_file`` and
   falsifiable — and would put a third party inside the trusted base that
   Theorems 1–2 require Perspt to control.
 * *Gate on the barrier only, skip conformal calibration.* Acceptable for
-  ``cautious`` and ``balanced``, and Gate Q is scoped to autonomous commitment
-  only. But asserting a risk budget without calibration would make ``yolo``
-  mode's safety claim an assumption rather than a measurement, which the trilogy
-  explicitly refuses.
+  an effect only when a deterministic barrier/contract completely discharges
+  the same declared unsafe event. Otherwise Gate Q routes autonomous mutation
+  to approval or denial. Asserting a probabilistic risk budget without
+  calibration would make ``yolo`` mode's safety claim an assumption rather than
+  a measurement, which the trilogy explicitly refuses.
 * *Ship parallelism first.* Rejected: without footprints from tool proposals, the
   commutativity rule has nothing to compute over, and parallel unmediated effects
   are strictly worse than sequential ones.
@@ -2950,14 +3230,17 @@ gate lands with the code it constrains.
    * - 4
      - Live ``toolloop`` and directed correction; kernel routing for **all**
        tool-loop and bundle effects; contract and barrier evaluators; command
-       IR; state witnesses; ``perspt-sandbox`` enforcement; denial residuals.
-     - J, K, L
+       IR; operational safety channels; ``VerificationCadence``; state
+       witnesses; child-role capability leases and authority epochs;
+       ``perspt-sandbox`` enforcement; denial residuals.
+     - J, K, L, M
      - No durable effect without a complete record of all five clauses and an
        explicit ``AdmissibilityProfile``; every ``SrbnCertified`` effect has
        five passing clauses; the current hardcoded barrier pass is removed;
        attenuation and payload-minting adversarial tests cover path, command,
        network, risk, approval, budget, expiry, and delegability; no
-       admissibility decision reads model identity.
+       admissibility decision reads model identity; no cadence exceeds ``H``;
+       child workers cannot durably deliver or self-escalate.
    * - 5
      - Recovery lattice; total classification; provider failover at level 1;
        measured plateau driving graph revision at level 2; optional
@@ -2970,11 +3253,13 @@ gate lands with the code it constrains.
        it; exhausting ``b`` below level ``k`` forces strict escalation.
    * - 6
      - Event-sourced ledger; ``record_observation`` refusal rule; idempotency
-       and external-effect logs; ``perspt replay``.
-     - O
+       and external-effect logs; ``ControlFrame``/``ContextCheckpoint`` context
+       compiler; durable ``GrantPolicy`` and authority epochs; ``perspt replay``.
+     - L, O
      - Audit replay folds full canonical transition records to the same state
        and head with credentials removed; a tampered observation, proposal, or
-       state hash is detected.
+       state hash is detected; compaction preserves unresolved calls and the
+       control frame; a revoked epoch rejects an in-flight and resumed effect.
    * - 7
      - Portfolio routing with objectives; sticky routes; exploration phase;
        ``--exploration-only``.
@@ -3003,13 +3288,16 @@ gate lands with the code it constrains.
        per-provider limits contend only within a provider.
    * - 11
      - Per-``CalibrationStratum`` conformal calibration; drift monitor;
-       approval back-off.
+       ``CalibrationReadiness`` epochs; uniform delayed-audit sampler; shadow
+       decisions and approval back-off.
      - Q
      - Realized accepted-unsafe rate is within the reported confidence interval
        of the declared :math:`\rho_c` on held-out fixtures — Theorem 5 bounds a
        marginal expectation, so a single run's realized rate is an estimate, not
        the guarantee; the sub-feasible target :math:`\rho_c<1/(n+1)` rejects
-       everything; stale and cross-route windows reported uncertified.
+       everything; stale, shadow, imported, and cross-route windows are reported
+       uncertified; only a predeclared ``CalibrationDomainId`` permits
+       cross-project certification.
    * - 12
      - External tool registration under the kernel.
      - K, L, U
@@ -3023,7 +3311,8 @@ gate lands with the code it constrains.
        stability is claimed without Theorem 9 assumption evidence.
    * - 14
      - Parity and internal ablation benchmarks; ``Auto`` default flip; ensemble
-       defaults decided by measurement.
+       defaults, cadence bounds within registered maxima, compaction threshold,
+       and audit rate decided by measurement.
      - —
      - Parity gate passes with failures preserved and reported.
 
@@ -3037,18 +3326,25 @@ framework", extending ``perspt-sdk/tests/mechanism_checks.rs``:
 * MC-K/L: adversarial suite — unauthorized invocation, amplified delegation,
   payload-minted capability, exhausted call budget, out-of-workspace path,
   hidden shell composition inside ``run_test``, external tool registration
-  claiming an effect the session lacks, missing barrier evaluator, and a
-  deterministic transition with :math:`h(x')>h(x)+c_c`. All denied; committed
-  scopes remain inside :math:`\text{Eff}^*`.
+  claiming an effect the session lacks, missing barrier evaluator, false
+  :math:`c_c=0`, and a deterministic transition with
+  :math:`h(x')>h(x)+c_c`. Child fixtures attempt durable delivery,
+  self-approval, delegation, and revision escape; resume fixtures serialize a
+  live capability and race promotion against epoch revocation. All are denied;
+  committed scopes remain inside :math:`\text{Eff}^*`.
 * MC-M: synthetic energy trace confirming the decision bound, including an
-  ensemble round.
+  ensemble round; cadence fixtures verify per-mutation realization/parse,
+  immediate high-risk and semantic-boundary diagnostics, and no more than
+  ``H`` admitted mutations between evidence boundaries.
 * MC-N: all failure classes under an always-failing adversary, with a provider
   that always errors, terminate within ``b + k`` in one of the four Theorem 6
   classes. A companion fixture drives repeated fallback and refinement to prove
   they draw on the same pool: :math:`b` horizontal steps distributed across
   levels must exhaust the budget exactly as :math:`b` retries at level 0 do.
 * MC-O: replay equality plus tamper detection, executed with all provider
-  credentials removed.
+  credentials removed. Compaction fixtures cross provider context sizes,
+  preserve exact unresolved tool calls/control frames, rebuild stale
+  checkpoints, and detect a changed covered-event root.
 * MC-P: footprint conflict matrix, including per-provider rate-limit resources,
   which must delay but never be reported as a required serialization; a
   registered footprint whose writes exceed its reads is rejected at assembly.
@@ -3056,8 +3352,10 @@ framework", extending ``perspt-sdk/tests/mechanism_checks.rs``:
   risk against declared budget; drift injection routes uncertified mutation to
   approval; a calibration set is refused for any different stratum fingerprint;
   a target below :math:`1/(n+1)` yields reject-all and is reported as
-  insufficient calibration rather than as a satisfied budget; a score exactly at
-  the threshold is rejected.
+  insufficient calibration rather than as a satisfied budget; a score exactly
+  at the threshold is rejected. Cold-start fixtures remain ``Shadow``, collect a
+  reproducible uniform audit sample, reject post-hoc cross-project pooling, and
+  activate only the next immutable epoch after the local sample floor is met.
 * MC-R: a sensor-name graph cannot populate ``StabilityClaim.mu``; a supplied
   linear :math:`B,W` fixture reproduces :math:`2\lambda^+_{\min}(B^TWB)`.
 * MC-S: a fixture session executed under three portfolios produces identical
@@ -3093,8 +3391,10 @@ Reported per arm: task success, accepted-state correctness, **escaped-defect
 rate** measured by a held-out verifier the harness never sees, correction
 rounds, energy trace and final energy, denied-proposal counts, escalation
 frequency, :math:`\rho_{\text{eff}}` and the :math:`\kappa` matrix where
-applicable, cost, and latency. Per Paper II's threshold list, failures are
-preserved and reported rather than filtered.
+applicable, verifier latency by boundary, mutations per interleaved check,
+context tokens/checkpoint rebuilds, audit coverage, approval rate, cost, and
+latency. Per Paper II's threshold list, failures are preserved and reported
+rather than filtered.
 
 Arms 3 and 4 are justified only by measured cost, latency, availability, and
 escaped-defect outcomes against arm 2. Proposal diversity and adjudication may
@@ -3102,63 +3402,70 @@ default on only where they improve the declared objective. Mechanism checks are
 labelled as mechanism checks and never reported as evidence about model
 capability.
 
-============
-Open Issues
-============
+=========================
+Resolved Design Decisions
+=========================
+
+The six operational questions that previously blocked implementation are
+resolved normatively:
+
+1. **Verification cadence:** use the bounded adaptive three-boundary policy of
+   system 6. Realization/postconditions and incremental parse run after every
+   mutation; touched-scope diagnostics run no later than ``H`` and immediately
+   at risk/semantic boundaries; the complete suite runs before every gate.
+   Measurement tunes cost only inside those bounds.
+2. **Coding barrier:** use the versioned operational safety barrier of system
+   12, with :math:`h=\max_j h_j` over declared unsafe policy channels and exact
+   deterministic increment :math:`c_t=\max(0,h(x')-h(x))`. Correctness remains
+   in :math:`V`. Missing or stochastic-uncertified channels downgrade the
+   profile or require approval; determinism never makes :math:`c_c=0`
+   automatically.
+3. **Conversation compaction:** treat model context as a reconstructable ledger
+   projection. Preserve a verbatim ``ControlFrame``, exact unresolved tool
+   calls, and content-addressed evidence; record and structurally validate
+   hierarchical ``ContextCheckpoint`` values. Optional summaries are untrusted
+   observations. Provider crossing is allowed because the projection is
+   provider-neutral.
+4. **Calibration cold start:** ship no safety prior. Operate in shadow mode,
+   route uncertified mutations to approval unless a separate deterministic
+   contract applies, and fund uniform per-stratum delayed audits. Activate the
+   exact theorem at its computed sample floor, reporting its practical
+   granularity. Imported data is non-certifying unless it belongs to a
+   predeclared signed calibration population; post-hoc pooling is forbidden.
+   Unlabeled validator pairs receive no :math:`\rho_{\text{eff}}` claim.
+5. **Subagent defaults:** delegate role templates intersected with parent
+   authority. Explorers and reviewers are read-only; workers may mutate only a
+   named candidate overlay and run declared verifiers. Children are bounded,
+   revision-scoped, non-delegable, unable to self-approve, and routed by the
+   scheduler independently of authority.
+6. **Cross-session authority:** persist signed ``GrantPolicy`` intent, never a
+   live capability. Resume re-mints new session capability ids from the
+   intersection of current policy, grant ceilings, and workspace facts.
+   Durable authority epochs are checked atomically on promotion, so revocation
+   invalidates resumed sessions and in-flight workers. Session-only remains the
+   default.
+
+These choices favor useful autonomy without weakening a named theorem: cheap
+work continues, deterministic safety contracts avoid unnecessary prompts, and
+probabilistic claims remain unavailable until their evidence exists.
+
+=====================
+Remaining Open Issues
+=====================
 
 * **Where the adjudicator earns its cost.** Adjudication on every turn is
-  affordable only with a cheap route, and a cheap route has a high :math:`q`. The
-  right trigger — gate failure only, risk class, energy plateau — should be
-  measured rather than guessed.
-* **Cold-start validator policy.** The paper's :math:`\kappa=0.5` is a worked
-  example, not a deployable prior. The unresolved product choice is whether an
-  unlabeled pair is treated as fully correlated for routing, excluded from
-  autonomous conjunctive certification, or sent to explicit audit sampling.
-* **Delayed unsafe labels are sparse.** Conformal calibration and :math:`\kappa`
-  estimation both need ``missed`` labels, which arrive only from rollbacks and
-  later regressions. A deployment that never rolls back produces no negative
-  labels, and the estimates stay conservative by default. Whether an explicit
-  audit sampling mechanism is worth its cost is unresolved.
-* **Calibration data volume and cold start.** A fresh installation has no
-  calibration set, and per-route keying makes each route's set smaller. Theorem
-  5 fixes the hard floor — :math:`n \ge 1/\rho_c - 1`, below which the threshold
-  is reject-all — so "defer autonomous commitment until ``n`` samples exist" is
-  the only option that is not a choice. What remains open is everything above
-  that floor: how much margin over the floor to require before the certificate
-  is worth acting on, whether a conservative shipped prior is useful at all
-  given that it carries no certificate, and whether calibration can ever be
-  imported across projects — the last of which likely violates exchangeability
-  and would silently void the theorem rather than loosen it.
+  affordable only with a cheap route, and a cheap route has a high :math:`q`.
+  Gate failure, risk class, and energy plateau remain benchmark arms rather than
+  assumed defaults.
 * **Whether coding can define a useful proxy geometry.** AST edit distance or
   verifier-vector distance can be useful metrics, but neither becomes Paper I's
   :math:`\lVert r_k\rVert` unless the proposed and realized states inhabit the
   same declared analysis space and the remaining Theorem 12.4 assumptions are
   validated. Until then the field is ``not_claimed`` and Corollary 12.5 is
   disabled.
-* **Interleaved verification cadence.** Running cheap sensors after every
-  mutating call gives the tightest energy signal but multiplies LSP and parse
-  work. The right cadence is likely per-language and should be measured.
-* **Barrier functions for tool proposals.** Paper III's admissibility
-  clause includes an expected barrier increment
-  :math:`\mathbb{E}[h(x')\mid x,p] \le h(x) + c_c`. For a coding workspace a
-  usable ``h`` is not obvious. This PSP fails closed when a capability requires
-  a Paper III chance-safety claim but has no registered ``BarrierEvaluator``.
-  Deterministic hard policy and verifier contracts can still mediate effects and
-  activate confinement without pretending to satisfy Theorems 3–5.
-* **Conversation compaction across providers.** Long tool loops exceed context
-  windows, and portfolios contain models with different limits. Compaction must
-  not drop observations the ledger relies on; the likely rule is that compaction
-  summarizes the *conversation* while the ledger retains the observations, but
-  the boundary — and whether a compacted conversation may cross providers —
-  needs specification.
-* **Subagent capability and route defaults.** What a ``spawn_agent`` child holds,
-  and which provider it is routed to, are policy questions. Attenuation is
-  enforced; the defaults are not yet chosen.
-* **Cross-session capability persistence.** Whether granted capabilities survive
-  a session, and how revocation propagates to a resumed session, is unspecified.
 * **External tool protocol choice.** System 13 specifies the kernel-side
-  contract, not the wire protocol. Whether to implement MCP directly or a
-  narrower internal protocol first is open.
+  contract, not the wire protocol. MCP and a narrower internal transport can be
+  evaluated without changing authority, recording, or replay semantics.
 
 ==========
 References
