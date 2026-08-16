@@ -769,11 +769,20 @@ fn resolved_vertex_endpoint() -> Option<String> {
 fn vertex_endpoint_base(project: &str, location: &str) -> String {
     let project = project.trim();
     let location = location.trim();
+    // Default to v1beta1: current Gemini releases (e.g. gemini-3.7-flash,
+    // gemini-3.5-flash-lite) are served there, and it is a superset of v1.
+    // Override with VERTEX_API_VERSION when an older surface is required.
+    let version = std::env::var("VERTEX_API_VERSION")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && valid_vertex_segment(v).is_some())
+        .unwrap_or_else(|| "v1beta1".to_string());
     if location.eq_ignore_ascii_case("global") {
-        format!("https://aiplatform.googleapis.com/v1/projects/{project}/locations/global/")
+        format!("https://aiplatform.googleapis.com/{version}/projects/{project}/locations/global/")
     } else {
         format!(
-            "https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/"
+            "https://{location}-aiplatform.googleapis.com/{version}/\
+             projects/{project}/locations/{location}/"
         )
     }
 }
@@ -945,7 +954,7 @@ mod tests {
         assert_eq!(
             resolved_vertex_endpoint().as_deref(),
             Some(
-                "https://aiplatform.googleapis.com/v1/projects/unit-test-project/locations/global/"
+                "https://aiplatform.googleapis.com/v1beta1/projects/unit-test-project/locations/global/"
             )
         );
 
@@ -992,7 +1001,7 @@ mod tests {
         std::env::set_var("VERTEX_LOCATION", "evil.com/");
         assert_eq!(
             resolved_vertex_endpoint().as_deref(),
-            Some("https://aiplatform.googleapis.com/v1/projects/perspt/locations/global/"),
+            Some("https://aiplatform.googleapis.com/v1beta1/projects/perspt/locations/global/"),
             "malicious location must fall back to global, never redirect the host"
         );
 
@@ -1015,11 +1024,11 @@ mod tests {
     fn test_vertex_endpoint_base_matches_genai_vertex_shape() {
         assert_eq!(
             vertex_endpoint_base("test-project", "global"),
-            "https://aiplatform.googleapis.com/v1/projects/test-project/locations/global/"
+            "https://aiplatform.googleapis.com/v1beta1/projects/test-project/locations/global/"
         );
         assert_eq!(
             vertex_endpoint_base("test-project", "test-location"),
-            "https://test-location-aiplatform.googleapis.com/v1/\
+            "https://test-location-aiplatform.googleapis.com/v1beta1/\
              projects/test-project/locations/test-location/"
         );
     }
