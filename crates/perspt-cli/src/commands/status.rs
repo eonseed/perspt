@@ -29,11 +29,13 @@ pub async fn run() -> Result<()> {
     );
 
     let status_display = match session.status.as_str() {
-        "COMPLETED" => "✅ Completed",
+        "COMPLETED" | "COMPLETED_PSP9" => "✅ Completed",
         "PARTIAL" => "⚠️ Partial (some nodes escalated)",
-        "RUNNING" => "🔄 Running",
+        "RUNNING" | "RUNNING_PSP9" => "🔄 Running",
         "PAUSED" => "⏸️ Paused",
-        "FAILED" => "❌ Failed",
+        "FAILED" | "FAILED_PSP9" => "❌ Failed",
+        "ESCALATED_PSP9" => "⚠️ Escalated (verified but not promoted)",
+        "ABORTED_PSP9" => "🛑 Aborted (authority revoked)",
         "active" => "🔄 Active",
         _ => &session.status,
     };
@@ -43,6 +45,12 @@ pub async fn run() -> Result<()> {
 
     if let Some(toolchain) = &session.detected_toolchain {
         println!("🔧 Toolchain:  {}", toolchain);
+    }
+
+    // PSP-9 sessions record into the governed ledger, not the legacy node
+    // tables, so their status view reads the PSP-9 surfaces.
+    if session.status.ends_with("_PSP9") {
+        return psp9_status(&store, session);
     }
 
     // Get node states
@@ -350,5 +358,103 @@ pub async fn run() -> Result<()> {
     println!("  perspt logs --last      View LLM request history");
     println!("  perspt logs             List all sessions");
 
+    Ok(())
+}
+
+/// Fold the ledger event stream into (measurements, denials, last energy,
+/// last gate decision).
+fn summarize_psp9_events(
+    rows: &[perspt_store::Psp9LedgerRow],
+) -> (usize, usize, Option<f64>, Option<String>) {
+    let mut measurements = 0usize;
+    let mut denials = 0usize;
+    let mut last_energy = None;
+    let mut gate = None;
+    for row in rows {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&row.event_json) else {
+            continue;
+        };
+        let event = value
+            .get("payload")
+            .and_then(|payload| payload.get("event"))
+            .and_then(|event| event.as_str())
+            .unwrap_or_default();
+        match event {
+            "candidate_measured" => {
+                measurements += 1;
+                last_energy = value
+                    .get("payload")
+                    .and_then(|payload| payload.get("energy"))
+                    .and_then(serde_json::Value::as_f64);
+            }
+            "effect_denied" => denials += 1,
+            "gate_decision_recorded" => {
+                gate = value
+                    .get("payload")
+                    .and_then(|payload| payload.get("decision"))
+                    .map(|decision| decision.to_string());
+            }
+            _ => {}
+        }
+    }
+    (measurements, denials, last_energy, gate)
+}
+
+/// PSP-9 status: the governed ledger, gate decisions, calibration readiness,
+/// verdicts, and any incomplete external effects.
+fn psp9_status(
+    store: &perspt_store::SessionStore,
+    session: &perspt_store::SessionRecord,
+) -> Result<()> {
+    let rows = store.get_psp9_events(&session.session_id)?;
+    println!();
+    println!("PSP-9 governed session");
+    println!("{}", "─".repeat(70));
+    println!("📜 Ledger events: {}", rows.len());
+    if let Some(last) = rows.last() {
+        println!(
+            "🔗 Ledger head:   {}",
+            &last.hash[..16.min(last.hash.len())]
+        );
+    }
+
+    let (measurements, denials, last_energy, gate) = summarize_psp9_events(&rows);
+    println!("📐 Measurements:  {measurements}");
+    if let Some(energy) = last_energy {
+        println!("⚡ Last energy:   V = {energy:.3}");
+    }
+    if let Some(gate) = gate {
+        println!("🚪 Last gate:     {gate}");
+    }
+    println!("🚫 Denials:       {denials}");
+
+    let verdicts = store.get_psp9_verdicts(&session.session_id)?;
+    for verdict in &verdicts {
+        println!(
+            "⚖️  Verdict:       {} {} (labeled: {})",
+            verdict.validator_id,
+            if verdict.missed { "MISS" } else { "pass" },
+            verdict
+                .unsafe_label
+                .map(|unsafe_label| if unsafe_label { "unsafe" } else { "safe" })
+                .unwrap_or("pending"),
+        );
+    }
+
+    let pending = store.pending_external_effects(&session.session_id)?;
+    if !pending.is_empty() {
+        println!("⚠️  Incomplete external effects: {}", pending.len());
+        println!(
+            "    Run `perspt resume {}` to finish them.",
+            session.session_id
+        );
+    }
+
+    println!("{}", "─".repeat(70));
+    println!("Commands:");
+    println!(
+        "  perspt replay {}   Credential-free audit replay",
+        session.session_id
+    );
     Ok(())
 }
