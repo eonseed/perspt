@@ -826,97 +826,89 @@ impl AgentApp {
 }
 
 /// Run the agent TUI with a real SRBNOrchestrator
-pub async fn run_agent_tui_with_orchestrator(
-    mut orchestrator: perspt_agent::SRBNOrchestrator,
-    task: String,
+/// One keypress dispatched to the app: the review modal consumes keys while
+/// visible; otherwise navigation and `q` apply.
+fn dispatch_key(app: &mut AgentApp, key: crossterm::event::KeyEvent) {
+    if key.kind != crossterm::event::KeyEventKind::Press {
+        return;
+    }
+    if app.review_modal.visible {
+        match key.code {
+            KeyCode::Left => app.review_modal.select_left(),
+            KeyCode::Right => app.review_modal.select_right(),
+            KeyCode::Char(c) => {
+                if let Some(decision) = app.review_modal.handle_key(c) {
+                    app.handle_review_decision(decision);
+                    app.review_modal.hide();
+                }
+            }
+            KeyCode::Enter => {
+                let decision = app.review_modal.get_decision();
+                app.handle_review_decision(decision);
+                app.review_modal.hide();
+            }
+            KeyCode::Esc => app.review_modal.hide(),
+            _ => {}
+        }
+    } else {
+        match key.code {
+            KeyCode::Char('q') => app.should_quit = true,
+            KeyCode::Tab => app.next_tab(),
+            KeyCode::Char('1') => app.active_tab = ActiveTab::Dashboard,
+            KeyCode::Char('2') => app.active_tab = ActiveTab::Tasks,
+            KeyCode::Char('3') => app.active_tab = ActiveTab::Diff,
+            KeyCode::Up | KeyCode::Char('k') => app.handle_up(),
+            KeyCode::Down | KeyCode::Char('j') => app.handle_down(),
+            _ => {}
+        }
+    }
+}
+
+/// Drive the shared render/key/event loop until quit or the driver finishes.
+async fn drive_event_loop(
+    app: &mut AgentApp,
+    terminal: &mut ratatui::DefaultTerminal,
+    event_receiver: &mut perspt_core::events::channel::EventReceiver,
+    finished: impl Fn() -> bool,
 ) -> anyhow::Result<()> {
     use crate::app_event::AppEvent;
-    use perspt_core::events::channel;
-
-    // Create channels for bidirectional communication
-    let (event_sender, mut event_receiver) = channel::event_channel();
-    let (action_sender, action_receiver) = channel::action_channel();
-
-    // Get abort flag before moving orchestrator into spawned task
-    let abort_flag = orchestrator.abort_flag();
-
-    // Connect orchestrator to TUI
-    orchestrator.connect_tui(event_sender, action_receiver);
-
-    // Initializing terminal
-    let mut terminal = ratatui::init();
-    let mut app = AgentApp::new();
-    app.set_action_sender(action_sender);
-
-    // Spawn orchestrator in background task
-    let orchestrator_handle = tokio::spawn(async move { orchestrator.run(task).await });
-
-    // Main event loop
     loop {
-        // Render
         terminal.draw(|frame| app.render(frame))?;
-
-        // Handle events with timeout for responsiveness
         tokio::select! {
-            // Terminal events
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 if crossterm::event::poll(std::time::Duration::from_millis(0))? {
                     if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                        if key.kind == crossterm::event::KeyEventKind::Press {
-                            // Map Key Events to app state
-                            if key.code == KeyCode::Char('q') {
-                                app.should_quit = true;
-                            }
-                            // Pass keys to modal if visible
-                            if app.review_modal.visible {
-                                match key.code {
-                                    KeyCode::Left => app.review_modal.select_left(),
-                                    KeyCode::Right => app.review_modal.select_right(),
-                                    KeyCode::Char(c) => {
-                                        if let Some(decision) = app.review_modal.handle_key(c) {
-                                            app.handle_review_decision(decision);
-                                            app.review_modal.hide();
-                                        }
-                                    }
-                                    KeyCode::Enter => {
-                                        let decision = app.review_modal.get_decision();
-                                        app.handle_review_decision(decision);
-                                        app.review_modal.hide();
-                                    }
-                                    KeyCode::Esc => app.review_modal.hide(),
-                                    _ => {}
-                                }
-                            } else {
-                                match key.code {
-                                    KeyCode::Tab => app.next_tab(),
-                                    KeyCode::Char('1') => app.active_tab = ActiveTab::Dashboard,
-                                    KeyCode::Char('2') => app.active_tab = ActiveTab::Tasks,
-                                    KeyCode::Char('3') => app.active_tab = ActiveTab::Diff,
-                                    KeyCode::Up | KeyCode::Char('k') => app.handle_up(),
-                                    KeyCode::Down | KeyCode::Char('j') => app.handle_down(),
-                                    _ => {}
-                                }
-                            }
-                        }
+                        dispatch_key(app, key);
                     }
                 }
             }
-            // Orchestrator events
             Some(event) = event_receiver.recv() => {
                 app.handle_app_event(AppEvent::CoreEvent(event));
             }
         }
-
-        if app.should_quit {
-            break;
-        }
-
-        // Check if orchestrator finished
-        if orchestrator_handle.is_finished() {
-            // app.dashboard.log("🏁 Orchestrator finished".to_string());
+        if app.should_quit || finished() {
+            return Ok(());
         }
     }
+}
 
+pub async fn run_agent_tui_with_orchestrator(
+    mut orchestrator: perspt_agent::SRBNOrchestrator,
+    task: String,
+) -> anyhow::Result<()> {
+    use perspt_core::events::channel;
+
+    let (event_sender, mut event_receiver) = channel::event_channel();
+    let (action_sender, action_receiver) = channel::action_channel();
+    let abort_flag = orchestrator.abort_flag();
+    orchestrator.connect_tui(event_sender, action_receiver);
+
+    let mut terminal = ratatui::init();
+    let mut app = AgentApp::new();
+    app.set_action_sender(action_sender);
+    let orchestrator_handle = tokio::spawn(async move { orchestrator.run(task).await });
+
+    drive_event_loop(&mut app, &mut terminal, &mut event_receiver, || false).await?;
     ratatui::restore();
 
     // Request graceful abort and give the orchestrator time to finalize
@@ -937,7 +929,6 @@ pub async fn run_agent_tui_with_runtime(
     runtime: perspt_agent::Psp9AgentRuntime,
     task: String,
 ) -> anyhow::Result<perspt_agent::Psp9RunSummary> {
-    use crate::app_event::AppEvent;
     use perspt_core::events::channel;
 
     let (event_sender, mut event_receiver) = channel::event_channel();
@@ -948,59 +939,29 @@ pub async fn run_agent_tui_with_runtime(
     app.set_action_sender(action_sender);
     let runtime_handle = tokio::spawn(async move { runtime.run(task).await });
 
-    loop {
-        terminal.draw(|frame| app.render(frame))?;
-        tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                if crossterm::event::poll(std::time::Duration::from_millis(0))? {
-                    if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
-                        if key.kind == crossterm::event::KeyEventKind::Press {
-                            if app.review_modal.visible {
-                                match key.code {
-                                    KeyCode::Left => app.review_modal.select_left(),
-                                    KeyCode::Right => app.review_modal.select_right(),
-                                    KeyCode::Char(c) => {
-                                        if let Some(decision) = app.review_modal.handle_key(c) {
-                                            app.handle_review_decision(decision);
-                                            app.review_modal.hide();
-                                        }
-                                    }
-                                    KeyCode::Enter => {
-                                        let decision = app.review_modal.get_decision();
-                                        app.handle_review_decision(decision);
-                                        app.review_modal.hide();
-                                    }
-                                    KeyCode::Esc => app.review_modal.hide(),
-                                    _ => {}
-                                }
-                            } else { match key.code {
-                                KeyCode::Char('q') => app.should_quit = true,
-                                KeyCode::Tab => app.next_tab(),
-                                KeyCode::Char('1') => app.active_tab = ActiveTab::Dashboard,
-                                KeyCode::Char('2') => app.active_tab = ActiveTab::Tasks,
-                                KeyCode::Char('3') => app.active_tab = ActiveTab::Diff,
-                                KeyCode::Up | KeyCode::Char('k') => app.handle_up(),
-                                KeyCode::Down | KeyCode::Char('j') => app.handle_down(),
-                                _ => {}
-                            }}
-                        }
-                    }
-                }
-            }
-            Some(event) = event_receiver.recv() => {
-                app.handle_app_event(AppEvent::CoreEvent(event));
-            }
-        }
-
-        if app.should_quit || runtime_handle.is_finished() {
-            break;
-        }
-    }
+    drive_event_loop(&mut app, &mut terminal, &mut event_receiver, || {
+        runtime_handle.is_finished()
+    })
+    .await?;
 
     ratatui::restore();
     if app.should_quit && !runtime_handle.is_finished() {
         runtime_handle.abort();
-        anyhow::bail!("agent run aborted from TUI");
+        // The killed task cannot close its own session row; revoke the
+        // session's authority and mark it aborted so `perspt resume` never
+        // finds a permanently RUNNING_PSP9 session it must refuse.
+        if let Ok(store) = perspt_store::SessionStore::new() {
+            if let Ok(sessions) = store.list_recent_sessions(5) {
+                if let Some(session) = sessions
+                    .into_iter()
+                    .find(|session| session.status == "RUNNING_PSP9")
+                {
+                    let _ = store.revoke_authority(&session.session_id);
+                    let _ = store.update_session_status(&session.session_id, "ABORTED_PSP9");
+                }
+            }
+        }
+        anyhow::bail!("agent run aborted from TUI; session authority revoked");
     }
     runtime_handle.await?
 }
