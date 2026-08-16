@@ -60,12 +60,36 @@ pub fn evaluate_gate(
     best_accepted_v: f64,
     rho_gate: f64,
 ) -> Result<GateDecision> {
+    evaluate_gate_with_floor(hard_pass, candidate_v, best_accepted_v, rho_gate, None)
+}
+
+/// The full gate ordering (PSP-9 system 10): hard pass; candidate at or below
+/// the declared floor; descent by at least `rho_gate`; rejection.
+///
+/// A floor decision checkpoints the realized candidate as a *classified
+/// terminal state* but does not imply delivery, and it is never reported as
+/// verified success.
+pub fn evaluate_gate_with_floor(
+    hard_pass: bool,
+    candidate_v: f64,
+    best_accepted_v: f64,
+    rho_gate: f64,
+    declared_energy_floor: Option<f64>,
+) -> Result<GateDecision> {
     check_positive_finite(rho_gate, "rho_gate")?;
     crate::error::check_non_negative_finite(candidate_v, "candidate energy")?;
     crate::error::check_non_negative_finite(best_accepted_v, "best accepted energy")?;
+    if let Some(floor) = declared_energy_floor {
+        crate::error::check_non_negative_finite(floor, "declared energy floor")?;
+    }
 
     if hard_pass {
         return Ok(GateDecision::HardPass);
+    }
+    if let Some(floor) = declared_energy_floor {
+        if candidate_v <= floor {
+            return Ok(GateDecision::StoppedAtDeclaredFloor);
+        }
     }
     let delta_v = best_accepted_v - candidate_v;
     if candidate_v <= best_accepted_v - rho_gate {
@@ -150,18 +174,35 @@ impl AcceptedTrajectory {
     /// the best accepted energy on acceptance and the rejection count on
     /// rejection. Returns the decision taken.
     pub fn submit(&mut self, hard_pass: bool, candidate_v: f64) -> Result<GateDecision> {
-        let decision = evaluate_gate(
+        self.submit_with_floor(hard_pass, candidate_v, None)
+    }
+
+    /// Submit a candidate under the full gate ordering, including the
+    /// domain's declared energy floor (PSP-9 system 10).
+    pub fn submit_with_floor(
+        &mut self,
+        hard_pass: bool,
+        candidate_v: f64,
+        declared_energy_floor: Option<f64>,
+    ) -> Result<GateDecision> {
+        let decision = evaluate_gate_with_floor(
             hard_pass,
             candidate_v,
             self.best_accepted_energy,
             self.rho_gate,
+            declared_energy_floor,
         )?;
         self.gate_decisions.push(GateDecisionRef {
             decision: decision.clone(),
             observed_energy: candidate_v,
             best_accepted_before: self.best_accepted_energy,
         });
-        if decision.is_accepted() {
+        let checkpoints =
+            decision.is_accepted() || matches!(decision, GateDecision::StoppedAtDeclaredFloor);
+        if checkpoints {
+            // A floor stop checkpoints the candidate as a classified terminal
+            // state; it consumes no rejection budget and is never reported as
+            // verified success.
             if candidate_v < self.best_accepted_energy {
                 self.best_accepted_energy = candidate_v;
             }
@@ -175,6 +216,23 @@ impl AcceptedTrajectory {
     pub fn budget_exhausted(&self) -> bool {
         self.rejections_used >= self.rejection_budget
     }
+}
+
+/// The product-level terminal classification of one node generation (PSP-9
+/// system 10). The kernel's `srbn::Status` is recorded as evidence; this
+/// enum is what the product reports and the ledger stores.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum NodeTerminalOutcome {
+    /// Realized candidate passed every hard predicate; eligible for delivery.
+    HardPass,
+    /// Best checkpoint reached the domain's measured tolerance without a
+    /// hard pass. Not delivered unless domain policy explicitly permits it,
+    /// and never reported as verified success.
+    DeclaredFloor { floor: f64 },
+    /// Budgets exhausted or recovery contained the node; a residual
+    /// certificate is issued.
+    Escalated { certificate_id: String },
 }
 
 #[cfg(test)]
@@ -243,5 +301,33 @@ mod tests {
             decisions += 1;
         }
         assert!(decisions <= bound);
+    }
+
+    #[test]
+    fn floor_ordering_sits_between_hard_pass_and_descent() {
+        // Hard pass wins even below the floor.
+        let d = evaluate_gate_with_floor(true, 0.1, 10.0, 0.5, Some(1.0)).unwrap();
+        assert_eq!(d, GateDecision::HardPass);
+        // At or below the floor without hard pass: classified floor stop.
+        let d = evaluate_gate_with_floor(false, 0.9, 10.0, 0.5, Some(1.0)).unwrap();
+        assert_eq!(d, GateDecision::StoppedAtDeclaredFloor);
+        // Above the floor, ordinary descent applies.
+        let d = evaluate_gate_with_floor(false, 5.0, 10.0, 0.5, Some(1.0)).unwrap();
+        assert!(matches!(d, GateDecision::AcceptedByDescent { .. }));
+    }
+
+    #[test]
+    fn floor_stop_checkpoints_without_consuming_the_rejection_budget() {
+        let mut traj = AcceptedTrajectory::new("n1", 0, 10.0, 0.5, 3).unwrap();
+        let d = traj.submit_with_floor(false, 0.8, Some(1.0)).unwrap();
+        assert_eq!(d, GateDecision::StoppedAtDeclaredFloor);
+        assert_eq!(traj.best_accepted_energy, 0.8);
+        assert_eq!(traj.rejections_used, 0);
+    }
+
+    #[test]
+    fn without_a_floor_the_legacy_gate_is_unchanged() {
+        let d = evaluate_gate(false, 0.9, 10.0, 0.5).unwrap();
+        assert!(matches!(d, GateDecision::AcceptedByDescent { .. }));
     }
 }

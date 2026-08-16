@@ -16,8 +16,9 @@
 
 use perspt_sdk::{
     AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope,
-    EnergyComponent, EnergyModel, ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight,
-    StabilityClaim, WorkspaceSnapshot,
+    EnergyComponent, EnergyModel, HardGatePolicy, ResidualClass, ResidualEvent, ResidualSchema,
+    ResidualWeight, SafetyBarrierDisposition, StabilityClaim, VerificationCadence,
+    VerifierSuiteSpec, WorkspaceSnapshot,
 };
 
 /// The research domain package.
@@ -109,6 +110,34 @@ impl AgentDomainPackage for ResearchDomain {
                 _ => None,
             })
             .collect()
+    }
+
+    fn tool_entries(&self, _scope: &DomainScope) -> Vec<perspt_sdk::ToolEntry> {
+        // Research-specific tools (source discovery, citation fetch) arrive
+        // with the research tool loop; the base catalog already covers
+        // reading, searching, and editing notes.
+        Vec::new()
+    }
+
+    fn hard_gate_policy(&self, _scope: &DomainScope) -> HardGatePolicy {
+        HardGatePolicy {
+            required_stages: vec!["citation-check".into()],
+        }
+    }
+
+    fn verifier_suite(&self, _scope: &DomainScope) -> VerifierSuiteSpec {
+        VerifierSuiteSpec {
+            stages: vec!["citation-check".into()],
+            cadence: VerificationCadence::default(),
+        }
+    }
+
+    fn safety_barrier(&self, _scope: &DomainScope) -> SafetyBarrierDisposition {
+        SafetyBarrierDisposition::NotClaimed {
+            reason: "the research domain declares no operational unsafe set yet; \
+                     chance-safety certification is unavailable"
+                .into(),
+        }
     }
 }
 

@@ -9,6 +9,7 @@ pub mod lsp;
 pub mod orchestrator;
 pub mod prompt_compiler;
 pub mod prompts;
+pub mod realize;
 pub mod test_runner;
 pub mod tools;
 pub mod transport;
@@ -22,6 +23,7 @@ pub use ledger::{
 };
 pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use orchestrator::SRBNOrchestrator;
+pub use realize::{snapshot_workspace, ProjectionMismatch, SnapshotRealizer, WorkspaceState};
 pub use test_runner::{PythonTestRunner, TestFailure, TestResults, TestRunner};
 pub use tools::{AgentTools, ToolCall, ToolDefinition, ToolResult};
 pub use transport::GenAiTransport;
