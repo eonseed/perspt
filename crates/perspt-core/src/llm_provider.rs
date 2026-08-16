@@ -90,6 +90,11 @@ pub struct GenAIProvider {
 }
 
 impl GenAIProvider {
+    /// The underlying bound client, for the sibling tool-calling driver.
+    pub(crate) fn client(&self) -> &Client {
+        &self.client
+    }
+
     /// Creates a new GenAI provider with automatic configuration.
     pub fn new() -> Result<Self> {
         let client = Client::default();

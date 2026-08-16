@@ -7,9 +7,15 @@
 //! than aspirational.
 
 mod capabilities;
+mod conversation;
 mod family;
 mod id;
+mod tool;
+mod transport;
 
 pub use capabilities::{CapabilityDegradation, ProviderCapabilities, ProviderCapabilityMask};
+pub use conversation::{Conversation, Message};
 pub use family::ModelFamily;
 pub use id::ModelId;
+pub use tool::{ProviderToolCall, ToolChoicePolicy, ToolSpec, TurnOutput};
+pub use transport::{ModelTransport, TransportFuture};

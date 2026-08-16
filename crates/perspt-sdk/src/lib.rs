@@ -96,7 +96,9 @@ pub use ledger::{
     LedgerEvent, LedgerRecord,
 };
 pub use model::{
-    CapabilityDegradation, ModelFamily, ModelId, ProviderCapabilities, ProviderCapabilityMask,
+    CapabilityDegradation, Conversation, Message, ModelFamily, ModelId, ModelTransport,
+    ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall, ToolChoicePolicy, ToolSpec,
+    TransportFuture, TurnOutput,
 };
 pub use observability::{
     backlog_gauge, phi, residual_heatmap, CapabilityAudit, ResidualHeatmap, TrajectoryProjection,
