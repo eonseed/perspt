@@ -143,8 +143,8 @@ pub use stability::{
     RealizabilityClaim, StabilityClaim, StabilityParameters,
 };
 pub use toolset::{
-    base_entries, AccessMode, FootprintSpec, ResourceSelector, StaticCatalog, ToolCatalog,
-    ToolEntry, ToolOrigin,
+    admit_external_tool, base_entries, AccessMode, ExternalToolDeclaration, FootprintSpec,
+    ResourceSelector, StaticCatalog, ToolCatalog, ToolEntry, ToolOrigin,
 };
 pub use workgraph::{
     EdgeKind, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge, WorkGraphRevision,
