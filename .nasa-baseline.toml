@@ -23,6 +23,11 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
+file = "crates/perspt-agent/src/orchestrator/branches.rs"
+rule = "NASA-2"
+count = 1
+
+[[allow]]
 file = "crates/perspt-agent/src/orchestrator/bundle.rs"
 rule = "NASA-2"
 count = 3
@@ -38,19 +43,24 @@ rule = "NASA-2"
 count = 2
 
 [[allow]]
+file = "crates/perspt-agent/src/orchestrator/events.rs"
+rule = "NASA-2"
+count = 1
+
+[[allow]]
+file = "crates/perspt-agent/src/orchestrator/execute.rs"
+rule = "NASA-2"
+count = 2
+
+[[allow]]
 file = "crates/perspt-agent/src/orchestrator/init.rs"
 rule = "NASA-2"
 count = 2
 
 [[allow]]
 file = "crates/perspt-agent/src/orchestrator/mod.rs"
-rule = "NASA-1"
-count = 1
-
-[[allow]]
-file = "crates/perspt-agent/src/orchestrator/mod.rs"
 rule = "NASA-2"
-count = 9
+count = 2
 
 [[allow]]
 file = "crates/perspt-agent/src/orchestrator/planning.rs"
@@ -63,7 +73,17 @@ rule = "NASA-2"
 count = 2
 
 [[allow]]
+file = "crates/perspt-agent/src/orchestrator/session.rs"
+rule = "NASA-2"
+count = 2
+
+[[allow]]
 file = "crates/perspt-agent/src/orchestrator/solo.rs"
+rule = "NASA-2"
+count = 1
+
+[[allow]]
+file = "crates/perspt-agent/src/orchestrator/speculate.rs"
 rule = "NASA-2"
 count = 1
 
