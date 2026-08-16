@@ -63,10 +63,10 @@ this PSP also closes PSP-8 Phases 2, 3, 4, 5, 7, 8, and 9. Where this PSP and
 PSP-8 describe the same object, this PSP supersedes PSP-8's roadmap for that
 object; PSP-8's SDK contracts are consumed, not replaced.
 
-The existing bundle pipeline is retained. Node execution gains an execution
-mode; the tool loop is opt-in, becomes the default once it passes a declared
-fixture-parity gate, and the bundle path remains available as a fallback for
-providers without tool support and for cheap structured nodes.
+The existing bundle pipeline is retained only as an offline ablation baseline.
+The live agent has one authoritative typed tool-loop path. Tool-less providers
+remain usable for chat, exploration, and adjudication but are ineligible to act
+as coding actuators.
 
 ==========
 Motivation
@@ -951,7 +951,8 @@ The degradation ladder is explicit, ordered, and **recorded**:
      - Route accounting marks the route as cache-cold; portfolio routing
        (system 3) weights it accordingly.
    * - ``tool_calling``
-     - Node falls back to ``Bundle`` execution mode with the reason recorded.
+     - Route is ineligible as an actuator; select an explicit tool-capable
+       fallback or stop before session creation.
    * - context shorter than the node's packed context
      - Route is ineligible for that node; routing selects another or the node
        is split.
@@ -2676,35 +2677,20 @@ The platform is visible, interruptible, auditable, and controllable.
   ``perspt tools``, ``perspt grants list|create|revoke``, and
   ``perspt context inspect``.
 
-.. rubric:: Execution Mode Coexistence
+.. rubric:: One Authoritative Execution Path
 
-Node execution gains a mode, selected per node and overridable per session:
+PSP-9 makes ``ToolLoop`` the only live ``perspt agent`` path. There is no
+``--execution-mode`` switch and no provider-text convention that imitates tool
+calls. A primary route without declared native tool calling fails before a
+session is created; recovery may choose only another explicitly configured,
+tool-capable actuator route.
 
-.. code-block:: rust
-
-   pub enum ExecutionMode {
-       /// Model-driven tool loop (this PSP).
-       ToolLoop,
-       /// Single-shot bundle generation (PSP-5 / PSP-7 path).
-       Bundle,
-       /// Domain package chooses per node type.
-       Auto,
-   }
-
-Selection policy while the tool loop matures:
-
-1. Ship ``ToolLoop`` behind ``--execution-mode tool-loop``; default ``Bundle``.
-2. Promote ``Auto`` to the default once the parity gate below passes, with
-   ``Auto`` choosing ``ToolLoop`` for edit/repair/exploration work on existing
-   repositories and ``Bundle`` for greenfield scaffold nodes, where whole-file
-   emission is genuinely cheaper.
-3. ``Bundle`` remains permanently supported as a fallback for providers without
-   tool support and as the recovery-level-1 route.
-
-**Parity gate.** ``ToolLoop`` becomes the ``Auto`` default only when, on the
-declared fixture set, it is at least as good as ``Bundle`` on accepted-state
-correctness and strictly better on at least one of cost or correction rounds,
-with failures preserved and reported.
+The old bundle implementation remains useful solely as an offline benchmark
+arm for measuring cost, accepted-state correctness, and greenfield behavior.
+It is not a recovery level, an authority path, or a compatibility promise. If
+future evidence justifies a whole-file proposal tool, that operation shall be
+added to the typed catalog and return through the same kernel rather than
+reviving a parallel orchestrator.
 
 .. rubric:: Internal Quality Targets
 
@@ -3029,8 +3015,9 @@ coding-rule limits; it is not part of the crate set specified here.)
 
 **Performance.** The tool loop trades one large generation for several small
 ones: more requests and lower total tokens per node on edit work, higher latency
-per node on trivial work — which is why ``Auto`` keeps ``Bundle`` for scaffold
-nodes. Prompt caching across turns is essential and SHALL be used where the
+per node on trivial work. The benchmark measures whether a future typed
+whole-file proposal tool is justified; it does not select another orchestrator.
+Prompt caching across turns is essential and SHALL be used where the
 provider supports it, which is why routing is sticky within a node. Ensembles
 and adjudication are opt-in and triggered, not always-on; their cost is bounded
 by ``EnsemblePolicy::budget``. Kernel admissibility is in-process and
@@ -3040,10 +3027,13 @@ incremental LSP sessions, bounded adaptive verifier flushes, and hierarchical
 context checkpoints are the primary latency/token controls; none changes a
 gate, authority decision, or recorded observation.
 
-**Dependencies.** One version bump and two additions, all first-party:
+**Dependencies.** The kernel version bump and companion additions remain
+first-party:
 ``srbn`` and ``srbn-serde`` move 0.1.1 → 0.3.0, and ``srbn-ledger`` 0.3.0 joins
-(``srbn-regex`` is optional, for pattern sensors). No new third-party crates are
-required: ``genai`` 0.6.5 already exposes tool request/response types, streaming
+(``srbn-regex`` is optional, for pattern sensors). ``ed25519-dalek`` is added
+for signed persistent grant intent, and ``perspt-agent`` uses ``rand_core`` only
+to generate a fallback installation key. ``shell-words`` is reused in the SDK
+for shell-free argv parsing. ``genai`` 0.6.5 already exposes tool request/response types, streaming
 capture, and the adapters listed in ``str_to_adapter_kind``. Actual tool support
 is capability-probed per route; it is not inferred from adapter existence.
 ``nalgebra`` (spectral) is already in tree.
@@ -3125,11 +3115,11 @@ harness uncertified: assumption failure weakens semantic interpretation and
 slows progress, but it does not break the gate invariant on accepted states,
 because that invariant is a measurement rather than an assumption.
 
-**Why retain bundle execution as a strategy.** Bundle generation can be
-better for greenfield scaffolding, where there is nothing to read and whole-file
-emission is one request instead of ten. It is also the only path for providers
-without tool support and a useful recovery route. It remains because it is
-useful, not because this PSP promises backward compatibility.
+**Why retain bundle generation as a benchmark.** Whole-file generation may be
+cheaper for greenfield scaffolding. The ablation therefore keeps it as a
+measured baseline, but production authority stays in the typed tool loop. A
+provider without tools is eligible for chat or no-tool exploration and
+adjudication, not for an emulated coding loop.
 
 **Why removing** ``sed_replace`` **and** ``awk_filter`` **from the model
 catalog.** Their current contracts lack exact-match cardinality, expected-content
@@ -3151,9 +3141,9 @@ computable, but safe effect preconditions are not. ``edit_file`` and
 * *Text-protocol tool emulation* (model emits ``<tool>`` blocks Perspt parses).
   Works on any provider and needs no transport change, but reintroduces the
   fragile parsing :psp:`000007` removed and cannot produce the recorded,
-  structured observations Theorem 7 requires. Rejected as the primary mechanism;
-  providers without tool support fall back to bundle mode with the limitation
-  recorded (Gate U).
+  structured observations Theorem 7 requires. Rejected; providers without tool
+  support are ineligible as actuators and may use an explicitly configured
+  tool-capable fallback (Gate U).
 * *Adopt an external agent framework.* Would supply a tool loop quickly but not
   the admissibility kernel, the residual/energy contract, the measured
   independence path, or the replay ledger — the parts that make Perspt's claims
@@ -3175,9 +3165,8 @@ Compatibility and Cutover
 
 This PSP has **no backward-compatibility requirement**. Perspt and the SDK are
 pre-1.0, and maintaining two authority, ledger, configuration, or graph models
-would undermine the invariants being introduced. Bundle execution remains an
-optional execution strategy because it is useful for scaffolding and tool-less
-providers; it does not retain an unmediated legacy control path.
+would undermine the invariants being introduced. Bundle execution remains only
+an offline benchmark baseline; it is not a live compatibility path.
 
 **Breaking changes.** The initial list is:
 
@@ -3201,10 +3190,16 @@ providers; it does not retain an unmediated legacy control path.
    envelope. Pre-PSP-9 sessions remain readable through an offline legacy
    viewer but are neither resumable nor replay-certified.
 
-``--mode cautious|balanced|yolo`` may retain its spelling, but its semantics are
-the new ``ApprovalPolicy`` presets. In particular, ``yolo`` removes prompts
-within granted authority; it does not grant network, privileged, or
-out-of-workspace capabilities.
+The legacy ``--mode``, complexity, deferred-test, free-form energy-weight,
+single-file, and unimplemented cost flags are removed rather than accepted and
+ignored. The PSP-9 CLI exposes the actual finite controls: ``--rho-gate``,
+``--max-turns``, ``--max-calls-per-turn``, ``--rejection-budget``, and
+``--max-parallel``. Model roles are explicit: ``--actuator-model``,
+``--explorer-model``, ``--adjudicator-model``, and repeatable
+``--fallback-model``. Architect or verifier routes are never silently treated
+as actuator failovers. ``--yes`` removes the final promotion prompt within
+granted authority; it does not grant network, privileged, or out-of-workspace
+effects.
 
 The cutover ships with a configuration converter and ledger exporter as one-way
 tools. Runtime dual-write, dual-read, and old-session resume are out of scope.
@@ -3242,8 +3237,8 @@ gate lands with the code it constrains.
        printed by ``perspt providers``; a one-entry portfolio passes the new
        configuration and routing contracts.
    * - 1
-     - Provider tool transport; ``Conversation``; bundle fallback for
-       tool-less providers.
+     - Provider tool transport; ``Conversation``; explicit ineligibility for
+       tool-less actuator routes.
      - S, U
      - A model completes a two-tool round trip on at least three provider
        families from one binary; the same conversation replays across
@@ -3355,9 +3350,9 @@ gate lands with the code it constrains.
      - No topology gap is reported as Paper II :math:`\mu`; no platform
        stability is claimed without Theorem 9 assumption evidence.
    * - 14
-     - Parity and internal ablation benchmarks; ``Auto`` default flip; ensemble
-       defaults, cadence bounds within registered maxima, compaction threshold,
-       and audit rate decided by measurement.
+     - Parity and internal ablation benchmarks; possible typed whole-file tool;
+       ensemble defaults, cadence bounds within registered maxima, compaction
+       threshold, and audit rate decided by measurement.
      - —
      - Parity gate passes with failures preserved and reported.
 
@@ -3430,7 +3425,7 @@ the SDK may not depend on I/O, so it cannot host them:
 **Benchmarks.** Fixture tasks per first-party language adapter, run in four
 internal ablation arms:
 
-1. ``Bundle`` mode, one-entry portfolio — the retained execution strategy.
+1. Legacy ``Bundle`` mode, one-entry portfolio — offline baseline only.
 2. ``ToolLoop``, single provider — isolates the tool loop.
 3. ``ToolLoop``, portfolio routing without model validation — isolates cost,
    exploration, and failover policy.
@@ -3480,9 +3475,11 @@ Implementation Status
      - U
      - **Partial**
      - ``[providers]`` table, ``ModelPortfolio``, declared capability matrix
-       and ``perspt providers`` are live. Startup/runtime capability probes and
-       durable probe evidence remain; current route filtering relies on the
-       declared matrix.
+       and ``perspt providers`` are live. Every live route records its declared
+       matrix and explicit degradation ladder; a primary without native tool
+       calling fails before session creation. Active behavioral probes remain,
+       so the evidence source is labelled ``declared`` and route filtering does
+       not claim more.
    * - 1 — Tool transport
      - S, U
      - **Partial**
@@ -3494,11 +3491,17 @@ Implementation Status
      - J
      - **Partial**
      - ``toolset`` catalog with declarative footprints and capability
-       filtering; ``edit_file``/``glob``/``git_read`` executors;
-       ``LanguageId`` registry. The authoritative candidate hides tools without
-       executors and keeps ``sed_replace``/``awk_filter`` out of the model-facing
-       catalog. ``lsp_query``, governed dependency mutation, and eliminating the
-       remaining runtime plugin-name normalization match remain.
+       filtering; deferred host-side ``tool_search``; a small provider-invariant
+       initial schema surface; bounded pure-Starlark ``tool_program`` composition;
+       governed direct-program ``exec`` for read-only OS tools; sandboxed,
+       long-lived ``lsp_query`` sessions; ``edit_file``/``glob``/``git_read``
+       executors; and the ``LanguageId`` registry. Every nested program call
+       returns to the five-clause kernel. Inspection processes cannot read user
+       home directories outside the candidate, reach the network, write the
+       candidate, or use process-spawning ``find``/``rg`` options.
+       ``sed_replace``/``awk_filter`` remain outside the model-facing catalog.
+       Governed dependency mutation and the remaining runtime plugin-name
+       normalization match remain.
    * - 3 — Realizability, gate, certificates
      - M, V
      - **Done**
@@ -3527,11 +3530,17 @@ Implementation Status
      - **Partial**
      - Every live loop observation is durably appended before use;
        ``perspt replay`` verifies sequence, predecessor, hash, and accepted
-       trajectory. Context compaction now records and validates exact
-       ``ControlFrame`` values, and durable promotion has a single-assignment
-       write-ahead effect journal. Session grant intent and authority epochs are
-       enforced at promotion. Signed persistent grant re-minting on resume and
-       process-crash completion of an interrupted multi-file promotion remain.
+       trajectory. Full tool output is content-addressed while model context
+       receives a bounded preview. Context checkpoints, verdicts, calibration
+       epochs/samples, and artifacts have durable tables. Promotion uses a
+       before/after artifact manifest and a single-assignment write-ahead
+       journal, so ``perspt resume`` can idempotently finish an interrupted
+       multi-file promotion after checking content hashes, workspace binding,
+       and authority epoch. Persistent grant intent is Ed25519-signed using an
+       operator key, OS credential-store key, or warned mode-0600 installation
+       key. Re-minting a fresh capability and continuing an interrupted model
+       loop from a durable candidate checkpoint remain; the CLI fails closed
+       rather than silently restarting such a task.
    * - 7 — Routing and exploration
      - S
      - **Partial**
@@ -3545,9 +3554,11 @@ Implementation Status
      - **Partial**
      - Matched strata, degenerate-pair direct joint misses, Hoeffding upper
        bounds, certification gating, ``n`` reported beside the bound;
-       ``attenuate_weight`` removed. The SDK path is tested; the authoritative
-       runtime does not yet dispatch contemporaneous adjudicator verdicts or
-       attach delayed labels.
+       ``attenuate_weight`` removed. A configured adjudicator receives only the
+       realized content-addressed diff with no tools or authority, records an
+       explicitly uncalibrated contemporaneous verdict, and acts as an optional
+       conjunctive veto without changing :math:`V`. Delayed labels and certified
+       live pairwise bounds remain.
    * - 9 — Proposal ensembles
      - M, T
      - **Partial**
@@ -3561,18 +3572,24 @@ Implementation Status
      - ``WorkGraphRevision`` is now the live scheduler authority and every
        running capability is revision/generation-bound. Independent
        compiler/test/lint sensors run concurrently under ``--max-parallel``
-       with isolated target directories. Multi-node worker dispatch, commuting
-       tool-call batches, and evidence-driven level-2 graph rewrites remain.
+       with isolated target directories. ``WorkGraphRevision::revise`` applies
+       evidence-backed edits to produce a new validated acyclic snapshot, so
+       the initial DAG is not immutable. Live multi-node worker dispatch,
+       commuting tool-call batches, and evidence-driven level-2 graph rewrites
+       remain.
    * - 11 — Conformal calibration
      - Q
      - **Partial**
      - SDK mechanism is complete: feasibility floor
        ``n >= 1/rho - 1``, strict tie rejection, complete
-       ``CalibrationStratum``, readiness and stale states. Durable per-stratum
-       samples, uniform delayed-audit selection, immutable activation epochs,
-       and live approval back-off are not wired. The current coding path relies
-       only on deterministic contract/barrier evidence and makes no conformal
-       claim.
+       ``CalibrationStratum``, readiness and stale states. The live runtime
+       fingerprints the exact model, verifier suite, catalog, policy and score
+       definition, creates or reuses an immutable cold-start epoch, persists
+       exact sample rows, reports the finite sample floor, and records
+       ``certified_for_promotion = false``. Uniform delayed-audit selection,
+       label ingestion, immutable activation after recomputation, and live
+       approval back-off remain. The current coding path relies only on
+       deterministic contract/barrier evidence and makes no conformal claim.
    * - 12 — External tools
      - K, L, U
      - **Partial**
@@ -3590,8 +3607,9 @@ Implementation Status
    * - 14 — Parity and ablation
      - —
      - **Not started**
-     - Requires live provider runs; the ``Auto`` default flip waits on the
-       declared fixture-parity gate.
+     - Requires the declared multi-provider fixture runs. Results may justify
+       adding a typed whole-file proposal tool, but do not switch production
+       back to a second orchestrator.
 
 =========================
 Resolved Design Decisions
@@ -3654,9 +3672,12 @@ Remaining Open Issues
   same declared analysis space and the remaining Theorem 12.4 assumptions are
   validated. Until then the field is ``not_claimed`` and Corollary 12.5 is
   disabled.
-* **External tool protocol choice.** System 13 specifies the kernel-side
-  contract, not the wire protocol. MCP and a narrower internal transport can be
-  evaluated without changing authority, recording, or replay semantics.
+* **External tool wire completion.** The implementation choice is a native
+  deferred catalog and bounded Starlark composition for first-party work, with
+  MCP stdio and Streamable HTTP retained only as optional edge adapters.
+  External schemas are never eagerly injected, and an MCP server never becomes
+  an authority, scheduler, ledger, or policy source. The wire adapters are not
+  yet registered by the authoritative runtime, so Phase 12 remains partial.
 
 ==========
 References
