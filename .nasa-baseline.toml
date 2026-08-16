@@ -68,14 +68,19 @@ rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-agent/src/orchestrator/verification.rs"
-rule = "NASA-1"
+file = "crates/perspt-agent/src/orchestrator/verification/deps.rs"
+rule = "NASA-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-agent/src/orchestrator/verification.rs"
+file = "crates/perspt-agent/src/orchestrator/verification/energy.rs"
 rule = "NASA-2"
-count = 3
+count = 2
+
+[[allow]]
+file = "crates/perspt-agent/src/orchestrator/verification/plugin.rs"
+rule = "NASA-2"
+count = 1
 
 [[allow]]
 file = "crates/perspt-agent/src/prompt_compiler.rs"
