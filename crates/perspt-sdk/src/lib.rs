@@ -100,7 +100,10 @@ pub use gate::{
     evaluate_gate, finite_decision_bound, AcceptedTrajectory, GateDecision, GateDecisionRef,
 };
 pub use goal::{goal_presence_residual, goal_presence_sensor, missing_symbols, GoalSpec};
-pub use independence::{compute as compute_independence, IndependenceStats, VerdictRecord};
+pub use independence::{
+    compute as compute_independence, compute_with_floor, pairwise_joint_miss,
+    EnsembleCertification, IndependenceStats, PairStats, VerdictRecord,
+};
 pub use kernel::{policy_restore_best, stabilize_realized};
 pub use kernel::{AgentBarrierResult, AgentStabilizationStatus, CorrectionDirectionSet, Evidence};
 pub use ledger::{audit_replay, require_recorded, AuditReport};
