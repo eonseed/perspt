@@ -470,7 +470,9 @@ async fn mc_j_calls_above_m_are_denied_and_recorded() {
         .events
         .iter()
         .filter_map(|e| match e {
-            LoopEvent::EffectDenied { call_id, reason } if reason.contains("Budget") => {
+            LoopEvent::EffectDenied { call_id, class, .. }
+                if *class == perspt_sdk::ResidualClass::BudgetExhausted =>
+            {
                 Some(call_id.as_str())
             }
             _ => None,
@@ -712,7 +714,8 @@ async fn one_provider_turn_cannot_exceed_the_cadence_bound() {
         .filter(|event| {
             matches!(
                 event,
-                LoopEvent::EffectDenied { reason, .. } if reason == "EvidenceBoundaryRequired"
+                LoopEvent::EffectDenied { reason, .. }
+                    if reason.contains("verification boundary required")
             )
         })
         .count();

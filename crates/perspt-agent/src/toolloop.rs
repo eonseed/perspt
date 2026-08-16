@@ -14,10 +14,10 @@
 
 use anyhow::{Context, Result};
 use perspt_sdk::{
-    check_admissibility, check_full_admissibility, classify_failure, promote, AcceptedTrajectory,
-    BarrierEvaluator, CandidateStateWitness, CandidateTransition, Capability, ContextCheckpoint,
-    ContractEvaluator, ControlFrame, Conversation, CorrectionDirection, EffectProposal,
-    FailureKind, FullAdmissibilityWitness, GateDecision, KernelState, ModelId, ModelTransport,
+    check_full_admissibility, classify_failure, promote, AcceptedTrajectory, BarrierEvaluator,
+    CandidateStateWitness, CandidateTransition, Capability, ContextCheckpoint, ContractEvaluator,
+    ControlFrame, Conversation, CorrectionDirection, EffectProposal, FailureKind,
+    FullAdmissibilityWitness, GateDecision, KernelState, ModelId, ModelTransport,
     NodeTerminalOutcome, ProviderToolCall, RecoveryCascade, ResidualEvent, StateWitness,
     StaticCatalog, ToolCatalog, ToolChoicePolicy, ToolEntry, TurnOutput, VerificationCadence,
 };
@@ -152,6 +152,10 @@ pub enum LoopEvent {
     EffectDenied {
         call_id: String,
         reason: String,
+        /// Typed admissibility residual (PSP-9 system 9): `CapabilityDenied`
+        /// for kernel denials, `BudgetExhausted` for budget boundaries.
+        #[serde(default = "default_denial_class")]
+        class: perspt_sdk::ResidualClass,
     },
     CandidateMeasured {
         node_id: String,
@@ -194,6 +198,60 @@ pub enum LoopEvent {
         reason: String,
         restored_checkpoint_id: String,
     },
+}
+
+fn default_denial_class() -> perspt_sdk::ResidualClass {
+    perspt_sdk::ResidualClass::CapabilityDenied
+}
+
+/// In-loop event log. With a durable recorder attached every event is already
+/// persisted before use, so only a rolling count and chain root are kept in
+/// memory; without one (conformance fixtures) the events are retained so
+/// tests can inspect them. This keeps long runs O(1) in event memory and
+/// makes each compaction O(1) instead of re-serializing the whole history.
+#[derive(Debug, Default)]
+pub struct EventLog {
+    retained: Vec<LoopEvent>,
+    retain: bool,
+    count: u64,
+    chain_root: String,
+}
+
+impl EventLog {
+    fn new(retain: bool) -> Self {
+        Self {
+            retain,
+            ..Self::default()
+        }
+    }
+
+    fn push(&mut self, event: &LoopEvent) -> Result<()> {
+        let hashed = perspt_sdk::ledger::content_hash(&serde_json::to_vec(event)?);
+        self.chain_root =
+            perspt_sdk::ledger::content_hash(format!("{}:{hashed}", self.chain_root).as_bytes());
+        self.count += 1;
+        if self.retain {
+            self.retained.push(event.clone());
+        }
+        Ok(())
+    }
+
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+
+    /// Rolling chain root over every event pushed so far.
+    pub fn chain_root(&self) -> &str {
+        &self.chain_root
+    }
+
+    pub fn events(&self) -> &[LoopEvent] {
+        &self.retained
+    }
+
+    fn into_events(self) -> Vec<LoopEvent> {
+        self.retained
+    }
 }
 
 /// Synchronous write-ahead event sink. Implementations must durably append
@@ -242,45 +300,53 @@ pub struct ToolLoop<'a> {
     pub recorder: Option<&'a dyn LoopRecorder>,
 }
 
+/// Where the last context checkpoint left off, so each new checkpoint covers
+/// exactly the log since the previous one instead of claiming the whole
+/// history from zero.
+#[derive(Debug, Default)]
+struct CompactionCursor {
+    parent: Option<String>,
+    next_from: u64,
+}
+
+fn finish(
+    outcome: NodeTerminalOutcome,
+    trajectory: AcceptedTrajectory,
+    log: EventLog,
+    projection: ProjectionMismatch,
+    turns_used: u32,
+) -> LoopOutcome {
+    LoopOutcome {
+        outcome,
+        trajectory,
+        events: log.into_events(),
+        projection,
+        turns_used,
+    }
+}
+
+/// One loop iteration's verdict after a gate boundary.
+enum BoundaryStep {
+    Terminal(NodeTerminalOutcome),
+    Continue,
+    Exhausted,
+}
+
 impl ToolLoop<'_> {
     /// Run the loop to a classified terminal state (Paper II Lemma 1).
     pub async fn run(mut self, goal: &str) -> Result<LoopOutcome> {
         self.budgets.validate(&self.cadence)?;
-        let mut events = Vec::new();
+        let mut log = EventLog::new(self.recorder.is_none());
         let mut projection = ProjectionMismatch::default();
         let mut recovery = RecoveryCascade::new(self.budgets.recovery_budget);
-        let mut context_parent = None;
+        let mut cursor = CompactionCursor::default();
         let mut activated_tools = BTreeSet::new();
 
         // 1. Measured baseline and its real restore point.
         let mut accepted_checkpoint = self.executor.checkpoint(&[]).await?;
-        let baseline = self.measurer.measure().await?;
-        emit(
-            self.recorder,
-            &mut events,
-            LoopEvent::CandidateMeasured {
-                node_id: self.node_id.clone(),
-                generation: self.generation,
-                energy: baseline.energy,
-                hard_pass: baseline.hard_pass,
-                residuals: baseline.residuals.clone(),
-            },
-        )?;
-        let mut trajectory = AcceptedTrajectory::new(
-            "toolloop",
-            0,
-            baseline.energy,
-            self.budgets.rho_gate,
-            self.budgets.rejection_budget,
-        )?;
+        let (baseline, mut trajectory) = self.measured_baseline(&mut log).await?;
         if let Some(outcome) = self.baseline_terminal(&baseline) {
-            return Ok(LoopOutcome {
-                outcome,
-                trajectory,
-                events,
-                projection,
-                turns_used: 0,
-            });
+            return Ok(finish(outcome, trajectory, log, projection, 0));
         }
 
         let mut conversation = Conversation::with_system(
@@ -292,17 +358,12 @@ impl ToolLoop<'_> {
         let mut mutations_since_boundary = 0u32;
         for turn in 1..=self.budgets.max_turns {
             turns_used = turn;
-            let remaining = self
-                .cadence
-                .max_mutations_between_checks
-                .saturating_sub(mutations_since_boundary)
-                .max(1);
             let turn_result = self
                 .model_turn(
                     turn,
-                    remaining,
+                    mutations_since_boundary,
                     &mut conversation,
-                    &mut events,
+                    &mut log,
                     &mut projection,
                     &mut recovery,
                     &mut activated_tools,
@@ -311,133 +372,175 @@ impl ToolLoop<'_> {
             let (output, mutations, immediate_boundary) = match turn_result {
                 Ok(result) => result,
                 Err(error) => {
-                    self.executor.restore(&accepted_checkpoint).await?;
-                    emit(
-                        self.recorder,
-                        &mut events,
-                        LoopEvent::RecoveryContained {
-                            reason: error.to_string(),
-                            restored_checkpoint_id: accepted_checkpoint.id.clone(),
-                        },
-                    )?;
-                    return Ok(LoopOutcome {
-                        outcome: NodeTerminalOutcome::Escalated {
-                            certificate_id: uuid::Uuid::new_v4().to_string(),
-                        },
-                        trajectory,
-                        events,
-                        projection,
-                        turns_used,
-                    });
+                    let outcome = self.contain(&error, &accepted_checkpoint, &mut log).await?;
+                    return Ok(finish(outcome, trajectory, log, projection, turns_used));
                 }
             };
             mutations_since_boundary = mutations_since_boundary.saturating_add(mutations);
-
-            // Measure boundary: text turn, cadence bound `H`, or turn budget.
-            let boundary_due = matches!(output, TurnOutput::Text(_))
-                || immediate_boundary
-                || mutations_since_boundary >= self.cadence.max_mutations_between_checks
-                || turn == self.budgets.max_turns;
-            if !boundary_due {
+            if !self.boundary_due(&output, immediate_boundary, mutations_since_boundary, turn) {
                 continue;
             }
-
-            let (measured, decision) = self.measure_and_gate(&mut trajectory, &mut events).await?;
             mutations_since_boundary = 0;
 
-            if decision.is_accepted() {
-                accepted_checkpoint = self.executor.checkpoint(&[]).await?;
-            } else if !matches!(decision, GateDecision::StoppedAtDeclaredFloor) {
-                self.executor.restore(&accepted_checkpoint).await?;
-                emit(
-                    self.recorder,
-                    &mut events,
-                    LoopEvent::CandidateRestored {
-                        checkpoint_id: accepted_checkpoint.id.clone(),
-                    },
-                )?;
-            }
-
-            match self.classify_decision(&decision, &measured) {
-                Some(outcome) => {
-                    return Ok(LoopOutcome {
-                        outcome,
-                        trajectory,
-                        events,
-                        projection,
-                        turns_used,
-                    })
+            let step = self
+                .boundary_step(
+                    goal,
+                    turn,
+                    &mut accepted_checkpoint,
+                    &mut trajectory,
+                    &mut recovery,
+                    &mut conversation,
+                    &mut log,
+                    &mut cursor,
+                )
+                .await?;
+            match step {
+                BoundaryStep::Terminal(outcome) => {
+                    return Ok(finish(outcome, trajectory, log, projection, turns_used));
                 }
-                None => {
-                    // Lemma 1: descent and rejection are non-terminal;
-                    // continue from the checkpoint with a directed correction.
-                    push_correction(&mut conversation, &measured);
-                    self.maybe_compact(
-                        goal,
-                        turn,
-                        &accepted_checkpoint,
-                        &measured,
-                        &trajectory,
-                        &mut conversation,
-                        &mut events,
-                        &mut context_parent,
-                    )?;
-                    if !decision.is_accepted() && trajectory.budget_exhausted() {
-                        break;
-                    }
-                    if !decision.is_accepted() {
-                        let granted = recovery.grant(classify_failure(FailureKind::GateRejection));
-                        emit(
-                            self.recorder,
-                            &mut events,
-                            LoopEvent::RecoveryControlGranted {
-                                failure: FailureKind::GateRejection,
-                                level: granted.level,
-                                forced_escalation: granted.forced_escalation,
-                                model: self.model.clone(),
-                            },
-                        )?;
-                        if granted.level > perspt_sdk::CascadeLevel::Retry {
-                            break;
-                        }
-                    }
-                }
+                BoundaryStep::Exhausted => break,
+                BoundaryStep::Continue => {}
             }
         }
 
-        let certificate_id = uuid::Uuid::new_v4().to_string();
-        Ok(LoopOutcome {
-            outcome: NodeTerminalOutcome::Escalated { certificate_id },
-            trajectory,
-            events,
-            projection,
-            turns_used,
+        let outcome = NodeTerminalOutcome::Escalated {
+            certificate_id: uuid::Uuid::new_v4().to_string(),
+        };
+        Ok(finish(outcome, trajectory, log, projection, turns_used))
+    }
+
+    /// Unconditional containment: restore the last accepted state and
+    /// escalate (Theorem 6's terminal class for an unrecoverable turn).
+    async fn contain(
+        &self,
+        error: &anyhow::Error,
+        accepted_checkpoint: &CandidateCheckpoint,
+        log: &mut EventLog,
+    ) -> Result<NodeTerminalOutcome> {
+        self.executor.restore(accepted_checkpoint).await?;
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::RecoveryContained {
+                reason: error.to_string(),
+                restored_checkpoint_id: accepted_checkpoint.id.clone(),
+            },
+        )?;
+        Ok(NodeTerminalOutcome::Escalated {
+            certificate_id: uuid::Uuid::new_v4().to_string(),
         })
     }
 
-    /// One model turn: send the conversation, record the observation, and
-    /// route every returned call through the kernel.
-    #[allow(clippy::too_many_arguments)]
-    async fn model_turn(
+    /// Measure the baseline candidate and open the accepted trajectory.
+    async fn measured_baseline(
         &mut self,
+        log: &mut EventLog,
+    ) -> Result<(Measured, AcceptedTrajectory)> {
+        let baseline = self.measurer.measure().await?;
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::CandidateMeasured {
+                node_id: self.node_id.clone(),
+                generation: self.generation,
+                energy: baseline.energy,
+                hard_pass: baseline.hard_pass,
+                residuals: baseline.residuals.clone(),
+            },
+        )?;
+        let trajectory = AcceptedTrajectory::new(
+            "toolloop",
+            0,
+            baseline.energy,
+            self.budgets.rho_gate,
+            self.budgets.rejection_budget,
+        )?;
+        Ok((baseline, trajectory))
+    }
+
+    /// Gate the measured candidate: accept (new checkpoint), restore on
+    /// rejection, classify terminals, and otherwise steer the next turn with
+    /// a directed correction (Lemma 1: descent and rejection are
+    /// non-terminal).
+    #[allow(clippy::too_many_arguments)]
+    async fn boundary_step(
+        &mut self,
+        goal: &str,
         turn: u32,
-        max_mutations: u32,
-        conversation: &mut Conversation,
-        events: &mut Vec<LoopEvent>,
-        projection: &mut ProjectionMismatch,
+        accepted_checkpoint: &mut CandidateCheckpoint,
+        trajectory: &mut AcceptedTrajectory,
         recovery: &mut RecoveryCascade,
-        activated_tools: &mut BTreeSet<String>,
-    ) -> Result<(TurnOutput, u32, bool)> {
-        let specs = self
-            .catalog
-            .deferred_specs_for(&self.capabilities, activated_tools, false);
-        let output = loop {
+        conversation: &mut Conversation,
+        log: &mut EventLog,
+        cursor: &mut CompactionCursor,
+    ) -> Result<BoundaryStep> {
+        let (measured, decision) = self.measure_and_gate(trajectory, log).await?;
+
+        if decision.is_accepted() {
+            *accepted_checkpoint = self.executor.checkpoint(&[]).await?;
+        } else if !matches!(decision, GateDecision::StoppedAtDeclaredFloor) {
+            self.executor.restore(accepted_checkpoint).await?;
+            emit(
+                self.recorder,
+                log,
+                LoopEvent::CandidateRestored {
+                    checkpoint_id: accepted_checkpoint.id.clone(),
+                },
+            )?;
+        }
+
+        if let Some(outcome) = self.classify_decision(&decision, &measured) {
+            return Ok(BoundaryStep::Terminal(outcome));
+        }
+        push_correction(conversation, &measured);
+        self.maybe_compact(
+            goal,
+            turn,
+            accepted_checkpoint,
+            &measured,
+            trajectory,
+            conversation,
+            log,
+            cursor,
+        )?;
+        if !decision.is_accepted() {
+            if trajectory.budget_exhausted() {
+                return Ok(BoundaryStep::Exhausted);
+            }
+            let granted = recovery.grant(classify_failure(FailureKind::GateRejection));
+            emit(
+                self.recorder,
+                log,
+                LoopEvent::RecoveryControlGranted {
+                    failure: FailureKind::GateRejection,
+                    level: granted.level,
+                    forced_escalation: granted.forced_escalation,
+                    model: self.model.clone(),
+                },
+            )?;
+            if granted.level > perspt_sdk::CascadeLevel::Retry {
+                return Ok(BoundaryStep::Exhausted);
+            }
+        }
+        Ok(BoundaryStep::Continue)
+    }
+
+    /// Send the conversation, consuming the sticky failover chain on observed
+    /// transport failures (a route is never selected per turn).
+    async fn chat_with_failover(
+        &mut self,
+        conversation: &Conversation,
+        specs: &[perspt_sdk::ToolSpec],
+        recovery: &mut RecoveryCascade,
+        log: &mut EventLog,
+    ) -> Result<TurnOutput> {
+        loop {
             match self
                 .transport
-                .chat_turn(&self.model, conversation, &specs, ToolChoicePolicy::Auto)
+                .chat_turn(&self.model, conversation, specs, ToolChoicePolicy::Auto)
                 .await
             {
-                Ok(output) => break output,
+                Ok(output) => return Ok(output),
                 Err(error) => {
                     let cause = error.to_string();
                     let failure = if cause.to_ascii_lowercase().contains("rate limit") {
@@ -448,7 +551,7 @@ impl ToolLoop<'_> {
                     let granted = recovery.grant(classify_failure(failure));
                     emit(
                         self.recorder,
-                        events,
+                        log,
                         LoopEvent::RecoveryControlGranted {
                             failure,
                             level: granted.level,
@@ -471,7 +574,7 @@ impl ToolLoop<'_> {
                     let previous = std::mem::replace(&mut self.model, next.clone());
                     emit(
                         self.recorder,
-                        events,
+                        log,
                         LoopEvent::RouteFailover {
                             from_model: previous,
                             to_model: next,
@@ -480,27 +583,107 @@ impl ToolLoop<'_> {
                     )?;
                 }
             }
-        };
+        }
+    }
+
+    /// Measure boundary: text turn, cadence bound `H`, or turn budget.
+    fn boundary_due(
+        &self,
+        output: &TurnOutput,
+        immediate_boundary: bool,
+        mutations_since_boundary: u32,
+        turn: u32,
+    ) -> bool {
+        matches!(output, TurnOutput::Text(_))
+            || immediate_boundary
+            || mutations_since_boundary >= self.cadence.max_mutations_between_checks
+            || turn == self.budgets.max_turns
+    }
+
+    /// One model turn: send the conversation, record the observation, and
+    /// route every returned call through the kernel. `mutations_so_far` is
+    /// the count since the last boundary; the cadence bound `H` caps what
+    /// this turn may add.
+    #[allow(clippy::too_many_arguments)]
+    async fn model_turn(
+        &mut self,
+        turn: u32,
+        mutations_so_far: u32,
+        conversation: &mut Conversation,
+        log: &mut EventLog,
+        projection: &mut ProjectionMismatch,
+        recovery: &mut RecoveryCascade,
+        activated_tools: &mut BTreeSet<String>,
+    ) -> Result<(TurnOutput, u32, bool)> {
+        let specs = self
+            .catalog
+            .deferred_specs_for(&self.capabilities, activated_tools, false);
+        let output = self
+            .chat_with_failover(conversation, &specs, recovery, log)
+            .await?;
         // R2: record the observation before inspecting it.
         emit(
             self.recorder,
-            events,
+            log,
             LoopEvent::TurnObserved {
                 turn,
                 output: output.clone(),
             },
         )?;
+        let max_mutations = self
+            .cadence
+            .max_mutations_between_checks
+            .saturating_sub(mutations_so_far)
+            .max(1);
         let (mutations, immediate_boundary) = self
             .execute_turn(
                 &output,
                 max_mutations,
                 conversation,
-                events,
+                log,
                 projection,
                 activated_tools,
             )
             .await?;
         Ok((output, mutations, immediate_boundary))
+    }
+
+    /// The verbatim control frame a compaction must preserve (resolved
+    /// design decision 3): goal, accepted state binding, live authority, and
+    /// exact remaining budgets.
+    #[allow(clippy::too_many_arguments)]
+    fn control_frame(
+        &self,
+        goal: &str,
+        turn: u32,
+        accepted_checkpoint: &CandidateCheckpoint,
+        measured: &Measured,
+        trajectory: &AcceptedTrajectory,
+        conversation: &Conversation,
+        authority_epoch: u64,
+    ) -> ControlFrame {
+        ControlFrame {
+            goal: goal.to_string(),
+            node_generation: self.generation,
+            accepted_state_root: accepted_checkpoint.witness.state_root.clone(),
+            graph_revision: accepted_checkpoint.witness.graph_revision.clone(),
+            capability_ids: self
+                .capabilities
+                .iter()
+                .map(|capability| capability.capability_id.clone())
+                .collect(),
+            authority_epoch,
+            remaining_rejection_budget: trajectory
+                .rejection_budget
+                .saturating_sub(trajectory.rejections_used),
+            remaining_turns: self.budgets.max_turns.saturating_sub(turn),
+            unresolved_call_ids: conversation.unresolved_call_ids(),
+            residual_summary: measured
+                .residuals
+                .iter()
+                .map(|residual| (format!("{:?}", residual.class), residual.score))
+                .collect(),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -512,8 +695,8 @@ impl ToolLoop<'_> {
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
         conversation: &mut Conversation,
-        events: &mut Vec<LoopEvent>,
-        parent: &mut Option<String>,
+        log: &mut EventLog,
+        cursor: &mut CompactionCursor,
     ) -> Result<()> {
         let route_limit = self.transport.capabilities(&self.model).max_context_tokens;
         let route_chars = usize::try_from(route_limit)
@@ -535,34 +718,23 @@ impl ToolLoop<'_> {
             .map(String::as_str)
             .and_then(|value| value.parse().ok())
             .unwrap_or(0);
-        let control = ControlFrame {
-            goal: goal.to_string(),
-            node_generation: self.generation,
-            accepted_state_root: accepted_checkpoint.witness.state_root.clone(),
-            graph_revision: accepted_checkpoint.witness.graph_revision.clone(),
-            capability_ids: self
-                .capabilities
-                .iter()
-                .map(|capability| capability.capability_id.clone())
-                .collect(),
+        let control = self.control_frame(
+            goal,
+            turn,
+            accepted_checkpoint,
+            measured,
+            trajectory,
+            conversation,
             authority_epoch,
-            remaining_rejection_budget: trajectory
-                .rejection_budget
-                .saturating_sub(trajectory.rejections_used),
-            remaining_turns: self.budgets.max_turns.saturating_sub(turn),
-            unresolved_call_ids: conversation.unresolved_call_ids(),
-            residual_summary: measured
-                .residuals
-                .iter()
-                .map(|residual| (format!("{:?}", residual.class), residual.score))
-                .collect(),
-        };
-        let covered = serde_json::to_vec(events)?;
-        let covered_root = perspt_sdk::ledger::content_hash(&covered);
+        );
+        // The rolling chain root commits to every event so far in O(1); the
+        // cursor makes each checkpoint cover exactly the span since the
+        // previous one instead of claiming the whole history from zero.
+        let covered_root = log.chain_root().to_string();
         let checkpoint = ContextCheckpoint {
-            parent: parent.clone(),
-            covered_from: 0,
-            covered_to: events.len().saturating_sub(1) as u64,
+            parent: cursor.parent.clone(),
+            covered_from: cursor.next_from,
+            covered_to: log.count().saturating_sub(1),
             covered_event_root: covered_root.clone(),
             control,
             artifact_refs: vec![accepted_checkpoint.witness.state_root.clone()],
@@ -577,14 +749,15 @@ impl ToolLoop<'_> {
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         emit(
             self.recorder,
-            events,
+            log,
             LoopEvent::ContextCheckpointCreated {
                 checkpoint: checkpoint.clone(),
             },
         )?;
         let control_json = serde_json::to_string(&checkpoint.control)?;
         conversation.compact_with_control(format!("PERSPECTIVE_CONTROL_FRAME_V1\n{control_json}"));
-        *parent = Some(covered_root);
+        cursor.parent = Some(covered_root);
+        cursor.next_from = checkpoint.covered_to.saturating_add(1);
         Ok(())
     }
 
@@ -592,12 +765,12 @@ impl ToolLoop<'_> {
     async fn measure_and_gate(
         &mut self,
         trajectory: &mut AcceptedTrajectory,
-        events: &mut Vec<LoopEvent>,
+        log: &mut EventLog,
     ) -> Result<(Measured, GateDecision)> {
         let measured = self.measurer.measure().await?;
         emit(
             self.recorder,
-            events,
+            log,
             LoopEvent::CandidateMeasured {
                 node_id: self.node_id.clone(),
                 generation: self.generation,
@@ -613,7 +786,7 @@ impl ToolLoop<'_> {
         )?;
         emit(
             self.recorder,
-            events,
+            log,
             LoopEvent::GateDecisionRecorded {
                 node_id: self.node_id.clone(),
                 generation: self.generation,
@@ -655,6 +828,77 @@ impl ToolLoop<'_> {
         }
     }
 
+    /// Record a denial as evidence: counted in the projection mismatch,
+    /// ledgered with its typed residual class, and returned to the model.
+    fn deny(
+        &self,
+        log: &mut EventLog,
+        projection: &mut ProjectionMismatch,
+        call_id: &str,
+        reason: String,
+        class: perspt_sdk::ResidualClass,
+    ) -> Result<String> {
+        projection.denied_proposals += 1;
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::EffectDenied {
+                call_id: call_id.to_string(),
+                reason: reason.clone(),
+                class,
+            },
+        )?;
+        Ok(format!("denied: {reason}"))
+    }
+
+    /// Per-turn budget denials (Gate J: a call above the budget still gets a
+    /// recorded proposal-and-result pair; it is denied, not silently
+    /// dropped). Returns `None` when the call is within budget.
+    #[allow(clippy::too_many_arguments)]
+    fn budget_denial(
+        &self,
+        log: &mut EventLog,
+        projection: &mut ProjectionMismatch,
+        call_id: &str,
+        ordinal: u32,
+        mutating: bool,
+        mutations: u32,
+        max_mutations: u32,
+    ) -> Result<Option<String>> {
+        if ordinal >= self.budgets.max_calls_per_turn {
+            return self
+                .deny(
+                    log,
+                    projection,
+                    call_id,
+                    "per-turn tool-call budget exceeded".into(),
+                    perspt_sdk::ResidualClass::BudgetExhausted,
+                )
+                .map(Some);
+        }
+        if mutating && mutations >= max_mutations {
+            return self
+                .deny(
+                    log,
+                    projection,
+                    call_id,
+                    "verification boundary required before another mutation".into(),
+                    perspt_sdk::ResidualClass::BudgetExhausted,
+                )
+                .map(Some);
+        }
+        Ok(None)
+    }
+
+    fn high_risk(entry: Option<&ToolEntry>) -> bool {
+        entry.is_some_and(|entry| {
+            matches!(
+                entry.risk,
+                perspt_sdk::RiskClass::High | perspt_sdk::RiskClass::Critical
+            )
+        })
+    }
+
     /// Route every returned call through the kernel; execute the admitted
     /// ones. Returns the number of admitted mutations.
     async fn execute_turn(
@@ -662,7 +906,7 @@ impl ToolLoop<'_> {
         output: &TurnOutput,
         max_mutations: u32,
         conversation: &mut Conversation,
-        events: &mut Vec<LoopEvent>,
+        log: &mut EventLog,
         projection: &mut ProjectionMismatch,
         activated_tools: &mut BTreeSet<String>,
     ) -> Result<(u32, bool)> {
@@ -682,131 +926,48 @@ impl ToolLoop<'_> {
         for (ordinal, call) in calls.iter().enumerate() {
             emit(
                 self.recorder,
-                events,
+                log,
                 LoopEvent::ToolCallObserved { call: call.clone() },
             )?;
             let entry = self.catalog.lookup(&call.name);
             let mutating = entry.is_some_and(|entry| candidate_mutating_effect(entry.effect));
-            let mut response = if ordinal as u32 >= self.budgets.max_calls_per_turn {
-                // Even a call above M gets a recorded proposal-and-result
-                // pair (Gate J); it is denied, not silently dropped.
-                projection.denied_proposals += 1;
-                emit(
-                    self.recorder,
-                    events,
-                    LoopEvent::EffectDenied {
-                        call_id: call.call_id.clone(),
-                        reason: "ToolCallBudgetExceeded".into(),
-                    },
-                )?;
-                "denied: per-turn tool-call budget exceeded".to_string()
-            } else if mutating && mutations >= max_mutations {
-                projection.denied_proposals += 1;
-                emit(
-                    self.recorder,
-                    events,
-                    LoopEvent::EffectDenied {
-                        call_id: call.call_id.clone(),
-                        reason: "EvidenceBoundaryRequired".into(),
-                    },
-                )?;
-                "denied: verification boundary required before another mutation".to_string()
-            } else {
-                self.check_and_apply(call, events, projection, &mut mutations)
-                    .await?
+            let mut response = match self.budget_denial(
+                log,
+                projection,
+                &call.call_id,
+                ordinal as u32,
+                mutating,
+                mutations,
+                max_mutations,
+            )? {
+                Some(denied) => denied,
+                None => {
+                    self.check_and_apply(call, log, projection, &mut mutations)
+                        .await?
+                }
             };
             if call.name == "tool_search" && !response.starts_with("denied:") {
-                let query = call
-                    .arguments
-                    .get("query")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                let limit = call
-                    .arguments
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|value| usize::try_from(value).ok())
-                    .unwrap_or(8);
-                activated_tools.extend(
-                    self.catalog
-                        .search_specs(&self.capabilities, query, limit, false)
-                        .into_iter()
-                        .map(|spec| spec.name),
-                );
+                // The response *is* the executed search result; activate from
+                // it instead of running the search a second time.
+                if let Ok(specs) = serde_json::from_str::<Vec<perspt_sdk::ToolSpec>>(&response) {
+                    activated_tools.extend(specs.into_iter().map(|spec| spec.name));
+                }
             }
             if call.name == "tool_program" && !response.starts_with("denied:") {
-                let program_calls: Vec<perspt_policy::ToolProgramCall> =
-                    serde_json::from_str(&response).context("decoding tool program result")?;
-                let mut nested_results = Vec::new();
-                for (nested_ordinal, nested) in program_calls.into_iter().enumerate() {
-                    let nested_call = ProviderToolCall {
-                        call_id: format!("{}:{}", call.call_id, nested_ordinal),
-                        name: nested.tool,
-                        arguments: nested.arguments,
-                    };
-                    emit(
-                        self.recorder,
-                        events,
-                        LoopEvent::ToolCallObserved {
-                            call: nested_call.clone(),
-                        },
-                    )?;
-                    let budget_ordinal = ordinal + nested_ordinal + 1;
-                    let nested_entry = self.catalog.lookup(&nested_call.name);
-                    let nested_mutating =
-                        nested_entry.is_some_and(|entry| candidate_mutating_effect(entry.effect));
-                    let nested_high_risk = nested_entry.is_some_and(|entry| {
-                        matches!(
-                            entry.risk,
-                            perspt_sdk::RiskClass::High | perspt_sdk::RiskClass::Critical
-                        )
-                    });
-                    let result = if budget_ordinal as u32 >= self.budgets.max_calls_per_turn {
-                        projection.denied_proposals += 1;
-                        emit(
-                            self.recorder,
-                            events,
-                            LoopEvent::EffectDenied {
-                                call_id: nested_call.call_id.clone(),
-                                reason: "ToolCallBudgetExceeded".into(),
-                            },
-                        )?;
-                        "denied: per-turn tool-call budget exceeded".to_string()
-                    } else if nested_mutating && mutations >= max_mutations {
-                        projection.denied_proposals += 1;
-                        emit(
-                            self.recorder,
-                            events,
-                            LoopEvent::EffectDenied {
-                                call_id: nested_call.call_id.clone(),
-                                reason: "EvidenceBoundaryRequired".into(),
-                            },
-                        )?;
-                        "denied: verification boundary required before another mutation".to_string()
-                    } else {
-                        self.check_and_apply(&nested_call, events, projection, &mut mutations)
-                            .await?
-                    };
-                    if nested_mutating && nested_high_risk && mutations > 0 {
-                        immediate_boundary = true;
-                    }
-                    nested_results.push(serde_json::json!({
-                        "call_id": nested_call.call_id,
-                        "tool": nested_call.name,
-                        "result": result,
-                    }));
-                }
-                response = serde_json::to_string(&nested_results)?;
-            }
-            if mutating
-                && entry.is_some_and(|entry| {
-                    matches!(
-                        entry.risk,
-                        perspt_sdk::RiskClass::High | perspt_sdk::RiskClass::Critical
+                response = self
+                    .run_tool_program(
+                        call,
+                        &response,
+                        ordinal,
+                        max_mutations,
+                        &mut mutations,
+                        &mut immediate_boundary,
+                        log,
+                        projection,
                     )
-                })
-                && mutations > 0
-            {
+                    .await?;
+            }
+            if mutating && Self::high_risk(entry) && mutations > 0 {
                 immediate_boundary = true;
             }
             conversation.push_tool_response(call.call_id.clone(), response);
@@ -814,25 +975,156 @@ impl ToolLoop<'_> {
         Ok((mutations, immediate_boundary))
     }
 
+    /// Execute a validated tool program's nested calls, each returning to the
+    /// same kernel and budgets as a top-level call.
+    #[allow(clippy::too_many_arguments)]
+    async fn run_tool_program(
+        &mut self,
+        call: &ProviderToolCall,
+        response: &str,
+        ordinal: usize,
+        max_mutations: u32,
+        mutations: &mut u32,
+        immediate_boundary: &mut bool,
+        log: &mut EventLog,
+        projection: &mut ProjectionMismatch,
+    ) -> Result<String> {
+        let program_calls: Vec<perspt_policy::ToolProgramCall> =
+            serde_json::from_str(response).context("decoding tool program result")?;
+        let mut nested_results = Vec::new();
+        for (nested_ordinal, nested) in program_calls.into_iter().enumerate() {
+            let nested_call = ProviderToolCall {
+                call_id: format!("{}:{}", call.call_id, nested_ordinal),
+                name: nested.tool,
+                arguments: nested.arguments,
+            };
+            emit(
+                self.recorder,
+                log,
+                LoopEvent::ToolCallObserved {
+                    call: nested_call.clone(),
+                },
+            )?;
+            let budget_ordinal = (ordinal + nested_ordinal + 1) as u32;
+            let nested_entry = self.catalog.lookup(&nested_call.name);
+            let nested_mutating =
+                nested_entry.is_some_and(|entry| candidate_mutating_effect(entry.effect));
+            let nested_high_risk = Self::high_risk(nested_entry);
+            let result = match self.budget_denial(
+                log,
+                projection,
+                &nested_call.call_id,
+                budget_ordinal,
+                nested_mutating,
+                *mutations,
+                max_mutations,
+            )? {
+                Some(denied) => denied,
+                None => {
+                    self.check_and_apply(&nested_call, log, projection, mutations)
+                        .await?
+                }
+            };
+            if nested_mutating && nested_high_risk && *mutations > 0 {
+                *immediate_boundary = true;
+            }
+            nested_results.push(serde_json::json!({
+                "call_id": nested_call.call_id,
+                "tool": nested_call.name,
+                "result": result,
+            }));
+        }
+        Ok(serde_json::to_string(&nested_results)?)
+    }
+
+    /// Execute one certified non-mutating call: the host-side tool surface
+    /// (`tool_search`, `tool_program` validation) or the sandboxed executor.
+    async fn apply_non_mutating(
+        &self,
+        call: &ProviderToolCall,
+        entry: &ToolEntry,
+    ) -> Result<String> {
+        if call.name == "tool_search" {
+            let query = call
+                .arguments
+                .get("query")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let limit = call
+                .arguments
+                .get("limit")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(8);
+            let matches = self
+                .catalog
+                .search_specs(&self.capabilities, query, limit, false);
+            return Ok(serde_json::to_string(&matches)?);
+        }
+        if call.name == "tool_program" {
+            let source = call
+                .arguments
+                .get("source")
+                .and_then(serde_json::Value::as_str)
+                .context("tool_program requires string source")?;
+            let calls = perspt_policy::evaluate_tool_program(
+                source,
+                perspt_policy::ToolProgramLimits::default(),
+            )?;
+            return Ok(serde_json::to_string(&calls)?);
+        }
+        Ok(self.executor.apply(call, entry).await?.output)
+    }
+
+    /// Evaluate all five clauses for a transition and ledger the witness.
+    fn certify(
+        &self,
+        call_id: &str,
+        transition: &CandidateTransition,
+        log: &mut EventLog,
+    ) -> Result<FullAdmissibilityWitness> {
+        let witness = check_full_admissibility(
+            transition,
+            &self.capabilities,
+            &self.kernel_state,
+            self.contract,
+            self.barrier,
+            self.c_c_max,
+        )
+        .map_err(|e| anyhow::anyhow!("kernel: {e}"))?;
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::ProposalChecked {
+                call_id: call_id.to_string(),
+                proposal: transition.proposal.clone(),
+                witness: Box::new(witness.clone()),
+            },
+        )?;
+        Ok(witness)
+    }
+
     /// Kernel check, promote, and execute one call.
+    ///
+    /// Both effect classes are certified by exactly one evaluator
+    /// (`check_full_admissibility`): non-mutating effects on the identity
+    /// transition before any process launches, mutating effects again on the
+    /// realized transition after the reversible overlay was touched.
     async fn check_and_apply(
         &mut self,
         call: &ProviderToolCall,
-        events: &mut Vec<LoopEvent>,
+        log: &mut EventLog,
         projection: &mut ProjectionMismatch,
         mutations: &mut u32,
     ) -> Result<String> {
         let Some(entry) = self.catalog.lookup(&call.name).cloned() else {
-            projection.denied_proposals += 1;
-            emit(
-                self.recorder,
-                events,
-                LoopEvent::EffectDenied {
-                    call_id: call.call_id.clone(),
-                    reason: format!("unknown tool {:?}", call.name),
-                },
-            )?;
-            return Ok(format!("denied: unknown tool {:?}", call.name));
+            return self.deny(
+                log,
+                projection,
+                &call.call_id,
+                format!("unknown tool {:?}", call.name),
+                perspt_sdk::ResidualClass::CapabilityDenied,
+            );
         };
         let scope = proposal_scope(call);
         let before = self.executor.checkpoint(&scope).await?;
@@ -845,7 +1137,7 @@ impl ToolLoop<'_> {
         );
         emit(
             self.recorder,
-            events,
+            log,
             LoopEvent::ProposalObserved {
                 call_id: call.call_id.clone(),
                 proposal: proposal.clone(),
@@ -854,145 +1146,36 @@ impl ToolLoop<'_> {
         self.kernel_state
             .set_witness("__candidate_root", before.witness.state_root.clone());
 
-        // Authority, effect scope, approval, and state preconditions are
-        // checked before even the reversible candidate overlay is touched.
-        let preflight = check_admissibility(&proposal, &self.capabilities, &self.kernel_state);
-        if !matches!(preflight.decision, perspt_sdk::AdmissibilityDecision::Allow) {
-            let transition = CandidateTransition::new(
-                proposal.clone(),
-                before.witness.clone(),
-                before.witness.clone(),
+        // Full five-clause certification on the identity transition before
+        // even the reversible candidate overlay is touched.
+        let identity = CandidateTransition::new(
+            proposal.clone(),
+            before.witness.clone(),
+            before.witness.clone(),
+        );
+        let witness = self.certify(&call.call_id, &identity, log)?;
+        if let Some(reason) = uncertified_reason(&witness) {
+            return self.deny(
+                log,
+                projection,
+                &call.call_id,
+                reason,
+                perspt_sdk::ResidualClass::CapabilityDenied,
             );
-            let witness = check_full_admissibility(
-                &transition,
-                &self.capabilities,
-                &self.kernel_state,
-                self.contract,
-                self.barrier,
-                self.c_c_max,
-            )
-            .map_err(|e| anyhow::anyhow!("kernel: {e}"))?;
-            emit(
-                self.recorder,
-                events,
-                LoopEvent::ProposalChecked {
-                    call_id: call.call_id.clone(),
-                    proposal: proposal.clone(),
-                    witness: Box::new(witness),
-                },
-            )?;
-            projection.denied_proposals += 1;
-            let reason = format!("{:?}", preflight.decision);
-            emit(
-                self.recorder,
-                events,
-                LoopEvent::EffectDenied {
-                    call_id: call.call_id.clone(),
-                    reason: reason.clone(),
-                },
-            )?;
-            return Ok(format!("denied: {reason}"));
         }
 
-        // Reads and governed verifier processes do not change the logical
-        // candidate state. Their complete five-clause transition can therefore
-        // be certified before invocation; no external process launches on a
-        // partial witness.
         if !candidate_mutating_effect(entry.effect) {
-            let transition =
-                CandidateTransition::new(proposal, before.witness.clone(), before.witness.clone());
-            let witness = check_full_admissibility(
-                &transition,
-                &self.capabilities,
-                &self.kernel_state,
-                self.contract,
-                self.barrier,
-                self.c_c_max,
-            )
-            .map_err(|e| anyhow::anyhow!("kernel: {e}"))?;
-            emit(
-                self.recorder,
-                events,
-                LoopEvent::ProposalChecked {
-                    call_id: call.call_id.clone(),
-                    proposal: transition.proposal.clone(),
-                    witness: Box::new(witness.clone()),
-                },
-            )?;
-            if !witness.allows()
-                || witness.profile != perspt_sdk::AdmissibilityProfile::SrbnCertified
-            {
-                projection.denied_proposals += 1;
-                let reason = format!(
-                    "non-candidate effect failed full admissibility: {:?}",
-                    witness.base.decision
-                );
-                emit(
-                    self.recorder,
-                    events,
-                    LoopEvent::EffectDenied {
-                        call_id: call.call_id.clone(),
-                        reason: reason.clone(),
-                    },
-                )?;
-                return Ok(format!("denied: {reason}"));
-            }
+            // Reads and governed verifier processes do not change the logical
+            // candidate state, so the identity certification above is their
+            // complete Def. 3.2 witness; no external process launches on a
+            // partial one.
             promote_matching_capability(&mut self.capabilities, &witness)
                 .map_err(|error| anyhow::anyhow!("promotion: {error}"))?;
-            if call.name == "tool_search" {
-                let query = call
-                    .arguments
-                    .get("query")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default();
-                let limit = call
-                    .arguments
-                    .get("limit")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|value| usize::try_from(value).ok())
-                    .unwrap_or(8);
-                let matches = self
-                    .catalog
-                    .search_specs(&self.capabilities, query, limit, false);
-                let output = bounded_model_output(self.recorder, serde_json::to_string(&matches)?)?;
-                emit(
-                    self.recorder,
-                    events,
-                    LoopEvent::EffectApplied {
-                        call_id: call.call_id.clone(),
-                        mutated: false,
-                        output: output.clone(),
-                    },
-                )?;
-                return Ok(output);
-            }
-            if call.name == "tool_program" {
-                let source = call
-                    .arguments
-                    .get("source")
-                    .and_then(serde_json::Value::as_str)
-                    .context("tool_program requires string source")?;
-                let calls = perspt_policy::evaluate_tool_program(
-                    source,
-                    perspt_policy::ToolProgramLimits::default(),
-                )?;
-                let output = serde_json::to_string(&calls)?;
-                emit(
-                    self.recorder,
-                    events,
-                    LoopEvent::EffectApplied {
-                        call_id: call.call_id.clone(),
-                        mutated: false,
-                        output: output.clone(),
-                    },
-                )?;
-                return Ok(output);
-            }
-            let outcome = self.executor.apply(call, &entry).await?;
-            let output = bounded_model_output(self.recorder, outcome.output)?;
+            let output = self.apply_non_mutating(call, &entry).await?;
+            let output = bounded_model_output(self.recorder, output)?;
             emit(
                 self.recorder,
-                events,
+                log,
                 LoopEvent::EffectApplied {
                     call_id: call.call_id.clone(),
                     mutated: false,
@@ -1002,83 +1185,60 @@ impl ToolLoop<'_> {
             return Ok(output);
         }
 
-        let outcome = self.executor.apply(call, &entry).await?;
+        self.apply_mutating(call, &entry, proposal, &before, log, projection, mutations)
+            .await
+    }
+
+    /// Apply a mutating call to the reversible overlay, certify the realized
+    /// transition, and either keep it (debiting the capability) or restore.
+    #[allow(clippy::too_many_arguments)]
+    async fn apply_mutating(
+        &mut self,
+        call: &ProviderToolCall,
+        entry: &ToolEntry,
+        proposal: EffectProposal,
+        before: &CandidateCheckpoint,
+        log: &mut EventLog,
+        projection: &mut ProjectionMismatch,
+        mutations: &mut u32,
+    ) -> Result<String> {
+        let outcome = self.executor.apply(call, entry).await?;
         let after = self.executor.state_witness().await?;
         let transition = CandidateTransition::new(proposal, before.witness.clone(), after);
-        let witness = check_full_admissibility(
-            &transition,
-            &self.capabilities,
-            &self.kernel_state,
-            self.contract,
-            self.barrier,
-            self.c_c_max,
-        )
-        .map_err(|e| anyhow::anyhow!("kernel: {e}"))?;
+        let witness = self.certify(&call.call_id, &transition, log)?;
         let output = bounded_model_output(self.recorder, outcome.output)?;
-        emit(
-            self.recorder,
-            events,
-            LoopEvent::ProposalChecked {
-                call_id: call.call_id.clone(),
-                proposal: transition.proposal.clone(),
-                witness: Box::new(witness.clone()),
-            },
-        )?;
 
-        if !witness.allows() || witness.profile != perspt_sdk::AdmissibilityProfile::SrbnCertified {
-            self.executor.restore(&before).await?;
+        if let Some(reason) = uncertified_reason(&witness) {
+            self.executor.restore(before).await?;
             // Denials are evidence, not errors: returned to the model so the
             // loop can adapt, and recorded for the ledger.
-            projection.denied_proposals += 1;
-            let reason = if witness.allows() {
-                format!(
-                    "admissibility profile {:?} is not autonomously committable",
-                    witness.profile
-                )
-            } else {
-                format!("{:?}", witness.base.decision)
-            };
-            emit(
-                self.recorder,
-                events,
-                LoopEvent::EffectDenied {
-                    call_id: call.call_id.clone(),
-                    reason: reason.clone(),
-                },
-            )?;
-            return Ok(format!("denied: {reason}"));
+            return self.deny(
+                log,
+                projection,
+                &call.call_id,
+                reason,
+                perspt_sdk::ResidualClass::CapabilityDenied,
+            );
         }
 
-        // Stage the debit on a clone. Executor failure or a failed promotion
-        // cannot consume capability budget without the corresponding effect.
-        let capability_id = witness.base.capability_id.clone();
-        if let Some(capability) = self
-            .capabilities
-            .iter_mut()
-            .find(|c| Some(&c.capability_id) == capability_id.as_ref())
-        {
-            let mut promoted = capability.clone();
-            if let Err(e) = promote(&mut promoted, &witness) {
-                self.executor.restore(&before).await?;
-                projection.denied_proposals += 1;
-                emit(
-                    self.recorder,
-                    events,
-                    LoopEvent::EffectDenied {
-                        call_id: call.call_id.clone(),
-                        reason: format!("promotion: {e}"),
-                    },
-                )?;
-                return Ok(format!("denied: {e}"));
-            }
-            *capability = promoted;
+        // The debit and the effect stand or fall together: a failed promotion
+        // restores the overlay and consumes no capability budget.
+        if let Err(e) = promote_matching_capability(&mut self.capabilities, &witness) {
+            self.executor.restore(before).await?;
+            return self.deny(
+                log,
+                projection,
+                &call.call_id,
+                format!("promotion: {e}"),
+                perspt_sdk::ResidualClass::CapabilityDenied,
+            );
         }
         if outcome.mutated {
             *mutations += 1;
             let boundary = self.measurer.measure_incremental().await?;
             emit(
                 self.recorder,
-                events,
+                log,
                 LoopEvent::EffectBoundaryMeasured {
                     call_id: call.call_id.clone(),
                     node_id: self.node_id.clone(),
@@ -1091,7 +1251,7 @@ impl ToolLoop<'_> {
         }
         emit(
             self.recorder,
-            events,
+            log,
             LoopEvent::EffectApplied {
                 call_id: call.call_id.clone(),
                 mutated: outcome.mutated,
@@ -1129,7 +1289,9 @@ fn proposal_scope(call: &ProviderToolCall) -> Vec<String> {
         .collect()
 }
 
-fn candidate_mutating_effect(effect: perspt_sdk::EffectKind) -> bool {
+/// The one definition of "this effect mutates the candidate overlay", shared
+/// by the loop's accounting and the executor's journal so they cannot drift.
+pub fn candidate_mutating_effect(effect: perspt_sdk::EffectKind) -> bool {
     matches!(
         effect,
         perspt_sdk::EffectKind::WriteArtifact
@@ -1138,6 +1300,21 @@ fn candidate_mutating_effect(effect: perspt_sdk::EffectKind) -> bool {
             | perspt_sdk::EffectKind::DeleteFile
             | perspt_sdk::EffectKind::MutateDependencies
     )
+}
+
+/// `Some(reason)` when a witness does not certify autonomous commitment.
+fn uncertified_reason(witness: &FullAdmissibilityWitness) -> Option<String> {
+    if witness.allows() && witness.profile == perspt_sdk::AdmissibilityProfile::SrbnCertified {
+        return None;
+    }
+    Some(if witness.allows() {
+        format!(
+            "admissibility profile {:?} is not autonomously committable",
+            witness.profile
+        )
+    } else {
+        format!("{:?}", witness.base.decision)
+    })
 }
 
 fn promote_matching_capability(
@@ -1210,14 +1387,10 @@ pub fn loop_decision_bound(baseline_energy: f64, budgets: &LoopBudgets) -> Resul
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
-fn emit(
-    recorder: Option<&dyn LoopRecorder>,
-    events: &mut Vec<LoopEvent>,
-    event: LoopEvent,
-) -> Result<()> {
+fn emit(recorder: Option<&dyn LoopRecorder>, log: &mut EventLog, event: LoopEvent) -> Result<()> {
     if let Some(recorder) = recorder {
         recorder.record(&event)?;
     }
-    events.push(event);
+    log.push(&event)?;
     Ok(())
 }
