@@ -241,6 +241,30 @@ impl SessionStore {
             .map_err(Into::into)
     }
 
+    /// Newest-first calibration epochs across all strata.
+    pub fn all_psp9_calibration_epochs(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<Psp9CalibrationEpochRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT epoch_id, stratum, target_rho, threshold, state, sample_count \
+             FROM psp9_calibration_epochs ORDER BY created_at DESC, epoch_id DESC LIMIT ?",
+        )?;
+        let rows = statement.query_map([limit], |row| {
+            Ok(Psp9CalibrationEpochRow {
+                epoch_id: row.get(0)?,
+                stratum: row.get(1)?,
+                target_rho: row.get(2)?,
+                threshold: row.get(3)?,
+                state: row.get(4)?,
+                sample_count: row.get(5)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     /// The stratum an epoch belongs to.
     pub fn psp9_epoch_stratum(&self, epoch_id: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();

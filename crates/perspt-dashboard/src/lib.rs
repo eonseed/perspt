@@ -51,6 +51,10 @@ pub fn build_router(state: AppState) -> Router {
             "/sessions/{session_id}/decisions",
             get(handlers::decisions::decisions_handler),
         )
+        .route(
+            "/sessions/{session_id}/governance",
+            get(handlers::governance::governance_handler),
+        )
         .route("/sse/{session_id}", get(sse::sse_handler))
         .layer(middleware::from_fn_with_state(
             state.clone(),

@@ -16,6 +16,7 @@
     <a role="tab" class="tab{% if active_tab == "llm" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/llm">LLM</a>
     <a role="tab" class="tab{% if active_tab == "sandbox" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/sandbox">Sandbox</a>
     <a role="tab" class="tab{% if active_tab == "decisions" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/decisions">Decisions</a>
+    <a role="tab" class="tab{% if active_tab == "governance" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/governance">Governance</a>
 </div>
 
 {% block session_content %}{% endblock %}
