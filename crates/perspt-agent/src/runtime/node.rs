@@ -127,13 +127,15 @@ pub(crate) fn certify_promotion(
 ) -> Result<bool> {
     let mut state = kernel_state.clone();
     state.set_witness("__candidate_root", realized.state_root.clone());
+    let generation = capability.node_generation;
     let mut proposal = perspt_sdk::EffectProposal::new(
         capability.holder.clone(),
         node_id,
         perspt_sdk::EffectKind::WriteArtifact,
     )
+    .with_generation(generation)
     .with_risk_class(perspt_sdk::RiskClass::High)
-    .with_idempotency_key(format!("promote:{node_id}:0"));
+    .with_idempotency_key(format!("promote:{node_id}:{generation}"));
     if let Some((first, rest)) = touched.split_first() {
         proposal = proposal
             .with_path(first.clone())
@@ -213,10 +215,89 @@ pub(crate) fn loop_kernel_state(
     kernel_state
 }
 
+/// Resolve, verify, and dedupe the sticky actuator fallback chain. Every
+/// fallback must declare native tool calling (Gate U).
+pub(crate) fn resolve_fallbacks(
+    routes: &[String],
+    model: &ModelId,
+    config: &perspt_core::Config,
+    transport: &Arc<GenAiTransport>,
+) -> Result<Vec<ModelId>> {
+    let mut fallback_models = Vec::new();
+    for value in routes {
+        let candidate = qualify_model(value, config, transport.portfolio())?;
+        transport.portfolio().resolve(&candidate.provider)?;
+        anyhow::ensure!(
+            transport.capabilities(&candidate).tool_calling,
+            "fallback route {candidate} does not declare native tool calling"
+        );
+        if candidate != *model && !fallback_models.contains(&candidate) {
+            fallback_models.push(candidate);
+        }
+    }
+    Ok(fallback_models)
+}
+
+/// Level-2 graph refinement (Theorem 6): revise the running graph with the
+/// exhausted attempt's evidence, producing the node's next generation and a
+/// refined goal. The revision passes `WorkGraphRevision::revise`, so it is a
+/// validated acyclic snapshot, never an in-place mutation.
+pub(crate) fn refine_node(
+    recorder: &Psp9Recorder,
+    graph: &WorkGraphRevision,
+    node_id: &str,
+    generation: u32,
+    goal: &str,
+    attempt: &NodeAttempt,
+) -> Result<(WorkGraphRevision, String)> {
+    let trajectory = &attempt.outcome.trajectory;
+    let refined_goal = format!(
+        "{goal}\n\nThe previous governed attempt (generation {generation}) exhausted its \
+         correction budget: best V = {best:.3} after {rejections} rejection(s) and \
+         {denied} denied proposal(s). Decompose the change into smaller verified steps \
+         and address the dominant failing verifier first.",
+        best = trajectory.best_accepted_energy,
+        rejections = trajectory.rejections_used,
+        denied = attempt.outcome.projection.denied_proposals,
+    );
+    let mut node = graph
+        .node(node_id)
+        .context("refining an unknown node")?
+        .clone();
+    node.generation = generation + 1;
+    node.goal = refined_goal.clone();
+    node.state = WorkNodeState::Running;
+    let evidence = vec![perspt_sdk::ResidualEventRef {
+        residual_id: format!("gate:{node_id}:{generation}:budget-exhausted"),
+        class: perspt_sdk::ResidualClass::BudgetExhausted,
+        component: perspt_sdk::EnergyComponent::Log,
+        weighted_energy: trajectory.best_accepted_energy,
+    }];
+    let revised = graph
+        .revise(
+            perspt_sdk::GraphRevisionReason::LocalRepair,
+            &[perspt_sdk::GraphEdit::ReplaceNode { node }],
+            evidence,
+        )
+        .map_err(|e| anyhow::anyhow!("graph refinement: {e}"))?;
+    recorder.record_custom("graph_revision", serde_json::to_value(&revised)?)?;
+    recorder.record_custom(
+        "recovery_refined",
+        serde_json::json!({
+            "level": "refine",
+            "node_id": node_id,
+            "next_generation": generation + 1,
+            "revision_id": revised.revision_id,
+        }),
+    )?;
+    Ok((revised, refined_goal))
+}
+
 pub(crate) fn worker_capability(
     session_id: &str,
     graph_revision: &str,
     authority_epoch: u64,
+    generation: u32,
 ) -> Capability {
     let mut capability = Capability::new(
         ActorId::new("toolloop"),
@@ -246,7 +327,7 @@ pub(crate) fn worker_capability(
     capability.session_id = session_id.into();
     capability.authority_epoch = authority_epoch;
     capability.graph_revision = graph_revision.into();
-    capability.node_generation = 0;
+    capability.node_generation = generation;
     capability.role = CapabilityRole::Worker;
     capability
 }

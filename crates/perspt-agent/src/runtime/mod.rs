@@ -96,6 +96,14 @@ struct CalibrationBinding {
     threshold: Option<f64>,
 }
 
+/// One completed governed attempt at a node generation.
+struct NodeAttempt {
+    outcome: crate::toolloop::LoopOutcome,
+    candidate: CandidateWorkspace,
+    assembly: NodeAssembly,
+    kernel_state: perspt_sdk::KernelState,
+}
+
 /// Everything `conclude_run` needs to decide a node's terminal fate.
 struct ConcludeContext<'a> {
     recorder: &'a Psp9Recorder,
@@ -125,6 +133,8 @@ pub struct Psp9AgentRuntime {
     fallback_models: Vec<ModelId>,
     explorer_model: Option<ModelId>,
     adjudicator_model: Option<ModelId>,
+    /// Higher-capability route for the recovery ladder's level-3 handoff.
+    handoff_model: Option<ModelId>,
     config: Psp9RunConfig,
     event_sender: Option<perspt_core::events::channel::EventSender>,
     action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
@@ -183,18 +193,14 @@ impl Psp9AgentRuntime {
             config,
             &transport,
         )?;
-        let mut fallback_models = Vec::new();
-        for value in &routes.fallbacks {
-            let candidate = qualify_model(value, config, transport.portfolio())?;
-            transport.portfolio().resolve(&candidate.provider)?;
-            anyhow::ensure!(
-                transport.capabilities(&candidate).tool_calling,
-                "fallback route {candidate} does not declare native tool calling"
-            );
-            if candidate != model && !fallback_models.contains(&candidate) {
-                fallback_models.push(candidate);
-            }
-        }
+        let handoff_model = resolve_role_route(
+            None,
+            config.models.as_ref().and_then(|m| m.architect.as_deref()),
+            config,
+            &transport,
+        )?
+        .filter(|candidate| transport.capabilities(candidate).tool_calling);
+        let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
         Ok(Self {
             working_dir,
             transport,
@@ -202,6 +208,7 @@ impl Psp9AgentRuntime {
             fallback_models,
             explorer_model,
             adjudicator_model,
+            handoff_model,
             config: run_config,
             event_sender: None,
             action_receiver: None,
@@ -225,6 +232,7 @@ impl Psp9AgentRuntime {
             fallback_models: Vec::new(),
             explorer_model: None,
             adjudicator_model: None,
+            handoff_model: None,
             config: run_config,
             event_sender: None,
             action_receiver: None,
@@ -369,7 +377,7 @@ impl Psp9AgentRuntime {
         let node_id = "explore-1".to_string();
         let (recorder, _goal, mut scheduler, running_graph) =
             self.open_session(&task, &session_id, &node_id).await?;
-        let candidate = self.open_candidate(&node_id, &running_graph.revision_id)?;
+        let candidate = self.open_candidate(&node_id, 0, &running_graph.revision_id)?;
         let explorer = perspt_sdk::exploration_capability(perspt_sdk::ActorId::new("toolloop"));
         debug_assert!(perspt_sdk::is_read_only_capability(&explorer));
         let mut capability = explorer;
@@ -517,14 +525,140 @@ impl Psp9AgentRuntime {
         Ok(outcome.output)
     }
 
-    fn open_candidate(&self, node_id: &str, revision_id: &str) -> Result<CandidateWorkspace> {
+    fn open_candidate(
+        &self,
+        node_id: &str,
+        generation: u32,
+        revision_id: &str,
+    ) -> Result<CandidateWorkspace> {
         CandidateWorkspace::create_with_policy(
             &self.working_dir,
             node_id,
-            0,
+            generation,
             revision_id,
             self.config.allow_unisolated_verifiers,
         )
+    }
+
+    /// One governed attempt at a node generation: fresh candidate overlay,
+    /// fresh assembly, one tool loop.
+    #[allow(clippy::too_many_arguments)]
+    async fn attempt_node(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        goal: &str,
+        node_id: &str,
+        generation: u32,
+        model: &ModelId,
+        graph: &WorkGraphRevision,
+    ) -> Result<NodeAttempt> {
+        let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
+        let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
+            .with_max_parallel(self.config.max_parallel_verifiers);
+        let assembly = self.assemble_node(recorder, session_id, graph, node_id, generation)?;
+        let kernel_state = loop_kernel_state(&assembly.grant_policy, &graph.revision_id);
+        let tool_loop = ToolLoop {
+            transport: self.transport.as_ref(),
+            model: model.clone(),
+            fallback_models: self.fallback_models.clone(),
+            catalog: &assembly.catalog,
+            capabilities: vec![assembly.capability.clone()],
+            contract: Some(&assembly.contract),
+            barrier: Some(&assembly.barrier),
+            c_c_max: 0.25,
+            executor: &candidate,
+            measurer: &measurer,
+            budgets: self.loop_budgets(assembly.energy.rho_gate),
+            cadence: assembly.cadence.clone(),
+            kernel_state: kernel_state.clone(),
+            node_id: node_id.to_string(),
+            generation,
+            recorder: Some(recorder),
+        };
+        let outcome = tool_loop.run(goal).await?;
+        Ok(NodeAttempt {
+            outcome,
+            candidate,
+            assembly,
+            kernel_state,
+        })
+    }
+
+    /// Recovery ladder (Theorem 6): the loop already consumed its retry and
+    /// fallback levels; the runtime holds the higher rungs. Level 2 refines
+    /// the work graph with the attempt's evidence and re-runs at a new
+    /// generation; level 3 hands the node to the configured higher-capability
+    /// route; level 4 revokes the session's authority epoch after
+    /// restore-best containment.
+    async fn recovery_ladder(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        node_id: &str,
+        mut graph: WorkGraphRevision,
+        mut goal: String,
+        mut attempt: NodeAttempt,
+    ) -> Result<(NodeAttempt, WorkGraphRevision)> {
+        let mut generation = 0u32;
+        let mut model = self.model.clone();
+        for level in [
+            perspt_sdk::CascadeLevel::Refine,
+            perspt_sdk::CascadeLevel::Escalate,
+        ] {
+            if !matches!(
+                attempt.outcome.outcome,
+                NodeTerminalOutcome::Escalated { .. }
+            ) {
+                break;
+            }
+            match level {
+                perspt_sdk::CascadeLevel::Refine => {
+                    let (revised, refined_goal) =
+                        refine_node(recorder, &graph, node_id, generation, &goal, &attempt)?;
+                    graph = revised;
+                    generation += 1;
+                    goal = refined_goal;
+                }
+                perspt_sdk::CascadeLevel::Escalate => {
+                    let Some(handoff) = self.handoff_model.clone() else {
+                        continue;
+                    };
+                    if handoff == model {
+                        continue;
+                    }
+                    recorder.record_custom(
+                        "recovery_handoff",
+                        serde_json::json!({
+                            "level": "escalate",
+                            "from_model": model,
+                            "to_model": handoff,
+                        }),
+                    )?;
+                    model = handoff;
+                }
+                _ => unreachable!("ladder iterates refine and escalate only"),
+            }
+            attempt = self
+                .attempt_node(
+                    recorder, session_id, &goal, node_id, generation, &model, &graph,
+                )
+                .await?;
+        }
+        if matches!(
+            attempt.outcome.outcome,
+            NodeTerminalOutcome::Escalated { .. }
+        ) {
+            // Level 4: the loop already restored the accepted state; revoke
+            // the session's authority so nothing minted under this epoch can
+            // still deliver.
+            let epoch = recorder.store.revoke_authority(session_id)?;
+            recorder.record_custom(
+                "authority_epoch_revoked",
+                serde_json::json!({"level": "contain", "new_epoch": epoch}),
+            )?;
+        }
+        Ok((attempt, graph))
     }
 
     pub async fn run(mut self, task: String) -> Result<Psp9RunSummary> {
@@ -532,68 +666,61 @@ impl Psp9AgentRuntime {
         let node_id = "implement-1".to_string();
         let (recorder, agent_goal, mut scheduler, running_graph) =
             self.open_session(&task, &session_id, &node_id).await?;
-        let candidate = self.open_candidate(&node_id, &running_graph.revision_id)?;
-        let measurer = CodingCandidateMeasurer::new(&candidate, &node_id, 0)
-            .with_max_parallel(self.config.max_parallel_verifiers);
-        let NodeAssembly {
-            catalog,
-            grant_policy,
-            capability,
-            contract,
-            barrier,
-            cadence,
-            energy,
-            calibration,
-        } = self.assemble_node(&recorder, &session_id, &running_graph, &node_id)?;
-        let kernel_state = loop_kernel_state(&grant_policy, &running_graph.revision_id);
-        let tool_loop = ToolLoop {
-            transport: self.transport.as_ref(),
-            model: self.model.clone(),
-            fallback_models: self.fallback_models.clone(),
-            catalog: &catalog,
-            capabilities: vec![capability.clone()],
-            contract: Some(&contract),
-            barrier: Some(&barrier),
-            c_c_max: 0.25,
-            executor: &candidate,
-            measurer: &measurer,
-            budgets: self.loop_budgets(energy.rho_gate),
-            cadence,
-            kernel_state: kernel_state.clone(),
-            node_id: node_id.clone(),
-            generation: 0,
-            recorder: Some(&recorder),
-        };
 
-        let outcome = match tool_loop.run(&agent_goal).await {
-            Ok(outcome) => outcome,
+        let first = match self
+            .attempt_node(
+                &recorder,
+                &session_id,
+                &agent_goal,
+                &node_id,
+                0,
+                &self.model.clone(),
+                &running_graph,
+            )
+            .await
+        {
+            Ok(attempt) => attempt,
+            Err(error) => return Err(self.fail_session(&recorder, error)),
+        };
+        let (attempt, graph) = match self
+            .recovery_ladder(
+                &recorder,
+                &session_id,
+                &node_id,
+                running_graph,
+                agent_goal,
+                first,
+            )
+            .await
+        {
+            Ok(result) => result,
             Err(error) => return Err(self.fail_session(&recorder, error)),
         };
 
         let verdict = self
             .conclude_run(ConcludeContext {
                 recorder: &recorder,
-                candidate: &candidate,
+                candidate: &attempt.candidate,
                 node_id: &node_id,
                 task: &task,
-                grant_policy: &grant_policy,
-                capability: &capability,
-                contract: &contract,
-                barrier: &barrier,
-                kernel_state: &kernel_state,
-                loop_outcome: &outcome.outcome,
-                calibration: &calibration,
+                grant_policy: &attempt.assembly.grant_policy,
+                capability: &attempt.assembly.capability,
+                contract: &attempt.assembly.contract,
+                barrier: &attempt.assembly.barrier,
+                kernel_state: &attempt.kernel_state,
+                loop_outcome: &attempt.outcome.outcome,
+                calibration: &attempt.assembly.calibration,
             })
             .await?;
         let (final_outcome, status, promoted_paths) = verdict;
         scheduler.finish(&node_id, 0);
-        self.finish_node(&recorder, &running_graph, &node_id, &final_outcome, status)?;
+        self.finish_node(&recorder, &graph, &node_id, &final_outcome, status)?;
 
         Ok(Psp9RunSummary {
             session_id,
             node_id,
             outcome: final_outcome,
-            turns_used: outcome.turns_used,
+            turns_used: attempt.outcome.turns_used,
             ledger_head: recorder.head(),
             promoted_paths,
         })
@@ -673,6 +800,7 @@ impl Psp9AgentRuntime {
         session_id: &str,
         running_graph: &WorkGraphRevision,
         node_id: &str,
+        generation: u32,
     ) -> Result<NodeAssembly> {
         let domain = CodingDomain::new();
         let scope = perspt_sdk::DomainScope {
@@ -689,12 +817,13 @@ impl Psp9AgentRuntime {
                 session_id,
                 &running_graph.revision_id,
                 grant_policy.authority_epoch,
+                generation,
             ))
             .map_err(|e| anyhow::anyhow!("grant intersection: {e}"))?;
         let contract = CodingContract {
             graph_revision: running_graph.revision_id.clone(),
             node_id: node_id.to_string(),
-            generation: 0,
+            generation,
             policy: perspt_policy::engine::PolicyEngine::new()?,
         };
         let barrier = OperationalSafetyBarrier::default();
@@ -849,7 +978,7 @@ impl Psp9AgentRuntime {
             "authority_epoch_rechecked",
             serde_json::json!({
                 "node_id": node_id,
-                "generation": 0,
+                "generation": capability.node_generation,
                 "epoch": grant_policy.authority_epoch,
             }),
         )?;
@@ -869,7 +998,8 @@ impl Psp9AgentRuntime {
             return Ok(None);
         }
 
-        let promotion_key = format!("promote:{node_id}:0");
+        let generation = capability.node_generation;
+        let promotion_key = format!("promote:{node_id}:{generation}");
         let promotion_files = promotion_manifest(
             recorder,
             &self.working_dir,
@@ -879,7 +1009,7 @@ impl Psp9AgentRuntime {
         let promotion_intent = serde_json::json!({
             "idempotency_key": promotion_key,
             "node_id": node_id,
-            "generation": 0,
+            "generation": generation,
             "authority_epoch": grant_policy.authority_epoch,
             "workspace_root": self.working_dir.canonicalize()?.display().to_string(),
             "candidate_root": realized.state_root,
