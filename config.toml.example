@@ -36,3 +36,30 @@ model = "gpt-4o-mini"
 # actuator_model = "gpt-4o-mini"
 # verifier_model = "gpt-4o-mini"
 # speculator_model = "gpt-4o-mini"
+
+# ---------------------------------------------------------------------------
+# PSP-9 model portfolio (several providers live in one process)
+# ---------------------------------------------------------------------------
+# Each [providers.<id>] entry is one credentialed route. The id is yours; the
+# adapter defaults to the id. Provider records describe resolution policy,
+# not embedded secrets: prefer api_key_env over a literal api_key.
+#
+# [providers.anthropic]
+# api_key_env = "ANTHROPIC_API_KEY"
+#
+# [providers.openai]
+# api_key_env = "OPENAI_API_KEY"
+#
+# [providers.local]
+# adapter  = "ollama"
+# base_url = "http://localhost:11434"
+#
+# Per-tier routes are fully qualified "provider::model" so identity,
+# calibration, and replay never depend on an ambient default provider.
+#
+# [models]
+# architect   = "anthropic::<model>"
+# actuator    = "openai::<model>"
+# verifier    = "anthropic::<model>"
+# speculator  = "local::<model>"
+# adjudicator = "openai::<model>"

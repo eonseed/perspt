@@ -605,7 +605,7 @@ fn provider_from_model_namespace(model: &str) -> Option<&'static str> {
     })
 }
 
-fn configure_vertex_environment(config: &Config) {
+pub(crate) fn configure_vertex_environment(config: &Config) {
     if std::env::var("VERTEX_PROJECT_ID").is_err() {
         if let Some(project) = config
             .vertex_project_id
@@ -773,7 +773,7 @@ fn vertex_endpoint_base(project: &str, location: &str) -> String {
     }
 }
 
-fn provider_base_url_env_var(provider: &str) -> Option<&'static str> {
+pub(crate) fn provider_base_url_env_var(provider: &str) -> Option<&'static str> {
     match provider.to_lowercase().as_str() {
         "openai" => Some("OPENAI_BASE_URL"),
         "anthropic" => Some("ANTHROPIC_BASE_URL"),
@@ -796,7 +796,7 @@ fn provider_base_url_from_env(provider: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn provider_api_key_env_var(provider: &str) -> Option<&'static str> {
+pub(crate) fn provider_api_key_env_var(provider: &str) -> Option<&'static str> {
     match provider.to_lowercase().as_str() {
         "openai" => Some("OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
@@ -819,7 +819,7 @@ fn normalize_base_url(base_url: &str) -> String {
 }
 
 /// Convert a provider string to genai AdapterKind
-fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
+pub(crate) fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
     match provider.to_lowercase().as_str() {
         "openai" => Ok(AdapterKind::OpenAI),
         "anthropic" => Ok(AdapterKind::Anthropic),

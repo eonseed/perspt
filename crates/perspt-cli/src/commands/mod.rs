@@ -8,6 +8,7 @@ pub mod dashboard;
 pub mod init;
 pub mod ledger;
 pub mod logs;
+pub mod providers;
 pub mod resume;
 pub mod simple_chat;
 pub mod status;

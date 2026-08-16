@@ -8,9 +8,10 @@ pub mod normalize;
 pub mod path;
 pub mod paths;
 pub mod plugin;
+pub mod portfolio;
 pub mod types;
 
-pub use config::Config;
+pub use config::{Config, ModelsConfig, ProviderEntry};
 pub use events::{ActionType, AgentAction, AgentEvent, NodeStatus};
 pub use llm_provider::{
     detect_provider_from_env, GenAIProvider, LlmResponse, ResolvedProvider, EOT_SIGNAL,
@@ -19,6 +20,7 @@ pub use memory::ProjectMemory;
 pub use plugin::{
     InitOptions, JsPlugin, LanguagePlugin, LspConfig, PluginRegistry, PythonPlugin, RustPlugin,
 };
+pub use portfolio::{declared_caps, ModelPortfolio, ProviderCaps, ProviderHandle};
 
 // Re-export commonly used types
 pub use types::{
