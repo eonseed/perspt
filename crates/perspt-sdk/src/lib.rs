@@ -124,7 +124,10 @@ pub use residual::{
     CorrectionDirection, EnergyComponent, EvidencePayload, IndependenceRoute, ResidualClass,
     ResidualEvent, ResidualEventRef, ResidualSeverity, SensorRef, SymbolRef,
 };
-pub use routing::{resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier, ModelTierConfig};
+pub use routing::{
+    resolve_portfolio_route, resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier,
+    ModelTierConfig, PortfolioModels, PortfolioRoute, RouteObjective,
+};
 pub use scheduler::{
     recovery_is_total, repair_to_effects, ExecutionLease, Footprint, LeaseKind, LeaseTable,
     NodeOutcome, RepairAction, Resource, Scheduler, SchedulerEffect,
