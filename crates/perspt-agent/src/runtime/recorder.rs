@@ -5,7 +5,7 @@ use super::*;
 /// Durable sink for all live PSP-9 events.
 pub struct Psp9Recorder {
     pub(crate) session_id: String,
-    pub(crate) store: SessionStore,
+    pub(crate) store: Arc<SessionStore>,
     ledger: Mutex<Ledger>,
     event_sender: Option<perspt_core::events::channel::EventSender>,
 }
@@ -25,11 +25,15 @@ impl Psp9Recorder {
         task: &str,
         working_dir: &Path,
         database_path: Option<&Path>,
+        shared_store: Option<Arc<SessionStore>>,
         event_sender: Option<perspt_core::events::channel::EventSender>,
     ) -> Result<Self> {
-        let store = match database_path {
-            Some(path) => SessionStore::open(&path.to_path_buf())?,
-            None => SessionStore::new()?,
+        // An embedder-supplied handle wins: sharing one connection with a
+        // dashboard avoids a second live handle on the same database file.
+        let store = match (shared_store, database_path) {
+            (Some(store), _) => store,
+            (None, Some(path)) => Arc::new(SessionStore::open(&path.to_path_buf())?),
+            (None, None) => Arc::new(SessionStore::new()?),
         };
         store.create_session(&SessionRecord {
             session_id: session_id.into(),
@@ -55,16 +59,15 @@ impl Psp9Recorder {
         })
     }
 
+    /// Write-ahead append: stage the record, persist it durably, and only
+    /// then extend the in-memory chain. Staging avoids the previous
+    /// clone-the-whole-ledger transaction, which made session recording
+    /// O(n²) in events.
     pub(crate) fn append(&self, event: LedgerEvent) -> Result<()> {
         let mut guard = self.ledger.lock().unwrap();
-        let mut candidate = guard.clone();
-        candidate
-            .append(event)
+        let record = guard
+            .stage(event)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let record = candidate
-            .records()
-            .last()
-            .context("missing appended record")?;
         self.store.record_psp9_event(&Psp9LedgerRow {
             session_id: self.session_id.clone(),
             sequence: record.sequence as i64,
@@ -72,7 +75,9 @@ impl Psp9Recorder {
             prev_hash: record.prev_hash.clone(),
             hash: record.hash.clone(),
         })?;
-        *guard = candidate;
+        guard
+            .commit_staged(record)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         Ok(())
     }
 
@@ -148,6 +153,17 @@ impl LoopRecorder for Psp9Recorder {
             )?;
         }
         if let Some(sender) = &self.event_sender {
+            // Structured surfaces first: the TUI's energy panel consumes the
+            // typed event, not the narration line.
+            if let LoopEvent::CandidateMeasured {
+                node_id, energy, ..
+            } = event
+            {
+                let _ = sender.send(perspt_core::AgentEvent::EnergyUpdated {
+                    node_id: node_id.clone(),
+                    energy: *energy as f32,
+                });
+            }
             let message = match event {
                 LoopEvent::CandidateMeasured {
                     node_id,

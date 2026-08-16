@@ -218,6 +218,43 @@ impl Ledger {
         Ok(hash)
     }
 
+    /// Compute the record `append` would produce, without mutating the chain.
+    ///
+    /// A write-ahead sink persists the staged record first and then commits
+    /// it with [`commit_staged`](Self::commit_staged); a durable-write failure
+    /// leaves the in-memory chain untouched, with no chain clone required.
+    pub fn stage(&self, event: LedgerEvent) -> Result<LedgerRecord> {
+        let sequence = self.records.len() as u64;
+        let prev_hash = self.head();
+        let hash = chain_hash(&prev_hash, sequence, &event)?;
+        Ok(LedgerRecord {
+            sequence,
+            event,
+            prev_hash,
+            hash,
+        })
+    }
+
+    /// Commit a record produced by [`stage`](Self::stage). Rejects a record
+    /// that does not extend the current head exactly.
+    pub fn commit_staged(&mut self, record: LedgerRecord) -> Result<()> {
+        if record.sequence != self.records.len() as u64 || record.prev_hash != self.head() {
+            return Err(SdkError::Domain(
+                "staged record does not extend the current ledger head".into(),
+            ));
+        }
+        if let LedgerEvent::ObservationRecorded {
+            handle,
+            content_hash,
+        } = &record.event
+        {
+            self.observations
+                .insert(handle.clone(), content_hash.clone());
+        }
+        self.records.push(record);
+        Ok(())
+    }
+
     /// Record a nondeterministic observation before it is used (R2). Returns the
     /// observation handle (content address).
     pub fn record_observation(&mut self, content: &[u8]) -> Result<String> {
