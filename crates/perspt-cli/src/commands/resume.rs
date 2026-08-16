@@ -89,6 +89,10 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
     println!("📁 Working dir: {}", session.working_dir);
     println!("🔖 Status: {}", session.status);
 
+    if session.status.ends_with("_PSP9") {
+        return resume_psp9(store, &session).await;
+    }
+
     // Get completed nodes
     let node_states = store.get_node_states(&actual_id)?;
     let completed_count = node_states
@@ -269,5 +273,146 @@ async fn resume_session(store: &perspt_store::SessionStore, session_id: &str) ->
         }
     }
 
+    Ok(())
+}
+
+/// PSP-9 resume is credential-free recovery, not a return to the legacy
+/// orchestrator. It verifies the ledger and completes bracketed promotion
+/// intents from content-addressed artifacts. A new model loop is started as a
+/// new session because live capabilities are intentionally not serialized.
+async fn resume_psp9(
+    store: &perspt_store::SessionStore,
+    session: &perspt_store::SessionRecord,
+) -> Result<()> {
+    verify_psp9_chain(store, &session.session_id)?;
+    let pending = store.pending_external_effects(&session.session_id)?;
+    if pending.is_empty() {
+        println!("PSP-9 ledger is valid and has no incomplete external effects.");
+        anyhow::ensure!(
+            session.status != "RUNNING_PSP9",
+            "the process stopped inside a model/tool loop without a durable candidate checkpoint; \
+             exact continuation is unavailable, and Perspt will not silently restart the task"
+        );
+        println!("This session is terminal; start a new agent session for additional work.");
+        return Ok(());
+    }
+    let current_epoch = store.authority_epoch(&session.session_id)?;
+    for effect in pending {
+        let intent: serde_json::Value = serde_json::from_str(&effect.intent_json)?;
+        let epoch = intent
+            .get("authority_epoch")
+            .and_then(serde_json::Value::as_u64)
+            .context("promotion intent has no authority epoch")?;
+        anyhow::ensure!(
+            epoch == current_epoch,
+            "refusing stale promotion intent at epoch {epoch}; current epoch is {current_epoch}"
+        );
+        let workspace = PathBuf::from(
+            intent
+                .get("workspace_root")
+                .and_then(serde_json::Value::as_str)
+                .context("promotion intent has no workspace binding")?,
+        )
+        .canonicalize()?;
+        anyhow::ensure!(
+            workspace == PathBuf::from(&session.working_dir).canonicalize()?,
+            "promotion workspace binding differs from the session workspace"
+        );
+        let files = intent
+            .get("files")
+            .and_then(serde_json::Value::as_array)
+            .context("promotion intent has no file manifest")?;
+        for file in files {
+            recover_promoted_file(store, &workspace, file)?;
+        }
+        store.complete_external_effect(
+            &session.session_id,
+            &effect.idempotency_key,
+            &serde_json::json!({"recovered": true, "files": files.len()}).to_string(),
+        )?;
+        println!(
+            "Completed interrupted promotion {} ({} file(s)).",
+            effect.idempotency_key,
+            files.len()
+        );
+    }
+    store.update_session_status(&session.session_id, "COMPLETED_PSP9")?;
+    Ok(())
+}
+
+fn verify_psp9_chain(store: &perspt_store::SessionStore, session_id: &str) -> Result<()> {
+    let rows = store.get_psp9_events(session_id)?;
+    anyhow::ensure!(
+        !rows.is_empty(),
+        "PSP-9 session has no durable ledger events"
+    );
+    let mut ledger = perspt_sdk::Ledger::new();
+    for (sequence, row) in rows.iter().enumerate() {
+        anyhow::ensure!(row.sequence == sequence as i64, "ledger sequence mismatch");
+        anyhow::ensure!(
+            row.prev_hash == ledger.head(),
+            "ledger predecessor mismatch"
+        );
+        let event: perspt_sdk::LedgerEvent = serde_json::from_str(&row.event_json)?;
+        let head = ledger.append(event)?;
+        anyhow::ensure!(
+            head == row.hash,
+            "ledger hash mismatch at sequence {sequence}"
+        );
+    }
+    Ok(())
+}
+
+fn recover_promoted_file(
+    store: &perspt_store::SessionStore,
+    workspace: &std::path::Path,
+    manifest: &serde_json::Value,
+) -> Result<()> {
+    let relative = manifest
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .context("promotion file has no path")?;
+    let relative_path = std::path::Path::new(relative);
+    anyhow::ensure!(
+        !relative_path.is_absolute()
+            && !relative_path
+                .components()
+                .any(|component| component == std::path::Component::ParentDir),
+        "promotion path escapes workspace: {relative:?}"
+    );
+    let target = workspace.join(relative_path);
+    let before = manifest
+        .get("before_hash")
+        .and_then(serde_json::Value::as_str);
+    let after = manifest
+        .get("after_hash")
+        .and_then(serde_json::Value::as_str);
+    let current_bytes = std::fs::read(&target).ok();
+    let current = current_bytes.as_deref().map(perspt_sdk::content_hash);
+    if current.as_deref() == after {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        current.as_deref() == before,
+        "workspace file changed after promotion intent: {relative}"
+    );
+    match after {
+        Some(hash) => {
+            let bytes = store
+                .get_psp9_artifact(hash)?
+                .with_context(|| format!("missing promotion artifact {hash}"))?;
+            anyhow::ensure!(
+                perspt_sdk::content_hash(&bytes) == hash,
+                "promotion artifact hash mismatch"
+            );
+            let parent = target.parent().context("promotion target has no parent")?;
+            std::fs::create_dir_all(parent)?;
+            let staged = parent.join(format!(".perspt-resume-{}", &hash[..12.min(hash.len())]));
+            std::fs::write(&staged, bytes)?;
+            std::fs::rename(staged, target)?;
+        }
+        None if target.is_file() => std::fs::remove_file(target)?,
+        None => {}
+    }
     Ok(())
 }
