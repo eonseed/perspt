@@ -203,6 +203,98 @@ pub fn decide(state: &CalibrationState, score: f64, risk: RiskClass) -> AcceptOu
     }
 }
 
+// ---------------------------------------------------------------------------
+// PSP-9 system 16: feasibility floor, strata, and readiness epochs
+// ---------------------------------------------------------------------------
+
+/// The sample floor a declared budget implies: the feasible set of Theorem 5
+/// is empty exactly when `rho < 1/(n+1)`, so `n >= 1/rho - 1` labeled
+/// samples are required before any proposal can be autonomously accepted at
+/// all. For the common `rho = 0.05` this is 19.
+pub fn sample_floor(rho: f64) -> Result<usize> {
+    if !(0.0..=1.0).contains(&rho) || rho == 0.0 {
+        return Err(SdkError::InvalidGate(format!(
+            "rho must be in (0,1]: {rho}"
+        )));
+    }
+    Ok((1.0 / rho - 1.0).ceil().max(0.0) as usize)
+}
+
+/// A threshold computation that names infeasibility instead of hiding it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "status")]
+pub enum ThresholdOutcome {
+    /// The finite-sample certificate is active at this threshold; acceptance
+    /// is strict (`score > theta`), ties rejected.
+    Feasible { theta_hat: f64 },
+    /// `rho < 1/(n+1)`: the feasible set is empty and everything would be
+    /// rejected. Reporting this as a satisfied budget is prohibited — it is
+    /// technically true and operationally a lie (Gate Q).
+    InsufficientCalibration { have: usize, need: usize },
+}
+
+/// Compute the threshold, reporting the feasibility floor explicitly.
+pub fn conformal_threshold_checked(
+    samples: &[CalibrationSample],
+    rho: f64,
+) -> Result<ThresholdOutcome> {
+    let need = sample_floor(rho)?;
+    if samples.len() < need {
+        return Ok(ThresholdOutcome::InsufficientCalibration {
+            have: samples.len(),
+            need,
+        });
+    }
+    let theta_hat = conformal_threshold(samples, rho)?;
+    Ok(ThresholdOutcome::Feasible { theta_hat })
+}
+
+/// The exchangeability stratum a calibration set is keyed by (PSP-9
+/// system 16). `(capability, model)` alone is not enough: different models
+/// fail differently, and so do different verifier suites and score
+/// definitions. Changing **any** field marks the calibration stale.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CalibrationStratum {
+    pub domain_package: String,
+    pub domain_version: String,
+    pub effect_kind: String,
+    pub risk_class: String,
+    pub model_route: String,
+    pub verifier_suite_fingerprint: String,
+    pub tool_catalog_fingerprint: String,
+    pub policy_version: String,
+    pub score_definition: String,
+}
+
+/// Cold-start readiness (PSP-9 system 16): before `Active`, read-only work
+/// and deterministically contracted effects continue; other mutations route
+/// to approval while shadow decisions build the local set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalibrationReadiness {
+    InsufficientSamples,
+    /// Decisions are recorded counterfactually; nothing is certified.
+    Shadow,
+    Active,
+    Stale,
+}
+
+/// Derive readiness from the sample count and stratum staleness.
+pub fn readiness(samples: usize, rho: f64, stratum_changed: bool) -> Result<CalibrationReadiness> {
+    if stratum_changed {
+        return Ok(CalibrationReadiness::Stale);
+    }
+    let need = sample_floor(rho)?;
+    if samples < need {
+        return Ok(if samples == 0 {
+            CalibrationReadiness::InsufficientSamples
+        } else {
+            CalibrationReadiness::Shadow
+        });
+    }
+    Ok(CalibrationReadiness::Active)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +390,88 @@ mod tests {
             AcceptOutcome::CertifiedAccept
         );
         assert_eq!(decide(&state, 0.0, RiskClass::Low), AcceptOutcome::Reject);
+    }
+
+    #[test]
+    fn mc_q_sub_feasible_target_reports_insufficient_calibration() {
+        // rho = 0.05 needs n >= 19; with 5 samples the outcome names the
+        // floor rather than presenting reject-all as a satisfied budget.
+        let samples: Vec<CalibrationSample> = (0..5)
+            .map(|i| CalibrationSample {
+                score: 0.5 + (i as f64) * 0.05,
+                is_unsafe: false,
+            })
+            .collect();
+        match conformal_threshold_checked(&samples, 0.05).unwrap() {
+            ThresholdOutcome::InsufficientCalibration { have, need } => {
+                assert_eq!(have, 5);
+                assert_eq!(need, 19);
+            }
+            other => panic!("expected insufficiency, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mc_q_the_sample_floor_matches_the_theorem() {
+        assert_eq!(sample_floor(0.05).unwrap(), 19);
+        assert_eq!(sample_floor(0.5).unwrap(), 1);
+        assert!(sample_floor(0.0).is_err());
+    }
+
+    #[test]
+    fn mc_q_a_score_exactly_at_the_threshold_is_rejected() {
+        // Acceptance is strict: right-continuity of the strict loss is what
+        // makes the infimum attained, so ties reject.
+        let state = CalibrationState::Calibrated {
+            theta_hat: 0.7,
+            rho: 0.05,
+        };
+        assert_eq!(
+            decide(&state, 0.7, RiskClass::Medium),
+            AcceptOutcome::Reject,
+            "tie at the threshold must reject"
+        );
+        assert_eq!(
+            decide(&state, 0.7 + 1e-9, RiskClass::Medium),
+            AcceptOutcome::CertifiedAccept
+        );
+    }
+
+    #[test]
+    fn mc_q_any_stratum_field_change_marks_stale() {
+        let stratum = CalibrationStratum {
+            domain_package: "coding".into(),
+            domain_version: "0.6.6".into(),
+            effect_kind: "apply_patch".into(),
+            risk_class: "medium".into(),
+            model_route: "anthropic::claude-opus-5".into(),
+            verifier_suite_fingerprint: "vs1".into(),
+            tool_catalog_fingerprint: "tc1".into(),
+            policy_version: "p1".into(),
+            score_definition: "s1".into(),
+        };
+        let mut failover = stratum.clone();
+        failover.model_route = "openai::gpt-5.5".into();
+        assert_ne!(stratum, failover, "automatic failover changes the stratum");
+        assert_eq!(
+            readiness(100, 0.05, stratum != failover).unwrap(),
+            CalibrationReadiness::Stale
+        );
+    }
+
+    #[test]
+    fn readiness_progresses_from_insufficient_through_shadow_to_active() {
+        assert_eq!(
+            readiness(0, 0.05, false).unwrap(),
+            CalibrationReadiness::InsufficientSamples
+        );
+        assert_eq!(
+            readiness(5, 0.05, false).unwrap(),
+            CalibrationReadiness::Shadow
+        );
+        assert_eq!(
+            readiness(19, 0.05, false).unwrap(),
+            CalibrationReadiness::Active
+        );
     }
 }
