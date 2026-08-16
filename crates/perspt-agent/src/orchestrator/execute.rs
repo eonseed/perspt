@@ -6,9 +6,11 @@ impl SRBNOrchestrator {
         log::info!("Starting SRBN execution for task: {}", task);
         self.emit_log(format!("🚀 Starting task: {}", task));
 
-        // Step 0: Start session first
-        let session_id = uuid::Uuid::new_v4().to_string();
-        self.context.session_id = session_id.clone();
+        // Step 0: Start the session whose id was minted with the orchestrator.
+        // The CLI, dashboard, budgets, and future capability leases all see
+        // this id before `run`; replacing it here splits one run across two
+        // identities and makes replay/observability point at the wrong ledger.
+        let session_id = self.context.session_id.clone();
         self.ledger.start_session(
             &session_id,
             &task,

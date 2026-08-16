@@ -52,6 +52,7 @@ grep = "0.4"
 ignore = "0.4"
 regex = "1.12.2"
 diffy = "0.5"
+tempfile = "3.14"
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
-tempfile = "3.14"
