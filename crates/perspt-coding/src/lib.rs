@@ -29,9 +29,10 @@ pub use runtime::{crash_marker, SmokeInvocation};
 pub use symbols::{defined_symbols, expected_symbols};
 
 use perspt_sdk::{
-    AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope,
-    EnergyComponent, EnergyModel, ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight,
-    StabilityClaim, WorkspaceSnapshot,
+    AgentDomainPackage, BarrierChannel, BarrierSpec, CorrectionDirection, DomainDetection,
+    DomainId, DomainScope, EnergyComponent, EnergyModel, HardGatePolicy, ResidualClass,
+    ResidualEvent, ResidualSchema, ResidualWeight, SafetyBarrierDisposition, StabilityClaim,
+    VerificationCadence, VerifierSuiteSpec, WorkspaceSnapshot,
 };
 
 /// The language an adapter targets, used to specialize correction directions.
@@ -148,6 +149,53 @@ impl AgentDomainPackage for CodingDomain {
             }
         }
         directions
+    }
+
+    fn tool_entries(&self, _scope: &DomainScope) -> Vec<perspt_sdk::ToolEntry> {
+        // The base catalog's run_test / run_build / run_formatter entries are
+        // bound to concrete commands by the plugin registry at catalog
+        // assembly; the coding domain contributes no extra entries yet.
+        Vec::new()
+    }
+
+    fn hard_gate_policy(&self, _scope: &DomainScope) -> HardGatePolicy {
+        HardGatePolicy {
+            required_stages: vec!["syntax".into(), "build".into(), "test".into()],
+        }
+    }
+
+    fn verifier_suite(&self, _scope: &DomainScope) -> VerifierSuiteSpec {
+        VerifierSuiteSpec {
+            stages: vec![
+                "syntax".into(),
+                "build".into(),
+                "test".into(),
+                "lint".into(),
+            ],
+            cadence: VerificationCadence::default(),
+        }
+    }
+
+    fn safety_barrier(&self, _scope: &DomainScope) -> SafetyBarrierDisposition {
+        // The versioned operational safety channels of PSP-9 system 12.
+        // Correctness evidence (compiler errors, test failures) stays in V;
+        // it is never duplicated into h.
+        SafetyBarrierDisposition::Registered(BarrierSpec {
+            channels: [
+                "protected-path-modification",
+                "sandbox-escape",
+                "secret-exposure",
+                "unapproved-network-reachability",
+                "dependency-policy-violation",
+                "resource-limits",
+            ]
+            .iter()
+            .map(|name| BarrierChannel {
+                name: (*name).to_string(),
+                policy_version: "1".to_string(),
+            })
+            .collect(),
+        })
     }
 }
 

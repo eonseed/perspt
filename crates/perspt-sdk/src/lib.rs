@@ -76,8 +76,9 @@ pub use conformal::{
     CalibrationSample, CalibrationState,
 };
 pub use domain::{
-    AgentDomainPackage, DomainDetection, DomainId, DomainRegistry, DomainScope, ResidualSchema,
-    WorkspaceSnapshot,
+    AdjudicationBrief, AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId,
+    DomainRegistry, DomainScope, HardGatePolicy, ResidualSchema, SafetyBarrierDisposition,
+    VerificationCadence, VerifierSuiteSpec, WorkspaceSnapshot,
 };
 pub use energy::{score_candidate, EnergyComponents, EnergyModel, EnergyScore, ResidualWeight};
 pub use error::{Result, SdkError};
@@ -85,6 +86,8 @@ pub use exploration::{
     exploration_capability, is_read_only_capability, ExplorationBudget, ExplorationReport,
     ExplorationUsage, GraphHint, ProjectMap,
 };
+pub use gate::evaluate_gate_with_floor;
+pub use gate::NodeTerminalOutcome;
 pub use gate::{
     evaluate_gate, finite_decision_bound, AcceptedTrajectory, GateDecision, GateDecisionRef,
 };
@@ -115,7 +118,10 @@ pub use scheduler::{
     NodeOutcome, RepairAction, Resource, Scheduler, SchedulerEffect,
 };
 pub use spectral::{VerificationEdge, VerificationGraph};
-pub use stability::{StabilityClaim, StabilityParameters};
+pub use stability::{
+    admit_analytic_path, AnalyticPathVerdict, BoundMode, CertifiedBound, ProxyGeometry,
+    RealizabilityClaim, StabilityClaim, StabilityParameters,
+};
 pub use toolset::{
     base_entries, AccessMode, FootprintSpec, ResourceSelector, StaticCatalog, ToolCatalog,
     ToolEntry, ToolOrigin,

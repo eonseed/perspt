@@ -23,6 +23,9 @@ perspt-policy = { workspace = true }
 perspt-sandbox = { workspace = true }
 perspt-store = { workspace = true }
 
+# Content addressing for realized workspace snapshots
+sha2 = "0.10"
+
 # Graph management
 petgraph = "0.8"
 

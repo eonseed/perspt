@@ -56,6 +56,28 @@ pub enum ResidualClass {
     CapabilityDenied,
     /// Admissibility outcome, not a verifier consistency residual.
     BudgetExhausted,
+    // --- PSP-9 system 9: tool-loop and model-plane residuals ---
+    /// Tool-call arguments violated the tool schema.
+    ToolArgumentInvalid,
+    /// A precondition hash no longer matches; the model edited a stale view.
+    WitnessStale,
+    /// The same proposal (identical idempotency key) repeated without an
+    /// intervening evidence change — the tool-loop analogue of livelock.
+    ToolThrash,
+    /// One provider turn requested non-commuting calls without an explicit
+    /// dependency order; no conflicting mutation was executed.
+    ToolBatchConflict,
+    /// A file was mutated in a turn that never read it.
+    UnreadEdit,
+    /// Turn/token/capability budget consumed past a declared fraction.
+    BudgetPressure,
+    /// An advisory model validator objected (its fixed domain weight is
+    /// declared before the run; a conjunctive adjudicator is a gate verdict,
+    /// never a dynamic energy weight).
+    AdjudicatorObjection,
+    /// A configured route failed and failover was taken; sensor-availability
+    /// class matching `SensorUnavailable`'s treatment.
+    ProviderUnavailable,
 }
 
 impl ResidualClass {
@@ -68,8 +90,12 @@ impl ResidualClass {
             Lint | Format | ImportGraph | SymbolMismatch | InterfaceMismatch
             | OwnershipViolation | Manifest | Dependency => Str,
             TestFailure | Runtime | Regression => Log,
-            SensorUnavailable | ToolFailure => Boot,
+            SensorUnavailable | ToolFailure | ProviderUnavailable => Boot,
             SheafInconsistency | ContextDrift => Sheaf,
+            // Tool-loop harness-progress residuals (PSP-9 system 9).
+            ToolArgumentInvalid | WitnessStale | ToolThrash | ToolBatchConflict | UnreadEdit
+            | BudgetPressure => Str,
+            AdjudicatorObjection => Log,
             // Admissibility outcomes are routed to the blocked channel and are
             // never summed into V; they are reported here for completeness only.
             Policy | CapabilityDenied | BudgetExhausted => Str,
