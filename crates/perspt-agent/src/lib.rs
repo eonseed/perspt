@@ -11,6 +11,7 @@ pub mod prompt_compiler;
 pub mod prompts;
 pub mod realize;
 pub mod test_runner;
+pub mod toolloop;
 pub mod tools;
 pub mod transport;
 pub mod types;
@@ -25,6 +26,7 @@ pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use orchestrator::SRBNOrchestrator;
 pub use realize::{snapshot_workspace, ProjectionMismatch, SnapshotRealizer, WorkspaceState};
 pub use test_runner::{PythonTestRunner, TestFailure, TestResults, TestRunner};
+pub use toolloop::{CandidateMeasurer, EffectExecutor, LoopBudgets, LoopOutcome, ToolLoop};
 pub use tools::{AgentTools, ToolCall, ToolDefinition, ToolResult};
 pub use transport::GenAiTransport;
 pub use types::{

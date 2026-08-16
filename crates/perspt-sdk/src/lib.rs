@@ -33,6 +33,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
+pub mod admissibility;
 pub mod benchmark;
 pub mod capability;
 pub mod certificate;
@@ -63,6 +64,10 @@ pub use srbn_ledger;
 pub use srbn_serde;
 
 // Convenience re-exports of the most-used SDK types.
+pub use admissibility::{
+    check_full_admissibility, promote, AdmissibilityProfile, BarrierEvaluator, BarrierWitness,
+    ClauseId, ContractEvaluator, ContractWitness, FullAdmissibilityWitness,
+};
 pub use benchmark::{BenchmarkCase, BenchmarkOutcome, BenchmarkReport, BenchmarkResult};
 pub use capability::{
     check_admissibility, ActorId, AdmissibilityDecision, AdmissibilityWitness, ApprovalPolicy,
