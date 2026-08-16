@@ -1,12 +1,12 @@
 [package]
 name = "perspt-sandbox"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Sandboxed command execution for Perspt"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-sandbox"
 keywords = ["sandbox", "command", "execution", "security"]
 categories = ["command-line-utilities", "development-tools"]

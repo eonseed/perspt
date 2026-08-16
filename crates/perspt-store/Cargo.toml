@@ -1,12 +1,12 @@
 [package]
 name = "perspt-store"
-version = "0.6.2"
-edition = "2021"
-authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "DuckDB-based persistence layer for Perspt SRBN sessions"
-repository = "https://github.com/eonseed/perspt"
-homepage = "https://github.com/eonseed/perspt"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/perspt-store"
 keywords = ["persistence", "duckdb", "srbn", "session"]
 categories = ["database"]
@@ -16,7 +16,7 @@ default = []
 bundled = ["duckdb/bundled"]
 
 [dependencies]
-perspt-core = { version = "0.6.2", path = "../perspt-core" }
+perspt-core = { workspace = true }
 
 # DuckDB for persistence
 duckdb = { workspace = true }
