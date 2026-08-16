@@ -128,7 +128,11 @@ impl LanguagePlugin for PythonPlugin {
     }
 
     fn test_command(&self) -> String {
-        "uv run pytest".to_string()
+        // `--no-sync` keeps verification offline against the project's
+        // already-synced environment: the governed verifier sandbox denies
+        // network, so installation must have happened via `uv sync` before
+        // the run (the degraded_reason above already tells the user so).
+        "uv run --no-sync pytest".to_string()
     }
 
     fn run_command(&self) -> String {
@@ -183,11 +187,17 @@ impl LanguagePlugin for PythonPlugin {
     // PSP-5 capability methods
 
     fn syntax_check_command(&self) -> Option<String> {
-        Some("uvx ty check .".to_string())
+        // Stdlib-only and offline: `uvx ty` would need a network download,
+        // which the verifier sandbox denies. Import/syntax errors are also
+        // caught by the test stage; this is the cheap incremental boundary.
+        Some(
+            r"uv run --no-sync python -m compileall -q -x '(\.venv|\.perspt|\.git)' ."
+                .to_string(),
+        )
     }
 
     fn lint_command(&self) -> Option<String> {
-        Some("uv run ruff check .".to_string())
+        Some("uv run --no-sync ruff check .".to_string())
     }
 
     fn file_ownership_patterns(&self) -> &[&str] {
@@ -210,10 +220,15 @@ impl LanguagePlugin for PythonPlugin {
         let uv = host_binary_available("uv");
         let pyright = host_binary_available("pyright");
 
+        // Verification is offline and environment-first: the governed
+        // sandbox denies network, so every command must be satisfiable from
+        // the project's synced `.venv` or a host binary. `uvx`-style
+        // download-on-demand tools are not usable as gate sensors.
+        let ruff = host_binary_available("ruff");
         let capabilities = vec![
             VerifierCapability {
                 stage: VerifierStage::SyntaxCheck,
-                command: Some("uvx ty check .".to_string()),
+                command: self.syntax_check_command(),
                 available: uv,
                 // pyright as CLI fallback for syntax checking
                 fallback_command: Some("pyright .".to_string()),
@@ -230,7 +245,7 @@ impl LanguagePlugin for PythonPlugin {
             },
             VerifierCapability {
                 stage: VerifierStage::Test,
-                command: Some("uv run pytest".to_string()),
+                command: Some(self.test_command()),
                 available: uv,
                 // bare pytest fallback
                 fallback_command: Some("python -m pytest".to_string()),
@@ -239,10 +254,13 @@ impl LanguagePlugin for PythonPlugin {
             },
             VerifierCapability {
                 stage: VerifierStage::Lint,
-                command: Some("uv run ruff check .".to_string()),
-                available: uv,
-                fallback_command: Some("ruff check .".to_string()),
-                fallback_available: host_binary_available("ruff"),
+                // Lint gates only where ruff is actually present on the
+                // host; otherwise the stage is a declared no-op, not a
+                // missing sensor — projects are not required to ship ruff.
+                command: ruff.then(|| "ruff check .".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
             },
         ];
 

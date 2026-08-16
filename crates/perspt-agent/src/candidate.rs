@@ -357,8 +357,25 @@ impl CandidateWorkspace {
             command.to_string(),
             self.allow_unisolated_verifiers,
             "tool".into(),
+            self.verifier_env(),
         )
         .await
+    }
+
+    /// Extra environment for governed verifiers. A copied virtualenv is not
+    /// valid at the overlay path, so `uv run --no-sync` is pointed at the
+    /// *source* project's synced environment instead — read-only use, which
+    /// the sandbox enforces (writes outside the overlay are denied).
+    pub(crate) fn verifier_env(&self) -> Vec<(String, String)> {
+        let venv = self.source_root.join(".venv");
+        if venv.is_dir() {
+            vec![(
+                "UV_PROJECT_ENVIRONMENT".into(),
+                venv.display().to_string(),
+            )]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -688,6 +705,17 @@ impl<'a> CodingCandidateMeasurer<'a> {
             let adapter_id = Self::adapter_for(plugin.name());
             for capability in plugin.verifier_profile().capabilities {
                 let Some(command) = capability.effective_command() else {
+                    // A stage the plugin declares as a no-op — no primary or
+                    // fallback command form at all, marked available — has
+                    // nothing to run and is not a missing sensor (e.g.
+                    // Python's build stage). Only a stage that *has* a
+                    // command form with no runnable binary blocks hard pass.
+                    if capability.available
+                        && capability.command.is_none()
+                        && capability.fallback_command.is_none()
+                    {
+                        continue;
+                    }
                     residuals.push(sensor_unavailable(
                         &self.node_id,
                         self.generation,
@@ -770,6 +798,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
             let semaphore = semaphore.clone();
             let root = self.candidate.overlay_root().to_path_buf();
             let allow_unisolated = self.candidate.allow_unisolated_verifiers;
+            let extra_env = self.candidate.verifier_env();
             workers.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.expect("semaphore closed");
                 let execution = run_governed_verifier(
@@ -777,6 +806,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                     job.command.clone(),
                     allow_unisolated,
                     format!("{}-{ordinal}", job.stage),
+                    extra_env,
                 )
                 .await;
                 (job, execution)
@@ -831,6 +861,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                 command,
                 self.candidate.allow_unisolated_verifiers,
                 "incremental-syntax".into(),
+                self.candidate.verifier_env(),
             )
             .await?;
             if let Some(adapter) = self.adapters.get(&adapter_id) {
@@ -889,6 +920,7 @@ async fn run_governed_verifier(
     command: String,
     allow_unisolated: bool,
     target_suffix: String,
+    extra_env: Vec<(String, String)>,
 ) -> Result<VerifierExecution> {
     let tmp = root.join(".perspt-tmp").join(&target_suffix);
     let target = root.join(".perspt-target").join(&target_suffix);
@@ -901,10 +933,19 @@ async fn run_governed_verifier(
     } else {
         isolated_command(&root, &command)?
     };
+    // Toolchain caches must live inside the writable overlay: the sandbox
+    // denies network and writes outside the candidate, so `uv` gets a
+    // per-run cache dir (mirroring CARGO_TARGET_DIR) and stays offline —
+    // verifiers run against the project's already-synced environment.
+    let uv_cache = root.join(".perspt-tmp").join("uv-cache");
+    std::fs::create_dir_all(&uv_cache)?;
     process
         .env("CARGO_NET_OFFLINE", "true")
         .env("CARGO_TARGET_DIR", target)
+        .env("UV_CACHE_DIR", uv_cache)
+        .env("UV_OFFLINE", "1")
         .env("TMPDIR", tmp)
+        .envs(extra_env)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
