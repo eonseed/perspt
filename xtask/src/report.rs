@@ -57,7 +57,7 @@ fn of_rule(violations: &[Violation], rule: RuleId) -> Vec<&Violation> {
 
 fn render_table(violations: &[Violation]) -> String {
     if violations.is_empty() {
-        return "All NASA coding rules pass.\n".to_string();
+        return "All PSP code check rules pass.\n".to_string();
     }
     let mut out = String::new();
     for rule in rules::ALL {
@@ -85,9 +85,9 @@ fn render_table(violations: &[Violation]) -> String {
 
 fn render_markdown(violations: &[Violation]) -> String {
     if violations.is_empty() {
-        return "**All NASA coding rules pass.**\n".to_string();
+        return "**All PSP code check rules pass.**\n".to_string();
     }
-    let mut out = String::from("## NASA coding rules\n\n");
+    let mut out = String::from("## PSP code check\n\n");
     for rule in rules::ALL {
         let found = of_rule(violations, rule);
         if found.is_empty() {
@@ -136,7 +136,7 @@ fn render_json(violations: &[Violation]) -> Result<String> {
     serde_json::to_string_pretty(&report).context("serializing the JSON report")
 }
 
-/// A one-line tally, e.g. `8 violations: NASA-1 x8`.
+/// A one-line tally, e.g. `8 violations: PSP-1 x8`.
 fn summary_line(violations: &[Violation]) -> String {
     let parts: Vec<String> = rules::ALL
         .into_iter()
@@ -175,7 +175,7 @@ mod tests {
     fn the_table_names_location_measurement_and_overage() {
         let found = [violation(RuleId::FileLength, "crates/a/src/big.rs", 5889)];
         let text = render(&found, Format::Table).unwrap();
-        assert!(text.contains("NASA-1"), "{text}");
+        assert!(text.contains("PSP-1"), "{text}");
         assert!(text.contains("crates/a/src/big.rs"), "{text}");
         assert!(text.contains("5889 lines"), "{text}");
         assert!(text.contains("(+4481)"), "{text}");
@@ -214,7 +214,7 @@ mod tests {
         let text = render(&found, Format::Json).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
         assert_eq!(parsed["total"], 2);
-        assert_eq!(parsed["by_rule"][0]["code"], "NASA-1");
+        assert_eq!(parsed["by_rule"][0]["code"], "PSP-1");
         assert_eq!(parsed["by_rule"][0]["count"], 1);
     }
 
@@ -224,6 +224,6 @@ mod tests {
             violation(RuleId::LineWidth, "a.rs", 120),
             violation(RuleId::LineWidth, "b.rs", 130),
         ];
-        assert_eq!(summary_line(&found), "2 violations: NASA-3 x2\n");
+        assert_eq!(summary_line(&found), "2 violations: PSP-3 x2\n");
     }
 }

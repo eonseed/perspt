@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 license = "LGPL-3.0"
-description = "Repository automation for Perspt: NASA coding-rule compliance checks"
+description = "Repository automation for Perspt: PSP code check compliance"
 
 # Dev-only tooling. This crate is never published, is not re-exported by the
 # `perspt` meta-crate, and is not part of the shipped crate set described by

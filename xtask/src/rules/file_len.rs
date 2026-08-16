@@ -1,4 +1,4 @@
-//! `NASA-1` — a Rust source file must not exceed 1408 physical lines.
+//! `PSP-1` — a Rust source file must not exceed 1408 physical lines.
 //!
 //! Every line counts, including comments and blanks: this is a file-size rule,
 //! not a code-density rule. A file that outgrows the limit is asking to be

@@ -1,4 +1,4 @@
-//! `NASA-3` — a line must not exceed 108 columns.
+//! `PSP-3` — a line must not exceed 108 columns.
 //!
 //! Width is counted in Unicode scalar values, not bytes, so a line carrying
 //! CJK text or an emoji is measured by what a reader sees rather than by its
