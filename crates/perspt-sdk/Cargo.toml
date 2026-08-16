@@ -12,9 +12,11 @@ keywords = ["srbn", "agent", "stability", "lyapunov", "sdk"]
 categories = ["development-tools", "science"]
 
 [dependencies]
-# Published SRBN kernel and its serde helpers (PSP-8 References).
-srbn = "0.1.1"
-srbn-serde = "0.1.1"
+# Published SRBN kernel and companions (PSP-9 Phase P).
+# srbn-ledger supplies the SHA-256 hash chain consumed by the replay ledger.
+srbn = "0.3.0"
+srbn-serde = "0.3.0"
+srbn-ledger = "0.3.0"
 
 # Spectral energy-slope constant mu = 2*lambda_min+(A): symmetric eigensolver.
 nalgebra = "0.35"

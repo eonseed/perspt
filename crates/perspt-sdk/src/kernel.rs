@@ -122,6 +122,23 @@ pub fn policy(params: &StabilityParameters, max_attempts: usize) -> srbn::Policy
     }
 }
 
+/// Build an [`srbn::Policy`] with the kernel's restore-best rule (PSP-9).
+///
+/// `OnNoDescent::Reject` keeps a non-descending attempt in the trace but
+/// issues the next correction from the best accepted attempt, measuring
+/// descent against the best accepted score. This is the executable
+/// conformance oracle for the SRBN gate's restore-best semantics; the live
+/// tool loop preserves the same semantics through
+/// [`crate::gate::AcceptedTrajectory`], which additionally tracks Paper II's
+/// separate rejection budget that the kernel's total-attempt policy cannot
+/// represent.
+pub fn policy_restore_best(params: &StabilityParameters, max_attempts: usize) -> srbn::Policy {
+    srbn::Policy {
+        on_no_descent: srbn::OnNoDescent::Reject,
+        ..policy(params, max_attempts)
+    }
+}
+
 /// Drive the kernel's [`srbn::stabilize`] loop over an arbitrary state, with the
 /// barrier producing an [`AgentBarrierResult`] (mapped to the kernel result).
 ///
@@ -144,6 +161,43 @@ where
 {
     let srbn_barrier = move |state: &State| barrier(state).into_srbn("agent-barrier");
     let result = srbn::stabilize(initial, srbn_barrier, updater, policy(params, max_attempts))?;
+    Ok(result)
+}
+
+/// Drive the kernel's realized stabilization loop (Paper I Definition 12.2).
+///
+/// Every proposed state — including `initial` — passes through `realizer`
+/// before the barrier evaluates it, so the gate is always grounded in the
+/// state that would actually be committed. The realizer is **synchronous** by
+/// kernel contract: an async runtime must materialize the candidate first and
+/// hand this adapter an already-realized value (PSP-9 system 10). Residuals
+/// measured via [`srbn::Realization::measured`] surface through
+/// [`srbn::StabilizationResult::max_realizability_residual`].
+pub fn stabilize_realized<State, B, U, R>(
+    initial: State,
+    mut barrier: B,
+    updater: U,
+    realizer: R,
+    params: &StabilityParameters,
+    max_attempts: usize,
+) -> crate::error::Result<srbn::StabilizationResult<State, CorrectionDirectionSet, Evidence>>
+where
+    State: Clone,
+    B: FnMut(&State) -> AgentBarrierResult,
+    U: FnMut(
+        State,
+        &srbn::BarrierResult<CorrectionDirectionSet, Evidence>,
+    ) -> srbn::SrbnResult<State>,
+    R: srbn::Realizer<State>,
+{
+    let srbn_barrier = move |state: &State| barrier(state).into_srbn("agent-barrier");
+    let result = srbn::stabilize_realized(
+        initial,
+        srbn_barrier,
+        updater,
+        realizer,
+        policy_restore_best(params, max_attempts),
+    )?;
     Ok(result)
 }
 
@@ -199,6 +253,62 @@ mod tests {
         let json = trace_to_json(&result).unwrap();
         assert!(json.contains("\"status\":\"stable\""));
         assert!(json.contains("\"attempts\""));
+    }
+
+    #[test]
+    fn realized_loop_gates_on_realized_state_and_records_residual() {
+        // Proposals land on a 0.25 lattice: the realizer rounds and measures
+        // the projection distance. The barrier must only ever see lattice
+        // points, and the max measured residual estimates delta_r.
+        let params = StabilityParameters::measured(0.05, 0.0);
+        let barrier = |state: &f64| AgentBarrierResult::new(state.abs() < 0.05, state * state);
+        let updater = |state: f64, _b: &srbn::BarrierResult<CorrectionDirectionSet, Evidence>| {
+            Ok(state - 0.4 * state.signum())
+        };
+        let realizer = |proposed: f64| {
+            let realized = (proposed * 4.0).round() / 4.0;
+            Ok(srbn::Realization::measured(
+                realized,
+                (proposed - realized).abs(),
+            ))
+        };
+        let result = stabilize_realized(1.1, barrier, updater, realizer, &params, 12).unwrap();
+        // Every attempt state is a lattice point.
+        for attempt in result.trace() {
+            let scaled = attempt.state * 4.0;
+            assert!(
+                (scaled - scaled.round()).abs() < 1e-9,
+                "off-lattice: {}",
+                attempt.state
+            );
+        }
+        let max_r = result
+            .max_realizability_residual()
+            .expect("measured residuals");
+        assert!(
+            max_r <= 0.125 + 1e-9,
+            "lattice projection bound exceeded: {max_r}"
+        );
+    }
+
+    #[test]
+    fn restore_best_policy_measures_descent_against_best() {
+        let params = StabilityParameters::measured(0.5, 0.0);
+        let p = policy_restore_best(&params, 7);
+        assert_eq!(p.on_no_descent, srbn::OnNoDescent::Reject);
+        assert!(p.require_descent);
+        assert_eq!(p.max_attempts, 7);
+    }
+
+    #[test]
+    fn hash_chain_commits_and_verifies() {
+        // srbn-ledger supplies the chain half of the Merkle-ized state; the
+        // SDK ledger keeps per-artifact content addressing.
+        let mut ledger = srbn_ledger::MerkleLedger::new();
+        ledger.commit("first trace payload");
+        ledger.commit("second trace payload");
+        assert!(ledger.verify());
+        assert_ne!(ledger.head(), srbn_ledger::GENESIS_HASH);
     }
 
     #[test]

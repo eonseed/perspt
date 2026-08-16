@@ -57,6 +57,7 @@ pub mod workgraph;
 
 // Re-export the published kernel crates so consumers depend on one SRBN source.
 pub use srbn;
+pub use srbn_ledger;
 pub use srbn_serde;
 
 // Convenience re-exports of the most-used SDK types.
@@ -87,6 +88,7 @@ pub use gate::{
 };
 pub use goal::{goal_presence_residual, goal_presence_sensor, missing_symbols, GoalSpec};
 pub use independence::{compute as compute_independence, IndependenceStats, VerdictRecord};
+pub use kernel::{policy_restore_best, stabilize_realized};
 pub use kernel::{AgentBarrierResult, AgentStabilizationStatus, CorrectionDirectionSet, Evidence};
 pub use ledger::{
     content_hash, replay_accepted_trajectory, ExternalEffectLog, IdempotencyLog, Ledger,
