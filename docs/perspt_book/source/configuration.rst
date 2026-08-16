@@ -261,22 +261,20 @@ Agent-specific (see :doc:`howto/agent-options` for the full list):
    perspt agent [OPTIONS] "<TASK>"
 
    # Key options:
-   --model <MODEL>              # Default model for all tiers
-   --architect-model <MODEL>    # Architect tier
-   --actuator-model <MODEL>     # Actuator tier
-   --verifier-model <MODEL>     # Verifier tier
-   --speculator-model <MODEL>   # Speculator tier
+   --model <MODEL>              # Primary actuator alias
+   --actuator-model <MODEL>     # Governed tool-call route
+   --explorer-model <MODEL>     # Optional cheap no-tool exploration
+   --adjudicator-model <MODEL>  # Optional no-tool diff veto
+   --fallback-model <MODEL>     # Repeatable sticky actuator fallback
    -w, --workdir <DIR>          # Working directory
    -y, --yes                    # Auto-approve (headless)
-   --defer-tests                # Skip V_log during coding
-   --mode <MODE>                # cautious | balanced | yolo
-   --max-cost <USD>             # Maximum cost in USD
-   --max-steps <N>              # Maximum iterations
-   --energy-weights <a,b,g>     # Proportional syn/str/log component scales (default 1.0,0.5,2.0)
-   --stability-threshold <e>    # Custom epsilon
-   --log-llm                    # Log all LLM calls to DB
-   --single-file                # Force single-file mode
-   --verifier-strictness <LVL>  # default | strict | minimal
+   --rho-gate <V>               # Required measured descent
+   --max-turns <N>              # Finite model-turn budget
+   --max-calls-per-turn <N>     # Direct and nested call budget
+   --rejection-budget <N>       # Shared recovery/rejection budget
+   --max-parallel <N>           # Parallel verifier sensors
+   --persistent-grants          # Sign durable grant intent
+   --output-summary <FILE>      # Terminal session summary as JSON
 
 Manage configuration interactively:
 

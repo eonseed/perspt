@@ -3,165 +3,97 @@
 Agent Options Reference
 =======================
 
-Complete reference for ``perspt agent`` flags.
+``perspt agent`` runs the governed PSP-9 tool loop. The CLI exposes only
+controls consumed by that runtime.
 
-Basic Options
--------------
+Core Options
+------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 70
+   :widths: 38 62
 
    * - Flag
      - Description
    * - ``<TASK>``
-     - Task description (positional argument)
+     - Task description.
    * - ``-w, --workdir <DIR>``
-     - Working directory for code generation
+     - Workspace root.
    * - ``-y, --yes``
-     - Auto-approve all changes (headless mode)
-   * - ``--model <MODEL>``
-     - LLM model for all tiers
-   * - ``--single-file``
-     - Single-file mode (no DAG planning)
+     - Approve final promotion within already-granted authority. It does not
+       grant network, shell, policy, or out-of-workspace effects.
+   * - ``--model <PROVIDER::MODEL>``
+     - Override the primary actuator route.
+   * - ``--output-summary <FILE>``
+     - Write the terminal PSP-9 run summary as JSON.
+   * - ``--persistent-grants``
+     - Store signed grant intent. Resume always rechecks the durable authority
+       epoch and must mint a fresh live capability.
 
-Per-Tier Model Selection
-------------------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Flag
-     - Description
-   * - ``--architect-model <M>``
-     - Model for task decomposition and planning
-   * - ``--actuator-model <M>``
-     - Model for code generation
-   * - ``--verifier-model <M>``
-     - Model for stability analysis
-   * - ``--speculator-model <M>``
-     - Model for branch prediction
-   * - ``--architect-fallback-model <M>``
-     - Fallback for architect tier
-   * - ``--actuator-fallback-model <M>``
-     - Fallback for actuator tier
-   * - ``--verifier-fallback-model <M>``
-     - Fallback for verifier tier
-   * - ``--speculator-fallback-model <M>``
-     - Fallback for speculator tier
-
-Energy and Convergence
-----------------------
+Finite Harness
+--------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 65
+   :widths: 38 62
 
    * - Flag
      - Description
-   * - ``--energy-weights <W>``
-     - Comma-separated ``a,b,g`` — proportional scales on the syntactic/structural/logic
-       component weights of the quadratic energy (default ``1.0,0.5,2.0`` = identity)
-   * - ``--stability-threshold <E>``
-     - Convergence epsilon (default: ``0.10``)
-   * - ``--verifier-strictness <S>``
-     - ``default``, ``strict``, or ``minimal``
+   * - ``--rho-gate <VALUE>``
+     - Required measured energy descent per accepted checkpoint (default
+       ``0.5``).
+   * - ``--max-turns <N>``
+     - Maximum model turns per node (default ``12``).
+   * - ``--max-calls-per-turn <N>``
+     - Maximum direct and nested tool calls per turn (default ``8``).
+   * - ``--rejection-budget <N>``
+     - Shared non-descending and recovery budget (default ``4``).
+   * - ``--max-parallel <N>``
+     - Maximum independent compiler, test, and lint sensors (default ``4``).
 
-Cost and Limits
+Model Portfolio
 ---------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 35 65
+   :widths: 42 58
 
    * - Flag
      - Description
-   * - ``--max-cost <USD>``
-     - Maximum total LLM spend
-   * - ``--max-steps <N>``
-     - Maximum total iterations across all nodes
+   * - ``--actuator-model <M>``
+     - Primary implementation route.
+   * - ``--explorer-model <M>``
+     - Cheap, no-tool repository-map summarizer.
+   * - ``--adjudicator-model <M>``
+     - Optional no-tool validator of the realized diff. Its verdict is an
+       uncalibrated conjunctive veto, never an energy measurement.
+   * - ``--fallback-model <M>``
+     - Add an ordered sticky actuator failover route. Repeat the option to add
+       more routes. Role-specific models are never silently reused as
+       actuator fallbacks.
 
-Execution Control
------------------
+Dashboard
+---------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Flag
-     - Description
-   * - ``--mode <MODE>``
-     - ``cautious``, ``balanced``, or ``yolo``
-   * - ``-k <N>``
-     - Complexity threshold for balanced mode
-   * - ``--complexity <LEVEL>``
-     - ``low``, ``medium``, ``high``, ``critical``
-   * - ``--defer-tests``
-     - Skip V_log during node coding
-   * - ``--auto-approve-safe``
-     - Auto-approve nodes below complexity threshold
-
-Logging and Output
-------------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Flag
-     - Description
-   * - ``--log-llm``
-     - Log all LLM calls to DuckDB
-   * - ``--output-plan <FILE>``
-     - Export task plan as JSON before execution
-
-Embedded Dashboard
-------------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 35 65
-
-   * - Flag
-     - Description
-   * - ``--dashboard``
-     - Start the web monitoring dashboard alongside the agent
-   * - ``--dashboard-port <PORT>``
-     - Port for the embedded dashboard server (default: ``3000``)
-
-When ``--dashboard`` is provided, an Axum web server is spawned as a background
-task within the agent process. It opens a separate read-only DuckDB connection
-to the same database file the agent writes to-DuckDB supports one writer plus
-concurrent readers-so the dashboard can display live progress without
-interfering with the agent.
-
-The dashboard server is automatically stopped when the agent process exits.
-See :doc:`dashboard-setup` for dashboard configuration details.
+``--dashboard`` starts the read-only monitoring server alongside the agent.
+``--dashboard-port <PORT>`` selects its port (default ``3000``).
 
 Examples
 --------
 
 .. code-block:: bash
 
-   # Simple headless run
    perspt agent -y -w /tmp/proj "Create a Python calculator"
 
-   # Full control
    perspt agent \
-     --architect-model gemini-3.1-pro \
-     --actuator-model gemini-3.5-flash \
-     --verifier-model gemini-3.1-pro \
-     --energy-weights "1.0,1.0,2.0" \
-     --stability-threshold 0.05 \
-     --max-cost 5.0 \
-     --max-steps 30 \
-     --log-llm \
-     --mode balanced \
+     --actuator-model vertex::gemini-3.5-flash-lite \
+     --explorer-model vertex::gemini-3.5-flash-lite \
+     --fallback-model vertex::gemini-3.5-flash \
+     --rho-gate 0.25 \
+     --max-turns 16 \
+     --max-calls-per-turn 8 \
+     --rejection-budget 5 \
+     --max-parallel 4 \
      -w ./project "Build a web server"
 
-   # Run agent with live dashboard
-   perspt agent --dashboard "Refactor the auth module"
-
-   # Agent with dashboard on custom port
    perspt agent --dashboard --dashboard-port 8080 -w ./myapp "Add unit tests"
