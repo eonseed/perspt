@@ -18,7 +18,7 @@ pub mod tui_runner;
 pub mod ui;
 
 // Re-exports for convenient access
-pub use agent_app::{run_agent_tui_with_orchestrator, AgentApp};
+pub use agent_app::{run_agent_tui_with_orchestrator, run_agent_tui_with_runtime, AgentApp};
 pub use app_event::{create_app_event_channel, AppEvent, AppEventReceiver, AppEventSender};
 pub use chat_app::ChatApp;
 pub use dashboard::Dashboard;

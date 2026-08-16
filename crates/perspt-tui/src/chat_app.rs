@@ -1580,6 +1580,8 @@ pub struct ChatApp {
     history_index: Option<usize>,
     /// Current input draft when traversing history
     history_draft: String,
+    /// Whether the local dedication command has already been shown.
+    love_triggered: bool,
 }
 
 impl ChatApp {
@@ -1661,7 +1663,22 @@ impl ChatApp {
             history,
             history_index: None,
             history_draft: String::new(),
+            love_triggered: false,
         }
+    }
+
+    /// Handle commands that never enter history or reach the model provider.
+    fn handle_local_command(&mut self, text: &str) -> bool {
+        if self.love_triggered || perspt_core::local_command::parse_local_command(text).is_none() {
+            return false;
+        }
+
+        self.love_triggered = true;
+        self.input.clear();
+        self.push_message(ChatMessage::system(
+            perspt_core::local_command::dedication_text(),
+        ));
+        true
     }
 
     /// Run the chat application main loop
@@ -1757,7 +1774,9 @@ impl ChatApp {
                             // Send message on Enter
                             KeyCode::Enter if !self.is_streaming && !self.input.is_empty() => {
                                 let text = self.input.text().trim().to_string();
-                                if text.starts_with('/') {
+                                if self.handle_local_command(&text) {
+                                    continue;
+                                } else if text.starts_with('/') {
                                     let cmd = text.to_lowercase();
                                     if cmd == "/exit" || cmd == "/quit" {
                                         self.should_quit = true;
@@ -2026,7 +2045,9 @@ impl ChatApp {
                     // Send message on Enter
                     KeyCode::Enter if !self.is_streaming && !self.input.is_empty() => {
                         let text = self.input.text().trim().to_string();
-                        if text.starts_with('/') {
+                        if self.handle_local_command(&text) {
+                            return true;
+                        } else if text.starts_with('/') {
                             let cmd = text.to_lowercase();
                             if cmd == "/exit" || cmd == "/quit" {
                                 return false; // Exit TUI app
