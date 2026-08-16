@@ -306,6 +306,14 @@ impl WorkGraphRevision {
                             node.generation, node.node_id, existing.generation
                         )));
                     }
+                    // A generation names one immutable incarnation: content may
+                    // only change under a strictly newer generation.
+                    if node.generation == existing.generation && *existing != *node {
+                        return Err(SdkError::Domain(format!(
+                            "node {:?} changed without a new generation",
+                            node.node_id
+                        )));
+                    }
                     *existing = node.clone();
                 }
                 GraphEdit::RetireNode { node_id, reason } => {
@@ -318,6 +326,10 @@ impl WorkGraphRevision {
                     node.state = WorkNodeState::Retired {
                         reason: reason.clone(),
                     };
+                    // A retired node never runs, so leaving its edges in place
+                    // would deadlock every dependent (the scheduler requires
+                    // accepted dependencies). Retirement releases its edges.
+                    edges.retain(|edge| edge.src != *node_id && edge.dst != *node_id);
                 }
                 GraphEdit::AddEdge { edge } => {
                     if !edges.contains(edge) {

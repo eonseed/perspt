@@ -20,7 +20,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::capability::RiskClass;
 use crate::error::{Result, SdkError};
 
 /// One calibration sample: a validator score and whether the accepted state was
@@ -55,7 +54,11 @@ pub fn accepted_unsafe_rate(samples: &[CalibrationSample], theta: f64) -> f64 {
 /// Returns the infimum threshold whose conformal-adjusted accepted-unsafe rate
 /// is at most `rho`. If even rejecting everything cannot meet `rho` (when
 /// `1/(n+1) > rho`), returns `1.0` (accept nothing in `[0,1]`).
-pub fn conformal_threshold(samples: &[CalibrationSample], rho: f64) -> Result<f64> {
+///
+/// Crate-private on purpose: this raw computation carries no feasibility-floor
+/// signal, so a caller cannot distinguish "reject everything" from "not enough
+/// calibration". External callers go through [`conformal_threshold_checked`].
+pub(crate) fn conformal_threshold(samples: &[CalibrationSample], rho: f64) -> Result<f64> {
     if !(0.0..=1.0).contains(&rho) {
         return Err(SdkError::InvalidGate(format!(
             "rho must be in [0,1]: {rho}"
@@ -178,13 +181,15 @@ pub enum AcceptOutcome {
 }
 
 /// Decide autonomous acceptance for a validator score under the current
-/// calibration state and the proposed effect's risk class.
+/// calibration state.
 ///
 /// During a stale window the backed-off threshold remains useful for routing,
 /// but no score alone authorizes a mutation: passing proposals route to
 /// approval and failing proposals reject. The conformal bound is never asserted
-/// in that window (PSP-9 Gate Q).
-pub fn decide(state: &CalibrationState, score: f64, _risk: RiskClass) -> AcceptOutcome {
+/// in that window (PSP-9 Gate Q). The effect's risk class is deliberately not
+/// an input: risk gating happens in the admissibility kernel, and Theorem 5's
+/// bound does not sharpen with risk.
+pub fn decide(state: &CalibrationState, score: f64) -> AcceptOutcome {
     let threshold = state.active_threshold();
     match state {
         CalibrationState::Calibrated { .. } => {
@@ -371,15 +376,7 @@ mod tests {
             .unwrap()
             .mark_stale();
         // A stale score can still route a proposal, but cannot commit it.
-        assert_eq!(
-            decide(&state, 0.99, RiskClass::Low),
-            AcceptOutcome::RouteToApproval
-        );
-        // High-risk effect routes to approval rather than halting.
-        assert_eq!(
-            decide(&state, 0.99, RiskClass::High),
-            AcceptOutcome::RouteToApproval
-        );
+        assert_eq!(decide(&state, 0.99), AcceptOutcome::RouteToApproval);
     }
 
     #[test]
@@ -396,10 +393,10 @@ mod tests {
             _ => unreachable!(),
         };
         assert_eq!(
-            decide(&state, threshold + 0.05, RiskClass::Low),
+            decide(&state, threshold + 0.05),
             AcceptOutcome::CertifiedAccept
         );
-        assert_eq!(decide(&state, 0.0, RiskClass::Low), AcceptOutcome::Reject);
+        assert_eq!(decide(&state, 0.0), AcceptOutcome::Reject);
     }
 
     #[test]
@@ -437,14 +434,11 @@ mod tests {
             rho: 0.05,
         };
         assert_eq!(
-            decide(&state, 0.7, RiskClass::Medium),
+            decide(&state, 0.7),
             AcceptOutcome::Reject,
             "tie at the threshold must reject"
         );
-        assert_eq!(
-            decide(&state, 0.7 + 1e-9, RiskClass::Medium),
-            AcceptOutcome::CertifiedAccept
-        );
+        assert_eq!(decide(&state, 0.7 + 1e-9), AcceptOutcome::CertifiedAccept);
     }
 
     #[test]
