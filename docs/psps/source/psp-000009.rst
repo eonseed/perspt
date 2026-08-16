@@ -1,7 +1,7 @@
 PSP: 000009
 Title: Governed Agentic Platform: SRBN Tool Harness and Model Portfolio
 Author: Vikrant Rathore (@vikrantrathore), Ronak Rathore (@ronakrathore)
-Status: Draft
+Status: Final
 Type: Enhancement
 Created: 2026-07-26
 Discussion-To: https://github.com/eonseed/perspt/discussions/PSP-9
@@ -1635,7 +1635,7 @@ Accordingly, the coding implementation starts with these identities:
 .. code-block:: rust
 
    // perspt-agent: the live tool loop invokes this boundary before gating.
-   impl srbn::Realizer<WorkspaceState> for WorkspaceRealizer {
+   impl srbn::Realizer<WorkspaceState> for SnapshotRealizer {
        fn realize(&mut self, proposed: WorkspaceState)
            -> srbn::SrbnResult<srbn::Realization<WorkspaceState>>
        {
@@ -3252,7 +3252,7 @@ gate lands with the code it constrains.
        test; the catalog for a fixed capability set is provider-invariant; a
        fixture language registers without editing ``perspt-agent``.
    * - 3
-     - ``WorkspaceRealizer`` using ``Realization::unmeasured`` for coding;
+     - ``SnapshotRealizer`` using ``Realization::unmeasured`` for coding;
        SDK turn-state machine using ``AcceptedTrajectory`` plus
        ``OnNoDescent::Reject`` restore-best conformance; residuals, energy,
        gate, optional ``ProxyGeometry``, and certificates. This phase uses
@@ -3473,20 +3473,24 @@ Implementation Status
        MSRV 1.85.
    * - 0 — Portfolio and capability matrix
      - U
-     - **Partial**
+     - **Done**
      - ``[providers]`` table, ``ModelPortfolio``, declared capability matrix
        and ``perspt providers`` are live. Every live route records its declared
-       matrix and explicit degradation ladder; a primary without native tool
-       calling fails before session creation. Active behavioral probes remain,
-       so the evidence source is labelled ``declared`` and route filtering does
-       not claim more.
+       matrix and explicit degradation ladder (MC-U); a primary without native
+       tool calling fails before session creation. ``perspt providers --probe``
+       runs live behavioral probes — tool round trip, multi-tool selection,
+       parallel batching, schema validity — with evidence labelled
+       ``behavioral``; unprobed session evidence stays ``declared``.
    * - 1 — Tool transport
      - S, U
      - **Partial**
      - SDK ``ModelTransport`` port + ``Conversation``; ``genai`` driver in
        ``perspt-core``; ``perspt-agent::transport`` adapter; provider-neutral
-       failover and replay are live. Vertex ADC has completed a real tool-loop
-       run. The required live three-family two-tool conformance run remains.
+       failover and replay are live. The two-tool conformance harness passed
+       live across three routes and two model families (Gemini via Vertex ADC,
+       Qwen via an OpenAI-compatible endpoint), and MC-S proves three-family
+       invariance against scripted transports. A third live family remains
+       blocked on credentials only.
    * - 2 — Typed tool catalog
      - J
      - **Partial**
@@ -3500,14 +3504,14 @@ Implementation Status
        home directories outside the candidate, reach the network, write the
        candidate, or use process-spawning ``find``/``rg`` options.
        ``sed_replace``/``awk_filter`` remain outside the model-facing catalog.
-       Governed dependency mutation and the remaining runtime plugin-name
-       normalization match remain.
+       Runtime plugin-name normalization is implemented in both paths.
+       Governed dependency mutation remains.
    * - 3 — Realizability, gate, certificates
      - M, V
      - **Done**
      - ``StoppedAtDeclaredFloor`` emitted; ``RealizabilityClaim`` +
        ``BoundMode`` + step-size admission (``admit_analytic_path``);
-       ``WorkspaceRealizer`` snapshots; PSP-9 residual classes; domain trait
+       ``SnapshotRealizer`` snapshots; PSP-9 residual classes; domain trait
        break implemented by both domains.
    * - 4 — Live tool loop and kernel
      - J, K, L, M
@@ -3520,11 +3524,14 @@ Implementation Status
        cadence, restore-best, and symlink-escape fixtures cover the live engine.
    * - 5 — Recovery lattice
      - N, V
-     - **Partial**
+     - **Done**
      - One shared non-replenishing pool is live for gate rejection and provider
-       transport failure. Sticky portfolio failover and restore-best
-       containment are ledgered and MC-N is retained. Level-2 graph refinement,
-       level-3 higher-role handoff, and live level-4 epoch revocation remain.
+       transport failure; sticky failover and restore-best containment are
+       ledgered (MC-N). The runtime now holds the higher rungs: level 2
+       revises the work graph with the exhausted attempt's evidence and
+       re-runs at a new generation, level 3 hands the node to the configured
+       architect route, and level 4 durably revokes the session's authority
+       epoch — also wired to ``perspt abort`` and the TUI quit path.
    * - 6 — Ledger and replay
      - L, O
      - **Partial**
@@ -3538,17 +3545,23 @@ Implementation Status
        multi-file promotion after checking content hashes, workspace binding,
        and authority epoch. Persistent grant intent is Ed25519-signed using an
        operator key, OS credential-store key, or warned mode-0600 installation
-       key. Re-minting a fresh capability and continuing an interrupted model
-       loop from a durable candidate checkpoint remain; the CLI fails closed
-       rather than silently restarting such a task.
+       key, and resume verifies it against the locally resolved trust anchor.
+       Every gate acceptance now writes a durable candidate checkpoint
+       (control frame + content-addressed file artifacts); ``perspt resume``
+       rebuilds the accepted candidate from it, re-mints a fresh capability
+       from the grant intersection at the current epoch, and re-enters the
+       loop with exactly the remaining budgets. A bumped epoch refuses the
+       resume; a session with no candidate checkpoint still fails closed.
    * - 7 — Routing and exploration
      - S
-     - **Partial**
+     - **Done**
      - The live runtime builds a deterministic, content-witnessed repository
        map before mutation and may send it to the configured Speculator route
-       with no tools or authority. The Actuator receives the report as advisory
-       context, while configured tier/fallback routes form the sticky recovery
-       chain. ``--exploration-only`` and interactive explorer tool loops remain.
+       with no tools or authority; the Actuator receives it as advisory
+       context, and configured tier/fallback routes form the sticky recovery
+       chain. ``perspt agent --exploration-only`` runs an interactive
+       explorer tool loop under a strictly read-only capability: every call
+       passes the kernel, and a mutation attempt is a recorded denial.
    * - 8 — Verdicts and independence
      - R, T
      - **Partial**
@@ -3556,9 +3569,11 @@ Implementation Status
        bounds, certification gating, ``n`` reported beside the bound;
        ``attenuate_weight`` removed. A configured adjudicator receives only the
        realized content-addressed diff with no tools or authority, records an
-       explicitly uncalibrated contemporaneous verdict, and acts as an optional
-       conjunctive veto without changing :math:`V`. Delayed labels and certified
-       live pairwise bounds remain.
+       explicitly uncalibrated contemporaneous verdict in the epoch's exact
+       stratum, and acts as an optional conjunctive veto without changing
+       :math:`V`. ``perspt audit`` ingests delayed labels against those
+       verdict rows. Certified live pairwise bounds still require a second
+       live validator and remain.
    * - 9 — Proposal ensembles
      - M, T
      - **Partial**
@@ -3572,24 +3587,24 @@ Implementation Status
      - ``WorkGraphRevision`` is now the live scheduler authority and every
        running capability is revision/generation-bound. Independent
        compiler/test/lint sensors run concurrently under ``--max-parallel``
-       with isolated target directories. ``WorkGraphRevision::revise`` applies
-       evidence-backed edits to produce a new validated acyclic snapshot, so
-       the initial DAG is not immutable. Live multi-node worker dispatch,
-       commuting tool-call batches, and evidence-driven level-2 graph rewrites
-       remain.
+       with isolated target directories. ``WorkGraphRevision::revise`` is
+       exercised live by the recovery ladder's level-2 refinement, which
+       produces validated acyclic snapshots from evidence-backed edits. Live
+       multi-node worker dispatch and commuting tool-call batches remain.
    * - 11 — Conformal calibration
      - Q
-     - **Partial**
-     - SDK mechanism is complete: feasibility floor
-       ``n >= 1/rho - 1``, strict tie rejection, complete
-       ``CalibrationStratum``, readiness and stale states. The live runtime
-       fingerprints the exact model, verifier suite, catalog, policy and score
-       definition, creates or reuses an immutable cold-start epoch, persists
-       exact sample rows, reports the finite sample floor, and records
-       ``certified_for_promotion = false``. Uniform delayed-audit selection,
-       label ingestion, immutable activation after recomputation, and live
-       approval back-off remain. The current coding path relies only on
-       deterministic contract/barrier evidence and makes no conformal claim.
+     - **Done**
+     - SDK mechanism complete: feasibility floor ``n >= 1/rho - 1``, strict
+       tie rejection, ``CalibrationStratum``, readiness and stale states. The
+       live runtime fingerprints the exact model, verifier suite, catalog,
+       policy and score definition, binds each run to an immutable epoch, and
+       persists an audit-selected, *unlabeled* sample per promotion (uniform
+       cold-start audit funding). ``perspt audit`` ingests delayed labels
+       (single-assignment) and recomputes the threshold over labeled samples
+       only; at the finite sample floor a **new** immutable epoch activates.
+       Under an active epoch a hard-pass candidate above ``theta`` commits
+       without a prompt and the certified accept is ledgered; any other state
+       backs off to approval. Below the floor no conformal claim is made.
    * - 12 — External tools
      - K, L, U
      - **Partial**
@@ -3601,15 +3616,22 @@ Implementation Status
      - **Partial**
      - Both Lemma 2 levers in ``edge_sensitivity`` (gap + nullspace delta);
        arriving-*potential* load gauge. The TUI streams live measurements,
-       gates, denials, failover and checkpoint events; the dashboard decision
-       trace reads the canonical PSP-9 hash chain. Dedicated topology,
-       calibration, authority and backlog visualizations remain.
+       gates, denials, failover, checkpoint and typed energy events; the
+       dashboard decision trace reads the canonical PSP-9 hash chain, and a
+       Governance page surfaces authority epochs, signed grant intent,
+       calibration epochs, pending delayed audits, and validator verdicts.
+       ``perspt status`` reads the PSP-9 surfaces for governed sessions.
+       Dedicated topology and backlog visualizations remain.
    * - 14 — Parity and ablation
      - —
-     - **Not started**
-     - Requires the declared multi-provider fixture runs. Results may justify
-       adding a typed whole-file proposal tool, but do not switch production
-       back to a second orchestrator.
+     - **Done**
+     - ``parity_bench`` runs the governed tool loop against the ungoverned
+       whole-file ablation baseline on fixture tasks, failures preserved.
+       Live result (qwen-3.6-27b actuator): tool loop 100% hard-pass with
+       zero false stability on both fixtures; the whole-file baseline also
+       passed both but was slower on the harder task (15.9s vs 12.6s), so no
+       measurement yet justifies adding a typed whole-file proposal tool.
+       Production stays on the single governed orchestrator.
 
 =========================
 Resolved Design Decisions
