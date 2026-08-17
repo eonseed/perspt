@@ -3,9 +3,11 @@
 //! Provides session persistence, node state tracking, and energy history
 //! with Merkle tree support for state verification and rollback.
 
+mod repair;
 mod schema;
 mod store;
 
+pub use repair::{repair_database, RepairReport};
 pub use schema::init_schema;
 pub use store::{
     ArtifactBundleRow, BranchFlushRow, BranchLineageRow, BudgetEnvelopeRow,
