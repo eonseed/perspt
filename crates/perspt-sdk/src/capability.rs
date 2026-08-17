@@ -32,6 +32,10 @@ impl ActorId {
 #[serde(rename_all = "snake_case")]
 pub enum EffectKind {
     ReadFile,
+    /// Read-only operating-system and toolchain facts.
+    SystemProbe,
+    /// Read-only, bounded queries over explicitly selected data sources.
+    DataRead,
     ToolSearch,
     ToolProgram,
     Search,
@@ -63,6 +67,8 @@ impl EffectKind {
         matches!(
             self,
             EffectKind::ReadFile
+                | EffectKind::SystemProbe
+                | EffectKind::DataRead
                 | EffectKind::ToolSearch
                 | EffectKind::ToolProgram
                 | EffectKind::Search
@@ -178,6 +184,9 @@ pub enum ApprovalPolicy {
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityRole {
     Session,
+    /// Interactive chat external tools. Kept distinct from coding workers so
+    /// chat eligibility cannot widen agent authority.
+    ChatTool,
     Explorer,
     Worker,
     Reviewer,

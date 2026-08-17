@@ -115,9 +115,11 @@ pub use ledger::{
     LedgerEvent, LedgerRecord,
 };
 pub use model::{
-    CapabilityDegradation, Conversation, EnsemblePolicy, EnsembleTrigger, Message, ModelFamily,
-    ModelId, ModelTransport, ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall,
-    ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,
+    CapabilityDegradation, Conversation, ConversationDelta, ConversationDeltaRecord,
+    ConversationProjection, ConversationSeeded, EnsemblePolicy, EnsembleTrigger, Message,
+    ModelFamily, ModelId, ModelTransport, ProviderCapabilities, ProviderCapabilityMask,
+    ProviderToolCall, ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,
+    CONVERSATION_EVENT_SCHEMA_VERSION,
 };
 pub use observability::arriving_potential_per_step;
 pub use observability::{
@@ -145,8 +147,11 @@ pub use stability::{
     RealizabilityClaim, StabilityClaim, StabilityParameters,
 };
 pub use toolset::{
-    admit_external_tool, base_entries, AccessMode, ExternalToolDeclaration, FootprintSpec,
-    ResourceSelector, StaticCatalog, ToolCatalog, ToolEntry, ToolOrigin,
+    admit_external_tool, base_entries, AccessMode, ConcurrencyClass, ExternalToolDeclaration,
+    FootprintSpec, HandlerContext, HandlerServices, MultiValueTarget, NetworkService,
+    ObservationService, ProcessService, ProposalBinding, ResourceSelector, StaticCatalog,
+    ToolCatalog, ToolDispatcher, ToolEntry, ToolExecution, ToolHandler, ToolOrigin,
+    WorkspaceService,
 };
 pub use workgraph::{
     EdgeKind, GraphEdit, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge,

@@ -15,6 +15,12 @@ use crate::model::ModelId;
 /// The verbatim, never-summarized control state of a compacted conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ControlFrame {
+    /// Canonical digest of the ledger-folded conversation projection.
+    #[serde(default)]
+    pub projection_digest: String,
+    /// Schema version used by conversation seed/delta events.
+    #[serde(default)]
+    pub event_schema_version: u32,
     pub goal: String,
     pub node_generation: u32,
     pub accepted_state_root: String,
@@ -97,6 +103,8 @@ mod tests {
             covered_to: 41,
             covered_event_root: "head".into(),
             control: ControlFrame {
+                projection_digest: "projection".into(),
+                event_schema_version: crate::CONVERSATION_EVENT_SCHEMA_VERSION,
                 goal: "fix the build".into(),
                 node_generation: 2,
                 accepted_state_root: "root-a".into(),
