@@ -504,6 +504,30 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Completed promotion intents, newest first — the rollback surface.
+    pub fn completed_external_effects(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<Psp9ExternalEffectRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT idempotency_key, intent_hash, intent_json, result_json, status \
+             FROM psp9_external_effects WHERE session_id = ? AND status = 'COMPLETED' \
+             ORDER BY created_at DESC",
+        )?;
+        let rows = statement.query_map([session_id], |row| {
+            Ok(Psp9ExternalEffectRow {
+                idempotency_key: row.get(0)?,
+                intent_hash: row.get(1)?,
+                intent_json: row.get(2)?,
+                result_json: row.get(3)?,
+                status: row.get(4)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    }
+
     pub fn pending_external_effects(&self, session_id: &str) -> Result<Vec<Psp9ExternalEffectRow>> {
         let conn = self.conn.lock().unwrap();
         let mut statement = conn.prepare(
