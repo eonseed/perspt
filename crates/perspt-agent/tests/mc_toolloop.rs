@@ -499,11 +499,11 @@ main
 
 #[tokio::test]
 async fn nested_tool_program_calls_share_the_top_level_turn_budget() {
-    let source = r#"
-def main():
-    return '[{"tool":"read_file","arguments":{"path":"a"}},{"tool":"read_file","arguments":{"path":"b"}},{"tool":"read_file","arguments":{"path":"c"}},{"tool":"read_file","arguments":{"path":"d"}},{"tool":"read_file","arguments":{"path":"e"}}]'
-main
-"#;
+    let nested: Vec<String> = ["a", "b", "c", "d", "e"]
+        .iter()
+        .map(|path| format!(r#"{{"tool":"read_file","arguments":{{"path":"{path}"}}}}"#))
+        .collect();
+    let source = format!("\ndef main():\n    return '[{}]'\nmain\n", nested.join(","));
     let transport = Scripted::new(vec![TurnOutput::ToolCalls(vec![call(
         "program",
         "tool_program",
@@ -813,13 +813,15 @@ async fn rejected_candidate_restores_the_last_accepted_workspace_state() {
 
 #[tokio::test]
 async fn one_provider_turn_cannot_exceed_the_cadence_bound() {
+    // Disjoint paths: the edits commute (Gate P admits all three), so the
+    // cadence bound alone must stop the second and third.
     let calls = (0..3)
         .map(|index| {
             call(
                 &format!("c{index}"),
                 "edit_file",
                 serde_json::json!({
-                    "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+                    "path": format!("src/file{index}.rs"), "old_string": "a", "new_string": "b"
                 }),
             )
         })
@@ -849,4 +851,133 @@ async fn one_provider_turn_cannot_exceed_the_cadence_bound() {
         })
         .count();
     assert_eq!(boundary_denials, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Gate P: intra-turn commuting batches (PSP-9 system 15).
+// ---------------------------------------------------------------------------
+
+fn edit(id: &str, path: &str) -> ProviderToolCall {
+    call(
+        id,
+        "edit_file",
+        serde_json::json!({"path": path, "old_string": "a", "new_string": "b"}),
+    )
+}
+
+#[tokio::test]
+async fn same_path_double_edit_is_returned_as_a_conflict_then_resequenced() {
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![edit("e1", "src/a.rs"), edit("e2", "src/a.rs")]),
+        TurnOutput::ToolCalls(vec![edit("e2-retry", "src/a.rs")]),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 2.0), (true, 0.0)]);
+    let toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+
+    let outcome = toolloop.run("edit the same file twice").await.unwrap();
+    let conflict = outcome.events.iter().find_map(|event| match event {
+        LoopEvent::ToolBatchConflict {
+            call_id,
+            conflicts_with,
+            ..
+        } => Some((call_id.clone(), conflicts_with.clone())),
+        _ => None,
+    });
+    assert_eq!(
+        conflict,
+        Some(("e2".into(), "e1".into())),
+        "the second same-path edit must be a recorded conflict observation"
+    );
+    // e1 applied in turn 1, the re-issued edit applied in turn 2; the
+    // conflicted e2 never executed.
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 2);
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+}
+
+#[tokio::test]
+async fn disjoint_path_edits_both_apply_in_one_turn() {
+    let transport = Scripted::new(vec![TurnOutput::ToolCalls(vec![
+        edit("e1", "src/a.rs"),
+        edit("e2", "src/b.rs"),
+    ])]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+
+    let outcome = toolloop.run("edit two files").await.unwrap();
+    assert_eq!(
+        executor.applied.load(Ordering::SeqCst),
+        2,
+        "commuting mutators run in arrival order in one turn"
+    );
+    assert!(!outcome
+        .events
+        .iter()
+        .any(|event| matches!(event, LoopEvent::ToolBatchConflict { .. })));
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+}
+
+#[tokio::test]
+async fn read_after_same_path_write_is_a_conflict() {
+    let transport = Scripted::new(vec![TurnOutput::ToolCalls(vec![
+        edit("w1", "src/a.rs"),
+        call("r1", "read_file", serde_json::json!({"path": "src/a.rs"})),
+    ])]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+
+    let outcome = toolloop.run("write then read").await.unwrap();
+    assert!(outcome.events.iter().any(|event| matches!(
+        event,
+        LoopEvent::ToolBatchConflict { call_id, .. } if call_id == "r1"
+    )));
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn three_reads_apply_concurrently_with_a_deterministic_chain() {
+    let transport = Scripted::new(vec![TurnOutput::ToolCalls(vec![
+        call("r1", "read_file", serde_json::json!({"path": "src/a.rs"})),
+        call("r2", "read_file", serde_json::json!({"path": "src/b.rs"})),
+        call("r3", "read_file", serde_json::json!({"path": "src/a.rs"})),
+    ])]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let toolloop = loop_with(&transport, &catalog, &executor, &measurer);
+
+    let outcome = toolloop.run("read three views").await.unwrap();
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 3);
+    assert!(!outcome
+        .events
+        .iter()
+        .any(|event| matches!(event, LoopEvent::ToolBatchConflict { .. })));
+    // Responses (and their recorded EffectApplied events) stay in arrival
+    // order even though execution was concurrent.
+    let applied_order: Vec<String> = outcome
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            LoopEvent::EffectApplied { call_id, .. } => Some(call_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(applied_order, ["r1", "r2", "r3"]);
 }

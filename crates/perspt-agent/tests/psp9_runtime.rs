@@ -129,6 +129,85 @@ async fn production_runtime_edits_verifies_promotes_and_records() {
     assert_eq!(replay.accepted, [("implement-1".into(), 0, 0.0)]);
 }
 
+/// Resume may append the terminal revision but must not fabricate a new
+/// graph root: lineage stays anchored to the checkpointed revision.
+fn assert_graph_lineage(
+    store: &perspt_store::SessionStore,
+    session_id: &str,
+    revisions_before: usize,
+    control: &perspt_sdk::ControlFrame,
+) {
+    let rows = store.get_psp9_events(session_id).unwrap();
+    let graph_events: Vec<_> = rows
+        .iter()
+        .filter_map(|row| {
+            let event: perspt_sdk::LedgerEvent = serde_json::from_str(&row.event_json).ok()?;
+            let perspt_sdk::LedgerEvent::Custom { kind, payload } = event else {
+                return None;
+            };
+            (kind == "graph_revision")
+                .then(|| serde_json::from_value::<perspt_sdk::WorkGraphRevision>(payload).unwrap())
+        })
+        .collect();
+    assert_eq!(
+        graph_events.len(),
+        revisions_before + 1,
+        "resume may append the terminal revision but must not fabricate a new root"
+    );
+    assert_eq!(
+        graph_events.last().unwrap().parent_revision_id.as_deref(),
+        Some(control.graph_revision.as_str())
+    );
+}
+
+/// Assert the checkpoint's control frame and conversation are exact, and
+/// return the control frame.
+fn inspect_candidate_checkpoint(
+    store: &perspt_store::SessionStore,
+    session_id: &str,
+) -> perspt_sdk::ControlFrame {
+    let checkpoint: serde_json::Value = serde_json::from_str(
+        &store
+            .latest_psp9_checkpoint(session_id)
+            .unwrap()
+            .expect("candidate checkpoint"),
+    )
+    .unwrap();
+    let control: perspt_sdk::ControlFrame =
+        serde_json::from_value(checkpoint["control"].clone()).unwrap();
+    let conversation: Conversation =
+        serde_json::from_value(checkpoint["conversation"].clone()).unwrap();
+    assert_eq!(control.active_model, ModelId::new("test", "scripted"));
+    assert!(control.remaining_fallback_models.is_empty());
+    assert!(conversation.messages().iter().any(|message| matches!(
+        message,
+        perspt_sdk::Message::AssistantToolCalls { calls }
+            if calls.iter().any(|call| call.call_id == "edit-1")
+    )));
+    control
+}
+
+/// Poll until a session has a durable *candidate* checkpoint, returning its
+/// session id.
+async fn wait_for_candidate_checkpoint(store: &perspt_store::SessionStore) -> String {
+    for _ in 0..600 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let Some(session) = store.list_recent_sessions(1).unwrap_or_default().pop() else {
+            continue;
+        };
+        let checkpoint = store
+            .latest_psp9_checkpoint(&session.session_id)
+            .unwrap_or(None);
+        let is_candidate = checkpoint
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .is_some_and(|v| v.get("kind").and_then(|k| k.as_str()) == Some("candidate"));
+        if is_candidate {
+            return session.session_id.clone();
+        }
+    }
+    panic!("durable candidate checkpoint recorded before approval");
+}
+
 /// Mid-loop resume (PSP-9 resolved decision 6): a session killed after an
 /// accepted durable checkpoint — here, while waiting for promotion approval —
 /// is continued by rebuilding the accepted candidate from content-addressed
@@ -163,42 +242,8 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
     let handle = tokio::spawn(async move { runtime.run("make answer return two".into()).await });
 
     // Wait for the durable candidate checkpoint to land, then kill the task.
-    let mut session_id = None;
-    for _ in 0..600 {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let Some(session) = store.list_recent_sessions(1).unwrap_or_default().pop() else {
-            continue;
-        };
-        let checkpoint = store
-            .latest_psp9_checkpoint(&session.session_id)
-            .unwrap_or(None);
-        let is_candidate = checkpoint
-            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-            .is_some_and(|v| v.get("kind").and_then(|k| k.as_str()) == Some("candidate"));
-        if is_candidate {
-            session_id = Some(session.session_id.clone());
-            break;
-        }
-    }
-    let session_id = session_id.expect("durable candidate checkpoint recorded before approval");
-    let checkpoint: serde_json::Value = serde_json::from_str(
-        &store
-            .latest_psp9_checkpoint(&session_id)
-            .unwrap()
-            .expect("candidate checkpoint"),
-    )
-    .unwrap();
-    let control: perspt_sdk::ControlFrame =
-        serde_json::from_value(checkpoint["control"].clone()).unwrap();
-    let conversation: Conversation =
-        serde_json::from_value(checkpoint["conversation"].clone()).unwrap();
-    assert_eq!(control.active_model, ModelId::new("test", "scripted"));
-    assert!(control.remaining_fallback_models.is_empty());
-    assert!(conversation.messages().iter().any(|message| matches!(
-        message,
-        perspt_sdk::Message::AssistantToolCalls { calls }
-            if calls.iter().any(|call| call.call_id == "edit-1")
-    )));
+    let session_id = wait_for_candidate_checkpoint(&store).await;
+    let control = inspect_candidate_checkpoint(&store, &session_id);
     let graph_revisions_before_resume = store
         .get_psp9_events(&session_id)
         .unwrap()
@@ -236,28 +281,10 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
     let promoted = std::fs::read_to_string(project.path().join("src/lib.rs")).unwrap();
     let status = store.get_session(&session_id).unwrap().unwrap().status;
     assert!(promoted.contains("{ 2 }") && status == "COMPLETED_PSP9");
-    let resumed_rows = store.get_psp9_events(&session_id).unwrap();
-    let graph_events: Vec<_> = resumed_rows
-        .iter()
-        .filter_map(|row| {
-            let event: perspt_sdk::LedgerEvent = serde_json::from_str(&row.event_json).ok()?;
-            let perspt_sdk::LedgerEvent::Custom { kind, payload } = event else {
-                return None;
-            };
-            (kind == "graph_revision")
-                .then(|| serde_json::from_value::<perspt_sdk::WorkGraphRevision>(payload).unwrap())
-        })
-        .collect();
-    assert_eq!(
-        graph_events.len(),
-        graph_revisions_before_resume + 1,
-        "resume may append the terminal revision but must not fabricate a new root"
-    );
-    assert_eq!(
-        graph_events.last().unwrap().parent_revision_id.as_deref(),
-        Some(control.graph_revision.as_str())
-    );
-    assert!(resumed_rows
+    assert_graph_lineage(&store, &session_id, graph_revisions_before_resume, &control);
+    assert!(store
+        .get_psp9_events(&session_id)
+        .unwrap()
         .iter()
         .any(|row| row.event_json.contains("graph_revision_resumed")));
 }

@@ -120,6 +120,13 @@ pub enum LoopEvent {
         mutated: bool,
         output: String,
     },
+    /// A same-turn footprint collision (Gate P): the call was returned to
+    /// the model as an observation, never given an invented order.
+    ToolBatchConflict {
+        call_id: String,
+        conflicts_with: String,
+        resources: Vec<String>,
+    },
     EffectDenied {
         call_id: String,
         reason: String,

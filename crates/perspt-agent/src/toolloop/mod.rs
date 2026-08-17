@@ -26,6 +26,7 @@ use std::collections::BTreeSet;
 
 use crate::realize::ProjectionMismatch;
 
+mod batch;
 mod context;
 mod contract;
 pub use contract::*;
@@ -125,6 +126,49 @@ fn finish(
     }
 }
 
+/// Loop-lifetime mutable state threaded through every turn.
+struct TurnState {
+    log: EventLog,
+    projection: ProjectionMismatch,
+    recovery: RecoveryCascade,
+    cursor: CompactionCursor,
+    accepted_checkpoint: CandidateCheckpoint,
+    trajectory: AcceptedTrajectory,
+    turns_used: u32,
+}
+
+impl TurnState {
+    fn finish(self, outcome: NodeTerminalOutcome) -> LoopOutcome {
+        finish(
+            outcome,
+            self.trajectory,
+            self.log,
+            self.projection,
+            self.turns_used,
+            self.recovery.spent,
+        )
+    }
+}
+
+/// Turn-scoped accounting shared by top-level and nested calls.
+struct TurnBudget {
+    calls_seen: u32,
+    mutations: u32,
+    immediate_boundary: bool,
+    max_mutations: u32,
+}
+
+impl TurnBudget {
+    fn new(max_mutations: u32) -> Self {
+        Self {
+            calls_seen: 0,
+            mutations: 0,
+            immediate_boundary: false,
+            max_mutations,
+        }
+    }
+}
+
 /// One loop iteration's verdict after a gate boundary.
 enum BoundaryStep {
     Terminal(NodeTerminalOutcome),
@@ -149,59 +193,37 @@ impl ToolLoop<'_> {
     ) -> Result<LoopOutcome> {
         self.budgets.validate(&self.cadence)?;
         let mut log = EventLog::new(self.recorder.is_none());
-        let mut projection = ProjectionMismatch::default();
-        let mut recovery = RecoveryCascade::new(self.budgets.recovery_budget);
-        let mut cursor = CompactionCursor::default();
-        let mut restored_tools = restored_activated_tools;
-        if let Some(conversation) = resumed.as_ref() {
-            restored_tools.extend(activated_tools_from_conversation(conversation));
-        }
 
         // 1. Measured baseline and its real restore point.
-        let mut accepted_checkpoint = self.executor.checkpoint(&[]).await?;
-        let (baseline, mut trajectory) = self.measured_baseline(&mut log).await?;
-        if let Some(outcome) = self.baseline_terminal(&baseline) {
-            return Ok(finish(outcome, trajectory, log, projection, 0, 0));
-        }
-
-        let mut context = match resumed {
-            Some(conversation) => {
-                LoopContext::resume(conversation, restored_tools, self.recorder, &mut log)?
-            }
-            None => LoopContext::seed(
-                "You are a governed coding agent. Propose tool calls; every effect is mediated.",
-                goal,
-                self.recorder,
-                &mut log,
-            )?,
+        let accepted_checkpoint = self.executor.checkpoint(&[]).await?;
+        let (baseline, trajectory) = self.measured_baseline(&mut log).await?;
+        let mut state = TurnState {
+            log,
+            projection: ProjectionMismatch::default(),
+            recovery: RecoveryCascade::new(self.budgets.recovery_budget),
+            cursor: CompactionCursor::default(),
+            accepted_checkpoint,
+            trajectory,
+            turns_used: 0,
         };
+        if let Some(outcome) = self.baseline_terminal(&baseline) {
+            return Ok(state.finish(outcome));
+        }
+        let mut context = self.open_context(goal, resumed, restored_activated_tools, &mut state)?;
 
-        let mut turns_used = 0;
         let mut mutations_since_boundary = 0u32;
         for turn in 1..=self.budgets.max_turns {
-            turns_used = turn;
+            state.turns_used = turn;
             let turn_result = self
-                .model_turn(
-                    turn,
-                    mutations_since_boundary,
-                    &mut context,
-                    &mut log,
-                    &mut projection,
-                    &mut recovery,
-                )
+                .model_turn(turn, mutations_since_boundary, &mut context, &mut state)
                 .await;
             let (output, mutations, immediate_boundary) = match turn_result {
                 Ok(result) => result,
                 Err(error) => {
-                    let outcome = self.contain(&error, &accepted_checkpoint, &mut log).await?;
-                    return Ok(finish(
-                        outcome,
-                        trajectory,
-                        log,
-                        projection,
-                        turns_used,
-                        recovery.spent,
-                    ));
+                    let outcome = self
+                        .contain(&error, &state.accepted_checkpoint, &mut state.log)
+                        .await?;
+                    return Ok(state.finish(outcome));
                 }
             };
             mutations_since_boundary = mutations_since_boundary.saturating_add(mutations);
@@ -210,29 +232,11 @@ impl ToolLoop<'_> {
             }
             mutations_since_boundary = 0;
 
-            let step = self
-                .boundary_step(
-                    goal,
-                    turn,
-                    &mut accepted_checkpoint,
-                    &mut trajectory,
-                    &mut recovery,
-                    &mut context,
-                    &mut log,
-                    &mut cursor,
-                )
-                .await?;
-            match step {
-                BoundaryStep::Terminal(outcome) => {
-                    return Ok(finish(
-                        outcome,
-                        trajectory,
-                        log,
-                        projection,
-                        turns_used,
-                        recovery.spent,
-                    ));
-                }
+            match self
+                .boundary_step(goal, turn, &mut state, &mut context)
+                .await?
+            {
+                BoundaryStep::Terminal(outcome) => return Ok(state.finish(outcome)),
                 BoundaryStep::Exhausted => break,
                 BoundaryStep::Continue => {}
             }
@@ -241,14 +245,32 @@ impl ToolLoop<'_> {
         let outcome = NodeTerminalOutcome::Escalated {
             certificate_id: uuid::Uuid::new_v4().to_string(),
         };
-        Ok(finish(
-            outcome,
-            trajectory,
-            log,
-            projection,
-            turns_used,
-            recovery.spent,
-        ))
+        Ok(state.finish(outcome))
+    }
+
+    /// Seed a fresh model context or re-enter a resumed one.
+    fn open_context(
+        &self,
+        goal: &str,
+        resumed: Option<Conversation>,
+        restored_activated_tools: Vec<String>,
+        state: &mut TurnState,
+    ) -> Result<LoopContext> {
+        let mut restored_tools = restored_activated_tools;
+        if let Some(conversation) = resumed.as_ref() {
+            restored_tools.extend(activated_tools_from_conversation(conversation));
+        }
+        match resumed {
+            Some(conversation) => {
+                LoopContext::resume(conversation, restored_tools, self.recorder, &mut state.log)
+            }
+            None => LoopContext::seed(
+                "You are a governed coding agent. Propose tool calls; every effect is mediated.",
+                goal,
+                self.recorder,
+                &mut state.log,
+            ),
+        }
     }
 
     /// Unconditional containment: restore the last accepted state and
@@ -304,82 +326,53 @@ impl ToolLoop<'_> {
     /// rejection, classify terminals, and otherwise steer the next turn with
     /// a directed correction (Lemma 1: descent and rejection are
     /// non-terminal).
-    #[allow(clippy::too_many_arguments)]
     async fn boundary_step(
         &mut self,
         goal: &str,
         turn: u32,
-        accepted_checkpoint: &mut CandidateCheckpoint,
-        trajectory: &mut AcceptedTrajectory,
-        recovery: &mut RecoveryCascade,
+        state: &mut TurnState,
         context: &mut LoopContext,
-        log: &mut EventLog,
-        cursor: &mut CompactionCursor,
     ) -> Result<BoundaryStep> {
-        let (measured, decision) = self.measure_and_gate(trajectory, log).await?;
+        let (measured, decision) = self
+            .measure_and_gate(&mut state.trajectory, &mut state.log)
+            .await?;
 
         let accepted = decision.is_accepted();
         if accepted {
-            *accepted_checkpoint = self.executor.checkpoint(&[]).await?;
+            state.accepted_checkpoint = self.executor.checkpoint(&[]).await?;
         } else if !matches!(decision, GateDecision::StoppedAtDeclaredFloor) {
-            self.executor.restore(accepted_checkpoint).await?;
+            self.executor.restore(&state.accepted_checkpoint).await?;
             emit(
                 self.recorder,
-                log,
+                &mut state.log,
                 LoopEvent::CandidateRestored {
-                    checkpoint_id: accepted_checkpoint.id.clone(),
+                    checkpoint_id: state.accepted_checkpoint.id.clone(),
                 },
             )?;
         }
 
         if let Some(outcome) = self.classify_decision(&decision, &measured) {
             if accepted {
-                self.durable_checkpoint(
-                    goal,
-                    turn,
-                    accepted_checkpoint,
-                    &measured,
-                    trajectory,
-                    recovery,
-                    context,
-                    log,
-                )
-                .await?;
+                self.durable_checkpoint(goal, turn, &measured, state, context)
+                    .await?;
             }
             return Ok(BoundaryStep::Terminal(outcome));
         }
-        push_correction(context, &measured, accepted, self.recorder, log)?;
-        self.maybe_compact(
-            goal,
-            turn,
-            accepted_checkpoint,
-            &measured,
-            trajectory,
-            recovery,
-            context,
-            log,
-            cursor,
-        )?;
+        push_correction(context, &measured, accepted, self.recorder, &mut state.log)?;
+        self.maybe_compact(goal, turn, &measured, state, context)?;
         if accepted {
-            self.durable_checkpoint(
-                goal,
-                turn,
-                accepted_checkpoint,
-                &measured,
-                trajectory,
-                recovery,
-                context,
-                log,
-            )
-            .await?;
+            self.durable_checkpoint(goal, turn, &measured, state, context)
+                .await?;
         } else {
-            if trajectory.budget_exhausted() {
+            if state.trajectory.budget_exhausted() {
                 return Ok(BoundaryStep::Exhausted);
             }
-            let granted = recovery.grant(classify_failure(FailureKind::GateRejection));
+            let granted = state
+                .recovery
+                .grant(classify_failure(FailureKind::GateRejection));
             emit(
                 self.recorder,
-                log,
+                &mut state.log,
                 LoopEvent::RecoveryControlGranted {
                     failure: FailureKind::GateRejection,
                     level: granted.level,
@@ -473,27 +466,24 @@ impl ToolLoop<'_> {
     /// route every returned call through the kernel. `mutations_so_far` is
     /// the count since the last boundary; the cadence bound `H` caps what
     /// this turn may add.
-    #[allow(clippy::too_many_arguments)]
     async fn model_turn(
         &mut self,
         turn: u32,
         mutations_so_far: u32,
         context: &mut LoopContext,
-        log: &mut EventLog,
-        projection: &mut ProjectionMismatch,
-        recovery: &mut RecoveryCascade,
+        state: &mut TurnState,
     ) -> Result<(TurnOutput, u32, bool)> {
         let specs =
             self.catalog
                 .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
         let conversation = context.conversation().clone();
         let output = self
-            .chat_with_failover(&conversation, &specs, recovery, log)
+            .chat_with_failover(&conversation, &specs, &mut state.recovery, &mut state.log)
             .await?;
         // R2: record the observation before inspecting it.
         emit(
             self.recorder,
-            log,
+            &mut state.log,
             LoopEvent::TurnObserved {
                 turn,
                 output: output.clone(),
@@ -505,7 +495,13 @@ impl ToolLoop<'_> {
             .saturating_sub(mutations_so_far)
             .max(1);
         let (mutations, immediate_boundary) = self
-            .execute_turn(&output, max_mutations, context, log, projection)
+            .execute_turn(
+                &output,
+                max_mutations,
+                context,
+                &mut state.log,
+                &mut state.projection,
+            )
             .await?;
         Ok((output, mutations, immediate_boundary))
     }
@@ -514,17 +510,13 @@ impl ToolLoop<'_> {
     /// accepted candidate's mutated contents as content-addressed artifacts
     /// and ledger them with the exact control frame, so a crashed loop can be
     /// continued from this acceptance instead of restarted.
-    #[allow(clippy::too_many_arguments)]
     async fn durable_checkpoint(
         &self,
         goal: &str,
         turn: u32,
-        accepted_checkpoint: &CandidateCheckpoint,
         measured: &Measured,
-        trajectory: &AcceptedTrajectory,
-        recovery: &RecoveryCascade,
+        state: &mut TurnState,
         context: &LoopContext,
-        log: &mut EventLog,
     ) -> Result<()> {
         let Some(recorder) = self.recorder else {
             return Ok(());
@@ -536,16 +528,7 @@ impl ToolLoop<'_> {
             .map(String::as_str)
             .and_then(|value| value.parse().ok())
             .unwrap_or(0);
-        let control = self.control_frame(
-            goal,
-            turn,
-            accepted_checkpoint,
-            measured,
-            trajectory,
-            recovery,
-            context,
-            authority_epoch,
-        );
+        let control = self.control_frame(goal, turn, measured, state, context, authority_epoch);
         let exported = self.executor.export_accepted().await?;
         let mut files = Vec::new();
         for seed in exported {
@@ -567,12 +550,12 @@ impl ToolLoop<'_> {
         }
         emit(
             self.recorder,
-            log,
+            &mut state.log,
             LoopEvent::DurableCandidateCheckpoint {
-                state_root: accepted_checkpoint.witness.state_root.clone(),
+                state_root: state.accepted_checkpoint.witness.state_root.clone(),
                 control,
                 conversation: context.conversation().clone(),
-                canonical_scope: accepted_checkpoint.witness.canonical_scope.clone(),
+                canonical_scope: state.accepted_checkpoint.witness.canonical_scope.clone(),
                 files,
             },
         )
@@ -581,15 +564,12 @@ impl ToolLoop<'_> {
     /// The verbatim control frame a compaction must preserve (resolved
     /// design decision 3): goal, accepted state binding, live authority, and
     /// exact remaining budgets.
-    #[allow(clippy::too_many_arguments)]
     fn control_frame(
         &self,
         goal: &str,
         turn: u32,
-        accepted_checkpoint: &CandidateCheckpoint,
         measured: &Measured,
-        trajectory: &AcceptedTrajectory,
-        recovery: &RecoveryCascade,
+        state: &TurnState,
         context: &LoopContext,
         authority_epoch: u64,
     ) -> ControlFrame {
@@ -598,17 +578,18 @@ impl ToolLoop<'_> {
             event_schema_version: perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
             goal: goal.to_string(),
             node_generation: self.generation,
-            accepted_state_root: accepted_checkpoint.witness.state_root.clone(),
-            graph_revision: accepted_checkpoint.witness.graph_revision.clone(),
+            accepted_state_root: state.accepted_checkpoint.witness.state_root.clone(),
+            graph_revision: state.accepted_checkpoint.witness.graph_revision.clone(),
             capability_ids: self
                 .capabilities
                 .iter()
                 .map(|capability| capability.capability_id.clone())
                 .collect(),
             authority_epoch,
-            remaining_rejection_budget: trajectory
+            remaining_rejection_budget: state
+                .trajectory
                 .rejection_budget
-                .saturating_sub(trajectory.rejections_used.max(recovery.spent)),
+                .saturating_sub(state.trajectory.rejections_used.max(state.recovery.spent)),
             remaining_turns: self.budgets.max_turns.saturating_sub(turn),
             active_model: self.model.clone(),
             remaining_fallback_models: self.fallback_models.clone(),
@@ -622,18 +603,13 @@ impl ToolLoop<'_> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn maybe_compact(
         &self,
         goal: &str,
         turn: u32,
-        accepted_checkpoint: &CandidateCheckpoint,
         measured: &Measured,
-        trajectory: &AcceptedTrajectory,
-        recovery: &RecoveryCascade,
+        state: &mut TurnState,
         context: &mut LoopContext,
-        log: &mut EventLog,
-        cursor: &mut CompactionCursor,
     ) -> Result<()> {
         let route_limit = self.transport.capabilities(&self.model).max_context_tokens;
         let route_chars = usize::try_from(route_limit)
@@ -655,39 +631,30 @@ impl ToolLoop<'_> {
             .map(String::as_str)
             .and_then(|value| value.parse().ok())
             .unwrap_or(0);
-        let control = self.control_frame(
-            goal,
-            turn,
-            accepted_checkpoint,
-            measured,
-            trajectory,
-            recovery,
-            context,
-            authority_epoch,
-        );
+        let control = self.control_frame(goal, turn, measured, state, context, authority_epoch);
         // The rolling chain root commits to every event so far in O(1); the
         // cursor makes each checkpoint cover exactly the span since the
         // previous one instead of claiming the whole history from zero.
-        let covered_root = log.chain_root().to_string();
+        let covered_root = state.log.chain_root().to_string();
         let checkpoint = ContextCheckpoint {
-            parent: cursor.parent.clone(),
-            covered_from: cursor.next_from,
-            covered_to: log.count().saturating_sub(1),
+            parent: state.cursor.parent.clone(),
+            covered_from: state.cursor.next_from,
+            covered_to: state.log.count().saturating_sub(1),
             covered_event_root: covered_root.clone(),
             control,
-            artifact_refs: vec![accepted_checkpoint.witness.state_root.clone()],
+            artifact_refs: vec![state.accepted_checkpoint.witness.state_root.clone()],
             narrative_observation: None,
         };
         checkpoint
             .validate_against(
-                &accepted_checkpoint.witness.state_root,
-                &accepted_checkpoint.witness.graph_revision,
+                &state.accepted_checkpoint.witness.state_root,
+                &state.accepted_checkpoint.witness.graph_revision,
                 authority_epoch,
             )
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         emit(
             self.recorder,
-            log,
+            &mut state.log,
             LoopEvent::ContextCheckpointCreated {
                 checkpoint: checkpoint.clone(),
             },
@@ -696,10 +663,10 @@ impl ToolLoop<'_> {
         context.compact(
             format!("PERSPECTIVE_CONTROL_FRAME_V1\n{control_json}"),
             self.recorder,
-            log,
+            &mut state.log,
         )?;
-        cursor.parent = Some(covered_root);
-        cursor.next_from = checkpoint.covered_to.saturating_add(1);
+        state.cursor.parent = Some(covered_root);
+        state.cursor.next_from = checkpoint.covered_to.saturating_add(1);
         Ok(())
     }
 
@@ -838,203 +805,6 @@ impl ToolLoop<'_> {
                 perspt_sdk::RiskClass::High | perspt_sdk::RiskClass::Critical
             )
         })
-    }
-
-    /// Route every returned call through the kernel; execute the admitted
-    /// ones. Returns the number of admitted mutations.
-    async fn execute_turn(
-        &mut self,
-        output: &TurnOutput,
-        max_mutations: u32,
-        context: &mut LoopContext,
-        log: &mut EventLog,
-        projection: &mut ProjectionMismatch,
-    ) -> Result<(u32, bool)> {
-        let calls = output.tool_calls().to_vec();
-        if calls.is_empty() {
-            if let TurnOutput::Text(text) = output {
-                context.push_message(
-                    perspt_sdk::Message::Assistant {
-                        content: text.clone(),
-                    },
-                    self.recorder,
-                    log,
-                )?;
-            }
-            return Ok((0, false));
-        }
-        context.push_tool_calls(calls.clone(), self.recorder, log)?;
-
-        let mut mutations = 0u32;
-        let mut immediate_boundary = false;
-        let mut calls_seen = 0u32;
-        for call in &calls {
-            emit(
-                self.recorder,
-                log,
-                LoopEvent::ToolCallObserved { call: call.clone() },
-            )?;
-            let entry = self.catalog.lookup(&call.name).cloned();
-            let mutating = entry
-                .as_ref()
-                .is_some_and(|entry| candidate_mutating_effect(entry.effect));
-            let invalid = entry
-                .as_ref()
-                .and_then(|entry| entry.validate_arguments(&call.arguments).err())
-                .map(|error| anyhow::anyhow!(error.to_string()));
-            let budget = self.budget_denial(calls_seen, mutating, mutations, max_mutations);
-            calls_seen = calls_seen.saturating_add(1);
-            let mut response = match (invalid, budget) {
-                (Some(reason), _) => {
-                    self.record_unchecked_proposal(
-                        call,
-                        entry.as_ref().expect("validated entry"),
-                        log,
-                    )
-                    .await?;
-                    self.deny(
-                        log,
-                        projection,
-                        &call.call_id,
-                        reason.to_string(),
-                        perspt_sdk::ResidualClass::ToolArgumentInvalid,
-                    )?
-                }
-                (None, Some(reason)) => {
-                    if let Some(entry) = entry.as_ref() {
-                        self.record_unchecked_proposal(call, entry, log).await?;
-                    }
-                    self.deny(
-                        log,
-                        projection,
-                        &call.call_id,
-                        reason.to_string(),
-                        perspt_sdk::ResidualClass::BudgetExhausted,
-                    )?
-                }
-                (None, None) => {
-                    self.check_and_apply(call, log, projection, &mut mutations)
-                        .await?
-                }
-            };
-            if call.name == "tool_search" && !response.starts_with("denied:") {
-                // The response *is* the executed search result; activate from
-                // it instead of running the search a second time.
-                if let Ok(specs) = serde_json::from_str::<Vec<perspt_sdk::ToolSpec>>(&response) {
-                    for spec in specs {
-                        context.activate_tool(&spec.name, self.recorder, log)?;
-                    }
-                }
-            }
-            if call.name == "tool_program" && !response.starts_with("denied:") {
-                response = self
-                    .run_tool_program(
-                        call,
-                        &response,
-                        &mut calls_seen,
-                        max_mutations,
-                        &mut mutations,
-                        &mut immediate_boundary,
-                        log,
-                        projection,
-                    )
-                    .await?;
-            }
-            if mutating && Self::high_risk(entry.as_ref()) && mutations > 0 {
-                immediate_boundary = true;
-            }
-            context.push_tool_response(call.call_id.clone(), response, self.recorder, log)?;
-        }
-        Ok((mutations, immediate_boundary))
-    }
-
-    /// Execute a validated tool program's nested calls, each returning to the
-    /// same kernel and budgets as a top-level call.
-    #[allow(clippy::too_many_arguments)]
-    async fn run_tool_program(
-        &mut self,
-        call: &ProviderToolCall,
-        response: &str,
-        calls_seen: &mut u32,
-        max_mutations: u32,
-        mutations: &mut u32,
-        immediate_boundary: &mut bool,
-        log: &mut EventLog,
-        projection: &mut ProjectionMismatch,
-    ) -> Result<String> {
-        let program_calls: Vec<perspt_policy::ToolProgramCall> =
-            serde_json::from_str(response).context("decoding tool program result")?;
-        let mut nested_results = Vec::new();
-        for (nested_ordinal, nested) in program_calls.into_iter().enumerate() {
-            let nested_call = ProviderToolCall {
-                call_id: format!("{}:{}", call.call_id, nested_ordinal),
-                name: nested.tool,
-                arguments: nested.arguments,
-            };
-            emit(
-                self.recorder,
-                log,
-                LoopEvent::ToolCallObserved {
-                    call: nested_call.clone(),
-                },
-            )?;
-            let budget_ordinal = *calls_seen;
-            *calls_seen = (*calls_seen).saturating_add(1);
-            let nested_entry = self.catalog.lookup(&nested_call.name).cloned();
-            let nested_mutating = nested_entry
-                .as_ref()
-                .is_some_and(|entry| candidate_mutating_effect(entry.effect));
-            let nested_high_risk = Self::high_risk(nested_entry.as_ref());
-            let invalid = nested_entry
-                .as_ref()
-                .and_then(|entry| entry.validate_arguments(&nested_call.arguments).err())
-                .map(|error| anyhow::anyhow!(error.to_string()));
-            let budget =
-                self.budget_denial(budget_ordinal, nested_mutating, *mutations, max_mutations);
-            let result = match (invalid, budget) {
-                (Some(reason), _) => {
-                    self.record_unchecked_proposal(
-                        &nested_call,
-                        nested_entry.as_ref().expect("validated entry"),
-                        log,
-                    )
-                    .await?;
-                    self.deny(
-                        log,
-                        projection,
-                        &nested_call.call_id,
-                        reason.to_string(),
-                        perspt_sdk::ResidualClass::ToolArgumentInvalid,
-                    )?
-                }
-                (None, Some(reason)) => {
-                    if let Some(entry) = nested_entry.as_ref() {
-                        self.record_unchecked_proposal(&nested_call, entry, log)
-                            .await?;
-                    }
-                    self.deny(
-                        log,
-                        projection,
-                        &nested_call.call_id,
-                        reason,
-                        perspt_sdk::ResidualClass::BudgetExhausted,
-                    )?
-                }
-                (None, None) => {
-                    self.check_and_apply(&nested_call, log, projection, mutations)
-                        .await?
-                }
-            };
-            if nested_mutating && nested_high_risk && *mutations > 0 {
-                *immediate_boundary = true;
-            }
-            nested_results.push(serde_json::json!({
-                "call_id": nested_call.call_id,
-                "tool": nested_call.name,
-                "result": result,
-            }));
-        }
-        Ok(serde_json::to_string(&nested_results)?)
     }
 
     /// Execute one certified non-mutating call: the host-side tool surface
