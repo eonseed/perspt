@@ -22,6 +22,7 @@ impl Psp9AgentRuntime {
         generation: u32,
         model: &ModelId,
         graph: &WorkGraphRevision,
+        seed: Option<&CandidateSeed>,
         remaining_budget: u32,
         refine_rung: bool,
     ) -> Result<(NodeAttempt, u32)> {
@@ -29,7 +30,7 @@ impl Psp9AgentRuntime {
             if let Some(routes) = self.ensemble_routes(recorder, remaining_budget)? {
                 return self
                     .run_ensemble_round(
-                        recorder, session_id, goal, node_id, generation, graph, routes,
+                        recorder, session_id, goal, node_id, generation, graph, seed, routes,
                     )
                     .await;
             }
@@ -43,7 +44,7 @@ impl Psp9AgentRuntime {
                 generation,
                 model,
                 graph,
-                None,
+                seed,
                 remaining_budget,
             )
             .await?;
@@ -103,6 +104,7 @@ impl Psp9AgentRuntime {
         node_id: &str,
         generation: u32,
         graph: &WorkGraphRevision,
+        seed: Option<&CandidateSeed>,
         routes: Vec<ModelId>,
     ) -> Result<(NodeAttempt, u32)> {
         let mut spent_total = 0u32;
@@ -110,7 +112,7 @@ impl Psp9AgentRuntime {
         for route in routes {
             let attempt = self
                 .attempt_node(
-                    recorder, session_id, goal, node_id, generation, &route, graph, None, 1,
+                    recorder, session_id, goal, node_id, generation, &route, graph, seed, 1,
                 )
                 .await?;
             spent_total = spent_total.saturating_add(spent_of(&attempt).max(1));

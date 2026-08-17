@@ -88,7 +88,11 @@ pub(crate) struct LadderSession<'a> {
 }
 
 /// Level 4: the loop already restored the accepted state; revoke the
-/// session's authority so nothing minted under this epoch can still deliver.
+/// session's authority so nothing minted under this epoch can still
+/// deliver. Exception: containment caused by exhausted provider transport
+/// is an infrastructure outcome, not a governance anomaly — authority is
+/// preserved so `perspt resume` can continue from the durable checkpoint
+/// once the provider recovers.
 pub(crate) fn contain_if_escalated(
     recorder: &Psp9Recorder,
     session_id: &str,
@@ -98,6 +102,15 @@ pub(crate) fn contain_if_escalated(
         attempt.outcome.outcome,
         NodeTerminalOutcome::Escalated { .. }
     ) {
+        return Ok(());
+    }
+    if attempt.outcome.contained_by_transport {
+        recorder.record_custom(
+            "containment_preserved_authority",
+            serde_json::json!({
+                "reason": "provider transport exhausted; resume remains viable",
+            }),
+        )?;
         return Ok(());
     }
     let epoch = recorder.store.revoke_authority(session_id)?;
@@ -755,6 +768,38 @@ pub(crate) fn load_candidate_checkpoint(
         activated_tools: control.activated_tools.clone(),
     };
     Ok((control, seed))
+}
+
+/// Export the previous attempt's best accepted state as a seed for the
+/// next ladder rung, so recovery continues from the best measured state
+/// instead of re-paying the whole cost (Paper III restore-best). `None`
+/// when the attempt accepted nothing. The seed carries files only — the
+/// next rung starts a fresh conversation around its refined goal.
+pub(crate) async fn seed_from_attempt(
+    recorder: &Psp9Recorder,
+    node_id: &str,
+    attempt: &NodeAttempt,
+) -> Result<Option<CandidateSeed>> {
+    let files = attempt.candidate.export_accepted().await?;
+    if files.is_empty() {
+        return Ok(None);
+    }
+    let checkpoint = attempt.candidate.checkpoint(&[]).await?;
+    recorder.record_custom(
+        "ladder_reseeded",
+        serde_json::json!({
+            "node_id": node_id,
+            "files": files.len(),
+            "state_root": checkpoint.witness.state_root,
+        }),
+    )?;
+    Ok(Some(CandidateSeed {
+        expected_state_root: checkpoint.witness.state_root,
+        canonical_scope: checkpoint.witness.canonical_scope.clone(),
+        files,
+        conversation: Conversation::default(),
+        activated_tools: Vec::new(),
+    }))
 }
 
 /// Rebuild an accepted candidate state from a durable checkpoint seed and

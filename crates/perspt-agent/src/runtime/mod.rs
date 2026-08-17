@@ -519,7 +519,9 @@ impl Psp9AgentRuntime {
             recorder: Some(recorder),
         };
         let outcome = match seed {
-            Some(seed) => {
+            // A files-only seed (empty conversation) restores candidate
+            // state but starts a fresh conversation around the goal.
+            Some(seed) if !seed.conversation.messages().is_empty() => {
                 tool_loop
                     .run_with_conversation(
                         goal,
@@ -528,7 +530,7 @@ impl Psp9AgentRuntime {
                     )
                     .await?
             }
-            None => tool_loop.run(goal).await?,
+            _ => tool_loop.run(goal).await?,
         };
         Ok(NodeAttempt {
             outcome,
@@ -653,6 +655,9 @@ impl Psp9AgentRuntime {
                 _ => unreachable!("ladder iterates refine and escalate only"),
             }
             let refine_rung = matches!(level, perspt_sdk::CascadeLevel::Refine);
+            // Restore-best across rungs: the next attempt continues from
+            // the previous attempt's best accepted state.
+            let seed = seed_from_attempt(recorder, node_id, &attempt).await?;
             let (next, spent) = self
                 .ladder_attempt(
                     recorder,
@@ -662,6 +667,7 @@ impl Psp9AgentRuntime {
                     generation,
                     &model,
                     &graph,
+                    seed.as_ref(),
                     remaining_budget,
                     refine_rung,
                 )

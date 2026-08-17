@@ -123,6 +123,7 @@ fn finish(
         projection,
         turns_used,
         recovery_spent,
+        contained_by_transport: false,
     }
 }
 
@@ -167,6 +168,30 @@ impl TurnBudget {
             max_mutations,
         }
     }
+}
+
+/// Marker error: the transport recovery chain is exhausted (no retry or
+/// eligible fallback absorbed a provider failure). Containment caused by
+/// this error is an infrastructure outcome, not a governance anomaly, and
+/// preserves the session's authority so `perspt resume` stays viable.
+#[derive(Debug)]
+pub(crate) struct TransportExhausted {
+    detail: String,
+}
+
+impl std::fmt::Display for TransportExhausted {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for TransportExhausted {}
+
+/// Whether an error chain bottoms out in exhausted transport recovery.
+pub(crate) fn is_transport_exhaustion(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.downcast_ref::<TransportExhausted>().is_some())
 }
 
 /// One loop iteration's verdict after a gate boundary.
@@ -220,10 +245,13 @@ impl ToolLoop<'_> {
             let (output, mutations, immediate_boundary) = match turn_result {
                 Ok(result) => result,
                 Err(error) => {
+                    let transport = is_transport_exhaustion(&error);
                     let outcome = self
                         .contain(&error, &state.accepted_checkpoint, &mut state.log)
                         .await?;
-                    return Ok(state.finish(outcome));
+                    let mut contained = state.finish(outcome);
+                    contained.contained_by_transport = transport;
+                    return Ok(contained);
                 }
             };
             mutations_since_boundary = mutations_since_boundary.saturating_add(mutations);
@@ -405,7 +433,11 @@ impl ToolLoop<'_> {
                 Ok(output) => return Ok(output),
                 Err(error) => {
                     let cause = error.to_string();
-                    let failure = if cause.to_ascii_lowercase().contains("rate limit") {
+                    let lowered = cause.to_ascii_lowercase();
+                    let rate_limited = ["rate limit", "429", "too many requests"]
+                        .iter()
+                        .any(|marker| lowered.contains(marker));
+                    let failure = if rate_limited {
                         FailureKind::ProviderRateLimit
                     } else {
                         FailureKind::ProviderTransport
@@ -422,15 +454,17 @@ impl ToolLoop<'_> {
                         },
                     )?;
                     if granted.level != perspt_sdk::CascadeLevel::Fallback || granted.terminal {
-                        return Err(anyhow::anyhow!(
-                            "transport recovery reached {:?}: {cause}",
-                            granted.level
-                        ));
+                        return Err(anyhow::Error::new(TransportExhausted {
+                            detail: format!(
+                                "transport recovery reached {:?}: {cause}",
+                                granted.level
+                            ),
+                        }));
                     }
                     let Some(next) = self.fallback_models.first().cloned() else {
-                        return Err(anyhow::anyhow!(
-                            "transport recovery has no eligible fallback: {cause}"
-                        ));
+                        return Err(anyhow::Error::new(TransportExhausted {
+                            detail: format!("transport recovery has no eligible fallback: {cause}"),
+                        }));
                     };
                     self.fallback_models.remove(0);
                     let previous = std::mem::replace(&mut self.model, next.clone());
