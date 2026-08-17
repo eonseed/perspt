@@ -278,10 +278,10 @@ async fn resume_session(
     Ok(())
 }
 
-/// PSP-9 resume is credential-free recovery, not a return to the legacy
-/// orchestrator. It verifies the ledger and completes bracketed promotion
-/// intents from content-addressed artifacts. A new model loop is started as a
-/// new session because live capabilities are intentionally not serialized.
+/// PSP-9 resume verifies the ledger and completes bracketed promotion intents
+/// from content-addressed artifacts. Mid-loop continuation reconstructs the
+/// accepted candidate and provider-neutral conversation, then mints fresh
+/// capabilities because live authority is intentionally never serialized.
 async fn resume_psp9(
     store: std::sync::Arc<perspt_store::SessionStore>,
     session: &perspt_store::SessionRecord,
@@ -332,7 +332,10 @@ async fn resume_psp9(
             .and_then(serde_json::Value::as_array)
             .context("promotion intent has no file manifest")?;
         for file in files {
-            recover_promoted_file(&store, &workspace, file)?;
+            let recovery = prepare_promoted_file(&store, &workspace, file)?;
+            store.with_authority_epoch(&session.session_id, epoch, || {
+                recover_promoted_file(&recovery)
+            })?;
         }
         store.complete_external_effect(
             &session.session_id,
@@ -448,11 +451,21 @@ fn verify_psp9_chain(store: &perspt_store::SessionStore, session_id: &str) -> Re
     Ok(())
 }
 
-fn recover_promoted_file(
+struct PromotionRecovery {
+    workspace: PathBuf,
+    target: PathBuf,
+    relative_path: PathBuf,
+    relative: String,
+    before_hash: Option<String>,
+    after_hash: Option<String>,
+    after_bytes: Option<Vec<u8>>,
+}
+
+fn prepare_promoted_file(
     store: &perspt_store::SessionStore,
     workspace: &std::path::Path,
     manifest: &serde_json::Value,
-) -> Result<()> {
+) -> Result<PromotionRecovery> {
     let relative = manifest
         .get("path")
         .and_then(serde_json::Value::as_str)
@@ -465,39 +478,98 @@ fn recover_promoted_file(
                 .any(|component| component == std::path::Component::ParentDir),
         "promotion path escapes workspace: {relative:?}"
     );
+    reject_symlink_ancestor(workspace, relative_path)?;
     let target = workspace.join(relative_path);
     let before = manifest
         .get("before_hash")
-        .and_then(serde_json::Value::as_str);
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
     let after = manifest
         .get("after_hash")
-        .and_then(serde_json::Value::as_str);
-    let current_bytes = std::fs::read(&target).ok();
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let after_bytes = match after.as_deref() {
+        Some(hash) => Some(
+            store
+                .get_psp9_artifact(hash)?
+                .with_context(|| format!("missing promotion artifact {hash}"))?,
+        ),
+        None => None,
+    };
+    if let (Some(hash), Some(bytes)) = (after.as_deref(), after_bytes.as_deref()) {
+        anyhow::ensure!(
+            perspt_sdk::content_hash(bytes) == hash,
+            "promotion artifact hash mismatch"
+        );
+    }
+    Ok(PromotionRecovery {
+        workspace: workspace.to_path_buf(),
+        target,
+        relative_path: relative_path.to_path_buf(),
+        relative: relative.to_string(),
+        before_hash: before,
+        after_hash: after,
+        after_bytes,
+    })
+}
+
+fn recover_promoted_file(recovery: &PromotionRecovery) -> Result<()> {
+    reject_symlink_ancestor(&recovery.workspace, &recovery.relative_path)?;
+    let parent = recovery
+        .target
+        .parent()
+        .context("promotion target has no parent")?;
+    let current_bytes = match std::fs::read(&recovery.target) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", recovery.target.display()))
+        }
+    };
     let current = current_bytes.as_deref().map(perspt_sdk::content_hash);
-    if current.as_deref() == after {
+    if current.as_deref() == recovery.after_hash.as_deref() {
         return Ok(());
     }
     anyhow::ensure!(
-        current.as_deref() == before,
-        "workspace file changed after promotion intent: {relative}"
+        current.as_deref() == recovery.before_hash.as_deref(),
+        "workspace file changed after promotion intent: {}",
+        recovery.relative
     );
-    match after {
-        Some(hash) => {
-            let bytes = store
-                .get_psp9_artifact(hash)?
-                .with_context(|| format!("missing promotion artifact {hash}"))?;
+    match recovery.after_bytes.as_deref() {
+        Some(bytes) => {
             anyhow::ensure!(
-                perspt_sdk::content_hash(&bytes) == hash,
-                "promotion artifact hash mismatch"
+                recovery.after_hash.as_deref() == Some(&perspt_sdk::content_hash(bytes)),
+                "promotion artifact changed after preparation"
             );
-            let parent = target.parent().context("promotion target has no parent")?;
             std::fs::create_dir_all(parent)?;
+            let hash = recovery
+                .after_hash
+                .as_deref()
+                .context("missing after hash")?;
             let staged = parent.join(format!(".perspt-resume-{}", &hash[..12.min(hash.len())]));
             std::fs::write(&staged, bytes)?;
-            std::fs::rename(staged, target)?;
+            std::fs::rename(staged, &recovery.target)?;
         }
-        None if target.is_file() => std::fs::remove_file(target)?,
+        None if recovery.target.is_file() => std::fs::remove_file(&recovery.target)?,
         None => {}
+    }
+    Ok(())
+}
+
+fn reject_symlink_ancestor(root: &std::path::Path, relative: &std::path::Path) -> Result<()> {
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        if let std::path::Component::Normal(part) = component {
+            current.push(part);
+            match std::fs::symlink_metadata(&current) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    anyhow::bail!("promotion through a workspace symlink is forbidden")
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
     }
     Ok(())
 }
