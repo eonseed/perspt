@@ -10,11 +10,6 @@ mod store;
 pub use repair::{repair_database, RepairReport};
 pub use schema::init_schema;
 pub use store::{
-    ArtifactBundleRow, BranchFlushRow, BranchLineageRow, BudgetEnvelopeRow,
-    ContextProvenanceRecord, CorrectionAttemptRow, EnergyRecord, EscalationReportRecord,
-    FeatureCharterRow, InterfaceSealRow, LlmRequestRecord, NodeStateRecord, PlanRevisionRow,
-    ProvisionalBranchRow, Psp9CalibrationEpochRow, Psp9ExternalEffectRow, Psp9LedgerRow,
-    Psp9VerdictRow, RepairFootprintRow, ReviewOutcomeRow, RewriteRecordRow, SessionRecord,
-    SessionStore, SheafValidationRow, SrbnStepRecord, StructuralDigestRecord, TaskGraphEdgeRow,
-    VerificationResultRow,
+    Psp9CalibrationEpochRow, Psp9ExternalEffectRow, Psp9LedgerRow, Psp9VerdictRow, SessionRecord,
+    SessionStore,
 };

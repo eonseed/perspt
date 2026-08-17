@@ -20,79 +20,6 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Update session merkle root
-    pub fn update_merkle_root(&self, session_id: &str, merkle_root: &[u8]) -> Result<()> {
-        self.conn.lock().unwrap().execute(
-            "UPDATE sessions SET merkle_root = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
-            [hex::encode(merkle_root), session_id.to_string()],
-        )?;
-        Ok(())
-    }
-
-    /// Record node state
-    pub fn record_node_state(&self, record: &NodeStateRecord) -> Result<()> {
-        let v_total = record.v_total.to_string();
-        let merkle_hash = record
-            .merkle_hash
-            .as_ref()
-            .map(hex::encode)
-            .unwrap_or_default();
-        let attempt_count = record.attempt_count.to_string();
-        let node_class = record.node_class.clone().unwrap_or_default();
-        let owner_plugin = record.owner_plugin.clone().unwrap_or_default();
-        let goal = record.goal.clone().unwrap_or_default();
-        let parent_id = record.parent_id.clone().unwrap_or_default();
-        let children = record.children.clone().unwrap_or_default();
-        let last_error_type = record.last_error_type.clone().unwrap_or_default();
-        let committed_at = record.committed_at.clone().unwrap_or_default();
-
-        self.conn.lock().unwrap().execute(
-            r#"
-            INSERT INTO node_states (node_id, session_id, state, v_total, merkle_hash, attempt_count,
-                                     node_class, owner_plugin, goal, parent_id, children, last_error_type,
-                                         committed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-            [
-                &record.node_id,
-                &record.session_id,
-                &record.state,
-                &v_total,
-                &merkle_hash,
-                &attempt_count,
-                &node_class,
-                &owner_plugin,
-                &goal,
-                &parent_id,
-                &children,
-                &last_error_type,
-                &committed_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Record energy measurement
-    pub fn record_energy(&self, record: &EnergyRecord) -> Result<()> {
-        self.conn.lock().unwrap().execute(
-            r#"
-            INSERT INTO energy_history (node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            "#,
-            [
-                &record.node_id,
-                &record.session_id,
-                &record.v_syn.to_string(),
-                &record.v_str.to_string(),
-                &record.v_log.to_string(),
-                &record.v_boot.to_string(),
-                &record.v_sheaf.to_string(),
-                &record.v_total.to_string(),
-            ],
-        )?;
-        Ok(())
-    }
-
     /// Get session by ID
     pub fn get_session(&self, session_id: &str) -> Result<Option<SessionRecord>> {
         let conn = self.conn.lock().unwrap();
@@ -137,60 +64,6 @@ impl SessionStore {
             std::fs::create_dir_all(&dir).context("Failed to create session directory")?;
         }
         Ok(dir)
-    }
-
-    /// Get energy history for a node (query)
-    pub fn get_energy_history(&self, session_id: &str, node_id: &str) -> Result<Vec<EnergyRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM \
-             energy_history WHERE session_id = ? AND node_id = ? ORDER BY timestamp",
-        )?;
-
-        let mut rows = stmt.query([session_id, node_id])?;
-        let mut records = Vec::new();
-
-        while let Some(row) = rows.next()? {
-            records.push(EnergyRecord {
-                node_id: row.get(0)?,
-                session_id: row.get(1)?,
-                v_syn: row.get::<_, f64>(2)? as f32,
-                v_str: row.get::<_, f64>(3)? as f32,
-                v_log: row.get::<_, f64>(4)? as f32,
-                v_boot: row.get::<_, f64>(5)? as f32,
-                v_sheaf: row.get::<_, f64>(6)? as f32,
-                v_total: row.get::<_, f64>(7)? as f32,
-            });
-        }
-
-        Ok(records)
-    }
-
-    /// Get all energy history for a session (all nodes)
-    pub fn get_session_energy_history(&self, session_id: &str) -> Result<Vec<EnergyRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, v_syn, v_str, v_log, v_boot, v_sheaf, v_total FROM \
-             energy_history WHERE session_id = ? ORDER BY timestamp",
-        )?;
-
-        let mut rows = stmt.query([session_id])?;
-        let mut records = Vec::new();
-
-        while let Some(row) = rows.next()? {
-            records.push(EnergyRecord {
-                node_id: row.get(0)?,
-                session_id: row.get(1)?,
-                v_syn: row.get::<_, f64>(2)? as f32,
-                v_str: row.get::<_, f64>(3)? as f32,
-                v_log: row.get::<_, f64>(4)? as f32,
-                v_boot: row.get::<_, f64>(5)? as f32,
-                v_sheaf: row.get::<_, f64>(6)? as f32,
-                v_total: row.get::<_, f64>(7)? as f32,
-            });
-        }
-
-        Ok(records)
     }
 
     /// List recent sessions (newest first)
@@ -240,41 +113,6 @@ impl SessionStore {
         } else {
             Ok(0)
         }
-    }
-
-    /// Get all node states for a session
-    pub fn get_node_states(&self, session_id: &str) -> Result<Vec<NodeStateRecord>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT node_id, session_id, state, v_total, CAST(merkle_hash AS VARCHAR), attempt_count, \
-                    node_class, owner_plugin, goal, parent_id, children, last_error_type, committed_at \
-             FROM node_states WHERE session_id = ? ORDER BY created_at",
-        )?;
-
-        let mut rows = stmt.query([session_id])?;
-        let mut records = Vec::new();
-
-        while let Some(row) = rows.next()? {
-            records.push(NodeStateRecord {
-                node_id: row.get(0)?,
-                session_id: row.get(1)?,
-                state: row.get(2)?,
-                v_total: row.get::<_, f64>(3)? as f32,
-                merkle_hash: row
-                    .get::<_, Option<String>>(4)?
-                    .and_then(|s| hex::decode(s).ok()),
-                attempt_count: row.get(5)?,
-                node_class: row.get::<_, Option<String>>(6)?.filter(|s| !s.is_empty()),
-                owner_plugin: row.get::<_, Option<String>>(7)?.filter(|s| !s.is_empty()),
-                goal: row.get::<_, Option<String>>(8)?.filter(|s| !s.is_empty()),
-                parent_id: row.get::<_, Option<String>>(9)?.filter(|s| !s.is_empty()),
-                children: row.get::<_, Option<String>>(10)?.filter(|s| !s.is_empty()),
-                last_error_type: row.get::<_, Option<String>>(11)?.filter(|s| !s.is_empty()),
-                committed_at: row.get::<_, Option<String>>(12)?.filter(|s| !s.is_empty()),
-            });
-        }
-
-        Ok(records)
     }
 
     /// Update session status
