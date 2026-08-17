@@ -7,7 +7,7 @@ async fn test_read_file() {
     let test_file = dir.join("test_read.txt");
     fs::write(&test_file, "Hello, World!").unwrap();
 
-    let tools = AgentTools::new(dir.clone(), false);
+    let tools = AgentTools::new(dir.clone());
     let call = ToolCall {
         name: "read_file".to_string(),
         arguments: [("path".to_string(), test_file.to_string_lossy().to_string())]
@@ -15,7 +15,7 @@ async fn test_read_file() {
             .collect(),
     };
 
-    let result = tools.execute(&call).await;
+    let result = tools.read_file(&call);
     assert!(result.success);
     assert_eq!(result.output, "Hello, World!");
 }
@@ -23,13 +23,13 @@ async fn test_read_file() {
 #[tokio::test]
 async fn test_list_files() {
     let dir = temp_dir();
-    let tools = AgentTools::new(dir.clone(), false);
+    let tools = AgentTools::new(dir.clone());
     let call = ToolCall {
         name: "list_files".to_string(),
         arguments: HashMap::new(),
     };
 
-    let result = tools.execute(&call).await;
+    let result = tools.list_files(&call);
     assert!(result.success);
 }
 
@@ -43,7 +43,7 @@ async fn test_apply_diff_tool() {
     // Explicitly write bytes with unix newlines
     file.write_all(b"Hello world\nThis is a test\n").unwrap();
 
-    let tools = AgentTools::new(temp_dir.clone(), true);
+    let tools = AgentTools::new(temp_dir.clone());
 
     // Exact string with newlines
     let diff =
@@ -77,14 +77,14 @@ async fn test_delete_file() {
     fs::write(&test_file, "temporary").unwrap();
     assert!(test_file.exists());
 
-    let tools = AgentTools::new(dir.clone(), false);
+    let tools = AgentTools::new(dir.clone());
     let mut args = HashMap::new();
     args.insert("path".to_string(), test_file.to_string_lossy().to_string());
     let call = ToolCall {
         name: "delete_file".to_string(),
         arguments: args,
     };
-    let result = tools.execute(&call).await;
+    let result = tools.delete_file(&call);
     assert!(result.success, "Delete should succeed: {:?}", result.error);
     assert!(!test_file.exists(), "File should be gone");
 }
@@ -92,7 +92,7 @@ async fn test_delete_file() {
 #[tokio::test]
 async fn test_delete_nonexistent_file_succeeds() {
     let dir = temp_dir();
-    let tools = AgentTools::new(dir.clone(), false);
+    let tools = AgentTools::new(dir.clone());
     let mut args = HashMap::new();
     args.insert(
         "path".to_string(),
@@ -102,7 +102,7 @@ async fn test_delete_nonexistent_file_succeeds() {
         name: "delete_file".to_string(),
         arguments: args,
     };
-    let result = tools.execute(&call).await;
+    let result = tools.delete_file(&call);
     assert!(result.success);
 }
 
@@ -113,7 +113,7 @@ async fn test_move_file() {
     let dst = dir.join("test_move_dst.txt");
     fs::write(&src, "move me").unwrap();
 
-    let tools = AgentTools::new(dir.clone(), false);
+    let tools = AgentTools::new(dir.clone());
     let mut args = HashMap::new();
     args.insert("to".to_string(), dst.to_string_lossy().to_string());
     // The governed catalog names the source argument `path`.
@@ -122,7 +122,7 @@ async fn test_move_file() {
         name: "move_file".to_string(),
         arguments: args,
     };
-    let result = tools.execute(&call).await;
+    let result = tools.move_file(&call);
     assert!(result.success, "Move should succeed: {:?}", result.error);
     assert!(!src.exists(), "Source should be gone");
     assert!(dst.exists(), "Destination should exist");
@@ -135,14 +135,14 @@ async fn test_delete_directory_rejected() {
     let dir = temp_dir().join("test_delete_dir");
     fs::create_dir_all(&dir).unwrap();
 
-    let tools = AgentTools::new(temp_dir(), false);
+    let tools = AgentTools::new(temp_dir());
     let mut args = HashMap::new();
     args.insert("path".to_string(), dir.to_string_lossy().to_string());
     let call = ToolCall {
         name: "delete_file".to_string(),
         arguments: args,
     };
-    let result = tools.execute(&call).await;
+    let result = tools.delete_file(&call);
     assert!(!result.success, "Should reject directory deletion");
     let _ = fs::remove_dir(&dir);
 }
@@ -157,7 +157,7 @@ async fn test_move_file_creates_parent_dirs() {
         .join("test_move_nested_dst.txt");
     fs::write(&src, "nested move").unwrap();
 
-    let tools = AgentTools::new(dir.clone(), false);
+    let tools = AgentTools::new(dir.clone());
     let mut args = HashMap::new();
     args.insert("from".to_string(), src.to_string_lossy().to_string());
     args.insert("to".to_string(), dst.to_string_lossy().to_string());
@@ -166,7 +166,7 @@ async fn test_move_file_creates_parent_dirs() {
         name: "move_file".to_string(),
         arguments: args,
     };
-    let result = tools.execute(&call).await;
+    let result = tools.move_file(&call);
     assert!(
         result.success,
         "Move with nested dirs should succeed: {:?}",

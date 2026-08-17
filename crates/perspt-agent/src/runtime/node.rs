@@ -31,6 +31,54 @@ pub(crate) fn promotion_manifest(
     Ok(files)
 }
 
+/// Write-ahead promotion: record the intent, promote under the epoch
+/// guard, then record the commit and completion.
+pub(crate) fn commit_promotion(
+    recorder: &Psp9Recorder,
+    candidate: &CandidateWorkspace,
+    node_id: &str,
+    epoch: u64,
+    state_root: &str,
+    touched: &[String],
+    working_dir: &Path,
+) -> Result<Vec<String>> {
+    let generation = candidate.node_generation();
+    let promotion_key = format!("promote:{node_id}:{generation}");
+    let promotion_files =
+        promotion_manifest(recorder, working_dir, candidate.overlay_root(), touched)?;
+    let promotion_intent = serde_json::json!({
+        "idempotency_key": promotion_key,
+        "node_id": node_id,
+        "generation": generation,
+        "authority_epoch": epoch,
+        "workspace_root": working_dir.canonicalize()?.display().to_string(),
+        "candidate_root": state_root,
+        "files": promotion_files,
+    });
+    recorder.record_external_intent(&promotion_key, &promotion_intent)?;
+    let promoted_paths =
+        recorder
+            .store
+            .with_authority_epoch(&recorder.session_id, epoch, || candidate.promote())?;
+    recorder.record_custom(
+        "authority_epoch_effect_committed",
+        serde_json::json!({
+            "node_id": node_id,
+            "generation": generation,
+            "epoch": epoch,
+        }),
+    )?;
+    recorder.complete_external_effect(
+        &promotion_key,
+        &serde_json::json!({"idempotency_key": promotion_key, "paths": promoted_paths}),
+    )?;
+    recorder.record_custom(
+        "candidate_promoted",
+        serde_json::json!({"node_id": node_id, "paths": promoted_paths}),
+    )?;
+    Ok(promoted_paths)
+}
+
 /// Session plumbing the recovery ladder threads through every rung.
 pub(crate) struct LadderSession<'a> {
     pub recorder: &'a Psp9Recorder,
@@ -359,30 +407,41 @@ pub(crate) fn refine_node(
     Ok((revised, refined_goal))
 }
 
+/// Effects that never enter a session grant implicitly, no matter what the
+/// assembled catalog declares. Each needs its own explicit opt-in path
+/// (approval mode, dedicated flag, or a future grant surface).
+pub(crate) const WITHHELD_EFFECTS: &[EffectKind] = &[
+    EffectKind::RunShell,
+    EffectKind::GitWrite,
+    EffectKind::NetworkFetch,
+    EffectKind::MutateDependencies,
+    EffectKind::SpawnAgent,
+    EffectKind::UpdateGraph,
+    EffectKind::UpdatePolicy,
+];
+
+/// Granting is policy × data: the effect set follows the assembled catalog
+/// (so a registered tool family is grantable without editing this module),
+/// intersected with the explicit withheld set above.
+pub(crate) fn granted_effects(catalog: &dyn ToolCatalog) -> Vec<EffectKind> {
+    let mut effects = Vec::new();
+    for entry in catalog.entries() {
+        if WITHHELD_EFFECTS.contains(&entry.effect) || effects.contains(&entry.effect) {
+            continue;
+        }
+        effects.push(entry.effect);
+    }
+    effects
+}
+
 pub(crate) fn worker_capability(
     session_id: &str,
     graph_revision: &str,
     authority_epoch: u64,
     generation: u32,
+    catalog: &dyn ToolCatalog,
 ) -> Capability {
-    let mut capability = Capability::new(
-        ActorId::new("toolloop"),
-        vec![
-            EffectKind::ReadFile,
-            EffectKind::ToolSearch,
-            EffectKind::ToolProgram,
-            EffectKind::Search,
-            EffectKind::List,
-            EffectKind::LspQuery,
-            EffectKind::WriteArtifact,
-            EffectKind::ApplyPatch,
-            EffectKind::MoveFile,
-            EffectKind::DeleteFile,
-            EffectKind::RunTest,
-            EffectKind::RunBuild,
-            EffectKind::GitRead,
-        ],
-    );
+    let mut capability = Capability::new(ActorId::new("toolloop"), granted_effects(catalog));
     capability.path_scope = vec![PathPattern("*".into())];
     capability.command_scope = inspection_command_scope();
     capability.max_calls = Some(100);
@@ -402,6 +461,7 @@ pub(crate) fn session_grant_policy(
     workspace: &Path,
     graph_revision: &str,
     persistent: bool,
+    catalog: &dyn ToolCatalog,
 ) -> Result<GrantPolicy> {
     let workspace_root = workspace.canonicalize()?.display().to_string();
     let policy_id = uuid::Uuid::new_v4().to_string();
@@ -409,21 +469,7 @@ pub(crate) fn session_grant_policy(
     Ok(GrantPolicy {
         policy_id,
         workspace_root,
-        effect_ceiling: vec![
-            EffectKind::ReadFile,
-            EffectKind::ToolSearch,
-            EffectKind::ToolProgram,
-            EffectKind::Search,
-            EffectKind::List,
-            EffectKind::LspQuery,
-            EffectKind::WriteArtifact,
-            EffectKind::ApplyPatch,
-            EffectKind::MoveFile,
-            EffectKind::DeleteFile,
-            EffectKind::RunTest,
-            EffectKind::RunBuild,
-            EffectKind::GitRead,
-        ],
+        effect_ceiling: granted_effects(catalog),
         path_ceiling: vec![PathPattern("*".into())],
         command_ceiling: inspection_command_scope(),
         network_ceiling: Vec::new(),
@@ -564,22 +610,18 @@ pub(crate) fn load_candidate_checkpoint(
         control.authority_epoch,
         current_epoch
     );
-    let seed = load_seed_files(recorder, file_handles)?;
-    let activated_tools = control.activated_tools.clone();
-    Ok((
-        control,
-        CandidateSeed {
-            expected_state_root: value
-                .get("state_root")
-                .and_then(serde_json::Value::as_str)
-                .context("checkpoint state root")?
-                .to_string(),
-            canonical_scope,
-            files: seed,
-            conversation,
-            activated_tools,
-        },
-    ))
+    let seed = CandidateSeed {
+        expected_state_root: value
+            .get("state_root")
+            .and_then(serde_json::Value::as_str)
+            .context("checkpoint state root")?
+            .to_string(),
+        canonical_scope,
+        files: load_seed_files(recorder, file_handles)?,
+        conversation,
+        activated_tools: control.activated_tools.clone(),
+    };
+    Ok((control, seed))
 }
 
 /// Rehydrate checkpointed seed files from the content-addressed artifact

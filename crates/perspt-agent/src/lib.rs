@@ -14,6 +14,7 @@ pub mod runtime;
 pub mod toolloop;
 pub mod tools;
 pub mod transport;
+pub(crate) mod verifier;
 
 pub use candidate::{CandidateWorkspace, CodingCandidateMeasurer};
 pub use external_tools::{
@@ -27,5 +28,6 @@ pub use runtime::{Psp9AgentRuntime, Psp9ModelRoutes, Psp9Recorder, Psp9RunConfig
 pub use toolloop::{
     CandidateMeasurer, EffectExecutor, LoopBudgets, LoopOutcome, LoopRecorder, ToolLoop,
 };
+pub use tools::handlers::{CandidateHandlerRegistry, CandidateToolHandler};
 pub use tools::{AgentTools, ToolCall, ToolResult};
 pub use transport::GenAiTransport;

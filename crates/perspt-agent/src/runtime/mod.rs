@@ -141,6 +141,12 @@ pub struct Psp9AgentRuntime {
     action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
     database_path: Option<PathBuf>,
     shared_store: Option<Arc<SessionStore>>,
+    /// The open execution plane shared by every candidate this runtime
+    /// creates. The composition root may extend it with registered families.
+    tool_handlers: Arc<crate::tools::handlers::CandidateHandlerRegistry>,
+    /// Catalog entries for registered tool families, appended to the
+    /// domain's entries at node assembly.
+    extra_tool_entries: Vec<perspt_sdk::ToolEntry>,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -215,6 +221,10 @@ impl Psp9AgentRuntime {
             action_receiver: None,
             database_path: None,
             shared_store: None,
+            tool_handlers: Arc::new(
+                crate::tools::handlers::CandidateHandlerRegistry::with_builtins(),
+            ),
+            extra_tool_entries: Vec::new(),
         })
     }
 
@@ -239,7 +249,29 @@ impl Psp9AgentRuntime {
             action_receiver: None,
             database_path: None,
             shared_store: None,
+            tool_handlers: Arc::new(
+                crate::tools::handlers::CandidateHandlerRegistry::with_builtins(),
+            ),
+            extra_tool_entries: Vec::new(),
         }
+    }
+
+    /// Extend or replace the execution plane with a registry assembled at
+    /// the composition root (registered tool families beyond the builtins).
+    pub fn with_tool_handlers(
+        mut self,
+        handlers: Arc<crate::tools::handlers::CandidateHandlerRegistry>,
+    ) -> Self {
+        self.tool_handlers = handlers;
+        self
+    }
+
+    /// Add a registered tool family's catalog entries. Pair with
+    /// [`Self::with_tool_handlers`]; the entries enter every node's
+    /// assembled catalog and therefore its derived grant.
+    pub fn with_tool_family(mut self, entries: Vec<perspt_sdk::ToolEntry>) -> Self {
+        self.extra_tool_entries.extend(entries);
+        self
     }
 
     pub fn with_database_path(mut self, path: PathBuf) -> Self {
@@ -346,11 +378,13 @@ impl Psp9AgentRuntime {
         &self,
         recorder: &Psp9Recorder,
         revision_id: &str,
+        catalog: &dyn ToolCatalog,
     ) -> Result<perspt_sdk::GrantPolicy> {
         let grant_policy = session_grant_policy(
             &self.working_dir,
             revision_id,
             self.config.persistent_grants,
+            catalog,
         )?;
         let signed_grant = if self.config.persistent_grants {
             let key = crate::grant::GrantSigningKey::resolve()?;
@@ -374,13 +408,15 @@ impl Psp9AgentRuntime {
         generation: u32,
         revision_id: &str,
     ) -> Result<CandidateWorkspace> {
-        CandidateWorkspace::create_with_policy(
+        let mut candidate = CandidateWorkspace::create_with_policy(
             &self.working_dir,
             node_id,
             generation,
             revision_id,
             self.config.allow_unisolated_verifiers,
-        )
+        )?;
+        candidate.set_tool_handlers(self.tool_handlers.clone());
+        Ok(candidate)
     }
 
     /// One governed attempt at a node generation: fresh candidate overlay,
@@ -815,9 +851,11 @@ impl Psp9AgentRuntime {
             label: node_id.to_string(),
             paths: Vec::new(),
         };
-        let catalog = StaticCatalog::with_base(domain.tool_entries(&scope))
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let grant_policy = self.mint_grant(recorder, &running_graph.revision_id)?;
+        let mut entries = domain.tool_entries(&scope);
+        entries.extend(self.extra_tool_entries.iter().cloned());
+        let catalog =
+            StaticCatalog::with_base(entries).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let grant_policy = self.mint_grant(recorder, &running_graph.revision_id, &catalog)?;
         // Every live capability is the intersection of the worker template
         // with the grant ceilings — the ceilings are enforced, not decorative.
         let capability = grant_policy
@@ -826,6 +864,7 @@ impl Psp9AgentRuntime {
                 &running_graph.revision_id,
                 grant_policy.authority_epoch,
                 generation,
+                &catalog,
             ))
             .map_err(|e| anyhow::anyhow!("grant intersection: {e}"))?;
         let contract = CodingContract {
@@ -1006,68 +1045,17 @@ impl Psp9AgentRuntime {
             return Ok(None);
         }
 
-        let promoted_paths = self.commit_promotion(
+        let promoted_paths = commit_promotion(
             recorder,
             candidate,
             node_id,
             grant_policy.authority_epoch,
             &realized.state_root,
             &touched,
+            &self.working_dir,
         )?;
         record_promotion_sample(recorder, calibration, &realized.state_root)?;
         Ok(Some(promoted_paths))
-    }
-
-    /// Write-ahead promotion: record the intent, promote under the epoch
-    /// guard, then record the commit and completion.
-    fn commit_promotion(
-        &self,
-        recorder: &Psp9Recorder,
-        candidate: &CandidateWorkspace,
-        node_id: &str,
-        epoch: u64,
-        state_root: &str,
-        touched: &[String],
-    ) -> Result<Vec<String>> {
-        let generation = candidate.node_generation();
-        let promotion_key = format!("promote:{node_id}:{generation}");
-        let promotion_files = promotion_manifest(
-            recorder,
-            &self.working_dir,
-            candidate.overlay_root(),
-            touched,
-        )?;
-        let promotion_intent = serde_json::json!({
-            "idempotency_key": promotion_key,
-            "node_id": node_id,
-            "generation": generation,
-            "authority_epoch": epoch,
-            "workspace_root": self.working_dir.canonicalize()?.display().to_string(),
-            "candidate_root": state_root,
-            "files": promotion_files,
-        });
-        recorder.record_external_intent(&promotion_key, &promotion_intent)?;
-        let promoted_paths =
-            recorder
-                .store
-                .with_authority_epoch(&recorder.session_id, epoch, || candidate.promote())?;
-        recorder.record_custom(
-            "authority_epoch_effect_committed",
-            serde_json::json!({
-                "node_id": node_id,
-                "generation": generation,
-                "epoch": epoch,
-            }),
-        )?;
-        recorder.complete_external_effect(
-            &promotion_key,
-            &serde_json::json!({"idempotency_key": promotion_key, "paths": promoted_paths}),
-        )?;
-        recorder.record_custom(
-            "candidate_promoted",
-            serde_json::json!({"node_id": node_id, "paths": promoted_paths}),
-        )?;
-        Ok(promoted_paths)
     }
 
     fn record_route_capabilities(&self, recorder: &Psp9Recorder) -> Result<()> {
