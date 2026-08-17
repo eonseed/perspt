@@ -25,16 +25,6 @@ pub use dashboard::Dashboard;
 pub use diff_viewer::DiffViewer;
 pub use logs_viewer::{run_logs_viewer, LogsViewer};
 pub use review_modal::ReviewModal;
-pub use task_tree::TaskTree;
-pub use telemetry::{
-    create_telemetry_channel, EnergyComponents, TelemetryEvent, TelemetryReceiver, TelemetrySender,
-};
+pub use telemetry::EnergyComponents;
 pub use theme::Theme;
-pub use tui_runner::{
-    init_terminal, restore_terminal, run_event_loop, FrameRateLimiter, TuiRunnerConfig, TuiTerminal,
-};
-pub use ui::{run_chat_tui, AppMode};
-
-// Legacy re-export
-#[allow(deprecated)]
-pub use ui::run_tui;
+pub use ui::run_chat_tui;

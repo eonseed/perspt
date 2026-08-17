@@ -27,5 +27,5 @@ pub use runtime::{Psp9AgentRuntime, Psp9ModelRoutes, Psp9Recorder, Psp9RunConfig
 pub use toolloop::{
     CandidateMeasurer, EffectExecutor, LoopBudgets, LoopOutcome, LoopRecorder, ToolLoop,
 };
-pub use tools::{AgentTools, ToolCall, ToolDefinition, ToolResult};
+pub use tools::{AgentTools, ToolCall, ToolResult};
 pub use transport::GenAiTransport;

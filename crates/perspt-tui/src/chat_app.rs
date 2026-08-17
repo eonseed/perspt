@@ -2680,27 +2680,6 @@ impl ChatApp {
     }
 }
 
-/// Run the chat TUI
-pub async fn run_chat_tui(provider: GenAIProvider, model: String) -> Result<()> {
-    use ratatui::crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-    use ratatui::crossterm::execute;
-    use std::io::stdout;
-
-    // Enable mouse capture
-    execute!(stdout(), EnableMouseCapture)?;
-
-    let mut terminal = ratatui::init();
-    let mut app = ChatApp::new(provider, model);
-
-    let result = app.run(&mut terminal).await;
-
-    // Restore terminal
-    ratatui::restore();
-    execute!(stdout(), DisableMouseCapture)?;
-
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

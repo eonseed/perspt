@@ -27,9 +27,6 @@ perspt-store = { workspace = true }
 # Content addressing for realized workspace snapshots
 sha2 = { workspace = true }
 
-# Graph management
-petgraph = "0.8"
-
 # LSP Client
 lsp-types = { workspace = true }
 url = "2.5"
@@ -48,8 +45,6 @@ serde_json = { workspace = true }
 # Utilities
 anyhow = { workspace = true }
 log = { workspace = true }
-# Code search (ripgrep library facade)
-grep = "0.4"
 ignore = "0.4"
 regex = "1.12.2"
 diffy = "0.5"
