@@ -146,6 +146,7 @@ perspt agent [OPTIONS] <TASK>
       --max-parallel <N>        Concurrent verifier sensors (default: 4)
       --persistent-grants       Persist signed grant intent
       --output-summary <FILE>   Write the terminal summary as JSON
+      --db-path <FILE>          Use a specific PSP-9 ledger database
       --dashboard               Start the monitoring dashboard
       --dashboard-port <PORT>   Dashboard port (default: 3000)
 ```
@@ -194,9 +195,10 @@ implementation must not turn an unmeasured assumption into a guarantee.
 
 The work graph is revisioned rather than permanently fixed. New nodes and edges
 can be added, replaced, or retired while preserving acyclicity and generation
-bindings. Live multi-node dispatch and evidence-driven graph refinement remain
-roadmap items; the current authoritative coding runtime executes one governed
-node while verifier sensors run in parallel.
+bindings. Evidence-driven refinement is live in the recovery ladder. Live
+multi-node worker dispatch remains a roadmap item; the current authoritative
+coding runtime executes one governed node while verifier sensors run in
+parallel.
 
 ## Reliability and Recovery
 
@@ -212,8 +214,10 @@ node while verifier sensors run in parallel.
 - `perspt replay <SESSION_ID>` verifies the ledger and accepted trajectory
   without calling a provider or reading provider credentials.
 - `perspt resume <SESSION_ID>` can finish an interrupted journaled promotion.
-  Exact continuation of a model loop from a durable candidate checkpoint is
-  not implemented yet and fails closed.
+  It can also reconstruct the last accepted candidate from content-addressed
+  artifacts, restore its provider-neutral conversation, graph revision, sticky
+  route and activated tool set, re-mint epoch-bound capabilities, and continue
+  with exactly its remaining turn and rejection budgets.
 
 External MCP-style tools are an optional edge integration in PSP 9, not the
 default tool plane. First-party coding work uses native typed tools, host-side
