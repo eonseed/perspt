@@ -430,10 +430,8 @@ fn parse_file_heading(line: &str) -> Option<(String, bool)> {
     // Check for "File:" or "Diff:" prefix
     let (rest, is_diff) = if let Some(rest) = stripped.strip_prefix("File:") {
         (rest, false)
-    } else if let Some(rest) = stripped.strip_prefix("Diff:") {
-        (rest, true)
     } else {
-        return None;
+        (stripped.strip_prefix("Diff:")?, true)
     };
 
     let path = rest

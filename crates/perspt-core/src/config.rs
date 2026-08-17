@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use perspt_sdk::{EffectKind, FootprintSpec, ProposalBinding, RiskClass};
+
 /// Placeholder shown instead of a real API key in `config --show`.
 const MASKED_API_KEY: &str = "***";
 
@@ -67,6 +69,146 @@ pub struct ModelsConfig {
     /// Optional adjudication route (PSP-9 system 8).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adjudicator: Option<String>,
+}
+
+/// Product surface allowed to create a lifecycle for an external server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalToolMode {
+    Agent,
+    Chat,
+}
+
+fn default_external_modes() -> Vec<ExternalToolMode> {
+    vec![ExternalToolMode::Agent]
+}
+
+/// MCP transports supported by Perspt 0.6.6.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalToolTransport {
+    Stdio,
+    #[serde(alias = "http")]
+    StreamableHttp,
+}
+
+fn default_external_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_external_result_bytes() -> usize {
+    1_048_576
+}
+
+fn default_external_stderr_bytes() -> usize {
+    65_536
+}
+
+/// Locally trusted governance declaration for one discovered remote tool.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalToolPolicy {
+    /// Omission fails closed to `RunShell`.
+    pub effect: Option<EffectKind>,
+    pub risk: Option<RiskClass>,
+    /// Omission fails closed to an opaque workspace footprint.
+    pub footprint: Option<FootprintSpec>,
+    pub proposal_bindings: Vec<ProposalBinding>,
+}
+
+/// One `[[external_tools]]` server. Secret values are never stored here:
+/// environment maps contain destination/header names and source variable names.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExternalToolConfig {
+    pub id: String,
+    pub transport: ExternalToolTransport,
+    /// Direct argv. Element zero is the program; no shell parsing occurs.
+    pub command: Vec<String>,
+    pub url: Option<String>,
+    /// Child variable -> source environment variable, for stdio servers.
+    pub env_from_env: BTreeMap<String, String>,
+    /// HTTP header -> source environment variable.
+    pub headers_from_env: BTreeMap<String, String>,
+    #[serde(default = "default_external_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_external_result_bytes")]
+    pub max_result_bytes: usize,
+    #[serde(default = "default_external_stderr_bytes")]
+    pub max_stderr_bytes: usize,
+    #[serde(default = "default_external_modes")]
+    pub modes: Vec<ExternalToolMode>,
+    pub tools: BTreeMap<String, ExternalToolPolicy>,
+}
+
+impl Default for ExternalToolConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            transport: ExternalToolTransport::Stdio,
+            command: Vec::new(),
+            url: None,
+            env_from_env: BTreeMap::new(),
+            headers_from_env: BTreeMap::new(),
+            timeout_ms: default_external_timeout_ms(),
+            max_result_bytes: default_external_result_bytes(),
+            max_stderr_bytes: default_external_stderr_bytes(),
+            modes: default_external_modes(),
+            tools: BTreeMap::new(),
+        }
+    }
+}
+
+impl ExternalToolConfig {
+    pub fn supports(&self, mode: ExternalToolMode) -> bool {
+        self.modes.contains(&mode)
+    }
+
+    fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.id.is_empty()
+                && self.id.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+                }),
+            "external tool server id {:?} must contain only ASCII letters, digits, '-' or '_'",
+            self.id
+        );
+        anyhow::ensure!(
+            self.timeout_ms > 0,
+            "external tool {:?}: timeout_ms must be positive",
+            self.id
+        );
+        anyhow::ensure!(
+            self.max_result_bytes > 0 && self.max_stderr_bytes > 0,
+            "external tool {:?}: result and stderr caps must be positive",
+            self.id
+        );
+        anyhow::ensure!(
+            !self.modes.is_empty(),
+            "external tool {:?}: modes cannot be empty",
+            self.id
+        );
+        let unique_modes: std::collections::BTreeSet<_> =
+            self.modes.iter().map(|mode| format!("{mode:?}")).collect();
+        anyhow::ensure!(
+            unique_modes.len() == self.modes.len(),
+            "external tool {:?}: duplicate mode",
+            self.id
+        );
+        match self.transport {
+            ExternalToolTransport::Stdio => anyhow::ensure!(
+                !self.command.is_empty() && self.url.is_none(),
+                "external tool {:?}: stdio requires command argv and forbids url",
+                self.id
+            ),
+            ExternalToolTransport::StreamableHttp => anyhow::ensure!(
+                self.command.is_empty() && self.url.is_some(),
+                "external tool {:?}: Streamable HTTP requires url and forbids command",
+                self.id
+            ),
+        }
+        Ok(())
+    }
 }
 
 /// Main configuration struct.
@@ -144,12 +286,18 @@ pub struct Config {
     /// `*_model` fields.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<ModelsConfig>,
+
+    /// Shared MCP server configuration. Omitted modes default to agent-only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub external_tools: Vec<ExternalToolConfig>,
 }
 
 impl Config {
     /// Parse a `Config` from a TOML string. A partial document is valid.
     pub fn from_toml_str(content: &str) -> Result<Self> {
-        toml::from_str(content).context("Failed to parse TOML configuration")
+        let config: Self = toml::from_str(content).context("Failed to parse TOML configuration")?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Load a `Config` from a file path. Returns `Config::default()` when the
@@ -180,6 +328,19 @@ impl Config {
             }
         }
         clone
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let mut server_ids = std::collections::BTreeSet::new();
+        for server in &self.external_tools {
+            server.validate()?;
+            anyhow::ensure!(
+                server_ids.insert(server.id.as_str()),
+                "duplicate external tool server id {:?}",
+                server.id
+            );
+        }
+        Ok(())
     }
 
     /// Set a single key to a string value, used by `config --set`.
@@ -349,5 +510,60 @@ mod tests {
         assert_eq!(serialized.matches("model").count(), 1);
         let reparsed = Config::from_toml_str(&serialized).unwrap();
         assert_eq!(reparsed.model.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn external_tools_default_to_agent_only() {
+        let config = Config::from_toml_str(
+            r#"
+            [[external_tools]]
+            id = "local-search"
+            transport = "stdio"
+            command = ["search-server", "--stdio"]
+            "#,
+        )
+        .unwrap();
+        let server = &config.external_tools[0];
+        assert!(server.supports(ExternalToolMode::Agent));
+        assert!(!server.supports(ExternalToolMode::Chat));
+    }
+
+    #[test]
+    fn external_tool_modes_and_local_policy_parse() {
+        let config = Config::from_toml_str(
+            r#"
+            [[external_tools]]
+            id = "records"
+            transport = "streamable_http"
+            url = "https://tools.example.test/mcp"
+            modes = ["agent", "chat"]
+            headers_from_env = { Authorization = "RECORDS_AUTH" }
+
+            [external_tools.tools.lookup]
+            effect = "data_read"
+            risk = "low"
+            "#,
+        )
+        .unwrap();
+        let server = &config.external_tools[0];
+        assert!(server.supports(ExternalToolMode::Agent));
+        assert!(server.supports(ExternalToolMode::Chat));
+        assert_eq!(server.tools["lookup"].effect, Some(EffectKind::DataRead));
+    }
+
+    #[test]
+    fn duplicate_external_server_ids_are_rejected() {
+        let invalid = r#"
+            [[external_tools]]
+            id = "same"
+            transport = "stdio"
+            command = ["one"]
+
+            [[external_tools]]
+            id = "same"
+            transport = "stdio"
+            command = ["two"]
+        "#;
+        assert!(Config::from_toml_str(invalid).is_err());
     }
 }
