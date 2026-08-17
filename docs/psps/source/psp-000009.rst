@@ -2336,6 +2336,9 @@ provider-neutral ``ContextCheckpoint`` records:
        pub accepted_state_root: ContentHash,
        pub graph_revision: RevisionId,
        pub authority_epoch: u64,
+       pub active_model: ModelId,
+       pub remaining_fallback_models: Vec<ModelId>,
+       pub activated_tools: Vec<ToolName>,
        pub artifact_refs: Vec<ContentHash>,
        pub unresolved_call_ids: Vec<String>,
        pub deterministic_digest: ContextDigest,
@@ -3547,11 +3550,14 @@ Implementation Status
        operator key, OS credential-store key, or warned mode-0600 installation
        key, and resume verifies it against the locally resolved trust anchor.
        Every gate acceptance now writes a durable candidate checkpoint
-       (control frame + content-addressed file artifacts); ``perspt resume``
-       rebuilds the accepted candidate from it, re-mints a fresh capability
-       from the grant intersection at the current epoch, and re-enters the
-       loop with exactly the remaining budgets. A bumped epoch refuses the
-       resume; a session with no candidate checkpoint still fails closed.
+       (control frame + bounded provider-neutral conversation projection +
+       content-addressed file artifacts); ``perspt resume`` rebuilds the
+       accepted candidate from it, recovers the exact graph revision, sticky
+       model route, fallback suffix, and activated tool set, re-mints a fresh
+       capability from the grant intersection at the current epoch, and
+       re-enters the loop with exactly the remaining budgets. A bumped epoch
+       refuses the resume; a session with no candidate checkpoint still fails
+       closed.
    * - 7 — Routing and exploration
      - S
      - **Done**
