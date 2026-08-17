@@ -53,6 +53,7 @@ grep = "0.4"
 ignore = "0.4"
 regex = "1.12.2"
 diffy = "0.5"
+rustix = { workspace = true }
 tempfile = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }
 reqwest = { workspace = true }
