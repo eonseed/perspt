@@ -536,7 +536,7 @@ pub struct CodingCandidateMeasurer<'a> {
     candidate: &'a CandidateWorkspace,
     node_id: String,
     generation: u32,
-    domain: CodingDomain,
+    domain: Arc<dyn AgentDomainPackage>,
     adapters: CodingAdapterRegistry,
     max_parallel: usize,
 }
@@ -547,7 +547,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
             candidate,
             node_id: node_id.into(),
             generation,
-            domain: CodingDomain::new(),
+            domain: Arc::new(CodingDomain::new()),
             adapters: CodingAdapterRegistry::with_builtins(),
             max_parallel: 4,
         }
@@ -555,6 +555,13 @@ impl<'a> CodingCandidateMeasurer<'a> {
 
     pub fn with_max_parallel(mut self, max_parallel: usize) -> Self {
         self.max_parallel = max_parallel.max(1);
+        self
+    }
+
+    /// Measure under the selected domain's energy model instead of the
+    /// default coding domain.
+    pub fn with_domain(mut self, domain: Arc<dyn AgentDomainPackage>) -> Self {
+        self.domain = domain;
         self
     }
 

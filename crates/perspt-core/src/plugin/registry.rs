@@ -17,6 +17,19 @@ impl PluginRegistry {
         }
     }
 
+    /// An empty registry, for embedders that assemble their own plugin set.
+    pub fn empty() -> Self {
+        Self {
+            plugins: Vec::new(),
+        }
+    }
+
+    /// Register an additional language plugin. Detection order is
+    /// registration order; built-ins come first in [`Self::new`].
+    pub fn register(&mut self, plugin: Box<dyn LanguagePlugin>) {
+        self.plugins.push(plugin);
+    }
+
     /// Detect which plugin should handle the given path (first match)
     pub fn detect(&self, path: &Path) -> Option<&dyn LanguagePlugin> {
         self.plugins

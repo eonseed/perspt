@@ -90,6 +90,10 @@ enum Commands {
         #[arg(long)]
         persistent_grants: bool,
 
+        /// Domain package to run (e.g. coding, research); default: detect
+        #[arg(long)]
+        domain: Option<String>,
+
         /// Run only the read-only exploration phase: deterministic map plus
         /// an interactive explorer tool loop; nothing is mutated or promoted
         #[arg(long)]
@@ -322,6 +326,7 @@ async fn main() -> Result<()> {
             rejection_budget,
             max_parallel,
             persistent_grants,
+            domain,
             exploration_only,
             fallback_models,
             output_summary,
@@ -346,6 +351,7 @@ async fn main() -> Result<()> {
                 rejection_budget,
                 max_parallel,
                 persistent_grants,
+                domain,
                 exploration_only,
                 dashboard,
                 dashboard_port,

@@ -20,7 +20,7 @@ impl Psp9AgentRuntime {
         capability.session_id = session_id.clone();
         capability.graph_revision = running_graph.revision_id.clone();
         capability.role = CapabilityRole::Explorer;
-        let domain = CodingDomain::new();
+        let domain = self.domain.clone();
         let scope = perspt_sdk::DomainScope {
             label: node_id.clone(),
             paths: Vec::new(),

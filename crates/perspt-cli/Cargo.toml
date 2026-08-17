@@ -31,6 +31,8 @@ perspt-core = { workspace = true }
 perspt-sdk = { workspace = true }
 perspt-tui = { workspace = true }
 perspt-agent = { workspace = true }
+perspt-coding = { workspace = true }
+perspt-research = { workspace = true }
 perspt-store = { workspace = true }
 perspt-dashboard = { workspace = true }
 

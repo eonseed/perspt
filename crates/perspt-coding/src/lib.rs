@@ -37,14 +37,6 @@ use perspt_sdk::{
     VerificationCadence, VerifierSuiteSpec, WorkspaceSnapshot,
 };
 
-/// The language an adapter targets, used to specialize correction directions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodingLanguage {
-    Rust,
-    Python,
-    TypeScript,
-}
-
 /// The coding domain package.
 #[derive(Debug, Clone, Default)]
 pub struct CodingDomain;

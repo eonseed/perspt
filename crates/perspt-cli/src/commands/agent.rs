@@ -23,6 +23,7 @@ pub async fn run(
     rejection_budget: u32,
     max_parallel: usize,
     persistent_grants: bool,
+    domain: Option<String>,
     exploration_only: bool,
     dashboard: bool,
     dashboard_port: u16,
@@ -80,6 +81,27 @@ pub async fn run(
         },
         run_config,
     )?;
+
+    // Composition root: domains come from the open registry — an explicit
+    // --domain id wins, otherwise the best detection. The coding domain is
+    // the fallback when nothing activates (an empty scratch directory).
+    let mut domains = perspt_sdk::DomainRegistry::new();
+    domains.register(std::sync::Arc::new(perspt_coding::CodingDomain::new()));
+    domains.register(std::sync::Arc::new(perspt_research::ResearchDomain::new()));
+    let snapshot = workspace_snapshot(&working_dir);
+    let explicit = domain.as_deref().map(perspt_sdk::DomainId::new);
+    let selected = match (&explicit, domains.select(explicit.as_ref(), &snapshot)) {
+        (_, Some(package)) => package,
+        (Some(id), None) => anyhow::bail!(
+            "unknown domain {id:?}; registered: {:?}",
+            domains.domain_ids()
+        ),
+        (None, None) => domains
+            .by_id(&perspt_sdk::DomainId::new("coding"))
+            .context("coding domain must be registered")?,
+    };
+    println!("Domain: {}", selected.domain_id());
+    runtime = runtime.with_domain(selected);
 
     // Composition root: the shipped read-only tool families (system
     // explorer, local DB explorer) register through the same public path a
@@ -147,6 +169,29 @@ pub async fn run(
             .with_context(|| format!("writing run summary to {}", path.display()))?;
     }
     Ok(())
+}
+
+/// A bounded, read-only file listing for domain detection: top-level
+/// entries plus one directory level is enough for every marker file the
+/// registered domains look for.
+fn workspace_snapshot(working_dir: &std::path::Path) -> perspt_sdk::WorkspaceSnapshot {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(working_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if entry.path().is_dir() {
+                if let Ok(nested) = std::fs::read_dir(entry.path()) {
+                    for child in nested.flatten() {
+                        files.push(format!("{name}/{}", child.file_name().to_string_lossy()));
+                    }
+                }
+            } else {
+                files.push(name);
+            }
+        }
+    }
+    files.sort();
+    perspt_sdk::WorkspaceSnapshot::new(working_dir.display().to_string(), files)
 }
 
 async fn start_dashboard(
