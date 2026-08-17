@@ -8,12 +8,12 @@ pub(crate) fn promotion_manifest(
     candidate: &Path,
     paths: &[String],
 ) -> Result<Vec<serde_json::Value>> {
+    let workspace_root = crate::promote::WorkspaceRoot::open(workspace)?;
+    let candidate_root = crate::promote::WorkspaceRoot::open(candidate)?;
     let mut files = Vec::new();
     for relative in paths {
-        crate::candidate::reject_symlink_ancestor(workspace, relative)?;
-        crate::candidate::reject_symlink_ancestor(candidate, relative)?;
-        let before = crate::candidate::read_optional_file(&workspace.join(relative))?;
-        let after = crate::candidate::read_optional_file(&candidate.join(relative))?;
+        let before = workspace_root.read_if_present(relative)?;
+        let after = candidate_root.read_if_present(relative)?;
         let before_hash = before
             .as_deref()
             .map(|bytes| recorder.record_artifact(bytes, "application/octet-stream"))
@@ -29,6 +29,70 @@ pub(crate) fn promotion_manifest(
         }));
     }
     Ok(files)
+}
+
+/// Session plumbing the recovery ladder threads through every rung.
+pub(crate) struct LadderSession<'a> {
+    pub recorder: &'a Psp9Recorder,
+    pub session_id: &'a str,
+    pub node_id: &'a str,
+    pub scheduler: &'a mut Scheduler,
+}
+
+/// Level 4: the loop already restored the accepted state; revoke the
+/// session's authority so nothing minted under this epoch can still deliver.
+pub(crate) fn contain_if_escalated(
+    recorder: &Psp9Recorder,
+    session_id: &str,
+    attempt: &NodeAttempt,
+) -> Result<()> {
+    if !matches!(
+        attempt.outcome.outcome,
+        NodeTerminalOutcome::Escalated { .. }
+    ) {
+        return Ok(());
+    }
+    let epoch = recorder.store.revoke_authority(session_id)?;
+    recorder.record_custom(
+        "authority_epoch_revoked",
+        serde_json::json!({"level": "contain", "new_epoch": epoch}),
+    )?;
+    Ok(())
+}
+
+/// Gate decisions an attempt consumed, for the shared non-replenishing pool.
+pub(crate) fn spent_of(attempt: &NodeAttempt) -> u32 {
+    attempt
+        .outcome
+        .trajectory
+        .rejections_used
+        .max(attempt.outcome.recovery_spent)
+}
+
+/// Swap the scheduler's running entry to the refined generation so its view
+/// stays aligned with the graph revision (frees the old footprint, occupies
+/// the new one, and records the dispatch).
+pub(crate) fn redispatch_refined(
+    recorder: &Psp9Recorder,
+    scheduler: &mut Scheduler,
+    revised: &WorkGraphRevision,
+    node_id: &str,
+    prior_generation: u32,
+) -> Result<()> {
+    scheduler.finish(node_id, prior_generation);
+    let node = revised
+        .node(node_id)
+        .context("refined node missing from revision")?;
+    scheduler.start(node, node_footprint(node));
+    recorder.record_custom(
+        "scheduler_dispatch",
+        serde_json::json!({
+            "node_id": node.node_id,
+            "generation": node.generation,
+            "parallel_slot": 0,
+        }),
+    )?;
+    Ok(())
 }
 
 pub(crate) fn qualify_model(
@@ -500,28 +564,7 @@ pub(crate) fn load_candidate_checkpoint(
         control.authority_epoch,
         current_epoch
     );
-    let mut seed = Vec::with_capacity(file_handles.len());
-    for durable in file_handles {
-        let load = |handle: Option<String>, label: &str| -> Result<Option<Vec<u8>>> {
-            let Some(handle) = handle else {
-                return Ok(None);
-            };
-            let bytes = recorder
-                .store
-                .get_psp9_artifact(&handle)?
-                .with_context(|| format!("missing {label} checkpoint artifact {handle}"))?;
-            anyhow::ensure!(
-                perspt_sdk::content_hash(&bytes) == handle,
-                "{label} checkpoint artifact hash mismatch"
-            );
-            Ok(Some(bytes))
-        };
-        seed.push(crate::toolloop::SeedFile {
-            path: durable.path,
-            content: load(durable.content_artifact, "content")?,
-            source_preimage: load(durable.source_preimage_artifact, "source pre-image")?,
-        });
-    }
+    let seed = load_seed_files(recorder, file_handles)?;
     let activated_tools = control.activated_tools.clone();
     Ok((
         control,
@@ -537,6 +580,37 @@ pub(crate) fn load_candidate_checkpoint(
             activated_tools,
         },
     ))
+}
+
+/// Rehydrate checkpointed seed files from the content-addressed artifact
+/// store, verifying every artifact against its recorded hash.
+fn load_seed_files(
+    recorder: &Psp9Recorder,
+    file_handles: Vec<crate::toolloop::DurableSeedFile>,
+) -> Result<Vec<crate::toolloop::SeedFile>> {
+    let load = |handle: Option<String>, label: &str| -> Result<Option<Vec<u8>>> {
+        let Some(handle) = handle else {
+            return Ok(None);
+        };
+        let bytes = recorder
+            .store
+            .get_psp9_artifact(&handle)?
+            .with_context(|| format!("missing {label} checkpoint artifact {handle}"))?;
+        anyhow::ensure!(
+            perspt_sdk::content_hash(&bytes) == handle,
+            "{label} checkpoint artifact hash mismatch"
+        );
+        Ok(Some(bytes))
+    };
+    let mut seed = Vec::with_capacity(file_handles.len());
+    for durable in file_handles {
+        seed.push(crate::toolloop::SeedFile {
+            path: durable.path,
+            content: load(durable.content_artifact, "content")?,
+            source_preimage: load(durable.source_preimage_artifact, "source pre-image")?,
+        });
+    }
+    Ok(seed)
 }
 
 /// Recover the exact immutable graph revision named by the durable control

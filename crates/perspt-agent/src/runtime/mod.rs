@@ -104,41 +104,6 @@ struct NodeAttempt {
     kernel_state: perspt_sdk::KernelState,
 }
 
-/// Gate decisions an attempt consumed, for the shared non-replenishing pool.
-fn spent_of(attempt: &NodeAttempt) -> u32 {
-    attempt
-        .outcome
-        .trajectory
-        .rejections_used
-        .max(attempt.outcome.recovery_spent)
-}
-
-/// Swap the scheduler's running entry to the refined generation so its view
-/// stays aligned with the graph revision (frees the old footprint, occupies
-/// the new one, and records the dispatch).
-fn redispatch_refined(
-    recorder: &Psp9Recorder,
-    scheduler: &mut Scheduler,
-    revised: &WorkGraphRevision,
-    node_id: &str,
-    prior_generation: u32,
-) -> Result<()> {
-    scheduler.finish(node_id, prior_generation);
-    let node = revised
-        .node(node_id)
-        .context("refined node missing from revision")?;
-    scheduler.start(node, node_footprint(node));
-    recorder.record_custom(
-        "scheduler_dispatch",
-        serde_json::json!({
-            "node_id": node.node_id,
-            "generation": node.generation,
-            "parallel_slot": 0,
-        }),
-    )?;
-    Ok(())
-}
-
 /// Everything `conclude_run` needs to decide a node's terminal fate.
 struct ConcludeContext<'a> {
     recorder: &'a Psp9Recorder,
@@ -499,33 +464,7 @@ impl Psp9AgentRuntime {
             self.event_sender.clone(),
         )?;
         let (control, seed) = load_candidate_checkpoint(&recorder, &session_id)?;
-        // Exactly the remaining budgets — a resume never refills what the
-        // interrupted loop already spent.
-        anyhow::ensure!(
-            control.remaining_turns > 0,
-            "the durable checkpoint has no model-turn budget remaining; resume cannot refill it"
-        );
-        self.config.max_turns = control.remaining_turns;
-        self.config.rejection_budget = control.remaining_rejection_budget;
-        self.model = control.active_model.clone();
-        self.fallback_models = control.remaining_fallback_models.clone();
-        anyhow::ensure!(
-            self.transport.capabilities(&self.model).tool_calling,
-            "checkpoint model route {} no longer supports native tool calling",
-            self.model
-        );
-        recorder.record_custom(
-            "session_resumed",
-            serde_json::json!({
-                "accepted_state_root": control.accepted_state_root,
-                "remaining_turns": self.config.max_turns,
-                "remaining_rejection_budget": self.config.rejection_budget,
-                "seed_files": seed.files.len(),
-                "model": self.model,
-                "remaining_fallback_models": self.fallback_models,
-                "activated_tools": control.activated_tools,
-            }),
-        )?;
+        self.adopt_checkpoint(&recorder, &control, &seed)?;
 
         let node_id = "implement-1".to_string();
         let task = control.goal.clone();
@@ -553,19 +492,7 @@ impl Psp9AgentRuntime {
             Err(error) => return Err(self.fail_session(&recorder, error)),
         };
         let verdict = match self
-            .conclude_run(ConcludeContext {
-                recorder: &recorder,
-                candidate: &attempt.candidate,
-                node_id: &node_id,
-                task: &task,
-                grant_policy: &attempt.assembly.grant_policy,
-                capability: &attempt.assembly.capability,
-                contract: &attempt.assembly.contract,
-                barrier: &attempt.assembly.barrier,
-                kernel_state: &attempt.kernel_state,
-                loop_outcome: &attempt.outcome.outcome,
-                calibration: &attempt.assembly.calibration,
-            })
+            .conclude_attempt(&recorder, &attempt, &node_id, &task)
             .await
         {
             Ok(verdict) => verdict,
@@ -595,14 +522,17 @@ impl Psp9AgentRuntime {
     /// restore-best containment.
     async fn recovery_ladder(
         &self,
-        recorder: &Psp9Recorder,
-        session_id: &str,
-        node_id: &str,
-        scheduler: &mut Scheduler,
+        session: LadderSession<'_>,
         mut graph: WorkGraphRevision,
         mut goal: String,
         mut attempt: NodeAttempt,
     ) -> Result<(NodeAttempt, WorkGraphRevision, u32)> {
+        let LadderSession {
+            recorder,
+            session_id,
+            node_id,
+            scheduler,
+        } = session;
         let mut generation = 0u32;
         let mut model = self.model.clone();
         let mut remaining_budget = self
@@ -651,20 +581,69 @@ impl Psp9AgentRuntime {
                 .await?;
             remaining_budget = remaining_budget.saturating_sub(spent_of(&attempt));
         }
-        if matches!(
-            attempt.outcome.outcome,
-            NodeTerminalOutcome::Escalated { .. }
-        ) {
-            // Level 4: the loop already restored the accepted state; revoke
-            // the session's authority so nothing minted under this epoch can
-            // still deliver.
-            let epoch = recorder.store.revoke_authority(session_id)?;
-            recorder.record_custom(
-                "authority_epoch_revoked",
-                serde_json::json!({"level": "contain", "new_epoch": epoch}),
-            )?;
-        }
+        contain_if_escalated(recorder, session_id, &attempt)?;
         Ok((attempt, graph, generation))
+    }
+
+    /// Adopt a durable checkpoint's exact remaining budgets and route state.
+    /// A resume never refills what the interrupted loop already spent.
+    fn adopt_checkpoint(
+        &mut self,
+        recorder: &Psp9Recorder,
+        control: &perspt_sdk::ControlFrame,
+        seed: &CandidateSeed,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            control.remaining_turns > 0,
+            "the durable checkpoint has no model-turn budget remaining; resume cannot refill it"
+        );
+        self.config.max_turns = control.remaining_turns;
+        self.config.rejection_budget = control.remaining_rejection_budget;
+        self.model = control.active_model.clone();
+        self.fallback_models = control.remaining_fallback_models.clone();
+        anyhow::ensure!(
+            self.transport.capabilities(&self.model).tool_calling,
+            "checkpoint model route {} no longer supports native tool calling",
+            self.model
+        );
+        recorder.record_custom(
+            "session_resumed",
+            serde_json::json!({
+                "accepted_state_root": control.accepted_state_root,
+                "remaining_turns": self.config.max_turns,
+                "remaining_rejection_budget": self.config.rejection_budget,
+                "seed_files": seed.files.len(),
+                "model": self.model,
+                "remaining_fallback_models": self.fallback_models,
+                "activated_tools": control.activated_tools,
+            }),
+        )?;
+        Ok(())
+    }
+
+    /// Assemble the conclusion context for a finished attempt and decide the
+    /// node's terminal fate.
+    async fn conclude_attempt(
+        &mut self,
+        recorder: &Psp9Recorder,
+        attempt: &NodeAttempt,
+        node_id: &str,
+        task: &str,
+    ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
+        self.conclude_run(ConcludeContext {
+            recorder,
+            candidate: &attempt.candidate,
+            node_id,
+            task,
+            grant_policy: &attempt.assembly.grant_policy,
+            capability: &attempt.assembly.capability,
+            contract: &attempt.assembly.contract,
+            barrier: &attempt.assembly.barrier,
+            kernel_state: &attempt.kernel_state,
+            loop_outcome: &attempt.outcome.outcome,
+            calibration: &attempt.assembly.calibration,
+        })
+        .await
     }
 
     /// Level-3 handoff: returns the higher-capability route when one is
@@ -716,10 +695,12 @@ impl Psp9AgentRuntime {
         };
         let (attempt, graph, final_generation) = match self
             .recovery_ladder(
-                &recorder,
-                &session_id,
-                &node_id,
-                &mut scheduler,
+                LadderSession {
+                    recorder: &recorder,
+                    session_id: &session_id,
+                    node_id: &node_id,
+                    scheduler: &mut scheduler,
+                },
                 running_graph,
                 agent_goal,
                 first,
@@ -731,19 +712,7 @@ impl Psp9AgentRuntime {
         };
 
         let verdict = match self
-            .conclude_run(ConcludeContext {
-                recorder: &recorder,
-                candidate: &attempt.candidate,
-                node_id: &node_id,
-                task: &task,
-                grant_policy: &attempt.assembly.grant_policy,
-                capability: &attempt.assembly.capability,
-                contract: &attempt.assembly.contract,
-                barrier: &attempt.assembly.barrier,
-                kernel_state: &attempt.kernel_state,
-                loop_outcome: &attempt.outcome.outcome,
-                calibration: &attempt.assembly.calibration,
-            })
+            .conclude_attempt(&recorder, &attempt, &node_id, &task)
             .await
         {
             Ok(verdict) => verdict,
@@ -1037,35 +1006,57 @@ impl Psp9AgentRuntime {
             return Ok(None);
         }
 
-        let generation = capability.node_generation;
+        let promoted_paths = self.commit_promotion(
+            recorder,
+            candidate,
+            node_id,
+            grant_policy.authority_epoch,
+            &realized.state_root,
+            &touched,
+        )?;
+        record_promotion_sample(recorder, calibration, &realized.state_root)?;
+        Ok(Some(promoted_paths))
+    }
+
+    /// Write-ahead promotion: record the intent, promote under the epoch
+    /// guard, then record the commit and completion.
+    fn commit_promotion(
+        &self,
+        recorder: &Psp9Recorder,
+        candidate: &CandidateWorkspace,
+        node_id: &str,
+        epoch: u64,
+        state_root: &str,
+        touched: &[String],
+    ) -> Result<Vec<String>> {
+        let generation = candidate.node_generation();
         let promotion_key = format!("promote:{node_id}:{generation}");
         let promotion_files = promotion_manifest(
             recorder,
             &self.working_dir,
             candidate.overlay_root(),
-            &touched,
+            touched,
         )?;
         let promotion_intent = serde_json::json!({
             "idempotency_key": promotion_key,
             "node_id": node_id,
             "generation": generation,
-            "authority_epoch": grant_policy.authority_epoch,
+            "authority_epoch": epoch,
             "workspace_root": self.working_dir.canonicalize()?.display().to_string(),
-            "candidate_root": realized.state_root,
+            "candidate_root": state_root,
             "files": promotion_files,
         });
         recorder.record_external_intent(&promotion_key, &promotion_intent)?;
-        let promoted_paths = recorder.store.with_authority_epoch(
-            &recorder.session_id,
-            grant_policy.authority_epoch,
-            || candidate.promote(),
-        )?;
+        let promoted_paths =
+            recorder
+                .store
+                .with_authority_epoch(&recorder.session_id, epoch, || candidate.promote())?;
         recorder.record_custom(
             "authority_epoch_effect_committed",
             serde_json::json!({
                 "node_id": node_id,
                 "generation": generation,
-                "epoch": grant_policy.authority_epoch,
+                "epoch": epoch,
             }),
         )?;
         recorder.complete_external_effect(
@@ -1076,8 +1067,7 @@ impl Psp9AgentRuntime {
             "candidate_promoted",
             serde_json::json!({"node_id": node_id, "paths": promoted_paths}),
         )?;
-        record_promotion_sample(recorder, calibration, &realized.state_root)?;
-        Ok(Some(promoted_paths))
+        Ok(promoted_paths)
     }
 
     fn record_route_capabilities(&self, recorder: &Psp9Recorder) -> Result<()> {

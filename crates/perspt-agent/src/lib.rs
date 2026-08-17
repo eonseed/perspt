@@ -8,6 +8,7 @@ pub mod external_tools;
 pub mod grant;
 pub mod lsp;
 pub mod probe;
+pub mod promote;
 pub mod realize;
 pub mod runtime;
 pub mod toolloop;

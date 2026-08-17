@@ -120,6 +120,11 @@ impl CandidateWorkspace {
         self.mutations.load(Ordering::SeqCst) > 0
     }
 
+    /// The node generation this candidate was created for.
+    pub fn node_generation(&self) -> u32 {
+        self.generation
+    }
+
     /// Paths mutated by admitted effects — the only promotable set.
     pub fn touched_paths(&self) -> Vec<String> {
         self.mutated_paths.lock().unwrap().iter().cloned().collect()
@@ -145,14 +150,19 @@ impl CandidateWorkspace {
         Ok(output)
     }
 
-    /// Promote only paths mutated by admitted governed proposals.
+    /// Promote only paths mutated by admitted governed proposals. Checks and
+    /// writes share one directory descriptor per target (`crate::promote`),
+    /// so a path swapped underneath the workspace between validation and
+    /// rename is refused rather than followed.
     pub fn promote(&self) -> Result<Vec<String>> {
         let paths: Vec<String> = self.mutated_paths.lock().unwrap().iter().cloned().collect();
-        let mut source_before = BTreeMap::new();
+        let source = crate::promote::WorkspaceRoot::open(&self.source_root)?;
+        let overlay = crate::promote::WorkspaceRoot::open(&self.overlay_root)?;
+        let mut staged = Vec::new();
         for rel in &paths {
             let rel = validate_relative_path(rel)?;
-            reject_symlink_ancestor(&self.source_root, &rel)?;
-            let current = read_optional_file(&self.source_root.join(&rel))?;
+            let target = source.target_dir(&rel, true)?;
+            let current = target.read_optional()?;
             let expected = self
                 .source_preimages
                 .lock()
@@ -164,50 +174,15 @@ impl CandidateWorkspace {
                 current == expected,
                 "workspace path changed since the candidate was created: {rel}"
             );
-            source_before.insert(rel.clone(), current);
+            let after = overlay.read_if_present(&rel)?;
+            staged.push((rel, target, current, after));
         }
 
-        let result = (|| {
-            for rel in &paths {
-                let rel = validate_relative_path(rel)?;
-                reject_symlink_ancestor(&self.overlay_root, &rel)?;
-                reject_symlink_ancestor(&self.source_root, &rel)?;
-                let from = self.overlay_root.join(&rel);
-                let to = self.source_root.join(&rel);
-                if from.is_file() {
-                    let parent = to.parent().context("promotion target has no parent")?;
-                    std::fs::create_dir_all(parent)?;
-                    let staged = parent.join(format!(".perspt-promote-{}", uuid::Uuid::new_v4()));
-                    std::fs::copy(&from, &staged).with_context(|| {
-                        format!("staging {} for {}", from.display(), to.display())
-                    })?;
-                    std::fs::rename(&staged, &to).with_context(|| {
-                        format!("promoting {} to {}", from.display(), to.display())
-                    })?;
-                } else if to.is_file() {
-                    std::fs::remove_file(&to)
-                        .with_context(|| format!("promoting deletion of {}", to.display()))?;
-                }
+        for (promoted, (rel, target, _before, after)) in staged.iter().enumerate() {
+            if let Err(error) = target.apply(after.as_deref()) {
+                let error = error.context(format!("promoting {rel}"));
+                return Err(rollback_promotion(&staged[..promoted], error));
             }
-            Ok::<(), anyhow::Error>(())
-        })();
-        if let Err(error) = result {
-            for (rel, content) in source_before {
-                let path = self.source_root.join(rel);
-                match content {
-                    Some(bytes) => {
-                        if let Some(parent) = path.parent() {
-                            let _ = std::fs::create_dir_all(parent);
-                        }
-                        let _ = std::fs::write(path, bytes);
-                    }
-                    None if path.is_file() => {
-                        let _ = std::fs::remove_file(path);
-                    }
-                    None => {}
-                }
-            }
-            return Err(error);
         }
         Ok(paths)
     }
@@ -1325,11 +1300,33 @@ fn validate_relative_path(path: &str) -> Result<String> {
         .join("/"))
 }
 
-pub(crate) fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+/// One staged promotion target: relative path, held parent descriptor,
+/// source pre-image, and overlay content (`None` means deletion).
+type StagedPromotion = (
+    String,
+    crate::promote::TargetDir,
+    Option<Vec<u8>>,
+    Option<Vec<u8>>,
+);
+
+/// Restore already-promoted targets to their pre-images after a failed
+/// promotion, through the same held descriptors. Restore failures are part
+/// of the returned error, never swallowed: a half-promoted workspace must
+/// be visible to the caller.
+fn rollback_promotion(promoted: &[StagedPromotion], error: anyhow::Error) -> anyhow::Error {
+    let mut failures = Vec::new();
+    for (rel, target, before, _) in promoted {
+        if let Err(restore) = target.apply(before.as_deref()) {
+            failures.push(format!("{rel}: {restore:#}"));
+        }
+    }
+    if failures.is_empty() {
+        error
+    } else {
+        error.context(format!(
+            "rollback left the workspace inconsistent: {}",
+            failures.join("; ")
+        ))
     }
 }
 
@@ -1716,6 +1713,37 @@ mod tests {
             .unwrap();
         assert!(candidate.promote().is_err());
         assert!(!outside.path().join("escaped.txt").exists());
+    }
+
+    /// The TOCTOU case: the ancestor is a real directory at admission time
+    /// and becomes a symlink only after the effect was admitted. The
+    /// descriptor walk at promotion time must still refuse it.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ancestor_swapped_for_symlink_after_admission_is_denied() {
+        let source = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir(source.path().join("dir")).unwrap();
+        std::fs::write(source.path().join("dir/a.txt"), "baseline").unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        candidate
+            .apply(&write_call("dir/a.txt", "mutated"), &write_entry())
+            .await
+            .unwrap();
+
+        std::fs::write(outside.path().join("a.txt"), "baseline").unwrap();
+        std::fs::remove_dir_all(source.path().join("dir")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), source.path().join("dir")).unwrap();
+
+        let error = candidate.promote().unwrap_err();
+        assert!(
+            error.to_string().contains("descending into dir"),
+            "expected symlink refusal, got: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("a.txt")).unwrap(),
+            "baseline"
+        );
     }
 
     #[tokio::test]
