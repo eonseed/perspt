@@ -39,6 +39,10 @@ pub struct Psp9RunConfig {
     /// Explicit opt-in for governed dependency mutation (Gate J). Off by
     /// default: `MutateDependencies` stays withheld from every grant.
     pub allow_dependency_mutation: bool,
+    /// Concurrent work-graph nodes (Gate P). 1 keeps the single-node path
+    /// verbatim; above 1 the multi-node dispatcher runs and a governed
+    /// architect planning turn may decompose the task.
+    pub max_parallel_nodes: usize,
 }
 
 impl Default for Psp9RunConfig {
@@ -53,6 +57,7 @@ impl Default for Psp9RunConfig {
             max_parallel_verifiers: 4,
             persistent_grants: false,
             allow_dependency_mutation: false,
+            max_parallel_nodes: 1,
         }
     }
 }
@@ -124,10 +129,12 @@ struct ConcludeContext<'a> {
 }
 
 mod adjudicate;
+mod dispatch;
 mod ensemble;
 mod explore;
 mod external;
 mod node;
+mod plan;
 mod recorder;
 
 use external::{external_runtime_from, registry_with_external};
@@ -146,7 +153,7 @@ pub struct Psp9AgentRuntime {
     handoff_model: Option<ModelId>,
     config: Psp9RunConfig,
     event_sender: Option<perspt_core::events::channel::EventSender>,
-    action_receiver: Option<perspt_core::events::channel::ActionReceiver>,
+    action_receiver: tokio::sync::Mutex<Option<perspt_core::events::channel::ActionReceiver>>,
     database_path: Option<PathBuf>,
     shared_store: Option<Arc<SessionStore>>,
     /// The open execution plane shared by every candidate this runtime
@@ -220,7 +227,7 @@ impl Psp9AgentRuntime {
             handoff_model,
             config: run_config,
             event_sender: None,
-            action_receiver: None,
+            action_receiver: tokio::sync::Mutex::new(None),
             database_path: None,
             shared_store: None,
             tool_handlers: Arc::new(handlers),
@@ -250,7 +257,7 @@ impl Psp9AgentRuntime {
             handoff_model: None,
             config: run_config,
             event_sender: None,
-            action_receiver: None,
+            action_receiver: tokio::sync::Mutex::new(None),
             database_path: None,
             shared_store: None,
             tool_handlers: Arc::new(
@@ -344,7 +351,7 @@ impl Psp9AgentRuntime {
         receiver: perspt_core::events::channel::ActionReceiver,
     ) -> Self {
         self.event_sender = Some(sender);
-        self.action_receiver = Some(receiver);
+        self.action_receiver = tokio::sync::Mutex::new(Some(receiver));
         self
     }
 
@@ -388,8 +395,12 @@ impl Psp9AgentRuntime {
             status: perspt_core::NodeStatus::Coding,
         });
 
-        let graph = initial_graph(node_id, task)?;
+        let graph = self.plan_initial_graph(&recorder, node_id, task).await?;
         recorder.record_custom("graph_revision", serde_json::to_value(&graph)?)?;
+        if self.config.max_parallel_nodes > 1 {
+            // The dispatcher owns scheduling; this scheduler is unused.
+            return Ok((recorder, agent_goal, Scheduler::new(1), graph));
+        }
         let mut scheduler = Scheduler::new(1);
         let ready = scheduler.ready_nodes(&graph, node_footprint);
         let selected = ready
@@ -600,6 +611,7 @@ impl Psp9AgentRuntime {
     async fn recovery_ladder(
         &self,
         session: LadderSession<'_>,
+        initial_budget: u32,
         mut graph: WorkGraphRevision,
         mut goal: String,
         mut attempt: NodeAttempt,
@@ -612,10 +624,7 @@ impl Psp9AgentRuntime {
         } = session;
         let mut generation = 0u32;
         let mut model = self.model.clone();
-        let mut remaining_budget = self
-            .config
-            .rejection_budget
-            .saturating_sub(spent_of(&attempt));
+        let mut remaining_budget = initial_budget.saturating_sub(spent_of(&attempt));
         for level in [
             perspt_sdk::CascadeLevel::Refine,
             perspt_sdk::CascadeLevel::Escalate,
@@ -664,6 +673,36 @@ impl Psp9AgentRuntime {
         Ok((attempt, graph, generation))
     }
 
+    /// Multi-node session: dispatch the planned graph, then close the
+    /// session with the aggregate outcome.
+    async fn run_graph_session(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        graph: WorkGraphRevision,
+    ) -> Result<Psp9RunSummary> {
+        let dispatched = match self.run_dispatched(recorder, session_id, graph).await {
+            Ok(dispatched) => dispatched,
+            Err(error) => {
+                recorder.finish("FAILED_PSP9").ok();
+                return Err(error);
+            }
+        };
+        recorder.finish(dispatched.status)?;
+        self.emit(perspt_core::AgentEvent::Complete {
+            success: matches!(dispatched.outcome, NodeTerminalOutcome::HardPass),
+            message: format!("PSP-9 outcome: {:?}", dispatched.outcome),
+        });
+        Ok(Psp9RunSummary {
+            session_id: session_id.to_string(),
+            node_id: "graph".into(),
+            outcome: dispatched.outcome,
+            turns_used: dispatched.turns_used,
+            ledger_head: recorder.head(),
+            promoted_paths: dispatched.promoted_paths,
+        })
+    }
+
     /// Adopt a durable checkpoint's exact remaining budgets and route state.
     /// A resume never refills what the interrupted loop already spent.
     fn adopt_checkpoint(
@@ -703,7 +742,7 @@ impl Psp9AgentRuntime {
     /// Assemble the conclusion context for a finished attempt and decide the
     /// node's terminal fate.
     async fn conclude_attempt(
-        &mut self,
+        &self,
         recorder: &Psp9Recorder,
         attempt: &NodeAttempt,
         node_id: &str,
@@ -755,6 +794,12 @@ impl Psp9AgentRuntime {
         let (recorder, agent_goal, mut scheduler, running_graph) =
             self.open_session(&task, &session_id, &node_id).await?;
 
+        if self.config.max_parallel_nodes > 1 {
+            return self
+                .run_graph_session(&recorder, &session_id, running_graph)
+                .await;
+        }
+
         let first = match self
             .attempt_node(
                 &recorder,
@@ -780,6 +825,7 @@ impl Psp9AgentRuntime {
                     node_id: &node_id,
                     scheduler: &mut scheduler,
                 },
+                self.config.rejection_budget,
                 running_graph,
                 agent_goal,
                 first,
@@ -937,7 +983,7 @@ impl Psp9AgentRuntime {
     /// human approval first, then the kernel-certified promotion. Anything
     /// short of a fully certified promotion escalates.
     async fn conclude_run(
-        &mut self,
+        &self,
         ctx: ConcludeContext<'_>,
     ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
         let hard_pass = matches!(ctx.loop_outcome, NodeTerminalOutcome::HardPass);
@@ -998,7 +1044,7 @@ impl Psp9AgentRuntime {
     /// validator, joined to the adjudicator's row by candidate id and
     /// stratum), then run adjudication and approval for a hard pass.
     async fn validate_and_approve(
-        &mut self,
+        &self,
         ctx: &ConcludeContext<'_>,
         hard_pass: bool,
     ) -> Result<bool> {
@@ -1029,7 +1075,7 @@ impl Psp9AgentRuntime {
     /// conformal threshold commits without a human prompt, and the certified
     /// accept is ledgered. Any other state (shadow, insufficient samples,
     /// stale) backs off to the configured approval policy.
-    async fn conformal_or_human_approval(&mut self, ctx: &ConcludeContext<'_>) -> Result<bool> {
+    async fn conformal_or_human_approval(&self, ctx: &ConcludeContext<'_>) -> Result<bool> {
         // Score definition v1: hard pass ⇒ V = 0 ⇒ score 1/(1+V) = 1.0.
         const HARD_PASS_SCORE: f64 = 1.0;
         let certified = self.config.approval_policy == ApprovalPolicy::Ask
@@ -1117,43 +1163,6 @@ impl Psp9AgentRuntime {
         record_promotion_sample(recorder, calibration, &realized.state_root)?;
         Ok(Some(promoted_paths))
     }
-
-    fn record_route_capabilities(&self, recorder: &Psp9Recorder) -> Result<()> {
-        for (position, model) in std::iter::once(&self.model)
-            .chain(self.fallback_models.iter())
-            .enumerate()
-        {
-            let capabilities = self.transport.capabilities(model);
-            let mut degradations = Vec::new();
-            if !capabilities.strict_schema {
-                degradations.push("strict_schema:local_validation");
-            }
-            if !capabilities.parallel_tool_calls {
-                degradations.push("parallel_tool_calls:sequential_execution");
-            }
-            if !capabilities.streaming_tool_calls {
-                degradations.push("streaming_tool_calls:turn_granular_progress");
-            }
-            if !capabilities.prompt_caching {
-                degradations.push("prompt_caching:cache_cold_accounting");
-            }
-            if !capabilities.structured_output {
-                degradations.push("structured_output:local_parse_and_validation");
-            }
-            recorder.record_custom(
-                "provider_capability_evidence",
-                serde_json::json!({
-                    "model": model,
-                    "route_position": position,
-                    "source": "declared",
-                    "capabilities": capabilities,
-                    "degradations": degradations,
-                }),
-            )?;
-        }
-        Ok(())
-    }
-
     /// The exact fingerprinted stratum this run calibrates under: model
     /// route, verifier suite, catalog, policy, and score definition.
     fn calibration_stratum(
@@ -1307,7 +1316,7 @@ impl Psp9AgentRuntime {
         ))
     }
     async fn approve_promotion(
-        &mut self,
+        &self,
         recorder: &Psp9Recorder,
         node_id: &str,
         paths: Vec<String>,
@@ -1333,7 +1342,8 @@ impl Psp9AgentRuntime {
             description: "Promote the verified PSP-9 candidate to the workspace".into(),
             diff,
         });
-        let Some(receiver) = self.action_receiver.as_mut() else {
+        let mut receiver_slot = self.action_receiver.lock().await;
+        let Some(receiver) = receiver_slot.as_mut() else {
             recorder.record_custom(
                 "approval_unavailable",
                 serde_json::json!({"request_id": request_id}),

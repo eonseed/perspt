@@ -26,6 +26,7 @@ pub async fn run(
     domain: Option<String>,
     allow_dependency_mutation: bool,
     ensemble_width: Option<u8>,
+    max_parallel_nodes: usize,
     exploration_only: bool,
     dashboard: bool,
     dashboard_port: u16,
@@ -60,8 +61,15 @@ pub async fn run(
         max_parallel_verifiers: max_parallel.max(1),
         persistent_grants,
         allow_dependency_mutation,
+        max_parallel_nodes: max_parallel_nodes.max(1),
         ..perspt_agent::Psp9RunConfig::default()
     };
+    // Multi-node dispatch is non-interactive: promotion approval cannot be
+    // prompted per node while other nodes run.
+    anyhow::ensure!(
+        max_parallel_nodes <= 1 || auto_approve,
+        "--max-parallel-nodes above 1 requires --yes"
+    );
     let interactive = std::io::stdout().is_terminal();
     // Fail fast: with Ask approval and no terminal, promotion could never be
     // approved and a fully verified run would silently escalate. Exploration

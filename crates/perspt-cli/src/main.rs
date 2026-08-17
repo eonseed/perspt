@@ -102,6 +102,10 @@ enum Commands {
         #[arg(long)]
         ensemble_width: Option<u8>,
 
+        /// Concurrent work-graph nodes (default 1; above 1 requires --yes)
+        #[arg(long, default_value = "1")]
+        max_parallel_nodes: usize,
+
         /// Run only the read-only exploration phase: deterministic map plus
         /// an interactive explorer tool loop; nothing is mutated or promoted
         #[arg(long)]
@@ -337,6 +341,7 @@ async fn main() -> Result<()> {
             domain,
             allow_dependency_mutation,
             ensemble_width,
+            max_parallel_nodes,
             exploration_only,
             fallback_models,
             output_summary,
@@ -364,6 +369,7 @@ async fn main() -> Result<()> {
                 domain,
                 allow_dependency_mutation,
                 ensemble_width,
+                max_parallel_nodes,
                 exploration_only,
                 dashboard,
                 dashboard_port,

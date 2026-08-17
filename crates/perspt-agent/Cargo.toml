@@ -51,6 +51,7 @@ diffy = "0.5"
 duckdb = { workspace = true }
 shell-words = { workspace = true }
 futures = { workspace = true }
+tokio-util = "0.7"
 rustix = { workspace = true }
 tempfile = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }
