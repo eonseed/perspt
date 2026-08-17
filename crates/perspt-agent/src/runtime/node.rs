@@ -600,14 +600,20 @@ pub(crate) fn load_candidate_checkpoint(
         conversation.unresolved_call_ids() == control.unresolved_call_ids,
         "checkpoint conversation does not match its unresolved-call control frame"
     );
-    let projection_digest = perspt_sdk::content_hash(&serde_json::to_vec(&conversation)?);
     anyhow::ensure!(
         control.event_schema_version == perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
         "checkpoint conversation event schema is unsupported"
     );
+    // Gate O: the checkpointed conversation clone is only the cheap resume
+    // path — it must be *derivable from the ledger*. Refold the recorded
+    // deltas and refuse resume unless the fold reproduces both the rolling
+    // digest the control frame committed to and the clone itself.
+    let rows = recorder.store.get_psp9_events(session_id)?;
+    let folded = crate::toolloop::refold_session_context(&rows, &control.projection_digest)?
+        .context("no ledger fold reaches the checkpoint digest; refusing resume")?;
     anyhow::ensure!(
-        projection_digest == control.projection_digest,
-        "checkpoint conversation projection digest mismatch"
+        folded.conversation() == &conversation,
+        "checkpoint conversation is not derivable from the recorded deltas; refusing resume"
     );
     let file_handles: Vec<crate::toolloop::DurableSeedFile> =
         serde_json::from_value(value.get("files").cloned().context("checkpoint files")?)?;
