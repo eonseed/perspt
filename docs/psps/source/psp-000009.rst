@@ -1142,6 +1142,21 @@ property, not a risk level.
      - ``EffectKind``
      - Risk
      - Notes
+   * - ``tool_search``
+     - ``ToolSearch``
+     - Low
+     - Host-side deferred-catalog discovery; matches activate on the next
+       turn.
+   * - ``tool_program``
+     - ``ToolProgram``
+     - Low
+     - Bounded pure-Starlark composition; every nested call returns to the
+       five-clause kernel.
+   * - ``exec``
+     - ``Search``
+     - Low
+     - One shell-free, read-only OS program in the inspection sandbox
+       (``rg``, ``git`` reads, ``awk``, ``sed -n``, coreutils).
    * - ``read_file``
      - ``ReadFile``
      - Low
@@ -1192,6 +1207,17 @@ property, not a risk level.
      - ``RunRepoScript``
      - Medium
      - Scripts declared in the project profile.
+   * - ``sys_info`` / ``sys_processes`` / ``sys_disk`` / ``sys_env``
+     - ``SystemProbe``
+     - Low
+     - The shipped system-explorer family, registered through the open
+       execution plane. Read-only; ``sys_env`` returns variable names only.
+   * - ``db_list`` / ``db_schema`` / ``db_query``
+     - ``DataRead``
+     - Low
+     - The shipped local-DB-explorer family. ``db_query`` is SELECT-only
+       over an in-memory read-only DuckDB view of one workspace data file,
+       with statement-class allowlisting and row/byte caps.
    * - ``mutate_dependencies``
      - ``MutateDependencies``
      - High
@@ -2418,9 +2444,12 @@ stopping the run. Rate limits are portfolio state, so ``RateLimits`` is a
 scheduler resource: two nodes on the same provider contend, two nodes on
 different providers do not.
 
-The default remains conservative: parallelism is opt-in via ``--max-parallel``
-(default 1, preserving today's sequential behaviour) until fixture benchmarks
-show no regression in accepted-trajectory quality.
+The default remains conservative: node-level parallelism is opt-in via
+``--max-parallel-nodes`` (default 1, preserving today's sequential
+behaviour); the pre-existing ``--max-parallel`` flag keeps its meaning of
+concurrent compiler/test/lint sensors within one node. Multi-node dispatch
+requires ``--yes`` because promotion approval cannot be prompted per node
+while other nodes run.
 
 **The session is not a DAG.** The current live orchestrator stores a mutable
 ``petgraph::DiGraph<SRBNNode, Dependency>`` and walks it topologically, while
@@ -3047,7 +3076,9 @@ Perspt's single-handle assumption prevents it.
 per-tier ``ModelId``, ``adjudicator_model``, ``ensemble`` policy block (default
 off), ``execution_mode`` (default ``bundle`` at first release, ``auto`` after
 the parity gate), ``max_turns_per_node``, ``descent_tolerance``,
-``cascade_budget``, ``max_parallel`` (default 1), an unlabeled-validator policy
+``cascade_budget``, ``max_parallel`` (verifier fan-out) and
+``max_parallel_nodes`` (node dispatch, both default 1), an
+unlabeled-validator policy
 (default ``uncertified``), ``risk_budget`` per capability,
 ``calibration_target_rho``, per-stratum ``audit_rate``, context-checkpoint
 threshold/reserve, ``persistent_grants`` (default false), and ``confidential``
@@ -3196,8 +3227,9 @@ an offline benchmark baseline; it is not a live compatibility path.
 The legacy ``--mode``, complexity, deferred-test, free-form energy-weight,
 single-file, and unimplemented cost flags are removed rather than accepted and
 ignored. The PSP-9 CLI exposes the actual finite controls: ``--rho-gate``,
-``--max-turns``, ``--max-calls-per-turn``, ``--rejection-budget``, and
-``--max-parallel``. Model roles are explicit: ``--actuator-model``,
+``--max-turns``, ``--max-calls-per-turn``, ``--rejection-budget``,
+``--max-parallel`` (verifier fan-out), and ``--max-parallel-nodes`` (node
+dispatch, default 1). Model roles are explicit: ``--actuator-model``,
 ``--explorer-model``, ``--adjudicator-model``, and repeatable
 ``--fallback-model``. Architect or verifier routes are never silently treated
 as actuator failovers. ``--yes`` removes the final promotion prompt within
@@ -3493,10 +3525,12 @@ Implementation Status
        live across three routes and two model families (Gemini via Vertex ADC,
        Qwen via an OpenAI-compatible endpoint), and MC-S proves three-family
        invariance against scripted transports. A third live family remains
-       blocked on credentials only.
+       blocked on credentials only — no code is outstanding; ``perspt
+       providers --probe`` verifies a new route behaviorally the day
+       credentials exist.
    * - 2 — Typed tool catalog
      - J
-     - **Partial**
+     - **Done**
      - ``toolset`` catalog with declarative footprints and capability
        filtering; deferred host-side ``tool_search``; a small provider-invariant
        initial schema surface; bounded pure-Starlark ``tool_program`` composition;
@@ -3508,7 +3542,15 @@ Implementation Status
        candidate, or use process-spawning ``find``/``rg`` options.
        ``sed_replace``/``awk_filter`` remain outside the model-facing catalog.
        Runtime plugin-name normalization is implemented in both paths.
-       Governed dependency mutation remains.
+       Governed dependency mutation is live: ``mutate_dependencies`` resolves
+       through the plugin's dependency commands behind an explicit
+       ``--allow-dependency-mutation`` grant, with Manifest/Lockfile
+       footprints, package-name validation, and write-ahead external-effect
+       bracketing. Execution dispatches through an open exact-name handler
+       registry with catalog-derived grants; the shipped ``system`` and
+       ``db`` read-only families and a conformance fixture prove a family
+       registers at the composition root without editing the loop, the
+       candidate, or the node assembly.
    * - 3 — Realizability, gate, certificates
      - M, V
      - **Done**
@@ -3537,7 +3579,7 @@ Implementation Status
        epoch — also wired to ``perspt abort`` and the TUI quit path.
    * - 6 — Ledger and replay
      - L, O
-     - **Partial**
+     - **Done**
      - Every live loop observation is durably appended before use;
        ``perspt replay`` verifies sequence, predecessor, hash, and accepted
        trajectory. Full tool output is content-addressed while model context
@@ -3570,33 +3612,54 @@ Implementation Status
        passes the kernel, and a mutation attempt is a recorded denial.
    * - 8 — Verdicts and independence
      - R, T
-     - **Partial**
+     - **Done**
      - Matched strata, degenerate-pair direct joint misses, Hoeffding upper
        bounds, certification gating, ``n`` reported beside the bound;
        ``attenuate_weight`` removed. A configured adjudicator receives only the
        realized content-addressed diff with no tools or authority, records an
        explicitly uncalibrated contemporaneous verdict in the epoch's exact
        stratum, and acts as an optional conjunctive veto without changing
-       :math:`V`. ``perspt audit`` ingests delayed labels against those
-       verdict rows. Certified live pairwise bounds still require a second
-       live validator and remain.
+       :math:`V`. The deterministic verifier suite now records its own
+       verdict row (``validator_id: deterministic-suite``) beside the
+       adjudicator's for the same candidate and stratum; ``perspt audit``
+       and ``perspt ledger --rollback`` label both verdict rows and the
+       calibration sample in one single-assignment pass; and the estimator
+       feeds ``compute_with_floor`` from labeled matched verdicts. A bound
+       is displayed only as Certified with ``n`` beside it; below the
+       20-matched-sample floor the surfaces state ``insufficient
+       evidence``.
    * - 9 — Proposal ensembles
      - M, T
-     - **Partial**
+     - **Done**
      - ``EnsemblePolicy`` charges each candidate one gate decision; distinct
-       family enforced by lineage, not host; refuses rather than re-rolls. The
-       policy is not yet invoked by the live coding loop, so no production
-       ensemble claim is made.
+       family enforced by lineage, not host; refuses rather than re-rolls.
+       The live runtime invokes it at the recovery ladder's refine rung
+       (``[ensemble]`` config or ``--ensemble-width``; default off): each
+       proposer runs the ordinary governed loop in its own reversible
+       candidate, the round and every candidate are ledgered, and selection
+       is strictly by measured energy. ``parity_bench`` gained the arm-4
+       heterogeneous-pair-vs-same-model comparison so the policy can be
+       rejected by measurement.
    * - 10 — Scheduler and parallelism
      - P
-     - **Partial**
+     - **Done**
      - ``WorkGraphRevision`` is now the live scheduler authority and every
        running capability is revision/generation-bound. Independent
        compiler/test/lint sensors run concurrently under ``--max-parallel``
        with isolated target directories. ``WorkGraphRevision::revise`` is
        exercised live by the recovery ladder's level-2 refinement, which
-       produces validated acyclic snapshots from evidence-backed edits. Live
-       multi-node worker dispatch and commuting tool-call batches remain.
+       produces validated acyclic snapshots from evidence-backed edits.
+       Intra-turn batches plan over declared footprints: commuting mutators
+       run in the model's own arrival order, reads with precise footprints
+       execute concurrently, and a colliding same-turn pair is returned as
+       a ``ToolBatchConflict`` observation, never given an invented order.
+       ``--max-parallel-nodes`` (default 1, requires ``--yes``) enables the
+       bounded multi-node dispatcher: a governed forced-choice
+       ``update_graph`` architect turn plans the graph, per-node lifecycle
+       futures run borrowed on one ``FuturesUnordered`` with cancellation
+       tokens, one shared non-replenishing recovery pool spans the session,
+       terminal folds take the first live ``GraphWrite`` lease, and
+       promotion is single-flight in the completion arm.
    * - 11 — Conformal calibration
      - Q
      - **Done**
@@ -3613,21 +3676,36 @@ Implementation Status
        backs off to approval. Below the floor no conformal claim is made.
    * - 12 — External tools
      - K, L, U
-     - **Partial**
+     - **Done**
      - SDK ``admit_external_tool`` prevents authority minting and maps
-       undeclared footprints to ``RunShell`` plus opaque scope. No external wire
-       protocol is registered in the authoritative runtime yet.
+       undeclared footprints to ``RunShell`` plus opaque scope. The
+       authoritative runtime registers MCP servers from
+       ``[[external_tools]]`` over both stdio and Streamable HTTP:
+       discovery at node assembly, admission against the session's derived
+       grant surface, namespaced entries marked durable (write-ahead
+       bracketed), untrusted descriptions, and replay that answers from
+       recorded observations and refuses to reconnect. Dual-transport
+       conformance fixtures prove the reject/downgrade/execute triple. The
+       interactive chat reuses the same admission with a read-only-effects
+       ceiling; ``simple-chat`` keeps the plain path.
    * - 13 — Diagnostics and surfaces
      - R
-     - **Partial**
+     - **Done**
      - Both Lemma 2 levers in ``edge_sensitivity`` (gap + nullspace delta);
        arriving-*potential* load gauge. The TUI streams live measurements,
        gates, denials, failover, checkpoint and typed energy events; the
        dashboard decision trace reads the canonical PSP-9 hash chain, and a
        Governance page surfaces authority epochs, signed grant intent,
        calibration epochs, pending delayed audits, and validator verdicts.
-       ``perspt status`` reads the PSP-9 surfaces for governed sessions.
-       Dedicated topology and backlog visualizations remain.
+       ``perspt status`` reads the PSP-9 surfaces for governed sessions and
+       now shows the arriving-potential gauge Φ(W) (labeled a conditional
+       diagnostic), the withheld ``topology_gap`` (the coding domain
+       declares no coordinate map), and validator-independence pair
+       statistics. The dashboard renders the work-graph revision lineage
+       (topology), a backlog page, and the governance pair table;
+       ``perspt ledger --rollback`` restores promoted pre-images through
+       the hardened descriptor-relative path and doubles as the delayed
+       unsafe-label source.
    * - 14 — Parity and ablation
      - —
      - **Done**
@@ -3704,8 +3782,10 @@ Remaining Open Issues
   deferred catalog and bounded Starlark composition for first-party work, with
   MCP stdio and Streamable HTTP retained only as optional edge adapters.
   External schemas are never eagerly injected, and an MCP server never becomes
-  an authority, scheduler, ledger, or policy source. The wire adapters are not
-  yet registered by the authoritative runtime, so Phase 12 remains partial.
+  an authority, scheduler, ledger, or policy source. Both wire adapters are
+  registered by the authoritative runtime and by the interactive chat (with a
+  read-only admission ceiling); ``[[external_tools]]`` in configuration is the
+  single opt-in.
 
 ==========
 References

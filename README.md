@@ -122,6 +122,36 @@ Read-only OS inspection uses direct argv execution for an allowlisted set of
 tools such as `rg`, `git`, `sed`, and `awk`; shell composition is not an implicit
 fallback.
 
+### Open extension surfaces
+
+The execution plane is a set of registries, so growing the agent is a
+registration at the composition root, never an edit to the loop, the
+candidate, or the node assembly:
+
+- **Tool families** register catalog entries
+  (`Psp9AgentRuntime::with_tool_family`) and handlers
+  (`CandidateHandlerRegistry::register`); grants derive from the assembled
+  catalog. Two read-only families ship this way: a system explorer
+  (`sys_info`, `sys_processes`, `sys_disk`, `sys_env` — names only, never
+  values) and a local DB explorer (`db_list`, `db_schema`, `db_query` —
+  SELECT-only over an in-memory read-only DuckDB view of one workspace data
+  file).
+- **Domains** register in a `DomainRegistry` and are selected by `--domain`
+  or detection; the coding and research domain packages are both wired.
+- **Languages** register `LanguageAdapter`s (diagnostics) and
+  `LanguagePlugin`s (commands, incl. governed dependency mutation) by id.
+- **External MCP servers** are configured under `[[external_tools]]` (stdio
+  or Streamable HTTP). Every listed tool passes admission against the
+  session's grant surface — a server can never exceed what the user could
+  grant — and each call is write-ahead bracketed in the ledger. The
+  interactive `perspt chat` reuses the same servers with a read-only
+  admission ceiling; `simple-chat` keeps the plain streaming path.
+
+Governed dependency mutation (`cargo add`, `uv add`, `npm install`) is an
+explicit opt-in via `--allow-dependency-mutation`. Gate failures can draw a
+distinct-family proposal ensemble round (`[ensemble]` in config or
+`--ensemble-width`); selection is strictly by measured energy.
+
 On macOS and Linux, model-triggered processes require OS isolation. Inspection
 processes cannot write the candidate, access unrelated user home directories,
 or reach the network. Compiler, test, and lint sensors can run concurrently in
@@ -144,6 +174,10 @@ perspt agent [OPTIONS] <TASK>
       --max-calls-per-turn <N>  Direct and nested call bound (default: 8)
       --rejection-budget <N>    Shared rejection/recovery budget (default: 4)
       --max-parallel <N>        Concurrent verifier sensors (default: 4)
+      --max-parallel-nodes <N>  Concurrent work-graph nodes (default: 1; needs --yes)
+      --domain <ID>             Domain package (coding, research); default: detect
+      --allow-dependency-mutation  Grant governed dependency mutation
+      --ensemble-width <N>      Enable proposal ensembles after gate failures
       --persistent-grants       Persist signed grant intent
       --output-summary <FILE>   Write the terminal summary as JSON
       --db-path <FILE>          Use a specific PSP-9 ledger database
@@ -223,15 +257,18 @@ External MCP tools are an optional edge integration, not the default coding
 tool plane. The shared runtime supports lazy stdio and Streamable HTTP
 lifecycles, paginated discovery, local schema/admission checks, namespaced
 tools, bounded observations, and provider-free replay. An external server
-cannot mint authority or classify its own effects. The runtime can construct
-separate agent- and chat-scoped lifecycles from shared configuration; wiring
-the headless lifecycle into the existing TUI chat loop remains release work.
+cannot mint authority or classify its own effects. Agent and chat construct
+separate lifecycles from the same `[[external_tools]]` configuration: the
+governed loop admits against the session's grant surface, while the TUI chat
+admits read-only effects only.
 
 ## Chat and Local Commands
 
 The TUI supports markdown, tables, math rendering, conversation export, model
 switching, and streaming. Common commands include `/help`, `/clear`, `/model`,
-`/save`, and `/quit`.
+`/save`, and `/quit`. With chat-enabled `[[external_tools]]` servers, chat
+turns can call the admitted read-only MCP tools; tool activity is shown
+inline and results are labeled untrusted.
 
 Entering `l-o-v-e` in chat, agent mode, the TUI, or simple CLI mode is handled
 locally and never sent to an LLM. It prints Perspt's family dedication.
@@ -250,7 +287,7 @@ locally and never sent to an LLM. It prints Perspt's family dedication.
 | `db repair` | Back up and quarantine a poisoned DuckDB WAL |
 | `logs` | LLM usage and request records |
 | `status` | Session and stability status |
-| `ledger` | Query the historical ledger |
+| `ledger` | Query the ledger; `--rollback <SESSION>` undoes the newest promotion and labels it unsafe |
 | `config` | Inspect or edit configuration |
 | `init` | Initialize project memory and policy |
 

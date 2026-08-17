@@ -93,3 +93,17 @@ model = "gpt-4o-mini"
 # url = "https://tools.example.test/mcp"
 # modes = ["agent"]
 # headers_from_env = { Authorization = "RECORDS_AUTHORIZATION" }
+
+# ---------------------------------------------------------------------------
+# Optional proposal ensembles (PSP-9 system 7; default off)
+# ---------------------------------------------------------------------------
+# After a gate failure, the recovery ladder's refine rung may draw one round
+# of distinct-family proposers. Ensembles propose, never decide: every
+# candidate runs the ordinary governed loop, consumes one gate decision, and
+# selection is strictly by measured energy. `--ensemble-width N` enables the
+# same policy from the command line.
+#
+# [ensemble]
+# trigger = "after_gate_failure"   # or "never" (default)
+# width = 2                        # candidates per round, max 4
+# require_distinct_family = true
