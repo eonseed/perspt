@@ -238,6 +238,38 @@ pub(crate) fn resolve_ensemble_policy(
     Ok(policy)
 }
 
+/// Resolve the explorer, adjudicator, and handoff role routes.
+#[allow(clippy::type_complexity)]
+pub(crate) fn resolve_role_routes(
+    routes: &Psp9ModelRoutes,
+    config: &perspt_core::Config,
+    transport: &Arc<GenAiTransport>,
+) -> Result<(Option<ModelId>, Option<ModelId>, Option<ModelId>)> {
+    let explorer = resolve_role_route(
+        routes.explorer.as_deref(),
+        config.models.as_ref().and_then(|m| m.speculator.as_deref()),
+        config,
+        transport,
+    )?;
+    let adjudicator = resolve_role_route(
+        routes.adjudicator.as_deref(),
+        config
+            .models
+            .as_ref()
+            .and_then(|m| m.adjudicator.as_deref()),
+        config,
+        transport,
+    )?;
+    let handoff = resolve_role_route(
+        None,
+        config.models.as_ref().and_then(|m| m.architect.as_deref()),
+        config,
+        transport,
+    )?
+    .filter(|candidate| transport.capabilities(candidate).tool_calling);
+    Ok((explorer, adjudicator, handoff))
+}
+
 /// Resolve an optional role route (explicit flag first, then config), and
 /// verify its provider eagerly so a typo fails before a session is created.
 pub(crate) fn resolve_role_route(
@@ -723,6 +755,24 @@ pub(crate) fn load_candidate_checkpoint(
         activated_tools: control.activated_tools.clone(),
     };
     Ok((control, seed))
+}
+
+/// Rebuild an accepted candidate state from a durable checkpoint seed and
+/// verify the restored state root matches it exactly.
+pub(crate) async fn restore_seed(
+    candidate: &CandidateWorkspace,
+    seed: Option<&CandidateSeed>,
+) -> Result<()> {
+    let Some(seed) = seed else {
+        return Ok(());
+    };
+    candidate.restore_exported(&seed.files)?;
+    let restored = candidate.checkpoint(&seed.canonical_scope).await?;
+    anyhow::ensure!(
+        restored.witness.state_root == seed.expected_state_root,
+        "restored candidate state does not match its durable checkpoint"
+    );
+    Ok(())
 }
 
 /// Rehydrate checkpointed seed files from the content-addressed artifact

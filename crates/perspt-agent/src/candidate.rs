@@ -507,7 +507,7 @@ impl EffectExecutor for CandidateWorkspace {
         let mutating = crate::toolloop::candidate_mutating_effect(entry.effect);
         let named_paths = self.admit_named_paths(call, entry, mutating)?;
 
-        let Some(handler) = self.handlers.get(&call.name).cloned() else {
+        let Some(handler) = self.handlers.resolve(&call.name).cloned() else {
             return Ok(EffectOutcome {
                 output: format!("tool failed: no executor registered for {}", call.name),
                 mutated: false,

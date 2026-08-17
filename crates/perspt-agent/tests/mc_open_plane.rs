@@ -160,7 +160,7 @@ async fn registered_family_executes_through_the_kernel_without_agent_edits() {
     )
     .with_database_path(database.clone())
     .with_tool_family(vec![fixture_entry()])
-    .with_tool_handlers(Arc::new(handlers));
+    .with_tool_handlers(handlers);
 
     let summary = runtime.run("probe then fix".into()).await.unwrap();
     assert!(matches!(summary.outcome, NodeTerminalOutcome::HardPass));

@@ -10,6 +10,7 @@
 
 mod deps;
 mod exec;
+pub mod external;
 mod fs;
 mod lsp;
 mod verify;
@@ -42,6 +43,9 @@ pub trait CandidateToolHandler: Send + Sync {
 /// family can never silently shadow a builtin.
 pub struct CandidateHandlerRegistry {
     handlers: BTreeMap<String, Arc<dyn CandidateToolHandler>>,
+    /// Consulted only when no exact name matches — the external (MCP)
+    /// dispatcher, whose namespaced tool names are discovered at runtime.
+    fallback: Option<Arc<dyn CandidateToolHandler>>,
 }
 
 impl std::fmt::Debug for CandidateHandlerRegistry {
@@ -58,6 +62,7 @@ impl CandidateHandlerRegistry {
     pub fn empty() -> Self {
         Self {
             handlers: BTreeMap::new(),
+            fallback: None,
         }
     }
 
@@ -89,6 +94,20 @@ impl CandidateHandlerRegistry {
 
     pub fn get(&self, name: &str) -> Option<&Arc<dyn CandidateToolHandler>> {
         self.handlers.get(name)
+    }
+
+    /// Install the fallback handler for names with no exact registration.
+    pub fn set_fallback(&mut self, handler: Arc<dyn CandidateToolHandler>) {
+        self.fallback = Some(handler);
+    }
+
+    pub fn has_fallback(&self) -> bool {
+        self.fallback.is_some()
+    }
+
+    /// Exact name first, then the fallback.
+    pub fn resolve(&self, name: &str) -> Option<&Arc<dyn CandidateToolHandler>> {
+        self.handlers.get(name).or(self.fallback.as_ref())
     }
 
     pub fn names(&self) -> impl Iterator<Item = &str> {

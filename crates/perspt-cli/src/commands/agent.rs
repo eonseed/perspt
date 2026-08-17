@@ -123,7 +123,7 @@ pub async fn run(
     perspt_agent::tools::families::register_standard_families(&mut tool_handlers)?;
     runtime = runtime
         .with_tool_family(perspt_agent::tools::families::standard_family_entries())
-        .with_tool_handlers(std::sync::Arc::new(tool_handlers));
+        .with_tool_handlers(tool_handlers);
 
     if let Some(path) = db_path.as_ref() {
         runtime = runtime.with_database_path(path.clone());

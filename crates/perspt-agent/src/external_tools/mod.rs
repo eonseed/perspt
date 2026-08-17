@@ -4,6 +4,7 @@
 //! local policy can classify effects and footprints. Constructing one runtime
 //! never starts a server; `discover_server` is the first lifecycle action.
 
+pub mod chat;
 mod http;
 mod protocol;
 mod stdio;
@@ -172,6 +173,12 @@ impl ExternalToolRuntime {
             replay_results: results,
             replay_only: true,
         }
+    }
+
+    /// Replace the admission capabilities (the composition root supplies
+    /// the session's derived grant surface before discovery).
+    pub fn set_capabilities(&mut self, capabilities: Vec<Capability>) {
+        self.capabilities = capabilities;
     }
 
     pub fn with_observer(mut self, observer: Arc<dyn ExternalToolObserver>) -> Self {
@@ -522,6 +529,12 @@ async fn initialize(client: &mut dyn McpTransport, config: &ExternalToolConfig) 
     client
         .notify("notifications/initialized", serde_json::json!({}))
         .await
+}
+
+/// Canonical replay key for a recorded external observation (public for
+/// replay assembly and conformance fixtures).
+pub fn replay_key_for(name: &str, arguments: &serde_json::Value) -> Result<String> {
+    replay_key(name, arguments)
 }
 
 fn namespace(server_id: &str, remote_name: &str) -> Result<String> {
