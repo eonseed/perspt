@@ -3,9 +3,24 @@
 
 use super::*;
 
-/// One exported file of an accepted candidate: relative path and current
-/// contents (`None` = deleted).
-pub type SeedFile = (String, Option<Vec<u8>>);
+/// One exported file of an accepted candidate. `content` is the accepted
+/// overlay state (`None` = deleted); `source_preimage` is the workspace state
+/// from which the first mutation was derived. Resume must preserve both so a
+/// later promotion cannot overwrite user edits made while the session slept.
+#[derive(Debug, Clone)]
+pub struct SeedFile {
+    pub path: String,
+    pub content: Option<Vec<u8>>,
+    pub source_preimage: Option<Vec<u8>>,
+}
+
+/// Content-addressed form persisted in a durable candidate checkpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DurableSeedFile {
+    pub path: String,
+    pub content_artifact: Option<String>,
+    pub source_preimage_artifact: Option<String>,
+}
 
 /// What applying one admitted call did to the candidate overlay.
 #[derive(Debug, Clone)]
@@ -135,8 +150,11 @@ pub enum LoopEvent {
     DurableCandidateCheckpoint {
         state_root: String,
         control: ControlFrame,
-        /// (path, artifact handle; `None` = deletion).
-        files: Vec<(String, Option<String>)>,
+        /// Exact provider-neutral projection selected for the next model turn.
+        conversation: Conversation,
+        /// Exact scope used to compute `state_root`, including read paths.
+        canonical_scope: Vec<String>,
+        files: Vec<DurableSeedFile>,
     },
     RecoveryControlGranted {
         failure: FailureKind,
@@ -230,4 +248,6 @@ pub struct LoopOutcome {
     pub events: Vec<LoopEvent>,
     pub projection: ProjectionMismatch,
     pub turns_used: u32,
+    /// Horizontal controls consumed from Paper III's one shared recovery pool.
+    pub recovery_spent: u32,
 }

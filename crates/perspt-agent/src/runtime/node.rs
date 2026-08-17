@@ -10,8 +10,10 @@ pub(crate) fn promotion_manifest(
 ) -> Result<Vec<serde_json::Value>> {
     let mut files = Vec::new();
     for relative in paths {
-        let before = std::fs::read(workspace.join(relative)).ok();
-        let after = std::fs::read(candidate.join(relative)).ok();
+        crate::candidate::reject_symlink_ancestor(workspace, relative)?;
+        crate::candidate::reject_symlink_ancestor(candidate, relative)?;
+        let before = crate::candidate::read_optional_file(&workspace.join(relative))?;
+        let after = crate::candidate::read_optional_file(&candidate.join(relative))?;
         let before_hash = before
             .as_deref()
             .map(|bytes| recorder.record_artifact(bytes, "application/octet-stream"))
@@ -436,10 +438,18 @@ impl ContractEvaluator for CodingContract {
 /// seed files fetched from content-addressed artifacts. Refuses when the
 /// session's durable authority epoch no longer matches the checkpoint's
 /// (revocation invalidates resumed sessions).
+pub(crate) struct CandidateSeed {
+    pub(crate) expected_state_root: String,
+    pub(crate) canonical_scope: Vec<String>,
+    pub(crate) files: Vec<crate::toolloop::SeedFile>,
+    pub(crate) conversation: Conversation,
+    pub(crate) activated_tools: Vec<String>,
+}
+
 pub(crate) fn load_candidate_checkpoint(
     recorder: &Psp9Recorder,
     session_id: &str,
-) -> Result<(perspt_sdk::ControlFrame, Vec<crate::toolloop::SeedFile>)> {
+) -> Result<(perspt_sdk::ControlFrame, CandidateSeed)> {
     let checkpoint_json = recorder
         .store
         .latest_psp9_checkpoint(session_id)?
@@ -455,7 +465,23 @@ pub(crate) fn load_candidate_checkpoint(
             .cloned()
             .context("checkpoint control")?,
     )?;
-    let file_handles: Vec<(String, Option<String>)> =
+    let canonical_scope: Vec<String> = serde_json::from_value(
+        value
+            .get("canonical_scope")
+            .cloned()
+            .context("checkpoint canonical scope")?,
+    )?;
+    let conversation: Conversation = serde_json::from_value(
+        value
+            .get("conversation")
+            .cloned()
+            .context("checkpoint conversation projection")?,
+    )?;
+    anyhow::ensure!(
+        conversation.unresolved_call_ids() == control.unresolved_call_ids,
+        "checkpoint conversation does not match its unresolved-call control frame"
+    );
+    let file_handles: Vec<crate::toolloop::DurableSeedFile> =
         serde_json::from_value(value.get("files").cloned().context("checkpoint files")?)?;
     let current_epoch = recorder.store.authority_epoch(session_id)?;
     anyhow::ensure!(
@@ -466,31 +492,79 @@ pub(crate) fn load_candidate_checkpoint(
         current_epoch
     );
     let mut seed = Vec::with_capacity(file_handles.len());
-    for (path, handle) in file_handles {
-        let bytes = match handle {
-            Some(handle) => Some(
-                recorder
-                    .store
-                    .get_psp9_artifact(&handle)?
-                    .with_context(|| format!("missing checkpoint artifact {handle}"))?,
-            ),
-            None => None,
+    for durable in file_handles {
+        let load = |handle: Option<String>, label: &str| -> Result<Option<Vec<u8>>> {
+            let Some(handle) = handle else {
+                return Ok(None);
+            };
+            let bytes = recorder
+                .store
+                .get_psp9_artifact(&handle)?
+                .with_context(|| format!("missing {label} checkpoint artifact {handle}"))?;
+            anyhow::ensure!(
+                perspt_sdk::content_hash(&bytes) == handle,
+                "{label} checkpoint artifact hash mismatch"
+            );
+            Ok(Some(bytes))
         };
-        seed.push((path, bytes));
+        seed.push(crate::toolloop::SeedFile {
+            path: durable.path,
+            content: load(durable.content_artifact, "content")?,
+            source_preimage: load(durable.source_preimage_artifact, "source pre-image")?,
+        });
     }
-    Ok((control, seed))
+    let activated_tools = control.activated_tools.clone();
+    Ok((
+        control,
+        CandidateSeed {
+            expected_state_root: value
+                .get("state_root")
+                .and_then(serde_json::Value::as_str)
+                .context("checkpoint state root")?
+                .to_string(),
+            canonical_scope,
+            files: seed,
+            conversation,
+            activated_tools,
+        },
+    ))
 }
 
-/// Rebuild a running single-node graph for a resumed session, recording both
-/// revisions in the resumed ledger.
+/// Recover the exact immutable graph revision named by the durable control
+/// frame. Resume mints fresh authority against it instead of fabricating an
+/// unrelated graph root.
 pub(crate) fn resumed_running_graph(
     recorder: &Psp9Recorder,
+    revision_id: &str,
     node_id: &str,
-    task: &str,
+    generation: u32,
 ) -> Result<WorkGraphRevision> {
-    let graph = initial_graph(node_id, task)?;
-    recorder.record_custom("graph_revision", serde_json::to_value(&graph)?)?;
-    let running_graph = execution_revision(&graph, node_id, WorkNodeState::Running)?;
-    recorder.record_custom("graph_revision", serde_json::to_value(&running_graph)?)?;
-    Ok(running_graph)
+    let mut recovered = None;
+    for row in recorder.store.get_psp9_events(&recorder.session_id)? {
+        let event: LedgerEvent = serde_json::from_str(&row.event_json)?;
+        if let LedgerEvent::Custom { kind, payload } = event {
+            if kind == "graph_revision" {
+                let graph: WorkGraphRevision = serde_json::from_value(payload)?;
+                if graph.revision_id == revision_id {
+                    recovered = Some(graph);
+                    break;
+                }
+            }
+        }
+    }
+    let graph = recovered.with_context(|| {
+        format!("checkpoint graph revision {revision_id} is absent from the durable ledger")
+    })?;
+    let node = graph
+        .node(node_id)
+        .with_context(|| format!("checkpoint graph has no node {node_id}"))?;
+    anyhow::ensure!(
+        node.generation == generation && node.state == WorkNodeState::Running,
+        "checkpoint graph node binding does not match the control frame"
+    );
+    recorder.record_custom(
+        "graph_revision_resumed",
+        serde_json::json!({"revision_id": revision_id}),
+    )?;
+    Ok(graph)
 }

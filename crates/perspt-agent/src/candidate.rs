@@ -38,6 +38,9 @@ pub struct CandidateWorkspace {
     /// approval file list read this set — a merely-read file must never be
     /// copied back into the source workspace.
     mutated_paths: Mutex<BTreeSet<String>>,
+    /// Workspace pre-image at the first mutation of each path. Promotion
+    /// compares against it to avoid overwriting concurrent user edits.
+    source_preimages: Mutex<BTreeMap<String, Option<Vec<u8>>>>,
     /// Pre-images of every mutation, in order. Restoring a checkpoint replays
     /// the suffix recorded after it in reverse, so files first touched after
     /// the checkpoint are restored (or removed) exactly.
@@ -97,6 +100,7 @@ impl CandidateWorkspace {
             _temp: temp,
             tracked: Mutex::new(BTreeSet::new()),
             mutated_paths: Mutex::new(BTreeSet::new()),
+            source_preimages: Mutex::new(BTreeMap::new()),
             journal: Mutex::new(Vec::new()),
             snapshots: Mutex::new(HashMap::new()),
             lsp_sessions: tokio::sync::Mutex::new(HashMap::new()),
@@ -147,13 +151,27 @@ impl CandidateWorkspace {
         let mut source_before = BTreeMap::new();
         for rel in &paths {
             let rel = validate_relative_path(rel)?;
-            source_before.insert(rel.clone(), std::fs::read(self.source_root.join(rel)).ok());
+            reject_symlink_ancestor(&self.source_root, &rel)?;
+            let current = read_optional_file(&self.source_root.join(&rel))?;
+            let expected = self
+                .source_preimages
+                .lock()
+                .unwrap()
+                .get(&rel)
+                .cloned()
+                .context("mutated path has no source pre-image")?;
+            anyhow::ensure!(
+                current == expected,
+                "workspace path changed since the candidate was created: {rel}"
+            );
+            source_before.insert(rel.clone(), current);
         }
 
         let result = (|| {
             for rel in &paths {
                 let rel = validate_relative_path(rel)?;
                 reject_symlink_ancestor(&self.overlay_root, &rel)?;
+                reject_symlink_ancestor(&self.source_root, &rel)?;
                 let from = self.overlay_root.join(&rel);
                 let to = self.source_root.join(&rel);
                 if from.is_file() {
@@ -271,12 +289,12 @@ impl CandidateWorkspace {
     /// exported files (mid-loop resume): each file is journaled and written
     /// into the overlay, and re-enters the mutated (promotable) set.
     pub fn restore_exported(&self, files: &[crate::toolloop::SeedFile]) -> Result<()> {
-        for (rel, bytes) in files {
-            let rel = validate_relative_path(rel)?;
+        for seed in files {
+            let rel = validate_relative_path(&seed.path)?;
             reject_symlink_ancestor(&self.overlay_root, &rel)?;
             self.journal_pre_image(&rel)?;
             let path = self.overlay_root.join(&rel);
-            match bytes {
+            match &seed.content {
                 Some(bytes) => {
                     if let Some(parent) = path.parent() {
                         std::fs::create_dir_all(parent)?;
@@ -287,6 +305,10 @@ impl CandidateWorkspace {
                 None => {}
             }
             self.tracked.lock().unwrap().insert(rel.clone());
+            self.source_preimages
+                .lock()
+                .unwrap()
+                .insert(rel.clone(), seed.source_preimage.clone());
             self.mutated_paths.lock().unwrap().insert(rel);
             self.mutations.fetch_add(1, Ordering::SeqCst);
         }
@@ -301,6 +323,11 @@ impl CandidateWorkspace {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e).with_context(|| format!("journaling {rel}")),
         };
+        self.source_preimages
+            .lock()
+            .unwrap()
+            .entry(rel.to_string())
+            .or_insert_with(|| prior.clone());
         self.journal.lock().unwrap().push(JournalEntry {
             path: rel.to_string(),
             prior,
@@ -369,13 +396,60 @@ impl CandidateWorkspace {
     pub(crate) fn verifier_env(&self) -> Vec<(String, String)> {
         let venv = self.source_root.join(".venv");
         if venv.is_dir() {
-            vec![(
-                "UV_PROJECT_ENVIRONMENT".into(),
-                venv.display().to_string(),
-            )]
+            vec![("UV_PROJECT_ENVIRONMENT".into(), venv.display().to_string())]
         } else {
             Vec::new()
         }
+    }
+
+    /// Build a second candidate whose implementation matches the current
+    /// candidate but whose pre-existing test files are restored to their
+    /// source pre-images. This prevents a candidate from certifying itself by
+    /// weakening the test oracle it is measured against.
+    fn immutable_test_oracle(&self) -> Result<Option<ImmutableTestOracle>> {
+        let registry = perspt_core::PluginRegistry::new();
+        let plugins = registry.detect_all(&self.overlay_root);
+        let preimages = self.source_preimages.lock().unwrap();
+        let touched_tests: Vec<_> = self
+            .mutated_paths
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|path| plugins.iter().any(|plugin| plugin.is_test_file(path)))
+            .filter_map(|path| {
+                preimages
+                    .get(path)
+                    .cloned()
+                    .map(|content| (path.clone(), content))
+            })
+            .collect();
+        if !touched_tests
+            .iter()
+            .any(|(_, source_preimage)| source_preimage.is_some())
+        {
+            return Ok(None);
+        }
+
+        let temp = tempfile::Builder::new()
+            .prefix("perspt-test-oracle-")
+            .tempdir()?;
+        let root = temp.path().join("workspace");
+        std::fs::create_dir_all(&root)?;
+        copy_workspace(&self.overlay_root, &root)?;
+        for (relative, source_preimage) in touched_tests {
+            let path = root.join(&relative);
+            match source_preimage {
+                Some(bytes) => {
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(path, bytes)?;
+                }
+                None if path.is_file() => std::fs::remove_file(path)?,
+                None => {}
+            }
+        }
+        Ok(Some(ImmutableTestOracle { _temp: temp, root }))
     }
 }
 
@@ -462,6 +536,7 @@ impl EffectExecutor for CandidateWorkspace {
 
     async fn export_accepted(&self) -> Result<Vec<crate::toolloop::SeedFile>> {
         let mutated = self.touched_paths();
+        let preimages = self.source_preimages.lock().unwrap();
         let mut exported = Vec::with_capacity(mutated.len());
         for rel in mutated {
             let path = self.overlay_root.join(&rel);
@@ -470,7 +545,15 @@ impl EffectExecutor for CandidateWorkspace {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
                 Err(e) => return Err(e).with_context(|| format!("exporting {rel}")),
             };
-            exported.push((rel, bytes));
+            let source_preimage = preimages
+                .get(&rel)
+                .cloned()
+                .context("mutated path has no source pre-image")?;
+            exported.push(crate::toolloop::SeedFile {
+                path: rel,
+                content: bytes,
+                source_preimage,
+            });
         }
         Ok(exported)
     }
@@ -694,6 +777,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
     /// capability with no effective command is a blocking sensor residual.
     fn collect_jobs(
         &self,
+        immutable_oracle_root: Option<&Path>,
         residuals: &mut Vec<ResidualEvent>,
         all_passed: &mut bool,
     ) -> Result<Vec<VerifierJob>> {
@@ -729,6 +813,16 @@ impl<'a> CodingCandidateMeasurer<'a> {
                     adapter_id: adapter_id.clone(),
                     stage: capability.stage,
                     command: command.to_string(),
+                    root: self.candidate.overlay_root().to_path_buf(),
+                });
+            }
+            if let Some(root) = immutable_oracle_root {
+                jobs.push(VerifierJob {
+                    plugin: format!("{}:immutable-test-oracle", plugin.name()),
+                    adapter_id,
+                    stage: perspt_core::plugin::VerifierStage::Test,
+                    command: plugin.test_command(),
+                    root: root.to_path_buf(),
                 });
             }
         }
@@ -789,14 +883,21 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
     async fn measure(&self) -> Result<Measured> {
         let mut residuals = Vec::new();
         let mut all_passed = false;
-        let jobs = self.collect_jobs(&mut residuals, &mut all_passed)?;
+        let immutable_oracle = self.candidate.immutable_test_oracle()?;
+        let jobs = self.collect_jobs(
+            immutable_oracle
+                .as_ref()
+                .map(|oracle| oracle.root.as_path()),
+            &mut residuals,
+            &mut all_passed,
+        )?;
 
         let ran = jobs.len();
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel));
         let mut workers = tokio::task::JoinSet::new();
         for (ordinal, job) in jobs.into_iter().enumerate() {
             let semaphore = semaphore.clone();
-            let root = self.candidate.overlay_root().to_path_buf();
+            let root = job.root.clone();
             let allow_unisolated = self.candidate.allow_unisolated_verifiers;
             let extra_env = self.candidate.verifier_env();
             workers.spawn(async move {
@@ -913,6 +1014,12 @@ struct VerifierJob {
     adapter_id: LanguageId,
     stage: perspt_core::plugin::VerifierStage,
     command: String,
+    root: PathBuf,
+}
+
+struct ImmutableTestOracle {
+    _temp: TempDir,
+    root: PathBuf,
 }
 
 async fn run_governed_verifier(
@@ -926,20 +1033,31 @@ async fn run_governed_verifier(
     let target = root.join(".perspt-target").join(&target_suffix);
     std::fs::create_dir_all(&tmp)?;
     std::fs::create_dir_all(&target)?;
+    let read_roots = verifier_read_roots(&root, &extra_env);
     let mut process = if allow_unisolated {
         let mut process = Command::new("/bin/sh");
         process.arg("-c").arg(&command).current_dir(&root);
         process
     } else {
-        isolated_command(&root, &command)?
+        isolated_command(&root, &command, &read_roots)?
     };
     // Toolchain caches must live inside the writable overlay: the sandbox
     // denies network and writes outside the candidate, so `uv` gets a
     // per-run cache dir (mirroring CARGO_TARGET_DIR) and stays offline —
     // verifiers run against the project's already-synced environment.
     let uv_cache = root.join(".perspt-tmp").join("uv-cache");
+    let isolated_home = root.join(".perspt-home");
     std::fs::create_dir_all(&uv_cache)?;
+    std::fs::create_dir_all(&isolated_home)?;
+    let original_home = std::env::var_os("HOME").map(PathBuf::from);
+    let cargo_home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| original_home.as_ref().map(|home| home.join(".cargo")));
+    let rustup_home = std::env::var_os("RUSTUP_HOME")
+        .map(PathBuf::from)
+        .or_else(|| original_home.as_ref().map(|home| home.join(".rustup")));
     process
+        .env("HOME", &isolated_home)
         .env("CARGO_NET_OFFLINE", "true")
         .env("CARGO_TARGET_DIR", target)
         .env("UV_CACHE_DIR", uv_cache)
@@ -949,6 +1067,12 @@ async fn run_governed_verifier(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if let Some(path) = cargo_home.filter(|path| path.is_dir()) {
+        process.env("CARGO_HOME", path);
+    }
+    if let Some(path) = rustup_home.filter(|path| path.is_dir()) {
+        process.env("RUSTUP_HOME", path);
+    }
     let output = tokio::time::timeout(std::time::Duration::from_secs(180), process.output())
         .await
         .context("governed verifier exceeded 180 second limit")??;
@@ -963,8 +1087,8 @@ async fn run_governed_verifier(
 }
 
 #[cfg(target_os = "macos")]
-fn isolated_command(root: &Path, command: &str) -> Result<Command> {
-    let profile = macos_sandbox_profile(root);
+fn isolated_command(root: &Path, command: &str, read_roots: &[PathBuf]) -> Result<Command> {
+    let profile = macos_sandbox_profile(root, read_roots);
     let mut process = Command::new("/usr/bin/sandbox-exec");
     process
         .arg("-p")
@@ -977,34 +1101,98 @@ fn isolated_command(root: &Path, command: &str) -> Result<Command> {
 }
 
 #[cfg(target_os = "macos")]
-fn macos_sandbox_profile(root: &Path) -> String {
+fn macos_sandbox_profile(root: &Path, read_roots: &[PathBuf]) -> String {
     let escaped = root.to_string_lossy().replace('"', "\\\"");
+    let mut readable = read_roots.to_vec();
+    readable.push(root.to_path_buf());
+    let users_deny = deny_data_except("/Users", &readable);
+    let home_deny = deny_data_except("/home", &readable);
+    let root_home_deny = deny_data_except("/root", &readable);
+    let private_tmp_deny = deny_data_except("/private/tmp", &readable);
+    let user_tmp_deny = deny_data_except("/private/var/folders", &readable);
+    let volumes_deny = deny_data_except("/Volumes", &readable);
+    let network_deny = deny_data_except("/Network", &readable);
+    let extra_reads = read_roots
+        .iter()
+        .map(|path| {
+            format!(
+                "(allow file-read* (subpath \"{}\"))",
+                path.to_string_lossy()
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "(version 1)\n\
              (deny default)\n\
              (allow process*)\n\
              (allow sysctl-read)\n\
              (allow file-read*)\n\
+             {users_deny}\n\
+             {home_deny}\n\
+             {root_home_deny}\n\
+             {private_tmp_deny}\n\
+             {user_tmp_deny}\n\
+             {volumes_deny}\n\
+             {network_deny}\n\
+             (allow file-read* (subpath \"{escaped}\"))\n\
+             {extra_reads}\n\
              (allow file-write* (literal \"/dev/null\"))\n\
              (allow file-write* (subpath \"{escaped}\"))\n\
              (deny network*)"
     )
 }
 
+#[cfg(target_os = "macos")]
+fn deny_data_except(parent: &str, allowed: &[PathBuf]) -> String {
+    let exceptions = allowed
+        .iter()
+        .filter(|path| path.starts_with(parent))
+        .map(|path| {
+            let escaped = path
+                .to_string_lossy()
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"");
+            format!("(require-not (subpath \"{escaped}\"))")
+        })
+        .collect::<Vec<_>>();
+    if exceptions.is_empty() {
+        format!("(deny file-read-data (subpath \"{parent}\"))")
+    } else {
+        format!(
+            "(deny file-read-data (require-all (subpath \"{parent}\") {}))",
+            exceptions.join(" ")
+        )
+    }
+}
+
 #[cfg(target_os = "linux")]
-fn isolated_command(root: &Path, command: &str) -> Result<Command> {
+fn isolated_command(root: &Path, command: &str, read_roots: &[PathBuf]) -> Result<Command> {
     let bwrap = ["/usr/bin/bwrap", "/bin/bwrap"]
         .into_iter()
         .find(|path| Path::new(path).is_file())
         .context("bubblewrap is required for governed verifier execution")?;
     let mut process = Command::new(bwrap);
+    process.args(["--die-with-parent", "--unshare-net", "--ro-bind", "/", "/"]);
+    for sensitive in ["/home", "/root", "/Users"] {
+        if Path::new(sensitive).exists() {
+            process.arg("--tmpfs").arg(sensitive);
+        }
+    }
+    process.arg("--tmpfs").arg("/tmp");
+    for read_root in read_roots {
+        if !read_root.starts_with(root) {
+            prepare_bwrap_destination(&mut process, read_root);
+            process.arg("--ro-bind").arg(read_root).arg(read_root);
+        }
+    }
+    prepare_bwrap_destination(&mut process, root);
     process
-        .args(["--die-with-parent", "--unshare-net", "--ro-bind", "/", "/"])
         .arg("--bind")
         .arg(root)
         .arg(root)
-        .arg("--tmpfs")
-        .arg("/tmp")
         .arg("--chdir")
         .arg(root)
         .arg("/bin/sh")
@@ -1013,9 +1201,105 @@ fn isolated_command(root: &Path, command: &str) -> Result<Command> {
     Ok(process)
 }
 
+#[cfg(target_os = "linux")]
+fn prepare_bwrap_destination(process: &mut Command, destination: &Path) {
+    for directory in bwrap_destination_parents(destination) {
+        process.arg("--dir").arg(directory);
+    }
+}
+
+#[cfg(any(test, target_os = "linux"))]
+fn bwrap_destination_parents(destination: &Path) -> Vec<PathBuf> {
+    let Some(parent) = destination.parent() else {
+        return Vec::new();
+    };
+    let masked_roots = [
+        Path::new("/home"),
+        Path::new("/root"),
+        Path::new("/Users"),
+        Path::new("/tmp"),
+    ];
+    let Some(masked) = masked_roots
+        .into_iter()
+        .find(|masked| parent.starts_with(masked))
+    else {
+        return Vec::new();
+    };
+    let mut missing_parents: Vec<_> = parent
+        .ancestors()
+        .take_while(|ancestor| *ancestor != masked)
+        .map(Path::to_path_buf)
+        .collect();
+    missing_parents.reverse();
+    missing_parents
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn isolated_command(_root: &Path, _command: &str) -> Result<Command> {
+fn isolated_command(_root: &Path, _command: &str, _read_roots: &[PathBuf]) -> Result<Command> {
     anyhow::bail!("this platform has no registered governed process sandbox")
+}
+
+fn verifier_read_roots(root: &Path, extra_env: &[(String, String)]) -> Vec<PathBuf> {
+    let mut roots = BTreeSet::new();
+    for (_, value) in extra_env {
+        let path = PathBuf::from(value);
+        if path.exists() {
+            roots.insert(path.canonicalize().unwrap_or_else(|_| path.clone()));
+            for interpreter in [
+                path.join("bin/python"),
+                path.join("bin/python3"),
+                path.join("Scripts/python.exe"),
+            ] {
+                if let Ok(target) = interpreter.canonicalize() {
+                    if let Some(installation) = target.parent().and_then(Path::parent) {
+                        roots.insert(installation.to_path_buf());
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(value) = std::env::var("CARGO_HOME") {
+        extend_cargo_read_roots(&mut roots, &PathBuf::from(value));
+    }
+    if let Ok(value) = std::env::var("RUSTUP_HOME") {
+        let path = PathBuf::from(value);
+        if path.exists() {
+            roots.insert(path.canonicalize().unwrap_or(path));
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        extend_cargo_read_roots(&mut roots, &home.join(".cargo"));
+        for relative in [".rustup", ".local/bin"] {
+            let path = home.join(relative);
+            if path.exists() {
+                roots.insert(path.canonicalize().unwrap_or(path));
+            }
+        }
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        for directory in std::env::split_paths(&path) {
+            if directory.exists()
+                && !directory.starts_with("/usr")
+                && !directory.starts_with("/bin")
+            {
+                roots.insert(directory.canonicalize().unwrap_or(directory));
+            }
+        }
+    }
+    roots.remove(root);
+    roots.into_iter().collect()
+}
+
+fn extend_cargo_read_roots(roots: &mut BTreeSet<PathBuf>, cargo_home: &Path) {
+    // Cargo credentials are intentionally absent. Offline verification needs
+    // only executables, configuration, and already-fetched source/index data.
+    for relative in ["bin", "config", "config.toml", "git", "registry"] {
+        let path = cargo_home.join(relative);
+        if path.exists() {
+            roots.insert(path.canonicalize().unwrap_or(path));
+        }
+    }
 }
 
 fn validate_relative_path(path: &str) -> Result<String> {
@@ -1041,7 +1325,15 @@ fn validate_relative_path(path: &str) -> Result<String> {
         .join("/"))
 }
 
-fn reject_symlink_ancestor(root: &Path, relative: &str) -> Result<()> {
+pub(crate) fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
+pub(crate) fn reject_symlink_ancestor(root: &Path, relative: &str) -> Result<()> {
     let mut current = root.to_path_buf();
     for component in Path::new(relative).components() {
         if let Component::Normal(part) = component {
@@ -1116,7 +1408,21 @@ fn copy_workspace(source: &Path, destination: &Path) -> Result<()> {
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
         let name = entry.file_name();
-        if matches!(name.to_str(), Some(".git" | ".perspt" | "target")) {
+        if matches!(
+            name.to_str(),
+            Some(
+                ".git"
+                    | ".perspt"
+                    | ".perspt-target"
+                    | ".perspt-tmp"
+                    | ".perspt-home"
+                    | ".venv"
+                    | ".pytest_cache"
+                    | ".ruff_cache"
+                    | "__pycache__"
+                    | "target"
+            )
+        ) {
             continue;
         }
         let from = entry.path();
@@ -1177,11 +1483,66 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_profile_only_allows_candidate_and_null_device_writes() {
-        let profile = macos_sandbox_profile(Path::new("/private/tmp/candidate"));
+        let profile = macos_sandbox_profile(
+            Path::new("/private/tmp/candidate"),
+            &[PathBuf::from("/Users/test/.rustup")],
+        );
         assert!(profile.contains("(allow file-write* (literal \"/dev/null\"))"));
         assert!(profile.contains("(allow file-write* (subpath \"/private/tmp/candidate\"))"));
         assert_eq!(profile.matches("allow file-write*").count(), 2);
+        assert!(profile
+            .lines()
+            .any(|line| line.trim() == "(allow file-read*)"));
+        assert!(profile.contains("(deny file-read-data (require-all (subpath \"/Users\")"));
+        assert!(profile.contains("(deny file-read-data (require-all (subpath \"/private/tmp\")"));
+        assert!(profile.contains("/Users/test/.rustup"));
         assert!(profile.contains("(deny network*)"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verifier_roots_follow_virtualenv_interpreter_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let install = root.path().join("uv-python");
+        let venv = root.path().join("project/.venv");
+        std::fs::create_dir_all(install.join("bin")).unwrap();
+        std::fs::create_dir_all(venv.join("bin")).unwrap();
+        std::fs::write(install.join("bin/python3"), "binary").unwrap();
+        std::os::unix::fs::symlink(install.join("bin/python3"), venv.join("bin/python3")).unwrap();
+
+        let roots = verifier_read_roots(
+            root.path(),
+            &[("UV_PROJECT_ENVIRONMENT".into(), venv.display().to_string())],
+        );
+        assert!(roots.contains(&install.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn cargo_verifier_roots_exclude_credentials() {
+        let root = tempfile::tempdir().unwrap();
+        let cargo_home = root.path().join("cargo-home");
+        std::fs::create_dir_all(cargo_home.join("bin")).unwrap();
+        std::fs::create_dir_all(cargo_home.join("registry")).unwrap();
+        std::fs::write(cargo_home.join("credentials.toml"), "[registry]").unwrap();
+
+        let mut roots = BTreeSet::new();
+        extend_cargo_read_roots(&mut roots, &cargo_home);
+        assert!(roots.contains(&cargo_home.join("bin").canonicalize().unwrap()));
+        assert!(roots.contains(&cargo_home.join("registry").canonicalize().unwrap()));
+        assert!(!roots.contains(&cargo_home));
+        assert!(!roots.contains(&cargo_home.join("credentials.toml")));
+    }
+
+    #[test]
+    fn bubblewrap_rebinds_recreate_only_masked_destination_parents() {
+        assert_eq!(
+            bwrap_destination_parents(Path::new("/home/user/.cargo/registry")),
+            [
+                PathBuf::from("/home/user"),
+                PathBuf::from("/home/user/.cargo")
+            ]
+        );
+        assert!(bwrap_destination_parents(Path::new("/usr/bin/cargo")).is_empty());
     }
 
     #[cfg(unix)]
@@ -1276,6 +1637,105 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(source.path().join("read-only.txt")).unwrap(),
             "user edit v2"
+        );
+    }
+
+    #[tokio::test]
+    async fn immutable_oracle_restores_existing_tests_but_keeps_candidate_code() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("src")).unwrap();
+        std::fs::create_dir_all(source.path().join("tests")).unwrap();
+        std::fs::write(
+            source.path().join("pyproject.toml"),
+            "[project]\nname='x'\n",
+        )
+        .unwrap();
+        std::fs::write(source.path().join("src/logic.py"), "VALUE = 'old'\n").unwrap();
+        std::fs::write(
+            source.path().join("tests/test_logic.py"),
+            "def test_value(): assert False\n",
+        )
+        .unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        candidate
+            .apply(
+                &write_call("src/logic.py", "VALUE = 'candidate'\n"),
+                &write_entry(),
+            )
+            .await
+            .unwrap();
+        candidate
+            .apply(
+                &write_call("tests/test_logic.py", "def test_value(): pass\n"),
+                &write_entry(),
+            )
+            .await
+            .unwrap();
+
+        let oracle = candidate.immutable_test_oracle().unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(oracle.root.join("src/logic.py")).unwrap(),
+            "VALUE = 'candidate'\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(oracle.root.join("tests/test_logic.py")).unwrap(),
+            "def test_value(): assert False\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn promotion_refuses_a_concurrent_workspace_edit() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("a.txt"), "baseline").unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        candidate
+            .apply(&write_call("a.txt", "agent edit"), &write_entry())
+            .await
+            .unwrap();
+        std::fs::write(source.path().join("a.txt"), "user edit").unwrap();
+        assert!(candidate.promote().is_err());
+        assert_eq!(
+            std::fs::read_to_string(source.path().join("a.txt")).unwrap(),
+            "user edit"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn promotion_cannot_cross_a_source_workspace_symlink() {
+        let source = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), source.path().join("linked")).unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        candidate
+            .apply(
+                &write_call("linked/escaped.txt", "must stay in overlay"),
+                &write_entry(),
+            )
+            .await
+            .unwrap();
+        assert!(candidate.promote().is_err());
+        assert!(!outside.path().join("escaped.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn resumed_candidate_keeps_the_original_source_precondition() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("a.txt"), "baseline").unwrap();
+        let first = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        first
+            .apply(&write_call("a.txt", "accepted"), &write_entry())
+            .await
+            .unwrap();
+        let seed = first.export_accepted().await.unwrap();
+
+        std::fs::write(source.path().join("a.txt"), "user edit while stopped").unwrap();
+        let resumed = CandidateWorkspace::create(source.path(), "n1", 0, "r2").unwrap();
+        resumed.restore_exported(&seed).unwrap();
+        assert!(resumed.promote().is_err());
+        assert_eq!(
+            std::fs::read_to_string(source.path().join("a.txt")).unwrap(),
+            "user edit while stopped"
         );
     }
 }
