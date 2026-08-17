@@ -40,52 +40,15 @@ pub struct ToolCall {
 pub struct AgentTools {
     /// Working directory (sandbox root)
     working_dir: PathBuf,
-    /// Whether to require user approval for commands
-    require_approval: bool,
-    /// Event sender for streaming output
-    event_sender: Option<perspt_core::events::channel::EventSender>,
 }
 
 impl AgentTools {
     /// Create new agent tools instance
-    pub fn new(working_dir: PathBuf, require_approval: bool) -> Self {
-        Self {
-            working_dir,
-            require_approval,
-            event_sender: None,
-        }
+    pub fn new(working_dir: PathBuf) -> Self {
+        Self { working_dir }
     }
-
-    /// Set event sender for streaming output
-    pub fn set_event_sender(&mut self, sender: perspt_core::events::channel::EventSender) {
-        self.event_sender = Some(sender);
-    }
-
-    /// Execute a tool call
-    pub async fn execute(&self, call: &ToolCall) -> ToolResult {
-        match call.name.as_str() {
-            "read_file" => self.read_file(call),
-            "search_code" => self.search_code(call),
-            "apply_patch" => self.apply_patch(call),
-            "run_command" => self.run_command(call).await,
-            "list_files" => self.list_files(call),
-            "write_file" => self.write_file(call),
-            "apply_diff" => self.apply_diff(call),
-            "edit_file" => self.edit_file(call),
-            "glob" => self.glob(call),
-            "git_read" => self.git_read(call),
-            "delete_file" => self.delete_file(call),
-            "move_file" => self.move_file(call),
-            // Power Tools (OS-level)
-            "sed_replace" => self.sed_replace(call),
-            "awk_filter" => self.awk_filter(call),
-            "diff_files" => self.diff_files(call),
-            _ => ToolResult::failure(&call.name, format!("Unknown tool: {}", call.name)),
-        }
-    }
-
     /// Read a file's contents
-    fn read_file(&self, call: &ToolCall) -> ToolResult {
+    pub(crate) fn read_file(&self, call: &ToolCall) -> ToolResult {
         let path = match call.arguments.get("path") {
             Some(p) => self.resolve_path(p),
             None => return ToolResult::failure("read_file", "Missing 'path' argument".to_string()),
@@ -98,7 +61,7 @@ impl AgentTools {
     }
 
     /// Search for code patterns using grep
-    fn search_code(&self, call: &ToolCall) -> ToolResult {
+    pub(crate) fn search_code(&self, call: &ToolCall) -> ToolResult {
         let query = match call.arguments.get("query") {
             Some(q) => q,
             None => {
@@ -132,41 +95,6 @@ impl AgentTools {
             Err(e) => ToolResult::failure("search_code", format!("Search failed: {}", e)),
         }
     }
-
-    /// Apply a patch to a file
-    fn apply_patch(&self, call: &ToolCall) -> ToolResult {
-        let path = match call.arguments.get("path") {
-            Some(p) => self.resolve_path(p),
-            None => {
-                return ToolResult::failure("apply_patch", "Missing 'path' argument".to_string())
-            }
-        };
-
-        let content = match call.arguments.get("content") {
-            Some(c) => c,
-            None => {
-                return ToolResult::failure("apply_patch", "Missing 'content' argument".to_string())
-            }
-        };
-
-        // Create parent directories if needed
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                return ToolResult::failure(
-                    "apply_patch",
-                    format!("Failed to create directories: {}", e),
-                );
-            }
-        }
-
-        match fs::write(&path, content) {
-            Ok(_) => ToolResult::success("apply_patch", format!("Successfully wrote {:?}", path)),
-            Err(e) => {
-                ToolResult::failure("apply_patch", format!("Failed to write {:?}: {}", path, e))
-            }
-        }
-    }
-
     /// Apply a unified diff patch to a file
     pub(crate) fn apply_diff(&self, call: &ToolCall) -> ToolResult {
         let path = match call.arguments.get("path") {
@@ -308,109 +236,8 @@ impl AgentTools {
             Err(e) => ToolResult::failure("git_read", format!("git failed to start: {e}")),
         }
     }
-
-    /// Run a shell command (requires approval unless auto-approve is set)
-    async fn run_command(&self, call: &ToolCall) -> ToolResult {
-        let cmd_str = match call.arguments.get("command") {
-            Some(c) => c,
-            None => {
-                return ToolResult::failure("run_command", "Missing 'command' argument".to_string())
-            }
-        };
-
-        // Honor explicit working_dir from the caller (e.g. sandbox path),
-        // falling back to self.working_dir (the main workspace).
-        let effective_dir = call
-            .arguments
-            .get("working_dir")
-            .map(PathBuf::from)
-            .filter(|d| d.is_dir())
-            .unwrap_or_else(|| self.working_dir.clone());
-
-        // PSP-5 Phase 4: Sanitize command through policy before execution
-        match perspt_policy::sanitize_command(cmd_str) {
-            Ok(sr) if sr.rejected => {
-                return ToolResult::failure(
-                    "run_command",
-                    format!(
-                        "Command rejected by policy: {}",
-                        sr.rejection_reason
-                            .unwrap_or_else(|| "unknown reason".to_string())
-                    ),
-                );
-            }
-            Ok(sr) => {
-                for warning in &sr.warnings {
-                    log::warn!("Command policy warning: {}", warning);
-                }
-            }
-            Err(e) => {
-                return ToolResult::failure(
-                    "run_command",
-                    format!("Command sanitization failed: {}", e),
-                );
-            }
-        }
-
-        // Validate workspace bounds
-        if let Err(e) = perspt_policy::validate_workspace_bound(cmd_str, &self.working_dir) {
-            return ToolResult::failure("run_command", format!("Command rejected: {}", e));
-        }
-
-        if self.require_approval {
-            log::info!("Command requires approval: {}", cmd_str);
-        }
-
-        self.spawn_and_stream(cmd_str, &effective_dir).await
-    }
-
-    /// Spawn a sanitized shell command and stream its output as log events.
-    async fn spawn_and_stream(&self, cmd_str: &str, effective_dir: &Path) -> ToolResult {
-        let mut child = match AsyncCommand::new("sh")
-            .args(["-c", cmd_str])
-            .current_dir(effective_dir)
-            .env_remove("VIRTUAL_ENV")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(e) => return ToolResult::failure("run_command", format!("Failed to spawn: {}", e)),
-        };
-
-        let stdout = child.stdout.take().expect("Failed to open stdout");
-        let stderr = child.stderr.take().expect("Failed to open stderr");
-        let stdout_handle = stream_lines(
-            BufReader::new(stdout).lines(),
-            self.event_sender.clone(),
-            "",
-        );
-        let stderr_handle = stream_lines(
-            BufReader::new(stderr).lines(),
-            self.event_sender.clone(),
-            "ERR: ",
-        );
-
-        let status = match child.wait().await {
-            Ok(s) => s,
-            Err(e) => return ToolResult::failure("run_command", format!("Failed to wait: {}", e)),
-        };
-
-        let stdout_str = stdout_handle.await.unwrap_or_default();
-        let stderr_str = stderr_handle.await.unwrap_or_default();
-
-        if status.success() {
-            ToolResult::success("run_command", stdout_str)
-        } else {
-            ToolResult::failure(
-                "run_command",
-                format!("Exit code: {:?}\n{}", status.code(), stderr_str),
-            )
-        }
-    }
-
     /// List files in a directory
-    fn list_files(&self, call: &ToolCall) -> ToolResult {
+    pub(crate) fn list_files(&self, call: &ToolCall) -> ToolResult {
         let path = call
             .arguments
             .get("path")
@@ -438,14 +265,38 @@ impl AgentTools {
         }
     }
 
-    /// Write content to a file
-    fn write_file(&self, call: &ToolCall) -> ToolResult {
-        // Alias for apply_patch with different semantics
-        self.apply_patch(call)
+    /// Create or replace a whole file, creating parent directories as needed
+    pub(crate) fn write_file(&self, call: &ToolCall) -> ToolResult {
+        let path = match call.arguments.get("path") {
+            Some(p) => self.resolve_path(p),
+            None => {
+                return ToolResult::failure("write_file", "Missing 'path' argument".to_string())
+            }
+        };
+        let content = match call.arguments.get("content") {
+            Some(c) => c,
+            None => {
+                return ToolResult::failure("write_file", "Missing 'content' argument".to_string())
+            }
+        };
+        if let Some(parent) = path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                return ToolResult::failure(
+                    "write_file",
+                    format!("Failed to create directories: {}", e),
+                );
+            }
+        }
+        match fs::write(&path, content) {
+            Ok(_) => ToolResult::success("write_file", format!("Successfully wrote {:?}", path)),
+            Err(e) => {
+                ToolResult::failure("write_file", format!("Failed to write {:?}: {}", path, e))
+            }
+        }
     }
 
     /// Delete a file from the workspace
-    fn delete_file(&self, call: &ToolCall) -> ToolResult {
+    pub(crate) fn delete_file(&self, call: &ToolCall) -> ToolResult {
         let path = match call.arguments.get("path") {
             Some(p) => self.resolve_path(p),
             None => {
@@ -479,7 +330,7 @@ impl AgentTools {
     }
 
     /// Move/rename a file within the workspace
-    fn move_file(&self, call: &ToolCall) -> ToolResult {
+    pub(crate) fn move_file(&self, call: &ToolCall) -> ToolResult {
         let from = match call
             .arguments
             .get("path")
@@ -534,153 +385,7 @@ impl AgentTools {
     // =========================================================================
     // Power Tools (OS-level operations)
     // =========================================================================
-
-    /// Replace text in a file using sed-like pattern matching
-    fn sed_replace(&self, call: &ToolCall) -> ToolResult {
-        let path = match call.arguments.get("path") {
-            Some(p) => self.resolve_path(p),
-            None => {
-                return ToolResult::failure("sed_replace", "Missing 'path' argument".to_string())
-            }
-        };
-
-        let pattern = match call.arguments.get("pattern") {
-            Some(p) => p,
-            None => {
-                return ToolResult::failure("sed_replace", "Missing 'pattern' argument".to_string())
-            }
-        };
-
-        let replacement = match call.arguments.get("replacement") {
-            Some(r) => r,
-            None => {
-                return ToolResult::failure(
-                    "sed_replace",
-                    "Missing 'replacement' argument".to_string(),
-                )
-            }
-        };
-
-        // Read file, perform replacement, write back
-        match fs::read_to_string(&path) {
-            Ok(content) => {
-                let new_content = content.replace(pattern, replacement);
-                match fs::write(&path, &new_content) {
-                    Ok(_) => ToolResult::success(
-                        "sed_replace",
-                        format!(
-                            "Replaced '{}' with '{}' in {:?}",
-                            pattern, replacement, path
-                        ),
-                    ),
-                    Err(e) => ToolResult::failure("sed_replace", format!("Failed to write: {}", e)),
-                }
-            }
-            Err(e) => {
-                ToolResult::failure("sed_replace", format!("Failed to read {:?}: {}", path, e))
-            }
-        }
-    }
-
-    /// Filter file content using awk-like field selection
-    fn awk_filter(&self, call: &ToolCall) -> ToolResult {
-        let path = match call.arguments.get("path") {
-            Some(p) => self.resolve_path(p),
-            None => {
-                return ToolResult::failure("awk_filter", "Missing 'path' argument".to_string())
-            }
-        };
-
-        let filter = match call.arguments.get("filter") {
-            Some(f) => f,
-            None => {
-                return ToolResult::failure("awk_filter", "Missing 'filter' argument".to_string())
-            }
-        };
-
-        // Use awk command for filtering
-        let output = Command::new("awk").arg(filter).arg(&path).output();
-
-        match output {
-            Ok(out) => {
-                if out.status.success() {
-                    ToolResult::success(
-                        "awk_filter",
-                        String::from_utf8_lossy(&out.stdout).to_string(),
-                    )
-                } else {
-                    ToolResult::failure(
-                        "awk_filter",
-                        String::from_utf8_lossy(&out.stderr).to_string(),
-                    )
-                }
-            }
-            Err(e) => ToolResult::failure("awk_filter", format!("Failed to run awk: {}", e)),
-        }
-    }
-
-    /// Show differences between two files
-    fn diff_files(&self, call: &ToolCall) -> ToolResult {
-        let file1 = match call.arguments.get("file1") {
-            Some(p) => self.resolve_path(p),
-            None => {
-                return ToolResult::failure("diff_files", "Missing 'file1' argument".to_string())
-            }
-        };
-
-        let file2 = match call.arguments.get("file2") {
-            Some(p) => self.resolve_path(p),
-            None => {
-                return ToolResult::failure("diff_files", "Missing 'file2' argument".to_string())
-            }
-        };
-
-        // Use diff command
-        let output = Command::new("diff")
-            .args([
-                "--unified",
-                &file1.to_string_lossy(),
-                &file2.to_string_lossy(),
-            ])
-            .output();
-
-        match output {
-            Ok(out) => {
-                // diff exits with 0 if files are same, 1 if different, 2 if error
-                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                if stdout.is_empty() {
-                    ToolResult::success("diff_files", "Files are identical".to_string())
-                } else {
-                    ToolResult::success("diff_files", stdout)
-                }
-            }
-            Err(e) => ToolResult::failure("diff_files", format!("Failed to run diff: {}", e)),
-        }
-    }
 }
-
-/// Read lines from a child pipe, forwarding each as a log event.
-fn stream_lines<R>(
-    mut reader: tokio::io::Lines<BufReader<R>>,
-    sender: Option<perspt_core::events::channel::EventSender>,
-    prefix: &'static str,
-) -> tokio::task::JoinHandle<String>
-where
-    R: tokio::io::AsyncRead + Unpin + Send + 'static,
-{
-    tokio::spawn(async move {
-        let mut output = String::new();
-        while let Ok(Some(line)) = reader.next_line().await {
-            if let Some(ref s) = sender {
-                let _ = s.send(perspt_core::AgentEvent::Log(format!("{prefix}{line}")));
-            }
-            output.push_str(&line);
-            output.push('\n');
-        }
-        output
-    })
-}
-
 /// Walk the workspace collecting files whose relative path matches `pattern`
 /// (via the plan-validation glob), with modification times for sorting.
 fn collect_glob_matches(
