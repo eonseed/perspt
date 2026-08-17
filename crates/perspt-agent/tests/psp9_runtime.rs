@@ -181,6 +181,30 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
         }
     }
     let session_id = session_id.expect("durable candidate checkpoint recorded before approval");
+    let checkpoint: serde_json::Value = serde_json::from_str(
+        &store
+            .latest_psp9_checkpoint(&session_id)
+            .unwrap()
+            .expect("candidate checkpoint"),
+    )
+    .unwrap();
+    let control: perspt_sdk::ControlFrame =
+        serde_json::from_value(checkpoint["control"].clone()).unwrap();
+    let conversation: Conversation =
+        serde_json::from_value(checkpoint["conversation"].clone()).unwrap();
+    assert_eq!(control.active_model, ModelId::new("test", "scripted"));
+    assert!(control.remaining_fallback_models.is_empty());
+    assert!(conversation.messages().iter().any(|message| matches!(
+        message,
+        perspt_sdk::Message::AssistantToolCalls { calls }
+            if calls.iter().any(|call| call.call_id == "edit-1")
+    )));
+    let graph_revisions_before_resume = store
+        .get_psp9_events(&session_id)
+        .unwrap()
+        .iter()
+        .filter(|row| row.event_json.contains("\"kind\":\"graph_revision\""))
+        .count();
     handle.abort();
     let _ = handle.await;
     assert_eq!(
@@ -212,4 +236,28 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
     let promoted = std::fs::read_to_string(project.path().join("src/lib.rs")).unwrap();
     let status = store.get_session(&session_id).unwrap().unwrap().status;
     assert!(promoted.contains("{ 2 }") && status == "COMPLETED_PSP9");
+    let resumed_rows = store.get_psp9_events(&session_id).unwrap();
+    let graph_events: Vec<_> = resumed_rows
+        .iter()
+        .filter_map(|row| {
+            let event: perspt_sdk::LedgerEvent = serde_json::from_str(&row.event_json).ok()?;
+            let perspt_sdk::LedgerEvent::Custom { kind, payload } = event else {
+                return None;
+            };
+            (kind == "graph_revision")
+                .then(|| serde_json::from_value::<perspt_sdk::WorkGraphRevision>(payload).unwrap())
+        })
+        .collect();
+    assert_eq!(
+        graph_events.len(),
+        graph_revisions_before_resume + 1,
+        "resume may append the terminal revision but must not fabricate a new root"
+    );
+    assert_eq!(
+        graph_events.last().unwrap().parent_revision_id.as_deref(),
+        Some(control.graph_revision.as_str())
+    );
+    assert!(resumed_rows
+        .iter()
+        .any(|row| row.event_json.contains("graph_revision_resumed")));
 }

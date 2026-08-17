@@ -192,6 +192,8 @@ impl LoopRecorder for Psp9Recorder {
         if let LoopEvent::DurableCandidateCheckpoint {
             state_root,
             control,
+            conversation,
+            canonical_scope,
             files,
         } = event
         {
@@ -204,6 +206,8 @@ impl LoopRecorder for Psp9Recorder {
                     "kind": "candidate",
                     "state_root": state_root,
                     "control": control,
+                    "conversation": conversation,
+                    "canonical_scope": canonical_scope,
                     "files": files,
                 }))?,
             )?;

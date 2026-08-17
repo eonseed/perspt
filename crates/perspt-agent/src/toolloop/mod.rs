@@ -109,6 +109,7 @@ fn finish(
     log: EventLog,
     projection: ProjectionMismatch,
     turns_used: u32,
+    recovery_spent: u32,
 ) -> LoopOutcome {
     LoopOutcome {
         outcome,
@@ -116,6 +117,7 @@ fn finish(
         events: log.into_events(),
         projection,
         turns_used,
+        recovery_spent,
     }
 }
 
@@ -128,25 +130,43 @@ enum BoundaryStep {
 
 impl ToolLoop<'_> {
     /// Run the loop to a classified terminal state (Paper II Lemma 1).
-    pub async fn run(mut self, goal: &str) -> Result<LoopOutcome> {
+    pub async fn run(self, goal: &str) -> Result<LoopOutcome> {
+        self.run_with_conversation(goal, None, Vec::new()).await
+    }
+
+    /// Re-enter from a durable provider-neutral conversation projection. The
+    /// runtime restores candidate state and budgets; this method restores only
+    /// model context and deferred tool activation.
+    pub async fn run_with_conversation(
+        mut self,
+        goal: &str,
+        resumed: Option<Conversation>,
+        restored_activated_tools: Vec<String>,
+    ) -> Result<LoopOutcome> {
         self.budgets.validate(&self.cadence)?;
         let mut log = EventLog::new(self.recorder.is_none());
         let mut projection = ProjectionMismatch::default();
         let mut recovery = RecoveryCascade::new(self.budgets.recovery_budget);
         let mut cursor = CompactionCursor::default();
-        let mut activated_tools = BTreeSet::new();
+        let mut activated_tools: BTreeSet<_> = restored_activated_tools.into_iter().collect();
+        if let Some(conversation) = resumed.as_ref() {
+            activated_tools.extend(activated_tools_from_conversation(conversation));
+        }
 
         // 1. Measured baseline and its real restore point.
         let mut accepted_checkpoint = self.executor.checkpoint(&[]).await?;
         let (baseline, mut trajectory) = self.measured_baseline(&mut log).await?;
         if let Some(outcome) = self.baseline_terminal(&baseline) {
-            return Ok(finish(outcome, trajectory, log, projection, 0));
+            return Ok(finish(outcome, trajectory, log, projection, 0, 0));
         }
 
-        let mut conversation = Conversation::with_system(
-            "You are a governed coding agent. Propose tool calls; every effect is mediated.",
-        );
-        conversation.push_user(goal.to_string());
+        let mut conversation = resumed.unwrap_or_else(|| {
+            let mut conversation = Conversation::with_system(
+                "You are a governed coding agent. Propose tool calls; every effect is mediated.",
+            );
+            conversation.push_user(goal.to_string());
+            conversation
+        });
 
         let mut turns_used = 0;
         let mut mutations_since_boundary = 0u32;
@@ -167,7 +187,14 @@ impl ToolLoop<'_> {
                 Ok(result) => result,
                 Err(error) => {
                     let outcome = self.contain(&error, &accepted_checkpoint, &mut log).await?;
-                    return Ok(finish(outcome, trajectory, log, projection, turns_used));
+                    return Ok(finish(
+                        outcome,
+                        trajectory,
+                        log,
+                        projection,
+                        turns_used,
+                        recovery.spent,
+                    ));
                 }
             };
             mutations_since_boundary = mutations_since_boundary.saturating_add(mutations);
@@ -184,13 +211,21 @@ impl ToolLoop<'_> {
                     &mut trajectory,
                     &mut recovery,
                     &mut conversation,
+                    &mut activated_tools,
                     &mut log,
                     &mut cursor,
                 )
                 .await?;
             match step {
                 BoundaryStep::Terminal(outcome) => {
-                    return Ok(finish(outcome, trajectory, log, projection, turns_used));
+                    return Ok(finish(
+                        outcome,
+                        trajectory,
+                        log,
+                        projection,
+                        turns_used,
+                        recovery.spent,
+                    ));
                 }
                 BoundaryStep::Exhausted => break,
                 BoundaryStep::Continue => {}
@@ -200,7 +235,14 @@ impl ToolLoop<'_> {
         let outcome = NodeTerminalOutcome::Escalated {
             certificate_id: uuid::Uuid::new_v4().to_string(),
         };
-        Ok(finish(outcome, trajectory, log, projection, turns_used))
+        Ok(finish(
+            outcome,
+            trajectory,
+            log,
+            projection,
+            turns_used,
+            recovery.spent,
+        ))
     }
 
     /// Unconditional containment: restore the last accepted state and
@@ -265,23 +307,15 @@ impl ToolLoop<'_> {
         trajectory: &mut AcceptedTrajectory,
         recovery: &mut RecoveryCascade,
         conversation: &mut Conversation,
+        activated_tools: &mut BTreeSet<String>,
         log: &mut EventLog,
         cursor: &mut CompactionCursor,
     ) -> Result<BoundaryStep> {
         let (measured, decision) = self.measure_and_gate(trajectory, log).await?;
 
-        if decision.is_accepted() {
+        let accepted = decision.is_accepted();
+        if accepted {
             *accepted_checkpoint = self.executor.checkpoint(&[]).await?;
-            self.durable_checkpoint(
-                goal,
-                turn,
-                accepted_checkpoint,
-                &measured,
-                trajectory,
-                conversation,
-                log,
-            )
-            .await?;
         } else if !matches!(decision, GateDecision::StoppedAtDeclaredFloor) {
             self.executor.restore(accepted_checkpoint).await?;
             emit(
@@ -294,20 +328,49 @@ impl ToolLoop<'_> {
         }
 
         if let Some(outcome) = self.classify_decision(&decision, &measured) {
+            if accepted {
+                self.durable_checkpoint(
+                    goal,
+                    turn,
+                    accepted_checkpoint,
+                    &measured,
+                    trajectory,
+                    recovery,
+                    conversation,
+                    activated_tools,
+                    log,
+                )
+                .await?;
+            }
             return Ok(BoundaryStep::Terminal(outcome));
         }
-        push_correction(conversation, &measured);
+        push_correction(conversation, &measured, accepted);
         self.maybe_compact(
             goal,
             turn,
             accepted_checkpoint,
             &measured,
             trajectory,
+            recovery,
             conversation,
+            activated_tools,
             log,
             cursor,
         )?;
-        if !decision.is_accepted() {
+        if accepted {
+            self.durable_checkpoint(
+                goal,
+                turn,
+                accepted_checkpoint,
+                &measured,
+                trajectory,
+                recovery,
+                conversation,
+                activated_tools,
+                log,
+            )
+            .await?;
+        } else {
             if trajectory.budget_exhausted() {
                 return Ok(BoundaryStep::Exhausted);
             }
@@ -464,7 +527,9 @@ impl ToolLoop<'_> {
         accepted_checkpoint: &CandidateCheckpoint,
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
+        recovery: &RecoveryCascade,
         conversation: &Conversation,
+        activated_tools: &BTreeSet<String>,
         log: &mut EventLog,
     ) -> Result<()> {
         let Some(recorder) = self.recorder else {
@@ -483,17 +548,29 @@ impl ToolLoop<'_> {
             accepted_checkpoint,
             measured,
             trajectory,
+            recovery,
             conversation,
+            activated_tools,
             authority_epoch,
         );
         let exported = self.executor.export_accepted().await?;
         let mut files = Vec::new();
-        for (path, bytes) in exported {
-            let handle = bytes
+        for seed in exported {
+            let content_artifact = seed
+                .content
                 .as_deref()
                 .map(|bytes| recorder.record_artifact(bytes, "application/octet-stream"))
                 .transpose()?;
-            files.push((path, handle));
+            let source_preimage_artifact = seed
+                .source_preimage
+                .as_deref()
+                .map(|bytes| recorder.record_artifact(bytes, "application/octet-stream"))
+                .transpose()?;
+            files.push(DurableSeedFile {
+                path: seed.path,
+                content_artifact,
+                source_preimage_artifact,
+            });
         }
         emit(
             self.recorder,
@@ -501,6 +578,8 @@ impl ToolLoop<'_> {
             LoopEvent::DurableCandidateCheckpoint {
                 state_root: accepted_checkpoint.witness.state_root.clone(),
                 control,
+                conversation: conversation.clone(),
+                canonical_scope: accepted_checkpoint.witness.canonical_scope.clone(),
                 files,
             },
         )
@@ -517,7 +596,9 @@ impl ToolLoop<'_> {
         accepted_checkpoint: &CandidateCheckpoint,
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
+        recovery: &RecoveryCascade,
         conversation: &Conversation,
+        activated_tools: &BTreeSet<String>,
         authority_epoch: u64,
     ) -> ControlFrame {
         ControlFrame {
@@ -533,8 +614,11 @@ impl ToolLoop<'_> {
             authority_epoch,
             remaining_rejection_budget: trajectory
                 .rejection_budget
-                .saturating_sub(trajectory.rejections_used),
+                .saturating_sub(trajectory.rejections_used.max(recovery.spent)),
             remaining_turns: self.budgets.max_turns.saturating_sub(turn),
+            active_model: self.model.clone(),
+            remaining_fallback_models: self.fallback_models.clone(),
+            activated_tools: activated_tools.iter().cloned().collect(),
             unresolved_call_ids: conversation.unresolved_call_ids(),
             residual_summary: measured
                 .residuals
@@ -552,7 +636,9 @@ impl ToolLoop<'_> {
         accepted_checkpoint: &CandidateCheckpoint,
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
+        recovery: &RecoveryCascade,
         conversation: &mut Conversation,
+        activated_tools: &BTreeSet<String>,
         log: &mut EventLog,
         cursor: &mut CompactionCursor,
     ) -> Result<()> {
@@ -582,7 +668,9 @@ impl ToolLoop<'_> {
             accepted_checkpoint,
             measured,
             trajectory,
+            recovery,
             conversation,
+            activated_tools,
             authority_epoch,
         );
         // The rolling chain root commits to every event so far in O(1); the
@@ -715,37 +803,36 @@ impl ToolLoop<'_> {
     #[allow(clippy::too_many_arguments)]
     fn budget_denial(
         &self,
-        log: &mut EventLog,
-        projection: &mut ProjectionMismatch,
-        call_id: &str,
         ordinal: u32,
         mutating: bool,
         mutations: u32,
         max_mutations: u32,
-    ) -> Result<Option<String>> {
+    ) -> Option<String> {
         if ordinal >= self.budgets.max_calls_per_turn {
-            return self
-                .deny(
-                    log,
-                    projection,
-                    call_id,
-                    "per-turn tool-call budget exceeded".into(),
-                    perspt_sdk::ResidualClass::BudgetExhausted,
-                )
-                .map(Some);
+            return Some("per-turn tool-call budget exceeded".into());
         }
         if mutating && mutations >= max_mutations {
-            return self
-                .deny(
-                    log,
-                    projection,
-                    call_id,
-                    "verification boundary required before another mutation".into(),
-                    perspt_sdk::ResidualClass::BudgetExhausted,
-                )
-                .map(Some);
+            return Some("verification boundary required before another mutation".into());
         }
-        Ok(None)
+        None
+    }
+
+    async fn record_unchecked_proposal(
+        &self,
+        call: &ProviderToolCall,
+        entry: &ToolEntry,
+        log: &mut EventLog,
+    ) -> Result<()> {
+        let before = self.executor.checkpoint(&[]).await?;
+        let proposal = proposal_from(call, entry, &self.node_id, self.generation, &before.witness);
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::ProposalObserved {
+                call_id: call.call_id.clone(),
+                proposal,
+            },
+        )
     }
 
     fn high_risk(entry: Option<&ToolEntry>) -> bool {
@@ -781,25 +868,52 @@ impl ToolLoop<'_> {
 
         let mut mutations = 0u32;
         let mut immediate_boundary = false;
-        for (ordinal, call) in calls.iter().enumerate() {
+        let mut calls_seen = 0u32;
+        for call in &calls {
             emit(
                 self.recorder,
                 log,
                 LoopEvent::ToolCallObserved { call: call.clone() },
             )?;
-            let entry = self.catalog.lookup(&call.name);
-            let mutating = entry.is_some_and(|entry| candidate_mutating_effect(entry.effect));
-            let mut response = match self.budget_denial(
-                log,
-                projection,
-                &call.call_id,
-                ordinal as u32,
-                mutating,
-                mutations,
-                max_mutations,
-            )? {
-                Some(denied) => denied,
-                None => {
+            let entry = self.catalog.lookup(&call.name).cloned();
+            let mutating = entry
+                .as_ref()
+                .is_some_and(|entry| candidate_mutating_effect(entry.effect));
+            let invalid = entry
+                .as_ref()
+                .and_then(|entry| entry.validate_arguments(&call.arguments).err())
+                .map(|error| anyhow::anyhow!(error.to_string()));
+            let budget = self.budget_denial(calls_seen, mutating, mutations, max_mutations);
+            calls_seen = calls_seen.saturating_add(1);
+            let mut response = match (invalid, budget) {
+                (Some(reason), _) => {
+                    self.record_unchecked_proposal(
+                        call,
+                        entry.as_ref().expect("validated entry"),
+                        log,
+                    )
+                    .await?;
+                    self.deny(
+                        log,
+                        projection,
+                        &call.call_id,
+                        reason.to_string(),
+                        perspt_sdk::ResidualClass::ToolArgumentInvalid,
+                    )?
+                }
+                (None, Some(reason)) => {
+                    if let Some(entry) = entry.as_ref() {
+                        self.record_unchecked_proposal(call, entry, log).await?;
+                    }
+                    self.deny(
+                        log,
+                        projection,
+                        &call.call_id,
+                        reason.to_string(),
+                        perspt_sdk::ResidualClass::BudgetExhausted,
+                    )?
+                }
+                (None, None) => {
                     self.check_and_apply(call, log, projection, &mut mutations)
                         .await?
                 }
@@ -816,7 +930,7 @@ impl ToolLoop<'_> {
                     .run_tool_program(
                         call,
                         &response,
-                        ordinal,
+                        &mut calls_seen,
                         max_mutations,
                         &mut mutations,
                         &mut immediate_boundary,
@@ -825,7 +939,7 @@ impl ToolLoop<'_> {
                     )
                     .await?;
             }
-            if mutating && Self::high_risk(entry) && mutations > 0 {
+            if mutating && Self::high_risk(entry.as_ref()) && mutations > 0 {
                 immediate_boundary = true;
             }
             conversation.push_tool_response(call.call_id.clone(), response);
@@ -840,7 +954,7 @@ impl ToolLoop<'_> {
         &mut self,
         call: &ProviderToolCall,
         response: &str,
-        ordinal: usize,
+        calls_seen: &mut u32,
         max_mutations: u32,
         mutations: &mut u32,
         immediate_boundary: &mut bool,
@@ -863,22 +977,49 @@ impl ToolLoop<'_> {
                     call: nested_call.clone(),
                 },
             )?;
-            let budget_ordinal = (ordinal + nested_ordinal + 1) as u32;
-            let nested_entry = self.catalog.lookup(&nested_call.name);
-            let nested_mutating =
-                nested_entry.is_some_and(|entry| candidate_mutating_effect(entry.effect));
-            let nested_high_risk = Self::high_risk(nested_entry);
-            let result = match self.budget_denial(
-                log,
-                projection,
-                &nested_call.call_id,
-                budget_ordinal,
-                nested_mutating,
-                *mutations,
-                max_mutations,
-            )? {
-                Some(denied) => denied,
-                None => {
+            let budget_ordinal = *calls_seen;
+            *calls_seen = (*calls_seen).saturating_add(1);
+            let nested_entry = self.catalog.lookup(&nested_call.name).cloned();
+            let nested_mutating = nested_entry
+                .as_ref()
+                .is_some_and(|entry| candidate_mutating_effect(entry.effect));
+            let nested_high_risk = Self::high_risk(nested_entry.as_ref());
+            let invalid = nested_entry
+                .as_ref()
+                .and_then(|entry| entry.validate_arguments(&nested_call.arguments).err())
+                .map(|error| anyhow::anyhow!(error.to_string()));
+            let budget =
+                self.budget_denial(budget_ordinal, nested_mutating, *mutations, max_mutations);
+            let result = match (invalid, budget) {
+                (Some(reason), _) => {
+                    self.record_unchecked_proposal(
+                        &nested_call,
+                        nested_entry.as_ref().expect("validated entry"),
+                        log,
+                    )
+                    .await?;
+                    self.deny(
+                        log,
+                        projection,
+                        &nested_call.call_id,
+                        reason.to_string(),
+                        perspt_sdk::ResidualClass::ToolArgumentInvalid,
+                    )?
+                }
+                (None, Some(reason)) => {
+                    if let Some(entry) = nested_entry.as_ref() {
+                        self.record_unchecked_proposal(&nested_call, entry, log)
+                            .await?;
+                    }
+                    self.deny(
+                        log,
+                        projection,
+                        &nested_call.call_id,
+                        reason,
+                        perspt_sdk::ResidualClass::BudgetExhausted,
+                    )?
+                }
+                (None, None) => {
                     self.check_and_apply(&nested_call, log, projection, mutations)
                         .await?
                 }
@@ -1139,6 +1280,32 @@ fn bounded_model_output(recorder: Option<&dyn LoopRecorder>, output: String) -> 
     ))
 }
 
+fn activated_tools_from_conversation(conversation: &Conversation) -> BTreeSet<String> {
+    let mut search_calls = BTreeSet::new();
+    let mut activated = BTreeSet::new();
+    for message in conversation.messages() {
+        match message {
+            perspt_sdk::Message::AssistantToolCalls { calls } => {
+                search_calls.extend(
+                    calls
+                        .iter()
+                        .filter(|call| call.name == "tool_search")
+                        .map(|call| call.call_id.clone()),
+                );
+            }
+            perspt_sdk::Message::ToolResponse { call_id, content }
+                if search_calls.contains(call_id) =>
+            {
+                if let Ok(specs) = serde_json::from_str::<Vec<perspt_sdk::ToolSpec>>(content) {
+                    activated.extend(specs.into_iter().map(|spec| spec.name));
+                }
+            }
+            _ => {}
+        }
+    }
+    activated
+}
+
 fn proposal_scope(call: &ProviderToolCall) -> Vec<String> {
     ["path", "to", "from"]
         .iter()
@@ -1224,16 +1391,23 @@ fn proposal_from(
     proposal
 }
 
-fn push_correction(conversation: &mut Conversation, measured: &Measured) {
+fn push_correction(conversation: &mut Conversation, measured: &Measured, accepted: bool) {
     let instruction = measured
         .correction
         .as_ref()
         .map(|c| c.instruction.clone())
         .unwrap_or_else(|| {
-            format!(
-                "The candidate did not descend (V = {:.3}). Address the dominant residual.",
-                measured.energy
-            )
+            if accepted {
+                format!(
+                    "The candidate descended to V = {:.3}. Continue addressing the remaining residuals.",
+                    measured.energy
+                )
+            } else {
+                format!(
+                    "The candidate did not descend (V = {:.3}). Address the dominant residual.",
+                    measured.energy
+                )
+            }
         });
     conversation.push_user(instruction);
 }

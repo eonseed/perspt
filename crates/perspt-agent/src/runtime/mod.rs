@@ -396,11 +396,17 @@ impl Psp9AgentRuntime {
         generation: u32,
         model: &ModelId,
         graph: &WorkGraphRevision,
-        seed: Option<&[crate::toolloop::SeedFile]>,
+        seed: Option<&CandidateSeed>,
+        shared_recovery_budget: u32,
     ) -> Result<NodeAttempt> {
         let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
-        if let Some(files) = seed {
-            candidate.restore_exported(files)?;
+        if let Some(seed) = seed {
+            candidate.restore_exported(&seed.files)?;
+            let restored = candidate.checkpoint(&seed.canonical_scope).await?;
+            anyhow::ensure!(
+                restored.witness.state_root == seed.expected_state_root,
+                "restored candidate state does not match its durable checkpoint"
+            );
         }
         let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
             .with_max_parallel(self.config.max_parallel_verifiers);
@@ -417,14 +423,25 @@ impl Psp9AgentRuntime {
             c_c_max: 0.25,
             executor: &candidate,
             measurer: &measurer,
-            budgets: self.loop_budgets(assembly.energy.rho_gate),
+            budgets: self.loop_budgets(assembly.energy.rho_gate, shared_recovery_budget),
             cadence: assembly.cadence.clone(),
             kernel_state: kernel_state.clone(),
             node_id: node_id.to_string(),
             generation,
             recorder: Some(recorder),
         };
-        let outcome = tool_loop.run(goal).await?;
+        let outcome = match seed {
+            Some(seed) => {
+                tool_loop
+                    .run_with_conversation(
+                        goal,
+                        Some(seed.conversation.clone()),
+                        seed.activated_tools.clone(),
+                    )
+                    .await?
+            }
+            None => tool_loop.run(goal).await?,
+        };
         Ok(NodeAttempt {
             outcome,
             candidate,
@@ -449,42 +466,58 @@ impl Psp9AgentRuntime {
         let (control, seed) = load_candidate_checkpoint(&recorder, &session_id)?;
         // Exactly the remaining budgets — a resume never refills what the
         // interrupted loop already spent.
-        self.config.max_turns = control.remaining_turns.max(1);
+        anyhow::ensure!(
+            control.remaining_turns > 0,
+            "the durable checkpoint has no model-turn budget remaining; resume cannot refill it"
+        );
+        self.config.max_turns = control.remaining_turns;
         self.config.rejection_budget = control.remaining_rejection_budget;
+        self.model = control.active_model.clone();
+        self.fallback_models = control.remaining_fallback_models.clone();
+        anyhow::ensure!(
+            self.transport.capabilities(&self.model).tool_calling,
+            "checkpoint model route {} no longer supports native tool calling",
+            self.model
+        );
         recorder.record_custom(
             "session_resumed",
             serde_json::json!({
                 "accepted_state_root": control.accepted_state_root,
                 "remaining_turns": self.config.max_turns,
                 "remaining_rejection_budget": self.config.rejection_budget,
-                "seed_files": seed.len(),
+                "seed_files": seed.files.len(),
+                "model": self.model,
+                "remaining_fallback_models": self.fallback_models,
+                "activated_tools": control.activated_tools,
             }),
         )?;
 
         let node_id = "implement-1".to_string();
         let task = control.goal.clone();
-        let running_graph = resumed_running_graph(&recorder, &node_id, &task)?;
-        let goal = format!(
-            "{task}\n\n[resumed] This session was interrupted after an accepted checkpoint. \
-             The candidate already contains the accepted work; continue from there."
-        );
+        let running_graph = resumed_running_graph(
+            &recorder,
+            &control.graph_revision,
+            &node_id,
+            control.node_generation,
+        )?;
         let attempt = match self
             .attempt_node(
                 &recorder,
                 &session_id,
-                &goal,
+                &task,
                 &node_id,
                 control.node_generation,
                 &self.model.clone(),
                 &running_graph,
                 Some(&seed),
+                self.config.rejection_budget,
             )
             .await
         {
             Ok(attempt) => attempt,
             Err(error) => return Err(self.fail_session(&recorder, error)),
         };
-        let verdict = self
+        let verdict = match self
             .conclude_run(ConcludeContext {
                 recorder: &recorder,
                 candidate: &attempt.candidate,
@@ -498,9 +531,17 @@ impl Psp9AgentRuntime {
                 loop_outcome: &attempt.outcome.outcome,
                 calibration: &attempt.assembly.calibration,
             })
-            .await?;
+            .await
+        {
+            Ok(verdict) => verdict,
+            Err(error) => return Err(self.fail_session(&recorder, error)),
+        };
         let (final_outcome, status, promoted_paths) = verdict;
-        self.finish_node(&recorder, &running_graph, &node_id, &final_outcome, status)?;
+        if let Err(error) =
+            self.finish_node(&recorder, &running_graph, &node_id, &final_outcome, status)
+        {
+            return Err(self.fail_session(&recorder, error));
+        }
         Ok(Psp9RunSummary {
             session_id,
             node_id,
@@ -528,6 +569,13 @@ impl Psp9AgentRuntime {
     ) -> Result<(NodeAttempt, WorkGraphRevision)> {
         let mut generation = 0u32;
         let mut model = self.model.clone();
+        let mut remaining_budget = self.config.rejection_budget.saturating_sub(
+            attempt
+                .outcome
+                .trajectory
+                .rejections_used
+                .max(attempt.outcome.recovery_spent),
+        );
         for level in [
             perspt_sdk::CascadeLevel::Refine,
             perspt_sdk::CascadeLevel::Escalate,
@@ -567,9 +615,24 @@ impl Psp9AgentRuntime {
             }
             attempt = self
                 .attempt_node(
-                    recorder, session_id, &goal, node_id, generation, &model, &graph, None,
+                    recorder,
+                    session_id,
+                    &goal,
+                    node_id,
+                    generation,
+                    &model,
+                    &graph,
+                    None,
+                    remaining_budget,
                 )
                 .await?;
+            remaining_budget = remaining_budget.saturating_sub(
+                attempt
+                    .outcome
+                    .trajectory
+                    .rejections_used
+                    .max(attempt.outcome.recovery_spent),
+            );
         }
         if matches!(
             attempt.outcome.outcome,
@@ -603,6 +666,7 @@ impl Psp9AgentRuntime {
                 &self.model.clone(),
                 &running_graph,
                 None,
+                self.config.rejection_budget,
             )
             .await
         {
@@ -624,7 +688,7 @@ impl Psp9AgentRuntime {
             Err(error) => return Err(self.fail_session(&recorder, error)),
         };
 
-        let verdict = self
+        let verdict = match self
             .conclude_run(ConcludeContext {
                 recorder: &recorder,
                 candidate: &attempt.candidate,
@@ -638,10 +702,16 @@ impl Psp9AgentRuntime {
                 loop_outcome: &attempt.outcome.outcome,
                 calibration: &attempt.assembly.calibration,
             })
-            .await?;
+            .await
+        {
+            Ok(verdict) => verdict,
+            Err(error) => return Err(self.fail_session(&recorder, error)),
+        };
         let (final_outcome, status, promoted_paths) = verdict;
         scheduler.finish(&node_id, 0);
-        self.finish_node(&recorder, &graph, &node_id, &final_outcome, status)?;
+        if let Err(error) = self.finish_node(&recorder, &graph, &node_id, &final_outcome, status) {
+            return Err(self.fail_session(&recorder, error));
+        }
 
         Ok(Psp9RunSummary {
             session_id,
@@ -674,15 +744,15 @@ impl Psp9AgentRuntime {
         error
     }
 
-    fn loop_budgets(&self, domain_rho_gate: f64) -> LoopBudgets {
+    fn loop_budgets(&self, domain_rho_gate: f64, shared_recovery_budget: u32) -> LoopBudgets {
         LoopBudgets {
             max_turns: self.config.max_turns,
             max_calls_per_turn: self.config.max_calls_per_turn,
-            rejection_budget: self.config.rejection_budget,
+            rejection_budget: shared_recovery_budget,
             rho_gate: self.config.rho_gate.max(domain_rho_gate),
             declared_energy_floor: None,
             context_soft_limit_chars: 240_000,
-            recovery_budget: self.config.rejection_budget,
+            recovery_budget: shared_recovery_budget,
         }
     }
 
@@ -943,7 +1013,19 @@ impl Psp9AgentRuntime {
             "files": promotion_files,
         });
         recorder.record_external_intent(&promotion_key, &promotion_intent)?;
-        let promoted_paths = candidate.promote()?;
+        let promoted_paths = recorder.store.with_authority_epoch(
+            &recorder.session_id,
+            grant_policy.authority_epoch,
+            || candidate.promote(),
+        )?;
+        recorder.record_custom(
+            "authority_epoch_effect_committed",
+            serde_json::json!({
+                "node_id": node_id,
+                "generation": generation,
+                "epoch": grant_policy.authority_epoch,
+            }),
+        )?;
         recorder.complete_external_effect(
             &promotion_key,
             &serde_json::json!({"idempotency_key": promotion_key, "paths": promoted_paths}),

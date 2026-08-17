@@ -14,12 +14,16 @@ const MAX_FILES: usize = 5_000;
 /// parallel with other read-only preparation.
 pub fn map_workspace(root: &Path) -> Result<ExplorationReport> {
     let mut scan = WorkspaceScan::default();
-    for entry in WalkBuilder::new(root)
+    let mut walker = WalkBuilder::new(root);
+    let walk_root = root.to_path_buf();
+    walker
         .hidden(false)
         .git_ignore(true)
         .git_global(true)
         .git_exclude(true)
         .max_depth(Some(12))
+        .filter_entry(move |entry| include_entry(&walk_root, entry.path()));
+    for entry in walker
         .build()
         .flatten()
         .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
@@ -51,6 +55,28 @@ pub fn map_workspace(root: &Path) -> Result<ExplorationReport> {
             .into(),
     });
     Ok(report)
+}
+
+fn include_entry(root: &Path, path: &Path) -> bool {
+    if path == root {
+        return true;
+    }
+    !path.components().any(|component| {
+        matches!(
+            component.as_os_str().to_str(),
+            Some(
+                ".git"
+                    | ".perspt"
+                    | ".venv"
+                    | ".pytest_cache"
+                    | ".ruff_cache"
+                    | ".mypy_cache"
+                    | "__pycache__"
+                    | "node_modules"
+                    | "target"
+            )
+        )
+    })
 }
 
 #[derive(Default)]
@@ -155,5 +181,29 @@ mod tests {
         assert_eq!(left.input_witnesses, right.input_witnesses);
         assert!(left.deterministically_backed);
         assert_eq!(left.project_map.build_systems, ["cargo"]);
+    }
+
+    #[test]
+    fn project_map_excludes_installed_environments_and_build_outputs() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("src")).unwrap();
+        std::fs::create_dir_all(root.path().join(".venv/lib/site-packages/pkg")).unwrap();
+        std::fs::create_dir_all(root.path().join("target/generated")).unwrap();
+        std::fs::write(root.path().join("pyproject.toml"), "[project]\nname='x'\n").unwrap();
+        std::fs::write(root.path().join("src/main.py"), "print('x')\n").unwrap();
+        std::fs::write(
+            root.path().join(".venv/lib/site-packages/pkg/main.py"),
+            "installed = True\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("target/generated/main.py"),
+            "generated = True\n",
+        )
+        .unwrap();
+
+        let report = map_workspace(root.path()).unwrap();
+        assert_eq!(report.project_map.languages, ["python:1"]);
+        assert_eq!(report.project_map.entry_points, ["src/main.py"]);
     }
 }

@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use perspt_agent::toolloop::{
     CandidateCheckpoint, CandidateMeasurer, EffectExecutor, EffectOutcome, LoopBudgets, LoopEvent,
-    Measured, ToolLoop,
+    LoopRecorder, Measured, ToolLoop,
 };
 use perspt_sdk::{
     ActorId, BarrierEvaluator, BarrierWitness, CandidateStateWitness, CandidateTransition,
@@ -22,6 +22,18 @@ use perspt_sdk::{
 /// A transport that replays a fixed script of turns.
 struct Scripted {
     turns: Mutex<Vec<TurnOutput>>,
+}
+
+#[derive(Default)]
+struct Recording {
+    events: Mutex<Vec<LoopEvent>>,
+}
+
+impl LoopRecorder for Recording {
+    fn record(&self, event: &LoopEvent) -> anyhow::Result<()> {
+        self.events.lock().unwrap().push(event.clone());
+        Ok(())
+    }
 }
 
 impl Scripted {
@@ -342,6 +354,51 @@ async fn context_projection_records_control_frame_before_reuse() {
     assert!(checkpoint.narrative_observation.is_none());
 }
 
+#[tokio::test]
+async fn durable_checkpoint_preserves_the_next_turn_projection() {
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![call(
+            "edit",
+            "edit_file",
+            serde_json::json!({
+                "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+            }),
+        )]),
+        TurnOutput::Text("done".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (false, 9.0), (true, 0.0)]);
+    let recorder = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.recorder = Some(&recorder);
+
+    let outcome = tool_loop.run("edit the file").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    let events = recorder.events.lock().unwrap();
+    let (control, conversation) = events
+        .iter()
+        .find_map(|event| match event {
+            LoopEvent::DurableCandidateCheckpoint {
+                control,
+                conversation,
+                ..
+            } if control.remaining_turns > 0 => Some((control, conversation)),
+            _ => None,
+        })
+        .expect("descent acceptance must persist a resumable projection");
+    assert_eq!(control.active_model, ModelId::new("test", "scripted"));
+    assert!(control.unresolved_call_ids.is_empty());
+    assert!(matches!(
+        conversation.messages().last(),
+        Some(perspt_sdk::Message::User { content })
+            if content.contains("descended to V = 9.000")
+    ));
+}
+
 /// MC-J: every executed effect traces to a model-issued call, and every
 /// returned call — including one above `M` — has a recorded proposal/result.
 #[tokio::test]
@@ -440,6 +497,45 @@ main
     }
 }
 
+#[tokio::test]
+async fn nested_tool_program_calls_share_the_top_level_turn_budget() {
+    let source = r#"
+def main():
+    return '[{"tool":"read_file","arguments":{"path":"a"}},{"tool":"read_file","arguments":{"path":"b"}},{"tool":"read_file","arguments":{"path":"c"}},{"tool":"read_file","arguments":{"path":"d"}},{"tool":"read_file","arguments":{"path":"e"}}]'
+main
+"#;
+    let transport = Scripted::new(vec![TurnOutput::ToolCalls(vec![call(
+        "program",
+        "tool_program",
+        serde_json::json!({"source": source}),
+    )])]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 1.0), (true, 0.0)]);
+
+    let outcome = loop_with(&transport, &catalog, &executor, &measurer)
+        .run("inspect")
+        .await
+        .unwrap();
+    // M=4 includes the top-level tool_program call, leaving three nested calls.
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 3);
+    let denied = outcome
+        .events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                LoopEvent::EffectDenied { class, .. }
+                    if *class == perspt_sdk::ResidualClass::BudgetExhausted
+            )
+        })
+        .count();
+    assert_eq!(denied, 2);
+}
+
 /// MC-J (budget half): a call above `M` is denied with a recorded pair, not
 /// silently dropped.
 #[tokio::test]
@@ -480,7 +576,40 @@ async fn mc_j_calls_above_m_are_denied_and_recorded() {
         .collect();
     // M = 4, six calls returned: two denied over budget.
     assert_eq!(denied, ["c4", "c5"]);
+    for call_id in ["c4", "c5"] {
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            LoopEvent::ProposalObserved { call_id: observed, .. } if observed == call_id
+        )));
+    }
     assert_eq!(executor.applied.load(Ordering::SeqCst), 4);
+}
+
+#[tokio::test]
+async fn malformed_tool_arguments_are_locally_denied_and_returned_to_the_model() {
+    let transport = Scripted::new(vec![TurnOutput::ToolCalls(vec![call(
+        "bad-edit",
+        "edit_file",
+        serde_json::json!({"path": "src/lib.rs", "old_string": 7}),
+    )])]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 1.0), (true, 0.0)]);
+
+    let outcome = loop_with(&transport, &catalog, &executor, &measurer)
+        .run("fix it")
+        .await
+        .unwrap();
+    assert_eq!(executor.applied.load(Ordering::SeqCst), 0);
+    assert!(outcome.events.iter().any(|event| matches!(
+        event,
+        LoopEvent::EffectDenied { call_id, class, .. }
+            if call_id == "bad-edit"
+                && *class == perspt_sdk::ResidualClass::ToolArgumentInvalid
+    )));
 }
 
 /// MC-M: the realized decision count never exceeds
