@@ -72,13 +72,25 @@ struct ArmRun {
 }
 
 async fn tool_loop_arm(config: &perspt_core::Config, fixture: &Fixture) -> anyhow::Result<ArmRun> {
+    tool_loop_arm_on(config, fixture, None).await
+}
+
+/// The governed arm, optionally pinned to an explicit actuator route.
+async fn tool_loop_arm_on(
+    config: &perspt_core::Config,
+    fixture: &Fixture,
+    route: Option<&ModelId>,
+) -> anyhow::Result<ArmRun> {
     let dir = tempfile::tempdir()?;
     write_project(dir.path(), fixture.lib_rs)?;
     let database = dir.path().join("bench.db");
     let runtime = perspt_agent::Psp9AgentRuntime::from_config(
         dir.path().to_path_buf(),
         config,
-        perspt_agent::Psp9ModelRoutes::default(),
+        perspt_agent::Psp9ModelRoutes {
+            primary: route.map(ToString::to_string),
+            ..perspt_agent::Psp9ModelRoutes::default()
+        },
         perspt_agent::Psp9RunConfig {
             approval_policy: perspt_sdk::ApprovalPolicy::Auto,
             max_turns: 8,
@@ -217,6 +229,8 @@ async fn main() -> anyhow::Result<()> {
         whole_file_report.add(BenchmarkResult::new(fixture.case_id, baseline.outcome));
     }
 
+    run_pair_arms(&config, &transport, &actuator).await?;
+
     println!();
     println!(
         "tool-loop:  hard-pass {:.0}%, residual-certified {:.0}%, false-stability {:.0}% (must be 0)",
@@ -235,5 +249,87 @@ async fn main() -> anyhow::Result<()> {
     );
     println!();
     println!("Failures preserved; no run was omitted (System 13).");
+    Ok(())
+}
+
+/// Best-of-two sequential governed runs — the unit of the arm-4 comparison.
+async fn pair_arm(
+    config: &perspt_core::Config,
+    fixture: &Fixture,
+    routes: [&ModelId; 2],
+) -> anyhow::Result<ArmRun> {
+    let mut seconds = 0.0;
+    let mut best: Option<ArmRun> = None;
+    for route in routes {
+        let run = tool_loop_arm_on(config, fixture, Some(route)).await?;
+        seconds += run.seconds;
+        let better = match &best {
+            None => true,
+            Some(current) => {
+                run.outcome == BenchmarkOutcome::HardPass
+                    && current.outcome != BenchmarkOutcome::HardPass
+            }
+        };
+        if better {
+            best = Some(run);
+        }
+    }
+    let mut best = best.expect("two routes ran");
+    best.seconds = seconds;
+    best.detail = "best of two governed runs".into();
+    Ok(best)
+}
+
+/// Arm 4 (spec phase 9): a heterogeneous proposer pair against two samples
+/// of the same model at comparable cost, so the ensemble policy can be
+/// *rejected by measurement*. Skipped (and said so) without a second
+/// family route.
+async fn run_pair_arms(
+    config: &perspt_core::Config,
+    transport: &perspt_agent::GenAiTransport,
+    actuator: &ModelId,
+) -> anyhow::Result<()> {
+    let second: Option<ModelId> = config
+        .models
+        .clone()
+        .unwrap_or_default()
+        .speculator
+        .as_deref()
+        .and_then(|value| value.parse().ok());
+    let Some(second) = second else {
+        println!();
+        println!("arm-4 pair comparison skipped: no [models].speculator second-family route");
+        return Ok(());
+    };
+    if !transport
+        .family_of(&second)
+        .is_distinct_from(&transport.family_of(actuator))
+    {
+        println!();
+        println!("arm-4 pair comparison skipped: speculator shares the actuator's family");
+        return Ok(());
+    }
+    println!();
+    println!("arm-4: heterogeneous pair vs two same-model samples");
+    for fixture in fixtures() {
+        let hetero = pair_arm(config, &fixture, [actuator, &second]).await?;
+        println!(
+            "  {:<24} {:<12} {:>9} {:>8.2}s  {}",
+            fixture.case_id,
+            "hetero-pair",
+            format!("{:?}", hetero.outcome),
+            hetero.seconds,
+            hetero.detail
+        );
+        let same = pair_arm(config, &fixture, [actuator, actuator]).await?;
+        println!(
+            "  {:<24} {:<12} {:>9} {:>8.2}s  {}",
+            fixture.case_id,
+            "same-pair",
+            format!("{:?}", same.outcome),
+            same.seconds,
+            same.detail
+        );
+    }
     Ok(())
 }

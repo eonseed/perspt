@@ -124,6 +124,7 @@ struct ConcludeContext<'a> {
 }
 
 mod adjudicate;
+mod ensemble;
 mod explore;
 mod node;
 mod recorder;
@@ -156,6 +157,8 @@ pub struct Psp9AgentRuntime {
     /// root selects from a `DomainRegistry` (explicit `--domain` or
     /// detection).
     domain: Arc<dyn AgentDomainPackage>,
+    /// Proposal-ensemble policy (system 7). Defaults to `Never`.
+    ensemble: perspt_sdk::EnsemblePolicy,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -217,6 +220,7 @@ impl Psp9AgentRuntime {
         )?
         .filter(|candidate| transport.capabilities(candidate).tool_calling);
         let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
+        let ensemble = resolve_ensemble_policy(config.ensemble.as_ref())?;
         Ok(Self {
             working_dir,
             transport,
@@ -235,6 +239,7 @@ impl Psp9AgentRuntime {
             ),
             extra_tool_entries: Vec::new(),
             domain: Arc::new(CodingDomain::new()),
+            ensemble,
         })
     }
 
@@ -264,6 +269,7 @@ impl Psp9AgentRuntime {
             ),
             extra_tool_entries: Vec::new(),
             domain: Arc::new(CodingDomain::new()),
+            ensemble: perspt_sdk::EnsemblePolicy::default(),
         }
     }
 
@@ -298,6 +304,12 @@ impl Psp9AgentRuntime {
     /// composition root). Defaults to the coding domain.
     pub fn with_domain(mut self, domain: Arc<dyn AgentDomainPackage>) -> Self {
         self.domain = domain;
+        self
+    }
+
+    /// Enable proposal ensembles (system 7). Off by default.
+    pub fn with_ensemble_policy(mut self, policy: perspt_sdk::EnsemblePolicy) -> Self {
+        self.ensemble = policy;
         self
     }
 
@@ -631,8 +643,9 @@ impl Psp9AgentRuntime {
                 }
                 _ => unreachable!("ladder iterates refine and escalate only"),
             }
-            attempt = self
-                .attempt_node(
+            let refine_rung = matches!(level, perspt_sdk::CascadeLevel::Refine);
+            let (next, spent) = self
+                .ladder_attempt(
                     recorder,
                     session_id,
                     &goal,
@@ -640,11 +653,12 @@ impl Psp9AgentRuntime {
                     generation,
                     &model,
                     &graph,
-                    None,
                     remaining_budget,
+                    refine_rung,
                 )
                 .await?;
-            remaining_budget = remaining_budget.saturating_sub(spent_of(&attempt));
+            attempt = next;
+            remaining_budget = remaining_budget.saturating_sub(spent);
         }
         contain_if_escalated(recorder, session_id, &attempt)?;
         Ok((attempt, graph, generation))

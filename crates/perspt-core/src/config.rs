@@ -290,6 +290,25 @@ pub struct Config {
     /// Shared MCP server configuration. Omitted modes default to agent-only.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub external_tools: Vec<ExternalToolConfig>,
+
+    /// Proposal-ensemble policy (`[ensemble]`; default off — Never).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ensemble: Option<EnsembleConfig>,
+}
+
+/// The `[ensemble]` policy block (PSP-9 system 7). Ensembles are opt-in:
+/// omitted fields keep the refusing defaults.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EnsembleConfig {
+    /// `after_gate_failure` or `never` (default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// Candidates per round, hard maximum 4.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u8>,
+    /// Refuse rounds that cannot supply distinct model families (default true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub require_distinct_family: Option<bool>,
 }
 
 impl Config {

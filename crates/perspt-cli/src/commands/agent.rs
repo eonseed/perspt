@@ -25,6 +25,7 @@ pub async fn run(
     persistent_grants: bool,
     domain: Option<String>,
     allow_dependency_mutation: bool,
+    ensemble_width: Option<u8>,
     exploration_only: bool,
     dashboard: bool,
     dashboard_port: u16,
@@ -83,6 +84,16 @@ pub async fn run(
         },
         run_config,
     )?;
+
+    if let Some(width) = ensemble_width {
+        // The CLI flag both enables the policy and sets its width; the
+        // config [ensemble] block is the durable form.
+        runtime = runtime.with_ensemble_policy(perspt_sdk::EnsemblePolicy {
+            trigger: perspt_sdk::EnsembleTrigger::AfterGateFailure,
+            width: width.clamp(1, perspt_sdk::EnsemblePolicy::MAX_WIDTH),
+            require_distinct_family: true,
+        });
+    }
 
     // Composition root: domains come from the open registry — an explicit
     // --domain id wins, otherwise the best detection. The coding domain is
