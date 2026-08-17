@@ -26,8 +26,12 @@ use std::collections::BTreeSet;
 
 use crate::realize::ProjectionMismatch;
 
+mod context;
 mod contract;
 pub use contract::*;
+
+pub(crate) use context::refold_session_context;
+use context::LoopContext;
 
 /// The loop's finite budgets (PSP-9 system 6).
 #[derive(Debug, Clone)]
@@ -148,9 +152,9 @@ impl ToolLoop<'_> {
         let mut projection = ProjectionMismatch::default();
         let mut recovery = RecoveryCascade::new(self.budgets.recovery_budget);
         let mut cursor = CompactionCursor::default();
-        let mut activated_tools: BTreeSet<_> = restored_activated_tools.into_iter().collect();
+        let mut restored_tools = restored_activated_tools;
         if let Some(conversation) = resumed.as_ref() {
-            activated_tools.extend(activated_tools_from_conversation(conversation));
+            restored_tools.extend(activated_tools_from_conversation(conversation));
         }
 
         // 1. Measured baseline and its real restore point.
@@ -160,13 +164,17 @@ impl ToolLoop<'_> {
             return Ok(finish(outcome, trajectory, log, projection, 0, 0));
         }
 
-        let mut conversation = resumed.unwrap_or_else(|| {
-            let mut conversation = Conversation::with_system(
+        let mut context = match resumed {
+            Some(conversation) => {
+                LoopContext::resume(conversation, restored_tools, self.recorder, &mut log)?
+            }
+            None => LoopContext::seed(
                 "You are a governed coding agent. Propose tool calls; every effect is mediated.",
-            );
-            conversation.push_user(goal.to_string());
-            conversation
-        });
+                goal,
+                self.recorder,
+                &mut log,
+            )?,
+        };
 
         let mut turns_used = 0;
         let mut mutations_since_boundary = 0u32;
@@ -176,11 +184,10 @@ impl ToolLoop<'_> {
                 .model_turn(
                     turn,
                     mutations_since_boundary,
-                    &mut conversation,
+                    &mut context,
                     &mut log,
                     &mut projection,
                     &mut recovery,
-                    &mut activated_tools,
                 )
                 .await;
             let (output, mutations, immediate_boundary) = match turn_result {
@@ -210,8 +217,7 @@ impl ToolLoop<'_> {
                     &mut accepted_checkpoint,
                     &mut trajectory,
                     &mut recovery,
-                    &mut conversation,
-                    &mut activated_tools,
+                    &mut context,
                     &mut log,
                     &mut cursor,
                 )
@@ -306,8 +312,7 @@ impl ToolLoop<'_> {
         accepted_checkpoint: &mut CandidateCheckpoint,
         trajectory: &mut AcceptedTrajectory,
         recovery: &mut RecoveryCascade,
-        conversation: &mut Conversation,
-        activated_tools: &mut BTreeSet<String>,
+        context: &mut LoopContext,
         log: &mut EventLog,
         cursor: &mut CompactionCursor,
     ) -> Result<BoundaryStep> {
@@ -336,15 +341,14 @@ impl ToolLoop<'_> {
                     &measured,
                     trajectory,
                     recovery,
-                    conversation,
-                    activated_tools,
+                    context,
                     log,
                 )
                 .await?;
             }
             return Ok(BoundaryStep::Terminal(outcome));
         }
-        push_correction(conversation, &measured, accepted);
+        push_correction(context, &measured, accepted, self.recorder, log)?;
         self.maybe_compact(
             goal,
             turn,
@@ -352,8 +356,7 @@ impl ToolLoop<'_> {
             &measured,
             trajectory,
             recovery,
-            conversation,
-            activated_tools,
+            context,
             log,
             cursor,
         )?;
@@ -365,8 +368,7 @@ impl ToolLoop<'_> {
                 &measured,
                 trajectory,
                 recovery,
-                conversation,
-                activated_tools,
+                context,
                 log,
             )
             .await?;
@@ -476,17 +478,17 @@ impl ToolLoop<'_> {
         &mut self,
         turn: u32,
         mutations_so_far: u32,
-        conversation: &mut Conversation,
+        context: &mut LoopContext,
         log: &mut EventLog,
         projection: &mut ProjectionMismatch,
         recovery: &mut RecoveryCascade,
-        activated_tools: &mut BTreeSet<String>,
     ) -> Result<(TurnOutput, u32, bool)> {
-        let specs = self
-            .catalog
-            .deferred_specs_for(&self.capabilities, activated_tools, false);
+        let specs =
+            self.catalog
+                .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
+        let conversation = context.conversation().clone();
         let output = self
-            .chat_with_failover(conversation, &specs, recovery, log)
+            .chat_with_failover(&conversation, &specs, recovery, log)
             .await?;
         // R2: record the observation before inspecting it.
         emit(
@@ -503,14 +505,7 @@ impl ToolLoop<'_> {
             .saturating_sub(mutations_so_far)
             .max(1);
         let (mutations, immediate_boundary) = self
-            .execute_turn(
-                &output,
-                max_mutations,
-                conversation,
-                log,
-                projection,
-                activated_tools,
-            )
+            .execute_turn(&output, max_mutations, context, log, projection)
             .await?;
         Ok((output, mutations, immediate_boundary))
     }
@@ -528,8 +523,7 @@ impl ToolLoop<'_> {
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
         recovery: &RecoveryCascade,
-        conversation: &Conversation,
-        activated_tools: &BTreeSet<String>,
+        context: &LoopContext,
         log: &mut EventLog,
     ) -> Result<()> {
         let Some(recorder) = self.recorder else {
@@ -549,8 +543,7 @@ impl ToolLoop<'_> {
             measured,
             trajectory,
             recovery,
-            conversation,
-            activated_tools,
+            context,
             authority_epoch,
         );
         let exported = self.executor.export_accepted().await?;
@@ -578,7 +571,7 @@ impl ToolLoop<'_> {
             LoopEvent::DurableCandidateCheckpoint {
                 state_root: accepted_checkpoint.witness.state_root.clone(),
                 control,
-                conversation: conversation.clone(),
+                conversation: context.conversation().clone(),
                 canonical_scope: accepted_checkpoint.witness.canonical_scope.clone(),
                 files,
             },
@@ -597,15 +590,11 @@ impl ToolLoop<'_> {
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
         recovery: &RecoveryCascade,
-        conversation: &Conversation,
-        activated_tools: &BTreeSet<String>,
+        context: &LoopContext,
         authority_epoch: u64,
     ) -> ControlFrame {
-        let projection_digest = serde_json::to_vec(conversation)
-            .map(|bytes| perspt_sdk::content_hash(&bytes))
-            .unwrap_or_default();
         ControlFrame {
-            projection_digest,
+            projection_digest: context.digest().to_string(),
             event_schema_version: perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
             goal: goal.to_string(),
             node_generation: self.generation,
@@ -623,8 +612,8 @@ impl ToolLoop<'_> {
             remaining_turns: self.budgets.max_turns.saturating_sub(turn),
             active_model: self.model.clone(),
             remaining_fallback_models: self.fallback_models.clone(),
-            activated_tools: activated_tools.iter().cloned().collect(),
-            unresolved_call_ids: conversation.unresolved_call_ids(),
+            activated_tools: context.activated_tools().iter().cloned().collect(),
+            unresolved_call_ids: context.conversation().unresolved_call_ids(),
             residual_summary: measured
                 .residuals
                 .iter()
@@ -642,8 +631,7 @@ impl ToolLoop<'_> {
         measured: &Measured,
         trajectory: &AcceptedTrajectory,
         recovery: &RecoveryCascade,
-        conversation: &mut Conversation,
-        activated_tools: &BTreeSet<String>,
+        context: &mut LoopContext,
         log: &mut EventLog,
         cursor: &mut CompactionCursor,
     ) -> Result<()> {
@@ -656,7 +644,7 @@ impl ToolLoop<'_> {
         } else {
             self.budgets.context_soft_limit_chars.min(route_chars)
         };
-        if conversation.estimated_chars() <= threshold {
+        if context.conversation().estimated_chars() <= threshold {
             return Ok(());
         }
 
@@ -674,8 +662,7 @@ impl ToolLoop<'_> {
             measured,
             trajectory,
             recovery,
-            conversation,
-            activated_tools,
+            context,
             authority_epoch,
         );
         // The rolling chain root commits to every event so far in O(1); the
@@ -706,7 +693,11 @@ impl ToolLoop<'_> {
             },
         )?;
         let control_json = serde_json::to_string(&checkpoint.control)?;
-        conversation.compact_with_control(format!("PERSPECTIVE_CONTROL_FRAME_V1\n{control_json}"));
+        context.compact(
+            format!("PERSPECTIVE_CONTROL_FRAME_V1\n{control_json}"),
+            self.recorder,
+            log,
+        )?;
         cursor.parent = Some(covered_root);
         cursor.next_from = checkpoint.covered_to.saturating_add(1);
         Ok(())
@@ -855,21 +846,24 @@ impl ToolLoop<'_> {
         &mut self,
         output: &TurnOutput,
         max_mutations: u32,
-        conversation: &mut Conversation,
+        context: &mut LoopContext,
         log: &mut EventLog,
         projection: &mut ProjectionMismatch,
-        activated_tools: &mut BTreeSet<String>,
     ) -> Result<(u32, bool)> {
         let calls = output.tool_calls().to_vec();
         if calls.is_empty() {
             if let TurnOutput::Text(text) = output {
-                conversation.push(perspt_sdk::Message::Assistant {
-                    content: text.clone(),
-                });
+                context.push_message(
+                    perspt_sdk::Message::Assistant {
+                        content: text.clone(),
+                    },
+                    self.recorder,
+                    log,
+                )?;
             }
             return Ok((0, false));
         }
-        conversation.push_tool_calls(calls.clone());
+        context.push_tool_calls(calls.clone(), self.recorder, log)?;
 
         let mut mutations = 0u32;
         let mut immediate_boundary = false;
@@ -927,7 +921,9 @@ impl ToolLoop<'_> {
                 // The response *is* the executed search result; activate from
                 // it instead of running the search a second time.
                 if let Ok(specs) = serde_json::from_str::<Vec<perspt_sdk::ToolSpec>>(&response) {
-                    activated_tools.extend(specs.into_iter().map(|spec| spec.name));
+                    for spec in specs {
+                        context.activate_tool(&spec.name, self.recorder, log)?;
+                    }
                 }
             }
             if call.name == "tool_program" && !response.starts_with("denied:") {
@@ -947,7 +943,7 @@ impl ToolLoop<'_> {
             if mutating && Self::high_risk(entry.as_ref()) && mutations > 0 {
                 immediate_boundary = true;
             }
-            conversation.push_tool_response(call.call_id.clone(), response);
+            context.push_tool_response(call.call_id.clone(), response, self.recorder, log)?;
         }
         Ok((mutations, immediate_boundary))
     }
@@ -1522,7 +1518,13 @@ fn bind_declared(
     proposal
 }
 
-fn push_correction(conversation: &mut Conversation, measured: &Measured, accepted: bool) {
+fn push_correction(
+    context: &mut LoopContext,
+    measured: &Measured,
+    accepted: bool,
+    recorder: Option<&dyn LoopRecorder>,
+    log: &mut EventLog,
+) -> Result<()> {
     let instruction = measured
         .correction
         .as_ref()
@@ -1540,7 +1542,7 @@ fn push_correction(conversation: &mut Conversation, measured: &Measured, accepte
                 )
             }
         });
-    conversation.push_user(instruction);
+    context.push_user(instruction, recorder, log)
 }
 
 /// The finite decision bound the loop must respect (logged at node entry;

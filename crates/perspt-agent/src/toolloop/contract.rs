@@ -89,6 +89,16 @@ pub trait CandidateMeasurer: Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum LoopEvent {
+    /// The fold base for the model context (Gate O). Additive: old ledgers
+    /// without seeds still replay.
+    ConversationSeeded {
+        seed: perspt_sdk::ConversationSeeded,
+    },
+    /// One digest-chained model-context change, recorded before it is
+    /// applied to the live projection.
+    ConversationDelta {
+        record: perspt_sdk::ConversationDeltaRecord,
+    },
     TurnObserved {
         turn: u32,
         output: TurnOutput,
