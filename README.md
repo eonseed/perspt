@@ -22,7 +22,7 @@ tested SDK mechanisms, and future work.
 
 ## Quick Start
 
-Perspt requires Rust 1.85 or newer.
+Perspt uses the pinned Rust 1.97.1 toolchain (edition 2021).
 
 ```bash
 git clone https://github.com/eonseed/perspt.git
@@ -219,11 +219,13 @@ parallel.
   route and activated tool set, re-mint epoch-bound capabilities, and continue
   with exactly its remaining turn and rejection budgets.
 
-External MCP-style tools are an optional edge integration in PSP 9, not the
-default tool plane. First-party coding work uses native typed tools, host-side
-deferred discovery, OS processes, LSP, and bounded Starlark composition. An
-external server cannot mint authority or bypass the kernel. MCP stdio and
-Streamable HTTP runtime registration remain incomplete.
+External MCP tools are an optional edge integration, not the default coding
+tool plane. The shared runtime supports lazy stdio and Streamable HTTP
+lifecycles, paginated discovery, local schema/admission checks, namespaced
+tools, bounded observations, and provider-free replay. An external server
+cannot mint authority or classify its own effects. The runtime can construct
+separate agent- and chat-scoped lifecycles from shared configuration; wiring
+the headless lifecycle into the existing TUI chat loop remains release work.
 
 ## Chat and Local Commands
 
@@ -245,6 +247,7 @@ locally and never sent to an LLM. It prints Perspt's family dedication.
 | `replay` | Provider-free PSP-9 audit replay |
 | `resume` | Resume or finish recoverable session state |
 | `dashboard` | Web monitoring UI |
+| `db repair` | Back up and quarantine a poisoned DuckDB WAL |
 | `logs` | LLM usage and request records |
 | `status` | Session and stability status |
 | `ledger` | Query the historical ledger |
@@ -282,6 +285,7 @@ The implementation uses the published [`srbn`](https://crates.io/crates/srbn),
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo deny check
 ```
 
 Build the documentation:
