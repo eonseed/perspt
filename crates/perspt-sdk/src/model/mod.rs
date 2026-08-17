@@ -11,6 +11,7 @@ mod conversation;
 mod ensemble;
 mod family;
 mod id;
+mod projection;
 mod tool;
 mod transport;
 
@@ -19,5 +20,9 @@ pub use conversation::{Conversation, Message};
 pub use ensemble::{EnsemblePolicy, EnsembleTrigger};
 pub use family::ModelFamily;
 pub use id::ModelId;
+pub use projection::{
+    ConversationDelta, ConversationDeltaRecord, ConversationProjection, ConversationSeeded,
+    CONVERSATION_EVENT_SCHEMA_VERSION,
+};
 pub use tool::{ProviderToolCall, ToolChoicePolicy, ToolSpec, TurnOutput};
 pub use transport::{ModelTransport, TransportFuture};

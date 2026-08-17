@@ -71,6 +71,7 @@ pub fn admit_external_tool(
         risk,
         schema: declaration.schema,
         footprint,
+        proposal_bindings: Vec::new(),
         // External calls are external effects: bracketed in the
         // write-ahead external-effect log (R5).
         durable: true,

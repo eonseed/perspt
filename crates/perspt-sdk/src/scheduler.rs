@@ -31,6 +31,11 @@ pub enum Resource {
     Migration(String),
     TestFixture(String),
     Toolchain(String),
+    /// An extension-defined resource family keyed by validated arguments.
+    Scoped {
+        family: String,
+        key: String,
+    },
     /// A specific capability in the capability table `Γ`.
     Capability(String),
     /// A named risk budget.

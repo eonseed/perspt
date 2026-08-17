@@ -40,6 +40,12 @@ pub enum ResourceSelector {
     /// The manifest owning the path in the named argument (e.g. the
     /// `Cargo.toml` above an edited source file).
     ParentManifestOf { field: String, access: AccessMode },
+    /// An extension-defined resource keyed by a validated scalar argument.
+    ScopedArgument {
+        family: String,
+        field: String,
+        access: AccessMode,
+    },
     /// The serving provider's rate limit — a throughput resource, never a
     /// required serialization (Gate P).
     ProviderRateLimit,
@@ -80,7 +86,8 @@ impl FootprintSpec {
         for selector in &self.selectors {
             let field = match selector {
                 ResourceSelector::PathArgument { field, .. }
-                | ResourceSelector::ParentManifestOf { field, .. } => field,
+                | ResourceSelector::ParentManifestOf { field, .. }
+                | ResourceSelector::ScopedArgument { field, .. } => field,
                 _ => continue,
             };
             let declared = properties.map(|p| p.contains_key(field)).unwrap_or(false);
@@ -127,6 +134,24 @@ impl FootprintSpec {
                         FieldValue::NotAString => return opaque_footprint(),
                     }
                 }
+                ResourceSelector::ScopedArgument {
+                    family,
+                    field,
+                    access,
+                } => match scalar_argument(arguments, field) {
+                    FieldValue::Present(key) => {
+                        footprint = add(
+                            footprint,
+                            Resource::Scoped {
+                                family: family.clone(),
+                                key,
+                            },
+                            *access,
+                        );
+                    }
+                    FieldValue::Absent => {}
+                    FieldValue::NotAString => return opaque_footprint(),
+                },
                 ResourceSelector::ProviderRateLimit => {
                     footprint = add(
                         footprint,
@@ -154,6 +179,16 @@ fn string_argument(arguments: &serde_json::Value, field: &str) -> FieldValue {
             Some(s) => FieldValue::Present(s.to_string()),
             None => FieldValue::NotAString,
         },
+    }
+}
+
+fn scalar_argument(arguments: &serde_json::Value, field: &str) -> FieldValue {
+    match arguments.get(field) {
+        None => FieldValue::Absent,
+        Some(serde_json::Value::String(value)) => FieldValue::Present(value.clone()),
+        Some(serde_json::Value::Number(value)) => FieldValue::Present(value.to_string()),
+        Some(serde_json::Value::Bool(value)) => FieldValue::Present(value.to_string()),
+        Some(_) => FieldValue::NotAString,
     }
 }
 

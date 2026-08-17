@@ -62,6 +62,7 @@ fn entry(
         risk,
         schema: arg_schema,
         footprint,
+        proposal_bindings: Vec::new(),
         durable,
         origin: ToolOrigin::Builtin,
     }
