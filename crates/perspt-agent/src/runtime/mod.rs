@@ -104,6 +104,41 @@ struct NodeAttempt {
     kernel_state: perspt_sdk::KernelState,
 }
 
+/// Gate decisions an attempt consumed, for the shared non-replenishing pool.
+fn spent_of(attempt: &NodeAttempt) -> u32 {
+    attempt
+        .outcome
+        .trajectory
+        .rejections_used
+        .max(attempt.outcome.recovery_spent)
+}
+
+/// Swap the scheduler's running entry to the refined generation so its view
+/// stays aligned with the graph revision (frees the old footprint, occupies
+/// the new one, and records the dispatch).
+fn redispatch_refined(
+    recorder: &Psp9Recorder,
+    scheduler: &mut Scheduler,
+    revised: &WorkGraphRevision,
+    node_id: &str,
+    prior_generation: u32,
+) -> Result<()> {
+    scheduler.finish(node_id, prior_generation);
+    let node = revised
+        .node(node_id)
+        .context("refined node missing from revision")?;
+    scheduler.start(node, node_footprint(node));
+    recorder.record_custom(
+        "scheduler_dispatch",
+        serde_json::json!({
+            "node_id": node.node_id,
+            "generation": node.generation,
+            "parallel_slot": 0,
+        }),
+    )?;
+    Ok(())
+}
+
 /// Everything `conclude_run` needs to decide a node's terminal fate.
 struct ConcludeContext<'a> {
     recorder: &'a Psp9Recorder,
@@ -563,19 +598,17 @@ impl Psp9AgentRuntime {
         recorder: &Psp9Recorder,
         session_id: &str,
         node_id: &str,
+        scheduler: &mut Scheduler,
         mut graph: WorkGraphRevision,
         mut goal: String,
         mut attempt: NodeAttempt,
-    ) -> Result<(NodeAttempt, WorkGraphRevision)> {
+    ) -> Result<(NodeAttempt, WorkGraphRevision, u32)> {
         let mut generation = 0u32;
         let mut model = self.model.clone();
-        let mut remaining_budget = self.config.rejection_budget.saturating_sub(
-            attempt
-                .outcome
-                .trajectory
-                .rejections_used
-                .max(attempt.outcome.recovery_spent),
-        );
+        let mut remaining_budget = self
+            .config
+            .rejection_budget
+            .saturating_sub(spent_of(&attempt));
         for level in [
             perspt_sdk::CascadeLevel::Refine,
             perspt_sdk::CascadeLevel::Escalate,
@@ -590,25 +623,15 @@ impl Psp9AgentRuntime {
                 perspt_sdk::CascadeLevel::Refine => {
                     let (revised, refined_goal) =
                         refine_node(recorder, &graph, node_id, generation, &goal, &attempt)?;
+                    redispatch_refined(recorder, scheduler, &revised, node_id, generation)?;
                     graph = revised;
                     generation += 1;
                     goal = refined_goal;
                 }
                 perspt_sdk::CascadeLevel::Escalate => {
-                    let Some(handoff) = self.handoff_model.clone() else {
+                    let Some(handoff) = self.escalation_handoff(recorder, &model)? else {
                         continue;
                     };
-                    if handoff == model {
-                        continue;
-                    }
-                    recorder.record_custom(
-                        "recovery_handoff",
-                        serde_json::json!({
-                            "level": "escalate",
-                            "from_model": model,
-                            "to_model": handoff,
-                        }),
-                    )?;
                     model = handoff;
                 }
                 _ => unreachable!("ladder iterates refine and escalate only"),
@@ -626,13 +649,7 @@ impl Psp9AgentRuntime {
                     remaining_budget,
                 )
                 .await?;
-            remaining_budget = remaining_budget.saturating_sub(
-                attempt
-                    .outcome
-                    .trajectory
-                    .rejections_used
-                    .max(attempt.outcome.recovery_spent),
-            );
+            remaining_budget = remaining_budget.saturating_sub(spent_of(&attempt));
         }
         if matches!(
             attempt.outcome.outcome,
@@ -647,7 +664,31 @@ impl Psp9AgentRuntime {
                 serde_json::json!({"level": "contain", "new_epoch": epoch}),
             )?;
         }
-        Ok((attempt, graph))
+        Ok((attempt, graph, generation))
+    }
+
+    /// Level-3 handoff: returns the higher-capability route when one is
+    /// configured and distinct from the current model.
+    fn escalation_handoff(
+        &self,
+        recorder: &Psp9Recorder,
+        current: &perspt_sdk::ModelId,
+    ) -> Result<Option<perspt_sdk::ModelId>> {
+        let Some(handoff) = self.handoff_model.clone() else {
+            return Ok(None);
+        };
+        if handoff == *current {
+            return Ok(None);
+        }
+        recorder.record_custom(
+            "recovery_handoff",
+            serde_json::json!({
+                "level": "escalate",
+                "from_model": current,
+                "to_model": handoff,
+            }),
+        )?;
+        Ok(Some(handoff))
     }
 
     pub async fn run(mut self, task: String) -> Result<Psp9RunSummary> {
@@ -673,11 +714,12 @@ impl Psp9AgentRuntime {
             Ok(attempt) => attempt,
             Err(error) => return Err(self.fail_session(&recorder, error)),
         };
-        let (attempt, graph) = match self
+        let (attempt, graph, final_generation) = match self
             .recovery_ladder(
                 &recorder,
                 &session_id,
                 &node_id,
+                &mut scheduler,
                 running_graph,
                 agent_goal,
                 first,
@@ -708,7 +750,7 @@ impl Psp9AgentRuntime {
             Err(error) => return Err(self.fail_session(&recorder, error)),
         };
         let (final_outcome, status, promoted_paths) = verdict;
-        scheduler.finish(&node_id, 0);
+        scheduler.finish(&node_id, final_generation);
         if let Err(error) = self.finish_node(&recorder, &graph, &node_id, &final_outcome, status) {
             return Err(self.fail_session(&recorder, error));
         }
