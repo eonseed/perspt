@@ -232,6 +232,18 @@ impl EventLog {
 pub trait LoopRecorder: Send + Sync {
     fn record(&self, event: &LoopEvent) -> Result<()>;
 
+    /// Write-ahead bracketing for durable external effects (system 13): the
+    /// intent is recorded before the effect runs and the result after, so an
+    /// interrupted run shows the open bracket. Defaults are no-ops for
+    /// in-memory conformance fixtures.
+    fn external_intent(&self, _key: &str, _intent: &serde_json::Value) -> Result<()> {
+        Ok(())
+    }
+
+    fn external_result(&self, _key: &str, _result: &serde_json::Value) -> Result<()> {
+        Ok(())
+    }
+
     /// Persist exact observation bytes and return their content handle. The
     /// default supports in-memory conformance fixtures; production recorders
     /// override it with durable content-addressed storage.

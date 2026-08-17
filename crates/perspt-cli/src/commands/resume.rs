@@ -128,6 +128,16 @@ async fn resume_psp9(
     let current_epoch = store.authority_epoch(&session.session_id)?;
     verify_persistent_grant(&store, &session.session_id, current_epoch)?;
     for effect in pending {
+        // Only promotion intents are replayable file operations. An open
+        // `tool:` bracket (e.g. an interrupted dependency mutation) is
+        // evidence, not a recipe: report it and leave it open.
+        if !effect.idempotency_key.starts_with("promote:") {
+            println!(
+                "Open external-effect bracket left unresolved: {} (inspect the ledger)",
+                effect.idempotency_key
+            );
+            continue;
+        }
         let intent: serde_json::Value = serde_json::from_str(&effect.intent_json)?;
         let epoch = intent
             .get("authority_epoch")

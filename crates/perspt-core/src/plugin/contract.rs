@@ -145,6 +145,25 @@ impl VerifierProfile {
 ///
 /// Runs `<binary> --version` silently; returns `true` if the process exits
 /// successfully. Used by plugins for per-sensor host-tool probing.
+/// A governed dependency-management action (Gate J).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyAction {
+    Add,
+    Remove,
+    Update,
+}
+
+impl DependencyAction {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "add" => Some(Self::Add),
+            "remove" => Some(Self::Remove),
+            "update" => Some(Self::Update),
+            _ => None,
+        }
+    }
+}
+
 pub fn host_binary_available(binary: &str) -> bool {
     std::process::Command::new(binary)
         .arg("--version")
@@ -420,6 +439,25 @@ pub trait LanguagePlugin: Send + Sync {
         _manifest_path: &str,
     ) -> crate::types::ManifestMutationPolicy {
         crate::types::ManifestMutationPolicy::Allow
+    }
+
+    /// The command sequence realizing a governed dependency action, or
+    /// empty when this plugin does not support dependency mutation. Every
+    /// returned command must itself satisfy `dependency_command_policy`,
+    /// and the handler re-checks it (fail closed).
+    fn dependency_commands(
+        &self,
+        _action: DependencyAction,
+        _packages: &[String],
+        _dev: bool,
+    ) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Workspace-relative manifest and lockfile paths a dependency command
+    /// may mutate — the promotable footprint of `mutate_dependencies`.
+    fn dependency_files(&self) -> Vec<String> {
+        Vec::new()
     }
 
     /// Policy for dependency-management commands emitted by the LLM.

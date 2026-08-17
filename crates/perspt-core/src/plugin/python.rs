@@ -302,12 +302,42 @@ impl LanguagePlugin for PythonPlugin {
         ]
     }
 
+    fn dependency_commands(
+        &self,
+        action: crate::plugin::DependencyAction,
+        packages: &[String],
+        dev: bool,
+    ) -> Vec<String> {
+        use crate::plugin::DependencyAction;
+        let list = packages.join(" ");
+        match action {
+            DependencyAction::Add if dev => vec![format!("uv add --dev {list}")],
+            DependencyAction::Add => vec![format!("uv add {list}")],
+            DependencyAction::Remove => vec![format!("uv remove {list}")],
+            DependencyAction::Update => {
+                let upgrades = packages
+                    .iter()
+                    .map(|p| format!("--upgrade-package {p}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                // The verifier sandbox runs offline against the synced env,
+                // so syncing is part of the governed action.
+                vec![format!("uv lock {upgrades}"), "uv sync".into()]
+            }
+        }
+    }
+
+    fn dependency_files(&self) -> Vec<String> {
+        vec!["pyproject.toml".into(), "uv.lock".into()]
+    }
+
     fn dependency_command_policy(&self, command: &str) -> crate::types::CommandPolicyDecision {
         let trimmed = command.trim();
         if trimmed.starts_with("uv add ")
             || trimmed.starts_with("uv pip install ")
             || trimmed.starts_with("pip install ")
             || trimmed.starts_with("uv sync")
+            || trimmed.starts_with("uv lock")
         {
             crate::types::CommandPolicyDecision::Allow
         } else if trimmed.starts_with("uv remove ") || trimmed.starts_with("pip uninstall ") {

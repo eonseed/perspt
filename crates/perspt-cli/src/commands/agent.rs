@@ -24,6 +24,7 @@ pub async fn run(
     max_parallel: usize,
     persistent_grants: bool,
     domain: Option<String>,
+    allow_dependency_mutation: bool,
     exploration_only: bool,
     dashboard: bool,
     dashboard_port: u16,
@@ -57,6 +58,7 @@ pub async fn run(
         approval_policy,
         max_parallel_verifiers: max_parallel.max(1),
         persistent_grants,
+        allow_dependency_mutation,
         ..perspt_agent::Psp9RunConfig::default()
     };
     let interactive = std::io::stdout().is_terminal();

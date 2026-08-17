@@ -292,6 +292,39 @@ impl CandidateWorkspace {
         Ok(named_paths)
     }
 
+    /// Admit paths a durable external command (e.g. a dependency mutation)
+    /// may touch: validate, journal pre-images, and track them, exactly as
+    /// argument-named paths are admitted before a mutating effect.
+    pub(crate) fn admit_external_paths(&self, paths: &[String]) -> Result<()> {
+        for rel in paths {
+            let rel = validate_relative_path(rel)?;
+            reject_symlink_ancestor(&self.overlay_root, &rel)?;
+            self.journal_pre_image(&rel)?;
+            self.tracked.lock().unwrap().insert(rel);
+        }
+        Ok(())
+    }
+
+    /// Mark externally mutated paths promotable. Callers pass only paths
+    /// whose content actually changed.
+    pub(crate) fn note_mutated_paths(&self, paths: &[String]) -> Result<()> {
+        let mut mutated = self.mutated_paths.lock().unwrap();
+        for rel in paths {
+            mutated.insert(validate_relative_path(rel)?);
+        }
+        Ok(())
+    }
+
+    /// Read a path from the overlay; `None` when absent.
+    pub(crate) fn overlay_bytes(&self, rel: &str) -> Result<Option<Vec<u8>>> {
+        let rel = validate_relative_path(rel)?;
+        match std::fs::read(self.overlay_root.join(&rel)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("reading {rel}")),
+        }
+    }
+
     /// Rebuild an accepted candidate state from a durable checkpoint's
     /// exported files (mid-loop resume): each file is journaled and written
     /// into the overlay, and re-enters the mutated (promotable) set.

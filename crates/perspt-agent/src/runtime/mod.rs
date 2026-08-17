@@ -36,6 +36,9 @@ pub struct Psp9RunConfig {
     /// Persist signed grant intent across sessions. Disabled by default;
     /// resume still re-mints fresh, epoch-bound capabilities.
     pub persistent_grants: bool,
+    /// Explicit opt-in for governed dependency mutation (Gate J). Off by
+    /// default: `MutateDependencies` stays withheld from every grant.
+    pub allow_dependency_mutation: bool,
 }
 
 impl Default for Psp9RunConfig {
@@ -49,6 +52,7 @@ impl Default for Psp9RunConfig {
             allow_unisolated_verifiers: false,
             max_parallel_verifiers: 4,
             persistent_grants: false,
+            allow_dependency_mutation: false,
         }
     }
 }
@@ -280,6 +284,15 @@ impl Psp9AgentRuntime {
         self
     }
 
+    /// Effects the user explicitly opted into beyond the default grant.
+    fn opted_in_effects(&self) -> Vec<EffectKind> {
+        if self.config.allow_dependency_mutation {
+            vec![EffectKind::MutateDependencies]
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Select the domain package (from a `DomainRegistry` at the
     /// composition root). Defaults to the coding domain.
     pub fn with_domain(mut self, domain: Arc<dyn AgentDomainPackage>) -> Self {
@@ -398,6 +411,7 @@ impl Psp9AgentRuntime {
             revision_id,
             self.config.persistent_grants,
             catalog,
+            &self.opted_in_effects(),
         )?;
         let signed_grant = if self.config.persistent_grants {
             let key = crate::grant::GrantSigningKey::resolve()?;
@@ -879,6 +893,7 @@ impl Psp9AgentRuntime {
                 grant_policy.authority_epoch,
                 generation,
                 &catalog,
+                &self.opted_in_effects(),
             ))
             .map_err(|e| anyhow::anyhow!("grant intersection: {e}"))?;
         let contract = CodingContract {

@@ -180,6 +180,14 @@ impl Psp9Recorder {
 }
 
 impl LoopRecorder for Psp9Recorder {
+    fn external_intent(&self, key: &str, intent: &serde_json::Value) -> Result<()> {
+        self.record_external_intent(key, intent)
+    }
+
+    fn external_result(&self, key: &str, result: &serde_json::Value) -> Result<()> {
+        self.complete_external_effect(key, result)
+    }
+
     fn record(&self, event: &LoopEvent) -> Result<()> {
         self.record_custom("tool_loop", serde_json::to_value(event)?)?;
         if let LoopEvent::ContextCheckpointCreated { checkpoint } = event {

@@ -175,6 +175,26 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
+    fn dependency_commands(
+        &self,
+        action: crate::plugin::DependencyAction,
+        packages: &[String],
+        dev: bool,
+    ) -> Vec<String> {
+        use crate::plugin::DependencyAction;
+        let list = packages.join(" ");
+        match action {
+            DependencyAction::Add if dev => vec![format!("cargo add --dev {list}")],
+            DependencyAction::Add => vec![format!("cargo add {list}")],
+            DependencyAction::Remove => vec![format!("cargo remove {list}")],
+            DependencyAction::Update => vec![format!("cargo update {list}")],
+        }
+    }
+
+    fn dependency_files(&self) -> Vec<String> {
+        vec!["Cargo.toml".into(), "Cargo.lock".into()]
+    }
+
     fn dependency_command_policy(&self, command: &str) -> crate::types::CommandPolicyDecision {
         let trimmed = command.trim();
         if trimmed.starts_with("cargo add ")

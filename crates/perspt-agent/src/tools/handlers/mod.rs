@@ -8,6 +8,7 @@
 //! wrapper (catalog → validate → budget → certify → execute → re-certify)
 //! is uniform and lives outside the handlers.
 
+mod deps;
 mod exec;
 mod fs;
 mod lsp;
@@ -68,6 +69,7 @@ impl CandidateHandlerRegistry {
         verify::register(&mut registry);
         exec::register(&mut registry);
         lsp::register(&mut registry);
+        deps::register(&mut registry);
         registry
     }
 
