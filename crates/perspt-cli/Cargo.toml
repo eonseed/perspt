@@ -2,6 +2,7 @@
 name = "perspt-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "CLI entry point for Perspt - A stability-aware AI coding assistant"
@@ -34,22 +35,22 @@ perspt-store = { workspace = true }
 perspt-dashboard = { workspace = true }
 
 # CLI
-clap = { version = "4.5", features = ["derive"] }
+clap = { workspace = true }
 rustyline = "18.0"
 
 # Async
-tokio = { version = "1.42", features = ["full"] }
+tokio = { workspace = true }
 
 # TLS crypto provider selection (Vertex ADC via gcp_auth uses rustls/ring).
 rustls = { version = "0.23", features = ["ring"] }
 
 # Logging
-log = "0.4"
+log = { workspace = true }
 env_logger = "0.11"
 
 # Utilities
-anyhow = "1.0"
-uuid = { version = "1", features = ["v4"] }
-serde_json = "1.0"
-dirs = "6.0"
+anyhow = { workspace = true }
+uuid = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
 axum = "0.8"

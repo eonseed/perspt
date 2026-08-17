@@ -2,6 +2,7 @@
 name = "perspt-agent"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "SRBN Orchestrator and Agent logic for Perspt"
@@ -24,35 +25,36 @@ perspt-sandbox = { workspace = true }
 perspt-store = { workspace = true }
 
 # Content addressing for realized workspace snapshots
-sha2 = "0.10"
+sha2 = { workspace = true }
 
 # Graph management
 petgraph = "0.8"
 
 # LSP Client
-lsp-types = "0.97"
+lsp-types = { workspace = true }
 url = "2.5"
 
 # UUID for session IDs
-uuid = { version = "1.11", features = ["v4"] }
+uuid = { workspace = true }
 
 # Async
-async-trait = "0.1.88"
-tokio = { version = "1.42", features = ["full", "process"] }
+async-trait = { workspace = true }
+tokio = { workspace = true }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Utilities
-anyhow = "1.0"
-log = "0.4"
+anyhow = { workspace = true }
+log = { workspace = true }
 # Code search (ripgrep library facade)
 grep = "0.4"
 ignore = "0.4"
 regex = "1.12.2"
 diffy = "0.5"
-tempfile = "3.14"
+tempfile = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }
+reqwest = { workspace = true }
 
 [dev-dependencies]

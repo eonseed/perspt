@@ -1,0 +1,36 @@
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+unmaintained = "workspace"
+ignore = [
+    { crate = "spin@0.9.8", reason = "All heapless-compatible spin 0.9 releases are yanked; transitive through starlark 0.14.2 and reviewed through 2026-11-17" },
+]
+
+[licenses]
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+    "ISC",
+    "LGPL-3.0-only",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

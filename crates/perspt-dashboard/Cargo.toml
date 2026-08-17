@@ -2,6 +2,7 @@
 name = "perspt-dashboard"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Real-time web dashboard for Perspt agent monitoring"
@@ -28,7 +29,7 @@ tower = "0.5"
 tower-http = { version = "0.7", features = ["fs", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-similar = "3"
+similar = { workspace = true }
 log = "0.4"
 anyhow = "1.0"
 rand = "0.10"

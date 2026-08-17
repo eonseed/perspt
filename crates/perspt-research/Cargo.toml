@@ -2,6 +2,7 @@
 name = "perspt-research"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Research domain package skeleton for the Perspt SRBN agent SDK: second-domain readiness check (PSP-8 Phase 10)"

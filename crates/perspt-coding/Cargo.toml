@@ -2,6 +2,7 @@
 name = "perspt-coding"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Coding domain package for the Perspt SRBN agent SDK: residual schema, energy model, and correction directions for Rust, Python, and TypeScript (PSP-8)"
