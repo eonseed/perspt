@@ -208,6 +208,36 @@ pub(crate) fn node_footprint(node: &WorkNode) -> Footprint {
         })
 }
 
+/// Resolve the `[ensemble]` config block into the SDK policy; omitted
+/// fields keep the refusing defaults, and an unknown trigger fails fast.
+pub(crate) fn resolve_ensemble_policy(
+    config: Option<&perspt_core::EnsembleConfig>,
+) -> Result<perspt_sdk::EnsemblePolicy> {
+    let mut policy = perspt_sdk::EnsemblePolicy::default();
+    let Some(config) = config else {
+        return Ok(policy);
+    };
+    if let Some(trigger) = config.trigger.as_deref() {
+        policy.trigger = match trigger {
+            "after_gate_failure" => perspt_sdk::EnsembleTrigger::AfterGateFailure,
+            "never" => perspt_sdk::EnsembleTrigger::Never,
+            other => anyhow::bail!("unknown ensemble trigger {other:?}"),
+        };
+    }
+    if let Some(width) = config.width {
+        anyhow::ensure!(
+            (1..=perspt_sdk::EnsemblePolicy::MAX_WIDTH).contains(&width),
+            "ensemble width must be between 1 and {}",
+            perspt_sdk::EnsemblePolicy::MAX_WIDTH
+        );
+        policy.width = width;
+    }
+    if let Some(distinct) = config.require_distinct_family {
+        policy.require_distinct_family = distinct;
+    }
+    Ok(policy)
+}
+
 /// Resolve an optional role route (explicit flag first, then config), and
 /// verify its provider eagerly so a typo fails before a session is created.
 pub(crate) fn resolve_role_route(

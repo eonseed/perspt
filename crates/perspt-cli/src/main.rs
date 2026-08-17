@@ -98,6 +98,10 @@ enum Commands {
         #[arg(long)]
         allow_dependency_mutation: bool,
 
+        /// Enable proposal ensembles after gate failures at this width (max 4)
+        #[arg(long)]
+        ensemble_width: Option<u8>,
+
         /// Run only the read-only exploration phase: deterministic map plus
         /// an interactive explorer tool loop; nothing is mutated or promoted
         #[arg(long)]
@@ -332,6 +336,7 @@ async fn main() -> Result<()> {
             persistent_grants,
             domain,
             allow_dependency_mutation,
+            ensemble_width,
             exploration_only,
             fallback_models,
             output_summary,
@@ -358,6 +363,7 @@ async fn main() -> Result<()> {
                 persistent_grants,
                 domain,
                 allow_dependency_mutation,
+                ensemble_width,
                 exploration_only,
                 dashboard,
                 dashboard_port,
