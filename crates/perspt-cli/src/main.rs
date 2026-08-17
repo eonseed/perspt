@@ -164,7 +164,7 @@ enum Commands {
         #[arg(long)]
         recent: bool,
 
-        /// Rollback to a specific commit hash
+        /// Roll back a session's newest completed promotion (session id prefix)
         #[arg(long)]
         rollback: Option<String>,
 

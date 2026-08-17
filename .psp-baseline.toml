@@ -33,11 +33,6 @@ rule = "PSP-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-cli/src/commands/status.rs"
-rule = "PSP-2"
-count = 1
-
-[[allow]]
 file = "crates/perspt-cli/src/main.rs"
 rule = "PSP-2"
 count = 1
@@ -59,21 +54,6 @@ count = 1
 
 [[allow]]
 file = "crates/perspt-dashboard/build.rs"
-rule = "PSP-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-dashboard/src/views/decisions.rs"
-rule = "PSP-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-dashboard/src/views/overview.rs"
-rule = "PSP-2"
-count = 1
-
-[[allow]]
-file = "crates/perspt-dashboard/src/views/session_detail.rs"
 rule = "PSP-2"
 count = 1
 
