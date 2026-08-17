@@ -3577,6 +3577,14 @@ Implementation Status
        re-runs at a new generation, level 3 hands the node to the configured
        architect route, and level 4 durably revokes the session's authority
        epoch — also wired to ``perspt abort`` and the TUI quit path.
+       Recovery is continuous: transient provider failures (429/5xx,
+       timeouts) are retried with bounded exponential backoff inside the
+       transport before any recovery control is drawn; each ladder rung
+       reseeds its candidate from the previous attempt's best accepted
+       state (restore-best across rungs, ledgered as ``ladder_reseeded``);
+       and containment caused by exhausted transport preserves the
+       authority epoch — an infrastructure outage never bricks ``perspt
+       resume`` — while governance containment still revokes.
    * - 6 — Ledger and replay
      - L, O
      - **Done**

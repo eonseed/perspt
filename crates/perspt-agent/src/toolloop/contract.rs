@@ -279,4 +279,7 @@ pub struct LoopOutcome {
     pub turns_used: u32,
     /// Horizontal controls consumed from Paper III's one shared recovery pool.
     pub recovery_spent: u32,
+    /// True when containment was caused by exhausted provider-transport
+    /// recovery — an infrastructure outcome, not a governance anomaly.
+    pub contained_by_transport: bool,
 }
