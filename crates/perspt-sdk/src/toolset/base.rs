@@ -353,49 +353,54 @@ fn command_entries() -> Vec<ToolEntry> {
             FootprintSpec::opaque(),
             false,
         ),
-        entry(
-            "mutate_dependencies",
-            "Add, remove, or update dependencies via the domain package manager",
-            EffectKind::MutateDependencies,
-            RiskClass::High,
-            serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "description": "add | remove | update"
-                    },
-                    "packages": {
-                        "type": "array",
-                        "description": "Package names (optionally versioned)",
-                        "items": {"type": "string"},
-                        "maxItems": 16
-                    },
-                    "dev": {
-                        "type": "boolean",
-                        "description": "Add as a development dependency"
-                    }
-                },
-                "required": ["action", "packages"],
-                "additionalProperties": false
-            }),
-            FootprintSpec::new(vec![
-                ResourceSelector::Literal {
-                    resource: crate::scheduler::Resource::Manifest("workspace".into()),
-                    access: AccessMode::Write,
-                },
-                ResourceSelector::Literal {
-                    resource: crate::scheduler::Resource::Lockfile("workspace".into()),
-                    access: AccessMode::Write,
-                },
-                ResourceSelector::Literal {
-                    resource: crate::scheduler::Resource::Toolchain("workspace".into()),
-                    access: AccessMode::Read,
-                },
-            ]),
-            true,
-        ),
+        dependency_entry(),
     ]
+}
+
+/// The governed dependency-mutation entry (Gate J).
+fn dependency_entry() -> ToolEntry {
+    entry(
+        "mutate_dependencies",
+        "Add, remove, or update dependencies via the domain package manager",
+        EffectKind::MutateDependencies,
+        RiskClass::High,
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "description": "add | remove | update"
+                },
+                "packages": {
+                    "type": "array",
+                    "description": "Package names (optionally versioned)",
+                    "items": {"type": "string"},
+                    "maxItems": 16
+                },
+                "dev": {
+                    "type": "boolean",
+                    "description": "Add as a development dependency"
+                }
+            },
+            "required": ["action", "packages"],
+            "additionalProperties": false
+        }),
+        FootprintSpec::new(vec![
+            ResourceSelector::Literal {
+                resource: crate::scheduler::Resource::Manifest("workspace".into()),
+                access: AccessMode::Write,
+            },
+            ResourceSelector::Literal {
+                resource: crate::scheduler::Resource::Lockfile("workspace".into()),
+                access: AccessMode::Write,
+            },
+            ResourceSelector::Literal {
+                resource: crate::scheduler::Resource::Toolchain("workspace".into()),
+                access: AccessMode::Read,
+            },
+        ]),
+        true,
+    )
 }
 
 /// High-risk command and network entries.
