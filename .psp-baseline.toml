@@ -18,11 +18,6 @@ rule = "PSP-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-cli/src/commands/logs.rs"
-rule = "PSP-2"
-count = 1
-
-[[allow]]
 file = "crates/perspt-cli/src/commands/resume.rs"
 rule = "PSP-2"
 count = 1
@@ -89,11 +84,6 @@ count = 1
 
 [[allow]]
 file = "crates/perspt-tui/src/diff_viewer.rs"
-rule = "PSP-2"
-count = 2
-
-[[allow]]
-file = "crates/perspt-tui/src/logs_viewer.rs"
 rule = "PSP-2"
 count = 2
 

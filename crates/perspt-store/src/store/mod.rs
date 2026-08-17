@@ -1,6 +1,6 @@
 //! Session Store Implementation
 //!
-//! Provides CRUD operations for SRBN sessions, node states, and energy history.
+//! CRUD operations for sessions and the PSP-9 governed ledger surfaces.
 
 use anyhow::{Context, Result};
 use duckdb::Connection;
@@ -9,16 +9,10 @@ use std::path::PathBuf;
 
 use crate::schema::init_schema;
 
-mod branches;
-mod evidence;
 mod handle;
-mod planning;
 mod psp9_ledger;
-mod reviews;
 mod rows;
 mod sessions;
-mod steps;
-mod telemetry;
 #[cfg(test)]
 mod tests;
 

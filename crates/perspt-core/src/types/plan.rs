@@ -350,17 +350,6 @@ impl PlannedTask {
             dependency_expectations: DependencyExpectation::default(),
         }
     }
-
-    /// Convert to SRBNNode
-    pub fn to_srbn_node(&self, tier: ModelTier) -> SRBNNode {
-        let mut node = SRBNNode::new(self.id.clone(), self.goal.clone(), tier);
-        node.context_files = self.context_files.iter().map(PathBuf::from).collect();
-        node.output_targets = self.output_files.iter().map(PathBuf::from).collect();
-        node.contract = self.contract.to_behavioral_contract();
-        node.node_class = self.node_class;
-        node.dependency_expectations = self.dependency_expectations.clone();
-        node
-    }
 }
 
 /// Contract specified in the plan
@@ -380,24 +369,15 @@ pub struct PlannedContract {
     pub tests: Vec<PlannedTest>,
 }
 
-impl PlannedContract {
-    /// Convert to BehavioralContract
-    pub fn to_behavioral_contract(&self) -> BehavioralContract {
-        BehavioralContract {
-            interface_signature: self.interface_signature.clone().unwrap_or_default(),
-            invariants: self.invariants.clone(),
-            forbidden_patterns: self.forbidden_patterns.clone(),
-            weighted_tests: self
-                .tests
-                .iter()
-                .map(|t| WeightedTest {
-                    test_name: t.name.clone(),
-                    criticality: t.criticality,
-                })
-                .collect(),
-            energy_weights: (1.0, 0.5, 2.0),
-        }
-    }
+/// Environment expectations a task declares (packages, setup, toolchain).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DependencyExpectation {
+    /// Packages or crates the task expects to be available.
+    pub required_packages: Vec<String>,
+    /// Setup commands that must have succeeded before this task runs.
+    pub setup_commands: Vec<String>,
+    /// Minimum toolchain version string (e.g. `"1.75"` for Rust).
+    pub min_toolchain_version: Option<String>,
 }
 
 /// A test case in the plan
@@ -405,13 +385,13 @@ impl PlannedContract {
 pub struct PlannedTest {
     /// Test name or pattern
     pub name: String,
-    /// Criticality level
+    /// Criticality level label (informational)
     #[serde(default = "default_criticality")]
-    pub criticality: Criticality,
+    pub criticality: String,
 }
 
-fn default_criticality() -> Criticality {
-    Criticality::High
+fn default_criticality() -> String {
+    "high".into()
 }
 
 /// Contract for command-type tasks (shell commands)

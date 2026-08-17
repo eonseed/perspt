@@ -280,26 +280,6 @@ pub enum NodeStatus {
     Aborted,
 }
 
-impl From<crate::types::NodeState> for NodeStatus {
-    fn from(state: crate::types::NodeState) -> Self {
-        use crate::types::NodeState;
-        match state {
-            NodeState::TaskQueued => NodeStatus::Queued,
-            NodeState::Planning => NodeStatus::Planning,
-            NodeState::Coding => NodeStatus::Coding,
-            NodeState::Verifying => NodeStatus::Verifying,
-            NodeState::Retry => NodeStatus::Retrying,
-            NodeState::SheafCheck => NodeStatus::SheafCheck,
-            NodeState::Committing => NodeStatus::Committing,
-            NodeState::Escalated => NodeStatus::Escalated,
-            NodeState::Completed => NodeStatus::Completed,
-            NodeState::Failed => NodeStatus::Failed,
-            NodeState::Aborted => NodeStatus::Aborted,
-            NodeState::Superseded => NodeStatus::Completed,
-        }
-    }
-}
-
 /// Type of action requiring approval
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ActionType {

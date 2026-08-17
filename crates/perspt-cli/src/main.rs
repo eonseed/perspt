@@ -231,24 +231,6 @@ enum Commands {
         db_path: Option<std::path::PathBuf>,
     },
 
-    /// View LLM request/response logs
-    Logs {
-        /// Session ID to view logs for
-        session_id: Option<String>,
-
-        /// Show logs from the most recent session
-        #[arg(long)]
-        last: bool,
-
-        /// Show usage statistics instead of individual requests
-        #[arg(long)]
-        stats: bool,
-
-        /// Launch interactive TUI logs viewer
-        #[arg(long)]
-        tui: bool,
-    },
-
     /// Simple CLI chat mode (no TUI)
     SimpleChat {
         /// Model to use for chat
@@ -407,12 +389,6 @@ async fn main() -> Result<()> {
             last,
             db_path,
         }) => commands::resume::run(session_id, last, db_path).await,
-        Some(Commands::Logs {
-            session_id,
-            last,
-            stats,
-            tui,
-        }) => commands::logs::run(session_id, last, stats, tui).await,
         Some(Commands::SimpleChat { model, log_file }) => {
             commands::simple_chat::run(commands::simple_chat::SimpleChatArgs {
                 model,
