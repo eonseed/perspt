@@ -190,10 +190,7 @@ impl LanguagePlugin for PythonPlugin {
         // Stdlib-only and offline: `uvx ty` would need a network download,
         // which the verifier sandbox denies. Import/syntax errors are also
         // caught by the test stage; this is the cheap incremental boundary.
-        Some(
-            r"uv run --no-sync python -m compileall -q -x '(\.venv|\.perspt|\.git)' ."
-                .to_string(),
-        )
+        Some(r"uv run --no-sync python -m compileall -q -x '(\.venv|\.perspt|\.git)' .".to_string())
     }
 
     fn lint_command(&self) -> Option<String> {
@@ -202,6 +199,15 @@ impl LanguagePlugin for PythonPlugin {
 
     fn file_ownership_patterns(&self) -> &[&str] {
         &["py", "pyproject.toml", "setup.py", "requirements.txt"]
+    }
+
+    fn is_test_file(&self, path: &str) -> bool {
+        let normalized = path.replace('\\', "/");
+        let file = normalized.rsplit('/').next().unwrap_or(&normalized);
+        normalized.starts_with("tests/")
+            || normalized.contains("/tests/")
+            || file.starts_with("test_") && file.ends_with(".py")
+            || file.ends_with("_test.py")
     }
 
     fn host_tool_available(&self) -> bool {

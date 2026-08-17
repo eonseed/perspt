@@ -94,6 +94,14 @@ impl LanguagePlugin for RustPlugin {
         &["rs", "Cargo.toml"]
     }
 
+    fn is_test_file(&self, path: &str) -> bool {
+        let normalized = path.replace('\\', "/");
+        let file = normalized.rsplit('/').next().unwrap_or(&normalized);
+        normalized.starts_with("tests/")
+            || normalized.contains("/tests/")
+            || file.ends_with("_test.rs")
+    }
+
     fn host_tool_available(&self) -> bool {
         host_binary_available("cargo")
     }
