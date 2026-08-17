@@ -13,7 +13,10 @@ pub mod portfolio;
 pub mod tools_driver;
 pub mod types;
 
-pub use config::{Config, ModelsConfig, ProviderEntry};
+pub use config::{
+    Config, ExternalToolConfig, ExternalToolMode, ExternalToolPolicy, ExternalToolTransport,
+    ModelsConfig, ProviderEntry,
+};
 pub use events::{ActionType, AgentAction, AgentEvent, NodeStatus};
 pub use llm_provider::{
     detect_provider_from_env, GenAIProvider, LlmResponse, ResolvedProvider, EOT_SIGNAL,

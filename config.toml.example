@@ -63,3 +63,33 @@ model = "gpt-4o-mini"
 # verifier    = "anthropic::<model>"
 # speculator  = "local::<model>"
 # adjudicator = "openai::<model>"
+
+# ---------------------------------------------------------------------------
+# Optional shared MCP servers
+# ---------------------------------------------------------------------------
+# Servers are lazy: they start only after deferred discovery in an eligible
+# mode. Omitted modes mean ["agent"]. Agent and chat always use separate
+# process/session lifecycles and separately minted capabilities.
+#
+# [[external_tools]]
+# id = "workspace-index"
+# transport = "stdio"
+# command = ["workspace-index-mcp", "--stdio"]
+# modes = ["agent", "chat"]
+# timeout_ms = 30000
+# max_result_bytes = 1048576
+# max_stderr_bytes = 65536
+# env_from_env = { INDEX_TOKEN = "WORKSPACE_INDEX_TOKEN" }
+#
+# [external_tools.tools.search]
+# effect = "data_read"
+# risk = "low"
+# footprint = { selectors = [{ kind = "scoped_argument", family = "index", field = "collection", access = "read" }] }
+# proposal_bindings = [{ kind = "multi_value", field = "collections", target = "path" }]
+#
+# [[external_tools]]
+# id = "records"
+# transport = "streamable_http"
+# url = "https://tools.example.test/mcp"
+# modes = ["agent"]
+# headers_from_env = { Authorization = "RECORDS_AUTHORIZATION" }
