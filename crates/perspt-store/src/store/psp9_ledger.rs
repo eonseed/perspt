@@ -343,6 +343,36 @@ impl SessionStore {
         Ok(epoch as u64)
     }
 
+    /// Execute one synchronous durable effect while holding the database's
+    /// authority-epoch write lock. Revocation uses the same row and therefore
+    /// cannot commit between the epoch check and `operation`.
+    pub fn with_authority_epoch<T>(
+        &self,
+        session_id: &str,
+        expected_epoch: u64,
+        operation: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        let mut conn = self.conn.lock().unwrap();
+        let transaction = conn.transaction()?;
+        let updated = transaction.execute(
+            "UPDATE psp9_authority_epochs SET epoch = epoch WHERE session_id = ?",
+            [session_id],
+        )?;
+        anyhow::ensure!(updated == 1, "authority epoch is not initialized");
+        let epoch: i64 = transaction.query_row(
+            "SELECT epoch FROM psp9_authority_epochs WHERE session_id = ?",
+            [session_id],
+            |row| row.get(0),
+        )?;
+        anyhow::ensure!(
+            epoch as u64 == expected_epoch,
+            "authority epoch changed before durable effect: expected {expected_epoch}, found {epoch}"
+        );
+        let output = operation()?;
+        transaction.commit()?;
+        Ok(output)
+    }
+
     pub fn revoke_authority(&self, session_id: &str) -> Result<u64> {
         let mut conn = self.conn.lock().unwrap();
         let transaction = conn.transaction()?;
@@ -604,5 +634,29 @@ mod tests {
             Some("rust:test:v1")
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn durable_effect_is_guarded_by_the_exact_authority_epoch() {
+        let (_dir, store) = scratch_store();
+        store.initialize_authority_epoch("s1", 3).unwrap();
+        let ran = std::sync::atomic::AtomicBool::new(false);
+        store
+            .with_authority_epoch("s1", 3, || {
+                ran.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+            .unwrap();
+        assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
+
+        store.revoke_authority("s1").unwrap();
+        ran.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(store
+            .with_authority_epoch("s1", 3, || {
+                ran.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            })
+            .is_err());
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
     }
 }
