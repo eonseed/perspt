@@ -155,21 +155,14 @@ latex_elements = {
 \usepackage{fontspec}
 \usepackage{graphicx}
 
-% Use a monospaced font if available, fallback to courier
-\setmonofont{Courier New}[
-    BoldFont={Courier New Bold},
-    ItalicFont={Courier New Italic},
-    BoldItalicFont={Courier New Bold Italic}
-]
+% Use a readable book face for prose and a distinct fixed-width face for code.
+% Both families ship with standard TeX Live installations.
+\setmainfont{TeX Gyre Pagella}
+\setsansfont{TeX Gyre Heros}
+\setmonofont{Latin Modern Mono}
 
-% Force monospaced throughout
-\renewcommand{\familydefault}{\ttdefault}
-
-% The monospaced family is used for prose too, and typewriter text does not
-% hyphenate by default, so long identifiers and words overran narrow table
-% columns and the page boundary. Enable typewriter hyphenation and allow a small
-% amount of emergency stretch so cell content wraps inside the page instead of
-% overflowing it.
+% Inline identifiers can still be long. Permit typewriter hyphenation and a
+% small amount of emergency stretch so tables stay within the page.
 \usepackage[htt]{hyphenat}
 \setlength{\emergencystretch}{3em}
 
