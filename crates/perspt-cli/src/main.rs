@@ -103,6 +103,10 @@ enum Commands {
         #[arg(long)]
         output_summary: Option<PathBuf>,
 
+        /// Path to the PSP-9 ledger database (defaults to platform data dir)
+        #[arg(long)]
+        db_path: Option<PathBuf>,
+
         /// Start the web monitoring dashboard alongside the agent
         #[arg(long)]
         dashboard: bool,
@@ -301,6 +305,7 @@ async fn main() -> Result<()> {
             exploration_only,
             fallback_models,
             output_summary,
+            db_path,
             dashboard,
             dashboard_port,
         }) => {
@@ -314,6 +319,7 @@ async fn main() -> Result<()> {
                 adjudicator_model,
                 fallback_models,
                 output_summary,
+                db_path,
                 rho_gate,
                 max_turns,
                 max_calls_per_turn,

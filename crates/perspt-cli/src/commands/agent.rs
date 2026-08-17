@@ -16,6 +16,7 @@ pub async fn run(
     adjudicator_model: Option<String>,
     fallback_models: Vec<String>,
     output_summary: Option<PathBuf>,
+    db_path: Option<PathBuf>,
     rho_gate: f64,
     max_turns: u32,
     max_calls_per_turn: u32,
@@ -80,11 +81,18 @@ pub async fn run(
         run_config,
     )?;
 
+    if let Some(path) = db_path.as_ref() {
+        runtime = runtime.with_database_path(path.clone());
+    }
+
     if dashboard {
         // One live handle: the dashboard reads through the same connection
         // the runtime writes, so no second DuckDB handle contends on the
         // database file.
-        let store = std::sync::Arc::new(perspt_store::SessionStore::new()?);
+        let store = std::sync::Arc::new(match db_path.as_ref() {
+            Some(path) => perspt_store::SessionStore::open(path)?,
+            None => perspt_store::SessionStore::new()?,
+        });
         start_dashboard(&working_dir, dashboard_port, store.clone()).await?;
         runtime = runtime.with_session_store(store);
     }
