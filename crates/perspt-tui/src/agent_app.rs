@@ -892,38 +892,6 @@ async fn drive_event_loop(
     }
 }
 
-pub async fn run_agent_tui_with_orchestrator(
-    mut orchestrator: perspt_agent::SRBNOrchestrator,
-    task: String,
-) -> anyhow::Result<()> {
-    use perspt_core::events::channel;
-
-    let (event_sender, mut event_receiver) = channel::event_channel();
-    let (action_sender, action_receiver) = channel::action_channel();
-    let abort_flag = orchestrator.abort_flag();
-    orchestrator.connect_tui(event_sender, action_receiver);
-
-    let mut terminal = ratatui::init();
-    let mut app = AgentApp::new();
-    app.set_action_sender(action_sender);
-    let orchestrator_handle = tokio::spawn(async move { orchestrator.run(task).await });
-
-    drive_event_loop(&mut app, &mut terminal, &mut event_receiver, || false).await?;
-    ratatui::restore();
-
-    // Request graceful abort and give the orchestrator time to finalize
-    abort_flag.store(true, std::sync::atomic::Ordering::Relaxed);
-    match tokio::time::timeout(std::time::Duration::from_secs(3), orchestrator_handle).await {
-        Ok(Ok(Ok(()))) => {} // Orchestrator finished cleanly
-        Ok(Ok(Err(e))) => log::warn!("Orchestrator finished with error: {}", e),
-        Ok(Err(e)) => log::warn!("Orchestrator task panicked: {}", e),
-        Err(_) => {
-            log::warn!("Orchestrator did not finish within 3s after abort — forcing shutdown");
-        }
-    }
-    Ok(())
-}
-
 /// Run the agent TUI against the authoritative PSP-9 runtime.
 pub async fn run_agent_tui_with_runtime(
     runtime: perspt_agent::Psp9AgentRuntime,
