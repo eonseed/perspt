@@ -1130,7 +1130,7 @@ impl ToolLoop<'_> {
                 perspt_sdk::ResidualClass::CapabilityDenied,
             );
         };
-        let scope = proposal_scope(call);
+        let scope = proposal_scope(call, &entry);
         let before = self.executor.checkpoint(&scope).await?;
         let proposal = proposal_from(
             call,
@@ -1311,12 +1311,49 @@ fn activated_tools_from_conversation(conversation: &Conversation) -> BTreeSet<St
     activated
 }
 
-fn proposal_scope(call: &ProviderToolCall) -> Vec<String> {
-    ["path", "to", "from"]
-        .iter()
-        .filter_map(|field| call.arguments.get(*field).and_then(|v| v.as_str()))
-        .map(str::to_string)
-        .collect()
+/// Paths a call names, for the checkpoint scope. An entry that declares
+/// `proposal_bindings` is authoritative; the conventional `path`/`to`/`from`
+/// fields cover the builtins, which declare none.
+fn proposal_scope(call: &ProviderToolCall, entry: &ToolEntry) -> Vec<String> {
+    if entry.proposal_bindings.is_empty() {
+        return ["path", "to", "from"]
+            .iter()
+            .filter_map(|field| call.arguments.get(*field).and_then(|v| v.as_str()))
+            .map(str::to_string)
+            .collect();
+    }
+    let mut scope = Vec::new();
+    for binding in &entry.proposal_bindings {
+        match binding {
+            perspt_sdk::ProposalBinding::Path { field } => {
+                if let Some(path) = call.arguments.get(field).and_then(|v| v.as_str()) {
+                    scope.push(path.to_string());
+                }
+            }
+            perspt_sdk::ProposalBinding::MultiValue { field, target }
+                if *target == perspt_sdk::MultiValueTarget::Path =>
+            {
+                scope.extend(string_array(call, field));
+            }
+            _ => {}
+        }
+    }
+    scope
+}
+
+/// The string elements of a schema-validated scalar array argument.
+fn string_array(call: &ProviderToolCall, field: &str) -> Vec<String> {
+    call.arguments
+        .get(field)
+        .and_then(|v| v.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The one definition of "this effect mutates the candidate overlay", shared
@@ -1381,17 +1418,66 @@ fn proposal_from(
                 resource: "__candidate_root".into(),
                 content_hash: before.state_root.clone(),
             }]);
-    if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
-        proposal = proposal.with_path(path);
+    if entry.proposal_bindings.is_empty() {
+        // Builtins: conventional field names.
+        if let Some(path) = call.arguments.get("path").and_then(|v| v.as_str()) {
+            proposal = proposal.with_path(path);
+        }
+        if let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) {
+            proposal = proposal.with_command(perspt_sdk::canonicalize(command, "."));
+        }
+        if let Some(path) = call.arguments.get("to").and_then(|v| v.as_str()) {
+            proposal = proposal.with_additional_paths(vec![path.to_string()]);
+        }
+        if let Some(url) = call.arguments.get("url").and_then(|v| v.as_str()) {
+            proposal = proposal.with_network_target(url);
+        }
+        return proposal;
     }
-    if let Some(command) = call.arguments.get("command").and_then(|v| v.as_str()) {
-        proposal = proposal.with_command(perspt_sdk::canonicalize(command, "."));
-    }
-    if let Some(path) = call.arguments.get("to").and_then(|v| v.as_str()) {
-        proposal = proposal.with_additional_paths(vec![path.to_string()]);
-    }
-    if let Some(url) = call.arguments.get("url").and_then(|v| v.as_str()) {
-        proposal = proposal.with_network_target(url);
+    // A registered entry declares its own scope extraction; the loop holds
+    // no per-tool field knowledge.
+    let mut primary_path_bound = false;
+    for binding in &entry.proposal_bindings {
+        match binding {
+            perspt_sdk::ProposalBinding::Path { field } => {
+                if let Some(path) = call.arguments.get(field).and_then(|v| v.as_str()) {
+                    if primary_path_bound {
+                        proposal = proposal.with_additional_paths(vec![path.to_string()]);
+                    } else {
+                        proposal = proposal.with_path(path);
+                        primary_path_bound = true;
+                    }
+                }
+            }
+            perspt_sdk::ProposalBinding::Command { field } => {
+                if let Some(command) = call.arguments.get(field).and_then(|v| v.as_str()) {
+                    proposal = proposal.with_command(perspt_sdk::canonicalize(command, "."));
+                }
+            }
+            perspt_sdk::ProposalBinding::Url { field } => {
+                if let Some(url) = call.arguments.get(field).and_then(|v| v.as_str()) {
+                    proposal = proposal.with_network_target(url);
+                }
+            }
+            perspt_sdk::ProposalBinding::MultiValue { field, target } => {
+                let values = string_array(call, field);
+                match target {
+                    perspt_sdk::MultiValueTarget::Path => {
+                        proposal = proposal.with_additional_paths(values);
+                    }
+                    perspt_sdk::MultiValueTarget::Command => {
+                        for value in values {
+                            proposal = proposal.with_command(perspt_sdk::canonicalize(&value, "."));
+                        }
+                    }
+                    perspt_sdk::MultiValueTarget::Url => {
+                        for value in values {
+                            proposal = proposal.with_network_target(&value);
+                        }
+                    }
+                }
+            }
+        }
     }
     proposal
 }
