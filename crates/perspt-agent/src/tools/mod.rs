@@ -11,7 +11,6 @@ use std::process::{Command, Stdio};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as AsyncCommand;
 
-mod definitions;
 mod executor;
 mod sandbox;
 #[cfg(test)]
@@ -19,6 +18,5 @@ mod sandbox_tests;
 #[cfg(test)]
 mod tests;
 
-pub use definitions::*;
 pub use executor::*;
 pub use sandbox::*;

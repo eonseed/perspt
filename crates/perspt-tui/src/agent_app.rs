@@ -777,16 +777,6 @@ impl AgentApp {
             .log("Manual approval modal Not Implemented".to_string());
     }
 
-    pub fn handle_terminal_event(&mut self, event: crossterm::event::Event) -> bool {
-        // Legacy bridge for run_agent_tui_with_orchestrator
-        if let crossterm::event::Event::Key(key) = event {
-            if key.code == KeyCode::Char('q') {
-                return false;
-            }
-        }
-        true
-    }
-
     pub fn render(&mut self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
