@@ -168,7 +168,7 @@ impl Psp9AgentRuntime {
             .or_else(|| config.models.as_ref().and_then(|m| m.actuator.as_deref()))
             .or(config.actuator_model.as_deref())
             .or(config.model.as_deref())
-            .unwrap_or_else(|| crate::ModelTier::default_model_name());
+            .unwrap_or_else(|| perspt_core::ModelTier::default_model_name());
         let model = qualify_model(route, config, &portfolio)?;
         // Resolve eagerly so a typo fails before a session is created.
         portfolio.resolve(&model.provider)?;

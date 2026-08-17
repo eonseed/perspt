@@ -481,6 +481,15 @@ pub(crate) fn load_candidate_checkpoint(
         conversation.unresolved_call_ids() == control.unresolved_call_ids,
         "checkpoint conversation does not match its unresolved-call control frame"
     );
+    let projection_digest = perspt_sdk::content_hash(&serde_json::to_vec(&conversation)?);
+    anyhow::ensure!(
+        control.event_schema_version == perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
+        "checkpoint conversation event schema is unsupported"
+    );
+    anyhow::ensure!(
+        projection_digest == control.projection_digest,
+        "checkpoint conversation projection digest mismatch"
+    );
     let file_handles: Vec<crate::toolloop::DurableSeedFile> =
         serde_json::from_value(value.get("files").cloned().context("checkpoint files")?)?;
     let current_epoch = recorder.store.authority_epoch(session_id)?;
