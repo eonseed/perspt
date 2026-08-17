@@ -221,6 +221,41 @@ impl SessionStore {
         Ok(updated)
     }
 
+    /// Single-assignment delayed label on every verdict row for a
+    /// candidate — the same oracle labels calibration samples and validator
+    /// verdicts in one pass (PSP-9 system 8).
+    pub fn label_psp9_verdicts(&self, candidate_id: &str, is_unsafe: bool) -> Result<usize> {
+        let updated = self.conn.lock().unwrap().execute(
+            "UPDATE psp9_verdicts SET unsafe_label = ? \
+             WHERE candidate_id = ? AND unsafe_label IS NULL",
+            duckdb::params![is_unsafe, candidate_id],
+        )?;
+        Ok(updated)
+    }
+
+    /// Labeled verdict rows across all sessions, for the independence
+    /// estimator (matched strata are joined by candidate id downstream).
+    pub fn labeled_psp9_verdicts(&self) -> Result<Vec<Psp9VerdictRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT session_id, candidate_id, validator_id, stratum, missed, \
+             unsafe_label, evidence_hash FROM psp9_verdicts \
+             WHERE unsafe_label IS NOT NULL ORDER BY candidate_id, validator_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(Psp9VerdictRow {
+                session_id: row.get(0)?,
+                candidate_id: row.get(1)?,
+                validator_id: row.get(2)?,
+                stratum: row.get(3)?,
+                missed: row.get(4)?,
+                unsafe_label: row.get(5)?,
+                evidence_hash: row.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
     /// Audit-selected samples still waiting for their delayed label.
     pub fn pending_psp9_audit_samples(&self, limit: usize) -> Result<Vec<(String, String, f64)>> {
         let conn = self.conn.lock().unwrap();

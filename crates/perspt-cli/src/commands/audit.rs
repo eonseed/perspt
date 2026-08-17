@@ -57,8 +57,12 @@ fn ingest_label(
         labeled > 0,
         "sample {sample_id} is unknown or already labeled (labels are single-assignment)"
     );
+    // The same delayed oracle labels validator verdicts (candidate id ==
+    // sample id == realized state root), feeding the pairwise
+    // independence estimator (system 8).
+    let verdicts = store.label_psp9_verdicts(&resolved.1, is_unsafe)?;
     println!(
-        "Labeled {} as {}.",
+        "Labeled {} as {} ({verdicts} validator verdict(s) labeled).",
         &resolved.1[..16.min(resolved.1.len())],
         if is_unsafe { "UNSAFE" } else { "safe" }
     );
