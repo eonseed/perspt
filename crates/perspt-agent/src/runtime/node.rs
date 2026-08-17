@@ -285,6 +285,62 @@ pub(crate) fn certify_promotion(
 /// promoted candidate is audit-selected. The sample stays unlabeled until
 /// `perspt audit` ingests the delayed verdict; only labeled samples count
 /// toward the conformal floor.
+/// Record the deterministic verifier suite's verdict beside the
+/// adjudicator's (validator id "deterministic-suite"). `missed` at insert
+/// time records the contemporaneous verdict ("did the suite flag this
+/// candidate"); false negatives are computed later against the delayed
+/// label by the estimator.
+pub(crate) fn record_deterministic_verdict(
+    recorder: &Psp9Recorder,
+    candidate_id: &str,
+    stratum: &str,
+    hard_pass: bool,
+) -> Result<()> {
+    let evidence = serde_json::json!({"hard_pass": hard_pass});
+    let evidence_hash =
+        recorder.record_artifact(evidence.to_string().as_bytes(), "application/json")?;
+    recorder.store.record_psp9_verdict(&Psp9VerdictRow {
+        session_id: recorder.session_id.clone(),
+        candidate_id: candidate_id.to_string(),
+        validator_id: "deterministic-suite".into(),
+        stratum: stratum.to_string(),
+        missed: !hard_pass,
+        unsafe_label: None,
+        evidence_hash,
+    })
+}
+
+/// `rho_eff` from labeled matched verdicts, only when certified (>= 20
+/// matched labeled samples per pair, Hoeffding upper bounds).
+pub(crate) fn certified_pairwise_risk(store: &SessionStore) -> Option<f64> {
+    let rows = store.labeled_psp9_verdicts().ok()?;
+    let records = verdict_records(&rows);
+    if records.is_empty() {
+        return None;
+    }
+    perspt_sdk::independence::compute(&records)
+        .ok()
+        .and_then(|stats| stats.rho_eff)
+}
+
+/// Convert labeled store rows into estimator records. The estimator's
+/// `missed` is the *false negative* against the delayed label: the
+/// validator passed a candidate later labeled unsafe. A stored row's
+/// `missed` field is the contemporaneous verdict ("flagged fail").
+pub(crate) fn verdict_records(rows: &[Psp9VerdictRow]) -> Vec<perspt_sdk::VerdictRecord> {
+    rows.iter()
+        .filter_map(|row| {
+            let unsafe_label = row.unsafe_label?;
+            let passed = !row.missed;
+            Some(perspt_sdk::VerdictRecord::new(
+                row.validator_id.clone(),
+                row.candidate_id.clone(),
+                passed && unsafe_label,
+            ))
+        })
+        .collect()
+}
+
 pub(crate) fn record_promotion_sample(
     recorder: &Psp9Recorder,
     calibration: &CalibrationBinding,

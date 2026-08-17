@@ -927,6 +927,16 @@ impl Psp9AgentRuntime {
         ctx: ConcludeContext<'_>,
     ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
         let hard_pass = matches!(ctx.loop_outcome, NodeTerminalOutcome::HardPass);
+        // The deterministic verifier suite is the second live validator
+        // (system 8): its verdict row shares the adjudicator's candidate id
+        // and stratum so delayed labels produce matched pairs.
+        let candidate_id = ctx.candidate.checkpoint(&[]).await?.witness.state_root;
+        record_deterministic_verdict(
+            ctx.recorder,
+            &candidate_id,
+            &ctx.calibration.stratum,
+            hard_pass,
+        )?;
         let promotion_approved = if hard_pass {
             let adjudicated = self
                 .adjudicate_candidate(
@@ -1339,7 +1349,9 @@ impl Psp9AgentRuntime {
                 "model": model,
                 "pass": verdict.pass,
                 "reason": verdict.reason,
-                "certified_risk": null,
+                // Certified only when every pair met the matched-label
+                // floor; otherwise absent, never a fabricated number.
+                "certified_risk": certified_pairwise_risk(&recorder.store),
             }),
         )?;
         Ok(verdict.pass)

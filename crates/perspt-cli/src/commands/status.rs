@@ -402,6 +402,58 @@ fn summarize_psp9_events(
 
 /// PSP-9 status: the governed ledger, gate decisions, calibration readiness,
 /// verdicts, and any incomplete external effects.
+/// Validator-independence statistics over labeled matched verdicts
+/// (system 8). Point estimates are labeled diagnostics; `rho_eff` is shown
+/// only when every pair met the matched-sample floor.
+fn print_independence(store: &perspt_store::SessionStore) {
+    let Ok(rows) = store.labeled_psp9_verdicts() else {
+        return;
+    };
+    let records = verdict_records(&rows);
+    if records.is_empty() {
+        println!("🧪 Independence:  insufficient evidence (no labeled matched verdicts)");
+        return;
+    }
+    match perspt_sdk::independence::compute(&records) {
+        Ok(stats) => {
+            for ((left, right), pair) in &stats.pairs {
+                println!(
+                    "🧪 Pair {left} × {right}: q={:.3}/{:.3} joint={:.3} upper={:.3} n={} \
+                     (label source: delayed audit)",
+                    pair.q_i, pair.q_j, pair.joint_miss, pair.joint_miss_upper, pair.samples
+                );
+            }
+            match stats.rho_eff {
+                Some(rho) => println!(
+                    "🧪 Independence:  rho_eff = {rho:.4} CERTIFIED ({} validators)",
+                    stats.validators
+                ),
+                None => println!(
+                    "🧪 Independence:  insufficient evidence ({} validators, floor {})",
+                    stats.validators,
+                    perspt_sdk::independence::DEFAULT_MIN_PAIR_SAMPLES
+                ),
+            }
+        }
+        Err(_) => println!("🧪 Independence:  insufficient evidence"),
+    }
+}
+
+/// The estimator's `missed` is the false negative against the delayed
+/// label: the validator passed a candidate later labeled unsafe.
+fn verdict_records(rows: &[perspt_store::Psp9VerdictRow]) -> Vec<perspt_sdk::VerdictRecord> {
+    rows.iter()
+        .filter_map(|row| {
+            let unsafe_label = row.unsafe_label?;
+            Some(perspt_sdk::VerdictRecord::new(
+                row.validator_id.clone(),
+                row.candidate_id.clone(),
+                !row.missed && unsafe_label,
+            ))
+        })
+        .collect()
+}
+
 fn psp9_status(
     store: &perspt_store::SessionStore,
     session: &perspt_store::SessionRecord,
@@ -440,6 +492,8 @@ fn psp9_status(
                 .unwrap_or("pending"),
         );
     }
+
+    print_independence(store);
 
     let pending = store.pending_external_effects(&session.session_id)?;
     if !pending.is_empty() {
