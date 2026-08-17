@@ -130,6 +130,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`Governed Agentic Platform: SRBN Tool Harness and Model Portfolio <psp-000009>`
      - Vikrant Rathore
      - Final
+   * - :psp:`000010`
+     - Enhancement
+     - :doc:`Bounded Search Trajectories and Provider-Conditioned Prompt Programs <psp-000010>`
+     - Vikrant Rathore
+     - Draft
 
 ====================
 Index by Category
@@ -224,6 +229,11 @@ Enhancement PSPs improve existing Perspt functionality.
      - :doc:`Governed Agentic Platform: SRBN Tool Harness and Model Portfolio <psp-000009>`
      - Vikrant Rathore
      - Final
+   * - :psp:`000010`
+     - Enhancement
+     - :doc:`Bounded Search Trajectories and Provider-Conditioned Prompt Programs <psp-000010>`
+     - Vikrant Rathore
+     - Draft
 
 UI/UX PSPs
 ===========
@@ -274,9 +284,9 @@ Draft PSPs (under development)
      - :doc:`Multi-line Input Support with Enhanced Navigation <psp-000002>`
      - Vikrant Rathore
      - Draft
-   * - :psp:`000009`
+   * - :psp:`000010`
      - Enhancement
-     - :doc:`Governed Agentic Platform: SRBN Tool Harness and Model Portfolio <psp-000009>`
+     - :doc:`Bounded Search Trajectories and Provider-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
      - Draft
 
