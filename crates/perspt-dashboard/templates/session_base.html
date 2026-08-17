@@ -11,10 +11,9 @@
 {# ── Session tab navigation ── #}
 <div role="tablist" class="tabs tabs-bordered mb-6">
     <a role="tab" class="tab{% if active_tab == "summary" %} tab-active{% endif %}" href="/sessions/{{ session_id }}">Summary</a>
-    <a role="tab" class="tab{% if active_tab == "dag" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/dag">DAG</a>
+    <a role="tab" class="tab{% if active_tab == "dag" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/topology">Topology</a>
+    <a role="tab" class="tab{% if active_tab == "backlog" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/backlog">Backlog</a>
     <a role="tab" class="tab{% if active_tab == "energy" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/energy">Energy</a>
-    <a role="tab" class="tab{% if active_tab == "llm" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/llm">LLM</a>
-    <a role="tab" class="tab{% if active_tab == "sandbox" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/sandbox">Sandbox</a>
     <a role="tab" class="tab{% if active_tab == "decisions" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/decisions">Decisions</a>
     <a role="tab" class="tab{% if active_tab == "governance" %} tab-active{% endif %}" href="/sessions/{{ session_id }}/governance">Governance</a>
 </div>

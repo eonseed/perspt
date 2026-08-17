@@ -5,9 +5,10 @@ use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::StreamExt;
 
 use crate::state::AppState;
-use crate::views::normalize_state;
+use crate::views::psp9::LedgerProjection;
 
-/// SSE endpoint: pushes named events for a session every 2 seconds.
+/// SSE endpoint: pushes a `psp9-stats` summary for a session every 2 seconds
+/// (ledger event count, measurement count, last measured energy).
 ///
 /// Route: `GET /sse/{session_id}`
 pub async fn sse_handler(
@@ -16,51 +17,37 @@ pub async fn sse_handler(
 ) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let interval = tokio::time::interval(std::time::Duration::from_secs(2));
     let stream = IntervalStream::new(interval).map(move |_| {
-        let store = &state.store;
-        let sid = &session_id;
-
-        // Node stats summary
-        let node_stats = match store.get_latest_node_states(sid) {
-            Ok(nodes) => {
-                let total = nodes.len();
-                let committed = nodes
-                    .iter()
-                    .filter(|n| normalize_state(&n.state) == "completed")
-                    .count();
-                let failed = nodes
-                    .iter()
-                    .filter(|n| normalize_state(&n.state) == "failed")
-                    .count();
-                let running = nodes
-                    .iter()
-                    .filter(|n| normalize_state(&n.state) == "running")
-                    .count();
-                // concat! keeps the payload a single line: SSE `data:` frames
-                // must not contain raw newlines.
-                format!(
-                    concat!(
-                        r#"<div class="stats shadow">"#,
-                        r#"<div class="stat"><div class="stat-title">Total</div>"#,
-                        r#"<div class="stat-value text-lg">{total}</div></div>"#,
-                        r#"<div class="stat"><div class="stat-title">Done</div>"#,
-                        r#"<div class="stat-value text-lg">{committed}</div></div>"#,
-                        r#"<div class="stat"><div class="stat-title">Running</div>"#,
-                        r#"<div class="stat-value text-lg">{running}</div></div>"#,
-                        r#"<div class="stat"><div class="stat-title">Failed</div>"#,
-                        r#"<div class="stat-value text-lg text-error">{failed}</div></div>"#,
-                        r#"</div>"#
-                    ),
-                    total = total,
-                    committed = committed,
-                    running = running,
-                    failed = failed
-                )
-            }
+        let payload = match state.store.get_psp9_events(&session_id) {
+            Ok(rows) => stats_fragment(&LedgerProjection::from_rows(&rows)),
             Err(_) => String::from("<span>DB unavailable</span>"),
         };
-
-        Ok(Event::default().event("node-stats").data(node_stats))
+        Ok(Event::default().event("psp9-stats").data(payload))
     });
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Render the live stats fragment. `concat!` keeps the payload a single
+/// line: SSE `data:` frames must not contain raw newlines.
+fn stats_fragment(projection: &LedgerProjection) -> String {
+    let last_energy = projection
+        .measurements
+        .last()
+        .map(|m| format!("{:.2}", m.energy))
+        .unwrap_or_else(|| "—".into());
+    format!(
+        concat!(
+            r#"<div class="stats shadow">"#,
+            r#"<div class="stat"><div class="stat-title">Ledger Events</div>"#,
+            r#"<div class="stat-value text-lg">{events}</div></div>"#,
+            r#"<div class="stat"><div class="stat-title">Measurements</div>"#,
+            r#"<div class="stat-value text-lg">{measurements}</div></div>"#,
+            r#"<div class="stat"><div class="stat-title">Last Energy</div>"#,
+            r#"<div class="stat-value text-lg">{last_energy}</div></div>"#,
+            r#"</div>"#
+        ),
+        events = projection.event_count,
+        measurements = projection.measurements.len(),
+        last_energy = last_energy
+    )
 }

@@ -1,29 +1,18 @@
+pub mod backlog;
 pub mod dag;
 pub mod decisions;
 pub mod energy;
 pub mod governance;
-pub mod llm;
 pub mod overview;
-pub mod sandbox;
+pub mod psp9;
 pub mod session_detail;
 
-/// Normalize a node/session state string for consistent display comparisons.
-/// Uses `NodeState::from_display_str` for canonical parsing, then maps
-/// active states to `"running"` for the dashboard UI.
-/// Session-level statuses ("PARTIAL", "ABORTED") are handled before node-state parsing.
-pub fn normalize_state(s: &str) -> String {
-    // Handle session-level statuses that are not node states.
-    match s.to_ascii_lowercase().as_str() {
-        "partial" => return "partial".to_string(),
-        "aborted" => return "aborted".to_string(),
-        _ => {}
-    }
-    let state = perspt_core::NodeState::from_display_str(s);
-    if state.is_active() {
-        "running".to_string()
-    } else {
-        state.to_string()
-    }
+/// Normalize a session status string for display: the PSP-9 runtime writes
+/// `RUNNING_PSP9` / `COMPLETED_PSP9` / `FAILED_PSP9` / `ESCALATED_PSP9`;
+/// strip the suffix and lowercase so badges match on stable names.
+pub fn normalize_status(s: &str) -> String {
+    let lower = s.to_ascii_lowercase();
+    lower.trim_end_matches("_psp9").to_string()
 }
 
 const ADJECTIVES: [&str; 32] = [

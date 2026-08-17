@@ -5,7 +5,9 @@ use axum::response::{Html, IntoResponse};
 use crate::error::DashboardError;
 use crate::state::AppState;
 use crate::views::friendly_name;
-use crate::views::governance::{EpochRow, GovernanceViewModel, PendingAuditRow, VerdictRow};
+use crate::views::governance::{
+    EpochRow, GovernanceViewModel, IndependenceView, PendingAuditRow, VerdictRow,
+};
 
 #[derive(Template)]
 #[template(path = "pages/governance.html")]
@@ -19,6 +21,7 @@ struct GovernanceTemplate {
     epochs: Vec<EpochRow>,
     verdicts: Vec<VerdictRow>,
     pending_audits: Vec<PendingAuditRow>,
+    independence: IndependenceView,
 }
 
 pub async fn governance_handler(
@@ -39,6 +42,8 @@ pub async fn governance_handler(
         .store
         .pending_psp9_audit_samples(50)
         .unwrap_or_default();
+    let labeled = state.store.labeled_psp9_verdicts().unwrap_or_default();
+    let independence = IndependenceView::from_rows(&labeled);
 
     let vm = GovernanceViewModel::from_store(
         session_id,
@@ -58,6 +63,7 @@ pub async fn governance_handler(
         epochs: vm.epochs,
         verdicts: vm.verdicts,
         pending_audits: vm.pending_audits,
+        independence,
     };
     Ok(Html(tmpl.render()?))
 }

@@ -3,89 +3,99 @@
 {% block session_content %}
 <h2 class="text-xl font-bold mb-4">{{ title }}</h2>
 
-{# ── Node Stats Banner ── #}
+{# ── Latest-revision node stats ── #}
 <div class="grid grid-cols-4 gap-3 mb-6">
     <div class="stat bg-base-100 rounded-box shadow-sm p-3">
-        <div class="stat-title text-xs">Total Nodes</div>
+        <div class="stat-title text-xs">Nodes (latest rev)</div>
         <div class="stat-value text-xl">{{ total_nodes }}</div>
     </div>
     <div class="stat bg-base-100 rounded-box shadow-sm p-3">
-        <div class="stat-title text-xs">Committed</div>
-        <div class="stat-value text-xl text-success">{{ committed_nodes }}</div>
+        <div class="stat-title text-xs">Stable</div>
+        <div class="stat-value text-xl text-success">{{ stable_nodes }}</div>
     </div>
     <div class="stat bg-base-100 rounded-box shadow-sm p-3">
         <div class="stat-title text-xs">Running</div>
         <div class="stat-value text-xl text-primary">{{ running_nodes }}</div>
     </div>
     <div class="stat bg-base-100 rounded-box shadow-sm p-3">
-        <div class="stat-title text-xs">Failed</div>
-        <div class="stat-value text-xl text-error">{{ failed_nodes }}</div>
+        <div class="stat-title text-xs">Stopped</div>
+        <div class="stat-value text-xl text-warning">{{ stopped_nodes }}</div>
     </div>
 </div>
 
-{% if nodes.is_empty() %}
-<div class="alert alert-info"><span>No nodes recorded yet.</span></div>
+{% if revisions.is_empty() %}
+<div class="alert alert-info"><span>No graph revisions ledgered yet.</span></div>
 {% else %}
 
-{# ── Expandable Node Cards ── #}
-<h3 class="text-md font-semibold mb-3">Nodes</h3>
-<div class="space-y-2 mb-6">
-    {% for n in nodes %}
-    <details class="collapse collapse-arrow bg-base-100 shadow-sm border-l-4
-        {% if n.state == "completed" %}border-success{% endif %}
-        {% if n.state == "failed" %}border-error{% endif %}
-        {% if n.state == "running" %}border-primary{% endif %}
-        {% if n.state != "completed" && n.state != "failed" && n.state != "running" %}border-base-300{% endif %}
-    ">
-        <summary class="collapse-title p-3 pe-10 min-h-0">
-            <div class="flex items-center gap-3 text-sm">
-                <span class="font-mono text-xs">{{ n.node_id }}</span>
-                {% if n.state == "completed" %}
+{# ── Revision lineage ── #}
+<h3 class="text-md font-semibold mb-3">Revision Lineage ({{ revisions.len() }})</h3>
+<div class="overflow-x-auto mb-6">
+    <table class="table table-xs table-zebra">
+        <thead><tr><th>Revision</th><th>Seq</th><th>Reason</th><th>Parent</th><th>Nodes</th><th>Edges</th></tr></thead>
+        <tbody>
+        {% for r in revisions %}
+        <tr>
+            <td class="font-mono text-xs">{{ r.revision_short }}{% if loop.last %} <span class="badge badge-primary badge-xs">latest</span>{% endif %}</td>
+            <td>{{ r.sequence }}</td>
+            <td><span class="badge badge-ghost badge-sm">{{ r.reason }}</span></td>
+            <td class="font-mono text-xs">{{ r.parent_short }}</td>
+            <td>{{ r.node_count }}</td>
+            <td>{{ r.edge_count }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{# ── Latest revision: nodes ── #}
+<h3 class="text-md font-semibold mb-3">Nodes of Revision {{ latest_revision_short }}</h3>
+{% if nodes.is_empty() %}
+<div class="alert alert-info mb-6"><span>The latest revision has no nodes.</span></div>
+{% else %}
+<div class="overflow-x-auto mb-6">
+    <table class="table table-xs table-zebra">
+        <thead><tr><th>Node</th><th>Gen</th><th>State</th><th>Class</th><th>Goal</th><th>Outputs</th></tr></thead>
+        <tbody>
+        {% for n in nodes %}
+        <tr>
+            <td class="font-mono text-xs">{{ n.node_id }}</td>
+            <td>{{ n.generation }}</td>
+            <td>
+                {% if n.state == "stable" %}
                 <span class="badge badge-success badge-sm">{{ n.state }}</span>
-                {% elif n.state == "failed" %}
-                <span class="badge badge-error badge-sm">{{ n.state }}</span>
                 {% elif n.state == "running" %}
                 <span class="badge badge-primary badge-sm">{{ n.state }}</span>
+                {% elif n.state == "stopped" || n.state == "blocked" %}
+                <span class="badge badge-warning badge-sm">{{ n.state }}</span>
+                {% elif n.state == "retired" %}
+                <span class="badge badge-ghost badge-sm">{{ n.state }}</span>
                 {% else %}
                 <span class="badge badge-sm">{{ n.state }}</span>
                 {% endif %}
-                {% if !n.node_class.is_empty() %}
-                <span class="badge badge-outline badge-sm">{{ n.node_class }}</span>
-                {% endif %}
-                <span class="text-xs text-base-content/60 ml-auto">V={{ n.v_total|fmt("{:.2}") }} | attempts={{ n.attempt_count }}</span>
-            </div>
-        </summary>
-        <div class="collapse-content px-4 pb-4">
-            {% if !n.goal.is_empty() %}
-            <div class="mb-2">
-                <span class="text-xs text-base-content/60">Goal:</span>
-                <p class="text-sm">{{ n.goal }}</p>
-            </div>
-            {% endif %}
-            <div class="grid grid-cols-3 gap-2 text-xs">
-                <div><span class="text-base-content/60">State:</span> {{ n.state }}</div>
-                <div><span class="text-base-content/60">Class:</span> {{ n.node_class }}</div>
-                <div><span class="text-base-content/60">V_total:</span> {{ n.v_total|fmt("{:.3}") }}</div>
-                <div><span class="text-base-content/60">Attempts:</span> {{ n.attempt_count }}</div>
-            </div>
-        </div>
-    </details>
-    {% endfor %}
+            </td>
+            <td><span class="badge badge-outline badge-sm">{{ n.node_class }}</span></td>
+            <td class="text-xs max-w-md">{{ n.goal }}</td>
+            <td class="font-mono text-xs max-w-xs truncate" title="{{ n.output_targets }}">{{ n.output_targets }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
 </div>
+{% endif %}
 
-{# ── Edge Table ── #}
+{# ── Latest revision: edges ── #}
 {% if !edges.is_empty() %}
 <h3 class="text-md font-semibold mb-3">Edges ({{ edges.len() }})</h3>
 <div class="overflow-x-auto">
     <table class="table table-xs table-zebra">
-        <thead><tr><th>Parent</th><th>→</th><th>Child</th><th>Type</th></tr></thead>
+        <thead><tr><th>Source</th><th>→</th><th>Destination</th><th>Kind</th></tr></thead>
         <tbody>
         {% for e in edges %}
         <tr>
-            <td class="font-mono text-xs">{{ e.parent_id }}</td>
+            <td class="font-mono text-xs">{{ e.src }}</td>
             <td>→</td>
-            <td class="font-mono text-xs">{{ e.child_id }}</td>
-            <td><span class="badge badge-ghost badge-sm">{{ e.edge_type }}</span></td>
+            <td class="font-mono text-xs">{{ e.dst }}</td>
+            <td><span class="badge badge-ghost badge-sm">{{ e.kind }}</span></td>
         </tr>
         {% endfor %}
         </tbody>
