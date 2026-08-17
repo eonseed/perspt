@@ -107,4 +107,47 @@
     </table>
 </div>
 {% endif %}
+
+{# ── Validator independence ── #}
+<h3 class="text-lg font-semibold mt-6 mb-2">Validator independence</h3>
+<p class="text-xs opacity-70 mb-2">Label source: delayed audit.</p>
+<div class="stat bg-base-100 rounded-box shadow-sm p-3 mb-4 max-w-md">
+    <div class="stat-title text-xs">Ensemble certification ({{ independence.validators }} validators)</div>
+    <div class="stat-value text-xl {% if independence.certification == "insufficient evidence" %}text-warning{% else %}text-success{% endif %}">
+        {{ independence.certification }}
+    </div>
+    <div class="stat-desc text-xs">{{ independence.labeled_records }} labeled verdicts; ρ_eff uses pairwise joint-miss upper bounds.</div>
+</div>
+{% if independence.pairs.is_empty() %}
+<div class="alert alert-info"><span>No matched validator pairs with delayed-audit labels yet.</span></div>
+{% else %}
+<div class="overflow-x-auto">
+    <table class="table table-zebra table-sm w-full">
+        <thead>
+            <tr>
+                <th>Validator i</th>
+                <th>Validator j</th>
+                <th>q_i</th>
+                <th>q_j</th>
+                <th>Joint miss</th>
+                <th>Joint miss (upper)</th>
+                <th>Samples</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for pair in independence.pairs %}
+            <tr>
+                <td class="font-mono text-xs">{{ pair.validator_i }}</td>
+                <td class="font-mono text-xs">{{ pair.validator_j }}</td>
+                <td>{{ pair.q_i }}</td>
+                <td>{{ pair.q_j }}</td>
+                <td>{{ pair.joint_miss }}</td>
+                <td>{{ pair.joint_miss_upper }}</td>
+                <td>{{ pair.samples }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
 {% endblock %}

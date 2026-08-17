@@ -1,7 +1,9 @@
 //! perspt-dashboard: Real-time web dashboard for Perspt agent monitoring
 //!
-//! Provides a browser-based interface for observing agent execution, including
-//! DAG topology, energy convergence, LLM telemetry, and decision traces.
+//! Provides a browser-based interface for observing agent execution: the
+//! work-graph topology lineage, backlog diagnostics, energy trajectory,
+//! decision traces, and governance — all projected read-only from the
+//! PSP-9 event ledger.
 
 pub mod auth;
 pub mod error;
@@ -33,19 +35,19 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/sessions/{session_id}/dag",
-            get(handlers::dag::dag_handler),
+            get(handlers::dag::topology_handler),
+        )
+        .route(
+            "/sessions/{session_id}/topology",
+            get(handlers::dag::topology_handler),
+        )
+        .route(
+            "/sessions/{session_id}/backlog",
+            get(handlers::backlog::backlog_handler),
         )
         .route(
             "/sessions/{session_id}/energy",
             get(handlers::energy::energy_handler),
-        )
-        .route(
-            "/sessions/{session_id}/llm",
-            get(handlers::llm::llm_handler),
-        )
-        .route(
-            "/sessions/{session_id}/sandbox",
-            get(handlers::sandbox::sandbox_handler),
         )
         .route(
             "/sessions/{session_id}/decisions",
@@ -154,32 +156,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn topology_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/topology")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn backlog_page_returns_200() {
+        let app = build_router(test_state_open());
+        let req = Request::builder()
+            .uri("/sessions/test-session/backlog")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn energy_page_returns_200() {
         let app = build_router(test_state_open());
         let req = Request::builder()
             .uri("/sessions/test-session/energy")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn llm_page_returns_200() {
-        let app = build_router(test_state_open());
-        let req = Request::builder()
-            .uri("/sessions/test-session/llm")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn sandbox_page_returns_200() {
-        let app = build_router(test_state_open());
-        let req = Request::builder()
-            .uri("/sessions/test-session/sandbox")
             .body(Body::empty())
             .unwrap();
         let res = app.oneshot(req).await.unwrap();

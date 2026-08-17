@@ -26,6 +26,80 @@ pub struct PendingAuditRow {
     pub epoch_short: String,
 }
 
+/// One validator pair's matched-stratum independence statistics.
+pub struct IndependencePairRow {
+    pub validator_i: String,
+    pub validator_j: String,
+    pub q_i: String,
+    pub q_j: String,
+    pub joint_miss: String,
+    pub joint_miss_upper: String,
+    pub samples: usize,
+}
+
+/// Validator-independence table (PSP-9 system 8). Labels come from the
+/// delayed audit oracle; `rho_eff` is only shown when certified.
+pub struct IndependenceView {
+    pub pairs: Vec<IndependencePairRow>,
+    pub validators: usize,
+    /// `rho_eff` when certified, else the literal "insufficient evidence".
+    pub certification: String,
+    pub labeled_records: usize,
+}
+
+impl IndependenceView {
+    /// Build from labeled verdict rows. `compute` errors on empty input, so
+    /// the no-evidence state is rendered without calling it.
+    pub fn from_rows(labeled: &[perspt_store::Psp9VerdictRow]) -> Self {
+        let records: Vec<perspt_sdk::independence::VerdictRecord> = labeled
+            .iter()
+            .map(|row| {
+                // A miss vs the delayed label: the validator passed the
+                // candidate (`!missed`) and the audit later labeled it unsafe.
+                let missed_vs_label = !row.missed && row.unsafe_label == Some(true);
+                perspt_sdk::independence::VerdictRecord::new(
+                    row.validator_id.clone(),
+                    row.candidate_id.clone(),
+                    missed_vs_label,
+                )
+            })
+            .collect();
+        let stats = if records.is_empty() {
+            None
+        } else {
+            perspt_sdk::independence::compute(&records).ok()
+        };
+        let pairs = stats
+            .as_ref()
+            .map(|s| {
+                s.pairs
+                    .iter()
+                    .map(|((vi, vj), pair)| IndependencePairRow {
+                        validator_i: vi.clone(),
+                        validator_j: vj.clone(),
+                        q_i: format!("{:.3}", pair.q_i),
+                        q_j: format!("{:.3}", pair.q_j),
+                        joint_miss: format!("{:.3}", pair.joint_miss),
+                        joint_miss_upper: format!("{:.3}", pair.joint_miss_upper),
+                        samples: pair.samples,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let certification = stats
+            .as_ref()
+            .and_then(|s| s.rho_eff)
+            .map(|rho| format!("ρ_eff = {rho:.4}"))
+            .unwrap_or_else(|| "insufficient evidence".into());
+        Self {
+            pairs,
+            validators: stats.map(|s| s.validators).unwrap_or(0),
+            certification,
+            labeled_records: labeled.len(),
+        }
+    }
+}
+
 pub struct GovernanceViewModel {
     pub session_id: String,
     pub authority_epoch: u64,

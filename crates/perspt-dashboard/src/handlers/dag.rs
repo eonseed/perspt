@@ -4,48 +4,49 @@ use axum::response::{Html, IntoResponse};
 
 use crate::error::DashboardError;
 use crate::state::AppState;
-use crate::views::dag::{DagEdge, DagNode, DagViewModel};
+use crate::views::dag::{RevisionRow, TopoEdgeRow, TopoNodeRow, TopologyViewModel};
 use crate::views::friendly_name;
+use crate::views::psp9::LedgerProjection;
 
 #[derive(Template)]
 #[template(path = "pages/dag.html")]
-struct DagTemplate {
+struct TopologyTemplate {
     session_id: String,
     display_name: String,
     active_tab: String,
     title: String,
-    nodes: Vec<DagNode>,
-    edges: Vec<DagEdge>,
+    revisions: Vec<RevisionRow>,
+    latest_revision_short: String,
+    nodes: Vec<TopoNodeRow>,
+    edges: Vec<TopoEdgeRow>,
     total_nodes: usize,
-    committed_nodes: usize,
-    failed_nodes: usize,
+    stable_nodes: usize,
     running_nodes: usize,
+    stopped_nodes: usize,
 }
 
-pub async fn dag_handler(
+/// Routes: `GET /sessions/{id}/dag` and `GET /sessions/{id}/topology`.
+pub async fn topology_handler(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
 ) -> Result<impl IntoResponse, DashboardError> {
-    let nodes = state.store.get_latest_node_states(&session_id)?;
-    let edges = state.store.get_task_graph_edges(&session_id)?;
-    let vm = DagViewModel::from_store(session_id.clone(), nodes, edges);
+    let rows = state.store.get_psp9_events(&session_id)?;
+    let projection = LedgerProjection::from_rows(&rows);
+    let vm = TopologyViewModel::from_projection(session_id, &projection);
 
-    let total_nodes = vm.nodes.len();
-    let committed_nodes = vm.nodes.iter().filter(|n| n.state == "completed").count();
-    let failed_nodes = vm.nodes.iter().filter(|n| n.state == "failed").count();
-    let running_nodes = vm.nodes.iter().filter(|n| n.state == "running").count();
-
-    let tmpl = DagTemplate {
+    let tmpl = TopologyTemplate {
         display_name: friendly_name(&vm.session_id),
         session_id: vm.session_id,
         active_tab: "dag".to_string(),
-        title: "DAG Topology".to_string(),
+        title: "Topology".to_string(),
+        revisions: vm.revisions,
+        latest_revision_short: vm.latest_revision_short,
+        total_nodes: vm.nodes.len(),
         nodes: vm.nodes,
         edges: vm.edges,
-        total_nodes,
-        committed_nodes,
-        failed_nodes,
-        running_nodes,
+        stable_nodes: vm.stable_nodes,
+        running_nodes: vm.running_nodes,
+        stopped_nodes: vm.stopped_nodes,
     };
     Ok(Html(tmpl.render()?))
 }

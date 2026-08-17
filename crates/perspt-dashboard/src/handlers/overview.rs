@@ -5,6 +5,7 @@ use axum::response::{Html, IntoResponse};
 use crate::error::DashboardError;
 use crate::state::AppState;
 use crate::views::overview::{GlobalStats, OverviewViewModel, SessionSummary};
+use crate::views::psp9::LedgerProjection;
 
 const PAGE_SIZE: usize = 20;
 
@@ -31,30 +32,22 @@ pub async fn overview_handler(
     let offset = (current_page - 1) * PAGE_SIZE;
 
     let total_sessions = state.store.count_sessions().unwrap_or(0);
-    let total_pages = (total_sessions + PAGE_SIZE - 1) / PAGE_SIZE.max(1);
+    let total_pages = total_sessions.div_ceil(PAGE_SIZE);
 
     let sessions = state.store.list_sessions_paginated(PAGE_SIZE, offset)?;
 
-    let mut nodes_by_session = Vec::new();
-    let mut budgets = Vec::new();
+    // One ledger projection per listed session; a session with no PSP-9
+    // events simply projects to an empty graph.
+    let mut projections = Vec::new();
     for s in &sessions {
-        let nodes = state
+        let rows = state
             .store
-            .get_latest_node_states(&s.session_id)
+            .get_psp9_events(&s.session_id)
             .unwrap_or_default();
-        nodes_by_session.push((s.session_id.clone(), nodes));
-
-        let budget = state
-            .store
-            .get_budget_envelope(&s.session_id)
-            .ok()
-            .flatten();
-        budgets.push((s.session_id.clone(), budget));
+        projections.push((s.session_id.clone(), LedgerProjection::from_rows(&rows)));
     }
 
-    let llm_summary = state.store.get_global_llm_summary().unwrap_or((0, 0, 0, 0));
-
-    let vm = OverviewViewModel::from_store(sessions, &nodes_by_session, &budgets, llm_summary);
+    let vm = OverviewViewModel::from_store(sessions, &projections);
 
     let tmpl = OverviewTemplate {
         title: "Dashboard".to_string(),

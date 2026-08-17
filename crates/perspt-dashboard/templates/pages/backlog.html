@@ -1,0 +1,69 @@
+{% extends "session_base.html" %}
+{% block title %}{{ title }} — Perspt Dashboard{% endblock %}
+{% block session_content %}
+<h2 class="text-xl font-bold mb-2">{{ title }}</h2>
+<p class="text-sm text-base-content/60 mb-6">
+    Conditional-capacity diagnostics projected from the ledger. These are
+    diagnostics only — never a stability claim.
+</p>
+
+{% if !has_revision %}
+<div class="alert alert-info"><span>No graph revisions ledgered yet.</span></div>
+{% else %}
+
+{# ── Gauges ── #}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Arriving potential Φ(W)</div>
+        <div class="stat-value text-xl">{{ phi }}</div>
+        <div class="stat-desc text-xs">Σ latest V over pending/ready/running nodes; 1.0 per unmeasured node.</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Backlog nodes</div>
+        <div class="stat-value text-xl">{{ backlog_nodes }}</div>
+        <div class="stat-desc text-xs">{{ unmeasured_backlog_nodes }} unmeasured (fallback 1.0)</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Empirical drift</div>
+        <div class="stat-value text-xl">{{ drift }}</div>
+        <div class="stat-desc text-xs">Last − first measured V across the session. Diagnostic, not a drift bound.</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow-sm p-3">
+        <div class="stat-title text-xs">Measurements</div>
+        <div class="stat-value text-xl">{{ measurement_count }}</div>
+        <div class="stat-desc text-xs">candidate_measured events</div>
+    </div>
+</div>
+
+{# ── Node states of the latest revision ── #}
+<h3 class="text-md font-semibold mb-3">Nodes by State (latest revision)</h3>
+<div class="flex flex-wrap gap-2 mb-6">
+    {% for c in state_counts %}
+    <div class="badge badge-lg gap-1
+        {% if c.state == "stable" %}badge-success{% endif %}
+        {% if c.state == "running" %}badge-primary{% endif %}
+        {% if c.state == "stopped" || c.state == "blocked" %}badge-warning{% endif %}
+        {% if c.state == "retired" %}badge-ghost{% endif %}
+    ">{{ c.state }}: {{ c.count }}</div>
+    {% endfor %}
+</div>
+
+{# ── Last measured V per node ── #}
+<h3 class="text-md font-semibold mb-3">Last Measured V per Node</h3>
+<div class="overflow-x-auto">
+    <table class="table table-xs table-zebra">
+        <thead><tr><th>Node</th><th>State</th><th>Last V</th><th>Backlog</th></tr></thead>
+        <tbody>
+        {% for n in node_rows %}
+        <tr>
+            <td class="font-mono text-xs">{{ n.node_id }}</td>
+            <td><span class="badge badge-ghost badge-sm">{{ n.state }}</span></td>
+            <td class="font-mono text-xs">{{ n.last_v }}</td>
+            <td>{% if n.in_backlog %}<span class="badge badge-primary badge-sm">yes</span>{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
