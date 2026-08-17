@@ -295,3 +295,41 @@ fn narration(event: &LoopEvent) -> Option<String> {
         _ => None,
     }
 }
+
+impl super::Psp9AgentRuntime {
+    pub(super) fn record_route_capabilities(&self, recorder: &Psp9Recorder) -> Result<()> {
+        for (position, model) in std::iter::once(&self.model)
+            .chain(self.fallback_models.iter())
+            .enumerate()
+        {
+            let capabilities = self.transport.capabilities(model);
+            let mut degradations = Vec::new();
+            if !capabilities.strict_schema {
+                degradations.push("strict_schema:local_validation");
+            }
+            if !capabilities.parallel_tool_calls {
+                degradations.push("parallel_tool_calls:sequential_execution");
+            }
+            if !capabilities.streaming_tool_calls {
+                degradations.push("streaming_tool_calls:turn_granular_progress");
+            }
+            if !capabilities.prompt_caching {
+                degradations.push("prompt_caching:cache_cold_accounting");
+            }
+            if !capabilities.structured_output {
+                degradations.push("structured_output:local_parse_and_validation");
+            }
+            recorder.record_custom(
+                "provider_capability_evidence",
+                serde_json::json!({
+                    "model": model,
+                    "route_position": position,
+                    "source": "declared",
+                    "capabilities": capabilities,
+                    "degradations": degradations,
+                }),
+            )?;
+        }
+        Ok(())
+    }
+}
