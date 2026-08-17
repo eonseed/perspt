@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, SdkError};
+use crate::model::ModelId;
 
 /// The verbatim, never-summarized control state of a compacted conversation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,6 +23,12 @@ pub struct ControlFrame {
     pub authority_epoch: u64,
     pub remaining_rejection_budget: u32,
     pub remaining_turns: u32,
+    /// Active route after sticky failover and its unconsumed fallback suffix.
+    /// Resume must not silently refill or reroute this recovery state.
+    pub active_model: ModelId,
+    pub remaining_fallback_models: Vec<ModelId>,
+    /// Deferred tools activated by governed discovery before this checkpoint.
+    pub activated_tools: Vec<String>,
     /// Tool calls whose results are still outstanding; a checkpoint must
     /// preserve these exactly.
     pub unresolved_call_ids: Vec<String>,
@@ -98,6 +105,9 @@ mod tests {
                 authority_epoch: 7,
                 remaining_rejection_budget: 2,
                 remaining_turns: 5,
+                active_model: ModelId::new("test", "model"),
+                remaining_fallback_models: vec![ModelId::new("test", "fallback")],
+                activated_tools: vec!["read_file".into()],
                 unresolved_call_ids: vec!["c9".into()],
                 residual_summary: vec![("build".into(), 2.0)],
             },

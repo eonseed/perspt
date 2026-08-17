@@ -24,7 +24,12 @@ fn schema(fields: &[(&str, &str, &str, bool)]) -> serde_json::Value {
             required.push(serde_json::Value::String((*name).to_string()));
         }
     }
-    serde_json::json!({"type": "object", "properties": properties, "required": required})
+    serde_json::json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false,
+    })
 }
 
 fn path_read() -> FootprintSpec {
