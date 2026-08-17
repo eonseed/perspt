@@ -94,6 +94,10 @@ enum Commands {
         #[arg(long)]
         domain: Option<String>,
 
+        /// Grant governed dependency mutation (cargo add, uv add, npm install)
+        #[arg(long)]
+        allow_dependency_mutation: bool,
+
         /// Run only the read-only exploration phase: deterministic map plus
         /// an interactive explorer tool loop; nothing is mutated or promoted
         #[arg(long)]
@@ -327,6 +331,7 @@ async fn main() -> Result<()> {
             max_parallel,
             persistent_grants,
             domain,
+            allow_dependency_mutation,
             exploration_only,
             fallback_models,
             output_summary,
@@ -352,6 +357,7 @@ async fn main() -> Result<()> {
                 max_parallel,
                 persistent_grants,
                 domain,
+                allow_dependency_mutation,
                 exploration_only,
                 dashboard,
                 dashboard_port,

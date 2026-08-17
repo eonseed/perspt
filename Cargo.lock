@@ -3427,6 +3427,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "shell-words",
  "tempfile",
  "tokio",
  "url",

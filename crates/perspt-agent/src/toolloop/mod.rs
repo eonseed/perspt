@@ -1193,6 +1193,34 @@ impl ToolLoop<'_> {
             .await
     }
 
+    /// R5 bracketing: a durable effect's intent is ledgered before it
+    /// runs, so an interruption leaves a visible open bracket.
+    fn open_effect_bracket(
+        &self,
+        call: &ProviderToolCall,
+        entry: &ToolEntry,
+    ) -> Result<Option<String>> {
+        let Some(key) = entry
+            .durable
+            .then(|| format!("tool:{}:{}", call.name, call.call_id))
+        else {
+            return Ok(None);
+        };
+        if let Some(recorder) = self.recorder {
+            recorder.external_intent(
+                &key,
+                &serde_json::json!({
+                    "tool": call.name,
+                    "call_id": call.call_id,
+                    "arguments": call.arguments,
+                    "node_id": self.node_id,
+                    "generation": self.generation,
+                }),
+            )?;
+        }
+        Ok(Some(key))
+    }
+
     /// Apply a mutating call to the reversible overlay, certify the realized
     /// transition, and either keep it (debiting the capability) or restore.
     #[allow(clippy::too_many_arguments)]
@@ -1206,7 +1234,11 @@ impl ToolLoop<'_> {
         projection: &mut ProjectionMismatch,
         mutations: &mut u32,
     ) -> Result<String> {
+        let bracket_key = self.open_effect_bracket(call, entry)?;
         let outcome = self.executor.apply(call, entry).await?;
+        if let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref()) {
+            recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
+        }
         let after = self.executor.state_witness().await?;
         let transition = CandidateTransition::new(proposal, before.witness.clone(), after);
         let witness = self.certify(&call.call_id, &transition, log)?;
@@ -1434,8 +1466,16 @@ fn proposal_from(
         }
         return proposal;
     }
-    // A registered entry declares its own scope extraction; the loop holds
-    // no per-tool field knowledge.
+    bind_declared(proposal, call, entry)
+}
+
+/// Bind a registered entry's declared proposal channels; the loop holds no
+/// per-tool field knowledge.
+fn bind_declared(
+    mut proposal: EffectProposal,
+    call: &ProviderToolCall,
+    entry: &ToolEntry,
+) -> EffectProposal {
     let mut primary_path_bound = false;
     for binding in &entry.proposal_bindings {
         match binding {

@@ -195,6 +195,26 @@ impl LanguagePlugin for JsPlugin {
         &["package.json", "tsconfig.json", "package-lock.json"]
     }
 
+    fn dependency_commands(
+        &self,
+        action: crate::plugin::DependencyAction,
+        packages: &[String],
+        dev: bool,
+    ) -> Vec<String> {
+        use crate::plugin::DependencyAction;
+        let list = packages.join(" ");
+        match action {
+            DependencyAction::Add if dev => vec![format!("npm install --save-dev {list}")],
+            DependencyAction::Add => vec![format!("npm install {list}")],
+            DependencyAction::Remove => vec![format!("npm uninstall {list}")],
+            DependencyAction::Update => vec![format!("npm update {list}")],
+        }
+    }
+
+    fn dependency_files(&self) -> Vec<String> {
+        vec!["package.json".into(), "package-lock.json".into()]
+    }
+
     fn dependency_command_policy(&self, command: &str) -> crate::types::CommandPolicyDecision {
         let trimmed = command.trim();
         if trimmed.starts_with("npm install ")
@@ -202,6 +222,7 @@ impl LanguagePlugin for JsPlugin {
             || trimmed.starts_with("yarn add ")
             || trimmed.starts_with("pnpm add ")
             || trimmed.starts_with("pnpm install ")
+            || trimmed.starts_with("npm update ")
         {
             crate::types::CommandPolicyDecision::Allow
         } else if trimmed.starts_with("npm uninstall ")

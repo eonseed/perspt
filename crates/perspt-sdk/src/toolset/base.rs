@@ -355,16 +355,44 @@ fn command_entries() -> Vec<ToolEntry> {
         ),
         entry(
             "mutate_dependencies",
-            "Add or update dependencies via the domain package manager",
+            "Add, remove, or update dependencies via the domain package manager",
             EffectKind::MutateDependencies,
             RiskClass::High,
-            schema(&[(
-                "packages",
-                "string",
-                "Space-separated packages to add",
-                true,
-            )]),
-            FootprintSpec::opaque(),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "add | remove | update"
+                    },
+                    "packages": {
+                        "type": "array",
+                        "description": "Package names (optionally versioned)",
+                        "items": {"type": "string"},
+                        "maxItems": 16
+                    },
+                    "dev": {
+                        "type": "boolean",
+                        "description": "Add as a development dependency"
+                    }
+                },
+                "required": ["action", "packages"],
+                "additionalProperties": false
+            }),
+            FootprintSpec::new(vec![
+                ResourceSelector::Literal {
+                    resource: crate::scheduler::Resource::Manifest("workspace".into()),
+                    access: AccessMode::Write,
+                },
+                ResourceSelector::Literal {
+                    resource: crate::scheduler::Resource::Lockfile("workspace".into()),
+                    access: AccessMode::Write,
+                },
+                ResourceSelector::Literal {
+                    resource: crate::scheduler::Resource::Toolchain("workspace".into()),
+                    access: AccessMode::Read,
+                },
+            ]),
             true,
         ),
     ]

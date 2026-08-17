@@ -49,6 +49,7 @@ ignore = "0.4"
 regex = "1.12.2"
 diffy = "0.5"
 duckdb = { workspace = true }
+shell-words = { workspace = true }
 rustix = { workspace = true }
 tempfile = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }

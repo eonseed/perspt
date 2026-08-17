@@ -422,11 +422,17 @@ pub(crate) const WITHHELD_EFFECTS: &[EffectKind] = &[
 
 /// Granting is policy × data: the effect set follows the assembled catalog
 /// (so a registered tool family is grantable without editing this module),
-/// intersected with the explicit withheld set above.
-pub(crate) fn granted_effects(catalog: &dyn ToolCatalog) -> Vec<EffectKind> {
+/// minus the withheld set, plus any effect the user explicitly opted into
+/// (e.g. `--allow-dependency-mutation`).
+pub(crate) fn granted_effects(
+    catalog: &dyn ToolCatalog,
+    opted_in: &[EffectKind],
+) -> Vec<EffectKind> {
     let mut effects = Vec::new();
     for entry in catalog.entries() {
-        if WITHHELD_EFFECTS.contains(&entry.effect) || effects.contains(&entry.effect) {
+        let withheld =
+            WITHHELD_EFFECTS.contains(&entry.effect) && !opted_in.contains(&entry.effect);
+        if withheld || effects.contains(&entry.effect) {
             continue;
         }
         effects.push(entry.effect);
@@ -440,8 +446,10 @@ pub(crate) fn worker_capability(
     authority_epoch: u64,
     generation: u32,
     catalog: &dyn ToolCatalog,
+    opted_in: &[EffectKind],
 ) -> Capability {
-    let mut capability = Capability::new(ActorId::new("toolloop"), granted_effects(catalog));
+    let mut capability =
+        Capability::new(ActorId::new("toolloop"), granted_effects(catalog, opted_in));
     capability.path_scope = vec![PathPattern("*".into())];
     capability.command_scope = inspection_command_scope();
     capability.max_calls = Some(100);
@@ -462,6 +470,7 @@ pub(crate) fn session_grant_policy(
     graph_revision: &str,
     persistent: bool,
     catalog: &dyn ToolCatalog,
+    opted_in: &[EffectKind],
 ) -> Result<GrantPolicy> {
     let workspace_root = workspace.canonicalize()?.display().to_string();
     let policy_id = uuid::Uuid::new_v4().to_string();
@@ -469,7 +478,7 @@ pub(crate) fn session_grant_policy(
     Ok(GrantPolicy {
         policy_id,
         workspace_root,
-        effect_ceiling: granted_effects(catalog),
+        effect_ceiling: granted_effects(catalog, opted_in),
         path_ceiling: vec![PathPattern("*".into())],
         command_ceiling: inspection_command_scope(),
         network_ceiling: Vec::new(),
