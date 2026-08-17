@@ -601,7 +601,12 @@ impl ToolLoop<'_> {
         activated_tools: &BTreeSet<String>,
         authority_epoch: u64,
     ) -> ControlFrame {
+        let projection_digest = serde_json::to_vec(conversation)
+            .map(|bytes| perspt_sdk::content_hash(&bytes))
+            .unwrap_or_default();
         ControlFrame {
+            projection_digest,
+            event_schema_version: perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
             goal: goal.to_string(),
             node_generation: self.generation,
             accepted_state_root: accepted_checkpoint.witness.state_root.clone(),
