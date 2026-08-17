@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod executor;
+pub mod families;
 pub mod handlers;
 mod sandbox;
 #[cfg(test)]

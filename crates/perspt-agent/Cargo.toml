@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "development-tools"]
 
 [features]
 default = []
-bundled = ["perspt-store/bundled"]
+bundled = ["perspt-store/bundled", "duckdb/bundled"]
 
 [dependencies]
 perspt-core = { workspace = true }
@@ -48,6 +48,7 @@ log = { workspace = true }
 ignore = "0.4"
 regex = "1.12.2"
 diffy = "0.5"
+duckdb = { workspace = true }
 rustix = { workspace = true }
 tempfile = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }
