@@ -129,14 +129,18 @@ async fn both_validators_record_matched_verdicts_and_labels_reach_them() {
         "both verdicts join on the same realized candidate id"
     );
 
-    // The delayed oracle labels both rows in one pass (single-assignment).
     let candidate_id = candidate_ids.iter().next().unwrap().to_string();
-    let labeled = store.label_psp9_verdicts(&candidate_id, false).unwrap();
-    assert_eq!(labeled, 2);
-    assert_eq!(store.label_psp9_verdicts(&candidate_id, true).unwrap(), 0);
+    assert_labels_and_floor(&store, &candidate_id);
+}
 
-    // One matched labeled pair is far below the certification floor: the
-    // estimator must refuse to certify, never fabricate a bound.
+/// The delayed oracle labels both rows in one single-assignment pass, and
+/// one matched labeled pair is far below the certification floor: the
+/// estimator refuses to certify rather than fabricate a bound.
+fn assert_labels_and_floor(store: &perspt_store::SessionStore, candidate_id: &str) {
+    let labeled = store.label_psp9_verdicts(candidate_id, false).unwrap();
+    assert_eq!(labeled, 2);
+    assert_eq!(store.label_psp9_verdicts(candidate_id, true).unwrap(), 0);
+
     let rows = store.labeled_psp9_verdicts().unwrap();
     assert_eq!(rows.len(), 2);
     let records: Vec<perspt_sdk::VerdictRecord> = rows

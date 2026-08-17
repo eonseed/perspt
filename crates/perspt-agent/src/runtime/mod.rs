@@ -123,6 +123,7 @@ struct ConcludeContext<'a> {
     calibration: &'a CalibrationBinding,
 }
 
+mod adjudicate;
 mod explore;
 mod node;
 mod recorder;
@@ -927,29 +928,7 @@ impl Psp9AgentRuntime {
         ctx: ConcludeContext<'_>,
     ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
         let hard_pass = matches!(ctx.loop_outcome, NodeTerminalOutcome::HardPass);
-        // The deterministic verifier suite is the second live validator
-        // (system 8): its verdict row shares the adjudicator's candidate id
-        // and stratum so delayed labels produce matched pairs.
-        let candidate_id = ctx.candidate.checkpoint(&[]).await?.witness.state_root;
-        record_deterministic_verdict(
-            ctx.recorder,
-            &candidate_id,
-            &ctx.calibration.stratum,
-            hard_pass,
-        )?;
-        let promotion_approved = if hard_pass {
-            let adjudicated = self
-                .adjudicate_candidate(
-                    ctx.recorder,
-                    ctx.candidate,
-                    ctx.task,
-                    &ctx.calibration.stratum,
-                )
-                .await?;
-            adjudicated && self.conformal_or_human_approval(&ctx).await?
-        } else {
-            false
-        };
+        let promotion_approved = self.validate_and_approve(&ctx, hard_pass).await?;
         let mut final_outcome = if hard_pass && !promotion_approved {
             NodeTerminalOutcome::Escalated {
                 certificate_id: uuid::Uuid::new_v4().to_string(),
@@ -1000,6 +979,35 @@ impl Psp9AgentRuntime {
             "ESCALATED_PSP9"
         };
         Ok((final_outcome, status, promoted_paths))
+    }
+
+    /// Record the deterministic-suite verdict (system 8's second live
+    /// validator, joined to the adjudicator's row by candidate id and
+    /// stratum), then run adjudication and approval for a hard pass.
+    async fn validate_and_approve(
+        &mut self,
+        ctx: &ConcludeContext<'_>,
+        hard_pass: bool,
+    ) -> Result<bool> {
+        let candidate_id = ctx.candidate.checkpoint(&[]).await?.witness.state_root;
+        record_deterministic_verdict(
+            ctx.recorder,
+            &candidate_id,
+            &ctx.calibration.stratum,
+            hard_pass,
+        )?;
+        if !hard_pass {
+            return Ok(false);
+        }
+        let adjudicated = self
+            .adjudicate_candidate(
+                ctx.recorder,
+                ctx.candidate,
+                ctx.task,
+                &ctx.calibration.stratum,
+            )
+            .await?;
+        Ok(adjudicated && self.conformal_or_human_approval(ctx).await?)
     }
 
     /// Autonomous commitment (PSP-9 Gate Q): with an *activated* calibration
@@ -1285,78 +1293,6 @@ impl Psp9AgentRuntime {
                 .unwrap_or_default()
         ))
     }
-
-    async fn adjudicate_candidate(
-        &self,
-        recorder: &Psp9Recorder,
-        candidate: &CandidateWorkspace,
-        task: &str,
-        stratum: &str,
-    ) -> Result<bool> {
-        let Some(model) = &self.adjudicator_model else {
-            return Ok(true);
-        };
-        let diff = candidate.realized_diff()?;
-        let diff_handle = recorder.record_artifact(diff.as_bytes(), "text/x-diff")?;
-        let mut boundary = diff.len().min(100_000);
-        while !diff.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        let mut conversation = Conversation::with_system(
-            "You are a conjunctive coding validator with no tools or authority. \
-             Review only the realized diff. Return strict JSON: \
-             {\"pass\":bool,\"reason\":string}. Reject uncertainty; do not \
-             propose edits.",
-        );
-        conversation.push_user(format!(
-            "Task: {task}\nDiff artifact: {diff_handle}\nRealized diff:\n{}",
-            &diff[..boundary]
-        ));
-        recorder.record_custom(
-            "adjudication_requested",
-            serde_json::json!({"model": model, "diff_artifact": diff_handle}),
-        )?;
-        let output = self
-            .transport
-            .chat_turn(model, &conversation, &[], ToolChoicePolicy::None)
-            .await?;
-        let TurnOutput::Text(text) = output else {
-            anyhow::bail!("adjudicator returned tool calls despite having no tools");
-        };
-        #[derive(serde::Deserialize)]
-        struct Verdict {
-            pass: bool,
-            reason: String,
-        }
-        let verdict: Verdict = serde_json::from_str(text.trim())
-            .context("adjudicator did not return strict verdict JSON")?;
-        let evidence_hash = recorder.record_artifact(text.as_bytes(), "application/json")?;
-        let candidate_id = candidate.checkpoint(&[]).await?.witness.state_root;
-        // The verdict shares the epoch's serialized stratum so verdicts and
-        // calibration samples can be joined during delayed-label ingestion.
-        recorder.store.record_psp9_verdict(&Psp9VerdictRow {
-            session_id: recorder.session_id.clone(),
-            candidate_id,
-            validator_id: model.to_string(),
-            stratum: stratum.to_string(),
-            missed: !verdict.pass,
-            unsafe_label: None,
-            evidence_hash,
-        })?;
-        recorder.record_custom(
-            "adjudication_verdict",
-            serde_json::json!({
-                "model": model,
-                "pass": verdict.pass,
-                "reason": verdict.reason,
-                // Certified only when every pair met the matched-label
-                // floor; otherwise absent, never a fabricated number.
-                "certified_risk": certified_pairwise_risk(&recorder.store),
-            }),
-        )?;
-        Ok(verdict.pass)
-    }
-
     async fn approve_promotion(
         &mut self,
         recorder: &Psp9Recorder,
