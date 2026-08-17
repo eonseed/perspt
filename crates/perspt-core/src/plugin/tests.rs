@@ -20,6 +20,23 @@ fn test_plugin_owns_file() {
     assert!(!js.owns_file("src/main.rs"));
 }
 
+#[test]
+fn plugins_classify_their_test_oracles() {
+    let rust = RustPlugin;
+    assert!(rust.is_test_file("tests/integration.rs"));
+    assert!(!rust.is_test_file("src/lib.rs"));
+
+    let python = PythonPlugin;
+    assert!(python.is_test_file("tests/test_main.py"));
+    assert!(python.is_test_file("src/pkg/parser_test.py"));
+    assert!(!python.is_test_file("src/pkg/parser.py"));
+
+    let js = JsPlugin;
+    assert!(js.is_test_file("src/parser.spec.ts"));
+    assert!(js.is_test_file("src/__tests__/parser.ts"));
+    assert!(!js.is_test_file("src/parser.ts"));
+}
+
 // =========================================================================
 // Verifier Capability & Profile Tests
 // =========================================================================

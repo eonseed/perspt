@@ -125,6 +125,16 @@ impl LanguagePlugin for JsPlugin {
         &["js", "ts", "jsx", "tsx", "package.json", "tsconfig.json"]
     }
 
+    fn is_test_file(&self, path: &str) -> bool {
+        let normalized = path.replace('\\', "/");
+        let file = normalized.rsplit('/').next().unwrap_or(&normalized);
+        normalized.starts_with("test/")
+            || normalized.starts_with("tests/")
+            || normalized.contains("/__tests__/")
+            || file.contains(".test.")
+            || file.contains(".spec.")
+    }
+
     fn host_tool_available(&self) -> bool {
         host_binary_available("node")
     }

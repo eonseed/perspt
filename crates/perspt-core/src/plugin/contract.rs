@@ -290,6 +290,13 @@ pub trait LanguagePlugin: Send + Sync {
         })
     }
 
+    /// Whether an existing file contributes executable test-oracle semantics.
+    /// The governed candidate runs a second verifier pass with source
+    /// pre-images restored whenever one of these files is modified.
+    fn is_test_file(&self, _path: &str) -> bool {
+        false
+    }
+
     /// Check if the host has the required build tools available
     ///
     /// Returns true if the plugin's primary toolchain is installed and callable.
