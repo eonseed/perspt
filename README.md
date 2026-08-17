@@ -285,7 +285,6 @@ locally and never sent to an LLM. It prints Perspt's family dedication.
 | `resume` | Resume or finish recoverable session state |
 | `dashboard` | Web monitoring UI |
 | `db repair` | Back up and quarantine a poisoned DuckDB WAL |
-| `logs` | LLM usage and request records |
 | `status` | Session and stability status |
 | `ledger` | Query the ledger; `--rollback <SESSION>` undoes the newest promotion and labels it unsafe |
 | `config` | Inspect or edit configuration |
