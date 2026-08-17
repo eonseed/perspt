@@ -8,12 +8,58 @@
 //! adjudication, calibration — sees only SDK types (Gate S).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use perspt_core::{CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec, CoreTurnOutput};
 use perspt_sdk::{
     Conversation, Message, ModelFamily, ModelId, ModelTransport, ProviderCapabilities,
     ProviderToolCall, SdkError, ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,
 };
+
+/// Retries per turn for transient provider failures. A 429 or 5xx is a
+/// throughput delay, not a route failure (Gate P: rate-limit waits stay
+/// inside the transport); only after these bounded retries does an error
+/// reach the recovery cascade, where it may consume a sticky failover.
+const TRANSIENT_RETRIES: u32 = 3;
+const BACKOFF_BASE: Duration = Duration::from_secs(2);
+
+/// The backoff before retry `attempt` (0-based), or `None` when the cause
+/// is not transient or the retry budget is exhausted. Backoff doubles per
+/// attempt: 2s, 4s, 8s.
+fn transient_retry_delay(cause: &str, attempt: u32) -> Option<Duration> {
+    if attempt >= TRANSIENT_RETRIES {
+        return None;
+    }
+    let lowered = cause.to_ascii_lowercase();
+    const TRANSIENT_MARKERS: &[&str] = &[
+        "429",
+        "too many requests",
+        "rate limit",
+        "resource exhausted",
+        "resource_exhausted",
+        "status code '500",
+        "internal server error",
+        "502",
+        "bad gateway",
+        "503",
+        "service unavailable",
+        "504",
+        "gateway timeout",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection closed before",
+        "overloaded",
+        "temporarily unavailable",
+    ];
+    if !TRANSIENT_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(marker))
+    {
+        return None;
+    }
+    Some(BACKOFF_BASE * 2u32.pow(attempt))
+}
 
 /// `perspt_sdk::ModelTransport` implemented over the core portfolio.
 pub struct GenAiTransport {
@@ -132,12 +178,29 @@ impl ModelTransport for GenAiTransport {
                 .map_err(|e| SdkError::Domain(format!("route resolution failed: {e}")))?;
             let messages = render_conversation(conversation);
             let specs = render_specs(tools);
-            let output = handle
-                .provider
-                .chat_turn_with_tools(&model.model, &messages, &specs, core_choice)
-                .await
-                .map_err(|e| SdkError::Domain(format!("chat turn failed: {e:#}")))?;
-            Ok(lift_output(output))
+            let mut attempt = 0u32;
+            loop {
+                match handle
+                    .provider
+                    .chat_turn_with_tools(&model.model, &messages, &specs, core_choice.clone())
+                    .await
+                {
+                    Ok(output) => return Ok(lift_output(output)),
+                    Err(error) => {
+                        let cause = format!("{error:#}");
+                        let Some(delay) = transient_retry_delay(&cause, attempt) else {
+                            return Err(SdkError::Domain(format!("chat turn failed: {cause}")));
+                        };
+                        log::warn!(
+                            "transient provider error from {model} (retry {} of {TRANSIENT_RETRIES} \
+                             in {delay:?}): {cause}",
+                            attempt + 1
+                        );
+                        tokio::time::sleep(delay).await;
+                        attempt += 1;
+                    }
+                }
+            }
         })
     }
 
@@ -158,6 +221,34 @@ impl ModelTransport for GenAiTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_causes_get_bounded_doubling_backoff() {
+        let cause = "Request failed with status code '429 Too Many Requests'";
+        assert_eq!(
+            transient_retry_delay(cause, 0),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            transient_retry_delay(cause, 1),
+            Some(Duration::from_secs(4))
+        );
+        assert_eq!(
+            transient_retry_delay(cause, 2),
+            Some(Duration::from_secs(8))
+        );
+        assert_eq!(transient_retry_delay(cause, 3), None, "retries are bounded");
+        assert!(transient_retry_delay("504 Gateway Timeout", 0).is_some());
+        assert!(transient_retry_delay("connection reset by peer", 0).is_some());
+        assert!(transient_retry_delay("RESOURCE_EXHAUSTED", 0).is_some());
+    }
+
+    #[test]
+    fn non_transient_causes_surface_immediately() {
+        assert_eq!(transient_retry_delay("401 Unauthorized", 0), None);
+        assert_eq!(transient_retry_delay("invalid request schema", 0), None);
+        assert_eq!(transient_retry_delay("model not found", 0), None);
+    }
 
     #[test]
     fn conversation_renders_role_for_role() {
