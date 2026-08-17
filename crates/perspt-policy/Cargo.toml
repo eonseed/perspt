@@ -2,6 +2,7 @@
 name = "perspt-policy"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Starlark execution policy engine for Perspt"
@@ -16,18 +17,18 @@ categories = ["command-line-utilities", "development-tools"]
 perspt-core = { workspace = true }
 # Starlark policy engine
 starlark = "0.14"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Shell parsing
-shell-words = "1.1"
+shell-words = { workspace = true }
 
 # Home directory detection
-dirs = "6.0"
+dirs = { workspace = true }
 
 # Utilities
-anyhow = "1.0"
-log = "0.4"
+anyhow = { workspace = true }
+log = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.14"

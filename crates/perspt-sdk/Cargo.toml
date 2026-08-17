@@ -2,6 +2,7 @@
 name = "perspt-sdk"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Domain-neutral SRBN agent SDK for Perspt: residual energy, measured acceptance gate, spectral diagnostics, and stabilization-kernel adapter (PSP-8)"
@@ -12,6 +13,7 @@ keywords = ["srbn", "agent", "stability", "lyapunov", "sdk"]
 categories = ["development-tools", "science"]
 
 [dependencies]
+async-trait = { workspace = true }
 # Published SRBN kernel and companions (PSP-9 Phase P).
 # srbn-ledger supplies the SHA-256 hash chain consumed by the replay ledger.
 srbn = "0.3.0"
@@ -29,13 +31,13 @@ serde_json = "1.0"
 uuid = { version = "1.11", features = ["v4"] }
 
 # Cryptographic hashing for the Merkle replay ledger.
-sha2 = "0.10"
+sha2 = { workspace = true }
 
 # Error handling.
 thiserror = "2.0"
 
 # Parse direct program invocations without granting shell composition.
-shell-words = "1.1"
+shell-words = { workspace = true }
 
 # Persistent grant intent signatures; live capabilities are never serialized.
 ed25519-dalek = "2.1"

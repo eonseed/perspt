@@ -21,9 +21,9 @@ members = [
 [workspace.package]
 version = "0.6.6"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.97"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
-license = "LGPL-3.0"
+license = "LGPL-3.0-only"
 repository = "https://github.com/eonseed/perspt"
 homepage = "https://eonseed.github.io/perspt/"
 
@@ -46,4 +46,24 @@ perspt = { version = "0.6.6", path = "crates/perspt" }
 # NOTE: `bundled` is NOT a default feature. Local dev links against system libduckdb
 # (fast). CI and release builds use `--all-features` or `--features bundled` to
 # compile DuckDB from source for a fully self-contained binary.
-duckdb = { version = "=1.10504.0" }
+duckdb = { version = "=1.10505.0" }
+
+# Shared third-party dependencies. Keeping these here makes direct-version
+# drift visible in one review and prevents duplicate majors across crates.
+anyhow = "1.0"
+async-trait = "0.1.89"
+dirs = "6.0"
+log = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+futures = "0.3"
+lsp-types = "0.97"
+shell-words = "1.1"
+similar = "3.0"
+toml = "1.1"
+clap = { version = "4.6", features = ["derive"] }
+tokio = { version = "1.52", features = ["full"] }
+tempfile = "3.27"
+uuid = { version = "1.23", features = ["v4"] }

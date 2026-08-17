@@ -2,6 +2,7 @@
 name = "perspt-store"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "DuckDB-based persistence layer for Perspt SRBN sessions"
@@ -22,23 +23,27 @@ perspt-core = { workspace = true }
 duckdb = { workspace = true }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # UUID for session IDs
-uuid = { version = "1.11", features = ["v4"] }
+uuid = { workspace = true }
 
 # Async
-tokio = { version = "1.42", features = ["full"] }
+tokio = { workspace = true }
 
 # Logging
-log = "0.4"
+log = { workspace = true }
 
 # Utilities
-anyhow = "1.0"
+anyhow = { workspace = true }
 
 # Hex encoding for Merkle hashes
 hex = "0.4"
+sha2 = { workspace = true }
 
 # Platform-specific directories
-dirs = "5.0"
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

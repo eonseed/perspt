@@ -2,6 +2,7 @@
 name = "perspt-tui"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Ratatui-based TUI for Perspt"
@@ -28,16 +29,13 @@ pulldown-cmark = "0.13"
 # Async
 tokio = { version = "1.42", features = ["full"] }
 tokio-stream = "0.1"
-futures = "0.3"
+futures = { workspace = true }
 
 # Rich Input
 tui-textarea = { package = "tui-textarea-2", version = "0.11" }
 
 # Diff Computation
-similar = "3.0"
-
-# Syntax Highlighting
-syntect = "5.2"
+similar = { workspace = true }
 
 # Async Indicators (0.10.0 for ratatui 0.30 compat)
 throbber-widgets-tui = "0.11"
@@ -46,7 +44,7 @@ throbber-widgets-tui = "0.11"
 termimad = "0.34"
 
 # Markdown to Ratatui Text
-tui-markdown = "0.3.6"
+tui-markdown = { version = "0.3.8", default-features = false }
 
 # Utilities
 anyhow = "1.0"

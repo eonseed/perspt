@@ -2,6 +2,7 @@
 name = "perspt-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Core types and LLM provider abstraction for Perspt"
@@ -12,9 +13,10 @@ keywords = ["llm", "ai", "chat", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+perspt-sdk = { workspace = true }
 # LLM unified interface
 genai = "0.6.5"
-futures = "0.3"
+futures = { workspace = true }
 
 # Google Cloud Application Default Credentials (ADC) for Vertex AI auth.
 # genai's Vertex adapter needs an OAuth2 Bearer token supplied via an
@@ -23,27 +25,27 @@ futures = "0.3"
 gcp_auth = "0.12"
 
 # TOML configuration parsing/serialization
-toml = "1.1"
+toml = { workspace = true }
 
 # Core async and traits
-async-trait = "0.1.88"
-tokio = { version = "1.42", features = ["full", "sync"] }
+async-trait = { workspace = true }
+tokio = { workspace = true }
 
 # Configuration
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # LSP types for agent integration
-lsp-types = "0.97"
+lsp-types = { workspace = true }
 
 # Logging
-log = "0.4"
+log = { workspace = true }
 
 # UUID for session IDs
-uuid = { version = "1.11", features = ["v4"] }
+uuid = { workspace = true }
 
 # Platform directories
-dirs = "5.0"
+dirs = { workspace = true }
 
 # Utilities
-anyhow = "1.0"
+anyhow = { workspace = true }
