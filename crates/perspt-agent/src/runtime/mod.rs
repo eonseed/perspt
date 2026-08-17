@@ -147,6 +147,10 @@ pub struct Psp9AgentRuntime {
     /// Catalog entries for registered tool families, appended to the
     /// domain's entries at node assembly.
     extra_tool_entries: Vec<perspt_sdk::ToolEntry>,
+    /// The selected domain package. Defaults to coding; the composition
+    /// root selects from a `DomainRegistry` (explicit `--domain` or
+    /// detection).
+    domain: Arc<dyn AgentDomainPackage>,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -225,6 +229,7 @@ impl Psp9AgentRuntime {
                 crate::tools::handlers::CandidateHandlerRegistry::with_builtins(),
             ),
             extra_tool_entries: Vec::new(),
+            domain: Arc::new(CodingDomain::new()),
         })
     }
 
@@ -253,6 +258,7 @@ impl Psp9AgentRuntime {
                 crate::tools::handlers::CandidateHandlerRegistry::with_builtins(),
             ),
             extra_tool_entries: Vec::new(),
+            domain: Arc::new(CodingDomain::new()),
         }
     }
 
@@ -271,6 +277,13 @@ impl Psp9AgentRuntime {
     /// assembled catalog and therefore its derived grant.
     pub fn with_tool_family(mut self, entries: Vec<perspt_sdk::ToolEntry>) -> Self {
         self.extra_tool_entries.extend(entries);
+        self
+    }
+
+    /// Select the domain package (from a `DomainRegistry` at the
+    /// composition root). Defaults to the coding domain.
+    pub fn with_domain(mut self, domain: Arc<dyn AgentDomainPackage>) -> Self {
+        self.domain = domain;
         self
     }
 
@@ -445,6 +458,7 @@ impl Psp9AgentRuntime {
             );
         }
         let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
+            .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers);
         let assembly = self.assemble_node(recorder, session_id, graph, node_id, generation)?;
         let kernel_state = loop_kernel_state(&assembly.grant_policy, &graph.revision_id);
@@ -846,7 +860,7 @@ impl Psp9AgentRuntime {
         node_id: &str,
         generation: u32,
     ) -> Result<NodeAssembly> {
-        let domain = CodingDomain::new();
+        let domain = self.domain.clone();
         let scope = perspt_sdk::DomainScope {
             label: node_id.to_string(),
             paths: Vec::new(),

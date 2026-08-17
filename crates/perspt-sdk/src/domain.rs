@@ -237,7 +237,7 @@ pub trait AgentDomainPackage: Send + Sync {
 /// contracts — every registered package implements the same trait.
 #[derive(Default)]
 pub struct DomainRegistry {
-    packages: Vec<Box<dyn AgentDomainPackage>>,
+    packages: Vec<std::sync::Arc<dyn AgentDomainPackage>>,
 }
 
 impl std::fmt::Debug for DomainRegistry {
@@ -262,7 +262,7 @@ impl DomainRegistry {
 
     /// Register a domain package. The SDK admits any number of domains without
     /// forking the control plane.
-    pub fn register(&mut self, package: Box<dyn AgentDomainPackage>) {
+    pub fn register(&mut self, package: std::sync::Arc<dyn AgentDomainPackage>) {
         self.packages.push(package);
     }
 
@@ -280,15 +280,15 @@ impl DomainRegistry {
     }
 
     /// Look up a package by explicit domain id.
-    pub fn by_id(&self, id: &DomainId) -> Option<&dyn AgentDomainPackage> {
-        self.packages
-            .iter()
-            .find(|p| &p.domain_id() == id)
-            .map(|p| p.as_ref())
+    pub fn by_id(&self, id: &DomainId) -> Option<std::sync::Arc<dyn AgentDomainPackage>> {
+        self.packages.iter().find(|p| &p.domain_id() == id).cloned()
     }
 
     /// The activated package with the highest detection confidence.
-    pub fn detect_best(&self, workspace: &WorkspaceSnapshot) -> Option<&dyn AgentDomainPackage> {
+    pub fn detect_best(
+        &self,
+        workspace: &WorkspaceSnapshot,
+    ) -> Option<std::sync::Arc<dyn AgentDomainPackage>> {
         self.packages
             .iter()
             .map(|p| (p, p.detect(workspace)))
@@ -298,7 +298,7 @@ impl DomainRegistry {
                     .partial_cmp(&b.confidence)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|(p, _)| p.as_ref())
+            .map(|(p, _)| p.clone())
     }
 
     /// Select a domain: an explicit id wins; otherwise detect the best match.
@@ -306,7 +306,7 @@ impl DomainRegistry {
         &self,
         explicit: Option<&DomainId>,
         workspace: &WorkspaceSnapshot,
-    ) -> Option<&dyn AgentDomainPackage> {
+    ) -> Option<std::sync::Arc<dyn AgentDomainPackage>> {
         match explicit {
             Some(id) => self.by_id(id),
             None => self.detect_best(workspace),
@@ -365,12 +365,12 @@ mod tests {
 
     fn registry() -> DomainRegistry {
         let mut r = DomainRegistry::new();
-        r.register(Box::new(StubDomain {
+        r.register(std::sync::Arc::new(StubDomain {
             id: "coding",
             marker: "Cargo.toml",
             confidence: 0.9,
         }));
-        r.register(Box::new(StubDomain {
+        r.register(std::sync::Arc::new(StubDomain {
             id: "research",
             marker: "refs.bib",
             confidence: 0.8,

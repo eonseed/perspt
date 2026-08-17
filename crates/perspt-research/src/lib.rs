@@ -184,7 +184,7 @@ mod tests {
     fn registry_admits_research_alongside_other_domains() {
         // The SDK control plane admits a second domain without forking.
         let mut registry = DomainRegistry::new();
-        registry.register(Box::new(ResearchDomain::new()));
+        registry.register(std::sync::Arc::new(ResearchDomain::new()));
         assert_eq!(registry.len(), 1);
         assert!(registry.by_id(&DomainId::new("research")).is_some());
     }

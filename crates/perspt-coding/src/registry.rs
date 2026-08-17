@@ -11,8 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::lang::{adapter_for, LanguageAdapter};
-use crate::CodingLanguage;
+use crate::lang::{LanguageAdapter, PythonAdapter, RustAdapter, TypeScriptAdapter};
 
 /// Open, stable language identifier (lowercase by convention).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -27,16 +26,6 @@ impl LanguageId {
 impl std::fmt::Display for LanguageId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
-    }
-}
-
-impl From<CodingLanguage> for LanguageId {
-    fn from(language: CodingLanguage) -> Self {
-        match language {
-            CodingLanguage::Rust => LanguageId::new("rust"),
-            CodingLanguage::Python => LanguageId::new("python"),
-            CodingLanguage::TypeScript => LanguageId::new("typescript"),
-        }
     }
 }
 
@@ -64,12 +53,13 @@ impl CodingAdapterRegistry {
     /// The registry with the first-party adapters registered.
     pub fn with_builtins() -> Self {
         let mut registry = Self::empty();
-        for language in [
-            CodingLanguage::Rust,
-            CodingLanguage::Python,
-            CodingLanguage::TypeScript,
-        ] {
-            registry.register(language.into(), adapter_for(language));
+        let builtins: [Box<dyn LanguageAdapter>; 3] = [
+            Box::new(RustAdapter),
+            Box::new(PythonAdapter),
+            Box::new(TypeScriptAdapter),
+        ];
+        for adapter in builtins {
+            registry.register(adapter.id(), adapter);
         }
         registry
     }
@@ -107,10 +97,8 @@ mod tests {
     struct GleamAdapter;
 
     impl LanguageAdapter for GleamAdapter {
-        fn language(&self) -> CodingLanguage {
-            // The legacy enum has no Gleam variant; the id is authoritative
-            // and the enum hint is only used for correction phrasing.
-            CodingLanguage::Rust
+        fn id(&self) -> LanguageId {
+            LanguageId::new("gleam")
         }
         fn diagnostic_sensor(&self) -> SensorRef {
             SensorRef::new("gleam-check", IndependenceRoute::DeterministicTool)

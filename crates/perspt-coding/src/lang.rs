@@ -15,11 +15,12 @@ use perspt_sdk::{
 };
 
 use crate::runtime::{default_classify_runtime, SmokeInvocation};
-use crate::CodingLanguage;
+use crate::LanguageId;
 
 /// A coding language adapter: a verifier-suite provider for one language.
 pub trait LanguageAdapter: Send + Sync {
-    fn language(&self) -> CodingLanguage;
+    /// The open, stable language identifier this adapter answers to.
+    fn id(&self) -> LanguageId;
     /// The primary diagnostic sensor for this language.
     fn diagnostic_sensor(&self) -> SensorRef;
     /// Parse raw diagnostic output into typed residuals.
@@ -69,15 +70,6 @@ fn cargo_package_name(manifest: &Path) -> Option<String> {
     None
 }
 
-/// Return the adapter for a language.
-pub fn adapter_for(language: CodingLanguage) -> Box<dyn LanguageAdapter> {
-    match language {
-        CodingLanguage::Rust => Box::new(RustAdapter),
-        CodingLanguage::Python => Box::new(PythonAdapter),
-        CodingLanguage::TypeScript => Box::new(TypeScriptAdapter),
-    }
-}
-
 fn residual(
     node_id: &str,
     generation: u32,
@@ -125,8 +117,8 @@ pub fn classify_rust_code(code: &str) -> ResidualClass {
 }
 
 impl LanguageAdapter for RustAdapter {
-    fn language(&self) -> CodingLanguage {
-        CodingLanguage::Rust
+    fn id(&self) -> LanguageId {
+        LanguageId::new("rust")
     }
 
     fn diagnostic_sensor(&self) -> SensorRef {
@@ -291,8 +283,8 @@ fn rust_examples(workspace: &Path) -> Vec<(Option<String>, String)> {
 pub struct PythonAdapter;
 
 impl LanguageAdapter for PythonAdapter {
-    fn language(&self) -> CodingLanguage {
-        CodingLanguage::Python
+    fn id(&self) -> LanguageId {
+        LanguageId::new("python")
     }
 
     fn diagnostic_sensor(&self) -> SensorRef {
@@ -422,8 +414,8 @@ pub fn classify_ts_code(code: &str) -> ResidualClass {
 }
 
 impl LanguageAdapter for TypeScriptAdapter {
-    fn language(&self) -> CodingLanguage {
-        CodingLanguage::TypeScript
+    fn id(&self) -> LanguageId {
+        LanguageId::new("typescript")
     }
 
     fn diagnostic_sensor(&self) -> SensorRef {
@@ -601,17 +593,8 @@ mod tests {
 
     #[test]
     fn adapter_for_dispatches_by_language() {
-        assert_eq!(
-            adapter_for(CodingLanguage::Rust).language(),
-            CodingLanguage::Rust
-        );
-        assert_eq!(
-            adapter_for(CodingLanguage::Python).language(),
-            CodingLanguage::Python
-        );
-        assert_eq!(
-            adapter_for(CodingLanguage::TypeScript).language(),
-            CodingLanguage::TypeScript
-        );
+        assert_eq!(RustAdapter.id(), LanguageId::new("rust"));
+        assert_eq!(PythonAdapter.id(), LanguageId::new("python"));
+        assert_eq!(TypeScriptAdapter.id(), LanguageId::new("typescript"));
     }
 }
