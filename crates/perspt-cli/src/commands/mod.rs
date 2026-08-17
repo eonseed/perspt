@@ -6,6 +6,7 @@ pub mod audit;
 pub mod chat;
 pub mod config;
 pub mod dashboard;
+pub mod db;
 pub mod init;
 pub mod ledger;
 pub mod logs;

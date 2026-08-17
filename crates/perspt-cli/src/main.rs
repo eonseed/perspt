@@ -254,6 +254,26 @@ enum Commands {
         #[arg(long)]
         db_path: Option<std::path::PathBuf>,
     },
+
+    /// Inspect and repair the local DuckDB store
+    Db {
+        #[command(subcommand)]
+        command: DbCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DbCommands {
+    /// Quarantine a poisoned WAL after making durable backups
+    Repair {
+        /// Database file to repair
+        #[arg(long)]
+        db_path: PathBuf,
+
+        /// Explicitly authorize WAL quarantine; the WAL is never deleted
+        #[arg(long)]
+        discard_wal: bool,
+    },
 }
 
 #[tokio::main]
@@ -380,5 +400,11 @@ async fn main() -> Result<()> {
         Some(Commands::Dashboard { port, db_path }) => {
             commands::dashboard::run(port, db_path).await
         }
+        Some(Commands::Db { command }) => match command {
+            DbCommands::Repair {
+                db_path,
+                discard_wal,
+            } => commands::db::repair(db_path, discard_wal).await,
+        },
     }
 }
