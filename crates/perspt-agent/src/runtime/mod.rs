@@ -126,9 +126,11 @@ struct ConcludeContext<'a> {
 mod adjudicate;
 mod ensemble;
 mod explore;
+mod external;
 mod node;
 mod recorder;
 
+use external::{external_runtime_from, registry_with_external};
 use node::*;
 pub use recorder::Psp9Recorder;
 
@@ -159,6 +161,11 @@ pub struct Psp9AgentRuntime {
     domain: Arc<dyn AgentDomainPackage>,
     /// Proposal-ensemble policy (system 7). Defaults to `Never`.
     ensemble: perspt_sdk::EnsemblePolicy,
+    /// Optional MCP edge adapter (system 13). Servers come from
+    /// `[[external_tools]]`; nothing changes when none are configured.
+    external: Option<Arc<tokio::sync::Mutex<crate::external_tools::ExternalToolRuntime>>>,
+    /// Admitted external entries, discovered once per session.
+    external_entries: Mutex<Option<Vec<perspt_sdk::ToolEntry>>>,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -197,30 +204,12 @@ impl Psp9AgentRuntime {
             "route {model} does not declare native tool calling; PSP-9 \
              tool-loop mode never emulates tool calls in text"
         );
-        let explorer_model = resolve_role_route(
-            routes.explorer.as_deref(),
-            config.models.as_ref().and_then(|m| m.speculator.as_deref()),
-            config,
-            &transport,
-        )?;
-        let adjudicator_model = resolve_role_route(
-            routes.adjudicator.as_deref(),
-            config
-                .models
-                .as_ref()
-                .and_then(|m| m.adjudicator.as_deref()),
-            config,
-            &transport,
-        )?;
-        let handoff_model = resolve_role_route(
-            None,
-            config.models.as_ref().and_then(|m| m.architect.as_deref()),
-            config,
-            &transport,
-        )?
-        .filter(|candidate| transport.capabilities(candidate).tool_calling);
+        let (explorer_model, adjudicator_model, handoff_model) =
+            resolve_role_routes(&routes, config, &transport)?;
         let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
         let ensemble = resolve_ensemble_policy(config.ensemble.as_ref())?;
+        let external = external_runtime_from(config)?;
+        let handlers = registry_with_external(&external);
         Ok(Self {
             working_dir,
             transport,
@@ -234,12 +223,12 @@ impl Psp9AgentRuntime {
             action_receiver: None,
             database_path: None,
             shared_store: None,
-            tool_handlers: Arc::new(
-                crate::tools::handlers::CandidateHandlerRegistry::with_builtins(),
-            ),
+            tool_handlers: Arc::new(handlers),
             extra_tool_entries: Vec::new(),
             domain: Arc::new(CodingDomain::new()),
             ensemble,
+            external,
+            external_entries: Mutex::new(None),
         })
     }
 
@@ -270,16 +259,24 @@ impl Psp9AgentRuntime {
             extra_tool_entries: Vec::new(),
             domain: Arc::new(CodingDomain::new()),
             ensemble: perspt_sdk::EnsemblePolicy::default(),
+            external: None,
+            external_entries: Mutex::new(None),
         }
     }
 
     /// Extend or replace the execution plane with a registry assembled at
     /// the composition root (registered tool families beyond the builtins).
+    /// A configured MCP dispatcher is preserved as the fallback.
     pub fn with_tool_handlers(
         mut self,
-        handlers: Arc<crate::tools::handlers::CandidateHandlerRegistry>,
+        mut handlers: crate::tools::handlers::CandidateHandlerRegistry,
     ) -> Self {
-        self.tool_handlers = handlers;
+        if let (Some(external), false) = (&self.external, handlers.has_fallback()) {
+            handlers.set_fallback(Arc::new(
+                crate::tools::handlers::external::ExternalDispatcher::new(external.clone()),
+            ));
+        }
+        self.tool_handlers = Arc::new(handlers);
         self
     }
 
@@ -476,18 +473,21 @@ impl Psp9AgentRuntime {
         shared_recovery_budget: u32,
     ) -> Result<NodeAttempt> {
         let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
-        if let Some(seed) = seed {
-            candidate.restore_exported(&seed.files)?;
-            let restored = candidate.checkpoint(&seed.canonical_scope).await?;
-            anyhow::ensure!(
-                restored.witness.state_root == seed.expected_state_root,
-                "restored candidate state does not match its durable checkpoint"
-            );
-        }
+        restore_seed(&candidate, seed).await?;
         let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
             .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers);
-        let assembly = self.assemble_node(recorder, session_id, graph, node_id, generation)?;
+        let assembly = {
+            let external_entries = self.external_tool_entries(recorder).await?;
+            self.assemble_node(
+                recorder,
+                session_id,
+                graph,
+                node_id,
+                generation,
+                &external_entries,
+            )?
+        };
         let kernel_state = loop_kernel_state(&assembly.grant_policy, &graph.revision_id);
         let tool_loop = ToolLoop {
             transport: self.transport.as_ref(),
@@ -881,6 +881,7 @@ impl Psp9AgentRuntime {
 
     /// Build the node's governed surfaces: catalog, grant, capability,
     /// contract, barrier, cadence, and energy model.
+    #[allow(clippy::too_many_arguments)]
     fn assemble_node(
         &self,
         recorder: &Psp9Recorder,
@@ -888,16 +889,14 @@ impl Psp9AgentRuntime {
         running_graph: &WorkGraphRevision,
         node_id: &str,
         generation: u32,
+        external_entries: &[perspt_sdk::ToolEntry],
     ) -> Result<NodeAssembly> {
         let domain = self.domain.clone();
         let scope = perspt_sdk::DomainScope {
             label: node_id.to_string(),
             paths: Vec::new(),
         };
-        let mut entries = domain.tool_entries(&scope);
-        entries.extend(self.extra_tool_entries.iter().cloned());
-        let catalog =
-            StaticCatalog::with_base(entries).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let catalog = self.assemble_catalog(node_id, external_entries)?;
         let grant_policy = self.mint_grant(recorder, &running_graph.revision_id, &catalog)?;
         // Every live capability is the intersection of the worker template
         // with the grant ceilings — the ceilings are enforced, not decorative.

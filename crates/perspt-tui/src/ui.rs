@@ -20,10 +20,17 @@ use perspt_core::GenAIProvider;
 /// #[tokio::main]
 /// async fn main() {
 ///     let provider = GenAIProvider::new().unwrap();
-///     run_chat_tui(provider, "gemini-2.0-flash".to_string()).await.unwrap();
+///     run_chat_tui(provider, "gemini-2.0-flash".to_string(), None, Vec::new())
+///         .await
+///         .unwrap();
 /// }
 /// ```
-pub async fn run_chat_tui(provider: GenAIProvider, model: String) -> Result<()> {
+pub async fn run_chat_tui(
+    provider: GenAIProvider,
+    model: String,
+    chat_tools: Option<perspt_agent::external_tools::chat::ChatToolSession>,
+    tool_notices: Vec<String>,
+) -> Result<()> {
     use crossterm::event::{
         DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyboardEnhancementFlags,
         PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -48,7 +55,7 @@ pub async fn run_chat_tui(provider: GenAIProvider, model: String) -> Result<()> 
     );
 
     let mut terminal = ratatui::init();
-    let mut app = ChatApp::new(provider, model);
+    let mut app = ChatApp::new(provider, model).with_chat_tools(chat_tools, tool_notices);
 
     let result = app.run(&mut terminal).await;
 

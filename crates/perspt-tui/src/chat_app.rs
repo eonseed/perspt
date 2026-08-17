@@ -1572,6 +1572,9 @@ pub struct ChatApp {
     visible_height: usize,
     /// Flag to indicate a message send is pending (for async handling)
     pending_send: bool,
+    /// Chat-scoped MCP tools (read-only admission); None keeps the plain
+    /// streaming path.
+    chat_tools: Option<perspt_agent::external_tools::chat::ChatToolSession>,
     /// Last viewport width used for wrapping (to detect resize)
     last_viewport_width: usize,
     /// Shared history loaded from data_dir/history.txt
@@ -1659,12 +1662,27 @@ impl ChatApp {
             auto_scroll: true, // Start with auto-scroll enabled
             visible_height: 20,
             pending_send: false,
+            chat_tools: None,
             last_viewport_width: 80,
             history,
             history_index: None,
             history_draft: String::new(),
             love_triggered: false,
         }
+    }
+
+    /// Attach chat-scoped MCP tools discovered by the composition root.
+    pub fn with_chat_tools(
+        mut self,
+        tools: Option<perspt_agent::external_tools::chat::ChatToolSession>,
+        notices: Vec<String>,
+    ) -> Self {
+        for notice in notices {
+            let msg = ChatMessage::system(notice);
+            self.push_message(msg);
+        }
+        self.chat_tools = tools.filter(|session| session.has_tools());
+        self
     }
 
     /// Handle commands that never enter history or reach the model provider.
@@ -2348,6 +2366,24 @@ impl ChatApp {
         let provider = Arc::clone(&self.provider);
         let model = self.model.clone();
 
+        if let Some(session) = self.chat_tools.clone() {
+            // Tool-calling turn: bounded MCP rounds, then the final text.
+            let messages = self.core_messages();
+            tokio::spawn(async move {
+                let outcome = session.run_turn(&provider, &model, messages, &tx).await;
+                match outcome {
+                    Ok(text) => {
+                        let _ = tx.send(text);
+                    }
+                    Err(error) => {
+                        let _ = tx.send(format!("error: {error:#}"));
+                    }
+                }
+                let _ = tx.send(EOT_SIGNAL.to_string());
+            });
+            return Ok(());
+        }
+
         tokio::spawn(async move {
             let _ = provider
                 .generate_response_stream_to_channel(&model, &context.join("\n"), tx)
@@ -2355,6 +2391,24 @@ impl ChatApp {
         });
 
         Ok(())
+    }
+
+    /// The provider-neutral message log for a tool-calling turn.
+    fn core_messages(&self) -> Vec<perspt_core::CoreMessage> {
+        self.messages
+            .iter()
+            .map(|message| match message.role {
+                MessageRole::User => perspt_core::CoreMessage::User {
+                    content: message.content.clone(),
+                },
+                MessageRole::Assistant => perspt_core::CoreMessage::Assistant {
+                    content: message.content.clone(),
+                },
+                MessageRole::System => perspt_core::CoreMessage::System {
+                    content: message.content.clone(),
+                },
+            })
+            .collect()
     }
 
     /// Finalize streaming and add assistant message

@@ -32,8 +32,17 @@ pub async fn run(model: Option<String>, config_override: Option<PathBuf>) -> Res
         resolved.model
     );
 
+    // Chat-scoped MCP tools: same servers and admission as the agent,
+    // read-only effects only. `simple-chat` keeps the plain path.
+    let (chat_tools, notices) =
+        match perspt_agent::external_tools::chat::ChatToolSession::from_config(&config).await {
+            Ok(Some((session, notices))) => (Some(session), notices),
+            Ok(None) => (None, Vec::new()),
+            Err(error) => (None, vec![format!("MCP setup failed: {error:#}")]),
+        };
+
     // Run the streaming chat TUI
-    perspt_tui::run_chat_tui(provider, resolved.model).await?;
+    perspt_tui::run_chat_tui(provider, resolved.model, chat_tools, notices).await?;
 
     Ok(())
 }
