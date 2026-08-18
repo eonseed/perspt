@@ -21,6 +21,7 @@ use super::family::ModelFamily;
 use super::id::ModelId;
 use super::tool::{ToolChoicePolicy, ToolSpec, TurnOutput};
 use crate::error::Result;
+use crate::prompt::PromptRoute;
 
 /// Boxed future returned by transport calls.
 pub type TransportFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
@@ -45,6 +46,23 @@ pub trait ModelTransport: Send + Sync {
 
     /// The model's training lineage — a routing prior, never a measurement.
     fn family_of(&self, model: &ModelId) -> ModelFamily;
+
+    /// The stable transport adapter identity (PSP-10 system 24). This is
+    /// NOT the configured endpoint id: endpoint names identify locations
+    /// and credentials, never model behavior. Scripted transports return
+    /// `"scripted"`.
+    fn adapter_kind(&self) -> &'static str;
+
+    /// The prompt identity of one call: adapter kind, model family, and the
+    /// exact model. A model served through a compatible gateway keeps its
+    /// own family identity.
+    fn prompt_route(&self, model: &ModelId) -> PromptRoute {
+        PromptRoute {
+            adapter: self.adapter_kind().to_owned(),
+            family: self.family_of(model),
+            exact_model: Some(model.model.clone()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -75,6 +93,10 @@ mod tests {
         fn family_of(&self, model: &ModelId) -> ModelFamily {
             ModelFamily::from_model_name(&model.model)
         }
+
+        fn adapter_kind(&self) -> &'static str {
+            "scripted"
+        }
     }
 
     #[test]
@@ -86,6 +108,9 @@ mod tests {
             transport.family_of(&model),
             ModelFamily::Other("scripted".into())
         );
+        let route = transport.prompt_route(&model);
+        assert_eq!(route.adapter, "scripted");
+        assert_eq!(route.exact_model.as_deref(), Some("scripted"));
     }
 
     #[test]

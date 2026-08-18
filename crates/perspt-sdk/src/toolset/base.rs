@@ -58,6 +58,8 @@ fn entry(
     ToolEntry {
         name: name.into(),
         description: description.into(),
+        discovery_summary: String::new(),
+        description_templates: None,
         effect,
         risk,
         schema: arg_schema,

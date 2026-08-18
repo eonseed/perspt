@@ -152,8 +152,8 @@ pub use toolset::{
     admit_external_tool, base_entries, AccessMode, ConcurrencyClass, ExternalToolDeclaration,
     FootprintSpec, HandlerContext, HandlerServices, MultiValueTarget, NetworkService,
     ObservationService, ProcessService, ProposalBinding, ResourceSelector, StaticCatalog,
-    ToolCatalog, ToolDispatcher, ToolEntry, ToolExecution, ToolHandler, ToolOrigin,
-    WorkspaceService,
+    ToolCatalog, ToolDescriptionLibrary, ToolDispatcher, ToolEntry, ToolExecution, ToolHandler,
+    ToolOrigin, WorkspaceService,
 };
 pub use workgraph::{
     EdgeKind, GraphEdit, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge,

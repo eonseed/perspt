@@ -234,7 +234,7 @@ mod tests {
             task_order_seed: 7,
             resampling_seed: 11,
             resamples: ACTIVATION_BOOTSTRAP_RESAMPLES,
-            model_revision: "qwen-3.6".into(),
+            model_revision: "qwen-3.8".into(),
             catalog_digest: "sha256:catalog".into(),
             budgets: "default".into(),
             paired_tasks: 30,

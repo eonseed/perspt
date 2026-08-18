@@ -44,6 +44,10 @@ impl ModelTransport for ScriptedTransport {
     fn family_of(&self, _model: &ModelId) -> ModelFamily {
         ModelFamily::Other("scripted".into())
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 /// A provider that is hard-down: every turn fails like an infrastructure
@@ -71,6 +75,10 @@ impl ModelTransport for DownTransport {
 
     fn family_of(&self, _model: &ModelId) -> ModelFamily {
         ModelFamily::Other("scripted".into())
+    }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
     }
 }
 

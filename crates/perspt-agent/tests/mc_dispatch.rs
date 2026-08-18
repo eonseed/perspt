@@ -83,6 +83,10 @@ impl ModelTransport for GoalRouted {
     fn family_of(&self, _model: &ModelId) -> ModelFamily {
         ModelFamily::Other("scripted".into())
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 fn write_fixture_project(project: &std::path::Path) {

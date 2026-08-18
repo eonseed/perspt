@@ -216,6 +216,13 @@ impl ModelTransport for GenAiTransport {
     fn family_of(&self, model: &ModelId) -> ModelFamily {
         ModelFamily::from_model_name(&model.model)
     }
+
+    /// The genai driver's adapter identity (PSP-10 system 24). One identity
+    /// for the whole driver: endpoint/provider ids stay credentials, and a
+    /// gateway-served model keeps its own family via `family_of`.
+    fn adapter_kind(&self) -> &'static str {
+        "genai"
+    }
 }
 
 #[cfg(test)]

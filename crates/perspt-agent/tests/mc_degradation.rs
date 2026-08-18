@@ -47,6 +47,10 @@ impl ModelTransport for DegradedTransport {
     fn family_of(&self, _model: &ModelId) -> ModelFamily {
         ModelFamily::Other("degraded".into())
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 #[tokio::test]

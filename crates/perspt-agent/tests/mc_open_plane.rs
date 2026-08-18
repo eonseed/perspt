@@ -50,6 +50,10 @@ impl ModelTransport for ScriptedTransport {
     fn family_of(&self, _model: &ModelId) -> ModelFamily {
         ModelFamily::Other("scripted".into())
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 /// The fixture family: one read-only probe with a scoped (non-file)
@@ -80,6 +84,8 @@ fn fixture_entry() -> ToolEntry {
     ToolEntry {
         name: "fixture_probe".into(),
         description: "Read-only fixture probe registered by the test crate".into(),
+        discovery_summary: String::new(),
+        description_templates: None,
         effect: EffectKind::SystemProbe,
         risk: RiskClass::Low,
         schema: serde_json::json!({

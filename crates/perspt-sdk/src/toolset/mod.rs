@@ -16,7 +16,7 @@ mod handler;
 
 pub use base::base_entries;
 pub use catalog::{StaticCatalog, ToolCatalog};
-pub use entry::{MultiValueTarget, ProposalBinding, ToolEntry, ToolOrigin};
+pub use entry::{MultiValueTarget, ProposalBinding, ToolDescriptionLibrary, ToolEntry, ToolOrigin};
 pub use external::{admit_external_tool, ExternalToolDeclaration};
 pub use footprint::{AccessMode, FootprintSpec, ResourceSelector};
 pub use handler::{

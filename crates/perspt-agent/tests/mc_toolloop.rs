@@ -68,6 +68,10 @@ impl ModelTransport for Scripted {
     fn family_of(&self, model: &ModelId) -> ModelFamily {
         ModelFamily::from_model_name(&model.model)
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 /// Executor that applies everything and reports mutation.
@@ -284,6 +288,10 @@ impl ModelTransport for FailPrimary {
 
     fn family_of(&self, model: &ModelId) -> ModelFamily {
         ModelFamily::from_model_name(&model.model)
+    }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
     }
 }
 
