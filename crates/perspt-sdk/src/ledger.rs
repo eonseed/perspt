@@ -346,48 +346,76 @@ pub fn replay_accepted_trajectory(ledger: &Ledger) -> Vec<(String, u32, f64)> {
     }
 
     let mut accepted = Vec::new();
-    let mut latest = HashMap::<(String, u32), f64>::new();
+    // Keyed by (node, generation, candidate_id) — PSP-10 Phase 2. A
+    // pre-PSP-10 row has no candidate id; its empty-string key reproduces
+    // the legacy latest-measurement correlation exactly, so old ledgers
+    // fold byte-identically. Concurrent candidates at one (node, gen) no
+    // longer overwrite one another.
+    let mut latest = HashMap::<(String, u32, String), f64>::new();
     for record in ledger.records() {
         if let LedgerEvent::Custom { kind, payload } = &record.event {
-            if kind != "tool_loop" {
-                continue;
-            }
-            let event = payload.get("event").and_then(|value| value.as_str());
-            let node = payload.get("node_id").and_then(|value| value.as_str());
-            let generation = payload
-                .get("generation")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u32::try_from(value).ok());
-            if let (Some("candidate_measured"), Some(node), Some(generation), Some(energy)) = (
-                event,
-                node,
-                generation,
-                payload.get("energy").and_then(|value| value.as_f64()),
-            ) {
-                latest.insert((node.to_string(), generation), energy);
-            }
-            if let (Some("gate_decision_recorded"), Some(node), Some(generation)) =
-                (event, node, generation)
-            {
-                // Deserialize into the typed decision so acceptance has one
-                // definition (`GateDecision::is_accepted`) shared with the
-                // producer, instead of a string list that drifts on rename.
-                let accepted_decision = payload
-                    .get("decision")
-                    .cloned()
-                    .and_then(|value| {
-                        serde_json::from_value::<crate::gate::GateDecision>(value).ok()
-                    })
-                    .is_some_and(|decision| decision.is_accepted());
-                if accepted_decision {
-                    if let Some(energy) = latest.get(&(node.to_string(), generation)) {
-                        accepted.push((node.to_string(), generation, *energy));
-                    }
-                }
+            if kind == "tool_loop" {
+                fold_tool_loop_row(payload, &mut latest, &mut accepted);
             }
         }
     }
     accepted
+}
+
+/// Fold one `tool_loop` payload into the accepted projection.
+fn fold_tool_loop_row(
+    payload: &serde_json::Value,
+    latest: &mut HashMap<(String, u32, String), f64>,
+    accepted: &mut Vec<(String, u32, f64)>,
+) {
+    let event = payload.get("event").and_then(|value| value.as_str());
+    let node = payload.get("node_id").and_then(|value| value.as_str());
+    let generation = payload
+        .get("generation")
+        .and_then(|value| value.as_u64())
+        .and_then(|value| u32::try_from(value).ok());
+    let candidate = payload
+        .get("candidate_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if let (Some("candidate_measured"), Some(node), Some(generation), Some(energy)) = (
+        event,
+        node,
+        generation,
+        payload.get("energy").and_then(|value| value.as_f64()),
+    ) {
+        latest.insert(
+            (node.to_string(), generation, candidate.to_string()),
+            energy,
+        );
+    }
+    if let (Some("gate_decision_recorded"), Some(node), Some(generation)) =
+        (event, node, generation)
+    {
+        // Deserialize into the typed decision so acceptance has one
+        // definition (`GateDecision::is_accepted`) shared with the
+        // producer, instead of a string list that drifts on rename.
+        let accepted_decision = payload
+            .get("decision")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<crate::gate::GateDecision>(value).ok())
+            .is_some_and(|decision| decision.is_accepted());
+        if accepted_decision {
+            // The event's own recorded energy is authoritative; the
+            // measurement correlation is the legacy fallback.
+            let energy = payload
+                .get("observed_energy")
+                .and_then(|value| value.as_f64())
+                .or_else(|| {
+                    latest
+                        .get(&(node.to_string(), generation, candidate.to_string()))
+                        .copied()
+                });
+            if let Some(energy) = energy {
+                accepted.push((node.to_string(), generation, energy));
+            }
+        }
+    }
 }
 
 /// R1 durable single-assignment outcomes. Every proposal/commit outcome is

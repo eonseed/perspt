@@ -16,6 +16,8 @@ pub struct Measurement {
     pub sequence: i64,
     pub node_id: String,
     pub generation: u32,
+    /// Candidate identity (PSP-10 Phase 2); empty on pre-PSP-10 rows.
+    pub candidate_id: String,
     pub energy: f64,
     pub hard_pass: bool,
 }
@@ -83,6 +85,11 @@ fn parse_measurement(sequence: i64, payload: &serde_json::Value) -> Option<Measu
         sequence,
         node_id: payload.get("node_id")?.as_str()?.to_string(),
         generation: u32::try_from(payload.get("generation")?.as_u64()?).ok()?,
+        candidate_id: payload
+            .get("candidate_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
         energy: payload.get("energy")?.as_f64()?,
         hard_pass: payload.get("hard_pass")?.as_bool()?,
     })

@@ -141,6 +141,11 @@ struct TurnState {
     /// `N_gate` computed at node entry; the loop refuses the
     /// `(N_gate + 1)`-th gate submission (Gate X).
     decision_bound: u64,
+    /// Monotone per-(node, generation) candidate counter (PSP-10 Phase 2).
+    candidate_seq: u64,
+    /// The candidate identity shared by the current measurement, gate
+    /// decision, and durable checkpoint (Proposition 2 keys by it).
+    current_candidate: String,
     turns_used: u32,
 }
 
@@ -154,6 +159,15 @@ impl TurnState {
             self.turns_used,
             self.recovery.spent,
         )
+    }
+
+    /// Mint the next candidate identity `"{node}/{gen}/c{seq}"`. Held for
+    /// the measurement → gate → durable-checkpoint triple.
+    fn next_candidate(&mut self, node_id: &str, generation: u32) -> String {
+        let id = format!("{node_id}/{generation}/c{}", self.candidate_seq);
+        self.candidate_seq += 1;
+        self.current_candidate = id.clone();
+        id
     }
 }
 
@@ -237,6 +251,8 @@ impl ToolLoop<'_> {
             accepted_checkpoint,
             trajectory,
             decision_bound,
+            candidate_seq: 1,
+            current_candidate: format!("{}/{}/c0", self.node_id, self.generation),
             turns_used: 0,
         };
         if let Some(outcome) = self.baseline_terminal(&baseline) {
@@ -343,6 +359,7 @@ impl ToolLoop<'_> {
             LoopEvent::CandidateMeasured {
                 node_id: self.node_id.clone(),
                 generation: self.generation,
+                candidate_id: format!("{}/{}/c0", self.node_id, self.generation),
                 energy: baseline.energy,
                 hard_pass: baseline.hard_pass,
                 residuals: baseline.residuals.clone(),
@@ -372,8 +389,9 @@ impl ToolLoop<'_> {
         if self.refuse_past_bound(state)? {
             return Ok(BoundaryStep::Exhausted);
         }
+        let candidate_id = state.next_candidate(&self.node_id, self.generation);
         let (measured, decision) = self
-            .measure_and_gate(&mut state.trajectory, &mut state.log)
+            .measure_and_gate(&candidate_id, &mut state.trajectory, &mut state.log)
             .await?;
 
         let accepted = decision.is_accepted();
@@ -618,6 +636,7 @@ impl ToolLoop<'_> {
             self.recorder,
             &mut state.log,
             LoopEvent::DurableCandidateCheckpoint {
+                candidate_id: state.current_candidate.clone(),
                 state_root: state.accepted_checkpoint.witness.state_root.clone(),
                 control,
                 conversation: context.conversation().clone(),
@@ -736,9 +755,13 @@ impl ToolLoop<'_> {
         Ok(())
     }
 
-    /// Measure the realized candidate and submit it to the gate.
+    /// Measure the realized candidate and submit it to the gate. The two
+    /// events share one candidate identity, and the gate event records the
+    /// trajectory's own `GateDecisionRef` fields — never recovered by
+    /// correlation (PSP-10 Phase 2).
     async fn measure_and_gate(
         &mut self,
+        candidate_id: &str,
         trajectory: &mut AcceptedTrajectory,
         log: &mut EventLog,
     ) -> Result<(Measured, GateDecision)> {
@@ -749,6 +772,7 @@ impl ToolLoop<'_> {
             LoopEvent::CandidateMeasured {
                 node_id: self.node_id.clone(),
                 generation: self.generation,
+                candidate_id: candidate_id.to_string(),
                 energy: measured.energy,
                 hard_pass: measured.hard_pass,
                 residuals: measured.residuals.clone(),
@@ -759,13 +783,20 @@ impl ToolLoop<'_> {
             measured.energy,
             self.budgets.declared_energy_floor,
         )?;
+        let recorded = trajectory
+            .gate_decisions
+            .last()
+            .context("submit_with_floor appended no decision")?;
         emit(
             self.recorder,
             log,
             LoopEvent::GateDecisionRecorded {
                 node_id: self.node_id.clone(),
                 generation: self.generation,
+                candidate_id: candidate_id.to_string(),
                 decision: decision.clone(),
+                observed_energy: Some(recorded.observed_energy),
+                best_accepted_before: Some(recorded.best_accepted_before),
             },
         )?;
         Ok((measured, decision))
