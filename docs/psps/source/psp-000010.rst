@@ -33,20 +33,29 @@ This PSP adds two mechanisms. It does not change the acceptance rule.
   gate.
 
 * A **model-conditioned prompt program** presents typed state to a model.
-  ``perspt-sdk`` defines the template and compilation primitives.
-  ``perspt-core`` owns compiled platform templates. Each domain package owns
-  its domain templates. ``perspt-agent`` resolves and composes both programs
-  at each actor call site.
+  A program is composed from small, single-concern **prompt sections**:
+  human-readable markdown files with typed front matter, compiled at build
+  time into typed Rust values. ``perspt-sdk`` defines the section,
+  composition, and digest primitives; a small codegen crate turns section
+  files into typed structs so that a malformed edit fails ``cargo build``,
+  never a session. ``perspt-core`` owns the platform section library. Each
+  domain package owns its domain sections. ``perspt-agent`` composes both
+  programs at each actor call site. There is no template engine and no
+  prompt database.
 
 Prompt selection uses the transport adapter and the model family. An exact
 model may override that choice. A configured provider name never selects a
 prompt. Provider names identify endpoints and credentials. They do not
-identify model behavior.
+identify model behavior. Structural differences between model families —
+tool-call convention, reasoning-trace handling, system-slot layout — live in
+a typed **model dialect**, never in forked prose. Family-specific prose
+exists only as single-section overrides gated by measured evidence.
 
-Each compiled program records its template identity, version, source hash,
-rendered hash, and tool specification hash. Replay reconstructs the exact
-messages that Perspt supplied to its transport. It does not claim knowledge
-of instructions or changes inside a remote service.
+A compiled program records its dialect, its ordered section identities,
+versions, and content hashes, its rendered hash, its dropped-section set,
+and its tool specification hash. Replay reconstructs the exact messages that
+Perspt supplied to its transport. It does not claim knowledge of
+instructions or changes inside a remote service.
 
 The design keeps three objects separate:
 
@@ -67,9 +76,10 @@ actor loops with one ``ActorTurnRunner``.
 
 A typed ``CorrectionPacket`` carries verifier structure to the next branch.
 A graph staging root holds node winners until a full integration check passes.
-Four implementation choices are fixed: branch workspaces are sequential eager
-copies, no-goods are exact, runtime events use one versioned envelope, and
-divergent prompts require measured activation evidence.
+Five implementation choices are fixed: branch workspaces are sequential eager
+copies, no-goods are exact, runtime events use one versioned envelope,
+prompt text is compile-time typed with no template engine and no prompt
+database, and divergent prompts require measured activation evidence.
 
 The old ensemble and exploration APIs are replaced by this search plane. The
 change is intentionally breaking. ``simple-chat`` remains unchanged.
@@ -281,34 +291,55 @@ mismatch is a stale-root or replay error. It fails closed.
    workspace. Only the selected descent enters the accepted trajectory. The
    numbers are illustrative and are not evaluation results.
 
-.. rubric:: Definition 4 (Prompt program and route resolution)
+.. rubric:: Definition 4 (Prompt sections, route resolution, and programs)
 
 A prompt route is :math:`r = (a, f, m)`. Here :math:`a` is the transport
 adapter, :math:`f` is the model family, and :math:`m` is an optional exact
-model. For stage :math:`s`, template resolution is
+model. A stage :math:`s` declares an ordered section list
+:math:`\mathrm{Sec}(s) = (c_1, \dots, c_j)`. Each section is a typed unit
+with an identity, a version, a content hash, a declared variable schema, a
+``required`` flag, and a priority. Resolution operates per section:
 
 .. math::
 
-   R : (r, s) \;\longrightarrow\; \mathcal{T} \cup \{\bot\},\qquad
-   R(r, s) = \begin{cases}
-     t_{a,f,m,s} & \text{if an exact-model override exists,}\\
-     t_{a,f,s}   & \text{if a family template exists,}\\
-     t_{\mathrm{fb},s} & \text{if } s \text{ is a domain stage with a declared
-       fallback,}\\
-     t_{\mathrm{neu},s} & \text{if } s \text{ is a platform stage,}\\
-     \bot        & \text{otherwise.}
+   R : (r, c) \;\longrightarrow\; \mathcal{T},\qquad
+   R(r, c) = \begin{cases}
+     c_{a,f,m} & \text{if an active exact-model override exists,}\\
+     c_{a,f}   & \text{if an active family override exists,}\\
+     c_{\mathrm{base}} & \text{otherwise.}
    \end{cases}
 
-The cases apply in order; the first matching case selects the template, so
-:math:`R` is a function. :math:`R(r,s) = \bot` fails closed. Domain stages
-may declare a fallback. Every platform stage resolves to the **neutral
-platform route** :math:`t_{\mathrm{neu},s}` when no family template exists.
-A model family outside the supported set, including
-``ModelFamily::Other``, therefore receives the neutral template, never a
-route error. The platform manifest must supply a neutral template for every
-platform stage; an incomplete neutral set fails manifest validation.
-Compilation is deterministic for a fixed template,
-template version, compiler version, and canonical variable value.
+The cases apply in order; the first matching case selects the section, so
+:math:`R` is a function. Every section has a base form: the build of the
+owning crate fails if a declared stage lacks any base section, so :math:`R`
+is **total** for built-in stages — a model family outside the supported set,
+including ``ModelFamily::Other``, receives the base sections, never a route
+error. A bundle-supplied stage missing a base section fails bundle
+validation (fail-closed). Overrides are inactive until Gate AE activates
+them.
+
+A compiled program is
+
+.. math::
+
+   \pi_{a,f,m,s} = \operatorname{compose}\bigl(d_{a,f,m},\;
+   \langle R(r, c) : c \in \mathrm{Sec}(s),\; P_c(\sigma) \rangle,\;
+   v,\; \beta_{\mathrm{tok}}\bigr),
+
+where :math:`d_{a,f,m}` is the resolved model dialect, :math:`P_c` are the
+typed inclusion predicates evaluated on typed session state :math:`\sigma`,
+:math:`v` the canonical variable values, and :math:`\beta_{\mathrm{tok}}`
+the prompt token budget. **Budget fitting is deterministic:** optional
+sections are dropped in increasing priority order (ties broken by section
+id) until the size estimate fits :math:`\beta_{\mathrm{tok}}`; required
+sections are never dropped; if the required sections alone exceed
+:math:`\beta_{\mathrm{tok}}`, compilation fails closed. The dropped-section
+set is therefore a function of the inputs and is recorded.
+
+Compilation is deterministic: identical (dialect id and version, ordered
+resolved sections with ids, versions, and hashes, inclusion outcomes,
+canonical variable values, token budget) yield identical rendered bytes,
+an identical dropped-section set, and identical digests.
 
 .. rubric:: Definition 5 (Search budget)
 
@@ -397,9 +428,11 @@ model call.
 
 **Argument.** Each ledger event has one fold rule. Search usage increases by
 recorded amounts. Conversation deltas are digest chained. A prompt call names
-its template, compiler, inputs, and rendered digest. The replayer either
-reconstructs the same program or reports a mismatch. It reads model output
-from the ledger. It never samples the model again.
+its dialect, its ordered section identities, versions, and hashes, its
+variable values, its dropped-section set, and its rendered digest. By
+Definition 4 compilation is deterministic in exactly these inputs, so the
+replayer either reconstructs the same program or reports a mismatch. It
+reads model output from the ledger. It never samples the model again.
 
 .. rubric:: Proposition 5 (Deterministic selection)
 
@@ -440,8 +473,9 @@ The numbering continues from system 18 in :psp:`000009`. This PSP defines
 systems 19 through 28.
 
 The crate boundary is simple. ``perspt-sdk`` defines reusable primitives.
-``perspt-core`` owns the platform prompt library and the model driver.
-Domain crates own domain prompts and verifier adapters. ``perspt-agent`` is
+``perspt-core`` owns the platform prompt section library and the model
+driver. Domain crates own domain sections and verifier adapters.
+``perspt-agent`` is
 the composition root. It runs actors, search, and integration.
 
 This placement matches the current manifests. ``perspt-core`` already depends
@@ -462,7 +496,7 @@ on ``perspt-sdk``. No dependency inversion is required.
        sdk [label="perspt-sdk\nprompt and search primitives"];
        core [label="perspt-core\nplatform prompts\nmodel driver"];
        coding [label="perspt-coding\ndomain prompts\ndiagnostic adapters"];
-       research [label="perspt-research\ndomain fallback prompts"];
+       research [label="perspt-research\ndomain base sections"];
        agent [label="perspt-agent\nactor turns, search, integration",
               fillcolor="#EAF2FF", color="#3B6FB6", penwidth=1.4];
 
@@ -796,21 +830,112 @@ staging layer.
 The work graph is the task trajectory. Branches propose node states. The
 staging root composes them. One atomic promotion commits the final result.
 
-23. Prompt Template Primitives in ``perspt-sdk``
-================================================
+23. Typed Prompt Sections and Codegen
+=====================================
 
-*Owner:* the new ``perspt-sdk::prompt`` module.
+*Owner:* the new ``perspt-sdk::prompt`` module (runtime types and
+composition) and a new small build-dependency crate,
+``perspt-prompt-macros`` (compile-time codegen).
+
+Prompt text is authored as small, single-concern markdown files. Each file
+does one thing — state the role, explain the tool protocol, define the
+output contract — and a stage prompt is their composition. A section opens
+with typed front matter; the body is plain prose with ``{{variable}}``
+placeholders and nothing else. There is **no template language**: no
+conditionals, no loops, no includes, no filters, no expression syntax. All
+logic lives in typed Rust.
+
+.. rubric:: Section file anatomy
+
+.. code-block:: markdown
+
+   ---
+   id: branch_correct/tool_protocol
+   version: 3
+   role: system
+   required: true          # never dropped by budget fitting
+   priority: 90            # higher survives longer (optional sections)
+   max_bytes: 4096
+   vars:
+     tool_names: { type: "Vec<String>", style: bullet_list }
+     budget_note: { type: "Option<String>" }
+   ---
+   Use only these tools:
+   {{tool_names}}
+   {{budget_note}}
+
+.. rubric:: Generated API
+
+The build step parses every section at compile time and generates one typed
+struct per section in the owning crate:
 
 .. code-block:: rust
 
-   pub struct PromptTemplateId(pub String);
-   pub struct PromptTemplateVersion(pub u32);
+   // generated by perspt-prompt-macros — not hand-edited
+   pub struct ToolProtocol {
+       pub tool_names: Vec<String>,
+       pub budget_note: Option<String>,
+   }
+
+   impl PromptSection for ToolProtocol {
+       const ID: &'static str = "branch_correct/tool_protocol";
+       const VERSION: u32 = 3;
+       const CONTENT_HASH: &'static str = "sha256:…";
+       const REQUIRED: bool = true;
+       const PRIORITY: u16 = 90;
+       fn render(&self) -> RenderedSection { /* deterministic */ }
+   }
+
+A malformed section fails ``cargo build`` of its owning crate. The codegen
+validations are:
+
+* every ``{{placeholder}}`` in the body is declared in ``vars``;
+* every declared variable appears in the body (no orphans);
+* the declared Rust type is on the supported list below;
+* the body respects ``max_bytes`` with worst-case variable expansion capped;
+* ``id``, ``version``, ``role``, and ``required``/``priority`` are present
+  and well-formed; and
+* the stage's section list is complete (every declared stage has all of its
+  base sections).
+
+.. rubric:: Typed rendering rules
+
+Template logic is replaced by deterministic typed rendering:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Declared type
+     - Rendering rule
+   * - ``String``
+     - Substituted verbatim.
+   * - ``Option<T>``
+     - The line containing the placeholder is omitted entirely when the
+       value is ``None``.
+   * - ``Vec<String>``
+     - Rendered in the declared ``style``: ``bullet_list`` (one ``- item``
+       per line), ``comma_list``, or ``numbered_list``. An empty vector
+       omits the line.
+   * - integers / floats
+     - Canonical formatting (no locale, fixed float form).
+
+This is the entire dynamic surface of a section body. Conditional structure
+beyond a dropped line is expressed by the composer's typed inclusion
+predicates (system 24), never inside prose.
+
+.. rubric:: Runtime types
+
+.. code-block:: rust
+
+   pub struct PromptSectionId(pub String);     // "stage/section"
+   pub struct PromptSectionVersion(pub u32);
 
    pub enum PromptStage {
-       // platform stages (neutral route is the guaranteed backstop)
+       // platform stages
        SessionBootstrap, GraphPlan, ToolDiscovery,
        ConversationCompact, ExternalReconcile,
-       // domain stages (declared fallback is legal)
+       // domain stages
        RepositoryExplore, BranchStrategy, BranchPropose,
        BranchCorrect, BranchReview, Adjudicate, EvidenceSummarize,
    }
@@ -821,28 +946,20 @@ staging root composes them. One atomic promotion commits the final result.
        pub exact_model: Option<String>,
    }
 
-   pub struct PromptTemplate {
-       pub id: PromptTemplateId,
-       pub version: PromptTemplateVersion,
-       pub stage: PromptStage,
-       pub role: PromptMessageRole,
-       pub source: String,             // include_str! or pinned bundle bytes
-       pub variable_schema: PromptVariableSchema,
-   }
-
    pub struct CompiledPromptMessage {
        pub role: PromptMessageRole,
        pub content: String,
-       pub template_id: PromptTemplateId,
-       pub template_version: PromptTemplateVersion,
-       pub source_hash: String,        // SHA-256 of template source
+       pub sections: Vec<SectionProvenance>, // id, version, content hash,
+                                             // override origin
        pub rendered_hash: String,      // SHA-256 of rendered content
    }
 
    pub struct CompiledPromptProgram {
        pub route: PromptRoute,
        pub stage: PromptStage,
+       pub dialect: DialectRef,        // id + version (system 24)
        pub messages: Vec<CompiledPromptMessage>,
+       pub dropped_sections: Vec<PromptSectionId>, // budget fitting
        pub tool_spec_hash: String,
        pub program_digest: String,     // over canonical bytes of the above
    }
@@ -853,30 +970,54 @@ staging root composes them. One atomic promotion commits the final result.
        pub invocation_digest: String,  // ordered platform + domain programs
    }
 
-Digests use a length-prefixed canonical encoding. Serde output is not treated
-as canonical.
+Digests use a length-prefixed canonical encoding with the domain tag
+``perspt-prompt-v1``, hashed with SHA-256 — the ``GrantPolicy``
+canonical-bytes discipline. Serde output is not treated as canonical.
 
-The private rendering engine is MiniJinja 2.x. No MiniJinja type appears in a
-public SDK signature. The SDK wrapper applies these rules:
+.. rubric:: Codegen pipeline
 
-* undefined variables are errors;
-* templates have no file loader;
-* the wrapper rejects ``include``, ``extends``, ``import``, ``macro``,
-  ``call``, and ``set`` syntax before registration;
-* only field access, conditions, bounded loops, and approved deterministic
-  filters are allowed;
-* fuel and rendered-byte limits bound execution;
-* auto-escaping is disabled; and
-* variables use canonical maps and values.
+.. graphviz::
+   :caption: A bad prompt edit fails the build, never a session.
+   :align: center
 
-The owning crate validates every built-in template in its test suite. Invalid
-templates must fail before release.
+   digraph prompt_codegen {
+       graph [rankdir=LR, bgcolor="#FFFFFF", pad="0.20",
+              nodesep="0.35", ranksep="0.55", fontname="Helvetica"];
+       node [shape=box, style="rounded,filled", fillcolor="#F7F8FA",
+             color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=9.5, margin="0.14,0.09"];
+       edge [color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=8.5, arrowsize=0.72, penwidth=1.05];
 
-24. Prompt Routes and Program Compilation
-=========================================
+       md [label="section .md files\ntyped front matter",
+           fillcolor="#FFF8E6"];
+       gen [label="perspt-prompt-macros\nparse + validate\nat compile time"];
+       err [label="cargo build error", shape=octagon,
+            fillcolor="#FCEBEC", color="#A34A52"];
+       structs [label="typed Section structs\nconst content hashes",
+                fillcolor="#EAF2FF"];
+       composer [label="stage composer\npredicates + variables\n+ budget fitting"];
+       dialect [label="ModelDialect\nstructure per family"];
+       msgs [label="compiled messages\n+ digests", shape=box, peripheries=2,
+             style="rounded,filled", fillcolor="#E9F7EF", color="#347A55"];
 
-*Owner:* ``perspt-sdk::model`` for the port and transport implementations for
-the adapter identity.
+       md -> gen;
+       gen -> err [label="invalid"];
+       gen -> structs [label="valid"];
+       structs -> composer;
+       dialect -> composer;
+       composer -> msgs;
+   }
+
+The owning crate's test suite additionally snapshots every section's
+rendered form with fixture variables, so a reviewed text change is always a
+visible snapshot diff.
+
+24. Dialects, Composition, and Budget Fitting
+=============================================
+
+*Owner:* ``perspt-sdk::model`` for the port; transport implementations for
+the adapter identity; ``perspt-sdk::prompt`` for dialects and composition.
 
 ``ModelTransport`` gains a stable adapter identity and a route method:
 
@@ -892,68 +1033,242 @@ the adapter identity.
        }
    }
 
-The configured endpoint id is not the adapter identity. A model served through
-a compatible gateway keeps its own family identity. It must not receive a
-template for another family. Scripted transports use the stable adapter
-identity ``scripted``.
+The configured endpoint id is not the adapter identity. A model served
+through a compatible gateway keeps its own family identity. It must not
+receive another family's sections or dialect. Scripted transports use the
+stable adapter identity ``scripted``.
+
+.. rubric:: Section resolution
+
+Each section resolves independently through the override chain of
+Definition 4. Base sections always exist, so resolution is total for
+built-in stages:
 
 .. graphviz::
-   :caption: Prompt resolution is deterministic. Platform stages resolve to
-             the neutral route; an undeclared domain fallback fails closed.
+   :caption: Per-section resolution. Base sections make resolution total;
+             overrides exist only with Gate AE activation evidence.
    :align: center
 
-   digraph route_resolution {
+   digraph section_resolution {
        graph [rankdir=TB, bgcolor="#FFFFFF", pad="0.20",
               nodesep="0.30", ranksep="0.45", fontname="Helvetica"];
        node [shape=box, style="rounded,filled", fillcolor="#F7F8FA",
-             color="#637083", fontcolor="#1F2933", fontname="Helvetica", fontsize=9.5,
-             margin="0.13,0.08"];
-       edge [color="#637083", fontcolor="#1F2933", fontname="Helvetica", fontsize=8.5,
-             arrowsize=0.72, penwidth=1.05];
+             color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=9.5, margin="0.13,0.08"];
+       edge [color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=8.5, arrowsize=0.72, penwidth=1.05];
 
-       route [label="adapter + family\n+ model + stage", fillcolor="#EAF2FF"];
-       exact [label="Exact-model template?"];
-       family [label="Adapter-family template?"];
-       fallback [label="Declared domain fallback?"];
-       neutral [label="Neutral platform template", fillcolor="#FFF8E6"];
-       compile [label="Compile", shape=box, peripheries=2,
-                style="rounded,filled", fillcolor="#E9F7EF", color="#347A55"];
-       fail [label="Route error", shape=octagon,
-             fillcolor="#FCEBEC", color="#A34A52"];
+       route [label="adapter + family + model\n+ stage + section",
+              fillcolor="#EAF2FF"];
+       exact [label="Active exact-model\noverride file?"];
+       family [label="Active family\noverride file?"];
+       base [label="Base section\n(always present)", fillcolor="#FFF8E6"];
+       resolved [label="Resolved section", shape=box, peripheries=2,
+                 style="rounded,filled", fillcolor="#E9F7EF",
+                 color="#347A55"];
 
        route -> exact;
-       exact -> compile [label="yes"];
+       exact -> resolved [label="yes"];
        exact -> family [label="no"];
-       family -> compile [label="yes"];
-       family -> fallback [label="no, domain stage"];
-       family -> neutral [label="no, platform stage"];
-       neutral -> compile [label="manifest-complete"];
-       fallback -> compile [label="yes"];
-       fallback -> fail [label="no"];
+       family -> resolved [label="yes"];
+       family -> base [label="no"];
+       base -> resolved;
    }
 
-Each model call compiles two programs. The first is the platform envelope.
-The second is the domain stage. They remain separate messages with separate
-hashes.
+.. rubric:: Model dialects
+
+Structural differences between model families never fork prose. They live in
+one typed value per resolved route:
+
+.. code-block:: rust
+
+   pub struct ModelDialect {
+       pub id: String,                 // e.g. "anthropic_native_v1"
+       pub version: u32,
+       pub system_slots: SystemSlotPolicy,   // Many | SingleConcatenated
+       pub tool_calls: ToolCallConvention,   // Native | JsonInText
+       pub reasoning: ReasoningTracePolicy,  // None | Requested | Stripped
+       pub boundary_marker: String,    // delimiter for concatenated slots
+       pub max_prompt_bytes: u64,
+   }
+
+Two contrasting instances:
+
+.. code-block:: rust
+
+   // A family with native tool calls and multiple system slots.
+   ModelDialect {
+       id: "native_tools_v1".into(), version: 1,
+       system_slots: SystemSlotPolicy::Many,
+       tool_calls: ToolCallConvention::Native,
+       reasoning: ReasoningTracePolicy::Stripped,
+       boundary_marker: String::new(),
+       max_prompt_bytes: 262_144,
+   }
+
+   // A family reached through a single-system-slot endpoint that emits
+   // tool calls as JSON in text.
+   ModelDialect {
+       id: "json_single_slot_v1".into(), version: 1,
+       system_slots: SystemSlotPolicy::SingleConcatenated,
+       tool_calls: ToolCallConvention::JsonInText,
+       reasoning: ReasoningTracePolicy::None,
+       boundary_marker: "\n===== perspt:boundary =====\n".into(),
+       max_prompt_bytes: 131_072,
+   }
+
+The dialect decides how compiled messages are laid out (separate system
+messages or a deterministic concatenation with the boundary marker), whether
+the output contract section instructs native tool calls or a JSON envelope,
+and how reasoning traces are requested or removed before parsing. The
+dialect id and version enter the program digest.
+
+.. rubric:: Stage composition
+
+A stage composer is ordinary typed Rust — the second dynamism channel after
+typed variables:
+
+.. code-block:: rust
+
+   pub fn branch_correct(state: &TurnState) -> StageComposition {
+       StageComposition::new(PromptStage::BranchCorrect)
+           .section(Role { domain_id: state.domain_id.clone() })
+           .section(ToolProtocol {
+               tool_names: state.activated_tools(),
+               budget_note: state.budget_note(),
+           })
+           .section_if(state.packet.is_some(), Correction {
+               packet: state.packet.clone().unwrap(),
+           })
+           .section(OutputContract { dialect: state.dialect.tool_calls })
+   }
+
+Inclusion predicates are code, so they are unit-tested like code; nothing
+conditional hides inside prose.
+
+.. rubric:: Budget fitting
+
+Every section carries ``required`` or a ``priority``. The composer fits the
+dialect's prompt budget deterministically: optional sections are dropped in
+increasing priority order (ties by section id) until the estimate fits;
+required sections are never dropped; required sections alone exceeding the
+budget fail compilation closed. A worked example:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 14 14 18 20
+
+   * - Section
+     - Required
+     - Priority
+     - Estimated tokens
+     - Fit at 1,800?
+   * - ``role``
+     - yes
+     - —
+     - 120
+     - kept
+   * - ``tool_protocol``
+     - yes
+     - —
+     - 640
+     - kept
+   * - ``correction``
+     - yes
+     - —
+     - 700
+     - kept
+   * - ``repository_hints``
+     - no
+     - 40
+     - 460
+     - **dropped first**
+   * - ``style_guidance``
+     - no
+     - 60
+     - 220
+     - kept (fits after drop)
+   * - ``output_contract``
+     - yes
+     - —
+     - 110
+     - kept
+
+The dropped set (here ``{repository_hints}``) is part of the compiled
+program, enters the program digest, and is ledgered — replay reproduces the
+same drop or reports a mismatch.
+
+.. rubric:: Injected turn blocks
+
+The third dynamism channel: per-turn state — correction packets, budget
+notices, no-good digests, graph deltas — is rendered as separate, delimited
+messages appended at turn boundaries. The compiled stage program is never
+re-rendered mid-session, so its digest is stable and the provider-visible
+prefix stays byte-identical across turns (which is also what makes provider
+prompt caching effective).
+
+.. code-block:: text
+
+   [perspt:turn-context v1]
+   dominant residual cluster: E0432 unresolved import (7 sites, 1 cluster)
+   correction targets: src/lib.rs, src/parser.rs :: parse_entry
+   remaining: 3 turns, 2 verifier runs, 41k tokens
+   no-goods: 2 recorded (exact-key)
+   [/perspt:turn-context]
 
 .. graphviz::
-   :caption: The agent composes typed platform and domain programs at the transport boundary.
+   :caption: The stage program is compiled once; per-turn state arrives as
+             injected blocks.
+   :align: center
+
+   digraph turn_timeline {
+       graph [rankdir=LR, bgcolor="#FFFFFF", pad="0.20",
+              nodesep="0.35", ranksep="0.50", fontname="Helvetica"];
+       node [shape=box, style="rounded,filled", fillcolor="#F7F8FA",
+             color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=9.5, margin="0.13,0.08"];
+       edge [color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=8.5, arrowsize=0.72, penwidth=1.05];
+
+       program [label="compiled stage program\n(stable prefix, one digest)",
+                fillcolor="#EAF2FF"];
+       t1 [label="turn 1\n+ turn-context block"];
+       t2 [label="turn 2\n+ correction block"];
+       t3 [label="turn 3\n+ budget notice"];
+       parse [label="fail-closed parse\nper output contract",
+              shape=box, peripheries=2, style="rounded,filled",
+              fillcolor="#E9F7EF", color="#347A55"];
+
+       program -> t1 -> t2 -> t3 -> parse;
+   }
+
+.. rubric:: Two programs per call
+
+Each model call compiles two programs — the platform envelope and the domain
+stage — as separate messages with separate hashes. The dialect lays them out
+at the transport boundary:
+
+.. graphviz::
+   :caption: Typed state feeds two section programs; the dialect controls
+             the final message layout.
    :align: center
 
    digraph prompt_composition {
        graph [rankdir=TB, bgcolor="#FFFFFF", pad="0.20",
               nodesep="0.42", ranksep="0.50", fontname="Helvetica"];
        node [shape=box, style="rounded,filled", fillcolor="#F7F8FA",
-             color="#637083", fontcolor="#1F2933", fontname="Helvetica", fontsize=9.5,
-             margin="0.14,0.09"];
-       edge [color="#637083", fontcolor="#1F2933", arrowsize=0.72, penwidth=1.05];
+             color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=9.5, margin="0.14,0.09"];
+       edge [color="#637083", fontcolor="#1F2933", arrowsize=0.72,
+             penwidth=1.05];
 
-       platform [label="Platform program\nperspt-core\nidentity + hashes",
-                 fillcolor="#EAF2FF"];
-       domain [label="Domain program\ndomain crate\nidentity + hashes",
-               fillcolor="#FFF8E6"];
        typed [label="Typed task, capability, tool,\nbranch, verifier, and budget data"];
-       adapter [label="Transport adapter\nordered system messages"];
+       platform [label="Platform section program\nperspt-core\nids + hashes",
+                 fillcolor="#EAF2FF"];
+       domain [label="Domain section program\ndomain crate\nids + hashes",
+               fillcolor="#FFF8E6"];
+       dialect [label="ModelDialect\nslots, tool convention,\nreasoning, markers"];
+       adapter [label="Transport adapter\nordered messages"];
        request [label="Model request", shape=box, peripheries=2,
                 style="rounded,filled", fillcolor="#E9F7EF", color="#347A55"];
 
@@ -961,39 +1276,48 @@ hashes.
        typed -> domain;
        platform -> adapter;
        domain -> adapter;
+       dialect -> adapter;
        adapter -> request;
    }
 
-The domain template does not receive the platform prompt as a string
-variable, and the platform prompt embeds no domain prose. Neither template
-can reach data the type system does not hand it.
+The domain program does not receive the platform prompt as a variable, and
+the platform program embeds no domain prose. Neither can reach data the type
+system does not hand it.
 
-25. Template Ownership, Manifests, and External Bundles
-=======================================================
+25. Section Ownership, Overrides, Manifests, and External Bundles
+=================================================================
 
-*Owner:* each template-owning crate; validation in ``perspt-sdk::prompt``.
+*Owner:* each section-owning crate; validation in ``perspt-sdk::prompt``
+and at build time in ``perspt-prompt-macros``.
 
-Each route-stage prompt is a complete template. Route-specific prose is not
-assembled from a global fragment directory. Similar templates may duplicate
-text. Their separate hashes make each change reviewable.
+Sections live as markdown files in the owning crate, ordered by filename.
+There are **no per-family directories and no copies**: the base sections are
+the universal default for every model family, and a family variant is a
+single override file beside its base — never a forked directory. A fix to a
+base section reaches every family automatically.
 
 .. code-block:: text
 
-   crates/perspt-core/prompts/             # platform
-     manifest.toml
-     neutral/
-     adapter_a__family_a/
-     adapter_b__family_b/
-     adapter_c__family_c/
-     overrides/
+   crates/perspt-core/prompts/                  # platform sections
+     manifest.toml                              # build-generated, committed
+     session_bootstrap/
+       10_role.md
+       20_governance.md
+       30_tool_discovery.md
+     graph_plan/
+       10_role.md
+       20_update_protocol.md
+       20_update_protocol.anthropic_claude.md   # family override (Gate AE)
+     ...
 
-   crates/perspt-coding/prompts/           # coding domain
+   crates/perspt-coding/prompts/                # coding domain sections
      manifest.toml
-     fallback/
-     adapter_a__family_a/
-     adapter_b__family_b/
-     adapter_c__family_c/
-     overrides/
+     branch_correct/
+       10_role.md
+       20_tool_protocol.md
+       30_correction.md
+       40_output_contract.md
+     ...
 
 The platform library owns: session bootstrap and platform behavior;
 capability and permission explanation; the governed graph-update protocol;
@@ -1002,20 +1326,25 @@ narrative; universal actor lifecycle and write-ahead behavior. The coding
 library owns: repository exploration; search-strategy generation; branch
 proposal; compiler/test-directed correction; candidate review; coding
 adjudication; failed-path evidence summarization. Other domains follow the
-same contract. ``perspt-research`` ships ``fallback/`` only. Any later family
-variant enters as experimental and must pass Gate AE before activation.
+same contract. ``perspt-research`` ships base sections only. Any override —
+family or exact-model — enters as experimental and must pass Gate AE before
+activation.
 
-Each ``manifest.toml`` records the template id, version, stage, route, role,
-variable schema, size limit, owner, rationale, review date, and source hash.
-The manifest digest is part of session provenance.
+The ``manifest.toml`` is generated and validated by the build step and
+committed. Per section it records: id, version, stage, role, variable
+schema, ``required``/``priority``, size limit, owner, rationale, review
+date, content hash, and — for overrides — activation state and the bound
+``PromptChangeRecord`` digest. The manifest digest is part of session
+provenance.
 
-**Prompt divergence activation.** The byte-identical migration templates are
-the active baseline. A route template whose rendered instruction differs from
-that baseline starts as ``experimental``. It cannot become the default merely
-because it is route-specific or preferred by a reviewer.
+**Override activation.** The base sections are the active baseline. An
+override file whose rendered text differs from its base starts as
+``experimental``. It cannot become the default merely because it is
+route-specific or preferred by a reviewer.
 
 Activation requires a content-addressed ``PromptChangeRecord``. The record
-binds the baseline and candidate manifest digests, route, stage, benchmark
+binds the base and override section identities, versions, and content
+hashes, the baseline and candidate manifest digests, route, stage, benchmark
 digest, task-order and resampling seeds, model revision, catalog digest,
 budgets, declared metrics, confidence intervals, reviewer, and decision. The
 paired evaluation must contain at least 30 tasks in the affected domain and
@@ -1032,10 +1361,10 @@ The candidate activates only when all of the following hold:
 * either that lower endpoint is greater than zero, or the upper endpoint for
   one predeclared normalized cost difference is less than zero.
 
-A smaller sample may be used for development, but the template remains
+A smaller sample may be used for development, but the override remains
 experimental. It runs only with ``--allow-experimental-prompts``. That flag,
 the candidate digest, and the missing activation evidence are ledgered.
-Built-in and external bundle templates follow the same rule. A platform
+Built-in and external bundle sections follow the same rule. A platform
 override still requires ``--allow-core-prompt-override`` as an additional
 condition. Configuration may raise the 30-task floor or reduce
 :math:`\epsilon_{prompt}`. It may not lower the floor or set
@@ -1058,22 +1387,26 @@ while preserving every authority field
 
 ``to_spec_for_route`` compiles the final ``ToolSpec.description``. If no
 description library exists, it uses the route-neutral description. MCP
-descriptions remain untrusted values inside a local template. Model-facing
-text never changes catalog effects, risks, or footprints.
+descriptions remain untrusted variable values rendered inside a local
+wrapper section — the current ``[untrusted MCP description]`` prefix becomes
+a typed obligation. Model-facing text never changes catalog effects, risks,
+or footprints.
 
-**External prompt bundles.** Built-in templates are compiled into their
-owning crate. Explicit external bundles use the same manifest and directory
-contract:
+**External prompt bundles.** Built-in sections are compiled into their
+owning crate. Explicit external bundles are section packs using the same
+file format, front matter, and manifest contract:
 
 .. code-block:: toml
 
    [prompts]
    bundles = ["/path/to/domain-prompts"]
 
-The runtime validates bundles at session start. It copies them into the
-content-addressed artifact store. A running session never rereads the source
-directory. Domain bundles may replace compatible domain templates. Replacing
-platform templates also requires ``--allow-core-prompt-override``. The ledger
+The runtime validates bundles at session start with the same checks the
+build step runs on built-ins (``perspt prompts lint`` exposes them). It
+copies validated bundles into the content-addressed artifact store. A
+running session never rereads the source directory. Domain bundles may
+replace compatible domain sections. Replacing
+platform sections also requires ``--allow-core-prompt-override``. The ledger
 records this weaker governance mode. ``ControlFrame`` gains
 ``prompt_invocation_digest`` and ``prompt_manifest_digest``.
 These fields have serde defaults. An empty value marks an older checkpoint.
@@ -1145,7 +1478,7 @@ measurement records ``SensorUnavailable`` and sets ``hard_pass = false``.
 Barriers and required sensors are eligibility predicates. Targeted residual
 improvement is a selection key. It is not a new acceptance rule.
 
-**Model-conditioned strategy statistics.** Route-specific templates
+**Model-conditioned strategy statistics.** Route-specific section programs
 encode different presentations of the same typed state, never different
 authority or acceptance rules. The store tracks
 
@@ -1159,7 +1492,7 @@ for route ordering, activated only past a minimum sample floor (the PSP-9
 cold-start discipline: no prior masquerades as evidence). Route ordering is
 frozen within a branch. Model-family diversity remains a search prior, never
 an independence certificate. These online statistics may order already active
-routes. They never edit, approve, or activate a prompt template.
+routes. They never edit, approve, or activate a prompt section.
 
 27. Universal Actor Turns and Kernel-Mediated Graph Update
 ==========================================================
@@ -1198,19 +1531,21 @@ shown to the model cannot drift from the schema enforced on it.
 
 .. code-block:: text
 
-   perspt prompts list                      # every template: id, version,
-                                            # stage, route, owner, hash
-   perspt prompts render <stage> --route ... # compile with fixture or
-                                            # session variables
+   perspt prompts list                      # every section: id, version,
+                                            # stage, overrides, state, hash
+   perspt prompts render <stage> --route ... # compose with fixture or
+                                            # session variables; shows the
+                                            # drop set for a token budget
    perspt prompts diff <a> <b>              # rendered-output diff between
                                             # routes/versions/bundles
-   perspt prompts lint                      # validate manifests, schemas,
-                                            # size caps, undeclared vars
-   perspt prompts evaluate <candidate>       # paired run against its baseline;
+   perspt prompts lint                      # the codegen checks, exposed
+                                            # for external bundles
+   perspt prompts evaluate <candidate>       # paired run against its base;
                                             # writes PromptChangeRecord
    perspt prompts activate <digest>          # requires passing evidence
    perspt prompts explain-session <id>      # which programs a session
                                             # actually compiled, with digests
+                                            # and dropped sections
 
 ``perspt status`` and the dashboard show opened, ineligible, unselected,
 abandoned, selected, and committed branches. They also show remaining limits
@@ -1245,24 +1580,26 @@ its falsifying predicate; the predicate runs in the mechanism checks.
        candidates, a commit changes the length by a value other than one, or
        a commit proceeds after the bound.
    * - Y
-     - **Prompt route determinism.** Resolution follows exact model, then
-       family, then declared domain fallback or the neutral platform route.
-       The platform manifest supplies a neutral template for every platform
-       stage. Identical inputs yield identical rendered bytes and digests.
-     - Two compilations of one ``(template, version, variables)`` differing
-       in ``rendered_hash``, a platform manifest validating with an
-       incomplete neutral set, or a domain fallback used without a manifest
-       declaration.
+     - **Prompt composition determinism.** Each section resolves exact
+       model, then family, then base; base sections are complete at build
+       time; identical inputs (dialect, sections, variables, budget) yield
+       identical rendered bytes, an identical drop set, and identical
+       digests; an inactive override never resolves.
+     - Two compilations of one input set differing in ``rendered_hash`` or
+       drop set, a build or bundle validation passing with a missing base
+       section, an override resolving without Gate AE activation, or a
+       required section dropped by budget fitting.
    * - Z
      - **Program provenance.** Every model call ledgers its compiled
-       programs (ids, versions, source and rendered hashes, program
-       digest); resume fails unless the exact program reconstructs from
-       built-ins or pinned bundle artifacts; platform override without
+       programs (dialect id and version, section ids, versions, and
+       content hashes, rendered hashes, dropped sections, program digest);
+       resume fails unless the exact program reconstructs from built-ins
+       or pinned bundle artifacts; platform override without
        ``--allow-core-prompt-override`` is rejected and with it is
        ledgered as degradation.
      - A model-call event with no program digest, a resume that proceeds
-       past an unreconstructable digest, or an unledgered platform
-       override.
+       past an unreconstructable digest, a replay whose drop set differs,
+       or an unledgered platform override.
    * - AA
      - **Integration atomicity.** Only the globally verified integration
        root is promoted, atomically; integration failure restores the
@@ -1301,13 +1638,15 @@ its falsifying predicate; the predicate runs in the mechanism checks.
        not decode as ``LoopEventEnvelopeV1``, or replay that skips an unknown
        version.
    * - AE
-     - **Measured prompt activation.** A divergent prompt is experimental until
-       a bound ``PromptChangeRecord`` satisfies the sample, safety,
-       noninferiority, and benefit rules.
-     - A divergent default with no passing record, fewer than 30 paired tasks,
-       a margin above 0.05, a changed or unrecorded resampling procedure, a new
-       escaped hard-gate regression, a failed confidence bound, or an
-       unledgered experimental override.
+     - **Measured prompt activation.** A section override is experimental
+       until a ``PromptChangeRecord`` bound to its section identity,
+       version, and hash satisfies the sample, safety, noninferiority, and
+       benefit rules.
+     - An override active with no passing record, a record not bound to the
+       override's section hash, fewer than 30 paired tasks, a margin above
+       0.05, a changed or unrecorded resampling procedure, a new escaped
+       hard-gate regression, a failed confidence bound, or an unledgered
+       experimental override.
 
 .. rubric:: Practical Decisions
 
@@ -1316,12 +1655,24 @@ The design makes the following tradeoffs.
 * **At most three sequential eager-copy branches.** This gives no parallel
   speedup. File and byte reservations bound copy cost. The rule avoids a
   second store writer, shared extents, and branch lease races.
-* **MiniJinja behind the SDK abstraction.** This adds one dependency. It gives
-  the SDK tested conditions and loops without exposing the engine.
-* **Byte-identical template migration first.** The five inline prompts move
-  into the neutral platform route verbatim. Supported family directories
-  start as copies of it. This gives no immediate quality gain. It gives later prompt changes
-  a known baseline.
+* **Typed codegen instead of a template engine.** Prompt text stays in
+  human-editable markdown, but every section compiles to a typed struct and
+  a malformed edit fails ``cargo build``. This costs a small build-dependency
+  crate and slightly slower compiles. It removes the template-engine
+  dependency, its injection surface, and the entire class of runtime prompt
+  errors.
+* **No prompt database.** Git reviews the text; the ledger already records
+  which program (sections, versions, hashes, drop set) every call used.
+  A registry would add a second source of truth and a bootstrap path for no
+  new guarantee.
+* **Base sections, not family copies.** The five inline prompts move
+  verbatim into base sections. No family directory ever starts as a copy;
+  a family variant is one override file with Gate AE evidence. A base fix
+  reaches every family; there is no copy drift to audit.
+* **Deterministic budget fitting.** Optional sections declare priorities and
+  are dropped lowest-first to fit the dialect's prompt budget; the drop set
+  is ledgered. This costs a size estimate per section. It buys graceful
+  behavior under context pressure without nondeterminism.
 * **Runtime events use one versioned envelope.** The envelope is
   ``Custom { kind: "tool_loop" }``. SDK mechanism events retain their own
   alphabet. One fact is never written to both.
@@ -1360,15 +1711,36 @@ boundary. The single-write rule prevents competing histories.
 hypothesis about model behavior. The paired activation rule tests that
 hypothesis under equal budgets before it becomes a default.
 
-**Why use complete route templates?** A reviewer of
-``adapter_b__family_b/branch_correct.j2`` should see the complete stage
-instruction. A route diff should be a real diff. This duplicates some prose.
-The manifest hash makes each copy accountable.
+**Why sections and dialects instead of per-family prose forks?** Production
+harness study shows that what actually differs between model families is
+structural — system-slot layout, tool-call convention, reasoning-trace
+handling — not vocabulary. A typed dialect represents an enumerable
+difference as data; a forked paragraph hides it inside prose a reviewer
+must diff by eye. Forked copies also drift: a fix to one copy silently
+misses the others, and no gate catches unintentional divergence. One base
+section per concern, plus rare evidence-gated overrides, keeps every family
+on the reviewed text by construction.
+
+**Why typed codegen over a template engine?** A template engine buys
+conditionals and loops at the price of a runtime failure mode and an
+injection surface inside every prompt. Perspt's conditionals are typed
+inclusion predicates and its loops are typed list rendering, so the engine
+buys nothing the type system does not already provide. Compile-time codegen
+turns every malformed prompt edit into a build error and every text change
+into a snapshot diff, while the files stay as human-editable as the
+markdown instruction files production harnesses ship.
+
+**Why no prompt database?** Registry practice stores immutable prompt
+versions and traces which version served each request. Perspt already has
+both: git holds the reviewed, versioned text, and the ledger records the
+exact section set, hashes, and drop set of every model call. A database
+would add a second source of truth, a bootstrap path, and unreviewed
+runtime text for no guarantee the ledger does not already give.
 
 **Why use adapter and family as prompt identity?** Endpoint ids name
 credentials and locations. Model families describe instruction-following
-behavior. A template for one family sent to another family is a category
-error.
+behavior. A section program for one family sent to another family is a
+category error.
 
 **Why exclude model confidence?** Model confidence is sampled and usually
 uncalibrated. Compiler and test measurements are external observations.
@@ -1408,8 +1780,13 @@ surfaces outright):
 
 The deterministic repository mapper is moved, not removed. ``map_workspace``
 still runs at session open. Its ``ProjectMap`` moves into
-``perspt_sdk::search`` as the seed of ``SearchContext``. ``--explore-only``
-uses ``SearchLimits.tool_calls`` and ``ActorTurnRunner``.
+``perspt_sdk::search`` as the seed of ``SearchContext``.
+``--exploration-only`` uses ``SearchLimits.tool_calls`` and
+``ActorTurnRunner``.
+
+No template-engine dependency is added: the prompt plane compiles to plain
+Rust. The only new build-time dependency is the small
+``perspt-prompt-macros`` crate, owned in this workspace.
 
 **Added configuration:**
 
@@ -1473,11 +1850,13 @@ PSP code check green, without raising ``.psp-baseline.toml``.
        full ``GateDecisionRef``; re-key ``replay_accepted_trajectory`` and
        the dashboard fold. Tests: ``mc_replay.rs`` two-candidate case +
        pre-change fixture regression.
-   * - 3 - SDK prompt primitives
+   * - 3 - SDK prompt sections and codegen
      - Y
-     - ``perspt_sdk::prompt``; restricted minijinja behind
-       ``prompt::compile``; digests per Definition 4. Tests: in-module +
-       ``mechanism_checks.rs``.
+     - ``perspt_sdk::prompt`` (sections, dialects, composition, budget
+       fitting, digests per Definition 4); the ``perspt-prompt-macros``
+       build crate and its validation list. Tests: in-module +
+       ``mechanism_checks.rs`` + codegen-failure fixtures (undeclared
+       variable, orphan variable, missing base section, oversize).
    * - 4 - Route and ToolEntry (behavior-preserving; ``adapter_kind`` is a
        new required transport method)
      - Y
@@ -1486,16 +1865,16 @@ PSP code check green, without raising ``.psp-baseline.toml``.
        ``description_templates`` with behavior-preserving defaults;
        ``to_spec_for_route``. Tests: ``mc_portability.rs`` route-identity;
        catalog-ranking fixture.
-   * - 5 - Platform prompt library
+   * - 5 - Platform section library
      - Y, Z, AE
-     - ``crates/perspt-core/prompts/``; move all five inline prompts
-       byte-identically into ``neutral/``, with supported family
-       directories starting as copies; remove the worker's
-       domain; architect JSON example rendered from the real
-       ``ToolSpec``; ``ControlFrame`` digests; delete dead prompt
-       machinery; experimental/active manifest state and
-       ``PromptChangeRecord`` validation. Tests: ``prompt_matrix.rs``
-       snapshots equal the pre-move literals and ``mc_prompt_activation.rs``.
+     - ``crates/perspt-core/prompts/``; split the five inline prompts into
+       base sections whose composed rendering is byte-identical to the
+       literals; remove the worker's hardcoded domain; architect JSON
+       example rendered from the real ``ToolSpec``; ``ControlFrame``
+       digests; delete dead prompt machinery; experimental/active manifest
+       state and ``PromptChangeRecord`` validation. Tests:
+       ``prompt_matrix.rs`` composed snapshots equal the pre-move literals
+       and ``mc_prompt_activation.rs``.
    * - 6 - Domain prompts, packets, and verifier adapters
      - Y
      - ``crates/perspt-coding/prompts/``; ``CorrectionPacket``;
@@ -1559,26 +1938,28 @@ attempts are not re-executed; unequal keys are. An empty correction packet
 expands or escalates. Crash and resume reconstruct the forest, usage, prompt
 programs, and accepted root.
 
-*Prompt matrix* (Phases 5-6): the three families resolve distinct complete
-templates per stage once family content diverges (identical-by-copy until
-then, by design); exact-model overrides beat family templates; missing
-domain routes use the declared fallback; a family outside the supported
-set, including ``ModelFamily::Other``, resolves every platform stage to the
-neutral route; a platform manifest with an incomplete neutral set fails
-validation; unknown/missing variables fail compilation; rendered output and
-hashes are deterministic; prompt-visible tool names match the effective
-governed catalog; bundles are pinned and replayable; platform override
-without the flag is rejected, with the flag is ledgered; no production
-``Conversation::with_system`` literal remains outside the prompt
+*Prompt matrix* (Phases 5-6): every family — including
+``ModelFamily::Other`` — composes every stage from base sections; an
+activated exact-model override beats an activated family override beats the
+base; an inactive override never resolves; a missing base section fails the
+build (built-ins) or bundle validation (packs); undeclared and orphan
+variables fail the build; composed rendering, drop sets, and hashes are
+deterministic across dialects; the two contrasting dialects lay out the
+same programs differently and both parse fail-closed against their output
+contracts; prompt-visible tool names match the effective governed catalog;
+bundles are pinned and replayable; platform override without the flag is
+rejected, with the flag is ledgered; no production
+``Conversation::with_system`` literal remains outside the section
 libraries, tests, probes, and examples.
 
-*Prompt activation* (Phases 5 and 11): a divergent template remains
+*Prompt activation* (Phases 5 and 11): a divergent section override remains
 experimental without 30 paired tasks and a content-addressed
-``PromptChangeRecord``. Fixtures falsify each activation condition separately:
+``PromptChangeRecord`` bound to its section hash. Fixtures falsify each
+activation condition separately:
 sample floor, escaped hard-gate regression, noninferiority, declared benefit,
 configuration bounds, resampling seed and count, digest binding, and
 experimental-override ledgering. Online route statistics cannot activate a
-template.
+section.
 
 *Event replay* (Phases 7 and 9): pre-PSP-10 payloads decode only through the
 legacy decoder; version 1 payloads decode only through
@@ -1659,7 +2040,7 @@ design choice.
      - W
      - Pending
      -
-   * - 3 - SDK prompt primitives
+   * - 3 - SDK prompt sections and codegen
      - Y
      - Pending
      -
@@ -1667,7 +2048,7 @@ design choice.
      - Y
      - Pending
      -
-   * - 5 - Platform prompt library
+   * - 5 - Platform section library
      - Y, Z, AE
      - Pending
      -
@@ -1700,9 +2081,10 @@ design choice.
 Resolved Design Decisions
 =========================
 
-1. **Platform templates live in the core crate.** The crate is
-   ``perspt-core``. The SDK supplies the template types. Core supplies the
-   compiled platform library. The agent composes it with a domain library.
+1. **Platform sections live in the core crate.** The crate is
+   ``perspt-core``. The SDK supplies the section, dialect, and composition
+   types. Core supplies the compiled platform section library. The agent
+   composes it with a domain library.
 2. **Branch concurrency is one.** The release permits at most three branches.
    Each branch is a fully materialized eager copy with reserved file and byte
    cost. Copy-on-write workspaces are forbidden.
@@ -1713,27 +2095,41 @@ Resolved Design Decisions
 4. **The finite decision bound is enforced.** Its
    enforcement is Phase 1 and precedes all search code.
 5. **Prompt identity is (adapter kind, model family, optional exact
-   model).** The configured endpoint id never selects a template.
-6. **Migration precedes measured divergence.** The current prompts move
-   verbatim into the neutral platform route; supported family directories
-   start as copies of it. Every later change is a reviewed snapshot diff and
-   remains experimental until Gate AE passes. Domain stages may use a
-   declared fallback; platform stages resolve to the neutral route when no
-   family template exists, so an unsupported model family never fails route
-   activation.
+   model).** The configured endpoint id never selects a prompt.
+6. **Base sections, migration before divergence.** The current prompts are
+   split verbatim into base sections; the composed rendering is
+   byte-identical to the literals before any change. No family directory or
+   copy exists. A family variant is one override file that stays
+   experimental until Gate AE passes. Every model family — including
+   ``ModelFamily::Other`` — composes from base sections, so an unsupported
+   family never fails route activation.
 7. **Statistics activate at a sample floor.** Route-ordering statistics
    (system 26) ship dark and activate per stratum only past the declared
    floor, mirroring the PSP-9 calibration cold-start rule.
 8. **No-goods are exact.** Only equality of every :math:`K_{ng}` component
    suppresses an attempt. Generalized no-goods are not part of PSP-10.
+9. **Prompt text is compile-time typed.** Sections are markdown files with
+   typed front matter, compiled by ``perspt-prompt-macros`` into typed
+   structs. There is no template engine: conditionals are typed inclusion
+   predicates, iteration is typed list rendering, and per-turn dynamism is
+   injected turn blocks.
+10. **There is no prompt database.** Git holds the reviewed text; the
+    ledger records the exact program of every model call. Activation state
+    lives in the committed manifest, changed only through Gate AE evidence.
+11. **Budget fitting is deterministic.** Optional sections drop in
+    increasing priority order (ties by section id); required sections never
+    drop; the drop set enters the program digest and the ledger.
 
 ==============
 Design Closure
 ==============
 
 PSP-10 has no unresolved design questions. The former questions about
-workspace copying, prompt divergence, no-good generalization, and ledger event
-layers are resolved by decisions 2, 3, 6, and 8 above. A later change to any
+workspace copying, prompt divergence, no-good generalization, and ledger
+event layers are resolved by decisions 2, 3, 6, and 8 above; the prompt
+representation questions (files versus a database, template engine versus
+typed codegen, prose forks versus dialects, context pressure) are resolved
+by decisions 9, 10, 6, and 11. A later change to any
 of these choices requires a new PSP and new conformance evidence. It is not an
 implementation detail of PSP-10.
 
@@ -1755,6 +2151,22 @@ References
   and capabilities.
 * :psp:`000009` - the governed tool loop, model portfolio, ledger, and
   conformance gates J-V.
+* Non-normative prompt-plane design sources (structural lessons only; no
+  prompt text is copied and none defines Perspt's architecture):
+
+  * DSPy — typed signatures and programmatic prompt construction
+    (https://dspy.ai/).
+  * BAML — schema-first typed prompt functions with declared output
+    contracts (https://www.boundaryml.com/).
+  * OpenAI Codex CLI prompting docs — static markdown instruction files,
+    layered project instructions
+    (https://developers.openai.com/codex/prompting).
+  * Reverse-engineered Claude Code prompt architecture — sectioned system
+    prompt, dynamic state injected as turn-boundary reminder blocks over a
+    stable prefix (https://github.com/zep-us/claude-system-prompt).
+  * Prompt-versioning registry practice — immutable prompt versions with
+    per-request traces; Perspt satisfies the same property through git and
+    the ledger rather than a database.
 
 =========
 Copyright
