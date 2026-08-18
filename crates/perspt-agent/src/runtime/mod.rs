@@ -84,26 +84,6 @@ pub struct Psp9ModelRoutes {
     pub fallbacks: Vec<String>,
 }
 
-/// The governed surfaces assembled for one node run.
-struct NodeAssembly {
-    catalog: StaticCatalog,
-    grant_policy: GrantPolicy,
-    capability: Capability,
-    contract: CodingContract,
-    barrier: OperationalSafetyBarrier,
-    cadence: perspt_sdk::VerificationCadence,
-    energy: perspt_sdk::EnergyModel,
-    calibration: CalibrationBinding,
-}
-
-/// One completed governed attempt at a node generation.
-struct NodeAttempt {
-    outcome: crate::toolloop::LoopOutcome,
-    candidate: CandidateWorkspace,
-    assembly: NodeAssembly,
-    kernel_state: perspt_sdk::KernelState,
-}
-
 mod adjudicate;
 mod dispatch;
 mod explore;
@@ -782,7 +762,7 @@ impl Psp9AgentRuntime {
 
     /// Adjudicate and approve one attempt without promoting it — the
     /// staging path's validation half (PSP-10 system 22).
-    pub(super) async fn validate_and_approve_attempt(
+    async fn validate_and_approve_attempt(
         &self,
         recorder: &Psp9Recorder,
         attempt: &NodeAttempt,
