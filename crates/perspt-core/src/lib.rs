@@ -10,6 +10,7 @@ pub mod path;
 pub mod paths;
 pub mod plugin;
 pub mod portfolio;
+pub mod prompts;
 pub mod tools_driver;
 pub mod types;
 

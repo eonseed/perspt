@@ -212,14 +212,6 @@ impl LanguagePlugin for RustPlugin {
         }
     }
 
-    fn correction_prompt_fragment(&self) -> Option<&str> {
-        Some(
-            "For Rust projects: use `cargo add <crate>` to add dependencies instead of \
-             editing Cargo.toml directly. Ensure all new modules are declared with `mod` \
-             in the parent module. Use fully qualified paths for cross-module references.",
-        )
-    }
-
     fn test_file_patterns(&self) -> &[&str] {
         &["tests/*.rs", "tests/**/*.rs", "**/tests.rs"]
     }

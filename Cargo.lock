@@ -3482,6 +3482,7 @@ dependencies = [
  "genai",
  "log",
  "lsp-types",
+ "perspt-prompt-macros",
  "perspt-sdk",
  "serde",
  "serde_json",

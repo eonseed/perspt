@@ -191,6 +191,12 @@ async fn run_family(family: ModelFamily) -> (NodeTerminalOutcome, Vec<GateDecisi
         kernel_state: perspt_sdk::KernelState::new(),
         node_id: "toolloop".into(),
         generation: 0,
+        system_prompt: perspt_agent::toolloop::PromptEnvelope {
+            text: "You are a governed coding agent. Propose tool calls; \
+                every effect is mediated."
+                .into(),
+            ..Default::default()
+        },
         recorder: None,
     };
     let outcome = tool_loop.run("portability fixture").await.unwrap();

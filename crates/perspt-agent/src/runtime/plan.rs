@@ -10,6 +10,12 @@
 
 use super::*;
 
+/// The single source of the `revision` payload shape shown to the model —
+/// co-located with `PlanSpec` so the prompt cannot drift from the parser
+/// (PSP-10 Phase 5; the historic inline JSON existed in three copies).
+pub(crate) const REVISION_SHAPE: &str = "{\"nodes\":[{\"node_id\":str,\"goal\":str,\
+\"output_targets\":[str]}],\"edges\":[[src,dst]]}";
+
 /// The architect's proposal, parsed from the `update_graph` call argument.
 #[derive(Debug, serde::Deserialize)]
 struct PlanSpec {
@@ -76,15 +82,10 @@ impl Psp9AgentRuntime {
             schema: entry.schema.clone(),
             strict: false,
         };
-        let mut conversation = Conversation::with_system(
-            "You are a planning architect. Decompose the task into independent \
-             work-graph nodes ONLY when parts genuinely touch disjoint files. \
-             Call update_graph exactly once; its `revision` argument is JSON: \
-             {\"nodes\":[{\"node_id\":str,\"goal\":str,\"output_targets\":[str]}],\
-             \"edges\":[[src,dst]]}. Declare output_targets precisely; a node \
-             without them serializes against everything. Prefer one node when \
-             in doubt.",
-        );
+        let envelope = perspt_core::prompts::PlatformPromptLibrary::graph_plan(REVISION_SHAPE)
+            .map_err(|e| anyhow::anyhow!("graph plan prompt: {e}"))?;
+        recorder.record_prompt_program("graph_plan", &envelope)?;
+        let mut conversation = Conversation::with_system(envelope.text);
         conversation.push_user(task.to_string());
         let output = self
             .transport
@@ -234,4 +235,26 @@ fn build_planned_graph(spec: &PlanSpec) -> Result<WorkGraphRevision> {
         edges,
     )
     .map_err(|error| anyhow::anyhow!("planned graph rejected: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An instance matching the advertised shape parses as `PlanSpec`, so
+    /// the model-facing shape and the parser cannot drift apart.
+    #[test]
+    fn the_advertised_revision_shape_matches_the_parser() {
+        let instance = serde_json::json!({
+            "nodes": [{"node_id": "n1", "goal": "g", "output_targets": ["src/a.rs"]}],
+            "edges": [["n1", "n1"]],
+        })
+        .to_string();
+        let parsed: PlanSpec = serde_json::from_str(&instance).unwrap();
+        assert_eq!(parsed.nodes.len(), 1);
+        // The shape names exactly the fields the parser reads.
+        for field in ["nodes", "node_id", "goal", "output_targets", "edges"] {
+            assert!(REVISION_SHAPE.contains(field), "shape lost {field}");
+        }
+    }
 }

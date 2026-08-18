@@ -347,14 +347,6 @@ impl LanguagePlugin for PythonPlugin {
         }
     }
 
-    fn correction_prompt_fragment(&self) -> Option<&str> {
-        Some(
-            "For Python projects: use `uv add <package>` to add dependencies. \
-             Ensure new packages are listed in pyproject.toml [project.dependencies]. \
-             Create `__init__.py` files for new packages.",
-        )
-    }
-
     fn test_file_patterns(&self) -> &[&str] {
         &["tests/*.py", "tests/**/*.py", "test_*.py", "*_test.py"]
     }

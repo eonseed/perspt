@@ -85,6 +85,17 @@ pub trait CandidateMeasurer: Send + Sync {
     }
 }
 
+/// The composed platform envelope for one actor plus its provenance
+/// digests (PSP-10 Phase 5). The runtime composes it from the section
+/// library; the loop seeds the text and stamps the digests into every
+/// control frame.
+#[derive(Debug, Clone, Default)]
+pub struct PromptEnvelope {
+    pub text: String,
+    pub invocation_digest: String,
+    pub manifest_digest: String,
+}
+
 /// Recorded loop events (the ledger consumes these in system 14).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]

@@ -500,6 +500,7 @@ impl Psp9AgentRuntime {
             )?
         };
         let kernel_state = loop_kernel_state(&assembly.grant_policy, &graph.revision_id);
+        let envelope = worker_envelope(recorder, &self.domain.domain_id().0)?;
         let tool_loop = ToolLoop {
             transport: self.transport.as_ref(),
             model: model.clone(),
@@ -516,6 +517,7 @@ impl Psp9AgentRuntime {
             kernel_state: kernel_state.clone(),
             node_id: node_id.to_string(),
             generation,
+            system_prompt: envelope,
             recorder: Some(recorder),
         };
         let outcome = match seed {
@@ -1281,11 +1283,10 @@ impl Psp9AgentRuntime {
                     "authority": "no_tools",
                 }),
             )?;
-            let mut conversation = Conversation::with_system(
-                "Summarize the deterministic repository map for a coding worker. \
-                 You have no tools and no authority. Do not claim facts absent \
-                 from the map.",
-            );
+            let envelope = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize()
+                .map_err(|e| anyhow::anyhow!("evidence summarize prompt: {e}"))?;
+            recorder.record_prompt_program("evidence_summarize", &envelope)?;
+            let mut conversation = Conversation::with_system(envelope.text);
             conversation.push_user(format!(
                 "Task: {task}\nRepository map:\n{}",
                 serde_json::to_string_pretty(&report.project_map)?

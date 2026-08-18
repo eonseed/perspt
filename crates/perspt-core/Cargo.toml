@@ -49,3 +49,6 @@ dirs = { workspace = true }
 
 # Utilities
 anyhow = { workspace = true }
+
+[build-dependencies]
+perspt-prompt-macros = { workspace = true }

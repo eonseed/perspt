@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 mod context;
 mod model;
 mod plan;
-mod prompt;
+mod policy;
 mod verification;
 mod workspace;
 
 pub use context::*;
 pub use model::*;
 pub use plan::*;
-pub use prompt::*;
+pub use policy::*;
 pub use verification::*;
 pub use workspace::*;

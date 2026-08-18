@@ -89,9 +89,9 @@ pub use conformal::{
     CalibrationSample, CalibrationState, CalibrationStratum, ThresholdOutcome,
 };
 pub use domain::{
-    AdjudicationBrief, AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId,
-    DomainRegistry, DomainScope, HardGatePolicy, ResidualSchema, SafetyBarrierDisposition,
-    VerificationCadence, VerifierSuiteSpec, WorkspaceSnapshot,
+    AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId, DomainRegistry,
+    DomainScope, HardGatePolicy, ResidualSchema, SafetyBarrierDisposition, VerificationCadence,
+    VerifierSuiteSpec, WorkspaceSnapshot,
 };
 pub use energy::{score_candidate, EnergyComponents, EnergyModel, EnergyScore, ResidualWeight};
 pub use error::{Result, SdkError};

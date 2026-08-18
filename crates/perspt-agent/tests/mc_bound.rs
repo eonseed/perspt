@@ -177,6 +177,12 @@ async fn loop_decisions_never_exceed_the_bound() {
         kernel_state: perspt_sdk::KernelState::new(),
         node_id: "n-bound".into(),
         generation: 0,
+        system_prompt: perspt_agent::toolloop::PromptEnvelope {
+            text: "You are a governed coding agent. Propose tool calls; \
+                every effect is mediated."
+                .into(),
+            ..Default::default()
+        },
         recorder: None,
     };
     let bound = perspt_agent::toolloop::loop_decision_bound(2.0, &budgets(40, 3)).unwrap();
@@ -219,6 +225,12 @@ async fn loop_trajectory_carries_the_real_node_identity() {
         kernel_state: perspt_sdk::KernelState::new(),
         node_id: "node-7".into(),
         generation: 3,
+        system_prompt: perspt_agent::toolloop::PromptEnvelope {
+            text: "You are a governed coding agent. Propose tool calls; \
+                every effect is mediated."
+                .into(),
+            ..Default::default()
+        },
         recorder: None,
     };
     let outcome = toolloop.run("do it").await.unwrap();
