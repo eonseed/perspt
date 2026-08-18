@@ -139,7 +139,14 @@ pub async fn run(
         // the runtime writes, so no second DuckDB handle contends on the
         // database file.
         let store = std::sync::Arc::new(match db_path.as_ref() {
-            Some(path) => perspt_store::SessionStore::open(path)?,
+            Some(path) => perspt_store::SessionStore::open(path).with_context(|| {
+                format!(
+                    "opening session database {}; if it is corrupted (for \
+                     example a poisoned WAL), run `perspt db repair {}`",
+                    path.display(),
+                    path.display()
+                )
+            })?,
             None => perspt_store::SessionStore::new()?,
         });
         start_dashboard(&working_dir, dashboard_port, store.clone()).await?;
@@ -162,7 +169,30 @@ pub async fn run(
     let summary = if interactive && !auto_approve {
         perspt_tui::run_agent_tui_with_runtime(runtime, task.clone()).await?
     } else {
-        runtime.run(task.clone()).await?
+        // Headless runs still narrate: every ledger narration line prints as
+        // a heartbeat instead of minutes of silence between model turns.
+        let (event_sender, mut event_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<perspt_core::AgentEvent>();
+        let (_action_sender, action_receiver) =
+            tokio::sync::mpsc::unbounded_channel::<perspt_core::AgentAction>();
+        let printer = tokio::spawn(async move {
+            while let Some(event) = event_receiver.recv().await {
+                match event {
+                    perspt_core::AgentEvent::Log(line) => println!("  {line}"),
+                    perspt_core::AgentEvent::Error(line) => eprintln!("  error: {line}"),
+                    perspt_core::AgentEvent::TaskStatusChanged { node_id, status } => {
+                        println!("  [{node_id}] {status:?}");
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let summary = runtime
+            .connect_tui(event_sender, action_receiver)
+            .run(task.clone())
+            .await?;
+        printer.abort();
+        summary
     };
 
     println!();
@@ -185,6 +215,11 @@ pub async fn run(
         }))?;
         std::fs::write(&path, output)
             .with_context(|| format!("writing run summary to {}", path.display()))?;
+    }
+    // Escalation and incomplete work are a nonzero process exit: CI and
+    // scripts must not read a stopped node as success.
+    if !matches!(summary.outcome, perspt_sdk::NodeTerminalOutcome::HardPass) {
+        std::process::exit(2);
     }
     Ok(())
 }

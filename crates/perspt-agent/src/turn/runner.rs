@@ -32,6 +32,36 @@ impl ActorKind {
     }
 }
 
+/// The default per-turn wall-clock deadline when none is configured.
+pub const DEFAULT_TURN_DEADLINE_SECS: u64 = 120;
+
+/// One transport call under a hard wall-clock deadline — the one door every
+/// actor's model turn goes through. A finite turn count alone never bounds
+/// wall time; the deadline does. Exceeding it is an ordinary transport
+/// failure (it consumes sticky failover like a provider outage), and
+/// dropping the timed future cancels the underlying request.
+pub async fn chat_turn_with_deadline(
+    transport: &dyn ModelTransport,
+    model: &ModelId,
+    conversation: &Conversation,
+    tools: &[ToolSpec],
+    choice: ToolChoicePolicy,
+    deadline_secs: u64,
+) -> perspt_sdk::Result<TurnOutput> {
+    let deadline = std::time::Duration::from_secs(deadline_secs.max(1));
+    match tokio::time::timeout(
+        deadline,
+        transport.chat_turn(model, conversation, tools, choice),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(perspt_sdk::SdkError::Domain(format!(
+            "transport deadline: no turn from {model} within {deadline_secs}s"
+        ))),
+    }
+}
+
 /// Classify a transport failure cause — the one definition the worker loop
 /// and the runner share, so no actor invents its own retry taxonomy.
 pub fn transport_failure_kind(cause: &str) -> FailureKind {
@@ -57,6 +87,9 @@ pub struct ActorTurnRunner<'a> {
     pub actor: ActorKind,
     /// Turn ordinal within this actor's own exchange.
     pub turn: u32,
+    /// Per-call wall-clock deadline in seconds ([`DEFAULT_TURN_DEADLINE_SECS`]
+    /// when unconfigured).
+    pub deadline_secs: u64,
 }
 
 impl ActorTurnRunner<'_> {
@@ -121,10 +154,15 @@ impl ActorTurnRunner<'_> {
     ) -> Result<TurnOutput> {
         self.ensure_feasible(conversation, tools)?;
         let output = loop {
-            match self
-                .transport
-                .chat_turn(&self.model, conversation, tools, choice.clone())
-                .await
+            match chat_turn_with_deadline(
+                self.transport,
+                &self.model,
+                conversation,
+                tools,
+                choice.clone(),
+                self.deadline_secs,
+            )
+            .await
             {
                 Ok(output) => break output,
                 Err(error) => {

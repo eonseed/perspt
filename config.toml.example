@@ -63,6 +63,7 @@ model = "gpt-4o-mini"
 # verifier    = "anthropic::<model>"
 # speculator  = "local::<model>"
 # adjudicator = "openai::<model>"
+# turn_timeout_secs = 120   # hard per-call deadline; a timeout consumes failover
 
 # ---------------------------------------------------------------------------
 # Optional shared MCP servers

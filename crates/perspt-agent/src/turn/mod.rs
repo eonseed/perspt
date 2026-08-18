@@ -11,4 +11,7 @@
 
 mod runner;
 
-pub use runner::{transport_failure_kind, ActorKind, ActorTurnRunner};
+pub use runner::{
+    chat_turn_with_deadline, transport_failure_kind, ActorKind, ActorTurnRunner,
+    DEFAULT_TURN_DEADLINE_SECS,
+};

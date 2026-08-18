@@ -32,7 +32,16 @@ impl Psp9Recorder {
         // dashboard avoids a second live handle on the same database file.
         let store = match (shared_store, database_path) {
             (Some(store), _) => store,
-            (None, Some(path)) => Arc::new(SessionStore::open(&path.to_path_buf())?),
+            (None, Some(path)) => {
+                Arc::new(SessionStore::open(&path.to_path_buf()).with_context(|| {
+                    format!(
+                        "opening session database {}; if it is corrupted (for example a \
+                         poisoned WAL), run `perspt db repair {}`",
+                        path.display(),
+                        path.display()
+                    )
+                })?)
+            }
             (None, None) => Arc::new(SessionStore::new()?),
         };
         store.create_session(&SessionRecord {
@@ -63,7 +72,16 @@ impl Psp9Recorder {
     ) -> Result<Self> {
         let store = match (shared_store, database_path) {
             (Some(store), _) => store,
-            (None, Some(path)) => Arc::new(SessionStore::open(&path.to_path_buf())?),
+            (None, Some(path)) => {
+                Arc::new(SessionStore::open(&path.to_path_buf()).with_context(|| {
+                    format!(
+                        "opening session database {}; if it is corrupted (for example a \
+                         poisoned WAL), run `perspt db repair {}`",
+                        path.display(),
+                        path.display()
+                    )
+                })?)
+            }
             (None, None) => Arc::new(SessionStore::new()?),
         };
         let rows = store.get_psp9_events(session_id)?;

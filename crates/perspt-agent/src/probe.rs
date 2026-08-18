@@ -117,6 +117,7 @@ async fn drive_probe(
             fallbacks: Vec::new(),
             recorder: None,
             actor: crate::turn::ActorKind::CapabilityProbe,
+            deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
             turn: report.turns,
         };
         let output = runner

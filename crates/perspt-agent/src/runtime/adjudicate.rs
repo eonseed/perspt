@@ -45,6 +45,7 @@ impl Psp9AgentRuntime {
             fallbacks: self.fallback_models.clone(),
             recorder: Some(recorder),
             actor: crate::turn::ActorKind::Adjudicator,
+            deadline_secs: self.config.turn_deadline_secs,
             turn: 1,
         };
         let output = runner

@@ -43,6 +43,9 @@ pub struct Psp9RunConfig {
     /// verbatim; above 1 the multi-node dispatcher runs and a governed
     /// architect planning turn may decompose the task.
     pub max_parallel_nodes: usize,
+    /// Per-model-call wall-clock deadline (seconds). Exceeding it is a
+    /// transport failure that consumes sticky failover.
+    pub turn_deadline_secs: u64,
 }
 
 impl Default for Psp9RunConfig {
@@ -58,6 +61,7 @@ impl Default for Psp9RunConfig {
             persistent_grants: false,
             allow_dependency_mutation: false,
             max_parallel_nodes: 1,
+            turn_deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
         }
     }
 }
@@ -173,6 +177,10 @@ impl Psp9AgentRuntime {
         let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
         let external = external_runtime_from(config)?;
         let handlers = registry_with_external(&external);
+        let mut run_config = run_config;
+        if let Some(secs) = config.models.as_ref().and_then(|m| m.turn_timeout_secs) {
+            run_config.turn_deadline_secs = secs.max(1);
+        }
         Ok(Self {
             working_dir,
             transport,
@@ -910,6 +918,7 @@ impl Psp9AgentRuntime {
             declared_energy_floor: None,
             context_soft_limit_chars: 240_000,
             recovery_budget: shared_recovery_budget,
+            turn_deadline_secs: self.config.turn_deadline_secs,
         }
     }
 
@@ -1310,6 +1319,7 @@ impl Psp9AgentRuntime {
                 fallbacks: self.fallback_models.clone(),
                 recorder: Some(recorder),
                 actor: crate::turn::ActorKind::Summarizer,
+                deadline_secs: self.config.turn_deadline_secs,
                 turn: 1,
             };
             match runner

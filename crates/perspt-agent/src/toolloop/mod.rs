@@ -57,6 +57,9 @@ pub struct LoopBudgets {
     pub context_soft_limit_chars: usize,
     /// Paper III's one non-replenishing recovery pool for this node.
     pub recovery_budget: u32,
+    /// Per-model-call wall-clock deadline in seconds; a finite turn count
+    /// alone never bounds wall time.
+    pub turn_deadline_secs: u64,
 }
 
 impl LoopBudgets {
@@ -482,10 +485,15 @@ impl ToolLoop<'_> {
         log: &mut EventLog,
     ) -> Result<TurnOutput> {
         loop {
-            match self
-                .transport
-                .chat_turn(&self.model, conversation, specs, ToolChoicePolicy::Auto)
-                .await
+            match crate::turn::chat_turn_with_deadline(
+                self.transport,
+                &self.model,
+                conversation,
+                specs,
+                ToolChoicePolicy::Auto,
+                self.budgets.turn_deadline_secs,
+            )
+            .await
             {
                 Ok(output) => return Ok(output),
                 Err(error) => {
