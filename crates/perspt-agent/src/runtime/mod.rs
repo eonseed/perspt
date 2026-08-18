@@ -108,6 +108,7 @@ mod adjudicate;
 mod dispatch;
 mod explore;
 mod external;
+mod integrate;
 mod node;
 mod plan;
 mod recorder;
@@ -777,6 +778,31 @@ impl Psp9AgentRuntime {
             calibration: &attempt.assembly.calibration,
         })
         .await
+    }
+
+    /// Adjudicate and approve one attempt without promoting it — the
+    /// staging path's validation half (PSP-10 system 22).
+    pub(super) async fn validate_and_approve_attempt(
+        &self,
+        recorder: &Psp9Recorder,
+        attempt: &NodeAttempt,
+        node_id: &str,
+        task: &str,
+    ) -> Result<bool> {
+        let ctx = ConcludeContext {
+            recorder,
+            candidate: &attempt.candidate,
+            node_id,
+            task,
+            grant_policy: &attempt.assembly.grant_policy,
+            capability: &attempt.assembly.capability,
+            contract: &attempt.assembly.contract,
+            barrier: &attempt.assembly.barrier,
+            kernel_state: &attempt.kernel_state,
+            loop_outcome: &attempt.outcome.outcome,
+            calibration: &attempt.assembly.calibration,
+        };
+        self.validate_and_approve(&ctx, true).await
     }
 
     /// Level-3 handoff: returns the higher-capability route when one is
