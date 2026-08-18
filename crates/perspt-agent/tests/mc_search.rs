@@ -356,3 +356,47 @@ fn spliced_search_streams_never_change_the_fold() {
         assert_eq!(build(true), build(false), "seed {seed}");
     }
 }
+
+/// Research-domain search conformance (Phase 11): the forest mechanics are
+/// domain-generic. With no runnable citation verifier every branch is
+/// ineligible — the forest opens, measures, records no-goods, commits
+/// nothing, and the session escalates honestly instead of promoting.
+#[tokio::test]
+async fn the_forest_is_domain_generic_under_the_research_domain() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("refs.bib"),
+        "@book{k, title={Working Set Model}}\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("draft.md"), "claim [k]\n").unwrap();
+    let database = project.path().join("runtime.db");
+    let transport = Arc::new(ScriptedTransport {
+        turns: Mutex::new(vec![
+            TurnOutput::Text("thinking".into()),
+            TurnOutput::Text("still thinking".into()),
+        ]),
+    });
+    let runtime = runtime_with(project.path(), transport, "alpha", vec!["beta"])
+        .with_domain(std::sync::Arc::new(perspt_research::ResearchDomain::new()))
+        .with_database_path(database.clone());
+    let summary = runtime.run("support the claim".into()).await.unwrap();
+    assert!(
+        !matches!(summary.outcome, NodeTerminalOutcome::HardPass),
+        "no citation verifier ran; nothing may hard-pass"
+    );
+    assert!(summary.promoted_paths.is_empty());
+
+    let store = perspt_store::SessionStore::open(&database).unwrap();
+    let rows = store.get_psp9_events(&summary.session_id).unwrap();
+    let names: Vec<String> = rows.iter().filter_map(event_name).collect();
+    let count = |needle: &str| names.iter().filter(|name| *name == needle).count();
+    assert!(
+        count("search_opened") >= 1,
+        "the refine rung opened a forest"
+    );
+    assert_eq!(count("search_closed"), count("search_opened"));
+    assert_eq!(count("branch_committed"), 0, "no eligible candidate");
+    assert!(count("branch_ineligible") >= 1);
+    assert_fold_invariant(&rows);
+}

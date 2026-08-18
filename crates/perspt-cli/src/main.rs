@@ -254,6 +254,52 @@ enum Commands {
         #[command(subcommand)]
         command: DbCommands,
     },
+
+    /// Inspect and maintain the compiled prompt section libraries (PSP-10)
+    Prompts {
+        #[command(subcommand)]
+        command: PromptsCommands,
+    },
+
+    /// Explain a session's recorded resident-context events (PSP-10)
+    Context {
+        #[command(subcommand)]
+        command: ContextCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum PromptsCommands {
+    /// List every compiled section: id, version, stage, role, hash
+    List,
+    /// Compose one stage with fixture variables and print it
+    Render { stage: String },
+    /// Run the codegen validation list over an external bundle directory
+    Lint {
+        #[arg(long)]
+        bundle: Option<PathBuf>,
+    },
+    /// Regenerate a prompt library's committed manifest.toml (explicit)
+    Manifest {
+        /// The prompts directory (e.g. crates/perspt-core/prompts)
+        dir: PathBuf,
+    },
+    /// Show the programs a session actually compiled, with digests
+    ExplainSession {
+        #[arg(long)]
+        db_path: PathBuf,
+        session_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ContextCommands {
+    /// Show a session's recorded context events (compactions, refusals)
+    ExplainTurn {
+        #[arg(long)]
+        db_path: PathBuf,
+        session_id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -394,6 +440,36 @@ async fn main() -> Result<()> {
         Some(Commands::Dashboard { port, db_path }) => {
             commands::dashboard::run(port, db_path).await
         }
+        Some(Commands::Prompts { command }) => match command {
+            PromptsCommands::List => commands::prompts::list(),
+            PromptsCommands::Render { stage } => commands::prompts::render(&stage),
+            PromptsCommands::Lint { bundle } => commands::prompts::lint(bundle.as_deref()),
+            PromptsCommands::Manifest { dir } => {
+                // Separators are part of each library's stage declaration.
+                let stages: &[(&str, &str)] = if dir.ends_with("perspt-coding/prompts") {
+                    &[("branch_correct", "\n")]
+                } else {
+                    &[
+                        ("session_bootstrap", " "),
+                        ("graph_plan", " "),
+                        ("repository_explore", " "),
+                        ("adjudicate", " "),
+                        ("evidence_summarize", " "),
+                    ]
+                };
+                commands::prompts::manifest(&dir, stages)
+            }
+            PromptsCommands::ExplainSession {
+                db_path,
+                session_id,
+            } => commands::prompts::explain_session(&db_path, &session_id),
+        },
+        Some(Commands::Context { command }) => match command {
+            ContextCommands::ExplainTurn {
+                db_path,
+                session_id,
+            } => commands::prompts::explain_context(&db_path, &session_id),
+        },
         Some(Commands::Db { command }) => match command {
             DbCommands::Repair {
                 db_path,
