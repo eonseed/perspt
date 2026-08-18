@@ -78,6 +78,9 @@ pub fn admit_external_tool(
         // write-ahead external-effect log (R5).
         durable: true,
         origin: ToolOrigin::External(server_id.to_string()),
+        // External servers stay behind discovery — the hot set is the
+        // domain's own operating loop.
+        hot: false,
     };
     entry.validate()?;
     Ok(entry)

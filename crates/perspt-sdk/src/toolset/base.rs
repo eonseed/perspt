@@ -67,6 +67,7 @@ fn entry(
         proposal_bindings: Vec::new(),
         durable,
         origin: ToolOrigin::Builtin,
+        hot: false,
     }
 }
 
@@ -85,7 +86,7 @@ fn surface_entries() -> Vec<ToolEntry> {
             ]),
             FootprintSpec::default(),
             false,
-        ),
+        ).hot(),
         entry(
             "tool_program",
             "Run a bounded pure Starlark program that returns nested tool \
@@ -100,7 +101,7 @@ fn surface_entries() -> Vec<ToolEntry> {
             )]),
             FootprintSpec::default(),
             false,
-        ),
+        ).hot(),
     ]
 }
 
@@ -120,7 +121,7 @@ fn read_entries() -> Vec<ToolEntry> {
             ]),
             path_read(),
             false,
-        ),
+        ).hot(),
         entry(
             "list_files",
             "List files in a directory, respecting ignore files",
@@ -143,7 +144,7 @@ fn read_entries() -> Vec<ToolEntry> {
             schema(&[("pattern", "string", "Glob pattern, e.g. src/**/*.rs", true)]),
             FootprintSpec::default(),
             false,
-        ),
+        ).hot(),
         entry(
             "grep",
             "Search file contents by regex with optional path filter and context lines",
@@ -161,7 +162,7 @@ fn read_entries() -> Vec<ToolEntry> {
             ]),
             path_read(),
             false,
-        ),
+        ).hot(),
     ]);
     entries
 }
@@ -211,7 +212,7 @@ fn context_entries() -> Vec<ToolEntry> {
             schema(&[("question", "string", "The question or request", true)]),
             FootprintSpec::default(),
             false,
-        ),
+        ).hot(),
     ]
 }
 
@@ -247,7 +248,7 @@ fn write_entries() -> Vec<ToolEntry> {
             ]),
             path_write(),
             false,
-        ),
+        ).hot(),
         entry(
             "apply_diff",
             "Apply a unified diff to a file",
@@ -259,7 +260,7 @@ fn write_entries() -> Vec<ToolEntry> {
             ]),
             path_write(),
             false,
-        ),
+        ).hot(),
     ]
 }
 
@@ -306,7 +307,9 @@ fn command_entries() -> Vec<ToolEntry> {
         entry(
             "exec",
             "Run one shell-free, read-only OS program in the workspace sandbox; \
-             use rg, git diff/status/log/show, awk, sed -n, or coreutils",
+             use rg, git diff/status/log/show, awk, sed -n, or coreutils. For \
+             tests use run_test, for builds run_build, for formatting \
+             run_formatter — exec denies them",
             EffectKind::Search,
             RiskClass::Low,
             schema(&[(
@@ -318,7 +321,7 @@ fn command_entries() -> Vec<ToolEntry> {
             )]),
             FootprintSpec::opaque(),
             false,
-        ),
+        ).hot(),
         entry(
             "run_test",
             "Run the domain's declared test command; output is parsed into residuals",
@@ -327,7 +330,7 @@ fn command_entries() -> Vec<ToolEntry> {
             schema(&[("filter", "string", "Optional test name filter", false)]),
             FootprintSpec::opaque(),
             false,
-        ),
+        ).hot(),
         entry(
             "run_build",
             "Run the domain's declared build command",
@@ -336,7 +339,7 @@ fn command_entries() -> Vec<ToolEntry> {
             schema(&[]),
             FootprintSpec::opaque(),
             false,
-        ),
+        ).hot(),
         entry(
             "run_formatter",
             "Run the domain's declared formatter",
@@ -345,7 +348,7 @@ fn command_entries() -> Vec<ToolEntry> {
             schema(&[]),
             FootprintSpec::opaque(),
             false,
-        ),
+        ).hot(),
         entry(
             "run_repo_script",
             "Run a script declared in the project profile",

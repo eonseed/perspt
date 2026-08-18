@@ -104,6 +104,7 @@ fn fixture_entry() -> ToolEntry {
         proposal_bindings: Vec::new(),
         durable: false,
         origin: ToolOrigin::Builtin,
+            hot: false,
     }
 }
 

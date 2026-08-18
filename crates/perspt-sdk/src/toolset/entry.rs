@@ -95,9 +95,21 @@ pub struct ToolEntry {
     /// Whether the tool mutates durable state (gates R5 bracketing).
     pub durable: bool,
     pub origin: ToolOrigin,
+    /// Part of the hot set: visible without discovery. The domain's common
+    /// operating loop (read, edit, test, build, format) stays hot; deferred
+    /// discovery is for rare tools and external servers, never the basic
+    /// loop. Context economy only — authority is still the kernel's.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hot: bool,
 }
 
 impl ToolEntry {
+    /// Mark this entry hot (visible without discovery).
+    pub fn hot(mut self) -> Self {
+        self.hot = true;
+        self
+    }
+
     /// Validate the entry at catalog-assembly time (Gates J and P).
     ///
     /// The schema must be an object schema; the footprint must reference
@@ -548,6 +560,7 @@ mod tests {
             }],
             durable: false,
             origin: ToolOrigin::Builtin,
+            hot: false,
         }
     }
 
