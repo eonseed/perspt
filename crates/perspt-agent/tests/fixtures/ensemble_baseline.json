@@ -1,0 +1,18 @@
+{
+  "recorded": "2026-08-18",
+  "source": "mc_ensemble.rs::gate_failure_triggers_a_distinct_family_round_selected_by_energy (PSP-9 ensemble, removed by PSP-10 phase 7)",
+  "scenario": {
+    "fixture": "rust lib with one failing test (answer 1 vs expected 2)",
+    "transport": "scripted; first attempt exhausts the gate budget, refine rung draws a width-2 distinct-family round; the second candidate fixes answer to 2",
+    "config": "Psp9RunConfig { approval_policy: Auto, allow_unisolated_verifiers: true, defaults otherwise }; EnsemblePolicy { trigger: AfterGateFailure, width: 2, require_distinct_family: true }"
+  },
+  "outcome": {
+    "terminal": "HardPass",
+    "ensemble_rounds": 1,
+    "ensemble_candidates": 2,
+    "ensemble_selected": 1,
+    "selected_energy": 0.0,
+    "selection_rule": "hard-pass-first, then lowest best_accepted_energy"
+  },
+  "exit_criterion": "PSP-10 phase 8: the same scripted scenario driven through the search forest must reach HardPass with at most 2 branch attempts and a committed candidate energy of 0.0 (single-branch search no worse than the removed ensemble)."
+}
