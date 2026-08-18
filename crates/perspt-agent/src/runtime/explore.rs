@@ -71,7 +71,10 @@ impl Psp9AgentRuntime {
         task: &str,
     ) -> Result<()> {
         let model = self.explorer_model.as_ref().unwrap_or(&self.model);
-        let budget = perspt_sdk::ExplorationBudget::default();
+        // PSP-10 interim (phase 7): the explorer runs under SearchLimits'
+        // tool-call cap; phase 9 re-drives this loop through
+        // ActorTurnRunner under the same limits.
+        let limits = perspt_sdk::SearchLimits::release_default();
         let specs = catalog.specs_for(std::slice::from_ref(&capability), false);
         let envelope = perspt_core::prompts::PlatformPromptLibrary::repository_explore()
             .map_err(|e| anyhow::anyhow!("repository explore prompt: {e}"))?;
@@ -97,7 +100,7 @@ impl Psp9AgentRuntime {
                     conversation.push_tool_calls(calls.clone());
                     for call in calls {
                         tool_calls += 1;
-                        let response = if tool_calls > budget.max_tool_calls {
+                        let response = if tool_calls > limits.tool_calls {
                             "denied: exploration tool-call budget exhausted".to_string()
                         } else {
                             self.explorer_call(

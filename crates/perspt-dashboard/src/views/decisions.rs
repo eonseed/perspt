@@ -34,6 +34,7 @@ fn psp9_event_row(row: Psp9LedgerRow) -> Psp9EventRow {
     let custom = value.get("kind").and_then(|value| value.as_str());
     let nested = value
         .get("payload")
+        .and_then(|payload| payload.get("body").or(Some(payload)))
         .and_then(|payload| payload.get("event"))
         .and_then(|value| value.as_str());
     let kind = [Some(outer), custom, nested]

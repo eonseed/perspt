@@ -210,7 +210,7 @@ fn replay_reconstructs_accepted_trajectory_and_refuses_unrecorded() {
         })
         .unwrap();
     assert!(ledger.verify_chain().is_ok());
-    assert_eq!(replay_accepted_trajectory(&ledger).len(), 2);
+    assert_eq!(replay_accepted_trajectory(&ledger).unwrap().len(), 2);
 
     let commit = LedgerEvent::EffectApplied {
         proposal_id: "p".into(),

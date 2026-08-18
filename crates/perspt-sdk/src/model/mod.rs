@@ -8,7 +8,6 @@
 
 mod capabilities;
 mod conversation;
-mod ensemble;
 mod family;
 mod id;
 mod projection;
@@ -17,7 +16,6 @@ mod transport;
 
 pub use capabilities::{CapabilityDegradation, ProviderCapabilities, ProviderCapabilityMask};
 pub use conversation::{Conversation, Message};
-pub use ensemble::{EnsemblePolicy, EnsembleTrigger};
 pub use family::ModelFamily;
 pub use id::ModelId;
 pub use projection::{

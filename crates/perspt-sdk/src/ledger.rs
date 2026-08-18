@@ -321,10 +321,37 @@ impl Ledger {
     }
 }
 
+/// The shape of one `tool_loop` payload (PSP-10 Gate AD).
+///
+/// Version 1 rows wrap the runtime event in
+/// `{"schema_version": 1, "body": {...}}`; rows without `schema_version`
+/// are pre-PSP-10 legacy payloads. Any other version fails authoritative
+/// folds closed — a forensic display may still show the raw payload, but
+/// replay and resume never guess.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolLoopBody<'a> {
+    Legacy(&'a serde_json::Value),
+    V1(&'a serde_json::Value),
+}
+
+/// Classify one `tool_loop` payload by its envelope version.
+pub fn tool_loop_body(payload: &serde_json::Value) -> Result<ToolLoopBody<'_>> {
+    match payload.get("schema_version") {
+        None => Ok(ToolLoopBody::Legacy(payload)),
+        Some(version) if version.as_u64() == Some(1) => payload
+            .get("body")
+            .map(ToolLoopBody::V1)
+            .ok_or_else(|| SdkError::Domain("versioned tool_loop row has no body".into())),
+        Some(version) => Err(SdkError::Domain(format!(
+            "unknown tool_loop schema_version {version}; authoritative replay fails closed"
+        ))),
+    }
+}
+
 /// Reconstruct the accepted trajectory deterministically from the recorded
 /// events (R3). Replay reads recorded observations rather than re-running
 /// nondeterministic sources.
-pub fn replay_accepted_trajectory(ledger: &Ledger) -> Vec<(String, u32, f64)> {
+pub fn replay_accepted_trajectory(ledger: &Ledger) -> Result<Vec<(String, u32, f64)>> {
     // A ledger carries acceptances either as typed `CandidateAccepted` events
     // or as the tool loop's custom stream. Folding both would double-count a
     // ledger that records both forms, so typed events win and the custom
@@ -342,7 +369,7 @@ pub fn replay_accepted_trajectory(ledger: &Ledger) -> Vec<(String, u32, f64)> {
         })
         .collect();
     if !typed.is_empty() {
-        return typed;
+        return Ok(typed);
     }
 
     let mut accepted = Vec::new();
@@ -355,11 +382,14 @@ pub fn replay_accepted_trajectory(ledger: &Ledger) -> Vec<(String, u32, f64)> {
     for record in ledger.records() {
         if let LedgerEvent::Custom { kind, payload } = &record.event {
             if kind == "tool_loop" {
-                fold_tool_loop_row(payload, &mut latest, &mut accepted);
+                // Unknown envelope versions fail the fold closed (Gate AD).
+                let (ToolLoopBody::Legacy(body) | ToolLoopBody::V1(body)) =
+                    tool_loop_body(payload)?;
+                fold_tool_loop_row(body, &mut latest, &mut accepted);
             }
         }
     }
-    accepted
+    Ok(accepted)
 }
 
 /// Fold one `tool_loop` payload into the accepted projection.
@@ -495,11 +525,14 @@ pub struct AuditReport {
 /// (nothing in the chain stores one), verifying every link.
 pub fn audit_replay(ledger: &Ledger) -> AuditReport {
     let chain_ok = ledger.verify_chain().is_ok();
+    // An unfoldable stream (unknown envelope version) is a failed audit,
+    // not a silently truncated projection (Gate AD).
+    let accepted = replay_accepted_trajectory(ledger);
     AuditReport {
-        chain_ok,
+        chain_ok: chain_ok && accepted.is_ok(),
         head: ledger.head(),
         records: ledger.records().len() as u64,
-        accepted: replay_accepted_trajectory(ledger),
+        accepted: accepted.unwrap_or_default(),
     }
 }
 
@@ -639,7 +672,10 @@ mod tests {
             })
             .unwrap();
         let traj = replay_accepted_trajectory(&ledger);
-        assert_eq!(traj, vec![("a".into(), 1, 8.0), ("b".into(), 0, 0.0)]);
+        assert_eq!(
+            traj.unwrap(),
+            vec![("a".into(), 1, 8.0), ("b".into(), 0, 0.0)]
+        );
     }
 
     #[test]

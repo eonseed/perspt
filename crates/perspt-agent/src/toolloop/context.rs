@@ -202,8 +202,12 @@ pub(crate) fn refold_session_context(
         if kind != "tool_loop" {
             continue;
         }
-        match serde_json::from_value::<LoopEvent>(payload) {
-            Ok(LoopEvent::ConversationSeeded { seed }) => {
+        // Authoritative refold: unknown envelope versions fail closed
+        // (Gate AD), so a checkpoint can never be validated against a
+        // stream this build cannot fully read.
+        let decoded = super::envelope::decode_tool_loop(&payload)?;
+        match decoded.event {
+            LoopEvent::ConversationSeeded { seed } => {
                 let projection =
                     ConversationProjection::from_seed(&seed).map_err(|e| anyhow::anyhow!("{e}"))?;
                 if projection.digest() == target_digest {
@@ -211,7 +215,7 @@ pub(crate) fn refold_session_context(
                 }
                 live = Some(projection);
             }
-            Ok(LoopEvent::ConversationDelta { record }) => {
+            LoopEvent::ConversationDelta { record } => {
                 let projection = live
                     .as_mut()
                     .context("conversation delta recorded before any seed")?;

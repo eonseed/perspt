@@ -291,24 +291,91 @@ pub struct Config {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub external_tools: Vec<ExternalToolConfig>,
 
-    /// Proposal-ensemble policy (`[ensemble]`; default off — Never).
+    /// Detector for the removed PSP-9 `[ensemble]` block. Deserialization
+    /// only: a present block fails validation with a pointed migration
+    /// error naming `[exploration]` (PSP-10 cutover), never a silent
+    /// ignore.
+    #[serde(default, skip_serializing)]
+    pub ensemble: Option<toml::Value>,
+
+    /// Bounded search configuration (`[exploration]`; PSP-10 system 20).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ensemble: Option<EnsembleConfig>,
+    pub exploration: Option<ExplorationConfig>,
+
+    /// Prompt bundles and activation bounds (`[prompts]`; PSP-10
+    /// system 25).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<PromptsConfig>,
 }
 
-/// The `[ensemble]` policy block (PSP-9 system 7). Ensembles are opt-in:
-/// omitted fields keep the refusing defaults.
+/// The `[exploration]` search block (PSP-10 system 20). Sequential eager
+/// branches only; the hard branch cap is 3 for this release.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct EnsembleConfig {
-    /// `after_gate_failure` or `never` (default).
+pub struct ExplorationConfig {
+    /// Branches opened before any expansion trigger (default 1).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trigger: Option<String>,
-    /// Candidates per round, hard maximum 4.
+    pub initial_branches: Option<u8>,
+    /// Branch identities per forest, children included (hard cap 3).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub width: Option<u8>,
-    /// Refuse rounds that cannot supply distinct model families (default true).
+    pub max_branches: Option<u8>,
+    /// Prefer a distinct model family on expansion (a prior, never a
+    /// certificate).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub require_distinct_family: Option<bool>,
+    pub distinct_family: Option<bool>,
+    /// Cumulative eager-copy file reservation cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_workspace_files: Option<u64>,
+    /// Cumulative eager-copy byte reservation cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_workspace_bytes: Option<u64>,
+}
+
+impl ExplorationConfig {
+    /// Validate the branch bounds (PSP-10: at most three branches, at
+    /// least one).
+    pub fn validate(&self) -> Result<()> {
+        let initial = self.initial_branches.unwrap_or(1);
+        let max = self.max_branches.unwrap_or(3);
+        anyhow::ensure!(
+            (1..=3).contains(&max),
+            "[exploration] max_branches must be between 1 and 3 (got {max})"
+        );
+        anyhow::ensure!(
+            initial >= 1 && initial <= max,
+            "[exploration] initial_branches must be between 1 and max_branches"
+        );
+        Ok(())
+    }
+}
+
+/// The `[prompts]` block (PSP-10 system 25, Gate AE). The activation floor
+/// may only be raised and the margin narrowed; invalid values fail at
+/// startup.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PromptsConfig {
+    /// External replacement bundle directories, pinned at session start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bundles: Vec<String>,
+    /// Minimum paired activation tasks (floor 30; raise-only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activation_min_tasks: Option<u32>,
+    /// Noninferiority margin epsilon in [0, 0.05].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub noninferiority_margin: Option<f64>,
+}
+
+impl PromptsConfig {
+    /// The activation bounds after startup validation.
+    pub fn activation_bounds(&self) -> Result<perspt_sdk::prompt::ActivationBounds> {
+        let bounds = perspt_sdk::prompt::ActivationBounds {
+            min_tasks: self.activation_min_tasks.unwrap_or(30),
+            noninferiority_margin: self.noninferiority_margin.unwrap_or(0.05),
+        };
+        bounds
+            .validate()
+            .map_err(|e| anyhow::anyhow!("[prompts]: {e}"))?;
+        Ok(bounds)
+    }
 }
 
 impl Config {
@@ -350,6 +417,18 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.ensemble.is_none(),
+            "the [ensemble] section was removed by PSP-10: the ensemble is replaced \
+             by the bounded search forest. Configure [exploration] instead \
+             (initial_branches, max_branches, distinct_family) and delete [ensemble]."
+        );
+        if let Some(exploration) = &self.exploration {
+            exploration.validate()?;
+        }
+        if let Some(prompts) = &self.prompts {
+            prompts.activation_bounds()?;
+        }
         let mut server_ids = std::collections::BTreeSet::new();
         for server in &self.external_tools {
             server.validate()?;
@@ -584,5 +663,40 @@ mod tests {
             command = ["two"]
         "#;
         assert!(Config::from_toml_str(invalid).is_err());
+    }
+}
+
+#[cfg(test)]
+mod psp10_config_tests {
+    use super::*;
+
+    #[test]
+    fn a_present_ensemble_block_fails_with_a_pointed_migration_error() {
+        let error = Config::from_toml_str("[ensemble]\nwidth = 2\n").unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("[exploration]"), "{message}");
+        assert!(message.contains("PSP-10"), "{message}");
+    }
+
+    #[test]
+    fn exploration_bounds_are_enforced_at_startup() {
+        assert!(Config::from_toml_str("[exploration]\nmax_branches = 4\n").is_err());
+        assert!(Config::from_toml_str("[exploration]\ninitial_branches = 0\n").is_err());
+        let config =
+            Config::from_toml_str("[exploration]\ninitial_branches = 1\nmax_branches = 3\n")
+                .unwrap();
+        config.exploration.unwrap().validate().unwrap();
+    }
+
+    #[test]
+    fn prompt_activation_bounds_are_floor_and_range_checked() {
+        assert!(Config::from_toml_str("[prompts]\nactivation_min_tasks = 29\n").is_err());
+        assert!(Config::from_toml_str("[prompts]\nnoninferiority_margin = 0.06\n").is_err());
+        let config = Config::from_toml_str(
+            "[prompts]\nactivation_min_tasks = 40\nnoninferiority_margin = 0.01\n",
+        )
+        .unwrap();
+        let bounds = config.prompts.unwrap().activation_bounds().unwrap();
+        assert_eq!(bounds.min_tasks, 40);
     }
 }

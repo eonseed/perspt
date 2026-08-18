@@ -130,7 +130,6 @@ struct ConcludeContext<'a> {
 
 mod adjudicate;
 mod dispatch;
-mod ensemble;
 mod explore;
 mod external;
 mod node;
@@ -166,8 +165,6 @@ pub struct Psp9AgentRuntime {
     /// root selects from a `DomainRegistry` (explicit `--domain` or
     /// detection).
     domain: Arc<dyn AgentDomainPackage>,
-    /// Proposal-ensemble policy (system 7). Defaults to `Never`.
-    ensemble: perspt_sdk::EnsemblePolicy,
     /// Optional MCP edge adapter (system 13). Servers come from
     /// `[[external_tools]]`; nothing changes when none are configured.
     external: Option<Arc<tokio::sync::Mutex<crate::external_tools::ExternalToolRuntime>>>,
@@ -214,7 +211,6 @@ impl Psp9AgentRuntime {
         let (explorer_model, adjudicator_model, handoff_model) =
             resolve_role_routes(&routes, config, &transport)?;
         let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
-        let ensemble = resolve_ensemble_policy(config.ensemble.as_ref())?;
         let external = external_runtime_from(config)?;
         let handlers = registry_with_external(&external);
         Ok(Self {
@@ -233,7 +229,6 @@ impl Psp9AgentRuntime {
             tool_handlers: Arc::new(handlers),
             extra_tool_entries: Vec::new(),
             domain: Arc::new(CodingDomain::new()),
-            ensemble,
             external,
             external_entries: Mutex::new(None),
         })
@@ -265,7 +260,6 @@ impl Psp9AgentRuntime {
             ),
             extra_tool_entries: Vec::new(),
             domain: Arc::new(CodingDomain::new()),
-            ensemble: perspt_sdk::EnsemblePolicy::default(),
             external: None,
             external_entries: Mutex::new(None),
         }
@@ -308,12 +302,6 @@ impl Psp9AgentRuntime {
     /// composition root). Defaults to the coding domain.
     pub fn with_domain(mut self, domain: Arc<dyn AgentDomainPackage>) -> Self {
         self.domain = domain;
-        self
-    }
-
-    /// Enable proposal ensembles (system 7). Off by default.
-    pub fn with_ensemble_policy(mut self, policy: perspt_sdk::EnsemblePolicy) -> Self {
-        self.ensemble = policy;
         self
     }
 
@@ -656,12 +644,13 @@ impl Psp9AgentRuntime {
                 }
                 _ => unreachable!("ladder iterates refine and escalate only"),
             }
-            let refine_rung = matches!(level, perspt_sdk::CascadeLevel::Refine);
             // Restore-best across rungs: the next attempt continues from
-            // the previous attempt's best accepted state.
+            // the previous attempt's best accepted state. The PSP-9
+            // ensemble draw is removed; PSP-10 phase 8 opens a search
+            // forest here instead (interim: one plain re-attempt).
             let seed = seed_from_attempt(recorder, node_id, &attempt).await?;
-            let (next, spent) = self
-                .ladder_attempt(
+            let next = self
+                .attempt_node(
                     recorder,
                     session_id,
                     &goal,
@@ -671,9 +660,9 @@ impl Psp9AgentRuntime {
                     &graph,
                     seed.as_ref(),
                     remaining_budget,
-                    refine_rung,
                 )
                 .await?;
+            let spent = spent_of(&next);
             attempt = next;
             remaining_budget = remaining_budget.saturating_sub(spent);
         }

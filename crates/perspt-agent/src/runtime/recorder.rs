@@ -189,7 +189,10 @@ impl LoopRecorder for Psp9Recorder {
     }
 
     fn record(&self, event: &LoopEvent) -> Result<()> {
-        self.record_custom("tool_loop", serde_json::to_value(event)?)?;
+        // PSP-10 Gate AD: every post-cutover runtime row is written once,
+        // wrapped in the versioned envelope.
+        let envelope = crate::toolloop::LoopEventEnvelopeV1::new(event.clone());
+        self.record_custom("tool_loop", serde_json::to_value(&envelope)?)?;
         if let LoopEvent::ContextCheckpointCreated { checkpoint } = event {
             self.store.record_psp9_checkpoint(
                 &self.session_id,

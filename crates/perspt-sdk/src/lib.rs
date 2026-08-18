@@ -44,7 +44,6 @@ pub mod conformal;
 pub mod domain;
 pub mod energy;
 pub mod error;
-pub mod exploration;
 pub mod gate;
 pub mod goal;
 pub mod independence;
@@ -97,10 +96,6 @@ pub use domain::{
 };
 pub use energy::{score_candidate, EnergyComponents, EnergyModel, EnergyScore, ResidualWeight};
 pub use error::{Result, SdkError};
-pub use exploration::{
-    exploration_capability, is_read_only_capability, ExplorationBudget, ExplorationReport,
-    ExplorationUsage, GraphHint, ProjectMap,
-};
 pub use gate::evaluate_gate_with_floor;
 pub use gate::NodeTerminalOutcome;
 pub use gate::{
@@ -120,10 +115,9 @@ pub use ledger::{
 };
 pub use model::{
     CapabilityDegradation, Conversation, ConversationDelta, ConversationDeltaRecord,
-    ConversationProjection, ConversationSeeded, EnsemblePolicy, EnsembleTrigger, Message,
-    ModelFamily, ModelId, ModelTransport, ProviderCapabilities, ProviderCapabilityMask,
-    ProviderToolCall, ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,
-    CONVERSATION_EVENT_SCHEMA_VERSION,
+    ConversationProjection, ConversationSeeded, Message, ModelFamily, ModelId, ModelTransport,
+    ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall, ToolChoicePolicy, ToolSpec,
+    TransportFuture, TurnOutput, CONVERSATION_EVENT_SCHEMA_VERSION,
 };
 pub use observability::arriving_potential_per_step;
 pub use observability::{
@@ -148,7 +142,9 @@ pub use scheduler::{
     NodeOutcome, RepairAction, Resource, Scheduler, SchedulerEffect,
 };
 pub use search::{
-    BranchMeasurement, BranchSelection, DomainMeasurement, SearchContext, SearchStrategy,
+    exploration_capability, is_read_only_capability, BranchMeasurement, BranchSelection,
+    DomainMeasurement, PartialCheckpointRef, ProjectMap, SearchBranch, SearchBranchState,
+    SearchContext, SearchForest, SearchLimits, SearchStrategy, SearchUsage, WitnessRef,
 };
 pub use spectral::{VerificationEdge, VerificationGraph};
 pub use stability::{
