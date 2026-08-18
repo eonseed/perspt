@@ -72,6 +72,9 @@ impl Psp9AgentRuntime {
         let scheduler = tokio::sync::Mutex::new(Scheduler::new(self.config.max_parallel_nodes));
         let mut leases = perspt_sdk::LeaseTable::default();
         let pool = SharedRecoveryPool::new(self.config.rejection_budget);
+        // PSP-10 system 22: node winners stage here; only a hard-passing
+        // integration root reaches the user workspace.
+        let mut staging = super::integrate::StagingRoot::default();
         let mut running: FuturesUnordered<futures::future::BoxFuture<'_, NodeDone>> =
             FuturesUnordered::new();
         let mut tokens: std::collections::BTreeMap<String, CancellationToken> = Default::default();
@@ -92,6 +95,7 @@ impl Psp9AgentRuntime {
                     &pool,
                     &mut running,
                     &mut tokens,
+                    &staging,
                 )
                 .await?;
             let Some(done) = running.next().await else {
@@ -127,9 +131,37 @@ impl Psp9AgentRuntime {
                     done.node_id,
                     attempt,
                     &mut aggregate,
+                    &mut staging,
                 )
                 .await?;
             cancel_stale(&graph, &tokens);
+        }
+        // Gate AA: one global integration gate after every node settles.
+        if !staging.is_empty() {
+            if matches!(aggregate.outcome, NodeTerminalOutcome::HardPass) {
+                match self
+                    .run_integration_gate(recorder, session_id, &graph, &staging)
+                    .await?
+                {
+                    Some(paths) => aggregate.promoted_paths = paths,
+                    None => {
+                        aggregate.outcome = NodeTerminalOutcome::Escalated {
+                            certificate_id: uuid::Uuid::new_v4().to_string(),
+                        };
+                        aggregate.status = "ESCALATED_PSP9";
+                    }
+                }
+            } else {
+                // Some node failed terminally: the staged winners never
+                // reach the user workspace (no partial promotion exists).
+                recorder.record_custom(
+                    "integration_failed",
+                    serde_json::json!({
+                        "staging_root": staging.digest(),
+                        "reason": "a sibling node failed; staged winners were discarded",
+                    }),
+                )?;
+            }
         }
         Ok(aggregate)
     }
@@ -147,6 +179,7 @@ impl Psp9AgentRuntime {
         pool: &SharedRecoveryPool,
         running: &mut FuturesUnordered<futures::future::BoxFuture<'a, NodeDone>>,
         tokens: &mut std::collections::BTreeMap<String, CancellationToken>,
+        staging: &super::integrate::StagingRoot,
     ) -> Result<WorkGraphRevision> {
         let mut updated = graph.clone();
         loop {
@@ -159,6 +192,9 @@ impl Psp9AgentRuntime {
             updated = execution_revision(&updated, &selected.node_id, WorkNodeState::Running)?;
             recorder.record_custom("graph_revision", serde_json::to_value(&updated)?)?;
             let graph_snapshot = updated.clone();
+            // PSP-10 system 22: downstream work builds on the latest
+            // staging root, never on unstaged sibling state.
+            let seed = self.staging_seed(&updated, staging).await?;
             running.push(Box::pin(async move {
                 let node_id = selected.node_id.clone();
                 let generation = selected.generation;
@@ -177,7 +213,7 @@ impl Psp9AgentRuntime {
                         selected.generation,
                         &self.model,
                         &graph_snapshot,
-                        None,
+                        seed.as_ref(),
                         claimed,
                     ) => NodeDone {
                         node_id,
@@ -194,6 +230,7 @@ impl Psp9AgentRuntime {
     /// Sequential completion arm: recovery (if escalated), conclusion,
     /// promotion, and the terminal graph fold under a `GraphWrite` lease.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     async fn fold_completion(
         &self,
         recorder: &Psp9Recorder,
@@ -205,6 +242,7 @@ impl Psp9AgentRuntime {
         node_id: String,
         attempt: NodeAttempt,
         aggregate: &mut DispatchOutcome,
+        staging: &mut super::integrate::StagingRoot,
     ) -> Result<WorkGraphRevision> {
         let (attempt, mut graph, _generation) = self
             .recover_if_escalated(
@@ -216,8 +254,11 @@ impl Psp9AgentRuntime {
             .node(&node_id)
             .map(|node| node.goal.clone())
             .unwrap_or_default();
+        // PSP-10 system 22: a hard-passing winner is STAGED, not promoted;
+        // only the globally verified integration root reaches the user
+        // workspace (Gate AA).
         let (final_outcome, status, promoted) = self
-            .conclude_attempt(recorder, &attempt, &node_id, &task)
+            .stage_or_conclude(recorder, &attempt, &node_id, &task, staging)
             .await?;
 
         // The fold itself is the first live GraphWrite lease site: a lost
@@ -313,6 +354,53 @@ impl Psp9AgentRuntime {
             .await?;
         pool.refund(claimed.saturating_sub(spent_of(&result.0)));
         Ok(result)
+    }
+}
+
+impl Psp9AgentRuntime {
+    /// Stage a validated hard-pass winner into the content-addressed
+    /// staging root; every other outcome keeps the ordinary conclusion.
+    async fn stage_or_conclude(
+        &self,
+        recorder: &Psp9Recorder,
+        attempt: &NodeAttempt,
+        node_id: &str,
+        task: &str,
+        staging: &mut super::integrate::StagingRoot,
+    ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
+        let hard = matches!(attempt.outcome.outcome, NodeTerminalOutcome::HardPass);
+        if !hard {
+            return self
+                .conclude_attempt(recorder, attempt, node_id, task)
+                .await;
+        }
+        let approved = self
+            .validate_and_approve_attempt(recorder, attempt, node_id, task)
+            .await?;
+        if !approved {
+            return Ok((
+                NodeTerminalOutcome::Escalated {
+                    certificate_id: uuid::Uuid::new_v4().to_string(),
+                },
+                "ESCALATED_PSP9",
+                Vec::new(),
+            ));
+        }
+        let files = attempt.candidate.export_accepted().await?;
+        let state_root = attempt.candidate.checkpoint(&[]).await?.witness.state_root;
+        staging.contributions.insert(
+            node_id.to_string(),
+            super::integrate::StagedWinner { state_root, files },
+        );
+        recorder.record_custom(
+            "staging_root_updated",
+            serde_json::json!({
+                "node_id": node_id,
+                "staging_root": staging.digest(),
+                "contributions": staging.contributions.len(),
+            }),
+        )?;
+        Ok((NodeTerminalOutcome::HardPass, "COMPLETED_PSP9", Vec::new()))
     }
 }
 
