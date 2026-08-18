@@ -12,21 +12,6 @@ use crate::capability::Capability;
 use crate::error::{Result, SdkError};
 use crate::model::ToolSpec;
 
-/// Small schemas that remain visible without discovery. This is a context
-/// optimization, not an authority boundary; the kernel still checks every
-/// call against the complete catalog and held capabilities.
-const ALWAYS_VISIBLE: &[&str] = &[
-    "tool_search",
-    "tool_program",
-    "read_file",
-    "grep",
-    "glob",
-    "edit_file",
-    "apply_diff",
-    "exec",
-    "ask_user",
-];
-
 /// The catalog port.
 pub trait ToolCatalog: Send + Sync {
     /// Every registered entry.
@@ -54,8 +39,12 @@ pub trait ToolCatalog: Send + Sync {
             .collect()
     }
 
-    /// Specs for the small stable surface plus tools activated by a previous
-    /// host-side search. Names without authority are omitted.
+    /// Specs for the hot set — entries the catalog marks visible without
+    /// discovery, which the domain's common operating loop always is — plus
+    /// tools activated by a previous host-side search. Names without
+    /// authority are omitted. This is a context optimization, not an
+    /// authority boundary; the kernel still checks every call against the
+    /// complete catalog and held capabilities.
     fn deferred_specs_for(
         &self,
         capabilities: &[Capability],
@@ -65,7 +54,7 @@ pub trait ToolCatalog: Send + Sync {
         self.entries()
             .iter()
             .filter(|entry| {
-                (ALWAYS_VISIBLE.contains(&entry.name.as_str()) || activated.contains(&entry.name))
+                (entry.hot || activated.contains(&entry.name))
                     && capabilities
                         .iter()
                         .any(|capability| capability.effects.contains(&entry.effect))
@@ -222,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn deferred_catalog_exposes_core_then_discovers_verifiers() {
+    fn the_hot_set_includes_the_verifier_loop_and_rare_tools_stay_deferred() {
         let catalog = StaticCatalog::with_base(Vec::new()).unwrap();
         let capability = Capability::new(
             actor(),
@@ -230,14 +219,22 @@ mod tests {
                 EffectKind::ToolSearch,
                 EffectKind::ReadFile,
                 EffectKind::RunTest,
+                EffectKind::MoveFile,
             ],
         );
         let activated = std::collections::BTreeSet::new();
         let initial =
             catalog.deferred_specs_for(std::slice::from_ref(&capability), &activated, false);
         assert!(initial.iter().any(|spec| spec.name == "tool_search"));
-        assert!(!initial.iter().any(|spec| spec.name == "run_test"));
-        let found = catalog.search_specs(&[capability], "test verifier", 4, false);
-        assert!(found.iter().any(|spec| spec.name == "run_test"));
+        // The coding loop's verifier tools are hot: no discovery detour
+        // before the first test run.
+        assert!(initial.iter().any(|spec| spec.name == "run_test"));
+        // Rarer tools still defer until discovered.
+        assert!(!initial.iter().any(|spec| spec.name == "move_file"));
+        let mut discovered = activated;
+        discovered.insert("move_file".into());
+        let after =
+            catalog.deferred_specs_for(std::slice::from_ref(&capability), &discovered, false);
+        assert!(after.iter().any(|spec| spec.name == "move_file"));
     }
 }

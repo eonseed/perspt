@@ -49,6 +49,7 @@ pub(crate) fn family_entry(
         proposal_bindings: Vec::new(),
         durable: false,
         origin: perspt_sdk::ToolOrigin::Builtin,
+            hot: false,
     }
 }
 
