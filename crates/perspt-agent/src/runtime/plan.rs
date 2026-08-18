@@ -39,7 +39,7 @@ impl Psp9AgentRuntime {
         if self.config.max_parallel_nodes <= 1 {
             return initial_graph(node_id, task);
         }
-        match self.architect_plan(recorder, task).await {
+        match self.architect_plan(recorder, node_id, task).await {
             Ok(Some(graph)) => Ok(graph),
             Ok(None) => {
                 recorder.record_custom(
@@ -62,6 +62,7 @@ impl Psp9AgentRuntime {
     async fn architect_plan(
         &self,
         recorder: &Psp9Recorder,
+        node_id: &str,
         task: &str,
     ) -> Result<Option<WorkGraphRevision>> {
         let route = self.handoff_model.as_ref().unwrap_or(&self.model).clone();
@@ -100,6 +101,9 @@ impl Psp9AgentRuntime {
         let Some(call) = calls.iter().find(|call| call.name == "update_graph") else {
             return Ok(None);
         };
+        entry
+            .validate_arguments(&call.arguments)
+            .context("update_graph arguments rejected by the catalog schema")?;
         let revision = call
             .arguments
             .get("revision")
@@ -108,6 +112,9 @@ impl Psp9AgentRuntime {
         let spec: PlanSpec = serde_json::from_str(revision).context("parsing plan revision")?;
         if spec.nodes.len() < 2 {
             return Ok(None);
+        }
+        if !self.admit_graph_update(recorder, node_id, revision)? {
+            anyhow::bail!("admissibility kernel refused the update_graph proposal");
         }
         let graph = build_planned_graph(&spec)?;
         recorder.record_custom(
@@ -119,6 +126,82 @@ impl Psp9AgentRuntime {
             }),
         )?;
         Ok(Some(graph))
+    }
+
+    /// Kernel mediation for the architect's graph update (PSP-10 Phase 1).
+    /// The runtime mints a single-use `UpdateGraph` capability — workers
+    /// never hold one (`WITHHELD_EFFECTS` is unchanged) — and the proposal
+    /// runs the admissibility kernel like every other effect. No contract or
+    /// barrier evaluator exists before a candidate workspace; those clauses
+    /// are recorded as missing in the witness, never defaulted true.
+    fn admit_graph_update(
+        &self,
+        recorder: &Psp9Recorder,
+        node_id: &str,
+        revision_json: &str,
+    ) -> Result<bool> {
+        let workspace_root = self.working_dir.canonicalize()?.display().to_string();
+        let policy_id = uuid::Uuid::new_v4().to_string();
+        let policy = perspt_sdk::GrantPolicy {
+            policy_id: policy_id.clone(),
+            workspace_root,
+            effect_ceiling: vec![perspt_sdk::EffectKind::UpdateGraph],
+            path_ceiling: Vec::new(),
+            command_ceiling: Vec::new(),
+            network_ceiling: Vec::new(),
+            approval_ceiling: perspt_sdk::ApprovalPolicy::Auto,
+            authority_epoch: 0,
+            persistent: false,
+            integrity_binding: format!(
+                "ledger:{}",
+                perspt_sdk::ledger::content_hash(policy_id.as_bytes())
+            ),
+        };
+        let mut requested = perspt_sdk::Capability::new(
+            perspt_sdk::ActorId::new("architect"),
+            vec![perspt_sdk::EffectKind::UpdateGraph],
+        );
+        requested.max_calls = Some(1);
+        requested.role = perspt_sdk::CapabilityRole::Session;
+        let capability = policy
+            .mint(requested)
+            .map_err(|e| anyhow::anyhow!("architect grant: {e}"))?;
+        let proposal = perspt_sdk::EffectProposal::new(
+            capability.holder.clone(),
+            node_id,
+            perspt_sdk::EffectKind::UpdateGraph,
+        )
+        .with_risk_class(perspt_sdk::RiskClass::Critical)
+        .with_idempotency_key(format!("plan:{node_id}"));
+        let transition = perspt_sdk::CandidateTransition::new(
+            proposal,
+            graph_state_witness(node_id, "unplanned"),
+            graph_state_witness(node_id, revision_json),
+        );
+        let witness = perspt_sdk::check_full_admissibility(
+            &transition,
+            std::slice::from_ref(&capability),
+            &perspt_sdk::KernelState::new(),
+            None,
+            None,
+            0.25,
+        )
+        .map_err(|e| anyhow::anyhow!("plan kernel: {e}"))?;
+        recorder.record_custom("graph_plan_admissibility", serde_json::to_value(&witness)?)?;
+        Ok(witness.allows())
+    }
+}
+
+/// The work-graph state witness for the architect transition: the mutated
+/// "state" is the serialized revision itself, not a workspace root.
+fn graph_state_witness(node_id: &str, revision: &str) -> perspt_sdk::CandidateStateWitness {
+    perspt_sdk::CandidateStateWitness {
+        state_root: perspt_sdk::ledger::content_hash(revision.as_bytes()),
+        graph_revision: "initial-plan".into(),
+        node_id: node_id.into(),
+        node_generation: 0,
+        canonical_scope: Vec::new(),
+        barrier_channels: std::collections::BTreeMap::new(),
     }
 }
 

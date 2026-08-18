@@ -694,6 +694,34 @@ impl<'a> CodingCandidateMeasurer<'a> {
         Ok(())
     }
 
+    /// Gate X / PSP-10 Phase 1: `HardGatePolicy::required_stages` is
+    /// authoritative. A declared stage that no plugin ran is a missing
+    /// sensor: it records `SensorUnavailable` and forces `hard_pass = false`.
+    /// The check only adds a necessary condition; it can never loosen the
+    /// plugin-derived verdict.
+    fn enforce_required_stages(
+        &self,
+        ran_stages: &BTreeSet<&'static str>,
+        residuals: &mut Vec<ResidualEvent>,
+        all_passed: &mut bool,
+    ) -> Result<()> {
+        let scope = DomainScope {
+            label: self.node_id.clone(),
+            paths: Vec::new(),
+        };
+        for stage in self.domain.hard_gate_policy(&scope).required_stages {
+            if !ran_stages.contains(stage.as_str()) {
+                residuals.push(sensor_unavailable(
+                    &self.node_id,
+                    self.generation,
+                    &format!("required-stage:{stage}"),
+                )?);
+                *all_passed = false;
+            }
+        }
+        Ok(())
+    }
+
     fn score(&self, residuals: &[ResidualEvent]) -> Result<(f64, Option<CorrectionDirection>)> {
         let scope = DomainScope {
             label: self.node_id.clone(),
@@ -725,6 +753,9 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         )?;
 
         let ran = jobs.len();
+        let ran_stages: BTreeSet<&'static str> =
+            jobs.iter().map(|job| job.stage.policy_name()).collect();
+        self.enforce_required_stages(&ran_stages, &mut residuals, &mut all_passed)?;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel));
         let mut workers = tokio::task::JoinSet::new();
         for (ordinal, job) in jobs.into_iter().enumerate() {

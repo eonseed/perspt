@@ -3418,6 +3418,7 @@ dependencies = [
  "perspt-coding",
  "perspt-core",
  "perspt-policy",
+ "perspt-research",
  "perspt-sandbox",
  "perspt-sdk",
  "perspt-store",

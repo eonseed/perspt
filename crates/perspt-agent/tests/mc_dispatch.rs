@@ -188,10 +188,62 @@ async fn disjoint_nodes_run_concurrently_and_both_promote() {
         dispatch_sequences[1] < first_terminal,
         "the second node must dispatch while the first is still running"
     );
+    // PSP-10 Phase 1: the architect's update_graph proposal passed the
+    // admissibility kernel — the witness is ledgered before the plan lands.
+    let admissibility = rows
+        .iter()
+        .find(|row| {
+            row.event_json
+                .contains("\"kind\":\"graph_plan_admissibility\"")
+        })
+        .map(|row| row.sequence)
+        .expect("architect turn must ledger its admissibility witness");
+    let planned = rows
+        .iter()
+        .find(|row| row.event_json.contains("\"kind\":\"graph_planned\""))
+        .map(|row| row.sequence)
+        .unwrap();
+    assert!(admissibility < planned, "kernel check precedes the plan");
     // Replay folds: the recorded chain verifies end to end.
     assert!(rows
         .windows(2)
         .all(|pair| pair[1].prev_hash == pair[0].hash));
+}
+
+/// PSP-10 Phase 1: an architect call whose arguments do not satisfy the real
+/// catalog schema is refused before any graph is built — the session falls
+/// back to the deterministic single-node graph and records why.
+#[tokio::test]
+async fn schema_invalid_plan_falls_back_to_the_initial_graph() {
+    let project = tempfile::tempdir().unwrap();
+    write_fixture_project(project.path());
+    let database = project.path().join("runtime.db");
+    let transport = Arc::new(GoalRouted {
+        // `revision` must be a string per the catalog schema; an object is
+        // schema-invalid even though serde could still reach inside it.
+        plan: Mutex::new(Some(TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: "plan-bad".into(),
+            name: "update_graph".into(),
+            arguments: serde_json::json!({"revision": {"nodes": []}}),
+        }]))),
+        alpha: Mutex::new(vec![]),
+        beta: Mutex::new(vec![]),
+    });
+    let runtime = runtime_with(project.path(), transport, 2).with_database_path(database.clone());
+    let summary = runtime.run("annotate both modules".into()).await.unwrap();
+    let store = perspt_store::SessionStore::open(&database).unwrap();
+    let rows = store.get_psp9_events(&summary.session_id).unwrap();
+    assert!(
+        rows.iter()
+            .any(|row| row.event_json.contains("\"kind\":\"graph_plan_fallback\"")),
+        "schema-invalid plan must record its fallback"
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.event_json.contains("\"kind\":\"graph_planned\"")),
+        "no multi-node graph may land from a schema-invalid call"
+    );
 }
 
 #[tokio::test]

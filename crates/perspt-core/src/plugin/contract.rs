@@ -28,6 +28,21 @@ pub enum VerifierStage {
     Lint,
 }
 
+impl VerifierStage {
+    /// The canonical stage name used by `HardGatePolicy::required_stages`
+    /// declarations. Domains declare `"syntax"`, not the `Display` form
+    /// `"syntax_check"`; this mapping is the single source for both sides
+    /// (PSP-10 Phase 1).
+    pub fn policy_name(&self) -> &'static str {
+        match self {
+            VerifierStage::SyntaxCheck => "syntax",
+            VerifierStage::Build => "build",
+            VerifierStage::Test => "test",
+            VerifierStage::Lint => "lint",
+        }
+    }
+}
+
 impl std::fmt::Display for VerifierStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

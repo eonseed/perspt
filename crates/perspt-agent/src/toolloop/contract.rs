@@ -147,6 +147,15 @@ pub enum LoopEvent {
         generation: u32,
         decision: GateDecision,
     },
+    /// The loop refused to submit a candidate past the finite-decision bound
+    /// `N_gate = floor(V0/rho) + B + 1` (PSP-10 Gate X). The refusal itself
+    /// appends no gate decision.
+    DecisionBoundRefused {
+        node_id: String,
+        generation: u32,
+        bound: u64,
+        decisions_used: u64,
+    },
     CandidateRestored {
         checkpoint_id: String,
     },
