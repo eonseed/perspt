@@ -179,12 +179,25 @@ impl AcceptedTrajectory {
 
     /// Submit a candidate under the full gate ordering, including the
     /// domain's declared energy floor (PSP-9 system 10).
+    ///
+    /// The finite-decision bound is enforced, not advisory (PSP-10 Gate X):
+    /// the `(N_gate + 1)`-th submission is refused before any decision is
+    /// appended. Ordinary descent/rejection flows stay under the bound by
+    /// construction; this guard fails closed against callers that would
+    /// resubmit past a terminal hard pass or floor stop.
     pub fn submit_with_floor(
         &mut self,
         hard_pass: bool,
         candidate_v: f64,
         declared_energy_floor: Option<f64>,
     ) -> Result<GateDecision> {
+        let bound = self.decision_bound()?;
+        if self.gate_decisions.len() as u64 >= bound {
+            return Err(SdkError::InvalidGate(format!(
+                "finite-decision bound {bound} reached for {}:{}; submission refused",
+                self.node_id, self.generation
+            )));
+        }
         let decision = evaluate_gate_with_floor(
             hard_pass,
             candidate_v,
