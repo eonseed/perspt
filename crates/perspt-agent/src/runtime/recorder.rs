@@ -198,6 +198,7 @@ impl LoopRecorder for Psp9Recorder {
             )?;
         }
         if let LoopEvent::DurableCandidateCheckpoint {
+            candidate_id,
             state_root,
             control,
             conversation,
@@ -212,6 +213,7 @@ impl LoopRecorder for Psp9Recorder {
                 state_root,
                 &serde_json::to_string(&serde_json::json!({
                     "kind": "candidate",
+                    "candidate_id": candidate_id,
                     "state_root": state_root,
                     "control": control,
                     "conversation": conversation,
@@ -256,6 +258,7 @@ fn narration(event: &LoopEvent) -> Option<String> {
             energy,
             hard_pass,
             residuals,
+            ..
         } => Some(format!(
             "Measured {node_id} generation {generation}: V={energy:.3}, \
                  hard_pass={hard_pass}, residuals={}",
@@ -265,6 +268,7 @@ fn narration(event: &LoopEvent) -> Option<String> {
             node_id,
             generation,
             decision,
+            ..
         } => Some(format!(
             "Gate {node_id} generation {generation}: {decision:?}"
         )),

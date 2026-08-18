@@ -49,6 +49,98 @@ fn mc_o_audit_replay_folds_to_the_recorded_head_without_credentials() {
     assert_eq!(audit_replay(&ledger), report);
 }
 
+fn tool_loop(ledger: &mut Ledger, payload: serde_json::Value) {
+    ledger
+        .append(LedgerEvent::Custom {
+            kind: "tool_loop".into(),
+            payload,
+        })
+        .unwrap();
+}
+
+fn measured(node: &str, generation: u32, candidate: &str, energy: f64) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "event": "candidate_measured",
+        "node_id": node,
+        "generation": generation,
+        "energy": energy,
+        "hard_pass": false,
+        "residuals": [],
+    });
+    if !candidate.is_empty() {
+        payload["candidate_id"] = candidate.into();
+    }
+    payload
+}
+
+fn gate_accepted(
+    node: &str,
+    generation: u32,
+    candidate: &str,
+    observed: Option<f64>,
+) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "event": "gate_decision_recorded",
+        "node_id": node,
+        "generation": generation,
+        "decision": {"kind": "accepted_by_descent", "delta_v": 0.5},
+    });
+    if !candidate.is_empty() {
+        payload["candidate_id"] = candidate.into();
+    }
+    if let Some(observed) = observed {
+        payload["observed_energy"] = observed.into();
+    }
+    payload
+}
+
+/// PSP-10 Phase 2 (Gate W): two candidates at one `(node, generation)` no
+/// longer collide. Pre-fix, the fold keyed by `(node, generation)`, so the
+/// later measurement silently overwrote the accepted one and the projection
+/// reported the wrong energy.
+#[test]
+fn concurrent_candidates_fold_by_candidate_identity() {
+    let mut ledger = Ledger::new();
+    // Candidate A measured, then candidate B measured (interleaved round),
+    // then A — not B — is accepted.
+    tool_loop(&mut ledger, measured("n1", 0, "n1/0/c1", 3.0));
+    tool_loop(&mut ledger, measured("n1", 0, "n1/0/c2", 2.0));
+    tool_loop(&mut ledger, gate_accepted("n1", 0, "n1/0/c1", Some(3.0)));
+    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger);
+    assert_eq!(
+        accepted,
+        vec![("n1".to_string(), 0, 3.0)],
+        "the accepted candidate's energy, not the last writer's"
+    );
+}
+
+/// A pre-PSP-10 ledger (no candidate ids, no recorded observed energy)
+/// folds through the legacy correlation exactly as before.
+#[test]
+fn legacy_rows_fold_identically() {
+    let mut ledger = Ledger::new();
+    tool_loop(&mut ledger, measured("n1", 0, "", 4.0));
+    tool_loop(&mut ledger, gate_accepted("n1", 0, "", None));
+    tool_loop(&mut ledger, measured("n1", 0, "", 3.2));
+    tool_loop(&mut ledger, gate_accepted("n1", 0, "", None));
+    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger);
+    assert_eq!(
+        accepted,
+        vec![("n1".to_string(), 0, 4.0), ("n1".to_string(), 0, 3.2)]
+    );
+}
+
+/// The gate event's own `observed_energy` wins over measurement correlation
+/// — recorded, never recovered (PSP-10 system 21).
+#[test]
+fn recorded_observed_energy_is_authoritative() {
+    let mut ledger = Ledger::new();
+    tool_loop(&mut ledger, measured("n1", 0, "n1/0/c1", 9.9));
+    tool_loop(&mut ledger, gate_accepted("n1", 0, "n1/0/c1", Some(3.0)));
+    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger);
+    assert_eq!(accepted, vec![("n1".to_string(), 0, 3.0)]);
+}
+
 #[test]
 fn mc_o_a_transition_on_an_unrecorded_observation_is_refused() {
     let mut ledger = Ledger::new();

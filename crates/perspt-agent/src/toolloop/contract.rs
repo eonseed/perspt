@@ -138,6 +138,10 @@ pub enum LoopEvent {
     CandidateMeasured {
         node_id: String,
         generation: u32,
+        /// Candidate identity `"{node}/{gen}/c{seq}"` (PSP-10 Phase 2). The
+        /// accepted fold keys by it; empty on pre-PSP-10 rows.
+        #[serde(default)]
+        candidate_id: String,
         energy: f64,
         hard_pass: bool,
         residuals: Vec<ResidualEvent>,
@@ -145,7 +149,17 @@ pub enum LoopEvent {
     GateDecisionRecorded {
         node_id: String,
         generation: u32,
+        /// Shares the measurement's candidate identity so the two events
+        /// key together (Proposition 2). Empty on pre-PSP-10 rows.
+        #[serde(default)]
+        candidate_id: String,
         decision: GateDecision,
+        /// Recorded from the trajectory's `GateDecisionRef`, never recovered
+        /// by correlation. `None` marks a pre-PSP-10 row.
+        #[serde(default)]
+        observed_energy: Option<f64>,
+        #[serde(default)]
+        best_accepted_before: Option<f64>,
     },
     /// The loop refused to submit a candidate past the finite-decision bound
     /// `N_gate = floor(V0/rho) + B + 1` (PSP-10 Gate X). The refusal itself
@@ -174,6 +188,10 @@ pub enum LoopEvent {
     /// path's content-addressed artifact handle, sufficient to rebuild the
     /// accepted candidate and continue the loop after a crash.
     DurableCandidateCheckpoint {
+        /// The accepted candidate this checkpoint makes durable (PSP-10
+        /// Phase 2). Empty on pre-PSP-10 rows.
+        #[serde(default)]
+        candidate_id: String,
         state_root: String,
         control: ControlFrame,
         /// Exact provider-neutral projection selected for the next model turn.
