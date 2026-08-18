@@ -82,12 +82,21 @@ impl Psp9AgentRuntime {
         let mut conversation = Conversation::with_system(envelope.text);
         conversation.push_user(task.to_string());
         let mut tool_calls = 0u32;
-        for _turn in 0..16u32 {
-            let output = self
-                .transport
-                .chat_turn(model, &conversation, &specs, ToolChoicePolicy::Auto)
-                .await
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        for turn in 0..16u32 {
+            // PSP-10 system 27: every actor turn runs through the shared
+            // runner — feasibility gate, sticky failover, raw actor-tagged
+            // observation before any parse.
+            let mut runner = crate::turn::ActorTurnRunner {
+                transport: self.transport.as_ref(),
+                model: model.clone(),
+                fallbacks: self.fallback_models.clone(),
+                recorder: Some(recorder),
+                actor: crate::turn::ActorKind::Explorer,
+                turn: turn + 1,
+            };
+            let output = runner
+                .run_turn(&conversation, &specs, ToolChoicePolicy::Auto)
+                .await?;
             match output {
                 TurnOutput::Text(text) => {
                     recorder

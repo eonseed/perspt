@@ -3,6 +3,13 @@
 
 use super::*;
 
+/// The adjudicator's strict output contract (fail-closed parse).
+#[derive(serde::Deserialize)]
+struct Verdict {
+    pass: bool,
+    reason: String,
+}
+
 impl Psp9AgentRuntime {
     pub(super) async fn adjudicate_candidate(
         &self,
@@ -32,18 +39,20 @@ impl Psp9AgentRuntime {
             "adjudication_requested",
             serde_json::json!({"model": model, "diff_artifact": diff_handle}),
         )?;
-        let output = self
-            .transport
-            .chat_turn(model, &conversation, &[], ToolChoicePolicy::None)
+        let mut runner = crate::turn::ActorTurnRunner {
+            transport: self.transport.as_ref(),
+            model: model.clone(),
+            fallbacks: self.fallback_models.clone(),
+            recorder: Some(recorder),
+            actor: crate::turn::ActorKind::Adjudicator,
+            turn: 1,
+        };
+        let output = runner
+            .run_turn(&conversation, &[], ToolChoicePolicy::None)
             .await?;
         let TurnOutput::Text(text) = output else {
             anyhow::bail!("adjudicator returned tool calls despite having no tools");
         };
-        #[derive(serde::Deserialize)]
-        struct Verdict {
-            pass: bool,
-            reason: String,
-        }
         let verdict: Verdict = serde_json::from_str(text.trim())
             .context("adjudicator did not return strict verdict JSON")?;
         let evidence_hash = recorder.record_artifact(text.as_bytes(), "application/json")?;

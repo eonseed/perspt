@@ -87,12 +87,18 @@ impl Psp9AgentRuntime {
         recorder.record_prompt_program("graph_plan", &envelope)?;
         let mut conversation = Conversation::with_system(envelope.text);
         conversation.push_user(task.to_string());
-        let output = self
-            .transport
-            .chat_turn(
-                &route,
+        let mut runner = crate::turn::ActorTurnRunner {
+            transport: self.transport.as_ref(),
+            model: route.clone(),
+            fallbacks: self.fallback_models.clone(),
+            recorder: Some(recorder),
+            actor: crate::turn::ActorKind::Architect,
+            turn: 1,
+        };
+        let output = runner
+            .run_turn(
                 &conversation,
-                &[spec],
+                std::slice::from_ref(&spec),
                 ToolChoicePolicy::Specific("update_graph".into()),
             )
             .await?;

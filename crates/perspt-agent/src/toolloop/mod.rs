@@ -490,15 +490,9 @@ impl ToolLoop<'_> {
                 Ok(output) => return Ok(output),
                 Err(error) => {
                     let cause = error.to_string();
-                    let lowered = cause.to_ascii_lowercase();
-                    let rate_limited = ["rate limit", "429", "too many requests"]
-                        .iter()
-                        .any(|marker| lowered.contains(marker));
-                    let failure = if rate_limited {
-                        FailureKind::ProviderRateLimit
-                    } else {
-                        FailureKind::ProviderTransport
-                    };
+                    // One shared failure taxonomy for every actor (PSP-10
+                    // system 27).
+                    let failure = crate::turn::transport_failure_kind(&cause);
                     let granted = recovery.grant(classify_failure(failure));
                     emit(
                         self.recorder,
@@ -577,6 +571,7 @@ impl ToolLoop<'_> {
             &mut state.log,
             LoopEvent::TurnObserved {
                 turn,
+                actor: "worker".into(),
                 output: output.clone(),
             },
         )?;
@@ -754,11 +749,34 @@ impl ToolLoop<'_> {
                 checkpoint: checkpoint.clone(),
             },
         )?;
+        self.apply_compaction(state, context, &checkpoint, covered_root)
+    }
+
+    /// Apply one compaction: replace the projection with the verbatim
+    /// control frame and record the eviction (PSP-10 Definition 6:
+    /// compaction moves material to the backing store, never destroys it).
+    fn apply_compaction(
+        &self,
+        state: &mut TurnState,
+        context: &mut LoopContext,
+        checkpoint: &ContextCheckpoint,
+        covered_root: String,
+    ) -> Result<()> {
         let control_json = serde_json::to_string(&checkpoint.control)?;
         context.compact(
             format!("PERSPECTIVE_CONTROL_FRAME_V1\n{control_json}"),
             self.recorder,
             &mut state.log,
+        )?;
+        emit(
+            self.recorder,
+            &mut state.log,
+            LoopEvent::ContextCompacted {
+                forest_id: String::new(),
+                branch_id: String::new(),
+                summary_page: covered_root.clone(),
+                source_pages: checkpoint.artifact_refs.clone(),
+            },
         )?;
         state.cursor.parent = Some(covered_root);
         state.cursor.next_from = checkpoint.covered_to.saturating_add(1);
