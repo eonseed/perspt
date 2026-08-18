@@ -163,7 +163,7 @@ mod tests {
             cumulative_cost: cost,
             checkpoint_depth: depth,
         };
-        let mut entries = vec![
+        let mut entries = [
             entry("c", false, 1, 2.0, 1.0, 1),
             entry("a", true, 0, 0.0, 0.0, 0),
             entry("b", false, 1, 2.0, 1.0, 1),

@@ -22,6 +22,21 @@ pub struct Measurement {
     pub hard_pass: bool,
 }
 
+/// Search-forest counters folded from the search alphabet (PSP-10
+/// system 28).
+#[derive(Default)]
+pub struct SearchCounters {
+    pub forests_opened: usize,
+    pub branches_forked: usize,
+    pub branches_ineligible: usize,
+    pub branches_not_selected: usize,
+    pub branches_abandoned: usize,
+    pub branches_selected: usize,
+    pub branches_committed: usize,
+    pub no_goods: usize,
+    pub forests_closed: usize,
+}
+
 /// Typed projection of a session's ledger rows, in ledger order.
 #[derive(Default)]
 pub struct LedgerProjection {
@@ -31,6 +46,8 @@ pub struct LedgerProjection {
     pub revisions: Vec<WorkGraphRevision>,
     /// Every `candidate_measured` event.
     pub measurements: Vec<Measurement>,
+    /// Search-forest state counts (PSP-10).
+    pub search: SearchCounters,
 }
 
 impl LedgerProjection {
@@ -65,6 +82,9 @@ impl LedgerProjection {
                     if let Some(m) = parse_measurement(row.sequence, body) {
                         projection.measurements.push(m);
                     }
+                    if let Some(event) = body.get("event").and_then(|event| event.as_str()) {
+                        count_search_event(&mut projection.search, event);
+                    }
                 }
                 _ => {}
             }
@@ -84,6 +104,21 @@ impl LedgerProjection {
             latest.insert(m.node_id.as_str(), m.energy);
         }
         latest
+    }
+}
+
+fn count_search_event(counters: &mut SearchCounters, event: &str) {
+    match event {
+        "search_opened" => counters.forests_opened += 1,
+        "branch_forked" => counters.branches_forked += 1,
+        "branch_ineligible" => counters.branches_ineligible += 1,
+        "branch_not_selected" => counters.branches_not_selected += 1,
+        "branch_abandoned" => counters.branches_abandoned += 1,
+        "branch_selected" => counters.branches_selected += 1,
+        "branch_committed" => counters.branches_committed += 1,
+        "no_good_recorded" => counters.no_goods += 1,
+        "search_closed" => counters.forests_closed += 1,
+        _ => {}
     }
 }
 
