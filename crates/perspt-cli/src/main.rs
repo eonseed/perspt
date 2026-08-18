@@ -98,10 +98,6 @@ enum Commands {
         #[arg(long)]
         allow_dependency_mutation: bool,
 
-        /// Enable proposal ensembles after gate failures at this width (max 4)
-        #[arg(long)]
-        ensemble_width: Option<u8>,
-
         /// Concurrent work-graph nodes (default 1; above 1 requires --yes)
         #[arg(long, default_value = "1")]
         max_parallel_nodes: usize,
@@ -322,7 +318,6 @@ async fn main() -> Result<()> {
             persistent_grants,
             domain,
             allow_dependency_mutation,
-            ensemble_width,
             max_parallel_nodes,
             exploration_only,
             fallback_models,
@@ -350,7 +345,6 @@ async fn main() -> Result<()> {
                 persistent_grants,
                 domain,
                 allow_dependency_mutation,
-                ensemble_width,
                 max_parallel_nodes,
                 exploration_only,
                 dashboard,

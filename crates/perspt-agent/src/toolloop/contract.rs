@@ -230,6 +230,166 @@ pub enum LoopEvent {
         reason: String,
         restored_checkpoint_id: String,
     },
+    // --- PSP-10 search alphabet (system 21). Emitted by the forest
+    // runtime; every event carries forest_id and branch_id where one
+    // exists. Defined with the envelope so the wire shape is pinned before
+    // emission begins. ---
+    SearchOpened {
+        forest_id: String,
+        node_id: String,
+        generation: u32,
+        accepted_root: String,
+        limits: perspt_sdk::SearchLimits,
+    },
+    BranchForked {
+        forest_id: String,
+        branch_id: String,
+        #[serde(default)]
+        parent_branch: Option<String>,
+        seed_checkpoint: String,
+        seed_witness: perspt_sdk::WitnessRef,
+    },
+    BranchStrategySelected {
+        forest_id: String,
+        branch_id: String,
+        strategy_id: String,
+    },
+    BranchObservation {
+        forest_id: String,
+        branch_id: String,
+        observation: String,
+    },
+    BranchCandidateMeasured {
+        forest_id: String,
+        branch_id: String,
+        candidate_id: String,
+        measurement: perspt_sdk::BranchMeasurement,
+    },
+    PartialCheckpointed {
+        forest_id: String,
+        branch_id: String,
+        checkpoint: perspt_sdk::PartialCheckpointRef,
+    },
+    FrontierEpochStarted {
+        forest_id: String,
+        epoch: u64,
+        /// Digest of the folded forest state; strict resume recomputes and
+        /// compares it.
+        forest_digest: String,
+    },
+    FrontierEntryServed {
+        forest_id: String,
+        branch_id: String,
+        epoch: u64,
+    },
+    BranchIneligible {
+        forest_id: String,
+        branch_id: String,
+        reason: String,
+    },
+    BranchNotSelected {
+        forest_id: String,
+        branch_id: String,
+    },
+    BranchAbandoned {
+        forest_id: String,
+        branch_id: String,
+        reason: String,
+    },
+    BranchSelected {
+        forest_id: String,
+        branch_id: String,
+        candidate_id: String,
+    },
+    BranchCommitted {
+        forest_id: String,
+        branch_id: String,
+        candidate_id: String,
+        decision: GateDecision,
+    },
+    NoGoodRecorded {
+        forest_id: String,
+        branch_id: String,
+        /// The exact key `K_ng` (Gate AB); support evidence hashed
+        /// separately.
+        key: String,
+        evidence_hash: String,
+    },
+    SearchClosed {
+        forest_id: String,
+        usage: perspt_sdk::SearchUsage,
+    },
+    // --- PSP-10 resident-context alphabet (Definition 6, Gate AF). ---
+    ContextWorkingSet {
+        #[serde(default)]
+        forest_id: String,
+        #[serde(default)]
+        branch_id: String,
+        turn: u32,
+        page_ids: Vec<String>,
+    },
+    ContextPagesSelected {
+        #[serde(default)]
+        forest_id: String,
+        #[serde(default)]
+        branch_id: String,
+        turn: u32,
+        resident_digest: String,
+        page_ids: Vec<String>,
+    },
+    ContextMiss {
+        #[serde(default)]
+        forest_id: String,
+        #[serde(default)]
+        branch_id: String,
+        turn: u32,
+        key: String,
+    },
+    ContextPageRecalled {
+        #[serde(default)]
+        forest_id: String,
+        #[serde(default)]
+        branch_id: String,
+        turn: u32,
+        page_id: String,
+    },
+    ContextInfeasible {
+        #[serde(default)]
+        forest_id: String,
+        #[serde(default)]
+        branch_id: String,
+        turn: u32,
+        required: u64,
+        allowance: u64,
+    },
+    ContextCompacted {
+        #[serde(default)]
+        forest_id: String,
+        #[serde(default)]
+        branch_id: String,
+        summary_page: String,
+        source_pages: Vec<String>,
+    },
+}
+
+/// The versioned runtime-event envelope (PSP-10 system 21, Gate AD). Every
+/// post-cutover `tool_loop` row wraps its event in exactly this shape;
+/// rows without `schema_version` decode through the strict legacy decoder;
+/// unknown versions fail authoritative replay and resume closed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoopEventEnvelopeV1 {
+    /// Exactly 1.
+    pub schema_version: u16,
+    pub body: LoopEvent,
+}
+
+impl LoopEventEnvelopeV1 {
+    pub fn new(body: LoopEvent) -> Self {
+        Self {
+            schema_version: 1,
+            body,
+        }
+    }
 }
 
 fn default_denial_class() -> perspt_sdk::ResidualClass {

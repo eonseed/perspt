@@ -148,9 +148,10 @@ candidate, or the node assembly:
   admission ceiling; `simple-chat` keeps the plain streaming path.
 
 Governed dependency mutation (`cargo add`, `uv add`, `npm install`) is an
-explicit opt-in via `--allow-dependency-mutation`. Gate failures can draw a
-distinct-family proposal ensemble round (`[ensemble]` in config or
-`--ensemble-width`); selection is strictly by measured energy.
+explicit opt-in via `--allow-dependency-mutation`. Gate failures can open a
+bounded search forest (`[exploration]` in config): isolated branches measured
+against the same accepted root, with exactly one candidate committed through
+the ordinary gate by a deterministic rule.
 
 On macOS and Linux, model-triggered processes require OS isolation. Inspection
 processes cannot write the candidate, access unrelated user home directories,
@@ -177,7 +178,6 @@ perspt agent [OPTIONS] <TASK>
       --max-parallel-nodes <N>  Concurrent work-graph nodes (default: 1; needs --yes)
       --domain <ID>             Domain package (coding, research); default: detect
       --allow-dependency-mutation  Grant governed dependency mutation
-      --ensemble-width <N>      Enable proposal ensembles after gate failures
       --persistent-grants       Persist signed grant intent
       --output-summary <FILE>   Write the terminal summary as JSON
       --db-path <FILE>          Use a specific PSP-9 ledger database

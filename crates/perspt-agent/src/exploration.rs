@@ -5,14 +5,26 @@ use std::path::Path;
 
 use anyhow::Result;
 use ignore::WalkBuilder;
-use perspt_sdk::{ExplorationReport, GraphHint, ProjectMap};
+use perspt_sdk::ProjectMap;
+use serde::{Deserialize, Serialize};
+
+/// The deterministic repository map plus its provenance witnesses — the
+/// seed of `SearchContext` (PSP-10: `ProjectMap` re-homed into
+/// `perspt_sdk::search`; the removed `ExplorationReport` surface collapses
+/// to exactly what the runtime consumes).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceMap {
+    pub project_map: ProjectMap,
+    /// Content hashes of the observed inputs, for provenance.
+    pub input_witnesses: Vec<String>,
+}
 
 const MAX_FILES: usize = 5_000;
 
 /// Build a bounded project map from filesystem metadata and small manifest
 /// hashes. This phase has no mutation capability and is safe to run in
 /// parallel with other read-only preparation.
-pub fn map_workspace(root: &Path) -> Result<ExplorationReport> {
+pub fn map_workspace(root: &Path) -> Result<WorkspaceMap> {
     let mut scan = WorkspaceScan::default();
     let mut walker = WalkBuilder::new(root);
     let walk_root = root.to_path_buf();
@@ -45,16 +57,10 @@ pub fn map_workspace(root: &Path) -> Result<ExplorationReport> {
         entry_points: scan.entry_points.into_iter().take(64).collect(),
         risk_hotspots: scan.risk_hotspots.into_iter().take(64).collect(),
     };
-    let mut report = ExplorationReport::new(map);
-    report.deterministically_backed = true;
-    report.input_witnesses = scan.witnesses;
-    report.graph_hints.push(GraphHint {
-        goal: "implement the requested change against the mapped package roots".into(),
-        suggested_outputs: Vec::new(),
-        rationale: "deterministic repository orientation; output scope remains proposal-bound"
-            .into(),
-    });
-    Ok(report)
+    Ok(WorkspaceMap {
+        project_map: map,
+        input_witnesses: scan.witnesses,
+    })
 }
 
 fn include_entry(root: &Path, path: &Path) -> bool {
@@ -179,7 +185,6 @@ mod tests {
         let right = map_workspace(root.path()).unwrap();
         assert_eq!(left.project_map, right.project_map);
         assert_eq!(left.input_witnesses, right.input_witnesses);
-        assert!(left.deterministically_backed);
         assert_eq!(left.project_map.build_systems, ["cargo"]);
     }
 

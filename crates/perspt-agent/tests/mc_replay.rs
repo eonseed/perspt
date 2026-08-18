@@ -106,7 +106,7 @@ fn concurrent_candidates_fold_by_candidate_identity() {
     tool_loop(&mut ledger, measured("n1", 0, "n1/0/c1", 3.0));
     tool_loop(&mut ledger, measured("n1", 0, "n1/0/c2", 2.0));
     tool_loop(&mut ledger, gate_accepted("n1", 0, "n1/0/c1", Some(3.0)));
-    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger);
+    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger).unwrap();
     assert_eq!(
         accepted,
         vec![("n1".to_string(), 0, 3.0)],
@@ -123,7 +123,7 @@ fn legacy_rows_fold_identically() {
     tool_loop(&mut ledger, gate_accepted("n1", 0, "", None));
     tool_loop(&mut ledger, measured("n1", 0, "", 3.2));
     tool_loop(&mut ledger, gate_accepted("n1", 0, "", None));
-    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger);
+    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger).unwrap();
     assert_eq!(
         accepted,
         vec![("n1".to_string(), 0, 4.0), ("n1".to_string(), 0, 3.2)]
@@ -137,7 +137,7 @@ fn recorded_observed_energy_is_authoritative() {
     let mut ledger = Ledger::new();
     tool_loop(&mut ledger, measured("n1", 0, "n1/0/c1", 9.9));
     tool_loop(&mut ledger, gate_accepted("n1", 0, "n1/0/c1", Some(3.0)));
-    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger);
+    let accepted = perspt_sdk::ledger::replay_accepted_trajectory(&ledger).unwrap();
     assert_eq!(accepted, vec![("n1".to_string(), 0, 3.0)]);
 }
 

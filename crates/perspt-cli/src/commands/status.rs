@@ -75,16 +75,17 @@ fn summarize_psp9_events(
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&row.event_json) else {
             continue;
         };
-        let event = value
+        let payload = value
             .get("payload")
+            .map(|payload| payload.get("body").unwrap_or(payload));
+        let event = payload
             .and_then(|payload| payload.get("event"))
             .and_then(|event| event.as_str())
             .unwrap_or_default();
         match event {
             "candidate_measured" => {
                 measurements += 1;
-                last_energy = value
-                    .get("payload")
+                last_energy = payload
                     .and_then(|payload| payload.get("energy"))
                     .and_then(serde_json::Value::as_f64);
             }

@@ -95,7 +95,26 @@ model = "gpt-4o-mini"
 # headers_from_env = { Authorization = "RECORDS_AUTHORIZATION" }
 
 # ---------------------------------------------------------------------------
-# Optional proposal ensembles (PSP-9 system 7; default off)
+# Bounded search (PSP-10 system 20; sequential branches, hard cap 3)
+#
+# A failed attempt may open a bounded search forest at the refine rung:
+# isolated eager-copy branches measured against the same accepted root,
+# with exactly one candidate committed through the ordinary gate.
+#
+# [exploration]
+# initial_branches = 1
+# max_branches = 3
+# distinct_family = true
+# max_workspace_files = 300000
+# max_workspace_bytes = 4294967296
+
+# Prompt bundles and activation bounds (PSP-10 system 25)
+#
+# [prompts]
+# bundles = []
+# activation_min_tasks = 30       # floor 30; may only be raised
+# noninferiority_margin = 0.05    # epsilon in [0, 0.05]
+
 # ---------------------------------------------------------------------------
 # After a gate failure, the recovery ladder's refine rung may draw one round
 # of distinct-family proposers. Ensembles propose, never decide: every

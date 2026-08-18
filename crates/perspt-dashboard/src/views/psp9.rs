@@ -52,7 +52,17 @@ impl LedgerProjection {
                     }
                 }
                 "tool_loop" => {
-                    if let Some(m) = parse_measurement(row.sequence, &payload) {
+                    // PSP-10: unwrap the versioned envelope; an unknown
+                    // version is display-only forensic data — the
+                    // projection skips it rather than guessing.
+                    let body = match perspt_sdk::ledger::tool_loop_body(&payload) {
+                        Ok(
+                            perspt_sdk::ledger::ToolLoopBody::Legacy(body)
+                            | perspt_sdk::ledger::ToolLoopBody::V1(body),
+                        ) => body,
+                        Err(_) => continue,
+                    };
+                    if let Some(m) = parse_measurement(row.sequence, body) {
                         projection.measurements.push(m);
                     }
                 }

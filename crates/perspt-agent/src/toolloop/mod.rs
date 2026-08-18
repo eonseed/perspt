@@ -29,8 +29,10 @@ use crate::realize::ProjectionMismatch;
 mod batch;
 mod context;
 mod contract;
+pub mod envelope;
 mod proposal;
 pub use contract::*;
+pub use envelope::{decode_tool_loop, DecodedLoopEvent};
 pub use proposal::candidate_mutating_effect;
 
 pub(crate) use context::refold_session_context;

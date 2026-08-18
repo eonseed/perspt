@@ -181,6 +181,8 @@ async fn refine_rung_continues_from_the_best_accepted_state() {
         .filter_map(|row| {
             let value: serde_json::Value = serde_json::from_str(&row.event_json).ok()?;
             let payload = value.get("payload")?;
+            // PSP-10: post-cutover rows wrap the event in the v1 envelope.
+            let payload = payload.get("body").unwrap_or(payload);
             if payload.get("event")?.as_str()? != "candidate_measured" {
                 return None;
             }
