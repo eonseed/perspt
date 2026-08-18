@@ -722,19 +722,42 @@ impl<'a> CodingCandidateMeasurer<'a> {
         Ok(())
     }
 
-    fn score(&self, residuals: &[ResidualEvent]) -> Result<(f64, Option<CorrectionDirection>)> {
+    #[allow(clippy::type_complexity)]
+    fn score(
+        &self,
+        residuals: &[ResidualEvent],
+    ) -> Result<(
+        f64,
+        Option<CorrectionDirection>,
+        Option<perspt_sdk::CorrectionPacket>,
+    )> {
         let scope = DomainScope {
             label: self.node_id.clone(),
             paths: Vec::new(),
         };
         let score = score_candidate(&self.domain.energy_model(&scope), residuals)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-        let correction = self
-            .domain
-            .correction_directions(residuals)
-            .into_iter()
-            .next();
-        Ok((score.total, correction))
+        // PSP-10 system 26: the typed packet folds every direction with
+        // full paths/symbols/rationale; its rendering through the
+        // `branch_correct` section program becomes the steering message.
+        // Domains without packets keep the legacy first-direction path.
+        let packet = self.domain.correction_packet(residuals);
+        let correction = match &packet {
+            Some(packet) if !packet.is_empty() => {
+                let rendered = perspt_coding::prompts::render_correction(packet)
+                    .map_err(|e| anyhow::anyhow!("rendering correction packet: {e}"))?;
+                Some(
+                    CorrectionDirection::new(packet.dominant_cluster.class, rendered)
+                        .with_paths(packet.affected.paths.clone()),
+                )
+            }
+            _ => self
+                .domain
+                .correction_directions(residuals)
+                .into_iter()
+                .next(),
+        };
+        Ok((score.total, correction, packet))
     }
 }
 
@@ -797,12 +820,13 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         if ran == 0 {
             all_passed = false;
         }
-        let (energy, correction) = self.score(&residuals)?;
+        let (energy, correction, packet) = self.score(&residuals)?;
         Ok(Measured {
             hard_pass: self.candidate.has_mutated() && all_passed && residuals.is_empty(),
             energy,
             residuals,
             correction,
+            packet,
         })
     }
 
@@ -844,12 +868,13 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                 )?);
             }
         }
-        let (energy, correction) = self.score(&residuals)?;
+        let (energy, correction, packet) = self.score(&residuals)?;
         Ok(Measured {
             hard_pass: false,
             energy,
             residuals,
             correction,
+            packet,
         })
     }
 }

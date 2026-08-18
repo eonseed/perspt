@@ -155,6 +155,11 @@ pub struct SensorRef {
     pub id: String,
     /// Independence route for this sensor.
     pub route: IndependenceRoute,
+    /// Tool identity, version, and configuration fingerprint (PSP-10
+    /// Assumption 2). Empty on pre-PSP-10 records. Sensors with different
+    /// fingerprints are never pooled as one calibration stratum.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub fingerprint: String,
 }
 
 impl SensorRef {
@@ -162,15 +167,112 @@ impl SensorRef {
         Self {
             id: id.into(),
             route,
+            fingerprint: String::new(),
         }
+    }
+
+    /// Attach the tool identity/version/configuration fingerprint.
+    pub fn with_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        self.fingerprint = fingerprint.into();
+        self
     }
 }
 
-/// Content-addressed reference to a recorded `CorrectionPacket`
-/// (PSP-10 system 26; the packet type itself lands with the verifier
-/// plane).
+/// Content-addressed reference to a recorded `CorrectionPacket`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectionPacketRef(pub String);
+
+/// One root-cause cluster of residuals (PSP-10 system 26): two hundred
+/// cascade errors from one missing import are one cluster, not two hundred
+/// units of energy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResidualClusterRef {
+    pub cluster_id: String,
+    pub class: ResidualClass,
+    /// The primary diagnostic the cascade folds into.
+    pub root_cause: String,
+    pub member_count: u32,
+    /// Profile-normalized magnitude, not a raw diagnostic count.
+    pub magnitude: f64,
+}
+
+/// One structured diagnostic preserved from a verifier's native output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StructuredDiagnosticRef {
+    /// Tool code (`E0432`, a pytest test id, a tsc `TSxxxx`), if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+}
+
+/// Everything a correction may touch, preserved from the diagnostics.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct AffectedSet {
+    pub paths: Vec<String>,
+    pub symbols: Vec<SymbolRef>,
+    /// `path:line:column` spans, when the tool reports them.
+    pub spans: Vec<String>,
+    pub tests: Vec<String>,
+    pub graph_edges: Vec<String>,
+}
+
+/// One correction operator the domain proposes for the dominant cluster.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorrectionOperator {
+    pub operator_id: String,
+    pub instruction: String,
+    pub addresses: ResidualClass,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rationale: String,
+}
+
+/// A declared sensor that could not run; correction proceeds under this
+/// named uncertainty instead of pretending completeness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MissingSensorDecl {
+    pub sensor: String,
+    pub reason: String,
+}
+
+/// Reference to a recorded no-good (PSP-10 system 21; the exact-key store
+/// arrives with the search plane).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoGoodRef {
+    pub key: String,
+    pub evidence_hash: String,
+}
+
+/// The typed correction packet carried to the next search quantum
+/// (PSP-10 system 26). It preserves paths, symbols, spans, and rationale —
+/// the correction channel no longer flattens to one instruction string.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CorrectionPacket {
+    pub dominant_cluster: ResidualClusterRef,
+    pub diagnostics: Vec<StructuredDiagnosticRef>,
+    pub affected: AffectedSet,
+    pub operators: Vec<CorrectionOperator>,
+    pub expected_footprint: crate::toolset::FootprintSpec,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub follow_up_stages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub no_goods: Vec<NoGoodRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uncertainty: Vec<MissingSensorDecl>,
+}
+
+impl CorrectionPacket {
+    /// A packet with no operators and no diagnostics carries no direction;
+    /// the caller expands or escalates instead of blind-retrying.
+    pub fn is_empty(&self) -> bool {
+        self.operators.is_empty() && self.diagnostics.is_empty()
+    }
+}
 
 /// Reference to a code symbol implicated by a residual.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

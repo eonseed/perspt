@@ -90,6 +90,51 @@ fn residual(
     r
 }
 
+/// The sensor fingerprint: tool identity, parser version, and the cluster
+/// normalization profile (PSP-10 Assumption 2).
+fn fingerprint(parser_id: &str) -> String {
+    format!("{parser_id}+{}", crate::diag::CLUSTER_PROFILE_V1)
+}
+
+/// Fold structured diagnostics into cluster-level residuals with full
+/// evidence (PSP-10 system 26). One residual per root-cause cluster; the
+/// magnitude is the profile-normalized cluster magnitude, never a raw
+/// diagnostic count.
+fn structured_residuals(
+    node_id: &str,
+    generation: u32,
+    diagnostics: Vec<crate::diag::StructuredDiagnostic>,
+    raw: &str,
+    sensor: SensorRef,
+) -> Vec<ResidualEvent> {
+    crate::diag::cluster(diagnostics)
+        .into_iter()
+        .filter_map(|cluster| {
+            let summary = if cluster.members.len() > 1 {
+                format!(
+                    "{} ({} diagnostics in cluster {})",
+                    cluster.root.message,
+                    cluster.members.len(),
+                    cluster.code
+                )
+            } else {
+                format!("{} ({})", cluster.root.message, cluster.code)
+            };
+            crate::diag::cluster_residual(
+                node_id,
+                generation,
+                cluster.class,
+                cluster.magnitude(),
+                sensor.clone(),
+                &summary,
+                raw,
+                &cluster.members,
+            )
+            .ok()
+        })
+        .collect()
+}
+
 // ============================ Rust ============================
 
 /// The Rust verifier-suite adapter (rustc / cargo / rust-analyzer).
@@ -126,6 +171,27 @@ impl LanguageAdapter for RustAdapter {
     }
 
     fn parse_diagnostics(&self, node_id: &str, generation: u32, raw: &str) -> Vec<ResidualEvent> {
+        // The structured plane first: cargo's native JSON stream preserves
+        // codes, spans, and suggestions (PSP-10 system 26).
+        if crate::diag::cargo::looks_like_stream(raw) {
+            let sensor = self
+                .diagnostic_sensor()
+                .with_fingerprint(fingerprint(crate::diag::cargo::PARSER_ID));
+            let mut residuals = structured_residuals(
+                node_id,
+                generation,
+                crate::diag::cargo::parse(raw),
+                raw,
+                sensor,
+            );
+            residuals.extend(rust_test_failures(node_id, generation, raw));
+            return residuals;
+        }
+        // Text fallback under its own parser identity; never pooled with
+        // the JSON parser's measurements.
+        let sensor = self
+            .diagnostic_sensor()
+            .with_fingerprint("rustc-text-v1".to_string());
         let mut residuals = Vec::new();
         for line in raw.lines() {
             let line = line.trim();
@@ -139,20 +205,13 @@ impl LanguageAdapter for RustAdapter {
                         node_id,
                         generation,
                         class,
-                        self.diagnostic_sensor(),
+                        sensor.clone(),
                         summary,
                     ));
                 }
-            } else if line.starts_with("test result: FAILED") || line.contains("... FAILED") {
-                residuals.push(residual(
-                    node_id,
-                    generation,
-                    ResidualClass::TestFailure,
-                    SensorRef::new("cargo-test", IndependenceRoute::TestOracle),
-                    line,
-                ));
             }
         }
+        residuals.extend(rust_test_failures(node_id, generation, raw));
         residuals
     }
 
@@ -226,6 +285,24 @@ impl LanguageAdapter for RustAdapter {
     }
 }
 
+/// Test-failure lines from `cargo test` text output (both stream shapes).
+fn rust_test_failures(node_id: &str, generation: u32, raw: &str) -> Vec<ResidualEvent> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("test result: FAILED") || line.contains("... FAILED"))
+        .map(|line| {
+            residual(
+                node_id,
+                generation,
+                ResidualClass::TestFailure,
+                SensorRef::new("cargo-test", IndependenceRoute::TestOracle)
+                    .with_fingerprint("cargo-test-text-v1".to_string()),
+                line,
+            )
+        })
+        .collect()
+}
+
 /// Discover binary crates (those with `src/main.rs`) in a Cargo workspace:
 /// the root package and any `crates/*` members. Returns `(package_name, dir)`.
 fn rust_binary_crates(workspace: &Path) -> Vec<(String, std::path::PathBuf)> {
@@ -278,7 +355,10 @@ fn rust_examples(workspace: &Path) -> Vec<(Option<String>, String)> {
 
 // ============================ Python ============================
 
-/// The Python verifier-suite adapter (pyright / mypy / pytest).
+/// The Python verifier-suite adapter. `ty` is the primary sensor; Pyright
+/// is a separately fingerprinted fallback (PSP-10 resolved decision 15).
+/// Attribution follows the observed output format — the historic
+/// split-brain that stamped every observation "pyright" is gone.
 #[derive(Debug, Clone, Default)]
 pub struct PythonAdapter;
 
@@ -288,10 +368,42 @@ impl LanguageAdapter for PythonAdapter {
     }
 
     fn diagnostic_sensor(&self) -> SensorRef {
-        SensorRef::new("pyright", IndependenceRoute::Lsp)
+        SensorRef::new("ty", IndependenceRoute::Lsp)
     }
 
     fn parse_diagnostics(&self, node_id: &str, generation: u32, raw: &str) -> Vec<ResidualEvent> {
+        // `ty check --output-format concise` (primary text form).
+        let ty_diagnostics = crate::diag::ty::parse_check_text(raw);
+        if !ty_diagnostics.is_empty() {
+            let sensor = SensorRef::new("ty", IndependenceRoute::Lsp)
+                .with_fingerprint(fingerprint(crate::diag::ty::PARSER_ID));
+            let mut residuals =
+                structured_residuals(node_id, generation, ty_diagnostics, raw, sensor);
+            residuals.extend(python_test_failures(node_id, generation, raw));
+            return residuals;
+        }
+        // Pyright JSON fallback, under its own fingerprint — never pooled
+        // with `ty` measurements.
+        let pyright_diagnostics = crate::diag::pyright::parse(raw);
+        if !pyright_diagnostics.is_empty() {
+            let sensor = SensorRef::new("pyright", IndependenceRoute::Lsp)
+                .with_fingerprint(fingerprint(crate::diag::pyright::PARSER_ID));
+            let mut residuals =
+                structured_residuals(node_id, generation, pyright_diagnostics, raw, sensor);
+            residuals.extend(python_test_failures(node_id, generation, raw));
+            return residuals;
+        }
+        // Pytest JUnit XML.
+        let junit = crate::diag::pytest::parse(raw);
+        if !junit.is_empty() {
+            let sensor = SensorRef::new("pytest", IndependenceRoute::TestOracle)
+                .with_fingerprint(fingerprint(crate::diag::pytest::PARSER_ID));
+            return structured_residuals(node_id, generation, junit, raw, sensor);
+        }
+        // Legacy text scrape (stdlib checks, bare tracebacks) under the
+        // honest sensor identity of the interpreter, not a type checker.
+        let sensor = SensorRef::new("python-check", IndependenceRoute::Compiler)
+            .with_fingerprint("python-text-v1".to_string());
         let mut residuals = Vec::new();
         for line in raw.lines() {
             let lower = line.to_lowercase();
@@ -314,8 +426,9 @@ impl LanguageAdapter for PythonAdapter {
             if let Some(class) = class {
                 let sensor = if class == ResidualClass::TestFailure {
                     SensorRef::new("pytest", IndependenceRoute::TestOracle)
+                        .with_fingerprint("pytest-text-v1".to_string())
                 } else {
-                    self.diagnostic_sensor()
+                    sensor.clone()
                 };
                 residuals.push(residual(node_id, generation, class, sensor, line.trim()));
             }
@@ -374,6 +487,27 @@ impl LanguageAdapter for PythonAdapter {
     }
 }
 
+/// Pytest text-output failures (when no JUnit XML was produced).
+fn python_test_failures(node_id: &str, generation: u32, raw: &str) -> Vec<ResidualEvent> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            lower.contains("failed") && lower.contains("test")
+        })
+        .map(|line| {
+            residual(
+                node_id,
+                generation,
+                ResidualClass::TestFailure,
+                SensorRef::new("pytest", IndependenceRoute::TestOracle)
+                    .with_fingerprint("pytest-text-v1".to_string()),
+                line,
+            )
+        })
+        .collect()
+}
+
 /// Discover importable top-level packages: directories containing `__init__.py`
 /// under `src/` (src-layout) or the workspace root (flat layout).
 fn python_packages(workspace: &Path) -> Vec<String> {
@@ -423,9 +557,21 @@ impl LanguageAdapter for TypeScriptAdapter {
     }
 
     fn parse_diagnostics(&self, node_id: &str, generation: u32, raw: &str) -> Vec<ResidualEvent> {
+        // The versioned `tsc --pretty false` normalizer preserves paths and
+        // positions (PSP-10 system 26).
+        let structured = crate::diag::tsc::parse(raw);
+        if !structured.is_empty() {
+            let sensor = self
+                .diagnostic_sensor()
+                .with_fingerprint(fingerprint(crate::diag::tsc::PARSER_ID));
+            return structured_residuals(node_id, generation, structured, raw, sensor);
+        }
+        // Fallback for lines without the position prefix.
+        let sensor = self
+            .diagnostic_sensor()
+            .with_fingerprint("tsc-loose-text-v1".to_string());
         let mut residuals = Vec::new();
         for line in raw.lines() {
-            // `src/x.ts(3,10): error TS2307: Cannot find module 'foo'.`
             if let Some(idx) = line.find("error TS") {
                 let rest = &line[idx + "error ".len()..];
                 let code: String = rest
@@ -438,7 +584,7 @@ impl LanguageAdapter for TypeScriptAdapter {
                     node_id,
                     generation,
                     class,
-                    self.diagnostic_sensor(),
+                    sensor.clone(),
                     summary,
                 ));
             }

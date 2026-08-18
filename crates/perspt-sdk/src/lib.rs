@@ -57,6 +57,7 @@ pub mod recovery;
 pub mod residual;
 pub mod routing;
 pub mod scheduler;
+pub mod search;
 pub mod spectral;
 pub mod stability;
 pub mod toolset;
@@ -89,9 +90,10 @@ pub use conformal::{
     CalibrationSample, CalibrationState, CalibrationStratum, ThresholdOutcome,
 };
 pub use domain::{
-    AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId, DomainRegistry,
-    DomainScope, HardGatePolicy, ResidualSchema, SafetyBarrierDisposition, VerificationCadence,
-    VerifierSuiteSpec, WorkspaceSnapshot,
+    AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId,
+    DomainPromptLibrary, DomainRegistry, DomainScope, EmptyDomainPromptLibrary, HardGatePolicy,
+    ResidualSchema, SafetyBarrierDisposition, VerificationCadence, VerifierSuiteSpec,
+    WorkspaceSnapshot,
 };
 pub use energy::{score_candidate, EnergyComponents, EnergyModel, EnergyScore, ResidualWeight};
 pub use error::{Result, SdkError};
@@ -132,8 +134,10 @@ pub use recovery::{
     classify_failure, CascadeClass, CascadeLevel, FailureKind, GrantedControl, RecoveryCascade,
 };
 pub use residual::{
-    CorrectionDirection, EnergyComponent, EvidencePayload, IndependenceRoute, ResidualClass,
-    ResidualEvent, ResidualEventRef, ResidualSeverity, SensorRef, SymbolRef,
+    AffectedSet, CorrectionDirection, CorrectionOperator, CorrectionPacket, CorrectionPacketRef,
+    EnergyComponent, EvidencePayload, IndependenceRoute, MissingSensorDecl, NoGoodRef,
+    ResidualClass, ResidualClusterRef, ResidualEvent, ResidualEventRef, ResidualSeverity,
+    SensorRef, StructuredDiagnosticRef, SymbolRef,
 };
 pub use routing::{
     resolve_portfolio_route, resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier,
@@ -142,6 +146,9 @@ pub use routing::{
 pub use scheduler::{
     recovery_is_total, repair_to_effects, ExecutionLease, Footprint, LeaseKind, LeaseTable,
     NodeOutcome, RepairAction, Resource, Scheduler, SchedulerEffect,
+};
+pub use search::{
+    BranchMeasurement, BranchSelection, DomainMeasurement, SearchContext, SearchStrategy,
 };
 pub use spectral::{VerificationEdge, VerificationGraph};
 pub use stability::{

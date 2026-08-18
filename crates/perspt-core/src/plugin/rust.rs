@@ -79,11 +79,14 @@ impl LanguagePlugin for RustPlugin {
     // PSP-5 capability methods
 
     fn syntax_check_command(&self) -> Option<String> {
-        Some("cargo check".to_string())
+        // JSON messages preserve codes, spans, and suggestions for the
+        // structured verifier plane (PSP-10 system 26); exit-code semantics
+        // are unchanged.
+        Some("cargo check --message-format=json".to_string())
     }
 
     fn build_command(&self) -> Option<String> {
-        Some("cargo build".to_string())
+        Some("cargo build --message-format=json".to_string())
     }
 
     fn lint_command(&self) -> Option<String> {
@@ -113,14 +116,14 @@ impl LanguagePlugin for RustPlugin {
         let capabilities = vec![
             VerifierCapability {
                 stage: VerifierStage::SyntaxCheck,
-                command: Some("cargo check".to_string()),
+                command: Some("cargo check --message-format=json".to_string()),
                 available: cargo,
                 fallback_command: None,
                 fallback_available: false,
             },
             VerifierCapability {
                 stage: VerifierStage::Build,
-                command: Some("cargo build".to_string()),
+                command: Some("cargo build --message-format=json".to_string()),
                 available: cargo,
                 fallback_command: None,
                 fallback_available: false,

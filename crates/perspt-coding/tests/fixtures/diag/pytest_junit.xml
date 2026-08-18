@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+<testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2">
+<testcase classname="tests.test_math" name="test_addition" file="tests/test_math.py" line="7">
+<failure message="assert 2 == 3">def test_addition():
+&gt;       assert add(1, 1) == 3
+E       assert 2 == 3</failure>
+</testcase>
+<testcase classname="tests.test_math" name="test_passes" file="tests/test_math.py" line="12" />
+</testsuite>
+</testsuites>

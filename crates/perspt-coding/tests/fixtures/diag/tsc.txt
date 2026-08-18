@@ -1,0 +1,2 @@
+src/index.ts(4,7): error TS2322: Type 'string' is not assignable to type 'number'.
+src/util.ts(10,1): error TS2307: Cannot find module './missing' or its corresponding type declarations.
