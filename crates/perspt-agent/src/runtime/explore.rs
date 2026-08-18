@@ -73,10 +73,10 @@ impl Psp9AgentRuntime {
         let model = self.explorer_model.as_ref().unwrap_or(&self.model);
         let budget = perspt_sdk::ExplorationBudget::default();
         let specs = catalog.specs_for(std::slice::from_ref(&capability), false);
-        let mut conversation = Conversation::with_system(
-            "You are a read-only repository explorer. Inspect with the provided \
-             tools, then answer. You cannot modify anything.",
-        );
+        let envelope = perspt_core::prompts::PlatformPromptLibrary::repository_explore()
+            .map_err(|e| anyhow::anyhow!("repository explore prompt: {e}"))?;
+        recorder.record_prompt_program("repository_explore", &envelope)?;
+        let mut conversation = Conversation::with_system(envelope.text);
         conversation.push_user(task.to_string());
         let mut tool_calls = 0u32;
         for _turn in 0..16u32 {

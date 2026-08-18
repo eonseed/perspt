@@ -889,3 +889,20 @@ pub(crate) fn resumed_running_graph(
     )?;
     Ok(graph)
 }
+
+/// Compose and ledger the worker's platform envelope (PSP-10 Phase 5): the
+/// section library renders with the real domain id, and the provenance is
+/// recorded before the loop runs (Gate Z's recording half).
+pub(crate) fn worker_envelope(
+    recorder: &Psp9Recorder,
+    domain_id: &str,
+) -> Result<crate::toolloop::PromptEnvelope> {
+    let envelope = perspt_core::prompts::PlatformPromptLibrary::session_bootstrap(domain_id)
+        .map_err(|e| anyhow::anyhow!("session bootstrap prompt: {e}"))?;
+    recorder.record_prompt_program("session_bootstrap", &envelope)?;
+    Ok(crate::toolloop::PromptEnvelope {
+        text: envelope.text.clone(),
+        invocation_digest: envelope.digest.clone(),
+        manifest_digest: perspt_core::prompts::PlatformPromptLibrary::manifest().digest(),
+    })
+}

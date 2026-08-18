@@ -484,15 +484,6 @@ pub trait LanguagePlugin: Send + Sync {
         crate::types::CommandPolicyDecision::Allow
     }
 
-    /// Plugin-specific correction prompt fragment.
-    ///
-    /// Injected into correction retry prompts to give the LLM language-specific
-    /// guidance (e.g., "use `cargo add` instead of editing Cargo.toml directly").
-    /// Returns None if the plugin has no special guidance.
-    fn correction_prompt_fragment(&self) -> Option<&str> {
-        None
-    }
-
     /// Glob patterns that identify test files for this language.
     ///
     /// Used by plan validation to infer that test-type tasks should depend on

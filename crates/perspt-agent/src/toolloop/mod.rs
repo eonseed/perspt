@@ -99,6 +99,11 @@ pub struct ToolLoop<'a> {
     pub kernel_state: KernelState,
     pub node_id: String,
     pub generation: u32,
+    /// The composed platform envelope for this actor (PSP-10 Phase 5). The
+    /// runtime composes it from the section library and records its
+    /// provenance; the loop seeds the text and stamps the digests into
+    /// every control frame.
+    pub system_prompt: PromptEnvelope,
     pub recorder: Option<&'a dyn LoopRecorder>,
 }
 
@@ -317,7 +322,7 @@ impl ToolLoop<'_> {
                 LoopContext::resume(conversation, restored_tools, self.recorder, &mut state.log)
             }
             None => LoopContext::seed(
-                "You are a governed coding agent. Propose tool calls; every effect is mediated.",
+                &self.system_prompt.text,
                 goal,
                 self.recorder,
                 &mut state.log,
@@ -661,6 +666,9 @@ impl ToolLoop<'_> {
         ControlFrame {
             projection_digest: context.digest().to_string(),
             event_schema_version: perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
+            prompt_invocation_digest: self.system_prompt.invocation_digest.clone(),
+            prompt_manifest_digest: self.system_prompt.manifest_digest.clone(),
+            resident_context_digest: String::new(),
             goal: goal.to_string(),
             node_generation: self.generation,
             accepted_state_root: state.accepted_checkpoint.witness.state_root.clone(),

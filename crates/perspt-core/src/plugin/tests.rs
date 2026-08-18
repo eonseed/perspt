@@ -343,12 +343,6 @@ fn test_rust_dependency_command_policy() {
 }
 
 #[test]
-fn test_rust_correction_prompt_fragment() {
-    let plugin = RustPlugin;
-    assert!(plugin.correction_prompt_fragment().is_some());
-}
-
-#[test]
 fn test_rust_test_file_patterns() {
     let plugin = RustPlugin;
     let patterns = plugin.test_file_patterns();

@@ -158,6 +158,9 @@ fn mc_o_a_stale_checkpoint_is_rebuilt_not_patched() {
         covered_event_root: "root".into(),
         control: ControlFrame {
             projection_digest: "projection".into(),
+            prompt_invocation_digest: String::new(),
+            prompt_manifest_digest: String::new(),
+            resident_context_digest: String::new(),
             event_schema_version: perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
             goal: "g".into(),
             node_generation: 1,

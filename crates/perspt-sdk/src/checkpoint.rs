@@ -21,6 +21,17 @@ pub struct ControlFrame {
     /// Schema version used by conversation seed/delta events.
     #[serde(default)]
     pub event_schema_version: u32,
+    /// PSP-10 prompt provenance (Gate Z). Empty marks a pre-PSP-10
+    /// checkpoint; a nonempty value requires exact reconstruction from
+    /// built-ins or pinned bundle artifacts on resume.
+    #[serde(default)]
+    pub prompt_invocation_digest: String,
+    #[serde(default)]
+    pub prompt_manifest_digest: String,
+    /// Resident-context digest (Gate AF); empty until the paged assembler
+    /// runs per turn.
+    #[serde(default)]
+    pub resident_context_digest: String,
     pub goal: String,
     pub node_generation: u32,
     pub accepted_state_root: String,
@@ -104,6 +115,9 @@ mod tests {
             covered_event_root: "head".into(),
             control: ControlFrame {
                 projection_digest: "projection".into(),
+                prompt_invocation_digest: String::new(),
+                prompt_manifest_digest: String::new(),
+                resident_context_digest: String::new(),
                 event_schema_version: crate::CONVERSATION_EVENT_SCHEMA_VERSION,
                 goal: "fix the build".into(),
                 node_generation: 2,

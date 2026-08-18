@@ -170,13 +170,6 @@ pub enum SafetyBarrierDisposition {
     Registered(BarrierSpec),
 }
 
-/// Context handed to an adjudicator route (PSP-9 system 8).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AdjudicationBrief {
-    /// What the adjudicator should check, in the domain's own words.
-    pub focus: Vec<String>,
-}
-
 /// The domain-package contract.
 ///
 /// A domain package maps verifier evidence into residuals, declares the
@@ -217,12 +210,6 @@ pub trait AgentDomainPackage: Send + Sync {
     /// The barrier position — `NotClaimed { reason }` is a legal, honest
     /// answer; a vacuous default is not.
     fn safety_barrier(&self, scope: &DomainScope) -> SafetyBarrierDisposition;
-
-    /// What an adjudicator should look at for a candidate, when the domain
-    /// supports adjudication at all.
-    fn adjudication_brief(&self, _candidate_id: &str) -> Option<AdjudicationBrief> {
-        None
-    }
 
     /// The optional analytic-path extension (Paper I §12). Coding returns
     /// `None` until a true proxy geometry exists.

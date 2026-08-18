@@ -235,14 +235,6 @@ impl LanguagePlugin for JsPlugin {
         }
     }
 
-    fn correction_prompt_fragment(&self) -> Option<&str> {
-        Some(
-            "For JavaScript/TypeScript projects: use `npm install <package>` to add \
-             dependencies. Ensure TypeScript projects have a valid tsconfig.json. \
-             Use ES module imports consistently.",
-        )
-    }
-
     fn test_file_patterns(&self) -> &[&str] {
         &[
             "**/*.test.js",

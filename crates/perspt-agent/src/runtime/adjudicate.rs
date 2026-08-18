@@ -20,12 +20,10 @@ impl Psp9AgentRuntime {
         while !diff.is_char_boundary(boundary) {
             boundary -= 1;
         }
-        let mut conversation = Conversation::with_system(
-            "You are a conjunctive coding validator with no tools or authority. \
-             Review only the realized diff. Return strict JSON: \
-             {\"pass\":bool,\"reason\":string}. Reject uncertainty; do not \
-             propose edits.",
-        );
+        let envelope = perspt_core::prompts::PlatformPromptLibrary::adjudicate()
+            .map_err(|e| anyhow::anyhow!("adjudicate prompt: {e}"))?;
+        recorder.record_prompt_program("adjudicate", &envelope)?;
+        let mut conversation = Conversation::with_system(envelope.text);
         conversation.push_user(format!(
             "Task: {task}\nDiff artifact: {diff_handle}\nRealized diff:\n{}",
             &diff[..boundary]

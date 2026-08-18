@@ -337,3 +337,24 @@ impl super::Psp9AgentRuntime {
         Ok(())
     }
 }
+
+impl Psp9Recorder {
+    /// Ledger one compiled stage program's provenance (PSP-10 Gate Z,
+    /// recording half): section identities, versions, content hashes, and
+    /// the composed digest. Strict resume enforcement arrives with the
+    /// event envelope.
+    pub(crate) fn record_prompt_program(
+        &self,
+        stage: &str,
+        composed: &perspt_core::prompts::ComposedStageText,
+    ) -> Result<()> {
+        self.record_custom(
+            "prompt_program_compiled",
+            serde_json::json!({
+                "stage": stage,
+                "sections": composed.sections,
+                "digest": composed.digest,
+            }),
+        )
+    }
+}
