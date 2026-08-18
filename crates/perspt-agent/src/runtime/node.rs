@@ -901,3 +901,23 @@ pub(crate) struct ConcludeContext<'a> {
     pub(crate) loop_outcome: &'a NodeTerminalOutcome,
     pub(crate) calibration: &'a CalibrationBinding,
 }
+
+/// The governed surfaces assembled for one node run.
+pub(crate) struct NodeAssembly {
+    pub(crate) catalog: StaticCatalog,
+    pub(crate) grant_policy: GrantPolicy,
+    pub(crate) capability: Capability,
+    pub(crate) contract: CodingContract,
+    pub(crate) barrier: OperationalSafetyBarrier,
+    pub(crate) cadence: perspt_sdk::VerificationCadence,
+    pub(crate) energy: perspt_sdk::EnergyModel,
+    pub(crate) calibration: CalibrationBinding,
+}
+
+/// One completed governed attempt at a node generation.
+pub(crate) struct NodeAttempt {
+    pub(crate) outcome: crate::toolloop::LoopOutcome,
+    pub(crate) candidate: CandidateWorkspace,
+    pub(crate) assembly: NodeAssembly,
+    pub(crate) kernel_state: perspt_sdk::KernelState,
+}

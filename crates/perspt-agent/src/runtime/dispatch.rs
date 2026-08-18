@@ -107,19 +107,10 @@ impl Psp9AgentRuntime {
                 .await
                 .finish(&done.node_id, done.generation);
             tokens.remove(&done.node_id);
-            let Some(outcome) = done.outcome else {
-                recorder.record_custom(
-                    "node_revalidation_cancelled",
-                    serde_json::json!({
-                        "node_id": done.node_id,
-                        "generation": done.generation,
-                    }),
-                )?;
-                pool.refund(done.claimed);
+            let node_id = done.node_id.clone();
+            let Some(attempt) = settle_done(recorder, &pool, done)? else {
                 continue;
             };
-            let attempt = outcome?;
-            pool.refund(done.claimed.saturating_sub(spent_of(&attempt)));
             graph = self
                 .fold_completion(
                     recorder,
@@ -128,7 +119,7 @@ impl Psp9AgentRuntime {
                     &mut leases,
                     &pool,
                     graph,
-                    done.node_id,
+                    node_id,
                     attempt,
                     &mut aggregate,
                     &mut staging,
@@ -136,34 +127,48 @@ impl Psp9AgentRuntime {
                 .await?;
             cancel_stale(&graph, &tokens);
         }
-        // Gate AA: one global integration gate after every node settles.
-        if !staging.is_empty() {
-            if matches!(aggregate.outcome, NodeTerminalOutcome::HardPass) {
-                match self
-                    .run_integration_gate(recorder, session_id, &graph, &staging)
-                    .await?
-                {
-                    Some(paths) => aggregate.promoted_paths = paths,
-                    None => {
-                        aggregate.outcome = NodeTerminalOutcome::Escalated {
-                            certificate_id: uuid::Uuid::new_v4().to_string(),
-                        };
-                        aggregate.status = "ESCALATED_PSP9";
-                    }
-                }
-            } else {
-                // Some node failed terminally: the staged winners never
-                // reach the user workspace (no partial promotion exists).
-                recorder.record_custom(
-                    "integration_failed",
-                    serde_json::json!({
-                        "staging_root": staging.digest(),
-                        "reason": "a sibling node failed; staged winners were discarded",
-                    }),
-                )?;
-            }
-        }
+        self.integrate_staged(recorder, session_id, &graph, &staging, &mut aggregate)
+            .await?;
         Ok(aggregate)
+    }
+
+    /// Gate AA: one global integration gate after every node settles. A
+    /// sibling failure discards the staged winners whole — no partial
+    /// promotion path exists.
+    async fn integrate_staged(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        graph: &WorkGraphRevision,
+        staging: &super::integrate::StagingRoot,
+        aggregate: &mut DispatchOutcome,
+    ) -> Result<()> {
+        if staging.is_empty() {
+            return Ok(());
+        }
+        if matches!(aggregate.outcome, NodeTerminalOutcome::HardPass) {
+            match self
+                .run_integration_gate(recorder, session_id, graph, staging)
+                .await?
+            {
+                Some(paths) => aggregate.promoted_paths = paths,
+                None => {
+                    aggregate.outcome = NodeTerminalOutcome::Escalated {
+                        certificate_id: uuid::Uuid::new_v4().to_string(),
+                    };
+                    aggregate.status = "ESCALATED_PSP9";
+                }
+            }
+        } else {
+            recorder.record_custom(
+                "integration_failed",
+                serde_json::json!({
+                    "staging_root": staging.digest(),
+                    "reason": "a sibling node failed; staged winners were discarded",
+                }),
+            )?;
+        }
+        Ok(())
     }
 
     /// Fill free slots with ready nodes; footprints and the slot bound come
@@ -402,6 +407,30 @@ impl Psp9AgentRuntime {
         )?;
         Ok((NodeTerminalOutcome::HardPass, "COMPLETED_PSP9", Vec::new()))
     }
+}
+
+/// Settle one finished lifecycle future: refund a cancelled node's claim,
+/// surface attempt errors, and refund the unspent share of a completed
+/// attempt. `None` means there is nothing to fold.
+fn settle_done(
+    recorder: &Psp9Recorder,
+    pool: &SharedRecoveryPool,
+    done: NodeDone,
+) -> Result<Option<NodeAttempt>> {
+    let Some(outcome) = done.outcome else {
+        recorder.record_custom(
+            "node_revalidation_cancelled",
+            serde_json::json!({
+                "node_id": done.node_id,
+                "generation": done.generation,
+            }),
+        )?;
+        pool.refund(done.claimed);
+        return Ok(None);
+    };
+    let attempt = outcome?;
+    pool.refund(done.claimed.saturating_sub(spent_of(&attempt)));
+    Ok(Some(attempt))
 }
 
 /// Take one ready node under the slot bound, ledger the dispatch, and mark

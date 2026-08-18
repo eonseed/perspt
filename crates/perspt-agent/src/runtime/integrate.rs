@@ -145,8 +145,20 @@ impl Psp9AgentRuntime {
             )?;
             return Ok(None);
         }
-        // Atomic promotion through the hardened path, under the ordinary
-        // grant/kernel discipline for a synthetic integration node.
+        self.promote_integration_root(recorder, session_id, graph, &workspace, &staging_digest)
+            .await
+    }
+
+    /// Atomic promotion of the verified integration root through the
+    /// hardened path, under the ordinary grant/kernel discipline.
+    async fn promote_integration_root(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        graph: &perspt_sdk::WorkGraphRevision,
+        workspace: &CandidateWorkspace,
+        staging_digest: &str,
+    ) -> Result<Option<Vec<String>>> {
         let assembly = {
             let external_entries = self.external_tool_entries(recorder).await?;
             self.assemble_node(
@@ -163,7 +175,7 @@ impl Psp9AgentRuntime {
         let promoted = self
             .promote_certified(
                 recorder,
-                &workspace,
+                workspace,
                 "integration",
                 &assembly.grant_policy,
                 &assembly.capability,
