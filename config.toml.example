@@ -109,6 +109,11 @@ model = "gpt-4o-mini"
 # max_workspace_files = 300000
 # max_workspace_bytes = 4294967296
 
+# Acceptance-stage options
+#
+# [verification]
+# require_format = true   # declare `cargo fmt --check` (etc.) as a gate sensor
+
 # Prompt bundles and activation bounds (PSP-10 system 25)
 #
 # [prompts]

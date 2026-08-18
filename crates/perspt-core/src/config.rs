@@ -303,6 +303,10 @@ pub struct Config {
     #[serde(default, skip_serializing)]
     pub ensemble: Option<toml::Value>,
 
+    /// Verification acceptance-stage options (`[verification]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification: Option<VerificationConfig>,
+
     /// Bounded search configuration (`[exploration]`; PSP-10 system 20).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exploration: Option<ExplorationConfig>,
@@ -346,6 +350,15 @@ impl ContextConfig {
         }
         Ok(())
     }
+}
+
+/// The `[verification]` acceptance-stage options.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct VerificationConfig {
+    /// Declare the plugin `format` verifier stage (e.g. `cargo fmt --check`)
+    /// as an acceptance sensor. Off by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub require_format: Option<bool>,
 }
 
 /// The `[exploration]` search block (PSP-10 system 20). Sequential eager

@@ -132,7 +132,11 @@ impl LanguagePlugin for PythonPlugin {
         // already-synced environment: the governed verifier sandbox denies
         // network, so installation must have happened via `uv sync` before
         // the run (the degraded_reason above already tells the user so).
-        "uv run --no-sync pytest".to_string()
+        // `--junitxml` writes the structured result the coding adapter's
+        // JUnit parser consumes; the harness appends the file to the raw
+        // sensor output after the run (live structured pytest, PSP-10
+        // system 26).
+        "uv run --no-sync pytest -q --junitxml .perspt-junit.xml".to_string()
     }
 
     fn run_command(&self) -> String {
@@ -187,9 +191,13 @@ impl LanguagePlugin for PythonPlugin {
     // PSP-5 capability methods
 
     fn syntax_check_command(&self) -> Option<String> {
-        // Stdlib-only and offline: `uvx ty` would need a network download,
-        // which the verifier sandbox denies. Import/syntax errors are also
-        // caught by the test stage; this is the cheap incremental boundary.
+        // `ty` is the primary Python sensor (PSP-10 decision 15) whenever
+        // its host binary is present — offline, no `uvx` download. The
+        // stdlib compileall boundary remains the no-`ty` fallback: cheap,
+        // offline, and import/syntax errors are also caught by tests.
+        if host_binary_available("ty") {
+            return Some("ty check --output-format concise".to_string());
+        }
         Some(r"uv run --no-sync python -m compileall -q -x '(\.venv|\.perspt|\.git)' .".to_string())
     }
 
@@ -214,6 +222,14 @@ impl LanguagePlugin for PythonPlugin {
         host_binary_available("uv")
     }
 
+    fn format_command(&self) -> Option<String> {
+        host_binary_available("ruff").then(|| "ruff format .".to_string())
+    }
+
+    fn format_check_command(&self) -> Option<String> {
+        host_binary_available("ruff").then(|| "ruff format --check .".to_string())
+    }
+
     fn lsp_fallback(&self) -> Option<LspConfig> {
         Some(LspConfig {
             server_binary: "pyright-langserver".to_string(),
@@ -235,9 +251,11 @@ impl LanguagePlugin for PythonPlugin {
             VerifierCapability {
                 stage: VerifierStage::SyntaxCheck,
                 command: self.syntax_check_command(),
-                available: uv,
-                // pyright as CLI fallback for syntax checking
-                fallback_command: Some("pyright .".to_string()),
+                available: uv || host_binary_available("ty"),
+                // Pyright is the separately fingerprinted fallback sensor;
+                // `--outputjson` feeds the structured parser, and its
+                // measurements are never pooled with `ty`.
+                fallback_command: Some("pyright --outputjson".to_string()),
                 fallback_available: pyright,
             },
             VerifierCapability {
@@ -264,6 +282,14 @@ impl LanguagePlugin for PythonPlugin {
                 // host; otherwise the stage is a declared no-op, not a
                 // missing sensor — projects are not required to ship ruff.
                 command: ruff.then(|| "ruff check .".to_string()),
+                available: true,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Format,
+                // Same posture as lint: a declared no-op without ruff.
+                command: self.format_check_command(),
                 available: true,
                 fallback_command: None,
                 fallback_available: false,

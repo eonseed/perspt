@@ -348,7 +348,8 @@ impl Psp9AgentRuntime {
         let measurer =
             CodingCandidateMeasurer::new(&attempt.candidate, &forest.node_id, forest.generation)
                 .with_domain(self.domain.clone())
-                .with_max_parallel(self.config.max_parallel_verifiers);
+                .with_max_parallel(self.config.max_parallel_verifiers)
+                .with_require_format(self.config.require_format);
         let measured = crate::toolloop::CandidateMeasurer::measure(&measurer).await?;
         let candidate_id = format!("{}/{}/{branch_id}", forest.node_id, forest.generation);
         let measurement = BranchMeasurement {

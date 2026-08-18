@@ -209,13 +209,14 @@ fn test_rust_plugin_verifier_profile_shape() {
     let rust = RustPlugin;
     let profile = rust.verifier_profile();
     assert_eq!(profile.plugin_name, "rust");
-    // Rust should declare all 4 stages
-    assert_eq!(profile.capabilities.len(), 4);
+    // Rust declares all 5 stages, format included.
+    assert_eq!(profile.capabilities.len(), 5);
     let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
     assert!(stages.contains(&VerifierStage::SyntaxCheck));
     assert!(stages.contains(&VerifierStage::Build));
     assert!(stages.contains(&VerifierStage::Test));
     assert!(stages.contains(&VerifierStage::Lint));
+    assert!(stages.contains(&VerifierStage::Format));
 }
 
 #[test]
@@ -223,8 +224,8 @@ fn test_python_plugin_verifier_profile_shape() {
     let py = PythonPlugin;
     let profile = py.verifier_profile();
     assert_eq!(profile.plugin_name, "python");
-    // Python: syntax_check, build (no-op), test, lint
-    assert_eq!(profile.capabilities.len(), 4);
+    // Python: syntax_check, build (no-op), test, lint, format
+    assert_eq!(profile.capabilities.len(), 5);
     let stages: Vec<_> = profile.capabilities.iter().map(|c| c.stage).collect();
     assert!(stages.contains(&VerifierStage::SyntaxCheck));
     assert!(stages.contains(&VerifierStage::Build));
@@ -249,6 +250,7 @@ fn test_verifier_stage_display() {
     assert_eq!(format!("{}", VerifierStage::Build), "build");
     assert_eq!(format!("{}", VerifierStage::Test), "test");
     assert_eq!(format!("{}", VerifierStage::Lint), "lint");
+    assert_eq!(format!("{}", VerifierStage::Format), "format");
 }
 
 #[test]
