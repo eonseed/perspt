@@ -91,8 +91,7 @@ fn summarize_psp9_events(
             }
             "effect_denied" => denials += 1,
             "gate_decision_recorded" => {
-                gate = value
-                    .get("payload")
+                gate = payload
                     .and_then(|payload| payload.get("decision"))
                     .map(|decision| decision.to_string());
             }
@@ -100,6 +99,30 @@ fn summarize_psp9_events(
         }
     }
     (measurements, denials, last_energy, gate)
+}
+
+/// PSP-10 search-forest counters for `perspt status`.
+fn summarize_search_events(rows: &[perspt_store::Psp9LedgerRow]) -> (usize, usize, usize, usize) {
+    let (mut opened, mut branches, mut committed, mut no_goods) = (0, 0, 0, 0);
+    for row in rows {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&row.event_json) else {
+            continue;
+        };
+        let event = value
+            .get("payload")
+            .map(|payload| payload.get("body").unwrap_or(payload))
+            .and_then(|payload| payload.get("event"))
+            .and_then(|event| event.as_str())
+            .unwrap_or_default();
+        match event {
+            "search_opened" => opened += 1,
+            "branch_forked" => branches += 1,
+            "branch_committed" => committed += 1,
+            "no_good_recorded" => no_goods += 1,
+            _ => {}
+        }
+    }
+    (opened, branches, committed, no_goods)
 }
 
 /// PSP-9 status: the governed ledger, gate decisions, calibration readiness,
@@ -244,6 +267,13 @@ fn psp9_status(
         println!("🚪 Last gate:     {gate}");
     }
     println!("🚫 Denials:       {denials}");
+    let (forests, branches, committed, no_goods) = summarize_search_events(&rows);
+    if forests > 0 {
+        println!(
+            "🌲 Search:        {forests} forest(s), {branches} branch(es), \
+             {committed} committed, {no_goods} no-good(s)"
+        );
+    }
 
     let verdicts = store.get_psp9_verdicts(&session.session_id)?;
     for verdict in &verdicts {

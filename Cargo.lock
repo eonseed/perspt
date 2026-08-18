@@ -3451,6 +3451,7 @@ dependencies = [
  "perspt-coding",
  "perspt-core",
  "perspt-dashboard",
+ "perspt-prompt-macros",
  "perspt-research",
  "perspt-sdk",
  "perspt-store",

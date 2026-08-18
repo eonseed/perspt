@@ -46,6 +46,14 @@ pub async fn run(
         Some(path) => perspt_core::Config::load_from_path(&path)?,
         None => perspt_core::Config::default(),
     };
+    // PSP-10 system 25: configured prompt bundles are validated before any
+    // session opens; an invalid bundle refuses startup, never a silent
+    // fallback.
+    if let Some(prompts) = &config.prompts {
+        if !prompts.bundles.is_empty() {
+            super::prompts::validate_configured_bundles(&prompts.bundles)?;
+        }
+    }
     let approval_policy = if auto_approve {
         perspt_sdk::ApprovalPolicy::Auto
     } else {

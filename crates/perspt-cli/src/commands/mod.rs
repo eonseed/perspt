@@ -9,6 +9,7 @@ pub mod dashboard;
 pub mod db;
 pub mod init;
 pub mod ledger;
+pub mod prompts;
 pub mod providers;
 pub mod psp9_chain;
 pub mod replay;
