@@ -20,7 +20,9 @@
 #![forbid(unsafe_code)]
 
 pub mod barrier;
+pub mod diag;
 pub mod lang;
+pub mod prompts;
 pub mod registry;
 pub mod runtime;
 pub mod symbols;
@@ -136,13 +138,27 @@ impl AgentDomainPackage for CodingDomain {
     }
 
     fn correction_directions(&self, residuals: &[ResidualEvent]) -> Vec<CorrectionDirection> {
-        let mut directions = Vec::new();
-        for r in residuals {
-            if let Some(d) = correction_for(r) {
-                directions.push(d);
-            }
-        }
-        directions
+        // The two correction systems are one (PSP-10 system 26): the
+        // language adapter identified by the residual's sensor answers
+        // first with its richer per-language arms; the class-only mapping
+        // is the fallback for language-neutral residuals.
+        let registry = crate::CodingAdapterRegistry::with_builtins();
+        residuals
+            .iter()
+            .filter_map(|residual| {
+                language_for_sensor(&residual.sensor.id)
+                    .and_then(|language| registry.get(&language))
+                    .and_then(|adapter| adapter.correction_for(residual))
+                    .or_else(|| correction_for(residual))
+            })
+            .collect()
+    }
+
+    fn correction_packet(
+        &self,
+        residuals: &[ResidualEvent],
+    ) -> Option<perspt_sdk::CorrectionPacket> {
+        build_correction_packet(self, residuals)
     }
 
     fn tool_entries(&self, _scope: &DomainScope) -> Vec<perspt_sdk::ToolEntry> {
@@ -191,6 +207,114 @@ impl AgentDomainPackage for CodingDomain {
             .collect(),
         })
     }
+}
+
+/// Map a residual's sensor identity to the language adapter that owns it.
+fn language_for_sensor(sensor_id: &str) -> Option<crate::LanguageId> {
+    match sensor_id {
+        "rustc" | "cargo-test" => Some(crate::LanguageId::new("rust")),
+        "ty" | "pyright" | "pytest" | "python-check" => Some(crate::LanguageId::new("python")),
+        "tsc" => Some(crate::LanguageId::new("typescript")),
+        _ => None,
+    }
+}
+
+/// Fold all verifier residuals into one coherent typed correction packet
+/// (PSP-10 system 26). Every direction participates — the historic
+/// first-direction-only flattening is gone — and paths, symbols, spans,
+/// and rationale survive to the model.
+/// Fold every residual's structured evidence into the packet's diagnostic
+/// list and affected set.
+fn fold_evidence(
+    residuals: &[ResidualEvent],
+) -> (
+    Vec<perspt_sdk::StructuredDiagnosticRef>,
+    perspt_sdk::AffectedSet,
+) {
+    let mut diagnostics = Vec::new();
+    let mut affected = perspt_sdk::AffectedSet::default();
+    for residual in residuals {
+        if let Some(refs) = residual.evidence.structured.as_ref().and_then(|value| {
+            serde_json::from_value::<Vec<perspt_sdk::StructuredDiagnosticRef>>(value.clone()).ok()
+        }) {
+            for item in &refs {
+                if let (Some(path), Some(line)) = (&item.path, item.line) {
+                    affected
+                        .spans
+                        .push(format!("{path}:{line}:{}", item.column.unwrap_or(1)));
+                }
+                if residual.class == ResidualClass::TestFailure {
+                    if let Some(test) = &item.code {
+                        affected.tests.push(test.clone());
+                    }
+                }
+            }
+            diagnostics.extend(refs);
+        }
+        affected
+            .paths
+            .extend(residual.affected_paths.iter().cloned());
+        affected
+            .symbols
+            .extend(residual.affected_symbols.iter().cloned());
+    }
+    affected.paths.sort();
+    affected.paths.dedup();
+    (diagnostics, affected)
+}
+
+fn build_correction_packet(
+    domain: &CodingDomain,
+    residuals: &[ResidualEvent],
+) -> Option<perspt_sdk::CorrectionPacket> {
+    let dominant = residuals
+        .iter()
+        .filter(|residual| residual.class != ResidualClass::SensorUnavailable)
+        .max_by(|a, b| a.score.total_cmp(&b.score))?;
+    let (diagnostics, affected) = fold_evidence(residuals);
+    let operators: Vec<perspt_sdk::CorrectionOperator> = domain
+        .correction_directions(residuals)
+        .into_iter()
+        .map(|direction| perspt_sdk::CorrectionOperator {
+            operator_id: direction.direction_id.clone(),
+            instruction: direction.instruction.clone(),
+            addresses: direction.addresses,
+            rationale: direction.rationale.clone(),
+        })
+        .collect();
+    let uncertainty: Vec<perspt_sdk::MissingSensorDecl> = residuals
+        .iter()
+        .filter(|residual| residual.class == ResidualClass::SensorUnavailable)
+        .map(|residual| perspt_sdk::MissingSensorDecl {
+            sensor: residual.sensor.id.clone(),
+            reason: residual.evidence.summary.clone(),
+        })
+        .collect();
+    if operators.is_empty() && diagnostics.is_empty() {
+        return None;
+    }
+    let member_count = dominant
+        .evidence
+        .structured
+        .as_ref()
+        .and_then(|value| value.as_array().map(|items| items.len() as u32))
+        .unwrap_or(1);
+    Some(perspt_sdk::CorrectionPacket {
+        dominant_cluster: perspt_sdk::ResidualClusterRef {
+            cluster_id: dominant.residual_id.clone(),
+            class: dominant.class,
+            root_cause: dominant.evidence.summary.clone(),
+            member_count,
+            magnitude: dominant.score,
+        },
+        diagnostics,
+        affected,
+        operators,
+        expected_footprint: perspt_sdk::FootprintSpec::new(Vec::new()),
+        follow_up_stages: Vec::new(),
+        no_goods: Vec::new(),
+        uncertainty,
+    })
 }
 
 /// Map a single residual to a coding correction direction, or `None` when there

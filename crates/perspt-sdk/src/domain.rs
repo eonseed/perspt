@@ -216,7 +216,63 @@ pub trait AgentDomainPackage: Send + Sync {
     fn proxy_geometry(&self, _scope: &DomainScope) -> Option<&dyn crate::stability::ProxyGeometry> {
         None
     }
+
+    // --- PSP-10 search and prompt contract. Defaulted so existing domains
+    // compile unchanged until they opt in. ---
+
+    /// The domain's compiled prompt section library.
+    fn prompt_library(&self) -> &dyn DomainPromptLibrary {
+        &EMPTY_PROMPT_LIBRARY
+    }
+
+    /// Deliberately diverse branch strategies for a failed attempt
+    /// (PSP-10 system 20). A strategy is a search prior, never authority.
+    fn search_strategies(
+        &self,
+        _context: &crate::search::SearchContext,
+    ) -> Vec<crate::search::SearchStrategy> {
+        Vec::new()
+    }
+
+    /// Fold verifier residuals into one coherent typed correction packet
+    /// (PSP-10 system 26). `None` means the domain has no direction — the
+    /// caller expands or escalates, never blind-retries.
+    fn correction_packet(
+        &self,
+        _residuals: &[crate::residual::ResidualEvent],
+    ) -> Option<crate::residual::CorrectionPacket> {
+        None
+    }
+
+    /// Compare branch candidates against the accepted root under the
+    /// domain's measurement semantics (advisory; Proposition 5's
+    /// deterministic rule selects).
+    fn compare_branch_measurements(
+        &self,
+        _root: &crate::search::DomainMeasurement,
+        _candidates: &[crate::search::BranchMeasurement],
+    ) -> crate::search::BranchSelection {
+        crate::search::BranchSelection::NoneEligible
+    }
 }
+
+/// A domain's compiled prompt sections, keyed by stage directory name.
+/// Object-safe; the empty default serves domains without a section library.
+pub trait DomainPromptLibrary: Send + Sync {
+    /// The base section templates for one stage, in declared order.
+    fn stage_templates(&self, stage: &str) -> Vec<crate::prompt::SectionTemplate> {
+        let _ = stage;
+        Vec::new()
+    }
+}
+
+/// The shared empty library behind the trait default.
+#[derive(Debug)]
+pub struct EmptyDomainPromptLibrary;
+
+impl DomainPromptLibrary for EmptyDomainPromptLibrary {}
+
+static EMPTY_PROMPT_LIBRARY: EmptyDomainPromptLibrary = EmptyDomainPromptLibrary;
 
 /// A registry of domain packages and the routing logic that selects one
 /// (PSP-8 System 1 / Phase 10). Domain selection is a routing decision; it does

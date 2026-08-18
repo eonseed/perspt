@@ -3466,8 +3466,11 @@ dependencies = [
 name = "perspt-coding"
 version = "0.6.6"
 dependencies = [
+ "anyhow",
+ "perspt-prompt-macros",
  "perspt-sdk",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

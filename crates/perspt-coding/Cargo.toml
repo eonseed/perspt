@@ -15,3 +15,8 @@ categories = ["development-tools"]
 [dependencies]
 perspt-sdk = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+[build-dependencies]
+perspt-prompt-macros = { workspace = true }

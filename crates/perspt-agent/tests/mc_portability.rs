@@ -116,6 +116,7 @@ impl CandidateMeasurer for EnergyScript {
             energy,
             residuals: vec![],
             correction: None,
+            packet: None,
         })
     }
 }

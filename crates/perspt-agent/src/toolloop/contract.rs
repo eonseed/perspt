@@ -62,13 +62,17 @@ pub trait EffectExecutor: Send + Sync {
 }
 
 /// One measured evaluation of the realized candidate.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Measured {
     pub hard_pass: bool,
     pub energy: f64,
     pub residuals: Vec<ResidualEvent>,
     /// The domain's directed correction for the dominant residual.
     pub correction: Option<CorrectionDirection>,
+    /// The typed correction packet folded from all residuals (PSP-10
+    /// system 26). `None` on domains that have not opted in; an empty
+    /// packet never causes a blind retry.
+    pub packet: Option<perspt_sdk::CorrectionPacket>,
 }
 
 /// Re-reads the candidate overlay and runs the declared verifier suite

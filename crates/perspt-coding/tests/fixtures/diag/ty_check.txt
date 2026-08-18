@@ -1,0 +1,2 @@
+bad.py:1:8: error[unresolved-import] Cannot resolve imported module `missing_module`
+bad.py:2:10: error[invalid-assignment] Object of type `Literal["s"]` is not assignable to `int`
