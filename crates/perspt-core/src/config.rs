@@ -69,6 +69,11 @@ pub struct ModelsConfig {
     /// Optional adjudication route (PSP-9 system 8).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adjudicator: Option<String>,
+    /// Hard wall-clock deadline for one model turn, in seconds (default
+    /// 120). A turn that exceeds it is an ordinary transport failure: it
+    /// consumes sticky failover instead of hanging the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_timeout_secs: Option<u64>,
 }
 
 /// Product surface allowed to create a lifecycle for an external server.
@@ -463,6 +468,9 @@ impl Config {
         }
         if let Some(prompts) = &self.prompts {
             prompts.activation_bounds()?;
+        }
+        if self.models.as_ref().and_then(|m| m.turn_timeout_secs) == Some(0) {
+            anyhow::bail!("[models] turn_timeout_secs must be positive");
         }
         if let Some(context) = &self.context {
             context.validate()?;

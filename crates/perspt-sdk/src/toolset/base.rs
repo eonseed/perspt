@@ -86,7 +86,8 @@ fn surface_entries() -> Vec<ToolEntry> {
             ]),
             FootprintSpec::default(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "tool_program",
             "Run a bounded pure Starlark program that returns nested tool \
@@ -101,7 +102,8 @@ fn surface_entries() -> Vec<ToolEntry> {
             )]),
             FootprintSpec::default(),
             false,
-        ).hot(),
+        )
+        .hot(),
     ]
 }
 
@@ -121,7 +123,8 @@ fn read_entries() -> Vec<ToolEntry> {
             ]),
             path_read(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "list_files",
             "List files in a directory, respecting ignore files",
@@ -144,7 +147,8 @@ fn read_entries() -> Vec<ToolEntry> {
             schema(&[("pattern", "string", "Glob pattern, e.g. src/**/*.rs", true)]),
             FootprintSpec::default(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "grep",
             "Search file contents by regex with optional path filter and context lines",
@@ -162,7 +166,8 @@ fn read_entries() -> Vec<ToolEntry> {
             ]),
             path_read(),
             false,
-        ).hot(),
+        )
+        .hot(),
     ]);
     entries
 }
@@ -212,7 +217,8 @@ fn context_entries() -> Vec<ToolEntry> {
             schema(&[("question", "string", "The question or request", true)]),
             FootprintSpec::default(),
             false,
-        ).hot(),
+        )
+        .hot(),
     ]
 }
 
@@ -248,7 +254,8 @@ fn write_entries() -> Vec<ToolEntry> {
             ]),
             path_write(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "apply_diff",
             "Apply a unified diff to a file",
@@ -260,7 +267,8 @@ fn write_entries() -> Vec<ToolEntry> {
             ]),
             path_write(),
             false,
-        ).hot(),
+        )
+        .hot(),
     ]
 }
 
@@ -321,7 +329,8 @@ fn command_entries() -> Vec<ToolEntry> {
             )]),
             FootprintSpec::opaque(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "run_test",
             "Run the domain's declared test command; output is parsed into residuals",
@@ -330,7 +339,8 @@ fn command_entries() -> Vec<ToolEntry> {
             schema(&[("filter", "string", "Optional test name filter", false)]),
             FootprintSpec::opaque(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "run_build",
             "Run the domain's declared build command",
@@ -339,7 +349,8 @@ fn command_entries() -> Vec<ToolEntry> {
             schema(&[]),
             FootprintSpec::opaque(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "run_formatter",
             "Run the domain's declared formatter",
@@ -348,7 +359,8 @@ fn command_entries() -> Vec<ToolEntry> {
             schema(&[]),
             FootprintSpec::opaque(),
             false,
-        ).hot(),
+        )
+        .hot(),
         entry(
             "run_repo_script",
             "Run a script declared in the project profile",

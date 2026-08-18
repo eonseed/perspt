@@ -91,6 +91,7 @@ async fn every_actor_records_a_tagged_observation_after_shared_failover() {
             fallbacks: vec![ModelId::new("test", "beta")],
             recorder: Some(&recording),
             actor,
+            deadline_secs: 30,
             turn: 1,
         };
         let conversation = Conversation::with_system("probe");
@@ -129,6 +130,7 @@ async fn an_exhausted_chain_surfaces_the_failure() {
         fallbacks: Vec::new(),
         recorder: Some(&recording),
         actor: ActorKind::Adjudicator,
+        deadline_secs: 30,
         turn: 1,
     };
     let conversation = Conversation::with_system("probe");
@@ -156,6 +158,7 @@ async fn an_infeasible_context_makes_no_model_call() {
         fallbacks: Vec::new(),
         recorder: Some(&recording),
         actor: ActorKind::Explorer,
+        deadline_secs: 30,
         turn: 3,
     };
     let mut conversation = Conversation::with_system("system");
@@ -188,4 +191,74 @@ fn the_failure_classification_is_shared() {
         transport_failure_kind("connection reset by peer"),
         FailureKind::ProviderTransport
     );
+}
+
+/// A route that never answers ("hangs"), and a healthy fallback.
+struct HangPrimary {
+    primary: String,
+}
+
+impl ModelTransport for HangPrimary {
+    fn chat_turn<'a>(
+        &'a self,
+        model: &'a ModelId,
+        _conversation: &'a Conversation,
+        _tools: &'a [ToolSpec],
+        _choice: ToolChoicePolicy,
+    ) -> TransportFuture<'a, TurnOutput> {
+        let hang = model.model == self.primary;
+        Box::pin(async move {
+            if hang {
+                std::future::pending::<()>().await;
+            }
+            Ok(TurnOutput::Text("late but alive".into()))
+        })
+    }
+
+    fn capabilities(&self, _model: &ModelId) -> ProviderCapabilities {
+        ProviderCapabilities::text_only(100_000)
+    }
+
+    fn family_of(&self, model: &ModelId) -> ModelFamily {
+        ModelFamily::Other(model.model.clone())
+    }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
+}
+
+/// The per-call wall-clock deadline: a hung provider is a transport failure
+/// that consumes sticky failover — a finite turn count alone never bounds
+/// wall time.
+#[tokio::test]
+async fn a_hung_route_hits_the_deadline_and_fails_over() {
+    let transport = HangPrimary {
+        primary: "alpha".into(),
+    };
+    let recording = Recording::default();
+    let mut runner = ActorTurnRunner {
+        transport: &transport,
+        model: ModelId::new("test", "alpha"),
+        fallbacks: vec![ModelId::new("test", "beta")],
+        recorder: Some(&recording),
+        actor: ActorKind::Architect,
+        deadline_secs: 1,
+        turn: 1,
+    };
+    let conversation = Conversation::with_system("plan");
+    let output = runner
+        .run_turn(&conversation, &[], ToolChoicePolicy::None)
+        .await
+        .unwrap();
+    assert!(matches!(output, TurnOutput::Text(text) if text == "late but alive"));
+    let events = recording.events.lock().unwrap();
+    let failover = events
+        .iter()
+        .find_map(|event| match event {
+            LoopEvent::RouteFailover { cause, .. } => Some(cause.clone()),
+            _ => None,
+        })
+        .expect("the deadline records a route failover");
+    assert!(failover.contains("transport deadline"), "{failover}");
 }

@@ -119,6 +119,7 @@ fn budgets(max_turns: u32, rejection_budget: u32) -> LoopBudgets {
         declared_energy_floor: None,
         context_soft_limit_chars: 240_000,
         recovery_budget: rejection_budget,
+        turn_deadline_secs: 120,
     }
 }
 
