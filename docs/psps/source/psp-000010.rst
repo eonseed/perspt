@@ -258,7 +258,7 @@ For accepted state :math:`x_k`, a search forest is a finite rooted set
 .. math::
 
    \mathcal{E}_k = \{\, b_1, \dots, b_n \,\},\qquad
-   n \le n_{\max},
+   n \le n_{\max}.
 
 Each branch :math:`b` has an accepted ancestor :math:`x_k`, a seed
 :math:`s_b`, and an internal sequence
@@ -723,7 +723,7 @@ Each branch:
   witnessed partial checkpoint whose accepted ancestor is that checkpoint;
 * receives a capability attenuated from the session grant with promotion and
   ``UpdateGraph`` withheld (the existing ``WITHHELD_EFFECTS`` +
-  ``GrantPolicy::mint`` path;
+  ``GrantPolicy::mint`` path);
 * holds an independent model-neutral conversation projection
   (``LoopContext``), digest-chained into the ledger like any worker context;
 * may perform bounded edits and verifier probes that create no gate decision;
@@ -1047,7 +1047,9 @@ validations are:
 * the declared Rust type is on the supported list below;
 * an optional or list placeholder is the only non-whitespace content on its
   line, because absence removes that line;
-* the body respects ``max_bytes`` with worst-case variable expansion capped;
+* the static body (placeholders unexpanded) respects ``max_bytes``; the
+  rendered bound — body plus every bounded variable's declared worst case —
+  is enforced at render time, which fails closed before any transport call;
 * ``id``, ``version``, ``role``, and ``required``/``priority`` are present
   and well-formed; and
 * the stage's section list is complete (every declared stage has all of its
@@ -2444,48 +2446,81 @@ design choice.
      - Notes
    * - 1 - Enforcement debts
      - X
-     - Pending
-     -
+     - Implemented
+     - Decision bound enforced at the gate and loop layers; trajectory
+       identity carries real node/generation; ``HardGatePolicy`` required
+       stages wired; architect goes through the admissibility kernel.
    * - 2 - Candidate identity
      - W
-     - Pending
-     -
+     - Implemented
+     - ``candidate_id = "{node}/{gen}/c{seq}"`` on measurement, gate
+       decision, and durable checkpoint; fold re-keyed; legacy ledgers
+       fold byte-identically.
    * - 3 - SDK prompt sections and codegen
      - Y, AF
-     - Pending
-     -
+     - Implemented
+     - ``perspt_sdk::prompt`` (sections, dialects, budget fitting,
+       digests, resident-context types) plus the ``perspt-prompt-macros``
+       codegen crate (build.rs + ``include!(OUT_DIR)``).
    * - 4 - Route and ToolEntry
      - Y
-     - Pending
-     -
+     - Implemented
+     - ``adapter_kind``/``prompt_route`` on ``ModelTransport``;
+       ``ToolDescriptionLibrary`` with byte-identical defaults.
    * - 5 - Platform section library
      - Y, Z, AE
-     - Pending
-     -
+     - Implemented
+     - Five literals migrated byte-identically (``prompt_matrix.rs``
+       golden asserts); composed programs recorded per call; Gate AE
+       activation surface in the manifest types.
    * - 6 - Domain prompts and verifiers
      - Y
-     - Pending
-     -
+     - Implemented
+     - Structured diagnostics (cargo JSON, ty, Pyright, pytest JUnit,
+       tsc) with root-cause clustering; ``CorrectionPacket`` rendered
+       through the coding ``branch_correct`` stage; ty primary with
+       fingerprinted Pyright fallback.
    * - 7 - Search types and cutover
      - AC, AD
-     - Pending
-     -
+     - Implemented
+     - ``perspt_sdk::search``; ``LoopEventEnvelopeV1`` write/read swap;
+       fold and resume fail closed on unknown envelopes; ensemble
+       removed with a pointed ``[exploration]`` migration error.
    * - 8 - Adaptive branch execution
      - W, X, AB, AC
-     - Pending
-     -
+     - Implemented
+     - Preview/commit forest on the Refine rung (``initial_branches = 1``
+       default); ``BranchRecorder`` keeps the accepted fold invariant;
+       exact no-goods; quantum granularity v1 is one full branch attempt
+       and forest resume is a deterministic re-run from the node
+       durable checkpoint.
    * - 9 - ActorTurnRunner
      - Z, AD, AF
-     - Pending
-     -
+     - Implemented
+     - Six actors (worker, explorer, architect, adjudicator, summarizer,
+       capability probe) on one runner with shared failover and the
+       resident-context feasibility gate. The TUI chat loop
+       (``external_tools/chat.rs``) is out of scope; the live
+       ``context_recall`` tool is deferred until handler services carry
+       store access.
    * - 10 - Graph staging
      - AA
-     - Pending
-     -
+     - Implemented
+     - Content-addressed staging root, divergent-path conflict
+       detection, one global integration gate, atomic promotion;
+       failure leaves the user workspace byte-identical.
    * - 11 - CLI, bundles, and evaluation
      - Z, AE, AF
-     - Pending
-     -
+     - Implemented
+     - ``perspt prompts`` list/render/lint/manifest/explain-session and
+       ``perspt context explain-turn``; configured bundles validated at
+       session start (invalid refuses startup); research-domain search
+       conformance test; seven-arm ladder in ``examples/psp10_eval.rs``
+       (live, credential-gated, never CI). Live bundle substitution into
+       composed programs waits for override resolution; the adaptive
+       default stays ``initial_branches = 1`` until the recorded
+       evaluation meets the acceptance rule — the flip is a separate
+       reviewed commit.
 
 =========================
 Resolved Design Decisions
@@ -2494,7 +2529,10 @@ Resolved Design Decisions
 1. **Platform sections live in the core crate.** The crate is
    ``perspt-core``. The SDK supplies the section, dialect, and composition
    types. Core supplies the compiled platform section library. The agent
-   composes it with a domain library.
+   composes it with a domain library. The five migrated literals form the
+   universal platform envelope in core; domain crates layer their own
+   domain-stage sections on top additively (coding correction packets
+   first) and never replace or move the core base.
 2. **Branch concurrency is one.** The release permits at most three branches.
    Each branch is a fully materialized eager copy with reserved file and byte
    cost. Copy-on-write workspaces are forbidden.
