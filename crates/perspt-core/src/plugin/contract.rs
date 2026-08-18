@@ -26,6 +26,10 @@ pub enum VerifierStage {
     Test,
     /// Lint pass (e.g. `cargo clippy`, `uv run ruff check .`)
     Lint,
+    /// Formatting check (e.g. `cargo fmt --check`). Declared by plugins
+    /// whose formatter has a check form; gates only when the run enables
+    /// `require_format`.
+    Format,
 }
 
 impl VerifierStage {
@@ -39,6 +43,7 @@ impl VerifierStage {
             VerifierStage::Build => "build",
             VerifierStage::Test => "test",
             VerifierStage::Lint => "lint",
+            VerifierStage::Format => "format",
         }
     }
 }
@@ -50,6 +55,7 @@ impl std::fmt::Display for VerifierStage {
             VerifierStage::Build => write!(f, "build"),
             VerifierStage::Test => write!(f, "test"),
             VerifierStage::Lint => write!(f, "lint"),
+            VerifierStage::Format => write!(f, "format"),
         }
     }
 }
@@ -303,6 +309,17 @@ pub trait LanguagePlugin: Send + Sync {
     ///
     /// Used only in VerifierStrictness::Strict mode.
     fn lint_command(&self) -> Option<String> {
+        None
+    }
+
+    /// The governed formatter command (`run_formatter`; e.g. `cargo fmt`).
+    fn format_command(&self) -> Option<String> {
+        None
+    }
+
+    /// The formatter's non-mutating check form (e.g. `cargo fmt --check`),
+    /// declared as the `format` verifier stage when present.
+    fn format_check_command(&self) -> Option<String> {
         None
     }
 

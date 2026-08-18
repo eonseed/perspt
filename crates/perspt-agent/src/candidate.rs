@@ -413,7 +413,9 @@ impl CandidateWorkspace {
                 .build_command()
                 .or_else(|| plugin.syntax_check_command())
                 .context("active language has no build or syntax command"),
-            "run_formatter" => bail!("active language has no governed formatter command"),
+            "run_formatter" => plugin
+                .format_command()
+                .context("active language has no governed formatter command"),
             _ => bail!("not a verifier tool: {tool}"),
         }
     }
@@ -572,6 +574,7 @@ pub struct CodingCandidateMeasurer<'a> {
     domain: Arc<dyn AgentDomainPackage>,
     adapters: CodingAdapterRegistry,
     max_parallel: usize,
+    require_format: bool,
 }
 
 impl<'a> CodingCandidateMeasurer<'a> {
@@ -583,7 +586,15 @@ impl<'a> CodingCandidateMeasurer<'a> {
             domain: Arc::new(CodingDomain::new()),
             adapters: CodingAdapterRegistry::with_builtins(),
             max_parallel: 4,
+            require_format: false,
         }
+    }
+
+    /// Enable the declared `format` acceptance stage
+    /// (`[verification] require_format`).
+    pub fn with_require_format(mut self, require_format: bool) -> Self {
+        self.require_format = require_format;
+        self
     }
 
     pub fn with_max_parallel(mut self, max_parallel: usize) -> Self {
@@ -620,6 +631,14 @@ impl<'a> CodingCandidateMeasurer<'a> {
         for plugin in plugins {
             let adapter_id = Self::adapter_for(plugin.name());
             for capability in plugin.verifier_profile().capabilities {
+                // Formatting gates acceptance only when the run declares it
+                // (`[verification] require_format`); otherwise the formatter
+                // stays a governed tool, never a silent gate change.
+                if capability.stage == perspt_core::plugin::VerifierStage::Format
+                    && !self.require_format
+                {
+                    continue;
+                }
                 let Some(command) = capability.effective_command() else {
                     // A stage the plugin declares as a no-op — no primary or
                     // fallback command form at all, marked available — has
@@ -668,6 +687,22 @@ impl<'a> CodingCandidateMeasurer<'a> {
         residuals: &mut Vec<ResidualEvent>,
         all_passed: &mut bool,
     ) -> Result<()> {
+        let mut output = execution.output.clone();
+        // A stage that declared a JUnit report file (pytest `--junitxml`)
+        // produced structured evidence on disk: fold it into the raw sensor
+        // text so the structured parser sees it, then drop the file.
+        if let Some(report) = junit_report_path(&job.command) {
+            let path = job.root.join(report);
+            if let Ok(xml) = std::fs::read_to_string(&path) {
+                output.push('\n');
+                output.push_str(&xml);
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+        let execution = VerifierExecution {
+            output,
+            ..execution
+        };
         if let Some(adapter) = self.adapters.get(&job.adapter_id) {
             residuals.extend(adapter.parse_diagnostics(
                 &self.node_id,
@@ -680,6 +715,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
             let class = match job.stage {
                 perspt_core::plugin::VerifierStage::Test => ResidualClass::TestFailure,
                 perspt_core::plugin::VerifierStage::Lint => ResidualClass::Lint,
+                perspt_core::plugin::VerifierStage::Format => ResidualClass::Format,
                 _ => ResidualClass::Build,
             };
             if !residuals.iter().any(|r| r.class == class) {
@@ -985,6 +1021,21 @@ fn tool_residual(
     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
     residual.evidence.summary = summary.into();
     Ok(residual)
+}
+
+/// The report path a verifier command declared via `--junitxml <path>` or
+/// `--junitxml=<path>`.
+fn junit_report_path(command: &str) -> Option<String> {
+    let mut words = command.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        if word == "--junitxml" {
+            return words.peek().map(|path| (*path).to_string());
+        }
+        if let Some(path) = word.strip_prefix("--junitxml=") {
+            return Some(path.to_string());
+        }
+    }
+    None
 }
 
 fn sensor_unavailable(node: &str, generation: u32, sensor: &str) -> Result<ResidualEvent> {

@@ -124,6 +124,7 @@ impl Psp9AgentRuntime {
         let measured = CodingCandidateMeasurer::new(&workspace, "integration", 0)
             .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers)
+            .with_require_format(self.config.require_format)
             .measure()
             .await?;
         recorder.record_custom(

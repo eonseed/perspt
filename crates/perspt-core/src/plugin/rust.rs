@@ -109,6 +109,14 @@ impl LanguagePlugin for RustPlugin {
         host_binary_available("cargo")
     }
 
+    fn format_command(&self) -> Option<String> {
+        Some("cargo fmt".to_string())
+    }
+
+    fn format_check_command(&self) -> Option<String> {
+        Some("cargo fmt --check".to_string())
+    }
+
     fn verifier_profile(&self) -> VerifierProfile {
         let cargo = host_binary_available("cargo");
         let clippy = cargo; // clippy is a cargo subcommand, same binary
@@ -139,6 +147,13 @@ impl LanguagePlugin for RustPlugin {
                 stage: VerifierStage::Lint,
                 command: Some("cargo clippy -- -D warnings".to_string()),
                 available: clippy,
+                fallback_command: None,
+                fallback_available: false,
+            },
+            VerifierCapability {
+                stage: VerifierStage::Format,
+                command: self.format_check_command(),
+                available: cargo,
                 fallback_command: None,
                 fallback_available: false,
             },
