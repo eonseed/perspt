@@ -104,21 +104,6 @@ struct NodeAttempt {
     kernel_state: perspt_sdk::KernelState,
 }
 
-/// Everything `conclude_run` needs to decide a node's terminal fate.
-struct ConcludeContext<'a> {
-    recorder: &'a Psp9Recorder,
-    candidate: &'a CandidateWorkspace,
-    node_id: &'a str,
-    task: &'a str,
-    grant_policy: &'a GrantPolicy,
-    capability: &'a Capability,
-    contract: &'a CodingContract,
-    barrier: &'a OperationalSafetyBarrier,
-    kernel_state: &'a perspt_sdk::KernelState,
-    loop_outcome: &'a NodeTerminalOutcome,
-    calibration: &'a CalibrationBinding,
-}
-
 mod adjudicate;
 mod dispatch;
 mod explore;
@@ -1313,9 +1298,16 @@ impl Psp9AgentRuntime {
                 "Task: {task}\nRepository map:\n{}",
                 serde_json::to_string_pretty(&report.project_map)?
             ));
-            match self
-                .transport
-                .chat_turn(model, &conversation, &[], ToolChoicePolicy::None)
+            let mut runner = crate::turn::ActorTurnRunner {
+                transport: self.transport.as_ref(),
+                model: model.clone(),
+                fallbacks: self.fallback_models.clone(),
+                recorder: Some(recorder),
+                actor: crate::turn::ActorKind::Summarizer,
+                turn: 1,
+            };
+            match runner
+                .run_turn(&conversation, &[], ToolChoicePolicy::None)
                 .await
             {
                 Ok(output) => {

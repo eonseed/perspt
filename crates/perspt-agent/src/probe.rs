@@ -109,8 +109,18 @@ async fn drive_probe(
     let mut saw_text_after_tools = false;
     for _ in 0..5 {
         report.turns += 1;
-        let output = transport
-            .chat_turn(model, &conversation, &specs, ToolChoicePolicy::Auto)
+        // The probe runs pre-session (no recorder), but shares the actor
+        // turn discipline (PSP-10 system 27).
+        let mut runner = crate::turn::ActorTurnRunner {
+            transport,
+            model: model.clone(),
+            fallbacks: Vec::new(),
+            recorder: None,
+            actor: crate::turn::ActorKind::CapabilityProbe,
+            turn: report.turns,
+        };
+        let output = runner
+            .run_turn(&conversation, &specs, ToolChoicePolicy::Auto)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         match output {

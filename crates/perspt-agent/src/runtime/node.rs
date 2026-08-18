@@ -886,3 +886,18 @@ pub(crate) struct CalibrationBinding {
     pub(crate) state: String,
     pub(crate) threshold: Option<f64>,
 }
+
+/// Everything `conclude_run` needs to decide a node's terminal fate.
+pub(crate) struct ConcludeContext<'a> {
+    pub(crate) recorder: &'a Psp9Recorder,
+    pub(crate) candidate: &'a CandidateWorkspace,
+    pub(crate) node_id: &'a str,
+    pub(crate) task: &'a str,
+    pub(crate) grant_policy: &'a GrantPolicy,
+    pub(crate) capability: &'a Capability,
+    pub(crate) contract: &'a CodingContract,
+    pub(crate) barrier: &'a OperationalSafetyBarrier,
+    pub(crate) kernel_state: &'a perspt_sdk::KernelState,
+    pub(crate) loop_outcome: &'a NodeTerminalOutcome,
+    pub(crate) calibration: &'a CalibrationBinding,
+}

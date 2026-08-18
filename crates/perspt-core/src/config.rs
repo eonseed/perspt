@@ -306,6 +306,41 @@ pub struct Config {
     /// system 25).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompts: Option<PromptsConfig>,
+
+    /// Resident-context reserves (`[context]`; PSP-10 Definition 6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextConfig>,
+}
+
+/// The `[context]` block (PSP-10 Definition 6): reserves and working-set
+/// bounds for the paged resident context.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContextConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_set_turns: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub synopsis_frame_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_reserve_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guard_reserve_tokens: Option<u64>,
+}
+
+impl ContextConfig {
+    /// Startup validation: every configured reserve must be positive.
+    pub fn validate(&self) -> Result<()> {
+        for (name, value) in [
+            ("working_set_turns", self.working_set_turns.map(u64::from)),
+            ("synopsis_frame_tokens", self.synopsis_frame_tokens),
+            ("output_reserve_tokens", self.output_reserve_tokens),
+            ("guard_reserve_tokens", self.guard_reserve_tokens),
+        ] {
+            if value == Some(0) {
+                anyhow::bail!("[context] {name} must be positive");
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The `[exploration]` search block (PSP-10 system 20). Sequential eager
@@ -428,6 +463,9 @@ impl Config {
         }
         if let Some(prompts) = &self.prompts {
             prompts.activation_bounds()?;
+        }
+        if let Some(context) = &self.context {
+            context.validate()?;
         }
         let mut server_ids = std::collections::BTreeSet::new();
         for server in &self.external_tools {

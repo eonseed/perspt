@@ -116,6 +116,11 @@ pub enum LoopEvent {
     },
     TurnObserved {
         turn: u32,
+        /// Which actor observed this output (PSP-10 system 27). Empty on
+        /// pre-PSP-10 rows; the observation is always recorded before any
+        /// parse.
+        #[serde(default)]
+        actor: String,
         output: TurnOutput,
     },
     ToolCallObserved {
