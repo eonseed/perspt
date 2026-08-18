@@ -40,6 +40,8 @@ pub(crate) fn family_entry(
     ToolEntry {
         name: name.into(),
         description: description.into(),
+        discovery_summary: String::new(),
+        description_templates: None,
         effect,
         risk: perspt_sdk::RiskClass::Low,
         schema,

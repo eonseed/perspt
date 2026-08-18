@@ -48,6 +48,10 @@ impl ModelTransport for FamilyScripted {
     fn family_of(&self, _model: &ModelId) -> ModelFamily {
         self.family.clone()
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 struct ApplyAll {
@@ -230,4 +234,71 @@ async fn mc_s_three_provider_families_yield_identical_classifications() {
         );
         assert_eq!(denials, first_denials, "denials must be provider-invariant");
     }
+}
+
+/// PSP-10 Phase 4 (Gate Y): the prompt route is (adapter kind, family,
+/// exact model). Scripted transports report the fixed adapter identity
+/// `"scripted"`; a model served through any endpoint keeps its own family.
+#[test]
+fn prompt_route_composes_adapter_family_and_exact_model() {
+    let transport = FamilyScripted {
+        family: ModelFamily::Qwen,
+        turns: Mutex::new(Vec::new()),
+    };
+    assert_eq!(transport.adapter_kind(), "scripted");
+    let model = ModelId::new("some-gateway", "qwen-3.8-27b");
+    let route = transport.prompt_route(&model);
+    assert_eq!(route.adapter, "scripted");
+    assert_eq!(
+        route.family,
+        ModelFamily::Qwen,
+        "family survives the gateway"
+    );
+    assert_eq!(route.exact_model.as_deref(), Some("qwen-3.8-27b"));
+    // Stability: the adapter identity is a constant of the transport.
+    assert_eq!(transport.adapter_kind(), transport.adapter_kind());
+}
+
+/// PSP-10 Phase 4: with defaults, the route-compiled tool spec is
+/// byte-identical to the neutral one for every base entry — the extension
+/// is behavior-preserving until a description library exists.
+#[test]
+fn route_specs_default_to_the_neutral_spec() {
+    let route = perspt_sdk::prompt::PromptRoute {
+        adapter: "scripted".into(),
+        family: ModelFamily::Qwen,
+        exact_model: Some("qwen-3.8".into()),
+    };
+    for entry in perspt_sdk::base_entries() {
+        let neutral = entry.to_spec(false);
+        let routed = entry.to_spec_for_route(&route, false);
+        assert_eq!(neutral, routed, "tool {}", entry.name);
+    }
+}
+
+/// PSP-10 Phase 4: a description library changes presentation only, by the
+/// first matching selector, and discovery ranks by the trusted summary.
+#[test]
+fn description_library_and_discovery_summary_are_presentation_only() {
+    let mut entry = perspt_sdk::base_entries()
+        .into_iter()
+        .find(|entry| entry.name == "read_file")
+        .unwrap();
+    entry.description_templates = Some(perspt_sdk::ToolDescriptionLibrary {
+        base: "neutral text".into(),
+        overrides: vec![("scripted/Qwen".into(), "qwen text".into())],
+    });
+    entry.discovery_summary = "grep-like file inspection".into();
+    let route = |family: ModelFamily| perspt_sdk::prompt::PromptRoute {
+        adapter: "scripted".into(),
+        family,
+        exact_model: None,
+    };
+    let qwen = entry.to_spec_for_route(&route(ModelFamily::Qwen), false);
+    assert_eq!(qwen.description, "qwen text");
+    let other = entry.to_spec_for_route(&route(ModelFamily::Mistral), false);
+    assert_eq!(other.description, "neutral text");
+    // Authority fields never move.
+    assert_eq!(qwen.schema, entry.schema);
+    assert_eq!(entry.discovery_text(), "grep-like file inspection");
 }

@@ -56,11 +56,33 @@ pub enum ToolOrigin {
     External(String),
 }
 
+/// Per-route presentation text for a tool (PSP-10 system 25). Presentation
+/// only: model-facing text never changes catalog effects, risks, or
+/// footprints.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolDescriptionLibrary {
+    /// The route-neutral description used when no override matches.
+    pub base: String,
+    /// `(route_selector, description)` pairs; a selector is an adapter
+    /// kind, a family label, or `"adapter/family"`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<(String, String)>,
+}
+
 /// One tool in the catalog.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolEntry {
     pub name: String,
     pub description: String,
+    /// Trusted text `tool_search` ranks by, when non-empty (PSP-10
+    /// system 25). Separate from the model-facing description so untrusted
+    /// external descriptions never steer discovery.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub discovery_summary: String,
+    /// Optional per-route presentation library; absent means the
+    /// route-neutral `description` serves every route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_templates: Option<ToolDescriptionLibrary>,
     pub effect: EffectKind,
     pub risk: RiskClass,
     /// JSON Schema for the tool's arguments.
@@ -116,6 +138,38 @@ impl ToolEntry {
             description: self.description.clone(),
             schema: self.schema.clone(),
             strict,
+        }
+    }
+
+    /// The spec compiled for one prompt route (PSP-10 system 25). With no
+    /// description library this equals [`ToolEntry::to_spec`] byte for
+    /// byte; with one, the first matching override (exact
+    /// `"adapter/family"`, then adapter, then family) replaces only the
+    /// description — never authority fields.
+    pub fn to_spec_for_route(&self, route: &crate::prompt::PromptRoute, strict: bool) -> ToolSpec {
+        let mut spec = self.to_spec(strict);
+        if let Some(library) = &self.description_templates {
+            let family = format!("{:?}", route.family);
+            let exact = format!("{}/{family}", route.adapter);
+            spec.description = library
+                .overrides
+                .iter()
+                .find(|(selector, _)| {
+                    *selector == exact || *selector == route.adapter || *selector == family
+                })
+                .map(|(_, description)| description.clone())
+                .unwrap_or_else(|| library.base.clone());
+        }
+        spec
+    }
+
+    /// The text `tool_search` ranks: the discovery summary when present,
+    /// else the route-neutral description.
+    pub fn discovery_text(&self) -> &str {
+        if self.discovery_summary.is_empty() {
+            &self.description
+        } else {
+            &self.discovery_summary
         }
     }
 }
@@ -476,6 +530,8 @@ mod tests {
         ToolEntry {
             name: "edit_file".into(),
             description: "Exact-string replace".into(),
+            discovery_summary: String::new(),
+            description_templates: None,
             effect: EffectKind::ApplyPatch,
             risk: RiskClass::Medium,
             schema: serde_json::json!({

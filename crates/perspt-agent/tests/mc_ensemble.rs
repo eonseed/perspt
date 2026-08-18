@@ -52,6 +52,10 @@ impl ModelTransport for ScriptedTransport {
     fn family_of(&self, model: &ModelId) -> ModelFamily {
         ModelFamily::Other(model.model.clone())
     }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
 }
 
 fn write_fixture_project(project: &std::path::Path) {

@@ -100,7 +100,10 @@ pub trait ToolCatalog: Send + Sync {
             })
             .filter_map(|entry| {
                 let name = entry.name.to_ascii_lowercase();
-                let haystack = format!("{} {}", name, entry.description.to_ascii_lowercase());
+                // Discovery ranks over the trusted discovery text (PSP-10
+                // system 25): the summary when declared, else the
+                // route-neutral description.
+                let haystack = format!("{} {}", name, entry.discovery_text().to_ascii_lowercase());
                 let score = terms.iter().fold(0usize, |score, term| {
                     score
                         + usize::from(name == *term) * 8

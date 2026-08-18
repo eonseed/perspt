@@ -67,6 +67,8 @@ pub fn admit_external_tool(
     let entry = ToolEntry {
         name: declaration.name,
         description: declaration.description,
+        discovery_summary: String::new(),
+        description_templates: None,
         effect,
         risk,
         schema: declaration.schema,
