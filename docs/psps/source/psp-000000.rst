@@ -132,7 +132,7 @@ The numerical index contains a table of all PSPs, ordered by number.
      - Final
    * - :psp:`000010`
      - Enhancement
-     - :doc:`Bounded Search Trajectories and Provider-Conditioned Prompt Programs <psp-000010>`
+     - :doc:`Bounded Search Trajectories and Model-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
      - Draft
 
@@ -231,7 +231,7 @@ Enhancement PSPs improve existing Perspt functionality.
      - Final
    * - :psp:`000010`
      - Enhancement
-     - :doc:`Bounded Search Trajectories and Provider-Conditioned Prompt Programs <psp-000010>`
+     - :doc:`Bounded Search Trajectories and Model-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
      - Draft
 
@@ -286,7 +286,7 @@ Draft PSPs (under development)
      - Draft
    * - :psp:`000010`
      - Enhancement
-     - :doc:`Bounded Search Trajectories and Provider-Conditioned Prompt Programs <psp-000010>`
+     - :doc:`Bounded Search Trajectories and Model-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
      - Draft
 

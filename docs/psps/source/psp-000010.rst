@@ -293,12 +293,21 @@ model. For stage :math:`s`, template resolution is
    R(r, s) = \begin{cases}
      t_{a,f,m,s} & \text{if an exact-model override exists,}\\
      t_{a,f,s}   & \text{if a family template exists,}\\
-     t_{\mathrm{fb},s} & \text{if a domain fallback is declared,}\\
+     t_{\mathrm{fb},s} & \text{if } s \text{ is a domain stage with a declared
+       fallback,}\\
+     t_{\mathrm{neu},s} & \text{if } s \text{ is a platform stage,}\\
      \bot        & \text{otherwise.}
    \end{cases}
 
-:math:`R(r,s) = \bot` fails closed. Domain stages may declare a fallback.
-Platform stages may not. Compilation is deterministic for a fixed template,
+The cases apply in order; the first matching case selects the template, so
+:math:`R` is a function. :math:`R(r,s) = \bot` fails closed. Domain stages
+may declare a fallback. Every platform stage resolves to the **neutral
+platform route** :math:`t_{\mathrm{neu},s}` when no family template exists.
+A model family outside the supported set, including
+``ModelFamily::Other``, therefore receives the neutral template, never a
+route error. The platform manifest must supply a neutral template for every
+platform stage; an incomplete neutral set fails manifest validation.
+Compilation is deterministic for a fixed template,
 template version, compiler version, and canonical variable value.
 
 .. rubric:: Definition 5 (Search budget)
@@ -798,7 +807,7 @@ staging root composes them. One atomic promotion commits the final result.
    pub struct PromptTemplateVersion(pub u32);
 
    pub enum PromptStage {
-       // platform stages (fail closed on a missing route)
+       // platform stages (neutral route is the guaranteed backstop)
        SessionBootstrap, GraphPlan, ToolDiscovery,
        ConversationCompact, ExternalReconcile,
        // domain stages (declared fallback is legal)
@@ -889,7 +898,8 @@ template for another family. Scripted transports use the stable adapter
 identity ``scripted``.
 
 .. graphviz::
-   :caption: Prompt resolution is deterministic and fails closed.
+   :caption: Prompt resolution is deterministic. Platform stages resolve to
+             the neutral route; an undeclared domain fallback fails closed.
    :align: center
 
    digraph route_resolution {
@@ -905,6 +915,7 @@ identity ``scripted``.
        exact [label="Exact-model template?"];
        family [label="Adapter-family template?"];
        fallback [label="Declared domain fallback?"];
+       neutral [label="Neutral platform template", fillcolor="#FFF8E6"];
        compile [label="Compile", shape=box, peripheries=2,
                 style="rounded,filled", fillcolor="#E9F7EF", color="#347A55"];
        fail [label="Route error", shape=octagon,
@@ -914,9 +925,11 @@ identity ``scripted``.
        exact -> compile [label="yes"];
        exact -> family [label="no"];
        family -> compile [label="yes"];
-       family -> fallback [label="no"];
+       family -> fallback [label="no, domain stage"];
+       family -> neutral [label="no, platform stage"];
+       neutral -> compile [label="manifest-complete"];
        fallback -> compile [label="yes"];
-       fallback -> fail [label="no or platform stage"];
+       fallback -> fail [label="no"];
    }
 
 Each model call compiles two programs. The first is the platform envelope.
@@ -968,6 +981,7 @@ text. Their separate hashes make each change reviewable.
 
    crates/perspt-core/prompts/             # platform
      manifest.toml
+     neutral/
      adapter_a__family_a/
      adapter_b__family_b/
      adapter_c__family_c/
@@ -1232,11 +1246,13 @@ its falsifying predicate; the predicate runs in the mechanism checks.
        a commit proceeds after the bound.
    * - Y
      - **Prompt route determinism.** Resolution follows exact model, then
-       family, then declared fallback. Platform stages fail closed. Identical
-       inputs yield identical rendered bytes and digests.
+       family, then declared domain fallback or the neutral platform route.
+       The platform manifest supplies a neutral template for every platform
+       stage. Identical inputs yield identical rendered bytes and digests.
      - Two compilations of one ``(template, version, variables)`` differing
-       in ``rendered_hash``, or a platform stage activating with a missing
-       route, or a domain fallback used without a manifest declaration.
+       in ``rendered_hash``, a platform manifest validating with an
+       incomplete neutral set, or a domain fallback used without a manifest
+       declaration.
    * - Z
      - **Program provenance.** Every model call ledgers its compiled
        programs (ids, versions, source and rendered hashes, program
@@ -1303,8 +1319,8 @@ The design makes the following tradeoffs.
 * **MiniJinja behind the SDK abstraction.** This adds one dependency. It gives
   the SDK tested conditions and loops without exposing the engine.
 * **Byte-identical template migration first.** The five inline prompts move
-  into supported route templates verbatim. Family directories start as
-  copies. This gives no immediate quality gain. It gives later prompt changes
+  into the neutral platform route verbatim. Supported family directories
+  start as copies of it. This gives no immediate quality gain. It gives later prompt changes
   a known baseline.
 * **Runtime events use one versioned envelope.** The envelope is
   ``Custom { kind: "tool_loop" }``. SDK mechanism events retain their own
@@ -1462,7 +1478,8 @@ PSP code check green, without raising ``.psp-baseline.toml``.
      - ``perspt_sdk::prompt``; restricted minijinja behind
        ``prompt::compile``; digests per Definition 4. Tests: in-module +
        ``mechanism_checks.rs``.
-   * - 4 - Route and ToolEntry (additive)
+   * - 4 - Route and ToolEntry (behavior-preserving; ``adapter_kind`` is a
+       new required transport method)
      - Y
      - ``ModelTransport::adapter_kind`` and ``prompt_route``;
        ``discovery_summary`` and
@@ -1472,7 +1489,8 @@ PSP code check green, without raising ``.psp-baseline.toml``.
    * - 5 - Platform prompt library
      - Y, Z, AE
      - ``crates/perspt-core/prompts/``; move all five inline prompts
-       byte-identically into supported route directories; remove the worker's
+       byte-identically into ``neutral/``, with supported family
+       directories starting as copies; remove the worker's
        domain; architect JSON example rendered from the real
        ``ToolSpec``; ``ControlFrame`` digests; delete dead prompt
        machinery; experimental/active manifest state and
@@ -1544,8 +1562,10 @@ programs, and accepted root.
 *Prompt matrix* (Phases 5-6): the three families resolve distinct complete
 templates per stage once family content diverges (identical-by-copy until
 then, by design); exact-model overrides beat family templates; missing
-domain routes use the declared fallback; missing platform routes fail
-closed; unknown/missing variables fail compilation; rendered output and
+domain routes use the declared fallback; a family outside the supported
+set, including ``ModelFamily::Other``, resolves every platform stage to the
+neutral route; a platform manifest with an incomplete neutral set fails
+validation; unknown/missing variables fail compilation; rendered output and
 hashes are deterministic; prompt-visible tool names match the effective
 governed catalog; bundles are pinned and replayable; platform override
 without the flag is rejected, with the flag is ledgered; no production
@@ -1694,10 +1714,13 @@ Resolved Design Decisions
    enforcement is Phase 1 and precedes all search code.
 5. **Prompt identity is (adapter kind, model family, optional exact
    model).** The configured endpoint id never selects a template.
-6. **Migration precedes measured divergence.** Supported family directories
-   start as copies of the current prompts. Every later change is a reviewed
-   snapshot diff and remains experimental until Gate AE passes. Only domain
-   stages may use a declared fallback.
+6. **Migration precedes measured divergence.** The current prompts move
+   verbatim into the neutral platform route; supported family directories
+   start as copies of it. Every later change is a reviewed snapshot diff and
+   remains experimental until Gate AE passes. Domain stages may use a
+   declared fallback; platform stages resolve to the neutral route when no
+   family template exists, so an unsupported model family never fails route
+   activation.
 7. **Statistics activate at a sample floor.** Route-ordering statistics
    (system 26) ship dark and activate per stratum only past the declared
    floor, mirroring the PSP-9 calibration cold-start rule.
