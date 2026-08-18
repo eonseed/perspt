@@ -3525,6 +3525,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "perspt-prompt-macros"
+version = "0.6.6"
+dependencies = [
+ "perspt-sdk",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "perspt-research"
 version = "0.6.6"
 dependencies = [

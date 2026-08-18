@@ -13,6 +13,7 @@ members = [
     "crates/perspt-cli",
     "crates/perspt-store",
     "crates/perspt-dashboard",
+    "crates/perspt-prompt-macros",
     "crates/perspt",
     # Dev-only repository automation (PSP code check). Never published.
     "xtask",
@@ -30,6 +31,7 @@ homepage = "https://eonseed.github.io/perspt/"
 [workspace.dependencies]
 perspt-core = { version = "0.6.6", path = "crates/perspt-core" }
 perspt-sdk = { version = "0.6.6", path = "crates/perspt-sdk" }
+perspt-prompt-macros = { version = "0.6.6", path = "crates/perspt-prompt-macros" }
 perspt-coding = { version = "0.6.6", path = "crates/perspt-coding" }
 perspt-research = { version = "0.6.6", path = "crates/perspt-research" }
 perspt-agent = { version = "0.6.6", path = "crates/perspt-agent" }
