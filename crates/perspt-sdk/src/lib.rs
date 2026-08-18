@@ -35,6 +35,7 @@
 
 pub mod admissibility;
 pub mod benchmark;
+pub mod canon;
 pub mod capability;
 pub mod certificate;
 pub mod checkpoint;
@@ -51,6 +52,7 @@ pub mod kernel;
 pub mod ledger;
 pub mod model;
 pub mod observability;
+pub mod prompt;
 pub mod recovery;
 pub mod residual;
 pub mod routing;

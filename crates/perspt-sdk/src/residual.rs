@@ -166,6 +166,12 @@ impl SensorRef {
     }
 }
 
+/// Content-addressed reference to a recorded `CorrectionPacket`
+/// (PSP-10 system 26; the packet type itself lands with the verifier
+/// plane).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CorrectionPacketRef(pub String);
+
 /// Reference to a code symbol implicated by a residual.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SymbolRef {
