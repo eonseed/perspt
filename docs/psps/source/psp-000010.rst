@@ -25,12 +25,13 @@ prompt should not be assumed to fit every model family.
 
 This PSP adds two mechanisms. It does not change the acceptance rule.
 
-* A **bounded search forest** explores isolated branches. Every branch starts
-  from the same accepted state :math:`x_k`. A branch may regress or fail. Its
-  intermediate states are not accepted states. The runtime measures branch
-  candidates against the same root. It selects one eligible candidate by a
-  deterministic rule. Only that candidate is committed through the ordinary
-  gate.
+* A **bounded search forest** explores isolated branches. Every branch has
+  the same accepted ancestor :math:`x_k`. A root branch starts there. A child
+  branch may start from a content-addressed partial checkpoint made by its
+  parent. A branch may regress or fail. Its intermediate states are not
+  accepted states. The runtime measures branch candidates against the same
+  accepted root. It selects one eligible candidate by a deterministic rule.
+  Only that candidate is committed through the ordinary gate.
 
 * A **model-conditioned prompt program** presents typed state to a model.
   A program is composed from small, single-concern **prompt sections**:
@@ -44,10 +45,10 @@ This PSP adds two mechanisms. It does not change the acceptance rule.
   prompt database.
 
 Prompt selection uses the transport adapter and the model family. An exact
-model may override that choice. A configured provider name never selects a
-prompt. Provider names identify endpoints and credentials. They do not
-identify model behavior. Structural differences between model families —
-tool-call convention, reasoning-trace handling, system-slot layout — live in
+model may override that choice. A configured endpoint name never selects a
+prompt. Endpoint names identify locations and credentials. They do not
+identify model behavior. Structural differences between model families -
+tool-call convention, reasoning-trace handling, and system-slot layout live in
 a typed **model dialect**, never in forked prose. Family-specific prose
 exists only as single-section overrides gated by measured evidence.
 
@@ -63,10 +64,11 @@ The design keeps three objects separate:
 * the speculative forest :math:`\mathcal{E}_k`; and
 * the prompt program :math:`\pi_{a,f,m,s}`.
 
-The formal model gives five checkable results. Search does not add accepted
+The formal model gives six checkable results. Search does not add accepted
 gate decisions. Discarded branches do not change the accepted projection.
 Search terminates under a finite budget. Prompt and search state replay
-without new model calls.
+without new model calls. Resident context fits a declared bound and replays
+from content-addressed pages.
 
 This PSP also fixes six defects found in PSP-9. It enforces the finite decision
 bound, wires ``HardGatePolicy`` into candidate measurement, sends architect
@@ -74,12 +76,19 @@ graph updates through the admissibility kernel, keys accepted replay by
 candidate identity, parses structured verifier output, and replaces duplicated
 actor loops with one ``ActorTurnRunner``.
 
-A typed ``CorrectionPacket`` carries verifier structure to the next branch.
+A typed ``CorrectionPacket`` carries verifier structure to the next search
+quantum. Concrete counterexamples, when a verifier can produce them, guide
+the next issue-specific prompt plan. Ordinary diagnostics remain correction
+evidence; the PSP does not mislabel them as formal counterexamples. A bounded
+working set keeps current evidence resident and moves older material to a
+content-addressed backing store.
+
 A graph staging root holds node winners until a full integration check passes.
-Five implementation choices are fixed: branch workspaces are sequential eager
+Six implementation choices are fixed: branch workspaces are sequential eager
 copies, no-goods are exact, runtime events use one versioned envelope,
 prompt text is compile-time typed with no template engine and no prompt
-database, and divergent prompts require measured activation evidence.
+database, context uses deterministic paging, and divergent prompts require
+measured activation evidence.
 
 The old ensemble and exploration APIs are replaced by this search plane. The
 change is intentionally breaking. ``simple-chat`` remains unchanged.
@@ -238,27 +247,34 @@ by the ordinary gate:
 Here :math:`V_{\mathrm{best}} = \min_{i \le k} V(x_i)`. An authoritative
 submission appends one decision to :math:`D`. A rejected submission also uses
 one unit of :math:`B`. ``AcceptedTrajectory::submit_with_floor`` performs this
-commit.
+commit. A hard pass is terminal for the node generation. Thus, a generation
+can contain at most one accepted hard pass. This terminal rule is necessary
+for the finite-decision bound below.
 
 .. rubric:: Definition 2 (Search forest)
 
-For accepted state :math:`x_k`, a search forest is a finite set
+For accepted state :math:`x_k`, a search forest is a finite rooted set
 
 .. math::
 
    \mathcal{E}_k = \{\, b_1, \dots, b_n \,\},\qquad
    n \le n_{\max},
 
-Each branch has an internal sequence
+Each branch :math:`b` has an accepted ancestor :math:`x_k`, a seed
+:math:`s_b`, and an internal sequence
 
 .. math::
 
-   z_{b,0} = x_k,\quad z_{b,1},\ \dots,\ z_{b,T_b},
+   z_{b,0} = s_b,\quad z_{b,1},\ \dots,\ z_{b,T_b}.
 
-The branch runs in an isolated eager-copy workspace seeded from :math:`x_k`.
-No descent rule applies to its internal states. For example,
+For a root branch, :math:`s_b=x_k`. For a child branch, :math:`s_b` is a
+content-addressed partial checkpoint made by its parent. In both cases, a
+witness chain proves :math:`x_k \leadsto s_b`. The branch runs in an isolated
+eager-copy workspace seeded from :math:`s_b`. No descent rule applies to its
+internal states. For example,
 :math:`V(z_{b,t+1}) > V(z_{b,t})` is allowed. Internal states are never
-promoted.
+promoted. A partial checkpoint is private search state. It is neither an
+accepted state nor evidence of progress.
 
 .. rubric:: Definition 3 (Measurement, preview, and commit)
 
@@ -275,9 +291,11 @@ The candidate is eligible when
 
 :math:`\Phi` means that operational barriers hold. :math:`S_{\mathrm{req}}`
 means that every required sensor ran. :math:`W` proves that the candidate
-descends from the recorded branch root.
+descends from the accepted root through the recorded branch and
+partial-checkpoint chain.
 
-The runtime measures all opened branches against the same immutable root. It
+The runtime measures all opened branches against the same immutable accepted
+root. The witness :math:`W` includes the complete parent-checkpoint chain. It
 selects at most one eligible candidate. It then calls
 ``submit_with_floor`` once. The committed decision must equal the preview. A
 mismatch is a stale-root or replay error. It fails closed.
@@ -312,24 +330,34 @@ with an identity, a version, a content hash, a declared variable schema, a
 The cases apply in order; the first matching case selects the section, so
 :math:`R` is a function. Every section has a base form: the build of the
 owning crate fails if a declared stage lacks any base section, so :math:`R`
-is **total** for built-in stages — a model family outside the supported set,
+is **total** for built-in stages. A model family outside the supported set,
 including ``ModelFamily::Other``, receives the base sections, never a route
-error. A bundle-supplied stage missing a base section fails bundle
-validation (fail-closed). Overrides are inactive until Gate AE activates
-them.
+error. A compiled domain package that declares a new stage must supply every
+base section for that stage or its build fails closed. Replacement bundles
+may be partial because they can only replace known section ids. Overrides are
+inactive until Gate AE activates them.
+
+Let the active section sequence preserve the order declared by the stage:
+
+.. math::
+
+   \mathrm{Sec}_s(\sigma) =
+   \langle c_i \mid c_i \in \mathrm{Sec}(s),\ P_{c_i}(\sigma)=\mathrm{true}\rangle.
 
 A compiled program is
 
 .. math::
 
    \pi_{a,f,m,s} = \operatorname{compose}\bigl(d_{a,f,m},\;
-   \langle R(r, c) : c \in \mathrm{Sec}(s),\; P_c(\sigma) \rangle,\;
+   \langle R(r, c) \mid c \in \mathrm{Sec}_s(\sigma) \rangle,\;
    v,\; \beta_{\mathrm{tok}}\bigr),
 
 where :math:`d_{a,f,m}` is the resolved model dialect, :math:`P_c` are the
 typed inclusion predicates evaluated on typed session state :math:`\sigma`,
 :math:`v` the canonical variable values, and :math:`\beta_{\mathrm{tok}}`
-the prompt token budget. **Budget fitting is deterministic:** optional
+the prompt token budget. The size function is the dialect's versioned exact
+tokenizer or a conservative upper bound; an underestimating accountant is not
+valid. **Budget fitting is deterministic:** optional
 sections are dropped in increasing priority order (ties broken by section
 id) until the size estimate fits :math:`\beta_{\mathrm{tok}}`; required
 sections are never dropped; if the required sections alone exceed
@@ -349,6 +377,40 @@ elapsed time, and cumulative eager-copy files and bytes. Every branch action
 reserves resources before it starts. It also uses one action unit. Unused
 resource reservations may be released. An action unit is never returned.
 Usage is monotone. The forest cannot run more than :math:`A_{\max}` actions.
+
+.. rubric:: Definition 6 (Resident context)
+
+For one model route, let :math:`\beta_{\mathrm{win}}` be the context-window
+limit under a versioned token accountant. Reserve
+:math:`\beta_{\mathrm{out}}` for output, :math:`\beta_{\mathrm{tool}}` for
+tool schemas and transport framing, and :math:`\beta_{\mathrm{guard}}` for
+accounting error. The input allowance is
+
+.. math::
+
+   \beta_{\mathrm{in}} = \beta_{\mathrm{win}}
+   - \beta_{\mathrm{out}} - \beta_{\mathrm{tool}}
+   - \beta_{\mathrm{guard}}.
+
+Let :math:`I_t` be the compiled instruction program. Let :math:`M_t` be the
+dependency closure of mandatory context pages. These include the task
+contract, control frame, current branch witness, current correction evidence,
+unresolved tool-call/result pairs, and every page required by an active
+capability or output contract. Let :math:`O_t` be the optional working set.
+The resident context is
+
+.. math::
+
+   C_t = M_t \cup
+   \operatorname{Select}\left(O_t,
+   \beta_{\mathrm{in}} - c(I_t) - c(M_t)\right),
+
+where :math:`c` is the route's deterministic token accounting function.
+Every page is immutable and content-addressed. ``Select`` is deterministic.
+If :math:`c(I_t)+c(M_t)>\beta_{\mathrm{in}}`, the runtime makes no model call
+and records ``ContextBudgetInfeasible``. The composed request must also fit
+the dialect's independent byte limit. Failure of either bound stops before
+transport.
 
 .. rubric:: Assumption 1 (Effect mediation)
 
@@ -421,7 +483,8 @@ resource limit may stop the forest earlier. The forest then records
 .. rubric:: Proposition 4 (Replay of prompts and search)
 
 Suppose a session pins its prompt bundles by content hash. Suppose every model
-call records the compiled program digest and the raw transport observation.
+call records the compiled program digest, ordered resident context page
+hashes, context digest, and raw transport observation.
 Then replay of one ledger prefix reconstructs the same accepted projection,
 branch state, budget usage, and Perspt-authored prompt messages. It makes no
 model call.
@@ -432,7 +495,8 @@ its dialect, its ordered section identities, versions, and hashes, its
 variable values, its dropped-section set, and its rendered digest. By
 Definition 4 compilation is deterministic in exactly these inputs, so the
 replayer either reconstructs the same program or reports a mismatch. It
-reads model output from the ledger. It never samples the model again.
+reconstructs the page sequence by Definition 6, reads model output from the
+ledger, and never samples the model again.
 
 .. rubric:: Proposition 5 (Deterministic selection)
 
@@ -448,6 +512,31 @@ The last key breaks every tie because branch identifiers are unique. The rule
 therefore selects one candidate from any finite nonempty eligible set. No
 model confidence or vote appears in the rule.
 
+All candidates compared by keys 2 and 3 must use the same immutable energy
+and sensor profile. A profile mismatch makes a candidate ineligible for that
+comparison. It is not normalized after the fact.
+
+.. rubric:: Proposition 6 (Bounded and replayable context)
+
+Every model request satisfies
+
+.. math::
+
+   c(I_t) + c(C_t) \le \beta_{\mathrm{in}}.
+
+It also satisfies the dialect's declared request-byte limit.
+
+If the ledger records the accountant identity, ordered resident page hashes,
+instruction-program digest, mandatory closure, and selection result, replay
+reconstructs the same Perspt-authored request bytes without consulting the
+model or rerunning a summarizer.
+
+**Argument.** Definition 6 refuses an infeasible mandatory set. Otherwise,
+``Select`` receives only the remaining nonnegative allowance and cannot
+exceed it. Pages and instruction programs are addressed by their canonical
+bytes. Their order and selection inputs are ledgered. Reconstruction either
+produces the recorded digest or fails closed.
+
 Non-Claims
 ==========
 
@@ -462,6 +551,11 @@ This PSP does not make the following claims.
   schemas, effects, risks, footprints, and capabilities.
 * Replay covers Perspt state and Perspt-authored request content. It does not
   reveal hidden remote instructions or remote internal state.
+* The context selector optimizes declared obligation coverage. It does not
+  prove that the selected pages are sufficient for task success.
+* Counterexample guidance is complete only when the domain supplies a sound
+  and complete verifier over a declared hypothesis space. Coding diagnostics
+  and finite test suites do not generally meet that condition.
 
 ================
 Proposed Changes
@@ -543,7 +637,9 @@ and witness semantics. Branch concurrency is therefore one for this PSP.
    pub struct SearchBranch {
        pub branch_id: String,
        pub parent_branch: Option<String>,
-       pub root_checkpoint: String,    // must equal forest.accepted_root
+       pub accepted_ancestor: String,  // must equal forest.accepted_root
+       pub seed_checkpoint: String,    // accepted root or parent's partial root
+       pub seed_witness: WitnessRef,   // seed descends from accepted ancestor
        pub strategy: SearchStrategy,
        pub route: ModelId,
        pub prompt_program: PromptProgramDigest,
@@ -554,11 +650,21 @@ and witness semantics. Branch concurrency is therefore one for this PSP.
    pub enum SearchBranchState {
        Ready,
        Running,
+       PartialCheckpointed(PartialCheckpointRef),
        CandidateMeasured(BranchMeasurement),
        Selected,
        Rejected { reason: String },
        Abandoned { reason: String },
        Contained { certificate_id: String },
+   }
+
+   pub struct PartialCheckpointRef {
+       pub state_root: String,
+       pub accepted_ancestor: String,
+       pub parent_witness: WitnessRef,
+       pub correction: Option<CorrectionPacketRef>,
+       pub remaining_obligations: Vec<ObligationRef>,
+       pub evidence_digest: String,
    }
 
 ``AcceptedTrajectory`` remains the sole owner of accepted state.
@@ -581,6 +687,9 @@ ordinary trajectory method.
 
        ready [label="Ready"];
        running [label="Running\n(uphill steps allowed)", fillcolor="#FFF8E6"];
+       partial [label="Partial checkpoint\nprivate; not accepted",
+                fillcolor="#FFF8E6"];
+       child [label="Child ready\nwitnessed partial seed"];
        measured [label="Measured\n(pure gate preview)"];
        selected [label="Selected", fillcolor="#EAF2FF", color="#3B6FB6"];
        committed [label="Committed x(k+1)", shape=box, peripheries=2,
@@ -594,6 +703,10 @@ ordinary trajectory method.
 
        ready -> running [label="fork accepted root"];
        running -> running [label="mediated edit or probe"];
+       running -> partial [label="actionable evidence"];
+       partial -> running [label="continue next quantum"];
+       partial -> child [label="fork with witness"];
+       child -> running [label="next frontier epoch"];
        running -> measured [label="realize; run required sensors"];
        running -> abandoned [label="limit or false assumption"];
        running -> contained [label="barrier or transport failure"];
@@ -606,7 +719,8 @@ ordinary trajectory method.
 
 Each branch:
 
-* receives an isolated workspace seeded from the accepted checkpoint;
+* receives an isolated workspace seeded from the accepted checkpoint or a
+  witnessed partial checkpoint whose accepted ancestor is that checkpoint;
 * receives a capability attenuated from the session grant with promotion and
   ``UpdateGraph`` withheld (the existing ``WITHHELD_EFFECTS`` +
   ``GrantPolicy::mint`` path;
@@ -615,6 +729,39 @@ Each branch:
 * may perform bounded edits and verifier probes that create no gate decision;
 * produces a ``BranchMeasurement`` only after every required stage runs; and
 * loses its private workspace when it is abandoned or not selected.
+
+.. rubric:: Continuing a partial solution
+
+A verifier result need not divide the world into success and waste. If a
+realized branch state is not eligible but has actionable structured evidence,
+the runtime may persist it as a private ``PartialCheckpointRef``. The next
+search quantum may continue that state. It may instead fork one child from it
+with a different correction operator, strategy, or route. The child inherits
+the witness chain and the exact evidence. It does not inherit the parent's raw
+conversation.
+
+A *search quantum* contains at most one model turn and its bounded governed
+tool actions. It ends at a verifier observation, a partial checkpoint, or a
+terminal branch state. Live frontier entries are served in epochs. Each entry
+receives at most one quantum per epoch. Within an epoch, the scheduler orders
+entries by the following deterministic key:
+
+1. no operational barrier before a barrier;
+2. fewer unresolved required obligations;
+3. lower dominant residual magnitude under the common sensor profile;
+4. lower cumulative recorded cost;
+5. shallower checkpoint depth; and
+6. lexicographically smaller ``branch_id``.
+
+New entries join the next epoch. This rule prevents a promising branch from
+monopolizing the finite budget. The key is a scheduling heuristic. It is not
+an energy function, an acceptance rule, or a safety certificate.
+
+When a verifier supplies a concrete failing input, test, or trace, the next
+``CorrectionPacket`` includes it as a counterexample. A compiler or language
+server diagnostic that lacks such a witness is recorded as correction
+evidence. Perspt uses the same correction loop for both, but it preserves the
+distinction in the type and ledger event.
 
 Proposition 5 defines selection. The rule uses verifier measurements and
 recorded costs. It does not use a vote or model confidence.
@@ -629,8 +776,10 @@ This system replaces the ensemble draw at the Refine rung. It does not change
 the Retry, Fallback, Refine, and Escalate ladder.
 
 The first branch uses the primary actuator route with the domain's default
-strategy. Additional, deliberately diverse branches are opened only on a
-measured trigger:
+strategy. A partial checkpoint is continued before a fresh branch is opened
+when it has a nonempty correction packet and remaining local budget.
+Additional, deliberately diverse branches are opened only on a measured
+trigger:
 
 * an ineligible branch measurement or a ``RejectedNonDescending`` commit;
 * the same dominant residual cluster recurring without a changed correction
@@ -642,9 +791,10 @@ measured trigger:
 * the branch exhausting its local retry allocation while the shared search
   budget remains.
 
-The release starts with one branch. It allows at most three. It runs one at a
-time. Expansion prefers a new strategy, then a new model family. This is a
-search heuristic, not a certificate.
+The release starts with one branch. It allows at most three branch identities,
+including children of partial checkpoints. It runs one quantum at a time.
+Expansion prefers a new correction operator, then a new strategy, then a new
+model family. This is a search heuristic, not a certificate.
 
 .. code-block:: rust
 
@@ -710,9 +860,12 @@ forensic data, but authoritative replay and resume fail closed on it.
 
    search_opened            branch_forked          branch_strategy_selected
    branch_observation       branch_candidate_measured
+   partial_checkpointed     frontier_epoch_started frontier_entry_served
    branch_ineligible        branch_not_selected    branch_abandoned
    branch_selected          branch_committed       no_good_recorded
    search_closed
+   context_working_set      context_pages_selected context_miss
+   context_page_recalled    context_infeasible      context_compacted
 
 Every search event carries ``forest_id`` and ``branch_id``. A measurement also
 carries ``candidate_id``.
@@ -838,8 +991,8 @@ composition) and a new small build-dependency crate,
 ``perspt-prompt-macros`` (compile-time codegen).
 
 Prompt text is authored as small, single-concern markdown files. Each file
-does one thing — state the role, explain the tool protocol, define the
-output contract — and a stage prompt is their composition. A section opens
+does one thing: state the role, explain the tool protocol, or define the
+output contract. A stage prompt is their composition. A section opens
 with typed front matter; the body is plain prose with ``{{variable}}``
 placeholders and nothing else. There is **no template language**: no
 conditionals, no loops, no includes, no filters, no expression syntax. All
@@ -857,8 +1010,8 @@ logic lives in typed Rust.
    priority: 90            # higher survives longer (optional sections)
    max_bytes: 4096
    vars:
-     tool_names: { type: "Vec<String>", style: bullet_list }
-     budget_note: { type: "Option<String>" }
+     tool_names: { type: "BoundedList<64,128>", style: bullet_list }
+     budget_note: { type: "Option<BoundedText<512>>" }
    ---
    Use only these tools:
    {{tool_names}}
@@ -871,16 +1024,16 @@ struct per section in the owning crate:
 
 .. code-block:: rust
 
-   // generated by perspt-prompt-macros — not hand-edited
+   // generated by perspt-prompt-macros; not hand-edited
    pub struct ToolProtocol {
-       pub tool_names: Vec<String>,
-       pub budget_note: Option<String>,
+       pub tool_names: BoundedList<64, 128>,
+       pub budget_note: Option<BoundedText<512>>,
    }
 
    impl PromptSection for ToolProtocol {
        const ID: &'static str = "branch_correct/tool_protocol";
        const VERSION: u32 = 3;
-       const CONTENT_HASH: &'static str = "sha256:…";
+       const CONTENT_HASH: &'static str = "sha256:...";
        const REQUIRED: bool = true;
        const PRIORITY: u16 = 90;
        fn render(&self) -> RenderedSection { /* deterministic */ }
@@ -892,6 +1045,8 @@ validations are:
 * every ``{{placeholder}}`` in the body is declared in ``vars``;
 * every declared variable appears in the body (no orphans);
 * the declared Rust type is on the supported list below;
+* an optional or list placeholder is the only non-whitespace content on its
+  line, because absence removes that line;
 * the body respects ``max_bytes`` with worst-case variable expansion capped;
 * ``id``, ``version``, ``role``, and ``required``/``priority`` are present
   and well-formed; and
@@ -908,21 +1063,72 @@ Template logic is replaced by deterministic typed rendering:
 
    * - Declared type
      - Rendering rule
-   * - ``String``
-     - Substituted verbatim.
+   * - ``BoundedText<N>``
+     - Locally trusted text, substituted after construction has enforced the
+       byte bound.
+   * - ``ObservationText<N>``
+     - Untrusted text rendered in a canonical length-prefixed observation
+       block. Delimiter bytes are escaped. The value never changes section
+       structure.
    * - ``Option<T>``
      - The line containing the placeholder is omitted entirely when the
        value is ``None``.
-   * - ``Vec<String>``
+   * - ``BoundedList<COUNT,BYTES>``
      - Rendered in the declared ``style``: ``bullet_list`` (one ``- item``
-       per line), ``comma_list``, or ``numbered_list``. An empty vector
-       omits the line.
+       per line), ``comma_list``, or ``numbered_list``. Construction bounds
+       both item count and item bytes. An empty list omits the line.
    * - integers / floats
      - Canonical formatting (no locale, fixed float form).
 
+Unbounded ``String`` and ``Vec<String>`` are not supported section variables.
+The distinction between trusted text and observations is explicit in the
+generated Rust type. This prevents template-structure injection. It cannot
+make untrusted prose semantically safe; capabilities and the admissibility
+kernel remain the authority boundary.
 This is the entire dynamic surface of a section body. Conditional structure
 beyond a dropped line is expressed by the composer's typed inclusion
 predicates (system 24), never inside prose.
+
+.. rubric:: Issue-conditioned prompt plans
+
+Perspt does not ask a model to write its next system prompt. It compiles an
+``IssuePromptPlan`` from typed state. A reviewed policy rule maps the actor
+stage, residual class, available witness kind, correction operator, and
+remaining budget to an ordered set of section ids. The mapping is ordinary
+exhaustive Rust code and is tested like the stage composers.
+
+.. code-block:: rust
+
+   pub struct IssuePromptPlan {
+       pub rule_id: String,
+       pub stage: PromptStage,
+       pub issue: ResidualClass,
+       pub witness: Option<CounterexampleRef>,
+       pub correction: CorrectionPacketRef,
+       pub sections: Vec<PromptSectionId>,
+       pub context_request: ContextRequest,
+   }
+
+The plan instantiates only compiled, active sections. It may select a
+compiler-explanation section for a type diagnostic, a failing-test section
+for a concrete test witness, or a hypothesis-revision section after the same
+residual recurs. The evidence values remain delimited data. They cannot add
+instructions, effects, tools, or capabilities.
+
+This is a counterexample-guided architecture, not a claim that general coding
+is formal synthesis. If a sound verifier returns a concrete counterexample,
+the next plan must include it and the previous hypothesis in the correction
+contract. If the observation is only a diagnostic or finite-test failure, the
+plan calls it correction evidence and makes no completeness claim.
+
+Research can propose a new policy rule, correction operator, or prompt
+section. It cannot become live prompt text at retrieval time. The proposal
+must cite a primary source, state the assumptions under which its result
+holds, pass license and prompt-injection review, compile into the finite
+section grammar, and enter as experimental content under Gate AE. A model may
+draft such an artifact, but cannot approve or activate it. Runtime prompt
+construction therefore remains dynamic over issue state and static over the
+reviewed instruction alphabet.
 
 .. rubric:: Runtime types
 
@@ -971,7 +1177,7 @@ predicates (system 24), never inside prose.
    }
 
 Digests use a length-prefixed canonical encoding with the domain tag
-``perspt-prompt-v1``, hashed with SHA-256 — the ``GrantPolicy``
+``perspt-prompt-v1``, hashed with SHA-256 under the ``GrantPolicy``
 canonical-bytes discipline. Serde output is not treated as canonical.
 
 .. rubric:: Codegen pipeline
@@ -1083,12 +1289,15 @@ one typed value per resolved route:
 .. code-block:: rust
 
    pub struct ModelDialect {
-       pub id: String,                 // e.g. "anthropic_native_v1"
+       pub id: String,                 // e.g. "native_multi_slot_v1"
        pub version: u32,
        pub system_slots: SystemSlotPolicy,   // Many | SingleConcatenated
        pub tool_calls: ToolCallConvention,   // Native | JsonInText
        pub reasoning: ReasoningTracePolicy,  // None | Requested | Stripped
        pub boundary_marker: String,    // delimiter for concatenated slots
+       pub context_window_tokens: u64,
+       pub max_output_tokens: u64,
+       pub token_accountant: TokenAccountantRef,
        pub max_prompt_bytes: u64,
    }
 
@@ -1103,6 +1312,9 @@ Two contrasting instances:
        tool_calls: ToolCallConvention::Native,
        reasoning: ReasoningTracePolicy::Stripped,
        boundary_marker: String::new(),
+       context_window_tokens: 131_072,
+       max_output_tokens: 16_384,
+       token_accountant: TokenAccountantRef::for_route(),
        max_prompt_bytes: 262_144,
    }
 
@@ -1114,8 +1326,15 @@ Two contrasting instances:
        tool_calls: ToolCallConvention::JsonInText,
        reasoning: ReasoningTracePolicy::None,
        boundary_marker: "\n===== perspt:boundary =====\n".into(),
+       context_window_tokens: 65_536,
+       max_output_tokens: 8_192,
+       token_accountant: TokenAccountantRef::for_route(),
        max_prompt_bytes: 131_072,
    }
+
+The token accountant is versioned. It is either an exact tokenizer for the
+route or a conservative upper bound. Its identity and mode enter the program
+digest. The byte limit remains an independent transport bound.
 
 The dialect decides how compiled messages are laid out (separate system
 messages or a deterministic concatenation with the boundary marker), whether
@@ -1125,7 +1344,7 @@ dialect id and version enter the program digest.
 
 .. rubric:: Stage composition
 
-A stage composer is ordinary typed Rust — the second dynamism channel after
+A stage composer is ordinary typed Rust. It is the second dynamism channel after
 typed variables:
 
 .. code-block:: rust
@@ -1165,17 +1384,17 @@ budget fail compilation closed. A worked example:
      - Fit at 1,800?
    * - ``role``
      - yes
-     - —
+     - n/a
      - 120
      - kept
    * - ``tool_protocol``
      - yes
-     - —
+     - n/a
      - 640
      - kept
    * - ``correction``
      - yes
-     - —
+     - n/a
      - 700
      - kept
    * - ``repository_hints``
@@ -1190,22 +1409,129 @@ budget fail compilation closed. A worked example:
      - kept (fits after drop)
    * - ``output_contract``
      - yes
-     - —
+     - n/a
      - 110
      - kept
 
 The dropped set (here ``{repository_hints}``) is part of the compiled
-program, enters the program digest, and is ledgered — replay reproduces the
+program, enters the program digest, and is ledgered. Replay reproduces the
 same drop or reports a mismatch.
+
+Section fitting handles only the instruction program. It does not solve the
+larger problem of fitting conversation, evidence, source excerpts, and tool
+results. Those values use the resident-context mechanism below.
+
+.. rubric:: Bounded context as paged memory
+
+The conversation projection is the backing store, not the prompt. It holds
+immutable, content-addressed ``ContextPage`` values. A page names its kind,
+source hashes, state dependency, byte and token costs, typed
+obligations covered, freshness, and dependency pages. Tool calls and their
+results form one atomic page. A lossy summary names every source page and is
+never an authority record.
+
+A state dependency is explicit. It is one of: session-invariant, accepted
+root, partial-checkpoint root, or path plus blob hash. The assembler checks
+the dependency against the current branch before making the page resident.
+
+The resident set follows Definition 6. Its mandatory closure is pinned. The
+optional candidate pool is a working set: pages referenced in the last
+:math:`\theta` actor turns, pages named by the current residual cluster, and
+pages explicitly requested by the current ``IssuePromptPlan``. Older pages
+remain in the backing store. A state change invalidates a page whose declared
+dependency no longer matches; it does not silently rewrite it.
+
+Optional evidence is represented by synopsis frames of at most :math:`q`
+tokens. Each frame has a deterministically derived set of typed obligation
+labels. If the remaining allowance is :math:`R`, then
+:math:`K=\lfloor R/q\rfloor`. With room for :math:`K` frames, the selector
+maximizes the declared
+weighted coverage
+
+.. math::
+
+   F(S) = \sum_{o \in \mathcal{O}} w_o
+   \mathbf{1}\left[o \in \bigcup_{p \in S}\operatorname{cover}(p)\right],
+   \qquad |S| \le K.
+
+This function is nonnegative, monotone, and submodular. Greedy selection by
+largest marginal gain, with page hash as the final tie-breaker, obtains a
+factor
+:math:`1-(1-1/K)^K \ge 1-1/e` of the best declared coverage among the
+candidate frames when :math:`K>0`. The claim concerns the declared labels only. It
+does not say that a frame is relevant, true, or sufficient for success.
+Labels derived from model prose are not eligible; they come from typed task,
+path, symbol, diagnostic, test, capability, and provenance fields.
+
+The frame size is an upper bound, so :math:`Kq` fits the optional allowance.
+Unused space is allowed. Exact current evidence may be pinned in
+:math:`M_t`; it need not be compressed into a synopsis. If mandatory evidence
+does not fit, Perspt fails before the model call. It never truncates a tool
+pair, witness, capability contract, or required prompt section.
+
+.. rubric:: Page faults and compaction
+
+The model sees a small typed page index and may request ``context_recall`` by
+page id, path, symbol, diagnostic id, test id, or provenance key. This is a
+read-only governed tool. A miss records ``ContextMiss``. A hit makes the
+requested page a candidate for the next turn; it does not mutate the current
+request. Page faults consume the ordinary tool-call, byte, turn, and elapsed
+budgets, so repeated recall terminates with the forest.
+
+Compaction writes a new summary page and retains the source pages in backing
+storage. The summary is an observation. Its claims carry source hashes, and
+the actor can fault the exact evidence back in. This resembles a small
+machine with a resident working set and a larger secondary store: locality is
+exploited, but eviction does not destroy information.
+
+.. graphviz::
+   :caption: The prompt is a bounded resident set over an immutable backing store.
+   :align: center
+
+   digraph context_paging {
+       graph [rankdir=TB, bgcolor="#FFFFFF", pad="0.20",
+              nodesep="0.48", ranksep="0.48", fontname="Helvetica"];
+       node [shape=box, style="rounded,filled", fillcolor="#F7F8FA",
+             color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=9.5, margin="0.14,0.09"];
+       edge [color="#637083", fontcolor="#1F2933", fontname="Helvetica",
+             fontsize=8.5, arrowsize=0.72, penwidth=1.05];
+
+       store [label="Content-addressed backing store\nexact pages + summaries"];
+       working [label="Typed working set\nrecent + issue-requested"];
+       mandatory [label="Mandatory closure\ncontracts, witness, tool pairs",
+                  fillcolor="#FFF8E6"];
+       select [label="Deterministic coverage selector\nwithin remaining slots"];
+       resident [label="Resident turn context\nledgered page order",
+                 fillcolor="#EAF2FF", color="#3B6FB6"];
+       call [label="Bounded model request", shape=box, peripheries=2,
+             style="rounded,filled", fillcolor="#E9F7EF", color="#347A55"];
+       recall [label="context_recall\nnext-turn page fault"];
+
+       {rank=same; working; mandatory;}
+       {rank=same; select; resident;}
+
+       store -> working;
+       store -> mandatory;
+       working -> select;
+       mandatory -> resident;
+       select -> resident;
+       resident -> call;
+       call -> recall [label="missing evidence"];
+       recall -> store [label="governed lookup", style=dashed,
+                        constraint=false];
+   }
 
 .. rubric:: Injected turn blocks
 
-The third dynamism channel: per-turn state — correction packets, budget
-notices, no-good digests, graph deltas — is rendered as separate, delimited
-messages appended at turn boundaries. The compiled stage program is never
-re-rendered mid-session, so its digest is stable and the provider-visible
-prefix stays byte-identical across turns (which is also what makes provider
-prompt caching effective).
+The third dynamism channel is the resident turn context. Correction packets,
+budget notices, no-good digests, graph deltas, and selected context pages are
+rendered as separate, delimited messages at turn boundaries. An invariant
+stage program is compiled once per dependency digest and reused while its
+route, manifest, catalog, capability, variables, and dialect remain unchanged.
+If a dependency changes, the program is recompiled and a new digest is
+ledgered. This gives a stable transport-visible prefix when state permits it;
+it does not pretend that one program is immutable for an entire session.
 
 .. code-block:: text
 
@@ -1217,8 +1543,8 @@ prompt caching effective).
    [/perspt:turn-context]
 
 .. graphviz::
-   :caption: The stage program is compiled once; per-turn state arrives as
-             injected blocks.
+   :caption: An invariant stage program is reused; per-turn state arrives as
+             resident context blocks.
    :align: center
 
    digraph turn_timeline {
@@ -1230,7 +1556,7 @@ prompt caching effective).
        edge [color="#637083", fontcolor="#1F2933", fontname="Helvetica",
              fontsize=8.5, arrowsize=0.72, penwidth=1.05];
 
-       program [label="compiled stage program\n(stable prefix, one digest)",
+       program [label="compiled stage program\n(stable for dependency digest)",
                 fillcolor="#EAF2FF"];
        t1 [label="turn 1\n+ turn-context block"];
        t2 [label="turn 2\n+ correction block"];
@@ -1244,8 +1570,8 @@ prompt caching effective).
 
 .. rubric:: Two programs per call
 
-Each model call compiles two programs — the platform envelope and the domain
-stage — as separate messages with separate hashes. The dialect lays them out
+Each model call compiles two programs: the platform envelope and the domain
+stage. They remain separate messages with separate hashes. The dialect lays them out
 at the transport boundary:
 
 .. graphviz::
@@ -1293,13 +1619,13 @@ and at build time in ``perspt-prompt-macros``.
 Sections live as markdown files in the owning crate, ordered by filename.
 There are **no per-family directories and no copies**: the base sections are
 the universal default for every model family, and a family variant is a
-single override file beside its base — never a forked directory. A fix to a
+single override file beside its base, never a forked directory. A fix to a
 base section reaches every family automatically.
 
 .. code-block:: text
 
    crates/perspt-core/prompts/                  # platform sections
-     manifest.toml                              # build-generated, committed
+     manifest.toml                              # CLI-generated, committed
      session_bootstrap/
        10_role.md
        20_governance.md
@@ -1307,7 +1633,7 @@ base section reaches every family automatically.
      graph_plan/
        10_role.md
        20_update_protocol.md
-       20_update_protocol.anthropic_claude.md   # family override (Gate AE)
+       20_update_protocol.family_a.md           # family override (Gate AE)
      ...
 
    crates/perspt-coding/prompts/                # coding domain sections
@@ -1326,14 +1652,16 @@ narrative; universal actor lifecycle and write-ahead behavior. The coding
 library owns: repository exploration; search-strategy generation; branch
 proposal; compiler/test-directed correction; candidate review; coding
 adjudication; failed-path evidence summarization. Other domains follow the
-same contract. ``perspt-research`` ships base sections only. Any override —
-family or exact-model — enters as experimental and must pass Gate AE before
+same contract. ``perspt-research`` ships base sections only. Any family or
+exact-model override enters as experimental and must pass Gate AE before
 activation.
 
-The ``manifest.toml`` is generated and validated by the build step and
-committed. Per section it records: id, version, stage, role, variable
+The ``manifest.toml`` is generated explicitly by
+``perspt prompts manifest``, committed, and validated by the build step. A
+normal build never edits the source tree. Per section it records: id,
+version, stage, role, variable
 schema, ``required``/``priority``, size limit, owner, rationale, review
-date, content hash, and — for overrides — activation state and the bound
+date, content hash, and, for overrides, activation state and the bound
 ``PromptChangeRecord`` digest. The manifest digest is part of session
 provenance.
 
@@ -1388,27 +1716,34 @@ while preserving every authority field
 ``to_spec_for_route`` compiles the final ``ToolSpec.description``. If no
 description library exists, it uses the route-neutral description. MCP
 descriptions remain untrusted variable values rendered inside a local
-wrapper section — the current ``[untrusted MCP description]`` prefix becomes
+wrapper section. The current ``[untrusted MCP description]`` prefix becomes
 a typed obligation. Model-facing text never changes catalog effects, risks,
 or footprints.
 
 **External prompt bundles.** Built-in sections are compiled into their
-owning crate. Explicit external bundles are section packs using the same
-file format, front matter, and manifest contract:
+owning crate. A runtime cannot generate new Rust types safely. Therefore an
+external bundle may replace only a known section id and must use exactly that
+section's compiled variable schema, role, and stage. It cannot add a stage,
+variable, dialect, or inclusion predicate. A new prompt vocabulary requires a
+compiled domain package. Compatible replacement bundles use the same body
+syntax and manifest contract:
 
 .. code-block:: toml
 
    [prompts]
    bundles = ["/path/to/domain-prompts"]
 
-The runtime validates bundles at session start with the same checks the
-build step runs on built-ins (``perspt prompts lint`` exposes them). It
+The runtime scanner validates replacement bodies at session start against the
+owning compiled ``SectionSchema``. It accepts only the known placeholder
+sequence and the bounded rendering rules in system 23; it is not a template
+engine. ``perspt prompts lint`` exposes the same validation. The runtime
 copies validated bundles into the content-addressed artifact store. A
 running session never rereads the source directory. Domain bundles may
 replace compatible domain sections. Replacing
 platform sections also requires ``--allow-core-prompt-override``. The ledger
 records this weaker governance mode. ``ControlFrame`` gains
-``prompt_invocation_digest`` and ``prompt_manifest_digest``.
+``prompt_invocation_digest``, ``prompt_manifest_digest``, and
+``resident_context_digest``.
 These fields have serde defaults. An empty value marks an older checkpoint.
 A nonempty value requires exact reconstruction from built-ins or stored
 artifacts.
@@ -1424,13 +1759,25 @@ Language adapters preserve as much source structure as each tool provides.
 * **Rust:** ``cargo`` and ``rustc`` JSON messages
   (``--message-format=json``): codes, spans, children, applicable
   suggestions.
-* **Python:** pyright JSON and pytest JUnit XML preserve diagnostics and test
-  identity.
+* **Python:** the primary language-server sensor is ``uvx ty server``. Perspt
+  preserves its LSP diagnostics. When the asynchronous LSP observation is
+  empty, the current runtime checks with ``uvx ty check`` and parses its
+  versioned text format; this PSP does not claim a JSON format for ``ty``.
+  Pyright is a declared fallback only when ``ty`` is unavailable. Pytest
+  JUnit XML preserves test identity.
 * **TypeScript:** a versioned parser normalizes ``tsc --pretty false`` output.
   The PSP does not claim that ``tsc`` provides a JSON diagnostic protocol.
 
+The current ``perspt-coding::lang::PythonAdapter`` hard-codes a Pyright
+``SensorRef`` even when the plugin selected ``ty``. Phase 6 removes that
+split-brain identity. The adapter receives the effective sensor configuration
+from the Python plugin and records the exact path used for each observation.
+
 Sensor version and configuration fingerprints are preserved in
-``SensorRef`` (Assumption 2). ``EvidencePayload::raw`` and ``::structured``
+``SensorRef`` (Assumption 2). A fallback emits ``SensorFallback`` and uses a
+different sensor fingerprint. Measurements from ``ty`` and Pyright are never
+pooled as one calibration stratum or compared as if they were the same
+sensor. ``EvidencePayload::raw`` and ``::structured``
 carry the actual
 diagnostic evidence. Cascaded errors are clustered by root cause before
 scoring, and magnitude is normalized per immutable sensor profile instead of
@@ -1546,14 +1893,20 @@ shown to the model cannot drift from the schema enforced on it.
    perspt prompts explain-session <id>      # which programs a session
                                             # actually compiled, with digests
                                             # and dropped sections
+   perspt context explain-turn <session> <turn>
+                                            # resident and evicted page hashes,
+                                            # mandatory closure, coverage, cost
 
 ``perspt status`` and the dashboard show opened, ineligible, unselected,
 abandoned, selected, and committed branches. They also show remaining limits
-and the no-good count. The dashboard fold uses candidate identity.
+and the no-good count. For each model turn they show the input allowance,
+mandatory-page cost, optional frame count, page faults, dropped instruction
+sections, and resident-context digest. The dashboard fold uses candidate
+identity.
 
 .. rubric:: Conformance Gates
 
-Lettering continues :psp:`000009` (J-V). This PSP adds W-AE. Each gate names
+Lettering continues :psp:`000009` (J-V). This PSP adds W-AF. Each gate names
 its falsifying predicate; the predicate runs in the mechanism checks.
 
 .. rubric:: Trajectory and provenance gates
@@ -1647,6 +2000,15 @@ its falsifying predicate; the predicate runs in the mechanism checks.
        0.05, a changed or unrecorded resampling procedure, a new escaped
        hard-gate regression, a failed confidence bound, or an unledgered
        experimental override.
+   * - AF
+     - **Resident-context boundedness.** Every request fits Definition 6.
+       Mandatory dependency closure is preserved, optional selection is
+       deterministic, tool-call/result pairing is atomic, and replay uses the
+       recorded page order without rerunning compaction.
+     - A request above its input allowance, a truncated mandatory page or tool
+       pair, an optional page selected differently from identical inputs, a
+       model-derived obligation label, a stale root-dependent page admitted,
+       or replay that reruns a model or summarizer.
 
 .. rubric:: Practical Decisions
 
@@ -1659,8 +2021,8 @@ The design makes the following tradeoffs.
   human-editable markdown, but every section compiles to a typed struct and
   a malformed edit fails ``cargo build``. This costs a small build-dependency
   crate and slightly slower compiles. It removes the template-engine
-  dependency, its injection surface, and the entire class of runtime prompt
-  errors.
+  dependency and its control-flow injection surface. It does not solve
+  semantic prompt injection from untrusted observations.
 * **No prompt database.** Git reviews the text; the ledger already records
   which program (sections, versions, hashes, drop set) every call used.
   A registry would add a second source of truth and a bootstrap path for no
@@ -1669,10 +2031,13 @@ The design makes the following tradeoffs.
   verbatim into base sections. No family directory ever starts as a copy;
   a family variant is one override file with Gate AE evidence. A base fix
   reaches every family; there is no copy drift to audit.
-* **Deterministic budget fitting.** Optional sections declare priorities and
-  are dropped lowest-first to fit the dialect's prompt budget; the drop set
-  is ledgered. This costs a size estimate per section. It buys graceful
-  behavior under context pressure without nondeterminism.
+* **Two bounded memory planes.** Optional instruction sections drop by stable
+  priority. Optional evidence pages use weighted-coverage selection. Required
+  instructions and mandatory evidence never compete silently. The split costs
+  a page store and token accounting, but makes context loss explicit.
+* **Partial checkpoints are private.** Actionable partial work can seed a
+  child branch through a witness chain. This costs storage and another search
+  state, but avoids restarting every correction from the accepted root.
 * **Runtime events use one versioned envelope.** The envelope is
   ``Custom { kind: "tool_loop" }``. SDK mechanism events retain their own
   alphabet. One fact is never written to both.
@@ -1694,6 +2059,12 @@ instead need a new strategy, plan, or prompt program. The forest can vary each
 of these. It can also stop a weak branch early. Route diversity remains an
 expansion prior and must be tested by ablation.
 
+**Why retain partial checkpoints?** A failed candidate can contain a correct
+substructure and one localized defect. Restarting from the accepted root
+throws that information away. Continuing every partial state forever is also
+wrong. A private checkpoint plus a finite frontier quantum retains measured
+work without confusing it with accepted progress.
+
 **Why require eager copies?** Shared extents and platform-specific overlays
 make physical isolation and disk accounting harder to attest. Three sequential
 copies are slower, but their roots, costs, cleanup, and recovery are portable
@@ -1711,10 +2082,9 @@ boundary. The single-write rule prevents competing histories.
 hypothesis about model behavior. The paired activation rule tests that
 hypothesis under equal budgets before it becomes a default.
 
-**Why sections and dialects instead of per-family prose forks?** Production
-harness study shows that what actually differs between model families is
-structural — system-slot layout, tool-call convention, reasoning-trace
-handling — not vocabulary. A typed dialect represents an enumerable
+**Why sections and dialects instead of per-family prose forks?** Some model
+interfaces differ structurally in system-slot layout, tool-call convention,
+and reasoning-trace handling. A typed dialect represents an enumerable
 difference as data; a forked paragraph hides it inside prose a reviewer
 must diff by eye. Forked copies also drift: a fix to one copy silently
 misses the others, and no gate catches unintentional divergence. One base
@@ -1728,7 +2098,7 @@ inclusion predicates and its loops are typed list rendering, so the engine
 buys nothing the type system does not already provide. Compile-time codegen
 turns every malformed prompt edit into a build error and every text change
 into a snapshot diff, while the files stay as human-editable as the
-markdown instruction files production harnesses ship.
+markdown files from which they are compiled.
 
 **Why no prompt database?** Registry practice stores immutable prompt
 versions and traces which version served each request. Perspt already has
@@ -1747,10 +2117,23 @@ uncalibrated. Compiler and test measurements are external observations.
 Stochastic actors propose. Deterministic rules select and commit. Proposition
 5 depends on this separation.
 
-**Why keep comparative harness study non-normative?** Other harnesses can
-suggest experiments. Their code and prompts are not sources for Perspt.
-They do not supply its control law, authority model, or prompt text. Perspt
-tests each hypothesis against its own domains and conformance gates.
+**Why compile issue-specific prompts from evidence?** A verifier can say more
+than pass or fail. A concrete counterexample rules out the current hypothesis;
+a structured diagnostic narrows the next correction. Typed policy rules can
+select the corresponding reviewed sections without letting retrieved prose or
+model output rewrite the control plane.
+
+**Why page context?** Long conversations behave like an address space larger
+than a single request. Sending the whole history wastes capacity; replacing it
+with one opaque summary loses evidence. A pinned working set, immutable
+backing pages, and explicit faults preserve exact material while bounding each
+turn. The coverage theorem justifies one local selector objective. It does not
+claim an optimal prompt or an optimal agent.
+
+**Why keep empirical observations non-normative?** Implementation experience
+can suggest experiments. It does not supply Perspt's control law, authority
+model, or prompt text. Perspt tests each hypothesis against its own domains
+and conformance gates.
 
 **Why fix enforcement first?** Search increases the number of proposals. It
 must not increase unchecked authority. The bound, hard-gate wiring, graph
@@ -1805,6 +2188,12 @@ Rust. The only new build-time dependency is the small
    activation_min_tasks = 30       # minimum allowed value
    noninferiority_margin = 0.05    # allowed range: 0.0 through 0.05
 
+   [context]
+   working_set_turns = 6
+   synopsis_frame_tokens = 512
+   output_reserve_tokens = 16384
+   guard_reserve_tokens = 2048
+
 The gate rule, admissibility kernel, recovery ladder, promotion path, and
 outer ledger encoding do not change. The ``tool_loop`` payload becomes
 versioned. Replay, resume, and audit gain new events but keep their existing
@@ -1814,8 +2203,9 @@ links ``perspt-core``. It loads no forest, catalog, store, or external tool.
 **Ledger and checkpoint compatibility:** every new event field
 (``candidate_id``, ``forest_id``, ``branch_id``) and every new
 ``ControlFrame`` field (``prompt_invocation_digest``,
-``prompt_manifest_digest``) is serde-defaulted. Pre-PSP-10 ledgers fold
-identically through the strict legacy payload decoder. Pre-PSP-10 checkpoints
+``prompt_manifest_digest``, ``resident_context_digest``) is serde-defaulted.
+Pre-PSP-10 ledgers fold identically through the strict legacy payload decoder.
+Pre-PSP-10 checkpoints
 resume legacy-permissive. Post-PSP-10 checkpoints resume strictly (Gates Z and
 AD). Unknown payload versions never resume.
 
@@ -1825,7 +2215,7 @@ Reference Implementation
 
 Phases are independently landable and behavior-preserving until Phase 7
 (the cutover). Every phase exits with the workspace tests, clippy, and the
-PSP code check green, without raising ``.psp-baseline.toml``.
+PSP code check green, without adding entries to the warning baseline.
 
 .. rubric:: Foundation phases
 
@@ -1851,12 +2241,15 @@ PSP code check green, without raising ``.psp-baseline.toml``.
        the dashboard fold. Tests: ``mc_replay.rs`` two-candidate case +
        pre-change fixture regression.
    * - 3 - SDK prompt sections and codegen
-     - Y
+     - Y, AF
      - ``perspt_sdk::prompt`` (sections, dialects, composition, budget
-       fitting, digests per Definition 4); the ``perspt-prompt-macros``
-       build crate and its validation list. Tests: in-module +
+       fitting, digests per Definition 4); ``ContextPage``, versioned token
+       accounting, mandatory closure, working-set selection, and page digests
+       per Definition 6; the ``perspt-prompt-macros`` build crate and its
+       validation list. Tests: in-module +
        ``mechanism_checks.rs`` + codegen-failure fixtures (undeclared
-       variable, orphan variable, missing base section, oversize).
+       variable, orphan variable, unbounded variable, missing base section,
+       oversize) + context-bound property tests.
    * - 4 - Route and ToolEntry (behavior-preserving; ``adapter_kind`` is a
        new required transport method)
      - Y
@@ -1878,8 +2271,9 @@ PSP code check green, without raising ``.psp-baseline.toml``.
    * - 6 - Domain prompts, packets, and verifier adapters
      - Y
      - ``crates/perspt-coding/prompts/``; ``CorrectionPacket``;
-       ``diag/`` adapters (cargo JSON, pyright JSON, pytest JUnit XML,
-       and normalized tsc text);
+       ``diag/`` adapters (cargo JSON, ``ty`` LSP diagnostics, versioned
+       ``ty check`` text, separately fingerprinted Pyright fallback, pytest
+       JUnit XML, and normalized tsc text);
        clustering and normalized magnitudes; unify the two
        ``correction_for`` systems; packet-rendering ``push_correction``.
        Tests: ``mc_correction.rs`` + recorded-output fixtures +
@@ -1897,52 +2291,69 @@ PSP code check green, without raising ``.psp-baseline.toml``.
    * - 7 - Search types and cutover (breaking)
      - AC, AD
      - ``perspt_sdk::search``; deterministic ``select_branch``;
+       partial checkpoints, witness chains, frontier epochs;
        ``LoopEventEnvelopeV1`` plus the strict legacy decoder;
        removals per Compatibility; ``[exploration]`` + ``[prompts]``
        config; ``[ensemble]`` pointed error; re-homing. Tests:
        ``mc_search_types.rs`` and ``mc_event_envelope.rs``.
    * - 8 - Adaptive branch execution
      - W, X, AB, AC
-     - ``runtime/search/``; branch forking from accepted seeds;
+     - ``runtime/search/``; branch forking from accepted or witnessed partial
+       seeds; fair deterministic search quanta;
        eager-copy reservation and root checks; expansion triggers; exact
        no-good keys; search events; fold-invariance property
        test; Refine rung opens a forest; strict resume for forests.
        Tests: ``mc_search.rs``. Exit: single-branch search is no worse than
        the removed ensemble on the bench fixtures.
    * - 9 - ActorTurnRunner
-     - Z, AD
+     - Z, AD, AF
      - ``turn.rs``; all six turn paths unified; raw-before-parse for
-       every actor; two-program compilation per call. Tests:
-       ``mc_actors.rs``.
+       every actor; two-program compilation and resident-context assembly per
+       call; governed ``context_recall``. Tests: ``mc_actors.rs`` and
+       ``mc_context.rs``.
    * - 10 - Graph staging and integration gate
      - AA
      - Staging root in ``fold_completion``; ``runtime/integrate.rs``;
        global gate with the immutable oracle; atomic promotion reusing
        the hardened path. Tests: ``mc_integration.rs``.
    * - 11 - CLI, bundles, conformance, and evaluation
-     - Z, AE
+     - Z, AE, AF
      - ``perspt prompts`` subcommands; bundle pinning +
        ``--allow-core-prompt-override``; research-domain search
-       conformance; prompt activation records; six-arm evaluation on the
-       parity benches; adaptive default flip on measured acceptance.
+       conformance; ``perspt context explain-turn``; prompt activation
+       records; seven-arm evaluation on the parity benches; adaptive default
+       flip on measured acceptance.
 
 .. rubric:: Test and Acceptance Plan
 
 *Search invariants* (Phase 8): a branch may increase energy before it finds a
 descent. Ineligible, unselected, and abandoned branches leave accepted state
-unchanged. Every branch starts from the recorded root. The action limit ends
-search. File and byte reservations precede every eager copy. Reflinks and
+unchanged. Every branch starts from the accepted root or a partial checkpoint
+with a complete witness chain to that root. Partial checkpoints never enter
+the accepted fold. Frontier epochs serve every live entry at most once before
+the next epoch. The action limit ends search. File and byte reservations
+precede every eager copy. Reflinks and
 copy-on-write mounts are rejected. Previews create no gate decision. A forest
 commits at most one candidate. Duplicate roots and exact :math:`K_{ng}`
 attempts are not re-executed; unequal keys are. An empty correction packet
 expands or escalates. Crash and resume reconstruct the forest, usage, prompt
 programs, and accepted root.
 
-*Prompt matrix* (Phases 5-6): every family — including
-``ModelFamily::Other`` — composes every stage from base sections; an
+*Resident context* (Phases 3 and 9): randomized page sets never exceed the
+route's declared input allowance. An infeasible mandatory closure makes no
+model call. Tool-call/result pairs remain atomic. Root-dependent pages are
+invalidated after an accepted-root or partial-checkpoint change. Path pages
+are invalidated when their blob hash changes. Greedy selection is deterministic
+and is checked against exhaustive optimum on small weighted-coverage
+fixtures. Page faults consume ordinary budgets. Replay reconstructs the same
+ordered page hashes and request digest without a model or summarizer call.
+
+*Prompt matrix* (Phases 5-6): every family, including
+``ModelFamily::Other``, composes every stage from base sections; an
 activated exact-model override beats an activated family override beats the
 base; an inactive override never resolves; a missing base section fails the
-build (built-ins) or bundle validation (packs); undeclared and orphan
+build for a compiled stage; a replacement bundle cannot add a stage or alter
+its schema; undeclared, orphan, and unbounded
 variables fail the build; composed rendering, drop sets, and hashes are
 deterministic across dialects; the two contrasting dialects lay out the
 same programs differently and both parse fail-closed against their output
@@ -1975,18 +2386,21 @@ prior staging root.
 
 *Evaluation* (Phase 11): the Rust and Python suites use matched tasks. Each arm
 gets the same model, initial context, tools, token limit, and elapsed limit.
-The six arms are:
+The seven arms are:
 
 1. the direct model harness;
 2. Perspt with one branch and prompt programs;
 3. the prior arm with correction packets;
-4. the prior arm with adaptive search;
-5. the prior arm with multi-family expansion; and
-6. the prior arm with graph integration.
+4. the prior arm with resident-context paging;
+5. the prior arm with adaptive search;
+6. the prior arm with multi-family expansion; and
+7. the prior arm with graph integration.
 
 The primary outcome is hidden-test hard pass. Secondary outcomes are escaped
 regressions, elapsed time, token cost, tool cost, verifier cost, duplicate
-branches, correction effectiveness, recovery, and replay validity.
+branches, correction effectiveness, mandatory-context failures, page-fault
+rate, exact-evidence recall, resident obligation coverage, recovery, and
+replay validity.
 
 Task order is randomized. Every task keeps its paired arm results. Reports
 show paired differences and bootstrap confidence intervals. They also publish
@@ -2005,10 +2419,6 @@ is at least :math:`-\epsilon`. It must also reduce repeated identical failures
 and produce no escaped hard-gate regression in the acceptance fixtures. Live
 runs must cover two model families. Scripted transports cover route invariants
 for a third family when credentials are unavailable.
-
-.. raw:: latex
-
-   \clearpage
 
 =====================
 Implementation Status
@@ -2041,7 +2451,7 @@ design choice.
      - Pending
      -
    * - 3 - SDK prompt sections and codegen
-     - Y
+     - Y, AF
      - Pending
      -
    * - 4 - Route and ToolEntry
@@ -2065,7 +2475,7 @@ design choice.
      - Pending
      -
    * - 9 - ActorTurnRunner
-     - Z, AD
+     - Z, AD, AF
      - Pending
      -
    * - 10 - Graph staging
@@ -2073,7 +2483,7 @@ design choice.
      - Pending
      -
    * - 11 - CLI, bundles, and evaluation
-     - Z, AE
+     - Z, AE, AF
      - Pending
      -
 
@@ -2100,8 +2510,8 @@ Resolved Design Decisions
    split verbatim into base sections; the composed rendering is
    byte-identical to the literals before any change. No family directory or
    copy exists. A family variant is one override file that stays
-   experimental until Gate AE passes. Every model family — including
-   ``ModelFamily::Other`` — composes from base sections, so an unsupported
+   experimental until Gate AE passes. Every model family, including
+   ``ModelFamily::Other``, composes from base sections, so an unsupported
    family never fails route activation.
 7. **Statistics activate at a sample floor.** Route-ordering statistics
    (system 26) ship dark and activate per stratum only past the declared
@@ -2119,6 +2529,20 @@ Resolved Design Decisions
 11. **Budget fitting is deterministic.** Optional sections drop in
     increasing priority order (ties by section id); required sections never
     drop; the drop set enters the program digest and the ledger.
+12. **Partial work remains private but reusable.** A child branch may start
+    from a content-addressed partial checkpoint only when a witness chain
+    reaches the forest's accepted root. The checkpoint never enters the
+    accepted fold.
+13. **Issue prompts are compiled, not invented.** Runtime state selects and
+    instantiates active sections through exhaustive typed policy rules.
+    Retrieved research and model-written instructions are proposals, not live
+    prompt text.
+14. **Context is paged.** Mandatory pages are pinned. Optional synopsis
+    frames are chosen by deterministic weighted coverage. Exact pages remain
+    in a content-addressed backing store and return through governed recall.
+15. **Python uses its configured sensor identity.** ``ty`` is primary.
+    Pyright is a separately fingerprinted fallback. Their measurements are
+    never pooled as one sensor profile.
 
 ==============
 Design Closure
@@ -2128,10 +2552,12 @@ PSP-10 has no unresolved design questions. The former questions about
 workspace copying, prompt divergence, no-good generalization, and ledger
 event layers are resolved by decisions 2, 3, 6, and 8 above; the prompt
 representation questions (files versus a database, template engine versus
-typed codegen, prose forks versus dialects, context pressure) are resolved
-by decisions 9, 10, 6, and 11. A later change to any
-of these choices requires a new PSP and new conformance evidence. It is not an
-implementation detail of PSP-10.
+typed codegen, and prose forks versus dialects) are resolved by decisions 9,
+10, and 6. A later change to any
+of these choices requires a new PSP and new conformance evidence. Partial
+continuation, issue-conditioned compilation, resident context, and Python
+sensor identity are resolved by decisions 12 through 15. They are not
+implementation details of PSP-10.
 
 ==========
 References
@@ -2151,22 +2577,25 @@ References
   and capabilities.
 * :psp:`000009` - the governed tool loop, model portfolio, ledger, and
   conformance gates J-V.
-* Non-normative prompt-plane design sources (structural lessons only; no
-  prompt text is copied and none defines Perspt's architecture):
-
-  * DSPy — typed signatures and programmatic prompt construction
-    (https://dspy.ai/).
-  * BAML — schema-first typed prompt functions with declared output
-    contracts (https://www.boundaryml.com/).
-  * OpenAI Codex CLI prompting docs — static markdown instruction files,
-    layered project instructions
-    (https://developers.openai.com/codex/prompting).
-  * Reverse-engineered Claude Code prompt architecture — sectioned system
-    prompt, dynamic state injected as turn-boundary reminder blocks over a
-    stable prefix (https://github.com/zep-us/claude-system-prompt).
-  * Prompt-versioning registry practice — immutable prompt versions with
-    per-request traces; Perspt satisfies the same property through git and
-    the ledger rather than a database.
+* Armando Solar-Lezama, *The Sketching Approach to Program Synthesis*, 2009
+  (https://people.csail.mit.edu/asolar/papers/Solar-Lezama09.pdf).
+  Counterexample-guided candidate generation and validation. PSP-10 uses the
+  architecture only where a domain exposes concrete verifier witnesses.
+* Susmit Jha and Sanjit A. Seshia, *A Theory of Formal Synthesis via
+  Inductive Learning*, 2017
+  (https://people.eecs.berkeley.edu/~sseshia/pubdir/togis17.pdf).
+  Oracle-guided synthesis, counterexample classes, and bounded-memory limits.
+* Peter J. Denning, *The Working Set Model for Program Behavior*, 1968
+  (https://denninginstitute.com/pjd/PUBS/WSModel_1968.pdf).
+  The working-set abstraction used by resident context.
+* G. L. Nemhauser, L. A. Wolsey, and M. L. Fisher, *An Analysis of
+  Approximations for Maximizing Submodular Set Functions - I*, 1978
+  (https://doi.org/10.1007/BF01588971). The cardinality-constrained greedy
+  coverage result used by the optional synopsis selector.
+* Astral, *ty: Type Checking* and *Diagnostics*
+  (https://docs.astral.sh/ty/type-checking/;
+  https://docs.astral.sh/ty/features/diagnostics/). The primary Python sensor
+  interface. Perspt's fallback and fingerprint policy remain local design.
 
 =========
 Copyright
