@@ -658,6 +658,7 @@ impl ContractEvaluator for CodingContract {
 /// seed files fetched from content-addressed artifacts. Refuses when the
 /// session's durable authority epoch no longer matches the checkpoint's
 /// (revocation invalidates resumed sessions).
+#[derive(Clone)]
 pub(crate) struct CandidateSeed {
     pub(crate) expected_state_root: String,
     pub(crate) canonical_scope: Vec<String>,
@@ -875,4 +876,13 @@ pub(crate) fn worker_envelope(
         invocation_digest: envelope.digest.clone(),
         manifest_digest: perspt_core::prompts::PlatformPromptLibrary::manifest().digest(),
     })
+}
+
+/// The immutable calibration epoch this run is bound to.
+#[derive(Debug, Clone)]
+pub(crate) struct CalibrationBinding {
+    pub(crate) epoch_id: String,
+    pub(crate) stratum: String,
+    pub(crate) state: String,
+    pub(crate) threshold: Option<f64>,
 }

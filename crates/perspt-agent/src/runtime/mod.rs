@@ -96,15 +96,6 @@ struct NodeAssembly {
     calibration: CalibrationBinding,
 }
 
-/// The immutable calibration epoch this run is bound to.
-#[derive(Debug, Clone)]
-struct CalibrationBinding {
-    epoch_id: String,
-    stratum: String,
-    state: String,
-    threshold: Option<f64>,
-}
-
 /// One completed governed attempt at a node generation.
 struct NodeAttempt {
     outcome: crate::toolloop::LoopOutcome,
@@ -135,6 +126,7 @@ mod external;
 mod node;
 mod plan;
 mod recorder;
+mod search;
 
 use external::{external_runtime_from, registry_with_external};
 use node::*;
@@ -170,6 +162,8 @@ pub struct Psp9AgentRuntime {
     external: Option<Arc<tokio::sync::Mutex<crate::external_tools::ExternalToolRuntime>>>,
     /// Admitted external entries, discovered once per session.
     external_entries: Mutex<Option<Vec<perspt_sdk::ToolEntry>>>,
+    /// Bounded-search settings from `[exploration]` (PSP-10 system 20).
+    search: search::SearchSettings,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -231,6 +225,7 @@ impl Psp9AgentRuntime {
             domain: Arc::new(CodingDomain::new()),
             external,
             external_entries: Mutex::new(None),
+            search: search::SearchSettings::from_config(config.exploration.as_ref()),
         })
     }
 
@@ -262,6 +257,7 @@ impl Psp9AgentRuntime {
             domain: Arc::new(CodingDomain::new()),
             external: None,
             external_entries: Mutex::new(None),
+            search: search::SearchSettings::default(),
         }
     }
 
@@ -471,6 +467,39 @@ impl Psp9AgentRuntime {
         seed: Option<&CandidateSeed>,
         shared_recovery_budget: u32,
     ) -> Result<NodeAttempt> {
+        self.attempt_node_with_recorder(
+            recorder,
+            session_id,
+            goal,
+            node_id,
+            generation,
+            model,
+            graph,
+            seed,
+            shared_recovery_budget,
+            recorder,
+        )
+        .await
+    }
+
+    /// The attempt body, parameterized over the loop's event recorder so a
+    /// search branch can rewrite its trajectory events into the search
+    /// alphabet (PSP-10 Gate W) while assembly records still reach the
+    /// session ledger.
+    #[allow(clippy::too_many_arguments)]
+    async fn attempt_node_with_recorder(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        goal: &str,
+        node_id: &str,
+        generation: u32,
+        model: &ModelId,
+        graph: &WorkGraphRevision,
+        seed: Option<&CandidateSeed>,
+        shared_recovery_budget: u32,
+        loop_recorder: &dyn crate::toolloop::LoopRecorder,
+    ) -> Result<NodeAttempt> {
         let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
         restore_seed(&candidate, seed).await?;
         let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
@@ -506,7 +535,7 @@ impl Psp9AgentRuntime {
             node_id: node_id.to_string(),
             generation,
             system_prompt: envelope,
-            recorder: Some(recorder),
+            recorder: Some(loop_recorder),
         };
         let outcome = match seed {
             // A files-only seed (empty conversation) restores candidate
@@ -644,13 +673,15 @@ impl Psp9AgentRuntime {
                 }
                 _ => unreachable!("ladder iterates refine and escalate only"),
             }
-            // Restore-best across rungs: the next attempt continues from
-            // the previous attempt's best accepted state. The PSP-9
-            // ensemble draw is removed; PSP-10 phase 8 opens a search
-            // forest here instead (interim: one plain re-attempt).
+            // Restore-best across rungs, then open a bounded search forest
+            // (PSP-10 system 20): isolated branches against the same
+            // accepted root, one candidate committed through the ordinary
+            // gate by the deterministic rule.
             let seed = seed_from_attempt(recorder, node_id, &attempt).await?;
+            let baseline_energy = attempt.outcome.trajectory.best_accepted_energy;
+            let rho_gate = attempt.assembly.energy.rho_gate;
             let next = self
-                .attempt_node(
+                .run_search_forest(
                     recorder,
                     session_id,
                     &goal,
@@ -660,6 +691,8 @@ impl Psp9AgentRuntime {
                     &graph,
                     seed.as_ref(),
                     remaining_budget,
+                    baseline_energy,
+                    rho_gate,
                 )
                 .await?;
             let spent = spent_of(&next);
