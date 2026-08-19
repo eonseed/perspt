@@ -82,6 +82,10 @@ pub struct SearchUsage {
     pub mutations: u32,
     pub verifier_runs: u32,
     pub tokens: u64,
+    /// Wall-clock seconds charged against `SearchLimits::elapsed_secs`
+    /// (Definition 5's time dimension; monotone like every other field).
+    #[serde(default)]
+    pub elapsed_secs: u64,
     pub result_bytes: u64,
     pub workspace_files: u64,
     pub workspace_bytes: u64,
@@ -126,6 +130,47 @@ impl SearchUsage {
         self.workspace_files += request.workspace_files;
         self.workspace_bytes += request.workspace_bytes;
         Ok(ReservationTicket { request })
+    }
+
+    /// Charge consumed actuals a reservation could not know in advance
+    /// (observed turns, calls, mutations, verifier runs, tokens, bytes).
+    /// Monotone; crossing any limit closes the forest by type — the error
+    /// is terminal for further reservations.
+    pub fn charge(&mut self, limits: &SearchLimits, consumed: ReservationRequest) -> Result<()> {
+        self.model_turns += consumed.model_turns;
+        self.tool_calls += consumed.tool_calls;
+        self.mutations += consumed.mutations;
+        self.verifier_runs += consumed.verifier_runs;
+        self.tokens += consumed.tokens;
+        self.result_bytes += consumed.result_bytes;
+        self.workspace_files += consumed.workspace_files;
+        self.workspace_bytes += consumed.workspace_bytes;
+        self.ensure_within(limits)
+    }
+
+    /// Charge one wall-clock interval (Definition 5's time dimension).
+    pub fn charge_elapsed(&mut self, limits: &SearchLimits, seconds: u64) -> Result<()> {
+        self.elapsed_secs += seconds;
+        self.ensure_within(limits)
+    }
+
+    fn ensure_within(&mut self, limits: &SearchLimits) -> Result<()> {
+        let over = self.model_turns > limits.model_turns
+            || self.tool_calls > limits.tool_calls
+            || self.mutations > limits.mutations
+            || self.verifier_runs > limits.verifier_runs
+            || self.tokens > limits.tokens
+            || self.elapsed_secs > limits.elapsed_secs
+            || self.result_bytes > limits.result_bytes
+            || self.workspace_files > limits.workspace_files
+            || self.workspace_bytes > limits.workspace_bytes;
+        if over {
+            self.close();
+            return Err(SdkError::Domain(
+                "search budget exhausted by consumed actuals; the forest closed".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Release the unused part of a held reservation. The action unit is
@@ -229,6 +274,29 @@ mod tests {
             )
             .is_err());
         assert_eq!(usage, before, "a refused reservation reserves nothing");
+    }
+
+    #[test]
+    fn consumed_actuals_and_elapsed_time_close_the_forest_at_the_limit() {
+        let mut usage = SearchUsage::default();
+        usage
+            .charge(
+                &limits(),
+                ReservationRequest {
+                    model_turns: 1,
+                    tool_calls: 2,
+                    tokens: 500,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        usage.charge_elapsed(&limits(), 59).unwrap();
+        // The next interval crosses elapsed_secs = 60: terminal.
+        assert!(usage.charge_elapsed(&limits(), 2).is_err());
+        assert!(usage.is_closed(), "crossing a limit closes the forest");
+        assert!(usage
+            .reserve(&limits(), ReservationRequest::default())
+            .is_err());
     }
 
     #[test]
