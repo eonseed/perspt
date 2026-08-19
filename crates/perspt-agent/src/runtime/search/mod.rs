@@ -7,12 +7,18 @@
 //! rewrites trajectory events into the search alphabet); exactly one
 //! selected candidate is committed through one `submit_with_floor` call,
 //! and the committed decision must equal the preview or the forest fails
-//! closed. A crash mid-forest resumes from the node's last durable
-//! checkpoint and re-runs the forest deterministically — branch
-//! workspaces are never resume points.
+//! closed. Branches carry deliberate strategies with real behavior
+//! (continuation, alternative approach, diagnostic probe, distinct
+//! family), every consumed resource — turns, calls, mutations, verifier
+//! runs, tokens, bytes, wall-clock seconds — is charged against the
+//! declared limit vector, and partial checkpoints carry the correction
+//! packet and the remaining obligations. A crash mid-forest resumes from
+//! the node's last durable checkpoint and re-runs the forest
+//! deterministically — branch workspaces are never resume points.
 
 mod branch;
 mod nogood;
+mod strategy;
 
 use anyhow::{Context, Result};
 use perspt_sdk::search::{BranchCandidate, ReservationTicket};
@@ -24,13 +30,10 @@ use perspt_sdk::{
 use super::node::{seed_from_attempt, CandidateSeed};
 use super::{NodeAttempt, Psp9AgentRuntime, Psp9Recorder};
 use crate::candidate::CodingCandidateMeasurer;
-use crate::toolloop::{LoopEvent, LoopRecorder};
-use branch::{measure_fork_cost, BranchRecorder};
+use crate::toolloop::{LoopEvent, LoopRecorder, Measured};
+use branch::{consumed_usage, measure_fork_cost, BranchRecorder};
 use nogood::{NoGoodComponents, NoGoodStore, NoGoodSupport};
-
-/// The sensor-profile identity branch measurements share (Proposition 5:
-/// candidates compared by energy must use one immutable profile).
-const BRANCH_SENSOR_PROFILE: &str = "coding-suite-v1+perspt-cluster-v1:log-damped";
+use strategy::{next_strategy, BranchStrategy, BranchSummary};
 
 /// Runtime search settings, resolved from `[exploration]` at construction.
 #[derive(Debug, Clone)]
@@ -84,19 +87,52 @@ struct ForestRun<'a> {
     usage: SearchUsage,
     limits: SearchLimits,
     no_goods: NoGoodStore,
+    /// The live verifier-suite identity, derived from the detected plugin
+    /// profiles and the cluster profile — never a hardcoded constant.
+    sensor_fingerprint: String,
+    started: std::time::Instant,
+    epoch: u64,
 }
 
 impl ForestRun<'_> {
     fn emit(&self, event: LoopEvent) -> Result<()> {
         self.recorder.record(&event)
     }
+
+    /// The folded forest identity for this epoch; a deterministic resume
+    /// re-run recomputes and compares it.
+    fn forest_digest(&self) -> String {
+        let mut encoder = perspt_sdk::canon::CanonicalEncoder::new(b"perspt-forest-v1");
+        encoder
+            .text(&self.node_id)
+            .u64(u64::from(self.generation))
+            .text(&self.accepted_root)
+            .u64(self.epoch)
+            .u64(u64::from(self.usage.actions));
+        encoder.digest()
+    }
+}
+
+/// What one finished branch leaves for the next branch's triggers and
+/// goal program — measurements only, never its private workspace.
+struct PreviousBranch {
+    support_key: String,
+    residual_count: usize,
+    energy: f64,
+    residual_summaries: Vec<String>,
+}
+
+/// The next branch's resolved plan.
+struct BranchPlan {
+    strategy: BranchStrategy,
+    route: ModelId,
 }
 
 impl Psp9AgentRuntime {
     /// Open a forest at the recovery ladder's refine rung (system 20): the
-    /// first branch uses the primary actuator route with the default
-    /// strategy; deliberately diverse branches open only on measured
-    /// triggers; one candidate commits through the ordinary gate.
+    /// first `initial_branches` open immediately with the default strategy;
+    /// further branches open only on measured triggers; one candidate
+    /// commits through the ordinary gate.
     #[allow(clippy::too_many_arguments)]
     pub(super) async fn run_search_forest(
         &self,
@@ -113,9 +149,12 @@ impl Psp9AgentRuntime {
         rho_gate: f64,
     ) -> Result<NodeAttempt> {
         let forest_id = uuid::Uuid::new_v4().to_string();
-        let accepted_root = seed
-            .map(|seed| seed.expected_state_root.clone())
-            .unwrap_or_else(|| format!("unseeded:{node_id}:{generation}"));
+        let accepted_root = match seed {
+            Some(seed) => seed.expected_state_root.clone(),
+            // An unseeded forest still measures against the real workspace
+            // content root, never a synthetic marker.
+            None => crate::realize::snapshot_workspace(&self.working_dir, &[])?.root_hash(),
+        };
         let mut forest = ForestRun {
             recorder,
             forest_id: forest_id.clone(),
@@ -127,6 +166,9 @@ impl Psp9AgentRuntime {
             usage: SearchUsage::default(),
             limits: self.search.limits.clone(),
             no_goods: NoGoodStore::default(),
+            sensor_fingerprint: self.live_sensor_fingerprint(),
+            started: std::time::Instant::now(),
+            epoch: 0,
         };
         forest.emit(LoopEvent::SearchOpened {
             forest_id: forest_id.clone(),
@@ -155,10 +197,28 @@ impl Psp9AgentRuntime {
         Ok(chosen)
     }
 
-    /// The sequential branch loop with continuation-before-expansion
-    /// (system 20): a failed branch with accepted files seeds the next as
-    /// a witnessed partial; otherwise a deliberately diverse fresh branch
-    /// opens from the forest seed.
+    /// The live sensor-profile identity: detected plugin verifier commands
+    /// plus the clustering profile, canonically digested (Proposition 5:
+    /// candidates compared by energy must share one immutable profile).
+    fn live_sensor_fingerprint(&self) -> String {
+        let mut encoder = perspt_sdk::canon::CanonicalEncoder::new(b"perspt-sensor-v1");
+        let registry = perspt_core::PluginRegistry::new();
+        for plugin in registry.detect_all(&self.working_dir) {
+            for capability in plugin.verifier_profile().capabilities {
+                encoder
+                    .text(plugin.name())
+                    .text(capability.stage.policy_name())
+                    .text(capability.effective_command().unwrap_or_default());
+            }
+        }
+        encoder.text("perspt-cluster-v1:log-damped");
+        encoder.digest()
+    }
+
+    /// The sequential branch loop. Continuation and expansion are trigger-
+    /// driven (system 20): measured progress continues the witnessed
+    /// partial, a repeated signature forces an alternative approach, and
+    /// stagnation expands to a distinct family.
     #[allow(clippy::too_many_arguments)]
     async fn run_branches(
         &self,
@@ -172,45 +232,112 @@ impl Psp9AgentRuntime {
     ) -> Result<Vec<(BranchCandidate, NodeAttempt, bool)>> {
         let routes = self.branch_routes(model);
         let mut attempts: Vec<(BranchCandidate, NodeAttempt, bool)> = Vec::new();
-        let mut branch_seed: Option<CandidateSeed> = seed.cloned();
-        let mut witness = WitnessRef::root(&forest.accepted_root);
+        let mut partial: Option<(CandidateSeed, WitnessRef)> = None;
+        let mut history: Vec<PreviousBranch> = Vec::new();
         for index in 0..usize::from(self.search.max_branches) {
-            let route = routes[index.min(routes.len() - 1)].clone();
+            let plan = self.plan_branch(index, &routes, &history, forest.baseline_energy);
+            let (branch_seed, witness) = match (&partial, plan.strategy.continues_partial()) {
+                (Some((seed, witness)), true) => (Some(seed.clone()), witness.clone()),
+                _ => (seed.cloned(), WitnessRef::root(&forest.accepted_root)),
+            };
+            let goal_text = branch_goal(goal, plan.strategy, history.last());
+            forest.epoch += 1;
+            forest.emit(LoopEvent::FrontierEpochStarted {
+                forest_id: forest.forest_id.clone(),
+                epoch: forest.epoch,
+                forest_digest: forest.forest_digest(),
+            })?;
             let outcome = self
                 .run_one_branch(
                     forest,
                     session_id,
-                    goal,
+                    &goal_text,
                     graph,
                     branch_seed.as_ref(),
                     &witness,
-                    &route,
+                    &plan,
                     index,
                     remaining_budget,
                 )
                 .await?;
-            let Some((candidate, attempt)) = outcome else {
+            let Some((candidate, attempt, eligible, measured, support_key)) = outcome else {
                 break; // budget refused the fork: the forest must close.
             };
-            let eligible = candidate_eligible(forest, &candidate);
-            let hard = candidate.measurement.hard_pass;
-            attempts.push((candidate, attempt, eligible));
-            if (eligible && hard) || index + 1 >= usize::from(self.search.max_branches) {
-                break;
+            let accepted = eligible && measured.hard_pass;
+            let over_budget = self.charge_attempt(forest, &attempt, &candidate).is_err();
+            if !accepted && !over_budget && index + 1 < usize::from(self.search.max_branches) {
+                partial = self.partial_checkpoint(forest, &attempt, &measured).await?;
             }
-            let last = &attempts.last().expect("just pushed").1;
-            match self.partial_checkpoint(forest, last).await? {
-                Some((next_seed, extended)) => {
-                    branch_seed = Some(next_seed);
-                    witness = extended;
-                }
-                None => {
-                    branch_seed = seed.cloned();
-                    witness = WitnessRef::root(&forest.accepted_root);
-                }
+            history.push(PreviousBranch {
+                support_key,
+                residual_count: measured.residuals.len(),
+                energy: candidate.measurement.energy,
+                residual_summaries: measured
+                    .residuals
+                    .iter()
+                    .take(6)
+                    .map(|residual| residual.evidence.summary.clone())
+                    .collect(),
+            });
+            attempts.push((candidate, attempt, eligible));
+            if accepted || over_budget {
+                break;
             }
         }
         Ok(attempts)
+    }
+
+    /// Resolve the next branch's strategy and route. The first
+    /// `initial_branches` open with the default strategy; later branches
+    /// follow the measured triggers; the distinct-family strategy walks the
+    /// diverse route plan.
+    fn plan_branch(
+        &self,
+        index: usize,
+        routes: &[ModelId],
+        history: &[PreviousBranch],
+        baseline_energy: f64,
+    ) -> BranchPlan {
+        let strategy = if index < usize::from(self.search.initial_branches.max(1)) {
+            BranchStrategy::LocalRepair
+        } else {
+            next_strategy(summarize(history, baseline_energy))
+        };
+        let route_index = if strategy == BranchStrategy::DistinctFamily {
+            index.min(routes.len() - 1)
+        } else {
+            0
+        };
+        BranchPlan {
+            strategy,
+            route: routes[route_index].clone(),
+        }
+    }
+
+    /// Charge the branch's consumed actuals and its wall-clock interval
+    /// against the declared limit vector (Definition 5 — every dimension,
+    /// not only the fork's file/byte cost).
+    fn charge_attempt(
+        &self,
+        forest: &mut ForestRun<'_>,
+        attempt: &NodeAttempt,
+        candidate: &BranchCandidate,
+    ) -> Result<()> {
+        let consumed = consumed_usage(&attempt.outcome);
+        let elapsed = forest.started.elapsed().as_secs();
+        let interval = elapsed.saturating_sub(forest.usage.elapsed_secs);
+        forest
+            .usage
+            .charge(&forest.limits, consumed)
+            .and_then(|()| forest.usage.charge_elapsed(&forest.limits, interval))
+            .map_err(|error| {
+                let _ = forest.emit(LoopEvent::BranchObservation {
+                    forest_id: forest.forest_id.clone(),
+                    branch_id: candidate.measurement.branch_id.clone(),
+                    observation: format!("budget exhausted after branch: {error}"),
+                });
+                anyhow::anyhow!("{error}")
+            })
     }
 
     /// The deliberately diverse route plan: primary first, then fallbacks
@@ -251,18 +378,13 @@ impl Psp9AgentRuntime {
         graph: &perspt_sdk::WorkGraphRevision,
         seed: Option<&CandidateSeed>,
         witness: &WitnessRef,
-        route: &ModelId,
+        plan: &BranchPlan,
         index: usize,
         remaining_budget: u32,
-    ) -> Result<Option<(BranchCandidate, NodeAttempt)>> {
+    ) -> Result<Option<(BranchCandidate, NodeAttempt, bool, Measured, String)>> {
         let branch_id = format!("{}/b{}", forest.forest_id, index + 1);
-        let strategy_id = if index == 0 {
-            "default"
-        } else {
-            "diverse-route"
-        };
-        let no_good = self.no_good_components(forest, goal, strategy_id, route);
-        if !self.admit_fork(forest, &branch_id, &no_good)? {
+        let no_good = self.no_good_components(forest, goal, plan.strategy.id(), &plan.route);
+        if !self.admit_fork(forest, &branch_id, remaining_budget, &no_good)? {
             return Ok(None);
         }
         forest.emit(LoopEvent::BranchForked {
@@ -275,7 +397,12 @@ impl Psp9AgentRuntime {
         forest.emit(LoopEvent::BranchStrategySelected {
             forest_id: forest.forest_id.clone(),
             branch_id: branch_id.clone(),
-            strategy_id: strategy_id.into(),
+            strategy_id: plan.strategy.id().into(),
+        })?;
+        forest.emit(LoopEvent::FrontierEntryServed {
+            forest_id: forest.forest_id.clone(),
+            branch_id: branch_id.clone(),
+            epoch: forest.epoch,
         })?;
         let branch_recorder = BranchRecorder {
             inner: forest.recorder,
@@ -289,30 +416,33 @@ impl Psp9AgentRuntime {
                 goal,
                 &forest.node_id,
                 forest.generation,
-                route,
+                &plan.route,
                 graph,
                 seed,
                 remaining_budget,
                 &branch_recorder,
             )
             .await?;
-        let candidate = self
+        let previewed = self
             .preview_branch(forest, &branch_id, &attempt, &no_good)
             .await?;
-        Ok(Some((candidate, attempt)))
+        let (candidate, eligible, measured, support_key) = previewed;
+        Ok(Some((candidate, attempt, eligible, measured, support_key)))
     }
 
-    /// Reserve the fork's eager-copy cost and check the exact no-good
-    /// store; a refused reservation or a suppressed duplicate creates no
-    /// branch (Gates AC and AB).
+    /// Reserve the fork's eager-copy cost plus the branch's turn quota, and
+    /// check the exact no-good store; a refused reservation or a suppressed
+    /// duplicate creates no branch (Gates AC and AB).
     fn admit_fork(
         &self,
         forest: &mut ForestRun<'_>,
         branch_id: &str,
+        remaining_budget: u32,
         no_good: &NoGoodComponents,
     ) -> Result<bool> {
-        let fork_cost = measure_fork_cost(&self.working_dir);
-        let ticket: ReservationTicket = match forest.usage.reserve(&forest.limits, fork_cost) {
+        let mut request = measure_fork_cost(&self.working_dir);
+        request.model_turns = remaining_budget.min(self.config.max_turns);
+        let ticket: ReservationTicket = match forest.usage.reserve(&forest.limits, request) {
             Ok(ticket) => ticket,
             Err(error) => {
                 forest.emit(LoopEvent::BranchObservation {
@@ -323,8 +453,13 @@ impl Psp9AgentRuntime {
                 return Ok(false);
             }
         };
+        // The turn quota is released here and re-charged from observed
+        // actuals after the branch runs; the fork's file/byte reservation
+        // stands for the branch's lifetime.
+        let mut consumed = *ticket.request();
+        consumed.model_turns = 0;
+        forest.usage.release_unused(ticket, consumed);
         if forest.no_goods.suppresses(no_good) {
-            forest.usage.release_unused(ticket, Default::default());
             forest.emit(LoopEvent::BranchObservation {
                 forest_id: forest.forest_id.clone(),
                 branch_id: branch_id.to_string(),
@@ -344,7 +479,7 @@ impl Psp9AgentRuntime {
         branch_id: &str,
         attempt: &NodeAttempt,
         no_good: &NoGoodComponents,
-    ) -> Result<BranchCandidate> {
+    ) -> Result<(BranchCandidate, bool, Measured, String)> {
         let measurer =
             CodingCandidateMeasurer::new(&attempt.candidate, &forest.node_id, forest.generation)
                 .with_domain(self.domain.clone())
@@ -358,7 +493,7 @@ impl Psp9AgentRuntime {
             energy: measured.energy,
             hard_pass: measured.hard_pass,
             residuals: measured.residuals.clone(),
-            sensor_profile: BRANCH_SENSOR_PROFILE.into(),
+            sensor_profile: forest.sensor_fingerprint.clone(),
             cost: f64::from(attempt.outcome.turns_used),
         };
         forest.emit(LoopEvent::BranchCandidateMeasured {
@@ -367,6 +502,7 @@ impl Psp9AgentRuntime {
             candidate_id,
             measurement: measurement.clone(),
         })?;
+        let mut support_key = String::new();
         if !candidate_preview_accepted(forest, &measurement) {
             forest.emit(LoopEvent::BranchIneligible {
                 forest_id: forest.forest_id.clone(),
@@ -374,6 +510,7 @@ impl Psp9AgentRuntime {
                 reason: "preview did not accept (no hard pass or measured descent)".into(),
             })?;
             let support = no_good_support(&measured);
+            support_key = support.evidence_hash();
             let key = forest.no_goods.record(no_good, &support);
             forest.emit(LoopEvent::NoGoodRecorded {
                 forest_id: forest.forest_id.clone(),
@@ -382,29 +519,50 @@ impl Psp9AgentRuntime {
                 evidence_hash: support.evidence_hash(),
             })?;
         }
-        Ok(BranchCandidate {
+        let eligible = candidate_eligible(forest, &measurement);
+        let candidate = BranchCandidate {
+            targeted_improvement: (forest.baseline_energy - measurement.energy).max(0.0),
             measurement,
-            targeted_improvement: 0.0,
-        })
+        };
+        Ok((candidate, eligible, measured, support_key))
     }
 
     /// Persist an ineligible-but-actionable branch as a private partial
-    /// checkpoint the next quantum may continue (system 19).
+    /// checkpoint the next quantum may continue (system 19). The checkpoint
+    /// carries the correction packet and the remaining obligations, so a
+    /// continuation knows exactly what is left.
     async fn partial_checkpoint(
         &self,
         forest: &mut ForestRun<'_>,
         attempt: &NodeAttempt,
+        measured: &Measured,
     ) -> Result<Option<(CandidateSeed, WitnessRef)>> {
         let Some(seed) = seed_from_attempt(forest.recorder, &forest.node_id, attempt).await? else {
             return Ok(None);
         };
         let witness = WitnessRef::root(&forest.accepted_root).extend(&seed.expected_state_root);
+        let correction = measured.packet.as_ref().map(|packet| {
+            perspt_sdk::CorrectionPacketRef(perspt_sdk::ledger::content_hash(
+                serde_json::to_string(packet).unwrap_or_default().as_bytes(),
+            ))
+        });
+        let remaining_obligations: Vec<perspt_sdk::search::ObligationRef> = measured
+            .residuals
+            .iter()
+            .map(|residual| {
+                perspt_sdk::search::ObligationRef(format!(
+                    "{:?}:{}",
+                    residual.class,
+                    perspt_sdk::ledger::content_hash(residual.evidence.summary.as_bytes())
+                ))
+            })
+            .collect();
         let checkpoint = perspt_sdk::PartialCheckpointRef {
             state_root: seed.expected_state_root.clone(),
             accepted_ancestor: forest.accepted_root.clone(),
             parent_witness: witness.clone(),
-            correction: None,
-            remaining_obligations: Vec::new(),
+            correction,
+            remaining_obligations,
             evidence_digest: seed.expected_state_root.clone(),
         };
         forest.emit(LoopEvent::PartialCheckpointed {
@@ -525,7 +683,8 @@ impl Psp9AgentRuntime {
         Ok(())
     }
 
-    /// The exact no-good components for one attempt configuration.
+    /// The exact no-good components for one attempt configuration. The
+    /// sensor fingerprint is the forest's live verifier identity.
     fn no_good_components(
         &self,
         forest: &ForestRun<'_>,
@@ -546,21 +705,67 @@ impl Psp9AgentRuntime {
             proposal_digest: digest("proposal", goal),
             grant_digest: digest("grant", &self.working_dir.display().to_string()),
             catalog_digest: digest("catalog", "base+domain"),
-            sensor_fingerprint: BRANCH_SENSOR_PROFILE.into(),
+            sensor_fingerprint: forest.sensor_fingerprint.clone(),
             build_digest: digest("build", env!("CARGO_PKG_VERSION")),
         }
     }
 }
 
+/// Fold the branch history into the next branch's trigger inputs: the
+/// latest branch is compared against its predecessor (or the baseline).
+fn summarize(history: &[PreviousBranch], baseline_energy: f64) -> BranchSummary {
+    let Some(last) = history.last() else {
+        return BranchSummary::default();
+    };
+    match history.len() {
+        0 => BranchSummary::default(),
+        1 => BranchSummary {
+            repeated_signature: false,
+            obligations_decreased: false,
+            energy_improved: last.energy < baseline_energy,
+        },
+        _ => {
+            let earlier = &history[history.len() - 2];
+            BranchSummary {
+                repeated_signature: !last.support_key.is_empty()
+                    && last.support_key == earlier.support_key,
+                obligations_decreased: last.residual_count < earlier.residual_count,
+                energy_improved: last.energy < earlier.energy,
+            }
+        }
+    }
+}
+
+/// The strategy-conditioned branch goal: the base goal, the strategy's
+/// fragment, and the previous branch's typed obligation summary.
+fn branch_goal(goal: &str, strategy: BranchStrategy, previous: Option<&PreviousBranch>) -> String {
+    let mut text = goal.to_string();
+    text.push_str("\n\n[search strategy: ");
+    text.push_str(strategy.id());
+    text.push_str("] ");
+    text.push_str(strategy.goal_fragment());
+    if let Some(previous) = previous {
+        if !previous.residual_summaries.is_empty() {
+            text.push_str("\nRemaining diagnostics from the previous attempt:\n");
+            for summary in &previous.residual_summaries {
+                text.push_str("- ");
+                text.push_str(summary);
+                text.push('\n');
+            }
+        }
+    }
+    text
+}
+
 /// Definition 3 eligibility: required sensors ran (no required-stage
 /// `SensorUnavailable`), the witness chain holds by construction, and the
 /// pure gate preview accepts.
-fn candidate_eligible(forest: &ForestRun<'_>, candidate: &BranchCandidate) -> bool {
-    let sensors_ok = !candidate.measurement.residuals.iter().any(|residual| {
+fn candidate_eligible(forest: &ForestRun<'_>, measurement: &BranchMeasurement) -> bool {
+    let sensors_ok = !measurement.residuals.iter().any(|residual| {
         residual.class == ResidualClass::SensorUnavailable
             && residual.evidence.summary.contains("required-stage:")
     });
-    sensors_ok && candidate_preview_accepted(forest, &candidate.measurement)
+    sensors_ok && candidate_preview_accepted(forest, measurement)
 }
 
 fn candidate_preview_accepted(forest: &ForestRun<'_>, measurement: &BranchMeasurement) -> bool {
@@ -579,7 +784,7 @@ fn candidate_preview_accepted(forest: &ForestRun<'_>, measurement: &BranchMeasur
 /// Deterministic support for a failed attempt's no-good (Gate AB): the
 /// dominant compiler code or failed test when present, else the unchanged
 /// realized-state hash class.
-fn no_good_support(measured: &crate::toolloop::Measured) -> NoGoodSupport {
+fn no_good_support(measured: &Measured) -> NoGoodSupport {
     for residual in &measured.residuals {
         if residual.class == ResidualClass::TestFailure {
             return NoGoodSupport::FailedTest(residual.evidence.summary.clone());

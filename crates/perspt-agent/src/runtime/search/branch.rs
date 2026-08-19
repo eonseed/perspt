@@ -117,3 +117,39 @@ pub(crate) fn measure_fork_cost(root: &std::path::Path) -> ReservationRequest {
         ..Default::default()
     }
 }
+
+/// Fold one branch attempt's observed events into the consumed-resource
+/// vector (Definition 5): every model turn, tool call, mutation, verifier
+/// run, output token (under the declared conservative accountant), and
+/// result byte is charged — never only the fork's file cost.
+pub(crate) fn consumed_usage(
+    outcome: &crate::toolloop::LoopOutcome,
+) -> perspt_sdk::search::ReservationRequest {
+    let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
+    let mut consumed = ReservationRequest {
+        model_turns: outcome.turns_used,
+        ..Default::default()
+    };
+    for event in &outcome.events {
+        match event {
+            LoopEvent::ToolCallObserved { .. } => consumed.tool_calls += 1,
+            LoopEvent::EffectApplied {
+                mutated, output, ..
+            } => {
+                if *mutated {
+                    consumed.mutations += 1;
+                }
+                consumed.result_bytes += output.len() as u64;
+            }
+            LoopEvent::CandidateMeasured { .. } | LoopEvent::EffectBoundaryMeasured { .. } => {
+                consumed.verifier_runs += 1;
+            }
+            LoopEvent::TurnObserved { output, .. } => {
+                let serialized = serde_json::to_string(output).unwrap_or_default();
+                consumed.tokens += accountant.count_message(&serialized);
+            }
+            _ => {}
+        }
+    }
+    consumed
+}
