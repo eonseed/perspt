@@ -82,8 +82,11 @@ impl Psp9AgentRuntime {
             schema: entry.schema.clone(),
             strict: false,
         };
-        let stage = perspt_core::prompts::PlatformPromptLibrary::graph_plan(REVISION_SHAPE)
-            .map_err(|e| anyhow::anyhow!("graph plan prompt: {e}"))?;
+        let stage = perspt_core::prompts::PlatformPromptLibrary::graph_plan(
+            REVISION_SHAPE,
+            &self.prompt_overrides,
+        )
+        .map_err(|e| anyhow::anyhow!("graph plan prompt: {e}"))?;
         let invocation = self.actor_invocation(
             recorder,
             "architect",

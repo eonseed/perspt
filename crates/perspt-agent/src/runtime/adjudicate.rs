@@ -27,7 +27,7 @@ impl Psp9AgentRuntime {
         while !diff.is_char_boundary(boundary) {
             boundary -= 1;
         }
-        let stage = perspt_core::prompts::PlatformPromptLibrary::adjudicate()
+        let stage = perspt_core::prompts::PlatformPromptLibrary::adjudicate(&self.prompt_overrides)
             .map_err(|e| anyhow::anyhow!("adjudicate prompt: {e}"))?;
         let invocation = self.actor_invocation(recorder, "adjudicator", &stage, model, &[])?;
         let mut conversation = Conversation::with_system(invocation.platform.system_text());

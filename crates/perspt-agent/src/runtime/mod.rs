@@ -70,6 +70,10 @@ pub struct Psp9AgentRuntime {
     external_entries: Mutex<Option<Vec<perspt_sdk::ToolEntry>>>,
     /// Bounded-search settings from `[exploration]` (PSP-10 system 20).
     search: search::SearchSettings,
+    /// Experimental platform-section overrides from validated
+    /// `[prompts].bundles`, loaded by the composition root only under
+    /// `--allow-experimental-prompts` (PSP-10 system 25, Gate AE).
+    prompt_overrides: perspt_core::prompts::SectionOverrides,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -133,6 +137,7 @@ impl Psp9AgentRuntime {
             external,
             external_entries: Mutex::new(None),
             search: search::SearchSettings::from_config(config.exploration.as_ref()),
+            prompt_overrides: Default::default(),
         })
     }
 
@@ -165,6 +170,7 @@ impl Psp9AgentRuntime {
             external: None,
             external_entries: Mutex::new(None),
             search: search::SearchSettings::default(),
+            prompt_overrides: Default::default(),
         }
     }
 
@@ -221,6 +227,18 @@ impl Psp9AgentRuntime {
         self
     }
 
+    /// Install experimental platform-section overrides (validated bundle
+    /// replacements). The composition root gates this behind
+    /// `--allow-experimental-prompts`; active overrides are ledgered at
+    /// session start.
+    pub fn with_prompt_overrides(
+        mut self,
+        overrides: perspt_core::prompts::SectionOverrides,
+    ) -> Self {
+        self.prompt_overrides = overrides;
+        self
+    }
+
     pub fn with_fallback_models(mut self, models: Vec<ModelId>) -> Self {
         self.fallback_models = models;
         self
@@ -273,6 +291,7 @@ impl Psp9AgentRuntime {
             }),
         )?;
         self.record_route_capabilities(&recorder)?;
+        self.record_prompt_overrides(&recorder)?;
 
         let agent_goal = self.explore(&recorder, task).await?;
 
@@ -309,6 +328,26 @@ impl Psp9AgentRuntime {
         let running_graph = execution_revision(&graph, node_id, WorkNodeState::Running)?;
         recorder.record_custom("graph_revision", serde_json::to_value(&running_graph)?)?;
         Ok((recorder, agent_goal, scheduler, running_graph))
+    }
+
+    /// Gate AE: experimental section overrides are ledgered at session
+    /// start, never silent.
+    fn record_prompt_overrides(&self, recorder: &Psp9Recorder) -> Result<()> {
+        if self.prompt_overrides.is_empty() {
+            return Ok(());
+        }
+        recorder.record_custom(
+            "prompt_overrides_active",
+            serde_json::json!({
+                "experimental": true,
+                "sections": self
+                    .prompt_overrides
+                    .provenance()
+                    .iter()
+                    .map(|(id, hash)| serde_json::json!({"id": id, "content_hash": hash}))
+                    .collect::<Vec<_>>(),
+            }),
+        )
     }
 
     /// Mint (and for persistent grants, sign and verify) the session grant.
@@ -1232,8 +1271,10 @@ impl Psp9AgentRuntime {
                     "authority": "no_tools",
                 }),
             )?;
-            let stage = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize()
-                .map_err(|e| anyhow::anyhow!("evidence summarize prompt: {e}"))?;
+            let stage = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize(
+                &self.prompt_overrides,
+            )
+            .map_err(|e| anyhow::anyhow!("evidence summarize prompt: {e}"))?;
             let invocation = self.actor_invocation(recorder, "summarizer", &stage, model, &[])?;
             let mut conversation = Conversation::with_system(invocation.platform.system_text());
             conversation.push_user(format!(

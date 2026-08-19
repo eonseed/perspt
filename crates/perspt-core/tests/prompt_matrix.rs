@@ -68,23 +68,25 @@ const REVISION_SHAPE: &str =
 #[test]
 fn composed_renderings_are_byte_identical_to_the_literals() {
     assert_eq!(
-        wire_text(&PlatformPromptLibrary::session_bootstrap("coding").unwrap()),
+        wire_text(
+            &PlatformPromptLibrary::session_bootstrap("coding", &Default::default()).unwrap()
+        ),
         WORKER
     );
     assert_eq!(
-        wire_text(&PlatformPromptLibrary::graph_plan(REVISION_SHAPE).unwrap()),
+        wire_text(&PlatformPromptLibrary::graph_plan(REVISION_SHAPE, &Default::default()).unwrap()),
         ARCHITECT
     );
     assert_eq!(
-        wire_text(&PlatformPromptLibrary::repository_explore().unwrap()),
+        wire_text(&PlatformPromptLibrary::repository_explore(&Default::default()).unwrap()),
         EXPLORER
     );
     assert_eq!(
-        wire_text(&PlatformPromptLibrary::adjudicate().unwrap()),
+        wire_text(&PlatformPromptLibrary::adjudicate(&Default::default()).unwrap()),
         ADJUDICATOR
     );
     assert_eq!(
-        wire_text(&PlatformPromptLibrary::evidence_summarize().unwrap()),
+        wire_text(&PlatformPromptLibrary::evidence_summarize(&Default::default()).unwrap()),
         SUMMARIZER
     );
 }
@@ -93,7 +95,8 @@ fn composed_renderings_are_byte_identical_to_the_literals() {
 /// wording instead of the historic hardcoded "coding".
 #[test]
 fn the_worker_domain_is_no_longer_hardcoded() {
-    let research = PlatformPromptLibrary::session_bootstrap("research").unwrap();
+    let research =
+        PlatformPromptLibrary::session_bootstrap("research", &Default::default()).unwrap();
     assert_eq!(
         wire_text(&research),
         "You are a governed research agent. Propose tool calls; every effect is mediated."
@@ -103,8 +106,8 @@ fn the_worker_domain_is_no_longer_hardcoded() {
 /// Composition, provenance, and digests are deterministic.
 #[test]
 fn composition_is_deterministic_with_full_provenance() {
-    let first = PlatformPromptLibrary::session_bootstrap("coding").unwrap();
-    let second = PlatformPromptLibrary::session_bootstrap("coding").unwrap();
+    let first = PlatformPromptLibrary::session_bootstrap("coding", &Default::default()).unwrap();
+    let second = PlatformPromptLibrary::session_bootstrap("coding", &Default::default()).unwrap();
     assert_eq!(digest(&first), digest(&second));
     assert_eq!(first.sections.len(), 2);
     assert!(first
@@ -112,7 +115,7 @@ fn composition_is_deterministic_with_full_provenance() {
         .iter()
         .all(|section| section.content_hash.starts_with("sha256:")));
     // A changed variable changes the digest.
-    let other = PlatformPromptLibrary::session_bootstrap("research").unwrap();
+    let other = PlatformPromptLibrary::session_bootstrap("research", &Default::default()).unwrap();
     assert_ne!(digest(&first), digest(&other));
 }
 
@@ -172,4 +175,48 @@ fn scan(dir: &std::path::Path, offenders: &mut Vec<String>) {
             offenders.push(path.display().to_string());
         }
     }
+}
+
+/// System 25 live substitution: a validated replacement body composes in
+/// place of the base section (same schema, its own content hash), renders
+/// with the base section's typed values, and refuses unknown ids and
+/// undeclared placeholders.
+#[test]
+fn a_bundle_override_substitutes_live_under_the_compiled_schema() {
+    let mut overrides = perspt_core::prompts::SectionOverrides::default();
+    overrides
+        .insert_replacement(
+            "session_bootstrap/role",
+            "You are an experimental governed {{domain_id}} agent.",
+        )
+        .unwrap();
+    let stage = PlatformPromptLibrary::session_bootstrap("coding", &overrides).unwrap();
+    assert!(stage.sections[0]
+        .content
+        .contains("experimental governed coding agent"));
+    let base = PlatformPromptLibrary::session_bootstrap("coding", &Default::default()).unwrap();
+    assert_ne!(
+        stage.sections[0].content_hash, base.sections[0].content_hash,
+        "the replacement carries its own content hash"
+    );
+    assert_eq!(
+        stage.sections[1].content, base.sections[1].content,
+        "sections without an override stay byte-identical"
+    );
+
+    let mut unknown = perspt_core::prompts::SectionOverrides::default();
+    assert!(
+        unknown
+            .insert_replacement("branch_correct/role", "x")
+            .is_err(),
+        "non-platform sections refuse live substitution"
+    );
+
+    let mut bad = perspt_core::prompts::SectionOverrides::default();
+    bad.insert_replacement("session_bootstrap/role", "hello {{undeclared}}")
+        .unwrap();
+    assert!(
+        PlatformPromptLibrary::session_bootstrap("coding", &bad).is_err(),
+        "an undeclared placeholder fails closed at render"
+    );
 }

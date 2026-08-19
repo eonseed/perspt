@@ -27,6 +27,7 @@ pub async fn run(
     allow_dependency_mutation: bool,
     max_parallel_nodes: usize,
     exploration_only: bool,
+    allow_experimental_prompts: bool,
     dashboard: bool,
     dashboard_port: u16,
     config_override: Option<PathBuf>,
@@ -49,9 +50,18 @@ pub async fn run(
     // PSP-10 system 25: configured prompt bundles are validated before any
     // session opens; an invalid bundle refuses startup, never a silent
     // fallback.
+    let mut prompt_overrides = perspt_core::prompts::SectionOverrides::default();
     if let Some(prompts) = &config.prompts {
         if !prompts.bundles.is_empty() {
             super::prompts::validate_configured_bundles(&prompts.bundles)?;
+            if allow_experimental_prompts {
+                prompt_overrides = super::prompts::load_bundle_overrides(&prompts.bundles)?;
+            } else {
+                println!(
+                    "prompt bundles validated; live substitution requires \
+                     --allow-experimental-prompts (Gate AE)"
+                );
+            }
         }
     }
     let approval_policy = if auto_approve {
@@ -120,6 +130,9 @@ pub async fn run(
     };
     println!("Domain: {}", selected.domain_id());
     runtime = runtime.with_domain(selected);
+    if !prompt_overrides.is_empty() {
+        runtime = runtime.with_prompt_overrides(prompt_overrides);
+    }
 
     // Composition root: the shipped read-only tool families (system
     // explorer, local DB explorer) register through the same public path a

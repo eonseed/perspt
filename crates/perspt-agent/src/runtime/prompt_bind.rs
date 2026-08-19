@@ -49,6 +49,7 @@ impl Psp9AgentRuntime {
             &route,
             &dialect,
             &perspt_sdk::prompt::tool_surface_hash(&initial_specs),
+            &self.prompt_overrides,
         )
     }
 }
