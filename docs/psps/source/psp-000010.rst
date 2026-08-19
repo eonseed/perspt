@@ -2532,10 +2532,14 @@ Three statuses are reported separately and never conflated:
        gate. The worker assembles its resident working set over the
        conversation's content-addressed pages before every call; the
        digest lands in the control frame and the invocation record; an
-       infeasible mandatory closure makes no transport call. The TUI
-       chat loop (``external_tools/chat.rs``) is out of scope; the live
-       ``context_recall`` tool is deferred until handler services carry
-       store access.
+       infeasible mandatory closure makes no transport call. Paging is
+       live on the wire: pages outside the assembled resident set are
+       tombstoned in place in the transported conversation (structure
+       and tool pairing preserved; the projection stays whole as the
+       backing store), and the governed ``context_recall`` tool restores
+       an evicted page by id with ledgered
+       ``context_page_recalled``/``context_miss`` events. The TUI chat
+       loop (``external_tools/chat.rs``) is out of scope.
    * - 10 - Graph staging
      - AA
      - SDK + Wired
@@ -2554,10 +2558,15 @@ Three statuses are reported separately and never conflated:
        ``examples/psp10_eval.rs`` (live, credential-gated, never CI) has
        a real ungoverned direct arm, real packet/paging ablation
        toggles, matched Rust and Python tasks, and per-cell process
-       metrics. Live bundle substitution into composed programs waits
-       for override resolution; the adaptive default stays
-       ``initial_branches = 1`` until the recorded evaluation meets the
-       acceptance rule — the flip is a separate reviewed commit.
+       metrics. Live bundle substitution is wired: a validated
+       replacement body substitutes into the composed platform programs
+       under exactly the compiled schema, only with
+       ``--allow-experimental-prompts``, with every active override
+       ledgered (``prompt_overrides_active``); domain-stage
+       (``branch_correct``) substitution is refused loudly, not silently
+       skipped. The adaptive default stays ``initial_branches = 1``
+       until the recorded evaluation meets the acceptance rule — the
+       flip is a separate reviewed commit.
 
 =========================
 Resolved Design Decisions
