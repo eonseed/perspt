@@ -192,16 +192,23 @@ async fn disjoint_nodes_run_concurrently_and_both_promote() {
         dispatch_sequences[1] < first_terminal,
         "the second node must dispatch while the first is still running"
     );
-    // PSP-10 Phase 1: the architect's update_graph proposal passed the
-    // admissibility kernel — the witness is ledgered before the plan lands.
-    let admissibility = rows
+    // PSP-10 Phase 1 (hardened): the architect's update_graph proposal
+    // passed the admissibility kernel with real contract and barrier
+    // evaluators — the ledgered witness is SrbnCertified, never
+    // ConfinementOnly, and precedes the plan.
+    let admissibility_row = rows
         .iter()
         .find(|row| {
             row.event_json
                 .contains("\"kind\":\"graph_plan_admissibility\"")
         })
-        .map(|row| row.sequence)
         .expect("architect turn must ledger its admissibility witness");
+    assert!(
+        admissibility_row.event_json.contains("srbn_certified"),
+        "the architect witness must be SrbnCertified: {}",
+        admissibility_row.event_json
+    );
+    let admissibility = admissibility_row.sequence;
     let planned = rows
         .iter()
         .find(|row| row.event_json.contains("\"kind\":\"graph_planned\""))

@@ -154,35 +154,34 @@ impl Psp9AgentRuntime {
         Ok(Some(graph))
     }
 
-    /// Kernel mediation for the architect's graph update (PSP-10 Phase 1).
-    /// The runtime mints a single-use `UpdateGraph` capability — workers
-    /// never hold one (`WITHHELD_EFFECTS` is unchanged) — and the proposal
-    /// runs the admissibility kernel like every other effect. No contract or
-    /// barrier evaluator exists before a candidate workspace; those clauses
-    /// are recorded as missing in the witness, never defaulted true.
+    /// Kernel mediation for the architect's graph update (PSP-10 Phase 1,
+    /// hardened). Authority derives from the session composition-root
+    /// grant — the same `session_grant_policy` construction every worker
+    /// grant attenuates from, with `UpdateGraph` as the one architect-role
+    /// opt-in — never a locally invented policy. The proposal runs the full
+    /// kernel with a real plan contract (graph validity) and a real plan
+    /// barrier (shape bounds), and only an `SrbnCertified` allow admits the
+    /// revision; a `ConfinementOnly` witness refuses.
     fn admit_graph_update(
         &self,
         recorder: &Psp9Recorder,
         node_id: &str,
         revision_json: &str,
     ) -> Result<bool> {
-        let workspace_root = self.working_dir.canonicalize()?.display().to_string();
-        let policy_id = uuid::Uuid::new_v4().to_string();
-        let policy = perspt_sdk::GrantPolicy {
-            policy_id: policy_id.clone(),
-            workspace_root,
-            effect_ceiling: vec![perspt_sdk::EffectKind::UpdateGraph],
-            path_ceiling: Vec::new(),
-            command_ceiling: Vec::new(),
-            network_ceiling: Vec::new(),
-            approval_ceiling: perspt_sdk::ApprovalPolicy::Auto,
-            authority_epoch: 0,
-            persistent: false,
-            integrity_binding: format!(
-                "ledger:{}",
-                perspt_sdk::ledger::content_hash(policy_id.as_bytes())
-            ),
-        };
+        let catalog = perspt_sdk::StaticCatalog::with_base(Vec::new())
+            .map_err(|e| anyhow::anyhow!("plan catalog: {e}"))?;
+        let mut policy = session_grant_policy(
+            &self.working_dir,
+            "initial-plan",
+            false,
+            &catalog,
+            &[perspt_sdk::EffectKind::UpdateGraph],
+        )?;
+        // The architect is a Session-role actor, so the ceiling's approval
+        // policy binds directly; the operator's configured session approval
+        // is the authority here (multi-node dispatch already requires an
+        // auto-approved session).
+        policy.approval_ceiling = self.config.approval_policy;
         let mut requested = perspt_sdk::Capability::new(
             perspt_sdk::ActorId::new("architect"),
             vec![perspt_sdk::EffectKind::UpdateGraph],
@@ -204,17 +203,84 @@ impl Psp9AgentRuntime {
             graph_state_witness(node_id, "unplanned"),
             graph_state_witness(node_id, revision_json),
         );
+        let contract = PlanContract {
+            revision_json: revision_json.to_string(),
+        };
+        let barrier = PlanBarrier {
+            revision_json: revision_json.to_string(),
+            max_nodes: self.config.max_parallel_nodes.saturating_mul(4).max(4),
+        };
         let witness = perspt_sdk::check_full_admissibility(
             &transition,
             std::slice::from_ref(&capability),
             &perspt_sdk::KernelState::new(),
-            None,
-            None,
+            Some(&contract),
+            Some(&barrier),
             0.25,
         )
         .map_err(|e| anyhow::anyhow!("plan kernel: {e}"))?;
         recorder.record_custom("graph_plan_admissibility", serde_json::to_value(&witness)?)?;
-        Ok(witness.allows())
+        Ok(witness.allows() && witness.profile == perspt_sdk::AdmissibilityProfile::SrbnCertified)
+    }
+}
+
+/// The plan contract: the proposed revision must parse against the
+/// advertised shape and build a valid (acyclic, complete) work graph with
+/// nonempty goals.
+struct PlanContract {
+    revision_json: String,
+}
+
+impl perspt_sdk::ContractEvaluator for PlanContract {
+    fn evaluate(&self, _transition: &perspt_sdk::CandidateTransition) -> ContractWitness {
+        let ok = serde_json::from_str::<PlanSpec>(&self.revision_json)
+            .ok()
+            .filter(|spec| spec.nodes.iter().all(|node| !node.goal.trim().is_empty()))
+            .and_then(|spec| build_planned_graph(&spec).ok())
+            .is_some();
+        ContractWitness {
+            ok,
+            policy_version: "plan-contract-v1".into(),
+            evidence_refs: vec![perspt_sdk::ledger::content_hash(
+                self.revision_json.as_bytes(),
+            )],
+        }
+    }
+}
+
+/// The plan barrier: graph shape stays inside declared bounds. Oversized
+/// or reference-broken revisions certify an unsafe increment.
+struct PlanBarrier {
+    revision_json: String,
+    max_nodes: usize,
+}
+
+impl perspt_sdk::BarrierEvaluator for PlanBarrier {
+    fn evaluate(
+        &self,
+        _transition: &perspt_sdk::CandidateTransition,
+    ) -> std::result::Result<perspt_sdk::BarrierWitness, perspt_sdk::SdkError> {
+        let shape_safe = serde_json::from_str::<PlanSpec>(&self.revision_json)
+            .map(|spec| {
+                let ids: std::collections::BTreeSet<&str> = spec
+                    .nodes
+                    .iter()
+                    .map(|node| node.node_id.as_str())
+                    .collect();
+                spec.nodes.len() <= self.max_nodes
+                    && spec
+                        .edges
+                        .iter()
+                        .all(|(src, dst)| ids.contains(src.as_str()) && ids.contains(dst.as_str()))
+            })
+            .unwrap_or(false);
+        Ok(perspt_sdk::BarrierWitness {
+            h_before: 0.0,
+            expected_h_after_upper: if shape_safe { 0.0 } else { 1.0 },
+            certified_increment: if shape_safe { 0.0 } else { 1.0 },
+            unsafe_threshold: 0.5,
+            evidence_refs: vec!["plan-barrier-v1".into()],
+        })
     }
 }
 
