@@ -95,6 +95,37 @@ impl CompiledPromptProgram {
     }
 }
 
+impl CompiledPromptProgram {
+    /// The transport-facing system text: system-role messages in layout
+    /// order. Under a single-slot dialect this is exactly the one
+    /// concatenated slot.
+    pub fn system_text(&self) -> String {
+        self.messages
+            .iter()
+            .filter(|message| message.role == PromptMessageRole::System)
+            .map(|message| message.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
+
+/// The content hash of the exact tool surface offered on one model call:
+/// name, description, and schema of every spec, in offered order. Enters
+/// the compiled program digest, so a discovery-activated tool visibly
+/// changes the program identity.
+pub fn tool_surface_hash(specs: &[crate::model::ToolSpec]) -> String {
+    let mut encoder = CanonicalEncoder::new(PROMPT_DIGEST_TAG);
+    encoder.text("tool-surface");
+    for spec in specs {
+        encoder
+            .text(&spec.name)
+            .text(&spec.description)
+            .text(&spec.schema.to_string())
+            .bool(spec.strict);
+    }
+    encoder.digest()
+}
+
 /// The two programs of one model call, hashed together in order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompiledPromptInvocation {

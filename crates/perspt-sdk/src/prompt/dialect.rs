@@ -86,6 +86,33 @@ impl ModelDialect {
         }
     }
 
+    /// The live genai adapter: native tool calls behind one system slot.
+    /// The compiled system sections join with the stage's declared
+    /// separator (see `StageComposition::system_separator`), which keeps
+    /// the migrated platform literals byte-identical on the wire.
+    pub fn genai_single_slot_v1() -> Self {
+        Self {
+            id: "genai_single_slot_v1".into(),
+            version: 1,
+            system_slots: SystemSlotPolicy::SingleConcatenated,
+            tool_calls: ToolCallConvention::Native,
+            reasoning: ReasoningTracePolicy::Stripped,
+            boundary_marker: String::new(),
+            context_window_tokens: 131_072,
+            max_output_tokens: 16_384,
+            token_accountant: TokenAccountantRef::approx_bytes_v1(),
+            max_prompt_bytes: 262_144,
+        }
+    }
+
+    /// The same dialect fitted to one route's declared context window. The
+    /// effective token budget is identity-bearing and enters the program
+    /// digest, so narrowing it is recorded, never silent.
+    pub fn with_context_window(mut self, tokens: u64) -> Self {
+        self.context_window_tokens = tokens.max(1);
+        self
+    }
+
     /// A family reached through a single-system-slot endpoint that emits
     /// tool calls as JSON in text.
     pub fn json_single_slot_v1() -> Self {

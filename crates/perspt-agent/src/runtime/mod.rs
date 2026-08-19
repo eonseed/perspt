@@ -430,7 +430,19 @@ impl Psp9AgentRuntime {
             )?
         };
         let kernel_state = loop_kernel_state(&assembly.grant_policy, &graph.revision_id);
-        let envelope = worker_envelope(recorder, &self.domain.domain_id().0)?;
+        let (prompt_route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), model);
+        let initial_specs = assembly.catalog.deferred_specs_for(
+            std::slice::from_ref(&assembly.capability),
+            &Default::default(),
+            false,
+        );
+        let envelope = worker_envelope(
+            recorder,
+            &self.domain,
+            &prompt_route,
+            &dialect,
+            &perspt_sdk::prompt::tool_surface_hash(&initial_specs),
+        )?;
         let tool_loop = ToolLoop {
             transport: self.transport.as_ref(),
             model: model.clone(),
@@ -1244,10 +1256,20 @@ impl Psp9AgentRuntime {
                     "authority": "no_tools",
                 }),
             )?;
-            let envelope = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize()
+            let stage = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize()
                 .map_err(|e| anyhow::anyhow!("evidence summarize prompt: {e}"))?;
-            recorder.record_prompt_program("evidence_summarize", &envelope)?;
-            let mut conversation = Conversation::with_system(envelope.text);
+            let (route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), model);
+            let invocation = perspt_core::prompts::compile_invocation(
+                &stage,
+                &[],
+                &route,
+                &dialect,
+                &perspt_sdk::prompt::tool_surface_hash(&[]),
+            )
+            .map_err(|e| anyhow::anyhow!("evidence summarize program: {e}"))?;
+            recorder.record_prompt_program(&invocation.platform)?;
+            recorder.record_prompt_invocation("summarizer", 1, &invocation)?;
+            let mut conversation = Conversation::with_system(invocation.platform.system_text());
             conversation.push_user(format!(
                 "Task: {task}\nRepository map:\n{}",
                 serde_json::to_string_pretty(&report.project_map)?

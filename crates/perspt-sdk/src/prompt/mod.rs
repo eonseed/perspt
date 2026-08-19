@@ -30,7 +30,9 @@ pub use context::{
 pub use dialect::{
     DialectRef, ModelDialect, ReasoningTracePolicy, SystemSlotPolicy, ToolCallConvention,
 };
-pub use digest::{CompiledPromptInvocation, CompiledPromptMessage, CompiledPromptProgram};
+pub use digest::{
+    tool_surface_hash, CompiledPromptInvocation, CompiledPromptMessage, CompiledPromptProgram,
+};
 pub use manifest::{
     ActivationBounds, ActivationState, ManifestEntry, PromptChangeRecord, PromptManifest,
     ACTIVATION_BOOTSTRAP_RESAMPLES,

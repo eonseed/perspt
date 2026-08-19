@@ -27,10 +27,20 @@ impl Psp9AgentRuntime {
         while !diff.is_char_boundary(boundary) {
             boundary -= 1;
         }
-        let envelope = perspt_core::prompts::PlatformPromptLibrary::adjudicate()
+        let stage = perspt_core::prompts::PlatformPromptLibrary::adjudicate()
             .map_err(|e| anyhow::anyhow!("adjudicate prompt: {e}"))?;
-        recorder.record_prompt_program("adjudicate", &envelope)?;
-        let mut conversation = Conversation::with_system(envelope.text);
+        let (route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), model);
+        let invocation = perspt_core::prompts::compile_invocation(
+            &stage,
+            &[],
+            &route,
+            &dialect,
+            &perspt_sdk::prompt::tool_surface_hash(&[]),
+        )
+        .map_err(|e| anyhow::anyhow!("adjudicate program: {e}"))?;
+        recorder.record_prompt_program(&invocation.platform)?;
+        recorder.record_prompt_invocation("adjudicator", 1, &invocation)?;
+        let mut conversation = Conversation::with_system(invocation.platform.system_text());
         conversation.push_user(format!(
             "Task: {task}\nDiff artifact: {diff_handle}\nRealized diff:\n{}",
             &diff[..boundary]

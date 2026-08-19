@@ -157,6 +157,20 @@ struct TurnState {
     /// decision, and durable checkpoint (Proposition 2 keys by it).
     current_candidate: String,
     turns_used: u32,
+    /// The prompt binding of the most recent compile (PSP-10 Gate Z): the
+    /// tool-surface hash and route it was compiled for, plus its digests.
+    prompt: PromptBinding,
+}
+
+/// The live per-call prompt identity (recompiled when the tool surface or
+/// the failover route changes).
+#[derive(Default)]
+struct PromptBinding {
+    surface_hash: String,
+    route_key: String,
+    invocation_digest: String,
+    platform_digest: String,
+    domain_digest: String,
 }
 
 impl TurnState {
@@ -264,6 +278,16 @@ impl ToolLoop<'_> {
             candidate_seq: 1,
             current_candidate: format!("{}/{}/c0", self.node_id, self.generation),
             turns_used: 0,
+            prompt: match &self.system_prompt.invocation {
+                Some(invocation) => PromptBinding {
+                    surface_hash: invocation.platform.tool_spec_hash.clone(),
+                    route_key: format!("{}", self.model),
+                    invocation_digest: invocation.invocation_digest.clone(),
+                    platform_digest: invocation.platform.program_digest.clone(),
+                    domain_digest: invocation.domain.program_digest.clone(),
+                },
+                None => PromptBinding::default(),
+            },
         };
         if let Some(outcome) = self.baseline_terminal(&baseline) {
             return Ok(state.finish(outcome));
@@ -555,6 +579,70 @@ impl ToolLoop<'_> {
             || turn == self.budgets.max_turns
     }
 
+    /// Ledger the exact prompt binding of this call (PSP-10 Gate Z):
+    /// recompile through the SDK compiler when the offered tool surface or
+    /// the failover route changed, then record one invocation per call.
+    fn bind_prompt_program(
+        &self,
+        turn: u32,
+        specs: &[perspt_sdk::ToolSpec],
+        state: &mut TurnState,
+    ) -> Result<()> {
+        let Some(stage) = &self.system_prompt.stage else {
+            return Ok(());
+        };
+        let surface_hash = perspt_sdk::prompt::tool_surface_hash(specs);
+        let route_key = format!("{}", self.model);
+        if state.prompt.surface_hash != surface_hash || state.prompt.route_key != route_key {
+            let (route, dialect) = crate::turn::route_dialect(self.transport, &self.model);
+            let invocation = perspt_core::prompts::compile_invocation(
+                stage,
+                &self.system_prompt.domain_sections,
+                &route,
+                &dialect,
+                &surface_hash,
+            )
+            .map_err(|e| anyhow::anyhow!("prompt recompilation failed closed: {e}"))?;
+            emit(
+                self.recorder,
+                &mut state.log,
+                LoopEvent::PromptProgramCompiled {
+                    turn,
+                    program: invocation.platform.clone(),
+                },
+            )?;
+            if !invocation.domain.messages.is_empty() {
+                emit(
+                    self.recorder,
+                    &mut state.log,
+                    LoopEvent::PromptProgramCompiled {
+                        turn,
+                        program: invocation.domain.clone(),
+                    },
+                )?;
+            }
+            state.prompt = PromptBinding {
+                surface_hash,
+                route_key,
+                invocation_digest: invocation.invocation_digest.clone(),
+                platform_digest: invocation.platform.program_digest.clone(),
+                domain_digest: invocation.domain.program_digest.clone(),
+            };
+        }
+        emit(
+            self.recorder,
+            &mut state.log,
+            LoopEvent::PromptProgramInvoked {
+                turn,
+                invocation_digest: state.prompt.invocation_digest.clone(),
+                platform_digest: state.prompt.platform_digest.clone(),
+                domain_digest: state.prompt.domain_digest.clone(),
+                tool_spec_hash: state.prompt.surface_hash.clone(),
+                resident_context_digest: String::new(),
+            },
+        )
+    }
+
     /// One model turn: send the conversation, record the observation, and
     /// route every returned call through the kernel. `mutations_so_far` is
     /// the count since the last boundary; the cadence bound `H` caps what
@@ -569,6 +657,7 @@ impl ToolLoop<'_> {
         let specs =
             self.catalog
                 .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
+        self.bind_prompt_program(turn, &specs, state)?;
         let conversation = context.conversation().clone();
         let output = self
             .chat_with_failover(&conversation, &specs, &mut state.recovery, &mut state.log)
@@ -671,7 +760,11 @@ impl ToolLoop<'_> {
         ControlFrame {
             projection_digest: context.digest().to_string(),
             event_schema_version: perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
-            prompt_invocation_digest: self.system_prompt.invocation_digest.clone(),
+            prompt_invocation_digest: if state.prompt.invocation_digest.is_empty() {
+                self.system_prompt.invocation_digest.clone()
+            } else {
+                state.prompt.invocation_digest.clone()
+            },
             prompt_manifest_digest: self.system_prompt.manifest_digest.clone(),
             resident_context_digest: String::new(),
             goal: goal.to_string(),

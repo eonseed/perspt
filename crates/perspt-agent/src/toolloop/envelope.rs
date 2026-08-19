@@ -62,6 +62,8 @@ pub(crate) fn is_legacy_variant(event: &LoopEvent) -> bool {
         | LoopEvent::ContextMiss { .. }
         | LoopEvent::ContextPageRecalled { .. }
         | LoopEvent::ContextInfeasible { .. }
+        | LoopEvent::PromptProgramCompiled { .. }
+        | LoopEvent::PromptProgramInvoked { .. }
         | LoopEvent::ContextCompacted { .. } => false,
     }
 }

@@ -35,6 +35,24 @@ impl ActorKind {
 /// The default per-turn wall-clock deadline when none is configured.
 pub const DEFAULT_TURN_DEADLINE_SECS: u64 = 120;
 
+/// The prompt route and dialect of one resolved model (PSP-10 system 24):
+/// route identity from the transport, the single-slot genai dialect fitted
+/// to the route's declared context window. Scripted transports get the
+/// same structural dialect, so tests exercise the production layout.
+pub fn route_dialect(
+    transport: &dyn ModelTransport,
+    model: &ModelId,
+) -> (
+    perspt_sdk::prompt::PromptRoute,
+    perspt_sdk::prompt::ModelDialect,
+) {
+    let route = transport.prompt_route(model);
+    let window = u64::from(transport.capabilities(model).max_context_tokens.max(1));
+    let dialect =
+        perspt_sdk::prompt::ModelDialect::genai_single_slot_v1().with_context_window(window);
+    (route, dialect)
+}
+
 /// One transport call under a hard wall-clock deadline — the one door every
 /// actor's model turn goes through. A finite turn count alone never bounds
 /// wall time; the deadline does. Exceeding it is an ordinary transport

@@ -85,8 +85,26 @@ pub fn render(stage: &str) -> Result<()> {
         ),
     }
     .map_err(|e| anyhow::anyhow!("{e}"))?;
+    // Render through the one SDK compiler, for a neutral preview route.
+    let route = perspt_sdk::prompt::PromptRoute {
+        adapter: "preview".into(),
+        family: perspt_sdk::ModelFamily::Other("preview".into()),
+        exact_model: None,
+    };
+    let dialect = perspt_sdk::prompt::ModelDialect::genai_single_slot_v1();
+    let program = composed
+        .compile(
+            &route,
+            &dialect,
+            &perspt_sdk::prompt::tool_surface_hash(&[]),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     println!("stage: {stage}");
-    println!("digest: {}", composed.digest);
+    println!("digest: {}", program.program_digest);
+    println!(
+        "dialect: {} v{}",
+        program.dialect.id, program.dialect.version
+    );
     println!("sections:");
     for section in &composed.sections {
         println!(
@@ -94,7 +112,10 @@ pub fn render(stage: &str) -> Result<()> {
             section.id.0, section.version.0, section.content_hash
         );
     }
-    println!("---\n{}", composed.text);
+    if !program.dropped_sections.is_empty() {
+        println!("dropped: {:?}", program.dropped_sections);
+    }
+    println!("---\n{}", program.system_text());
     Ok(())
 }
 
