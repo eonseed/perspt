@@ -593,9 +593,12 @@ impl Psp9AgentRuntime {
             }
             match level {
                 perspt_sdk::CascadeLevel::Refine => {
-                    let (revised, refined_goal) =
-                        refine_node(recorder, &graph, node_id, generation, &goal, &attempt)?;
-                    redispatch_refined(recorder, scheduler, &revised, node_id, generation)?;
+                    let refined = refine_rung(
+                        recorder, scheduler, &graph, node_id, generation, &goal, &attempt,
+                    )?;
+                    let Some((revised, refined_goal)) = refined else {
+                        continue;
+                    };
                     graph = revised;
                     generation += 1;
                     goal = refined_goal;
@@ -608,15 +611,8 @@ impl Psp9AgentRuntime {
                 }
                 _ => unreachable!("ladder iterates refine and escalate only"),
             }
-            // Restore-best across rungs, then open a bounded search forest
-            // (PSP-10 system 20): isolated branches against the same
-            // accepted root, one candidate committed through the ordinary
-            // gate by the deterministic rule.
-            let seed = seed_from_attempt(recorder, node_id, &attempt).await?;
-            let baseline_energy = attempt.outcome.trajectory.best_accepted_energy;
-            let rho_gate = attempt.assembly.energy.rho_gate;
             let next = self
-                .run_search_forest(
+                .rung_forest(
                     recorder,
                     session_id,
                     &goal,
@@ -624,10 +620,8 @@ impl Psp9AgentRuntime {
                     generation,
                     &model,
                     &graph,
-                    seed.as_ref(),
+                    &attempt,
                     remaining_budget,
-                    baseline_energy,
-                    rho_gate,
                 )
                 .await?;
             let spent = spent_of(&next);
@@ -636,6 +630,42 @@ impl Psp9AgentRuntime {
         }
         contain_if_escalated(recorder, session_id, &attempt)?;
         Ok((attempt, graph, generation))
+    }
+
+    /// One rung's re-attempt: restore-best, then open a bounded search
+    /// forest (PSP-10 system 20) — isolated branches against the same
+    /// accepted root, one candidate committed through the ordinary gate
+    /// by the deterministic rule.
+    #[allow(clippy::too_many_arguments)]
+    async fn rung_forest(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        goal: &str,
+        node_id: &str,
+        generation: u32,
+        model: &ModelId,
+        graph: &WorkGraphRevision,
+        attempt: &NodeAttempt,
+        remaining_budget: u32,
+    ) -> Result<NodeAttempt> {
+        let seed = seed_from_attempt(recorder, node_id, attempt).await?;
+        let baseline_energy = attempt.outcome.trajectory.best_accepted_energy;
+        let rho_gate = attempt.assembly.energy.rho_gate;
+        self.run_search_forest(
+            recorder,
+            session_id,
+            goal,
+            node_id,
+            generation,
+            model,
+            graph,
+            seed.as_ref(),
+            remaining_budget,
+            baseline_energy,
+            rho_gate,
+        )
+        .await
     }
 
     /// Multi-node session: dispatch the planned graph, then close the
@@ -1248,78 +1278,6 @@ impl Psp9AgentRuntime {
         })
     }
 
-    async fn explore(&self, recorder: &Psp9Recorder, task: &str) -> Result<String> {
-        let root = self.working_dir.clone();
-        let report = tokio::task::spawn_blocking(move || crate::exploration::map_workspace(&root))
-            .await
-            .context("repository exploration worker panicked")??;
-        recorder.record_custom("exploration_report", serde_json::to_value(&report)?)?;
-        self.emit(perspt_core::AgentEvent::Log(format!(
-            "Exploration mapped {} language groups and {} package roots",
-            report.project_map.languages.len(),
-            report.project_map.package_roots.len()
-        )));
-
-        let mut advisory = None;
-        if let Some(model) = &self.explorer_model {
-            recorder.record_custom(
-                "route_resolved",
-                serde_json::json!({
-                    "phase": "explore",
-                    "model": model,
-                    "reason": "configured speculator/explorer route",
-                    "authority": "no_tools",
-                }),
-            )?;
-            let stage = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize(
-                &self.prompt_overrides,
-            )
-            .map_err(|e| anyhow::anyhow!("evidence summarize prompt: {e}"))?;
-            let invocation = self.actor_invocation(recorder, "summarizer", &stage, model, &[])?;
-            let mut conversation = Conversation::with_system(invocation.platform.system_text());
-            conversation.push_user(format!(
-                "Task: {task}\nRepository map:\n{}",
-                serde_json::to_string_pretty(&report.project_map)?
-            ));
-            let mut runner = crate::turn::ActorTurnRunner {
-                transport: self.transport.as_ref(),
-                model: model.clone(),
-                fallbacks: self.fallback_models.clone(),
-                recorder: Some(recorder),
-                actor: crate::turn::ActorKind::Summarizer,
-                deadline_secs: self.config.turn_deadline_secs,
-                turn: 1,
-            };
-            match runner
-                .run_turn(&conversation, &[], ToolChoicePolicy::None)
-                .await
-            {
-                Ok(output) => {
-                    recorder.record_custom(
-                        "exploration_model_observation",
-                        serde_json::json!({"model": model, "output": output}),
-                    )?;
-                    if let TurnOutput::Text(text) = output {
-                        advisory = Some(text);
-                    }
-                }
-                Err(error) => {
-                    recorder.record_custom(
-                        "exploration_model_unavailable",
-                        serde_json::json!({"model": model, "error": error.to_string()}),
-                    )?;
-                }
-            }
-        }
-
-        Ok(format!(
-            "{task}\n\nDeterministic repository map (advisory orientation, not acceptance evidence):\n{}{}",
-            serde_json::to_string_pretty(&report.project_map)?,
-            advisory
-                .map(|summary| format!("\n\nUntrusted explorer summary:\n{summary}"))
-                .unwrap_or_default()
-        ))
-    }
     async fn approve_promotion(
         &self,
         recorder: &Psp9Recorder,
