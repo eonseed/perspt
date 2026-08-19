@@ -278,7 +278,11 @@ impl ToolLoop<'_> {
         if let Some(outcome) = self.baseline_terminal(&baseline) {
             return Ok(state.finish(outcome));
         }
-        let mut context = self.open_context(goal, resumed, restored_activated_tools, &mut state)?;
+        // The first call carries the measured baseline diagnostics: the
+        // model starts from evidence, not from a blind read of the tree.
+        let seeded_goal = goal_with_baseline(goal, &baseline);
+        let mut context =
+            self.open_context(&seeded_goal, resumed, restored_activated_tools, &mut state)?;
 
         let mut mutations_since_boundary = 0u32;
         for turn in 1..=self.budgets.max_turns {
@@ -1286,6 +1290,22 @@ fn push_correction(
             }
         });
     context.push_user(instruction, recorder, log)
+}
+
+/// The seeded goal plus the baseline's typed diagnostics (up to six),
+/// so the first model turn starts from measured evidence.
+fn goal_with_baseline(goal: &str, baseline: &Measured) -> String {
+    if baseline.residuals.is_empty() {
+        return goal.to_string();
+    }
+    let mut text = goal.to_string();
+    text.push_str("\n\nBaseline diagnostics (already measured):\n");
+    for residual in baseline.residuals.iter().take(6) {
+        text.push_str("- ");
+        text.push_str(&residual.evidence.summary);
+        text.push('\n');
+    }
+    text
 }
 
 /// The finite decision bound the loop must respect. Computed once at node
