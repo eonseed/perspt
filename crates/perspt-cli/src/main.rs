@@ -107,6 +107,11 @@ enum Commands {
         #[arg(long)]
         exploration_only: bool,
 
+        /// Substitute validated [prompts] bundle sections live (Gate AE:
+        /// experimental until a change record passes paired evaluation)
+        #[arg(long)]
+        allow_experimental_prompts: bool,
+
         /// Ordered sticky actuator fallback route; repeat to add routes
         #[arg(long = "fallback-model")]
         fallback_models: Vec<String>,
@@ -366,6 +371,7 @@ async fn main() -> Result<()> {
             allow_dependency_mutation,
             max_parallel_nodes,
             exploration_only,
+            allow_experimental_prompts,
             fallback_models,
             output_summary,
             db_path,
@@ -393,6 +399,7 @@ async fn main() -> Result<()> {
                 allow_dependency_mutation,
                 max_parallel_nodes,
                 exploration_only,
+                allow_experimental_prompts,
                 dashboard,
                 dashboard_port,
                 config_override,

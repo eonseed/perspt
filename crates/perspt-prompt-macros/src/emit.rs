@@ -104,6 +104,15 @@ fn emit_base(section: &CompiledSection) -> String {
          \x20   impl {name} {{\n\
          \x20       pub fn template() -> perspt_sdk::prompt::SectionTemplate {{\n\
          \x20           {template}\n\
+         \x20       }}\n\n\
+         \x20       /// The typed variable values this instance renders with —\n\
+         \x20       /// the substitution input for a validated override body.\n\
+         \x20       pub fn values(\n\
+         \x20           &self,\n\
+         \x20       ) -> std::collections::BTreeMap<String, perspt_sdk::prompt::VarValue> {{\n\
+         \x20           #[allow(unused_mut)]\n\
+         \x20           let mut values = std::collections::BTreeMap::new();\n{inserts}\n\
+         \x20           values\n\
          \x20       }}\n\
          \x20   }}\n\n\
          \x20   impl perspt_sdk::prompt::PromptSection for {name} {{\n\
@@ -113,10 +122,7 @@ fn emit_base(section: &CompiledSection) -> String {
          \x20       const REQUIRED: bool = {required};\n\
          \x20       const PRIORITY: u16 = {priority};\n\n\
          \x20       fn render(&self) -> perspt_sdk::error::Result<perspt_sdk::prompt::RenderedSection> {{\n\
-         \x20           let template = Self::template();\n\
-         \x20           #[allow(unused_mut)]\n\
-         \x20           let mut values = std::collections::BTreeMap::new();\n{inserts}\n\
-         \x20           template.render(&values)\n\
+         \x20           Self::template().render(&self.values())\n\
          \x20       }}\n\
          \x20   }}\n",
         file = section.file_name,

@@ -73,12 +73,13 @@ pub fn list() -> Result<()> {
 /// `perspt prompts render <stage>`: compose a stage with fixture
 /// variables and print the composed text, provenance, and digest.
 pub fn render(stage: &str) -> Result<()> {
+    let base = perspt_core::prompts::SectionOverrides::default();
     let composed = match stage {
-        "session_bootstrap" => PlatformPromptLibrary::session_bootstrap("coding"),
-        "graph_plan" => PlatformPromptLibrary::graph_plan("{\"nodes\":[…],\"edges\":[…]}"),
-        "repository_explore" => PlatformPromptLibrary::repository_explore(),
-        "adjudicate" => PlatformPromptLibrary::adjudicate(),
-        "evidence_summarize" => PlatformPromptLibrary::evidence_summarize(),
+        "session_bootstrap" => PlatformPromptLibrary::session_bootstrap("coding", &base),
+        "graph_plan" => PlatformPromptLibrary::graph_plan("{\"nodes\":[…],\"edges\":[…]}", &base),
+        "repository_explore" => PlatformPromptLibrary::repository_explore(&base),
+        "adjudicate" => PlatformPromptLibrary::adjudicate(&base),
+        "evidence_summarize" => PlatformPromptLibrary::evidence_summarize(&base),
         other => anyhow::bail!(
             "unknown stage {other:?}; renderable stages: session_bootstrap, graph_plan, \
              repository_explore, adjudicate, evidence_summarize"
@@ -171,15 +172,45 @@ pub fn lint(bundle: Option<&Path>) -> Result<()> {
 /// Validate every configured `[prompts].bundles` directory at session
 /// start (PSP-10 system 25): an invalid bundle refuses startup — never a
 /// silent fallback. Replacement bodies must satisfy exactly the compiled
-/// section schema; live substitution into composed programs arrives with
-/// override resolution and is refused until then unless the bundle merely
-/// re-states known sections.
+/// section schema; `load_bundle_overrides` performs the live substitution
+/// when the operator opted in with `--allow-experimental-prompts`.
 pub fn validate_configured_bundles(bundles: &[String]) -> Result<()> {
     for bundle in bundles {
         lint(Some(Path::new(bundle)))
             .with_context(|| format!("validating [prompts] bundle {bundle}"))?;
     }
     Ok(())
+}
+
+/// Load every validated bundle replacement for live substitution
+/// (PSP-10 system 25). Call only behind `--allow-experimental-prompts`;
+/// `validate_configured_bundles` must have passed first. Overrides of
+/// non-platform sections refuse loudly.
+pub fn load_bundle_overrides(bundles: &[String]) -> Result<perspt_core::prompts::SectionOverrides> {
+    let mut overrides = perspt_core::prompts::SectionOverrides::default();
+    for bundle in bundles {
+        for entry in std::fs::read_dir(Path::new(bundle)).context("reading bundle directory")? {
+            let stage_dir = entry?.path();
+            if !stage_dir.is_dir() {
+                continue;
+            }
+            for file in std::fs::read_dir(&stage_dir)? {
+                let path = file?.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                    continue;
+                }
+                let raw = std::fs::read_to_string(&path)?;
+                let (matter, body) =
+                    perspt_prompt_macros::parse_section_file(&path.display().to_string(), &raw)
+                        .map_err(|error| anyhow::anyhow!("{error}"))?;
+                let body = body.strip_suffix('\n').unwrap_or(&body);
+                overrides
+                    .insert_replacement(&matter.id, body)
+                    .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
+            }
+        }
+    }
+    Ok(overrides)
 }
 
 /// `perspt prompts manifest <crate-dir>`: regenerate a library's committed

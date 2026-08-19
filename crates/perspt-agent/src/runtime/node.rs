@@ -872,10 +872,13 @@ pub(crate) fn worker_envelope(
     route: &perspt_sdk::prompt::PromptRoute,
     dialect: &perspt_sdk::prompt::ModelDialect,
     tool_spec_hash: &str,
+    overrides: &perspt_core::prompts::SectionOverrides,
 ) -> Result<crate::toolloop::PromptEnvelope> {
-    let stage =
-        perspt_core::prompts::PlatformPromptLibrary::session_bootstrap(&domain.domain_id().0)
-            .map_err(|e| anyhow::anyhow!("session bootstrap prompt: {e}"))?;
+    let stage = perspt_core::prompts::PlatformPromptLibrary::session_bootstrap(
+        &domain.domain_id().0,
+        overrides,
+    )
+    .map_err(|e| anyhow::anyhow!("session bootstrap prompt: {e}"))?;
     // The domain's same-stage sections are static per session; render once
     // so the loop can recompile per call without the domain package.
     let mut domain_sections = Vec::new();

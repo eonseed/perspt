@@ -76,8 +76,9 @@ impl Psp9AgentRuntime {
         // ActorTurnRunner under the same limits.
         let limits = perspt_sdk::SearchLimits::release_default();
         let specs = catalog.specs_for(std::slice::from_ref(&capability), false);
-        let stage = perspt_core::prompts::PlatformPromptLibrary::repository_explore()
-            .map_err(|e| anyhow::anyhow!("repository explore prompt: {e}"))?;
+        let stage =
+            perspt_core::prompts::PlatformPromptLibrary::repository_explore(&self.prompt_overrides)
+                .map_err(|e| anyhow::anyhow!("repository explore prompt: {e}"))?;
         let invocation = self.actor_invocation(recorder, "explorer", &stage, model, &specs)?;
         let mut conversation = Conversation::with_system(invocation.platform.system_text());
         conversation.push_user(task.to_string());
