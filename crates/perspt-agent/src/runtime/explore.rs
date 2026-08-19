@@ -78,17 +78,7 @@ impl Psp9AgentRuntime {
         let specs = catalog.specs_for(std::slice::from_ref(&capability), false);
         let stage = perspt_core::prompts::PlatformPromptLibrary::repository_explore()
             .map_err(|e| anyhow::anyhow!("repository explore prompt: {e}"))?;
-        let (route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), model);
-        let invocation = perspt_core::prompts::compile_invocation(
-            &stage,
-            &[],
-            &route,
-            &dialect,
-            &perspt_sdk::prompt::tool_surface_hash(&specs),
-        )
-        .map_err(|e| anyhow::anyhow!("repository explore program: {e}"))?;
-        recorder.record_prompt_program(&invocation.platform)?;
-        recorder.record_prompt_invocation("explorer", 1, &invocation)?;
+        let invocation = self.actor_invocation(recorder, "explorer", &stage, model, &specs)?;
         let mut conversation = Conversation::with_system(invocation.platform.system_text());
         conversation.push_user(task.to_string());
         let mut tool_calls = 0u32;
