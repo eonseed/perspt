@@ -627,10 +627,15 @@ impl<'a> CodingCandidateMeasurer<'a> {
 
     /// Enumerate every declared verifier capability as a runnable job; a
     /// capability with no effective command is a blocking sensor residual.
+    /// A declared no-op stage *satisfies* its required-stage obligation —
+    /// the plugin states there is nothing to run, which is a covered
+    /// sensor, not a missing one (Python's build stage would otherwise
+    /// make hard pass unreachable and loop the model forever).
     fn collect_jobs(
         &self,
         immutable_oracle_root: Option<&Path>,
         residuals: &mut Vec<ResidualEvent>,
+        satisfied_stages: &mut BTreeSet<&'static str>,
         all_passed: &mut bool,
     ) -> Result<Vec<VerifierJob>> {
         let registry = perspt_core::PluginRegistry::new();
@@ -658,6 +663,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
                         && capability.command.is_none()
                         && capability.fallback_command.is_none()
                     {
+                        satisfied_stages.insert(capability.stage.policy_name());
                         continue;
                     }
                     residuals.push(sensor_unavailable(
@@ -814,18 +820,19 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
     async fn measure(&self) -> Result<Measured> {
         let mut residuals = Vec::new();
         let mut all_passed = false;
+        let mut ran_stages: BTreeSet<&'static str> = BTreeSet::new();
         let immutable_oracle = self.candidate.immutable_test_oracle()?;
         let jobs = self.collect_jobs(
             immutable_oracle
                 .as_ref()
                 .map(|oracle| oracle.root.as_path()),
             &mut residuals,
+            &mut ran_stages,
             &mut all_passed,
         )?;
 
         let ran = jobs.len();
-        let ran_stages: BTreeSet<&'static str> =
-            jobs.iter().map(|job| job.stage.policy_name()).collect();
+        ran_stages.extend(jobs.iter().map(|job| job.stage.policy_name()));
         self.enforce_required_stages(&ran_stages, &mut residuals, &mut all_passed)?;
         let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel));
         let mut workers = tokio::task::JoinSet::new();

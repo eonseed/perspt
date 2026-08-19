@@ -121,3 +121,37 @@ async fn covered_required_stages_add_no_residual() {
         "covered stages must add no required-stage residual: {evidence:?}"
     );
 }
+
+/// A plugin's declared no-op stage (Python has no build step) *satisfies*
+/// its required-stage obligation. Before this fix `required-stage:build`
+/// blocked hard pass on every Python project forever — the model would fix
+/// the code and then loop against a residual no edit can address.
+#[tokio::test]
+async fn a_declared_no_op_stage_satisfies_its_required_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/t")).unwrap();
+    std::fs::write(
+        dir.path().join("pyproject.toml"),
+        "[project]\nname='t'\nversion='0.1.0'\nrequires-python='>=3.10'\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("src/t/__init__.py"), "").unwrap();
+    std::fs::write(
+        dir.path().join("src/t/lib.py"),
+        "def answer() -> int:\n    return 2\n",
+    )
+    .unwrap();
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    let evidence = required_stage_residuals(&measured);
+    assert!(
+        !evidence
+            .iter()
+            .any(|summary| summary.contains("required-stage:build")),
+        "python's declared no-op build stage must satisfy the required \
+         stage, never block it: {evidence:?}"
+    );
+}

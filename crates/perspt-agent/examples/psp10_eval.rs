@@ -299,10 +299,7 @@ fn write_fixture(dir: &Path, task: &Task) -> anyhow::Result<()> {
         // The synced environment is part of the fixture, not the agent's
         // job: verification is offline (`uv run --no-sync`), so pytest
         // must already be importable from the project's `.venv`.
-        for args in [
-            vec!["venv", "-q"],
-            vec!["pip", "install", "-q", "pytest"],
-        ] {
+        for args in [vec!["venv", "-q"], vec!["pip", "install", "-q", "pytest"]] {
             let status = Command::new("uv").args(&args).current_dir(dir).status()?;
             anyhow::ensure!(status.success(), "fixture env setup failed: uv {args:?}");
         }
