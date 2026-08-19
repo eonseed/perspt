@@ -25,7 +25,7 @@ struct TopologyTemplate {
     stopped_nodes: usize,
 }
 
-/// Routes: `GET /sessions/{id}/dag` and `GET /sessions/{id}/topology`.
+/// Route: `GET /sessions/{id}/topology`.
 pub async fn topology_handler(
     State(state): State<AppState>,
     Path(session_id): Path<String>,

@@ -121,14 +121,3 @@ model = "gpt-4o-mini"
 # activation_min_tasks = 30       # floor 30; may only be raised
 # noninferiority_margin = 0.05    # epsilon in [0, 0.05]
 
-# ---------------------------------------------------------------------------
-# After a gate failure, the recovery ladder's refine rung may draw one round
-# of distinct-family proposers. Ensembles propose, never decide: every
-# candidate runs the ordinary governed loop, consumes one gate decision, and
-# selection is strictly by measured energy. `--ensemble-width N` enables the
-# same policy from the command line.
-#
-# [ensemble]
-# trigger = "after_gate_failure"   # or "never" (default)
-# width = 2                        # candidates per round, max 4
-# require_distinct_family = true

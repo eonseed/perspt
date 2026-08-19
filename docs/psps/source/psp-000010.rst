@@ -2426,19 +2426,25 @@ for a third family when credentials are unavailable.
 Implementation Status
 =====================
 
-``Pending`` below means that code has not landed. It does not mark an open
-design choice.
+Three statuses are reported separately and never conflated:
+
+* **SDK** — the contract exists and is unit-tested.
+* **Wired** — the mechanism is invoked on the live runtime path, verified
+  by scripted-transport mechanism checks.
+* **Accepted** — the live seven-arm evaluation demonstrated the claimed
+  capability improvement with paired evidence. No phase carries this
+  status yet: the evaluation harness is real (honest direct arm, real
+  ablation toggles, matched Rust and Python tasks, per-cell process
+  metrics) but the credential-gated runs have not been recorded.
 
 .. note::
 
-   Same discipline as PSP-8/PSP-9: **SDK contract implemented** (module
-   exists, unit-tested) is distinct from **wired** (invoked during a real
-   run). Updated as each phase lands. This PSP ships within the v0.6.6
-   release line together with PSP-9.
+   Updated as each phase lands. This PSP ships within the v0.6.6 release
+   line together with PSP-9.
 
 .. list-table::
    :header-rows: 1
-   :widths: 30 10 14 46
+   :widths: 26 10 16 48
 
    * - Phase
      - Gates
@@ -2446,81 +2452,112 @@ design choice.
      - Notes
    * - 1 - Enforcement debts
      - X
-     - Implemented
+     - SDK + Wired
      - Decision bound enforced at the gate and loop layers; trajectory
        identity carries real node/generation; ``HardGatePolicy`` required
-       stages wired; architect goes through the admissibility kernel.
+       stages wired. The architect's authority derives from the session
+       composition-root grant with a real plan contract and barrier; only
+       an ``SrbnCertified`` witness admits a revision.
    * - 2 - Candidate identity
      - W
-     - Implemented
+     - SDK + Wired
      - ``candidate_id = "{node}/{gen}/c{seq}"`` on measurement, gate
        decision, and durable checkpoint; fold re-keyed; legacy ledgers
        fold byte-identically.
    * - 3 - SDK prompt sections and codegen
      - Y, AF
-     - Implemented
+     - SDK + Wired
      - ``perspt_sdk::prompt`` (sections, dialects, budget fitting,
        digests, resident-context types) plus the ``perspt-prompt-macros``
-       codegen crate (build.rs + ``include!(OUT_DIR)``).
+       codegen crate (build.rs + ``include!(OUT_DIR)``). The
+       ``StageComposition`` compiler is the one live composer: every
+       actor's model call compiles through it.
    * - 4 - Route and ToolEntry
      - Y
-     - Implemented
+     - SDK + Wired
      - ``adapter_kind``/``prompt_route`` on ``ModelTransport``;
-       ``ToolDescriptionLibrary`` with byte-identical defaults.
+       ``ToolDescriptionLibrary`` with byte-identical defaults. The
+       coding hot set (read, search, edit, ``run_test``, ``run_build``,
+       ``run_formatter``) is visible without discovery; deferred
+       discovery covers rare tools and external servers only.
    * - 5 - Platform section library
      - Y, Z, AE
-     - Implemented
+     - SDK + Wired
      - Five literals migrated byte-identically (``prompt_matrix.rs``
-       golden asserts); composed programs recorded per call; Gate AE
-       activation surface in the manifest types.
+       golden asserts against the compiled wire text); every model call
+       ledgers its exact program — route, dialect, section provenance,
+       dropped sections, tool-surface hash — plus one
+       ``prompt_program_invoked`` record per call, recompiled whenever
+       the tool surface or failover route changes. Gate AE activation
+       surface in the manifest types.
    * - 6 - Domain prompts and verifiers
      - Y
-     - Implemented
+     - SDK + Wired
      - Structured diagnostics (cargo JSON, ty, Pyright, pytest JUnit,
        tsc) with root-cause clustering; ``CorrectionPacket`` rendered
-       through the coding ``branch_correct`` stage; ty primary with
-       fingerprinted Pyright fallback.
+       through the coding ``branch_correct`` stage. The live Python gate
+       runs ``ty`` as the primary syntax sensor when its host binary is
+       present (compileall otherwise), Pyright ``--outputjson`` as the
+       separately fingerprinted fallback, and pytest with a JUnit report
+       folded into the structured parser.
    * - 7 - Search types and cutover
      - AC, AD
-     - Implemented
+     - SDK + Wired
      - ``perspt_sdk::search``; ``LoopEventEnvelopeV1`` write/read swap;
        fold and resume fail closed on unknown envelopes; ensemble
        removed with a pointed ``[exploration]`` migration error.
    * - 8 - Adaptive branch execution
      - W, X, AB, AC
-     - Implemented
+     - SDK + Wired
      - Preview/commit forest on the Refine rung (``initial_branches = 1``
        default); ``BranchRecorder`` keeps the accepted fold invariant;
-       exact no-goods; quantum granularity v1 is one full branch attempt
-       and forest resume is a deterministic re-run from the node
-       durable checkpoint.
+       exact no-goods with the live sensor fingerprint (derived from the
+       detected plugin verifier commands, never a constant). Strategies
+       carry real behavior — local repair continues the witnessed
+       partial, a repeated signature forces an alternative approach,
+       stagnation expands to a distinct family, and the diagnostic probe
+       localizes before editing. Every consumed dimension (turns, calls,
+       mutations, verifier runs, tokens, bytes, wall-clock seconds) is
+       charged against ``SearchLimits``; partial checkpoints carry the
+       correction packet and remaining obligations. Quantum granularity
+       v1 is one full branch attempt; forest resume is a deterministic
+       re-run from the node durable checkpoint.
    * - 9 - ActorTurnRunner
      - Z, AD, AF
-     - Implemented
+     - SDK + Wired
      - Six actors (worker, explorer, architect, adjudicator, summarizer,
-       capability probe) on one runner with shared failover and the
-       resident-context feasibility gate. The TUI chat loop
-       (``external_tools/chat.rs``) is out of scope; the live
+       capability probe) on one runner with shared failover, a hard
+       per-call wall-clock deadline (``[models] turn_timeout_secs``;
+       timeout consumes failover), and the resident-context feasibility
+       gate. The worker assembles its resident working set over the
+       conversation's content-addressed pages before every call; the
+       digest lands in the control frame and the invocation record; an
+       infeasible mandatory closure makes no transport call. The TUI
+       chat loop (``external_tools/chat.rs``) is out of scope; the live
        ``context_recall`` tool is deferred until handler services carry
        store access.
    * - 10 - Graph staging
      - AA
-     - Implemented
+     - SDK + Wired
      - Content-addressed staging root, divergent-path conflict
        detection, one global integration gate, atomic promotion;
        failure leaves the user workspace byte-identical.
    * - 11 - CLI, bundles, and evaluation
      - Z, AE, AF
-     - Implemented
+     - SDK + Wired
      - ``perspt prompts`` list/render/lint/manifest/explain-session and
        ``perspt context explain-turn``; configured bundles validated at
        session start (invalid refuses startup); research-domain search
-       conformance test; seven-arm ladder in ``examples/psp10_eval.rs``
-       (live, credential-gated, never CI). Live bundle substitution into
-       composed programs waits for override resolution; the adaptive
-       default stays ``initial_branches = 1`` until the recorded
-       evaluation meets the acceptance rule — the flip is a separate
-       reviewed commit.
+       conformance test; nonzero process exit for escalation or
+       incomplete work; headless progress narration; ``perspt db
+       repair`` guidance on a corrupted store. The seven-arm ladder in
+       ``examples/psp10_eval.rs`` (live, credential-gated, never CI) has
+       a real ungoverned direct arm, real packet/paging ablation
+       toggles, matched Rust and Python tasks, and per-cell process
+       metrics. Live bundle substitution into composed programs waits
+       for override resolution; the adaptive default stays
+       ``initial_branches = 1`` until the recorded evaluation meets the
+       acceptance rule — the flip is a separate reviewed commit.
 
 =========================
 Resolved Design Decisions
