@@ -780,7 +780,7 @@ impl AgentApp {
     }
 }
 
-/// Run the agent TUI with a real SRBNOrchestrator
+/// Run the agent TUI against a live PSP-9 runtime
 /// One keypress dispatched to the app: the review modal consumes keys while
 /// visible; otherwise navigation and `q` apply.
 fn dispatch_key(app: &mut AgentApp, key: crossterm::event::KeyEvent) {

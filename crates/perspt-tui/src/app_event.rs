@@ -21,7 +21,7 @@ pub enum AppEvent {
     /// Agent state update (for Agent mode - legacy)
     AgentUpdate(AgentStateUpdate),
 
-    /// Core agent event from SRBNOrchestrator (new event system)
+    /// Core agent event from the PSP-9 runtime
     CoreEvent(perspt_core::AgentEvent),
 
     /// Periodic tick for animations (throbber, cursor blink)

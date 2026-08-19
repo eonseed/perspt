@@ -34,10 +34,6 @@ pub fn build_router(state: AppState) -> Router {
             get(handlers::session_detail::session_detail_handler),
         )
         .route(
-            "/sessions/{session_id}/dag",
-            get(handlers::dag::topology_handler),
-        )
-        .route(
             "/sessions/{session_id}/topology",
             get(handlers::dag::topology_handler),
         )
@@ -138,17 +134,6 @@ mod tests {
         let app = build_router(test_state_open());
         let req = Request::builder()
             .uri("/login")
-            .body(Body::empty())
-            .unwrap();
-        let res = app.oneshot(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn dag_page_returns_200() {
-        let app = build_router(test_state_open());
-        let req = Request::builder()
-            .uri("/sessions/test-session/dag")
             .body(Body::empty())
             .unwrap();
         let res = app.oneshot(req).await.unwrap();
