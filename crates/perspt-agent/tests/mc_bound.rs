@@ -120,6 +120,7 @@ fn budgets(max_turns: u32, rejection_budget: u32) -> LoopBudgets {
         context_soft_limit_chars: 240_000,
         recovery_budget: rejection_budget,
         turn_deadline_secs: 120,
+        resident: perspt_agent::toolloop::ResidentReserves::default(),
     }
 }
 

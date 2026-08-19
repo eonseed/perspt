@@ -113,13 +113,7 @@ impl Psp9AgentRuntime {
         let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
         let external = external_runtime_from(config)?;
         let handlers = registry_with_external(&external);
-        let mut run_config = run_config;
-        if let Some(secs) = config.models.as_ref().and_then(|m| m.turn_timeout_secs) {
-            run_config.turn_deadline_secs = secs.max(1);
-        }
-        if let Some(verification) = &config.verification {
-            run_config.require_format = verification.require_format.unwrap_or(false);
-        }
+        let run_config = settings::apply_config_overrides(run_config, config);
         Ok(Self {
             working_dir,
             transport,
@@ -859,6 +853,7 @@ impl Psp9AgentRuntime {
             context_soft_limit_chars: 240_000,
             recovery_budget: shared_recovery_budget,
             turn_deadline_secs: self.config.turn_deadline_secs,
+            resident: self.config.resident,
         }
     }
 

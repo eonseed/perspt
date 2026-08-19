@@ -30,6 +30,8 @@ pub struct Psp9RunConfig {
     /// Declare the plugin `format` verifier stage as an acceptance sensor
     /// (`[verification] require_format`). Off by default.
     pub require_format: bool,
+    /// Definition 6 context reserves and working-set bounds (`[context]`).
+    pub resident: crate::toolloop::ResidentReserves,
 }
 
 impl Default for Psp9RunConfig {
@@ -47,6 +49,7 @@ impl Default for Psp9RunConfig {
             max_parallel_nodes: 1,
             turn_deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
             require_format: false,
+            resident: crate::toolloop::ResidentReserves::default(),
         }
     }
 }
@@ -71,4 +74,37 @@ pub struct Psp9ModelRoutes {
     pub explorer: Option<String>,
     pub adjudicator: Option<String>,
     pub fallbacks: Vec<String>,
+}
+
+/// Fold the file configuration into the run settings: `[models]`
+/// turn deadline, `[verification]` format gating, and `[context]` reserves.
+pub(super) fn apply_config_overrides(
+    mut run_config: Psp9RunConfig,
+    config: &perspt_core::Config,
+) -> Psp9RunConfig {
+    if let Some(secs) = config.models.as_ref().and_then(|m| m.turn_timeout_secs) {
+        run_config.turn_deadline_secs = secs.max(1);
+    }
+    if let Some(verification) = &config.verification {
+        run_config.require_format = verification.require_format.unwrap_or(false);
+    }
+    if let Some(context) = &config.context {
+        let defaults = crate::toolloop::ResidentReserves::default();
+        run_config.resident = crate::toolloop::ResidentReserves {
+            output_reserve_tokens: context
+                .output_reserve_tokens
+                .unwrap_or(defaults.output_reserve_tokens),
+            guard_reserve_tokens: context
+                .guard_reserve_tokens
+                .unwrap_or(defaults.guard_reserve_tokens),
+            frame_tokens: context
+                .synopsis_frame_tokens
+                .unwrap_or(defaults.frame_tokens),
+            pinned_tail: context
+                .working_set_turns
+                .map(|turns| turns as usize)
+                .unwrap_or(defaults.pinned_tail),
+        };
+    }
+    run_config
 }

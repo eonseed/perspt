@@ -188,6 +188,7 @@ async fn run_family(family: ModelFamily) -> (NodeTerminalOutcome, Vec<GateDecisi
             context_soft_limit_chars: 240_000,
             recovery_budget: 2,
             turn_deadline_secs: 120,
+            resident: perspt_agent::toolloop::ResidentReserves::default(),
         },
         cadence: VerificationCadence::default(),
         kernel_state: perspt_sdk::KernelState::new(),
