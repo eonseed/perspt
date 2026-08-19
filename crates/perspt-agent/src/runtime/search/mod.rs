@@ -279,8 +279,12 @@ impl Psp9AgentRuntime {
                     .map(|residual| residual.evidence.summary.clone())
                     .collect(),
             });
+            // A transport-contained branch means the route itself is
+            // refusing (rate limit, outage): opening more branches against
+            // it multiplies the retry storm for nothing. Close the forest.
+            let transport_dead = attempt.outcome.contained_by_transport;
             attempts.push((candidate, attempt, eligible));
-            if accepted || over_budget {
+            if accepted || over_budget || transport_dead {
                 break;
             }
         }

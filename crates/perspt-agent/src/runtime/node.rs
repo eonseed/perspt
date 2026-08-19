@@ -453,6 +453,37 @@ pub(crate) fn resolve_fallbacks(
     Ok(fallback_models)
 }
 
+/// The Refine rung, gated on failure class: a transport-contained attempt
+/// is an infrastructure outage, not a capability failure — refining the
+/// goal and opening forest branches against the same rate-limited or dead
+/// route multiplies the retry storm for nothing, so the rung is skipped
+/// (`None`) with a ledgered reason and only the Escalate rung (a different
+/// route) may follow.
+pub(crate) fn refine_rung(
+    recorder: &Psp9Recorder,
+    scheduler: &mut Scheduler,
+    graph: &WorkGraphRevision,
+    node_id: &str,
+    generation: u32,
+    goal: &str,
+    attempt: &NodeAttempt,
+) -> Result<Option<(WorkGraphRevision, String)>> {
+    if attempt.outcome.contained_by_transport {
+        recorder.record_custom(
+            "recovery_rung_skipped",
+            serde_json::json!({
+                "level": "refine",
+                "reason": "attempt was contained by transport exhaustion; \
+                           branch search against the same route cannot help",
+            }),
+        )?;
+        return Ok(None);
+    }
+    let (revised, refined_goal) = refine_node(recorder, graph, node_id, generation, goal, attempt)?;
+    redispatch_refined(recorder, scheduler, &revised, node_id, generation)?;
+    Ok(Some((revised, refined_goal)))
+}
+
 /// Level-2 graph refinement (Theorem 6): revise the running graph with the
 /// exhausted attempt's evidence, producing the node's next generation and a
 /// refined goal. The revision passes `WorkGraphRevision::revise`, so it is a

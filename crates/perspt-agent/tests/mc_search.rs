@@ -400,3 +400,82 @@ async fn the_forest_is_domain_generic_under_the_research_domain() {
     assert!(count("branch_ineligible") >= 1);
     assert_fold_invariant(&rows);
 }
+
+/// A permanently rate-limited route never opens the forest: the attempt is
+/// contained by transport exhaustion, the Refine rung is skipped with a
+/// ledgered reason, and the session terminates promptly instead of
+/// multiplying the retry storm across branches (429 pathology).
+#[tokio::test]
+async fn a_rate_limited_route_skips_the_forest_and_terminates() {
+    struct RateLimited;
+    impl ModelTransport for RateLimited {
+        fn chat_turn<'a>(
+            &'a self,
+            _model: &'a ModelId,
+            _conversation: &'a Conversation,
+            _tools: &'a [ToolSpec],
+            _choice: ToolChoicePolicy,
+        ) -> TransportFuture<'a, TurnOutput> {
+            Box::pin(async {
+                Err(perspt_sdk::SdkError::Domain(
+                    "chat turn failed: status code '429 Too Many Requests'".into(),
+                ))
+            })
+        }
+        fn capabilities(&self, _model: &ModelId) -> ProviderCapabilities {
+            ProviderCapabilities {
+                tool_calling: true,
+                strict_schema: true,
+                parallel_tool_calls: false,
+                streaming_tool_calls: false,
+                prompt_caching: false,
+                structured_output: true,
+                max_context_tokens: 32_000,
+            }
+        }
+        fn family_of(&self, model: &ModelId) -> ModelFamily {
+            ModelFamily::Other(model.model.clone())
+        }
+        fn adapter_kind(&self) -> &'static str {
+            "scripted"
+        }
+    }
+
+    let project = tempfile::tempdir().unwrap();
+    write_fixture_project(project.path());
+    let database = project.path().join("ledger.db");
+    let runtime = Psp9AgentRuntime::with_transport(
+        project.path().to_path_buf(),
+        Arc::new(RateLimited),
+        ModelId::new("test", "limited"),
+        Psp9RunConfig {
+            approval_policy: ApprovalPolicy::Auto,
+            max_turns: 4,
+            rejection_budget: 4,
+            allow_unisolated_verifiers: true,
+            ..Psp9RunConfig::default()
+        },
+    )
+    .with_database_path(database.clone());
+
+    let summary = runtime.run("fix the answer function".into()).await.unwrap();
+    assert!(matches!(
+        summary.outcome,
+        NodeTerminalOutcome::Escalated { .. }
+    ));
+
+    let store = perspt_store::SessionStore::open(&database).unwrap();
+    let rows = store.get_psp9_events(&summary.session_id).unwrap();
+    let skipped = rows
+        .iter()
+        .any(|row| row.event_json.contains("recovery_rung_skipped"));
+    assert!(skipped, "the refine rung records why it was skipped");
+    let forest_opened = rows
+        .iter()
+        .filter_map(event_name)
+        .any(|name| name == "search_opened" || name == "branch_forked");
+    assert!(
+        !forest_opened,
+        "no forest opens against a transport-dead route"
+    );
+}

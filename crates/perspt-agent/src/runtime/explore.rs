@@ -175,3 +175,78 @@ impl Psp9AgentRuntime {
         Ok(outcome.output)
     }
 }
+
+impl Psp9AgentRuntime {
+    pub(super) async fn explore(&self, recorder: &Psp9Recorder, task: &str) -> Result<String> {
+        let root = self.working_dir.clone();
+        let report = tokio::task::spawn_blocking(move || crate::exploration::map_workspace(&root))
+            .await
+            .context("repository exploration worker panicked")??;
+        recorder.record_custom("exploration_report", serde_json::to_value(&report)?)?;
+        self.emit(perspt_core::AgentEvent::Log(format!(
+            "Exploration mapped {} language groups and {} package roots",
+            report.project_map.languages.len(),
+            report.project_map.package_roots.len()
+        )));
+
+        let mut advisory = None;
+        if let Some(model) = &self.explorer_model {
+            recorder.record_custom(
+                "route_resolved",
+                serde_json::json!({
+                    "phase": "explore",
+                    "model": model,
+                    "reason": "configured speculator/explorer route",
+                    "authority": "no_tools",
+                }),
+            )?;
+            let stage = perspt_core::prompts::PlatformPromptLibrary::evidence_summarize(
+                &self.prompt_overrides,
+            )
+            .map_err(|e| anyhow::anyhow!("evidence summarize prompt: {e}"))?;
+            let invocation = self.actor_invocation(recorder, "summarizer", &stage, model, &[])?;
+            let mut conversation = Conversation::with_system(invocation.platform.system_text());
+            conversation.push_user(format!(
+                "Task: {task}\nRepository map:\n{}",
+                serde_json::to_string_pretty(&report.project_map)?
+            ));
+            let mut runner = crate::turn::ActorTurnRunner {
+                transport: self.transport.as_ref(),
+                model: model.clone(),
+                fallbacks: self.fallback_models.clone(),
+                recorder: Some(recorder),
+                actor: crate::turn::ActorKind::Summarizer,
+                deadline_secs: self.config.turn_deadline_secs,
+                turn: 1,
+            };
+            match runner
+                .run_turn(&conversation, &[], ToolChoicePolicy::None)
+                .await
+            {
+                Ok(output) => {
+                    recorder.record_custom(
+                        "exploration_model_observation",
+                        serde_json::json!({"model": model, "output": output}),
+                    )?;
+                    if let TurnOutput::Text(text) = output {
+                        advisory = Some(text);
+                    }
+                }
+                Err(error) => {
+                    recorder.record_custom(
+                        "exploration_model_unavailable",
+                        serde_json::json!({"model": model, "error": error.to_string()}),
+                    )?;
+                }
+            }
+        }
+
+        Ok(format!(
+            "{task}\n\nDeterministic repository map (advisory orientation, not acceptance evidence):\n{}{}",
+            serde_json::to_string_pretty(&report.project_map)?,
+            advisory
+                .map(|summary| format!("\n\nUntrusted explorer summary:\n{summary}"))
+                .unwrap_or_default()
+        ))
+    }
+}
