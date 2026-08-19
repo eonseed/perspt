@@ -955,3 +955,25 @@ pub(crate) struct NodeAttempt {
     pub(crate) assembly: NodeAssembly,
     pub(crate) kernel_state: perspt_sdk::KernelState,
 }
+
+/// Run the loop, re-entering a seeded conversation when one exists: a
+/// files-only seed restores candidate state but starts a fresh
+/// conversation around the goal.
+pub(crate) async fn run_seeded(
+    tool_loop: crate::toolloop::ToolLoop<'_>,
+    goal: &str,
+    seed: Option<&CandidateSeed>,
+) -> Result<crate::toolloop::LoopOutcome> {
+    match seed {
+        Some(seed) if !seed.conversation.messages().is_empty() => {
+            tool_loop
+                .run_with_conversation(
+                    goal,
+                    Some(seed.conversation.clone()),
+                    seed.activated_tools.clone(),
+                )
+                .await
+        }
+        _ => tool_loop.run(goal).await,
+    }
+}

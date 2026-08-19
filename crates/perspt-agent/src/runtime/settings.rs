@@ -32,6 +32,13 @@ pub struct Psp9RunConfig {
     pub require_format: bool,
     /// Definition 6 context reserves and working-set bounds (`[context]`).
     pub resident: crate::toolloop::ResidentReserves,
+    /// Seven-arm evaluation ablation: drop typed correction packets and
+    /// fall back to the legacy first-direction text. Never set in
+    /// production configurations.
+    pub ablate_correction_packets: bool,
+    /// Seven-arm evaluation ablation: skip live resident-context paging.
+    /// Never set in production configurations.
+    pub ablate_context_paging: bool,
 }
 
 impl Default for Psp9RunConfig {
@@ -50,6 +57,8 @@ impl Default for Psp9RunConfig {
             turn_deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
             require_format: false,
             resident: crate::toolloop::ResidentReserves::default(),
+            ablate_correction_packets: false,
+            ablate_context_paging: false,
         }
     }
 }
@@ -91,6 +100,7 @@ pub(super) fn apply_config_overrides(
     if let Some(context) = &config.context {
         let defaults = crate::toolloop::ResidentReserves::default();
         run_config.resident = crate::toolloop::ResidentReserves {
+            paging_enabled: defaults.paging_enabled,
             output_reserve_tokens: context
                 .output_reserve_tokens
                 .unwrap_or(defaults.output_reserve_tokens),
