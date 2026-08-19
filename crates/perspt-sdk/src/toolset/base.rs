@@ -104,6 +104,22 @@ fn surface_entries() -> Vec<ToolEntry> {
             false,
         )
         .hot(),
+        entry(
+            "context_recall",
+            "Restore one evicted context page by the page id shown in a \
+             bracketed eviction note; returns the page's original content",
+            EffectKind::DataRead,
+            RiskClass::Low,
+            schema(&[(
+                "page_id",
+                "string",
+                "The content-addressed page id from an eviction note",
+                true,
+            )]),
+            FootprintSpec::opaque(),
+            false,
+        )
+        .hot(),
     ]
 }
 

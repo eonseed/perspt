@@ -60,6 +60,106 @@ fn labels(index: usize, message: &Message) -> Vec<String> {
     labels
 }
 
+/// One message's content-addressed page identity and its exact serialized
+/// form — the single hashing rule shared by assembly, the transport view,
+/// and recall.
+fn page_key(message: &Message) -> (String, String) {
+    let serialized = serde_json::to_string(message).unwrap_or_default();
+    let page_id = perspt_sdk::ledger::content_hash(serialized.as_bytes());
+    (page_id, serialized)
+}
+
+/// The model-facing content of one page, returned by `context_recall`.
+fn page_content(message: &Message) -> String {
+    match message {
+        Message::System { content }
+        | Message::User { content }
+        | Message::Assistant { content }
+        | Message::ToolResponse { content, .. } => content.clone(),
+        Message::AssistantToolCalls { calls } => serde_json::to_string(calls).unwrap_or_default(),
+    }
+}
+
+/// Every page of the projection keyed by page id — the `context_recall`
+/// store. The projection is the backing store (Definition 6): eviction
+/// removes a page from the transport view, never from here.
+pub(super) fn page_contents(conversation: &Conversation) -> BTreeMap<String, String> {
+    conversation
+        .messages()
+        .iter()
+        .map(|message| (page_key(message).0, page_content(message)))
+        .collect()
+}
+
+/// Tool-call arguments above this size are elided when their page is
+/// evicted (whole-file writes dominate stale context cost).
+const EVICTED_ARGS_BYTES: usize = 256;
+
+fn tombstone(page_id: &str, kind: &str) -> String {
+    format!(
+        "[{kind} page {page_id} evicted from the resident context; call \
+         context_recall with this page_id to restore it]"
+    )
+}
+
+/// The transport view of the conversation under the assembled resident
+/// set: resident pages verbatim, evicted pages tombstoned **in place** so
+/// message structure and tool pairing survive every provider's validation.
+/// Returns the view and how many pages were tombstoned.
+pub(super) fn resident_view(
+    conversation: &Conversation,
+    resident: &std::collections::BTreeSet<String>,
+) -> (Conversation, usize) {
+    let mut view = Conversation::default();
+    let mut evicted = 0usize;
+    for message in conversation.messages() {
+        let (page_id, _) = page_key(message);
+        if resident.contains(&page_id) {
+            view.push(message.clone());
+            continue;
+        }
+        evicted += 1;
+        view.push(evicted_message(message, &page_id));
+    }
+    (view, evicted)
+}
+
+/// The in-place tombstone for one evicted page. Tool-call structure is
+/// preserved; only oversized arguments are elided.
+fn evicted_message(message: &Message, page_id: &str) -> Message {
+    match message {
+        Message::System { .. } => Message::System {
+            content: tombstone(page_id, "instruction"),
+        },
+        Message::User { .. } => Message::User {
+            content: tombstone(page_id, "task"),
+        },
+        Message::Assistant { .. } => Message::Assistant {
+            content: tombstone(page_id, "assistant"),
+        },
+        Message::ToolResponse { call_id, .. } => Message::ToolResponse {
+            call_id: call_id.clone(),
+            content: tombstone(page_id, "tool_result"),
+        },
+        Message::AssistantToolCalls { calls } => Message::AssistantToolCalls {
+            calls: calls
+                .iter()
+                .map(|call| {
+                    if call.arguments.to_string().len() <= EVICTED_ARGS_BYTES {
+                        call.clone()
+                    } else {
+                        perspt_sdk::ProviderToolCall {
+                            call_id: call.call_id.clone(),
+                            name: call.name.clone(),
+                            arguments: serde_json::json!({ "_evicted_page": page_id }),
+                        }
+                    }
+                })
+                .collect(),
+        },
+    }
+}
+
 /// One page per message, plus the mandatory page-id set: the leading
 /// instruction/task pages, every unresolved tool pair, and the pinned
 /// recency tail.
@@ -75,8 +175,7 @@ pub(super) fn conversation_pages(
     let mut pages = Vec::with_capacity(total);
     let mut mandatory = Vec::new();
     for (index, message) in messages.iter().enumerate() {
-        let serialized = serde_json::to_string(message).unwrap_or_default();
-        let page_id = perspt_sdk::ledger::content_hash(serialized.as_bytes());
+        let (page_id, serialized) = page_key(message);
         let tokens = accountant.count_message(&serialized);
         let pinned = index < 2
             || index + pinned_tail >= total

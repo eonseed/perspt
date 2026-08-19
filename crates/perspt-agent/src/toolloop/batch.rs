@@ -118,6 +118,7 @@ impl ToolLoop<'_> {
     pub(super) async fn execute_turn(
         &mut self,
         output: &TurnOutput,
+        turn: u32,
         max_mutations: u32,
         context: &mut LoopContext,
         log: &mut EventLog,
@@ -136,6 +137,12 @@ impl ToolLoop<'_> {
             }
             return Ok((0, false));
         }
+        // The recall store: every projection page by id, built only when
+        // this turn actually asks for one (Definition 6 backing store).
+        let recall = calls
+            .iter()
+            .any(|call| call.name == "context_recall")
+            .then(|| super::resident::page_contents(context.conversation()));
         context.push_tool_calls(calls.clone(), self.recorder, log)?;
 
         let plan = plan_batch(&calls, self.catalog);
@@ -145,6 +152,8 @@ impl ToolLoop<'_> {
         for planned in &plan {
             self.route_planned(
                 planned,
+                turn,
+                recall.as_ref(),
                 &mut budget,
                 &mut deferred,
                 &mut responses,
@@ -175,6 +184,8 @@ impl ToolLoop<'_> {
     async fn route_planned(
         &mut self,
         planned: &PlannedCall,
+        turn: u32,
+        recall: Option<&std::collections::BTreeMap<String, String>>,
         budget: &mut TurnBudget,
         deferred: &mut Vec<(ProviderToolCall, ToolEntry)>,
         responses: &mut std::collections::BTreeMap<String, String>,
@@ -220,7 +231,7 @@ impl ToolLoop<'_> {
             }
             PlannedClass::Sequential => {
                 let response = self
-                    .sequential_call(call, budget, context, log, projection)
+                    .sequential_call(call, turn, recall, budget, context, log, projection)
                     .await?;
                 responses.insert(call.call_id.clone(), response);
             }
@@ -280,9 +291,12 @@ impl ToolLoop<'_> {
 
     /// The ordinary sequential path: screen, kernel-check, execute, and
     /// post-process the host-surface tools.
+    #[allow(clippy::too_many_arguments)]
     async fn sequential_call(
         &mut self,
         call: &ProviderToolCall,
+        turn: u32,
+        recall: Option<&std::collections::BTreeMap<String, String>>,
         budget: &mut TurnBudget,
         context: &mut LoopContext,
         log: &mut EventLog,
@@ -299,8 +313,11 @@ impl ToolLoop<'_> {
             return Ok(denial);
         }
         let mut response = self
-            .check_and_apply(call, log, projection, &mut budget.mutations)
+            .check_and_apply(call, recall, log, projection, &mut budget.mutations)
             .await?;
+        if call.name == "context_recall" && !response.starts_with("denied:") {
+            self.record_recall(call, turn, &response, log)?;
+        }
         if call.name == "tool_search" && !response.starts_with("denied:") {
             // The response *is* the executed search result; activate from
             // it instead of running the search a second time.
@@ -395,6 +412,39 @@ impl ToolLoop<'_> {
         Ok(results)
     }
 
+    /// Ledger one `context_recall` outcome: a restored page or a typed
+    /// miss (Definition 6 recall alphabet).
+    fn record_recall(
+        &self,
+        call: &ProviderToolCall,
+        turn: u32,
+        response: &str,
+        log: &mut EventLog,
+    ) -> Result<()> {
+        let page_id = call
+            .arguments
+            .get("page_id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let event = if response.starts_with("recalled page ") {
+            LoopEvent::ContextPageRecalled {
+                forest_id: String::new(),
+                branch_id: String::new(),
+                turn,
+                page_id,
+            }
+        } else {
+            LoopEvent::ContextMiss {
+                forest_id: String::new(),
+                branch_id: String::new(),
+                turn,
+                key: page_id,
+            }
+        };
+        emit(self.recorder, log, event)
+    }
+
     /// A same-turn footprint collision (Gate P): recorded and returned as
     /// an observation; the call executes nothing and consumes no budget.
     fn conflict_observation(
@@ -460,7 +510,7 @@ impl ToolLoop<'_> {
             {
                 Some(denial) => denial,
                 None => {
-                    self.check_and_apply(&nested_call, log, projection, &mut budget.mutations)
+                    self.check_and_apply(&nested_call, None, log, projection, &mut budget.mutations)
                         .await?
                 }
             };
