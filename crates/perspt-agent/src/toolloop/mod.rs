@@ -583,9 +583,22 @@ impl ToolLoop<'_> {
         let specs =
             self.catalog
                 .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
-        self.assemble_resident_context(turn, &specs, context, state)?;
+        let resident_ids = self.assemble_resident_context(turn, &specs, context, state)?;
         self.bind_prompt_program(turn, &specs, state)?;
-        let conversation = context.conversation().clone();
+        // Definition 6, transport half: the model sees the resident view —
+        // evicted pages tombstoned in place, recallable via context_recall.
+        // The projection itself stays whole as the backing store.
+        let conversation = match &resident_ids {
+            Some(ids) => {
+                let (view, evicted) = resident::resident_view(context.conversation(), ids);
+                if evicted == 0 {
+                    context.conversation().clone()
+                } else {
+                    view
+                }
+            }
+            None => context.conversation().clone(),
+        };
         let output = self
             .chat_with_failover(&conversation, &specs, &mut state.recovery, &mut state.log)
             .await?;
@@ -607,6 +620,7 @@ impl ToolLoop<'_> {
         let (mutations, immediate_boundary) = self
             .execute_turn(
                 &output,
+                turn,
                 max_mutations,
                 context,
                 &mut state.log,
@@ -961,12 +975,28 @@ impl ToolLoop<'_> {
     }
 
     /// Execute one certified non-mutating call: the host-side tool surface
-    /// (`tool_search`, `tool_program` validation) or the sandboxed executor.
+    /// (`tool_search`, `tool_program` validation, `context_recall`) or the
+    /// sandboxed executor.
     async fn apply_non_mutating(
         &self,
         call: &ProviderToolCall,
         entry: &ToolEntry,
+        recall: Option<&std::collections::BTreeMap<String, String>>,
     ) -> Result<String> {
+        if call.name == "context_recall" {
+            let key = call
+                .arguments
+                .get("page_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            return Ok(match recall.and_then(|pages| pages.get(key)) {
+                Some(content) => format!("recalled page {key}\n{content}"),
+                None => format!(
+                    "miss: no context page {key} in this session; evicted page ids \
+                     appear in the bracketed eviction notes"
+                ),
+            });
+        }
         if call.name == "tool_search" {
             let query = call
                 .arguments
@@ -1036,6 +1066,7 @@ impl ToolLoop<'_> {
     async fn check_and_apply(
         &mut self,
         call: &ProviderToolCall,
+        recall: Option<&std::collections::BTreeMap<String, String>>,
         log: &mut EventLog,
         projection: &mut ProjectionMismatch,
         mutations: &mut u32,
@@ -1094,7 +1125,7 @@ impl ToolLoop<'_> {
             // partial one.
             promote_matching_capability(&mut self.capabilities, &witness)
                 .map_err(|error| anyhow::anyhow!("promotion: {error}"))?;
-            let output = self.apply_non_mutating(call, &entry).await?;
+            let output = self.apply_non_mutating(call, &entry, recall).await?;
             let output = bounded_model_output(self.recorder, output)?;
             emit(
                 self.recorder,

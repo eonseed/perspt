@@ -39,16 +39,17 @@ impl ToolLoop<'_> {
     /// conversation's content-addressed pages before every transport call.
     /// An infeasible mandatory closure records `ContextInfeasible` and
     /// makes no model call; the resident digest enters the control frame
-    /// and the per-call invocation record.
+    /// and the per-call invocation record. Returns the resident page-id
+    /// set for the transport view (`None` when paging is off).
     pub(super) fn assemble_resident_context(
         &self,
         turn: u32,
         specs: &[perspt_sdk::ToolSpec],
         context: &LoopContext,
         state: &mut TurnState,
-    ) -> Result<()> {
+    ) -> Result<Option<std::collections::BTreeSet<String>>> {
         if !self.budgets.resident.paging_enabled {
-            return Ok(());
+            return Ok(None);
         }
         let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
         let tool_reserve: u64 = specs
@@ -95,9 +96,15 @@ impl ToolLoop<'_> {
             }
             perspt_sdk::prompt::ResidentOutcome::Assembled(assembled) => {
                 self.record_working_set(turn, &assembled, state)?;
+                Ok(Some(
+                    assembled
+                        .pages
+                        .iter()
+                        .map(|page| page.page_id.clone())
+                        .collect(),
+                ))
             }
         }
-        Ok(())
     }
 
     /// Ledger the assembled working set: the selection (with its digest)

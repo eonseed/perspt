@@ -1098,3 +1098,233 @@ async fn an_infeasible_worker_context_makes_no_model_call() {
         .iter()
         .any(|event| matches!(event, LoopEvent::ContextInfeasible { .. })));
 }
+
+/// A transport that records every conversation it is asked to send.
+struct Capturing {
+    inner: Scripted,
+    sent: Mutex<Vec<Conversation>>,
+}
+
+impl ModelTransport for Capturing {
+    fn chat_turn<'a>(
+        &'a self,
+        model: &'a ModelId,
+        conversation: &'a Conversation,
+        tools: &'a [ToolSpec],
+        choice: ToolChoicePolicy,
+    ) -> TransportFuture<'a, TurnOutput> {
+        self.sent.lock().unwrap().push(conversation.clone());
+        self.inner.chat_turn(model, conversation, tools, choice)
+    }
+    fn capabilities(&self, _model: &ModelId) -> ProviderCapabilities {
+        ProviderCapabilities::text_only(100_000)
+    }
+    fn family_of(&self, model: &ModelId) -> ModelFamily {
+        ModelFamily::from_model_name(&model.model)
+    }
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
+}
+
+/// An executor whose `r1` read returns a large payload (everything else
+/// reads "ok"); nothing mutates.
+struct PayloadReads {
+    payload: String,
+}
+
+#[async_trait::async_trait]
+impl EffectExecutor for PayloadReads {
+    async fn checkpoint(&self, _scope: &[String]) -> anyhow::Result<CandidateCheckpoint> {
+        Ok(CandidateCheckpoint {
+            id: "0".into(),
+            witness: CandidateStateWitness {
+                state_root: "0".into(),
+                node_id: "toolloop".into(),
+                canonical_scope: vec!["src/lib.rs".into()],
+                ..CandidateStateWitness::default()
+            },
+        })
+    }
+    async fn apply(
+        &self,
+        call: &ProviderToolCall,
+        _entry: &ToolEntry,
+    ) -> anyhow::Result<EffectOutcome> {
+        Ok(EffectOutcome {
+            output: if call.call_id == "r1" {
+                self.payload.clone()
+            } else {
+                "ok".into()
+            },
+            mutated: false,
+        })
+    }
+    async fn restore(&self, _checkpoint: &CandidateCheckpoint) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn state_witness(&self) -> anyhow::Result<CandidateStateWitness> {
+        Ok(self.checkpoint(&[]).await?.witness)
+    }
+}
+
+/// The eviction/recall assertions over the captured wire traffic and the
+/// recorded events.
+fn assert_evicted_then_recalled(
+    sent: &[Conversation],
+    events: &[LoopEvent],
+    evicted_page: &str,
+    payload: &str,
+) {
+    let tombstoned = sent[5].messages().iter().any(|message| {
+        matches!(message, perspt_sdk::Message::ToolResponse { call_id, content }
+            if call_id == "r1" && content.contains("evicted from the resident context")
+               && content.contains(evicted_page))
+    });
+    assert!(
+        tombstoned,
+        "the oversized old tool result is tombstoned on the wire"
+    );
+    let recalled = events.iter().any(|event| {
+        matches!(event, LoopEvent::ContextPageRecalled { page_id, .. } if page_id == evicted_page)
+    });
+    assert!(recalled, "the recall is ledgered as ContextPageRecalled");
+    let restored = events.iter().any(|event| {
+        matches!(event, LoopEvent::EffectApplied { call_id, output, .. }
+            if call_id == "recall" && output.contains(payload))
+    });
+    assert!(restored, "recall returns the page's original content");
+    let projection_whole = events.iter().any(|event| {
+        matches!(event, LoopEvent::DurableCandidateCheckpoint { conversation, .. }
+        if conversation.messages().iter().any(|message| matches!(
+            message,
+            perspt_sdk::Message::ToolResponse { call_id, content }
+                if call_id == "r1" && content == payload
+        )))
+    });
+    assert!(
+        projection_whole,
+        "the projection (backing store) keeps the evicted page whole"
+    );
+}
+
+/// The loop for the eviction scenario: an eight-turn budget, the worker
+/// capability widened with `DataRead` for `context_recall`.
+fn eviction_loop<'a>(
+    transport: &'a Capturing,
+    catalog: &'a StaticCatalog,
+    executor: &'a PayloadReads,
+    measurer: &'a EnergyScript,
+    recording: &'a Recording,
+) -> ToolLoop<'a> {
+    let mut capability = worker_capability();
+    capability.effects.push(EffectKind::DataRead);
+    ToolLoop {
+        transport,
+        model: ModelId::new("test", "scripted"),
+        fallback_models: Vec::new(),
+        catalog,
+        capabilities: vec![capability],
+        contract: Some(&PASS_CONTRACT),
+        barrier: Some(&ZERO_BARRIER),
+        c_c_max: 0.0,
+        executor,
+        measurer,
+        budgets: LoopBudgets {
+            max_turns: 8,
+            ..budgets()
+        },
+        cadence: VerificationCadence::default(),
+        kernel_state: perspt_sdk::KernelState::new(),
+        node_id: "toolloop".into(),
+        generation: 0,
+        system_prompt: perspt_agent::toolloop::PromptEnvelope {
+            text: "governed test worker".into(),
+            ..Default::default()
+        },
+        recorder: Some(recording),
+    }
+}
+
+/// Definition 6, transport half: an oversized tool result older than the
+/// pinned tail is tombstoned in the *sent* conversation while the
+/// projection keeps it whole, and `context_recall` restores its content
+/// with a ledgered `ContextPageRecalled`.
+#[tokio::test]
+async fn evicted_pages_are_tombstoned_on_the_wire_and_recallable() {
+    let payload = "x".repeat(4_096);
+    let evicted_page = perspt_sdk::ledger::content_hash(
+        serde_json::to_string(&perspt_sdk::Message::ToolResponse {
+            call_id: "r1".into(),
+            content: payload.clone(),
+        })
+        .unwrap()
+        .as_bytes(),
+    );
+    let read = |id: &str| {
+        TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: id.into(),
+            name: "read_file".into(),
+            arguments: serde_json::json!({"path": "src/lib.rs"}),
+        }])
+    };
+    let transport = Capturing {
+        inner: Scripted::new(vec![
+            read("r1"),
+            read("r2"),
+            read("r3"),
+            read("r4"),
+            read("r5"),
+            TurnOutput::ToolCalls(vec![ProviderToolCall {
+                call_id: "recall".into(),
+                name: "context_recall".into(),
+                arguments: serde_json::json!({"page_id": evicted_page}),
+            }]),
+            TurnOutput::Text("done".into()),
+        ]),
+        sent: Mutex::new(Vec::new()),
+    };
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = PayloadReads {
+        payload: payload.clone(),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let recording = Recording::default();
+    let tool_loop = eviction_loop(&transport, &catalog, &executor, &measurer, &recording);
+
+    let outcome = tool_loop.run("say done").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+
+    let sent = transport.sent.lock().unwrap();
+    let events = recording.events.lock().unwrap();
+    assert_evicted_then_recalled(&sent, &events, &evicted_page, &payload);
+}
+
+/// A recall of an unknown page id is a typed miss, never an error.
+#[tokio::test]
+async fn an_unknown_page_recall_is_a_typed_miss() {
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: "recall".into(),
+            name: "context_recall".into(),
+            arguments: serde_json::json!({"page_id": "sha256:nope"}),
+        }]),
+        TurnOutput::Text("done".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let recording = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.capabilities[0].effects.push(EffectKind::DataRead);
+    tool_loop.recorder = Some(&recording);
+
+    tool_loop.run("say done").await.unwrap();
+    let events = recording.events.lock().unwrap();
+    assert!(events.iter().any(|event| {
+        matches!(event, LoopEvent::ContextMiss { key, .. } if key == "sha256:nope")
+    }));
+}
