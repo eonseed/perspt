@@ -27,13 +27,17 @@ use std::collections::BTreeSet;
 use crate::realize::ProjectionMismatch;
 
 mod batch;
+mod binding;
 mod context;
 mod contract;
 pub mod envelope;
 mod proposal;
+mod resident;
+use binding::PromptBinding;
 pub use contract::*;
 pub use envelope::{decode_tool_loop, DecodedLoopEvent};
 pub use proposal::candidate_mutating_effect;
+pub use resident::ResidentReserves;
 
 pub(crate) use context::refold_session_context;
 use context::LoopContext;
@@ -60,6 +64,8 @@ pub struct LoopBudgets {
     /// Per-model-call wall-clock deadline in seconds; a finite turn count
     /// alone never bounds wall time.
     pub turn_deadline_secs: u64,
+    /// Definition 6 reserves and working-set bounds (`[context]`).
+    pub resident: resident::ResidentReserves,
 }
 
 impl LoopBudgets {
@@ -160,33 +166,6 @@ struct TurnState {
     /// The prompt binding of the most recent compile (PSP-10 Gate Z): the
     /// tool-surface hash and route it was compiled for, plus its digests.
     prompt: PromptBinding,
-}
-
-/// The live per-call prompt identity (recompiled when the tool surface or
-/// the failover route changes).
-#[derive(Default)]
-struct PromptBinding {
-    surface_hash: String,
-    route_key: String,
-    invocation_digest: String,
-    platform_digest: String,
-    domain_digest: String,
-}
-
-impl PromptBinding {
-    /// The binding the seed-time envelope compiled, when one exists.
-    fn seed(envelope: &PromptEnvelope, model: &perspt_sdk::ModelId) -> Self {
-        match &envelope.invocation {
-            Some(invocation) => Self {
-                surface_hash: invocation.platform.tool_spec_hash.clone(),
-                route_key: format!("{model}"),
-                invocation_digest: invocation.invocation_digest.clone(),
-                platform_digest: invocation.platform.program_digest.clone(),
-                domain_digest: invocation.domain.program_digest.clone(),
-            },
-            None => Self::default(),
-        }
-    }
 }
 
 impl TurnState {
@@ -586,70 +565,6 @@ impl ToolLoop<'_> {
             || turn == self.budgets.max_turns
     }
 
-    /// Ledger the exact prompt binding of this call (PSP-10 Gate Z):
-    /// recompile through the SDK compiler when the offered tool surface or
-    /// the failover route changed, then record one invocation per call.
-    fn bind_prompt_program(
-        &self,
-        turn: u32,
-        specs: &[perspt_sdk::ToolSpec],
-        state: &mut TurnState,
-    ) -> Result<()> {
-        let Some(stage) = &self.system_prompt.stage else {
-            return Ok(());
-        };
-        let surface_hash = perspt_sdk::prompt::tool_surface_hash(specs);
-        let route_key = format!("{}", self.model);
-        if state.prompt.surface_hash != surface_hash || state.prompt.route_key != route_key {
-            let (route, dialect) = crate::turn::route_dialect(self.transport, &self.model);
-            let invocation = perspt_core::prompts::compile_invocation(
-                stage,
-                &self.system_prompt.domain_sections,
-                &route,
-                &dialect,
-                &surface_hash,
-            )
-            .map_err(|e| anyhow::anyhow!("prompt recompilation failed closed: {e}"))?;
-            emit(
-                self.recorder,
-                &mut state.log,
-                LoopEvent::PromptProgramCompiled {
-                    turn,
-                    program: invocation.platform.clone(),
-                },
-            )?;
-            if !invocation.domain.messages.is_empty() {
-                emit(
-                    self.recorder,
-                    &mut state.log,
-                    LoopEvent::PromptProgramCompiled {
-                        turn,
-                        program: invocation.domain.clone(),
-                    },
-                )?;
-            }
-            state.prompt = PromptBinding {
-                surface_hash,
-                route_key,
-                invocation_digest: invocation.invocation_digest.clone(),
-                platform_digest: invocation.platform.program_digest.clone(),
-                domain_digest: invocation.domain.program_digest.clone(),
-            };
-        }
-        emit(
-            self.recorder,
-            &mut state.log,
-            LoopEvent::PromptProgramInvoked {
-                turn,
-                invocation_digest: state.prompt.invocation_digest.clone(),
-                platform_digest: state.prompt.platform_digest.clone(),
-                domain_digest: state.prompt.domain_digest.clone(),
-                tool_spec_hash: state.prompt.surface_hash.clone(),
-                resident_context_digest: String::new(),
-            },
-        )
-    }
-
     /// One model turn: send the conversation, record the observation, and
     /// route every returned call through the kernel. `mutations_so_far` is
     /// the count since the last boundary; the cadence bound `H` caps what
@@ -664,6 +579,7 @@ impl ToolLoop<'_> {
         let specs =
             self.catalog
                 .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
+        self.assemble_resident_context(turn, &specs, context, state)?;
         self.bind_prompt_program(turn, &specs, state)?;
         let conversation = context.conversation().clone();
         let output = self
@@ -773,7 +689,7 @@ impl ToolLoop<'_> {
                 state.prompt.invocation_digest.clone()
             },
             prompt_manifest_digest: self.system_prompt.manifest_digest.clone(),
-            resident_context_digest: String::new(),
+            resident_context_digest: state.prompt.resident_digest.clone(),
             goal: goal.to_string(),
             node_generation: self.generation,
             accepted_state_root: state.accepted_checkpoint.witness.state_root.clone(),

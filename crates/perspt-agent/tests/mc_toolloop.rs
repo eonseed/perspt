@@ -204,6 +204,7 @@ fn budgets() -> LoopBudgets {
         context_soft_limit_chars: 240_000,
         recovery_budget: 2,
         turn_deadline_secs: 120,
+        resident: perspt_agent::toolloop::ResidentReserves::default(),
     }
 }
 
@@ -997,4 +998,103 @@ async fn three_reads_apply_concurrently_with_a_deterministic_chain() {
         })
         .collect();
     assert_eq!(applied_order, ["r1", "r2", "r3"]);
+}
+
+/// Definition 6 is live in the worker: every model call assembles the
+/// resident working set over the conversation's content-addressed pages,
+/// the digest lands in the durable control frame, and the working-set
+/// selection is ledgered.
+#[tokio::test]
+async fn every_worker_call_assembles_and_ledgers_the_resident_working_set() {
+    let transport = Scripted::new(vec![TurnOutput::Text("done".into())]);
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (true, 0.0)]);
+    let recording = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.recorder = Some(&recording);
+
+    tool_loop.run("say done").await.unwrap();
+    let events = recording.events.lock().unwrap();
+    let working_sets: Vec<&LoopEvent> = events
+        .iter()
+        .filter(|event| matches!(event, LoopEvent::ContextWorkingSet { .. }))
+        .collect();
+    assert!(
+        !working_sets.is_empty(),
+        "each call records its working set"
+    );
+    let digest = events
+        .iter()
+        .find_map(|event| match event {
+            LoopEvent::ContextPagesSelected {
+                resident_digest, ..
+            } => Some(resident_digest.clone()),
+            _ => None,
+        })
+        .expect("the selected pages are ledgered with their digest");
+    assert!(digest.starts_with("sha256:"));
+    let control_digest = events
+        .iter()
+        .find_map(|event| match event {
+            LoopEvent::DurableCandidateCheckpoint { control, .. } => {
+                Some(control.resident_context_digest.clone())
+            }
+            _ => None,
+        })
+        .expect("acceptance writes a durable control frame");
+    assert_eq!(
+        control_digest, digest,
+        "the control frame binds the live set"
+    );
+}
+
+/// An infeasible mandatory closure refuses before any transport call.
+#[tokio::test]
+async fn an_infeasible_worker_context_makes_no_model_call() {
+    struct TinyWindow(Scripted);
+    impl ModelTransport for TinyWindow {
+        fn chat_turn<'a>(
+            &'a self,
+            model: &'a ModelId,
+            conversation: &'a Conversation,
+            tools: &'a [ToolSpec],
+            choice: ToolChoicePolicy,
+        ) -> TransportFuture<'a, TurnOutput> {
+            self.0.chat_turn(model, conversation, tools, choice)
+        }
+        fn capabilities(&self, _model: &ModelId) -> ProviderCapabilities {
+            ProviderCapabilities::text_only(1_400)
+        }
+        fn family_of(&self, model: &ModelId) -> ModelFamily {
+            ModelFamily::from_model_name(&model.model)
+        }
+        fn adapter_kind(&self) -> &'static str {
+            "scripted"
+        }
+    }
+    let transport = TinyWindow(Scripted::new(vec![TurnOutput::Text("done".into())]));
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0)]);
+    let recording = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.recorder = Some(&recording);
+
+    let outcome = tool_loop.run(&"x".repeat(10_000)).await.unwrap();
+    assert!(!matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    assert!(
+        transport.0.turns.lock().unwrap().len() == 1,
+        "no scripted turn was consumed: zero transport calls"
+    );
+    let events = recording.events.lock().unwrap();
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, LoopEvent::ContextInfeasible { .. })));
 }
