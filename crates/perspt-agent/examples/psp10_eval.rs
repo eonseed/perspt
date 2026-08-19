@@ -197,7 +197,7 @@ const TASKS: &[Task] = &[
                  test_answer():\n    assert answer() == 2\n",
             ),
         ],
-        hidden_check: &["python3", "-m", "pytest", "-q", "tests"],
+        hidden_check: &["uv", "run", "--no-sync", "pytest", "-q", "tests"],
     },
     Task {
         id: "py-dependency-order",
@@ -222,7 +222,7 @@ const TASKS: &[Task] = &[
                  topo_order([('a', 'b'), ('b', 'a')]) is None\n",
             ),
         ],
-        hidden_check: &["python3", "-m", "pytest", "-q", "tests"],
+        hidden_check: &["uv", "run", "--no-sync", "pytest", "-q", "tests"],
     },
 ];
 
@@ -286,12 +286,26 @@ fn hidden_pass(dir: &Path, check: &[&str]) -> bool {
 }
 
 fn write_fixture(dir: &Path, task: &Task) -> anyhow::Result<()> {
+    let mut python = false;
     for (path, content) in task.files {
         let full = dir.join(path);
         if let Some(parent) = full.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(full, content)?;
+        python |= *path == "pyproject.toml";
+    }
+    if python {
+        // The synced environment is part of the fixture, not the agent's
+        // job: verification is offline (`uv run --no-sync`), so pytest
+        // must already be importable from the project's `.venv`.
+        for args in [
+            vec!["venv", "-q"],
+            vec!["pip", "install", "-q", "pytest"],
+        ] {
+            let status = Command::new("uv").args(&args).current_dir(dir).status()?;
+            anyhow::ensure!(status.success(), "fixture env setup failed: uv {args:?}");
+        }
     }
     Ok(())
 }
