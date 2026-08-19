@@ -47,6 +47,9 @@ impl ToolLoop<'_> {
         context: &LoopContext,
         state: &mut TurnState,
     ) -> Result<()> {
+        if !self.budgets.resident.paging_enabled {
+            return Ok(());
+        }
         let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
         let tool_reserve: u64 = specs
             .iter()

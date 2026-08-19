@@ -412,7 +412,8 @@ impl Psp9AgentRuntime {
         let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
             .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers)
-            .with_require_format(self.config.require_format);
+            .with_require_format(self.config.require_format)
+            .with_correction_packets(!self.config.ablate_correction_packets);
         let assembly = {
             let external_entries = self.external_tool_entries(recorder).await?;
             self.assemble_node(
@@ -445,20 +446,7 @@ impl Psp9AgentRuntime {
             system_prompt: envelope,
             recorder: Some(loop_recorder),
         };
-        let outcome = match seed {
-            // A files-only seed (empty conversation) restores candidate
-            // state but starts a fresh conversation around the goal.
-            Some(seed) if !seed.conversation.messages().is_empty() => {
-                tool_loop
-                    .run_with_conversation(
-                        goal,
-                        Some(seed.conversation.clone()),
-                        seed.activated_tools.clone(),
-                    )
-                    .await?
-            }
-            _ => tool_loop.run(goal).await?,
-        };
+        let outcome = run_seeded(tool_loop, goal, seed).await?;
         Ok(NodeAttempt {
             outcome,
             candidate,
@@ -853,7 +841,11 @@ impl Psp9AgentRuntime {
             context_soft_limit_chars: 240_000,
             recovery_budget: shared_recovery_budget,
             turn_deadline_secs: self.config.turn_deadline_secs,
-            resident: self.config.resident,
+            resident: crate::toolloop::ResidentReserves {
+                paging_enabled: self.config.resident.paging_enabled
+                    && !self.config.ablate_context_paging,
+                ..self.config.resident
+            },
         }
     }
 

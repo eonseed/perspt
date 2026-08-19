@@ -20,6 +20,9 @@ use perspt_sdk::{Conversation, Message};
 /// The worker's per-call context reserves, from `[context]`.
 #[derive(Debug, Clone, Copy)]
 pub struct ResidentReserves {
+    /// Live paging on (default). The evaluation ladder's paging arm turns
+    /// it off to measure the feature's contribution.
+    pub paging_enabled: bool,
     pub output_reserve_tokens: u64,
     pub guard_reserve_tokens: u64,
     /// The synopsis frame bound `q`.
@@ -32,6 +35,7 @@ pub struct ResidentReserves {
 impl Default for ResidentReserves {
     fn default() -> Self {
         Self {
+            paging_enabled: true,
             output_reserve_tokens: 1_024,
             guard_reserve_tokens: 256,
             frame_tokens: 512,

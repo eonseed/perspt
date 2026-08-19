@@ -575,6 +575,7 @@ pub struct CodingCandidateMeasurer<'a> {
     adapters: CodingAdapterRegistry,
     max_parallel: usize,
     require_format: bool,
+    correction_packets: bool,
 }
 
 impl<'a> CodingCandidateMeasurer<'a> {
@@ -587,7 +588,15 @@ impl<'a> CodingCandidateMeasurer<'a> {
             adapters: CodingAdapterRegistry::with_builtins(),
             max_parallel: 4,
             require_format: false,
+            correction_packets: true,
         }
+    }
+
+    /// Evaluation ablation: disable typed correction packets (legacy
+    /// first-direction text only).
+    pub fn with_correction_packets(mut self, enabled: bool) -> Self {
+        self.correction_packets = enabled;
+        self
     }
 
     /// Enable the declared `format` acceptance stage
@@ -777,7 +786,10 @@ impl<'a> CodingCandidateMeasurer<'a> {
         // full paths/symbols/rationale; its rendering through the
         // `branch_correct` section program becomes the steering message.
         // Domains without packets keep the legacy first-direction path.
-        let packet = self.domain.correction_packet(residuals);
+        let packet = self
+            .correction_packets
+            .then(|| self.domain.correction_packet(residuals))
+            .flatten();
         let correction = match &packet {
             Some(packet) if !packet.is_empty() => {
                 let rendered = perspt_coding::prompts::render_correction(packet)
