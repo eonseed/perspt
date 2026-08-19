@@ -2432,10 +2432,22 @@ Three statuses are reported separately and never conflated:
 * **Wired** — the mechanism is invoked on the live runtime path, verified
   by scripted-transport mechanism checks.
 * **Accepted** — the live seven-arm evaluation demonstrated the claimed
-  capability improvement with paired evidence. No phase carries this
-  status yet: the evaluation harness is real (honest direct arm, real
-  ablation toggles, matched Rust and Python tasks, per-cell process
-  metrics) but the credential-gated runs have not been recorded.
+  capability improvement with paired evidence.
+
+Live seven-arm runs were recorded on 2026-08-19 across two model families
+(reports under ``psp-000010/evidence/``): ``komerco::qwen-3.8-27b``
+(llama.cpp) passed **35/35** hidden-test cells — every arm, every matched
+Rust and Python task, zero denied and zero repeated calls, with the
+governed arm's mean wall time (25.0s) matching the ungoverned direct
+arm's (25.8s) — and ``vertex::gemini-3.5-flash-lite`` passed 30/35, with
+all five failures being turn-1 provider-quota (429) infrastructure
+failures published in the report, one of them in the *direct* arm. No
+phase advances to **Accepted** on this evidence: the matched suite
+saturates (nearly every arm passes), so noninferiority is demonstrated
+(qwen paired CI for adaptive−single is exactly [0, 0]) but no *per-phase
+improvement* is separable, and the spec's adaptive-default rule
+("must also reduce repeated identical failures") is not met when both
+arms already show zero. The default stays ``initial_branches = 1``.
 
 .. note::
 
