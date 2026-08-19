@@ -29,17 +29,7 @@ impl Psp9AgentRuntime {
         }
         let stage = perspt_core::prompts::PlatformPromptLibrary::adjudicate()
             .map_err(|e| anyhow::anyhow!("adjudicate prompt: {e}"))?;
-        let (route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), model);
-        let invocation = perspt_core::prompts::compile_invocation(
-            &stage,
-            &[],
-            &route,
-            &dialect,
-            &perspt_sdk::prompt::tool_surface_hash(&[]),
-        )
-        .map_err(|e| anyhow::anyhow!("adjudicate program: {e}"))?;
-        recorder.record_prompt_program(&invocation.platform)?;
-        recorder.record_prompt_invocation("adjudicator", 1, &invocation)?;
+        let invocation = self.actor_invocation(recorder, "adjudicator", &stage, model, &[])?;
         let mut conversation = Conversation::with_system(invocation.platform.system_text());
         conversation.push_user(format!(
             "Task: {task}\nDiff artifact: {diff_handle}\nRealized diff:\n{}",

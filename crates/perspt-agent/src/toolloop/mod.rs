@@ -173,6 +173,22 @@ struct PromptBinding {
     domain_digest: String,
 }
 
+impl PromptBinding {
+    /// The binding the seed-time envelope compiled, when one exists.
+    fn seed(envelope: &PromptEnvelope, model: &perspt_sdk::ModelId) -> Self {
+        match &envelope.invocation {
+            Some(invocation) => Self {
+                surface_hash: invocation.platform.tool_spec_hash.clone(),
+                route_key: format!("{model}"),
+                invocation_digest: invocation.invocation_digest.clone(),
+                platform_digest: invocation.platform.program_digest.clone(),
+                domain_digest: invocation.domain.program_digest.clone(),
+            },
+            None => Self::default(),
+        }
+    }
+}
+
 impl TurnState {
     fn finish(self, outcome: NodeTerminalOutcome) -> LoopOutcome {
         finish(
@@ -278,16 +294,7 @@ impl ToolLoop<'_> {
             candidate_seq: 1,
             current_candidate: format!("{}/{}/c0", self.node_id, self.generation),
             turns_used: 0,
-            prompt: match &self.system_prompt.invocation {
-                Some(invocation) => PromptBinding {
-                    surface_hash: invocation.platform.tool_spec_hash.clone(),
-                    route_key: format!("{}", self.model),
-                    invocation_digest: invocation.invocation_digest.clone(),
-                    platform_digest: invocation.platform.program_digest.clone(),
-                    domain_digest: invocation.domain.program_digest.clone(),
-                },
-                None => PromptBinding::default(),
-            },
+            prompt: PromptBinding::seed(&self.system_prompt, &self.model),
         };
         if let Some(outcome) = self.baseline_terminal(&baseline) {
             return Ok(state.finish(outcome));

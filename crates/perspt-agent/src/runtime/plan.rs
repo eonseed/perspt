@@ -84,17 +84,13 @@ impl Psp9AgentRuntime {
         };
         let stage = perspt_core::prompts::PlatformPromptLibrary::graph_plan(REVISION_SHAPE)
             .map_err(|e| anyhow::anyhow!("graph plan prompt: {e}"))?;
-        let (prompt_route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), &route);
-        let invocation = perspt_core::prompts::compile_invocation(
+        let invocation = self.actor_invocation(
+            recorder,
+            "architect",
             &stage,
-            &[],
-            &prompt_route,
-            &dialect,
-            &perspt_sdk::prompt::tool_surface_hash(std::slice::from_ref(&spec)),
-        )
-        .map_err(|e| anyhow::anyhow!("graph plan program: {e}"))?;
-        recorder.record_prompt_program(&invocation.platform)?;
-        recorder.record_prompt_invocation("architect", 1, &invocation)?;
+            &route,
+            std::slice::from_ref(&spec),
+        )?;
         let mut conversation = Conversation::with_system(invocation.platform.system_text());
         conversation.push_user(task.to_string());
         let mut runner = crate::turn::ActorTurnRunner {
@@ -113,6 +109,18 @@ impl Psp9AgentRuntime {
                 ToolChoicePolicy::Specific("update_graph".into()),
             )
             .await?;
+        self.fold_plan_output(recorder, node_id, &route, &entry, output)
+    }
+
+    /// Parse, validate, and kernel-admit the architect's proposal.
+    fn fold_plan_output(
+        &self,
+        recorder: &Psp9Recorder,
+        node_id: &str,
+        route: &ModelId,
+        entry: &perspt_sdk::ToolEntry,
+        output: TurnOutput,
+    ) -> Result<Option<WorkGraphRevision>> {
         let TurnOutput::ToolCalls(calls) = output else {
             return Ok(None);
         };
