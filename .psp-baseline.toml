@@ -69,13 +69,8 @@ count = 1
 
 [[allow]]
 file = "crates/perspt-tui/src/chat_app.rs"
-rule = "PSP-1"
-count = 1
-
-[[allow]]
-file = "crates/perspt-tui/src/chat_app.rs"
 rule = "PSP-2"
-count = 8
+count = 3
 
 [[allow]]
 file = "crates/perspt-tui/src/dashboard.rs"
