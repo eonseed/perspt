@@ -89,15 +89,23 @@ pub trait CandidateMeasurer: Send + Sync {
     }
 }
 
-/// The composed platform envelope for one actor plus its provenance
-/// digests (PSP-10 Phase 5). The runtime composes it from the section
-/// library; the loop seeds the text and stamps the digests into every
-/// control frame.
+/// The compiled prompt binding for one actor (PSP-10 systems 23–24). The
+/// runtime compiles it through the SDK compiler for the resolved route and
+/// dialect; the loop seeds the text, stamps the digests into every control
+/// frame, and — holding the stage — recompiles whenever the offered tool
+/// surface or the failover route changes mid-loop, so each call's exact
+/// program is ledgered.
 #[derive(Debug, Clone, Default)]
 pub struct PromptEnvelope {
     pub text: String,
     pub invocation_digest: String,
     pub manifest_digest: String,
+    /// The platform stage sections, kept for per-call recompilation.
+    pub stage: Option<perspt_core::prompts::PlatformStage>,
+    /// The domain's same-stage sections, rendered once at assembly.
+    pub domain_sections: Vec<perspt_sdk::prompt::RenderedSection>,
+    /// The invocation compiled at seed time (initial tool surface).
+    pub invocation: Option<perspt_sdk::prompt::CompiledPromptInvocation>,
 }
 
 /// Recorded loop events (the ledger consumes these in system 14).
@@ -374,6 +382,24 @@ pub enum LoopEvent {
         branch_id: String,
         summary_page: String,
         source_pages: Vec<String>,
+    },
+    /// A prompt program recompiled mid-loop — the offered tool surface or
+    /// the failover route changed, so the program identity changed
+    /// (PSP-10 Gate Z).
+    PromptProgramCompiled {
+        turn: u32,
+        program: perspt_sdk::prompt::CompiledPromptProgram,
+    },
+    /// The exact prompt binding of one model call: both program digests
+    /// and the invocation digest (one record per call, Gate Z).
+    PromptProgramInvoked {
+        turn: u32,
+        invocation_digest: String,
+        platform_digest: String,
+        domain_digest: String,
+        tool_spec_hash: String,
+        #[serde(default)]
+        resident_context_digest: String,
     },
 }
 

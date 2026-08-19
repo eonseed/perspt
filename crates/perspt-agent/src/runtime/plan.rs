@@ -82,10 +82,20 @@ impl Psp9AgentRuntime {
             schema: entry.schema.clone(),
             strict: false,
         };
-        let envelope = perspt_core::prompts::PlatformPromptLibrary::graph_plan(REVISION_SHAPE)
+        let stage = perspt_core::prompts::PlatformPromptLibrary::graph_plan(REVISION_SHAPE)
             .map_err(|e| anyhow::anyhow!("graph plan prompt: {e}"))?;
-        recorder.record_prompt_program("graph_plan", &envelope)?;
-        let mut conversation = Conversation::with_system(envelope.text);
+        let (prompt_route, dialect) = crate::turn::route_dialect(self.transport.as_ref(), &route);
+        let invocation = perspt_core::prompts::compile_invocation(
+            &stage,
+            &[],
+            &prompt_route,
+            &dialect,
+            &perspt_sdk::prompt::tool_surface_hash(std::slice::from_ref(&spec)),
+        )
+        .map_err(|e| anyhow::anyhow!("graph plan program: {e}"))?;
+        recorder.record_prompt_program(&invocation.platform)?;
+        recorder.record_prompt_invocation("architect", 1, &invocation)?;
+        let mut conversation = Conversation::with_system(invocation.platform.system_text());
         conversation.push_user(task.to_string());
         let mut runner = crate::turn::ActorTurnRunner {
             transport: self.transport.as_ref(),

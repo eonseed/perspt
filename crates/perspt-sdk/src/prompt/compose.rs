@@ -23,6 +23,7 @@ pub struct StageComposition {
     stage: PromptStage,
     sections: Vec<(RenderedSection, OverrideOrigin)>,
     error: Option<SdkError>,
+    system_separator: Option<String>,
 }
 
 impl StageComposition {
@@ -31,7 +32,17 @@ impl StageComposition {
             stage,
             sections: Vec::new(),
             error: None,
+            system_separator: None,
         }
+    }
+
+    /// Use the stage's declared section separator when the dialect
+    /// concatenates system sections into one slot (the migrated platform
+    /// literals' byte identity depends on it). Without this, the dialect's
+    /// boundary marker joins.
+    pub fn system_separator(mut self, separator: &str) -> Self {
+        self.system_separator = Some(separator.to_string());
+        self
     }
 
     /// Append a typed base section, rendering it eagerly.
@@ -83,7 +94,11 @@ impl StageComposition {
             rendered.push(section);
         }
         let fit = fit_budget(rendered, &dialect.token_accountant, token_budget)?;
-        let messages = layout_messages(&fit.kept, dialect, &origins);
+        let separator = self
+            .system_separator
+            .as_deref()
+            .unwrap_or(&dialect.boundary_marker);
+        let messages = layout_messages(&fit.kept, dialect, separator, &origins);
         let total_bytes: usize = messages.iter().map(|message| message.content.len()).sum();
         if total_bytes as u64 > dialect.max_prompt_bytes {
             return Err(SdkError::Domain(format!(
@@ -136,6 +151,7 @@ fn provenance(
 fn layout_messages(
     kept: &[RenderedSection],
     dialect: &ModelDialect,
+    separator: &str,
     origins: &std::collections::BTreeMap<String, OverrideOrigin>,
 ) -> Vec<CompiledPromptMessage> {
     let mut messages = Vec::new();
@@ -159,7 +175,7 @@ fn layout_messages(
                     .iter()
                     .map(|section| section.content.as_str())
                     .collect::<Vec<_>>()
-                    .join(&dialect.boundary_marker);
+                    .join(separator);
                 let sections = system
                     .iter()
                     .map(|section| provenance(section, origins))

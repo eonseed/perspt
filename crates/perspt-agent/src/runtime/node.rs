@@ -861,20 +861,54 @@ pub(crate) fn resumed_running_graph(
     Ok(graph)
 }
 
-/// Compose and ledger the worker's platform envelope (PSP-10 Phase 5): the
-/// section library renders with the real domain id, and the provenance is
-/// recorded before the loop runs (Gate Z's recording half).
+/// Compile and ledger the worker's prompt invocation through the SDK
+/// compiler (PSP-10 systems 23–24): the platform envelope for the resolved
+/// route and dialect, plus the domain's own session-bootstrap stage (empty
+/// when the domain contributes none). Both programs and the invocation are
+/// recorded before the loop runs (Gate Z).
 pub(crate) fn worker_envelope(
     recorder: &Psp9Recorder,
-    domain_id: &str,
+    domain: &Arc<dyn AgentDomainPackage>,
+    route: &perspt_sdk::prompt::PromptRoute,
+    dialect: &perspt_sdk::prompt::ModelDialect,
+    tool_spec_hash: &str,
 ) -> Result<crate::toolloop::PromptEnvelope> {
-    let envelope = perspt_core::prompts::PlatformPromptLibrary::session_bootstrap(domain_id)
-        .map_err(|e| anyhow::anyhow!("session bootstrap prompt: {e}"))?;
-    recorder.record_prompt_program("session_bootstrap", &envelope)?;
+    let stage =
+        perspt_core::prompts::PlatformPromptLibrary::session_bootstrap(&domain.domain_id().0)
+            .map_err(|e| anyhow::anyhow!("session bootstrap prompt: {e}"))?;
+    // The domain's same-stage sections are static per session; render once
+    // so the loop can recompile per call without the domain package.
+    let mut domain_sections = Vec::new();
+    for template in domain
+        .prompt_library()
+        .stage_templates(stage.stage.dir_name())
+    {
+        domain_sections.push(
+            template
+                .render(&std::collections::BTreeMap::new())
+                .map_err(|e| anyhow::anyhow!("domain section: {e}"))?,
+        );
+    }
+    let invocation = perspt_core::prompts::compile_invocation(
+        &stage,
+        &domain_sections,
+        route,
+        dialect,
+        tool_spec_hash,
+    )
+    .map_err(|e| anyhow::anyhow!("worker prompt invocation: {e}"))?;
+    recorder.record_prompt_program(&invocation.platform)?;
+    if !invocation.domain.messages.is_empty() {
+        recorder.record_prompt_program(&invocation.domain)?;
+    }
+    recorder.record_prompt_invocation("worker", 0, &invocation)?;
     Ok(crate::toolloop::PromptEnvelope {
-        text: envelope.text.clone(),
-        invocation_digest: envelope.digest.clone(),
+        text: invocation.platform.system_text(),
+        invocation_digest: invocation.invocation_digest.clone(),
         manifest_digest: perspt_core::prompts::PlatformPromptLibrary::manifest().digest(),
+        stage: Some(stage),
+        domain_sections,
+        invocation: Some(invocation),
     })
 }
 

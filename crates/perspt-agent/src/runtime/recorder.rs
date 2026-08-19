@@ -360,21 +360,49 @@ impl super::Psp9AgentRuntime {
 }
 
 impl Psp9Recorder {
-    /// Ledger one compiled stage program's provenance (PSP-10 Gate Z,
-    /// recording half): section identities, versions, content hashes, and
-    /// the composed digest. Strict resume enforcement arrives with the
-    /// event envelope.
+    /// Ledger one compiled prompt program exactly (PSP-10 Gate Z): route,
+    /// dialect, ordered section provenance, budget-dropped sections, the
+    /// tool-surface hash, and the program digest.
     pub(crate) fn record_prompt_program(
         &self,
-        stage: &str,
-        composed: &perspt_core::prompts::ComposedStageText,
+        program: &perspt_sdk::prompt::CompiledPromptProgram,
     ) -> Result<()> {
+        let sections: Vec<&perspt_sdk::prompt::SectionProvenance> = program
+            .messages
+            .iter()
+            .flat_map(|message| message.sections.iter())
+            .collect();
         self.record_custom(
             "prompt_program_compiled",
             serde_json::json!({
-                "stage": stage,
-                "sections": composed.sections,
-                "digest": composed.digest,
+                "stage": program.stage.dir_name(),
+                "route": program.route,
+                "dialect": program.dialect,
+                "sections": sections,
+                "dropped_sections": program.dropped_sections,
+                "tool_spec_hash": program.tool_spec_hash,
+                "digest": program.program_digest,
+            }),
+        )
+    }
+
+    /// Ledger one model call's exact prompt binding: both program digests
+    /// and the invocation digest (Gate Z, one record per call).
+    pub(crate) fn record_prompt_invocation(
+        &self,
+        actor: &str,
+        turn: u32,
+        invocation: &perspt_sdk::prompt::CompiledPromptInvocation,
+    ) -> Result<()> {
+        self.record_custom(
+            "prompt_program_invoked",
+            serde_json::json!({
+                "actor": actor,
+                "turn": turn,
+                "platform_digest": invocation.platform.program_digest,
+                "domain_digest": invocation.domain.program_digest,
+                "invocation_digest": invocation.invocation_digest,
+                "tool_spec_hash": invocation.platform.tool_spec_hash,
             }),
         )
     }

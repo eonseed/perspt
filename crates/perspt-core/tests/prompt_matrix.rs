@@ -4,7 +4,41 @@
 //! golden asserts prove the composed rendering is byte-identical to the
 //! pre-move literals. A text change is always a visible diff here.
 
-use perspt_core::prompts::PlatformPromptLibrary;
+use perspt_core::prompts::{PlatformPromptLibrary, PlatformStage};
+
+/// Compile a stage for the live single-slot dialect and return the one
+/// transport-facing system text (the byte-identity surface).
+fn wire_text(stage: &PlatformStage) -> String {
+    let route = perspt_sdk::prompt::PromptRoute {
+        adapter: "genai".into(),
+        family: perspt_sdk::ModelFamily::Other("test".into()),
+        exact_model: None,
+    };
+    stage
+        .compile(
+            &route,
+            &perspt_sdk::prompt::ModelDialect::genai_single_slot_v1(),
+            &perspt_sdk::prompt::tool_surface_hash(&[]),
+        )
+        .unwrap()
+        .system_text()
+}
+
+fn digest(stage: &PlatformStage) -> String {
+    let route = perspt_sdk::prompt::PromptRoute {
+        adapter: "genai".into(),
+        family: perspt_sdk::ModelFamily::Other("test".into()),
+        exact_model: None,
+    };
+    stage
+        .compile(
+            &route,
+            &perspt_sdk::prompt::ModelDialect::genai_single_slot_v1(),
+            &perspt_sdk::prompt::tool_surface_hash(&[]),
+        )
+        .unwrap()
+        .program_digest
+}
 
 /// The exact pre-move literals, frozen at migration time.
 const WORKER: &str =
@@ -34,27 +68,23 @@ const REVISION_SHAPE: &str =
 #[test]
 fn composed_renderings_are_byte_identical_to_the_literals() {
     assert_eq!(
-        PlatformPromptLibrary::session_bootstrap("coding")
-            .unwrap()
-            .text,
+        wire_text(&PlatformPromptLibrary::session_bootstrap("coding").unwrap()),
         WORKER
     );
     assert_eq!(
-        PlatformPromptLibrary::graph_plan(REVISION_SHAPE)
-            .unwrap()
-            .text,
+        wire_text(&PlatformPromptLibrary::graph_plan(REVISION_SHAPE).unwrap()),
         ARCHITECT
     );
     assert_eq!(
-        PlatformPromptLibrary::repository_explore().unwrap().text,
+        wire_text(&PlatformPromptLibrary::repository_explore().unwrap()),
         EXPLORER
     );
     assert_eq!(
-        PlatformPromptLibrary::adjudicate().unwrap().text,
+        wire_text(&PlatformPromptLibrary::adjudicate().unwrap()),
         ADJUDICATOR
     );
     assert_eq!(
-        PlatformPromptLibrary::evidence_summarize().unwrap().text,
+        wire_text(&PlatformPromptLibrary::evidence_summarize().unwrap()),
         SUMMARIZER
     );
 }
@@ -65,7 +95,7 @@ fn composed_renderings_are_byte_identical_to_the_literals() {
 fn the_worker_domain_is_no_longer_hardcoded() {
     let research = PlatformPromptLibrary::session_bootstrap("research").unwrap();
     assert_eq!(
-        research.text,
+        wire_text(&research),
         "You are a governed research agent. Propose tool calls; every effect is mediated."
     );
 }
@@ -75,7 +105,7 @@ fn the_worker_domain_is_no_longer_hardcoded() {
 fn composition_is_deterministic_with_full_provenance() {
     let first = PlatformPromptLibrary::session_bootstrap("coding").unwrap();
     let second = PlatformPromptLibrary::session_bootstrap("coding").unwrap();
-    assert_eq!(first, second);
+    assert_eq!(digest(&first), digest(&second));
     assert_eq!(first.sections.len(), 2);
     assert!(first
         .sections
@@ -83,7 +113,7 @@ fn composition_is_deterministic_with_full_provenance() {
         .all(|section| section.content_hash.starts_with("sha256:")));
     // A changed variable changes the digest.
     let other = PlatformPromptLibrary::session_bootstrap("research").unwrap();
-    assert_ne!(first.digest, other.digest);
+    assert_ne!(digest(&first), digest(&other));
 }
 
 /// The committed manifest digest covers every section.
