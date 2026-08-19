@@ -1303,6 +1303,33 @@ fn push_correction(
     recorder: Option<&dyn LoopRecorder>,
     log: &mut EventLog,
 ) -> Result<()> {
+    // Infrastructure-only residuals are not code defects: steering the
+    // model to "fix" them loops forever. Name the gap instead — the model
+    // can add missing project configuration or report the blocker.
+    let infra_only = !measured.residuals.is_empty()
+        && measured
+            .residuals
+            .iter()
+            .all(|residual| residual.class == perspt_sdk::ResidualClass::SensorUnavailable);
+    if infra_only {
+        let gaps: Vec<&str> = measured
+            .residuals
+            .iter()
+            .take(4)
+            .map(|residual| residual.evidence.summary.as_str())
+            .collect();
+        return context.push_user(
+            format!(
+                "Verification is blocked by unavailable sensors, not by the \
+                 code: {}. If project configuration can enable them (for \
+                 example a missing manifest), add it; otherwise state the \
+                 blocker plainly and stop.",
+                gaps.join("; ")
+            ),
+            recorder,
+            log,
+        );
+    }
     let instruction = measured
         .correction
         .as_ref()
