@@ -6,8 +6,12 @@
 pub mod agent_app;
 pub mod app_event;
 pub mod chat_app;
+mod chat_commands;
+mod chat_view;
 pub mod dashboard;
 pub mod diff_viewer;
+pub mod latex;
+pub mod markdown;
 pub mod review_modal;
 pub mod simple_input;
 pub mod task_tree;
