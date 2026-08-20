@@ -220,6 +220,25 @@ impl Psp9AgentRuntime {
     /// partial, a repeated signature forces an alternative approach, and
     /// stagnation expands to a distinct family.
     #[allow(clippy::too_many_arguments)]
+    /// The evidence summary a later branch's goal text draws on.
+    fn history_entry(
+        support_key: String,
+        measured: &Measured,
+        candidate: &BranchCandidate,
+    ) -> PreviousBranch {
+        PreviousBranch {
+            support_key,
+            residual_count: measured.residuals.len(),
+            energy: candidate.measurement.energy,
+            residual_summaries: measured
+                .residuals
+                .iter()
+                .take(6)
+                .map(|residual| residual.evidence.summary.clone())
+                .collect(),
+        }
+    }
+
     async fn run_branches(
         &self,
         forest: &mut ForestRun<'_>,
@@ -236,16 +255,12 @@ impl Psp9AgentRuntime {
         let mut history: Vec<PreviousBranch> = Vec::new();
         for index in 0..usize::from(self.search.max_branches) {
             let plan = self.plan_branch(index, &routes, &history, forest.baseline_energy);
-            // Real seed lineage: a continuing strategy inherits the partial
-            // (its producer becomes the parent); every other strategy
-            // restarts from the accepted root with no parent branch.
-            let (branch_seed, witness, parent_branch) =
-                match (&partial, plan.strategy.continues_partial()) {
-                    (Some((seed, witness, producer)), true) => {
-                        (Some(seed.clone()), witness.clone(), Some(producer.clone()))
-                    }
-                    _ => (seed.cloned(), WitnessRef::root(&forest.accepted_root), None),
-                };
+            let (branch_seed, witness, parent_branch) = Self::branch_lineage(
+                &partial,
+                plan.strategy.continues_partial(),
+                seed,
+                &forest.accepted_root,
+            );
             let goal_text = branch_goal(goal, plan.strategy, history.last());
             forest.epoch += 1;
             forest.emit(LoopEvent::FrontierEpochStarted {
@@ -283,17 +298,7 @@ impl Psp9AgentRuntime {
                     )
                     .await?;
             }
-            history.push(PreviousBranch {
-                support_key,
-                residual_count: measured.residuals.len(),
-                energy: candidate.measurement.energy,
-                residual_summaries: measured
-                    .residuals
-                    .iter()
-                    .take(6)
-                    .map(|residual| residual.evidence.summary.clone())
-                    .collect(),
-            });
+            history.push(Self::history_entry(support_key, &measured, &candidate));
             // A transport-contained branch means the route itself is
             // refusing (rate limit, outage): opening more branches against
             // it multiplies the retry storm for nothing. Close the forest.
@@ -304,6 +309,25 @@ impl Psp9AgentRuntime {
             }
         }
         Ok(attempts)
+    }
+
+    /// Real seed lineage for the next branch: a continuing strategy
+    /// inherits the pending partial (its producer becomes the parent);
+    /// every other strategy restarts from the accepted root with no
+    /// parent branch — `parent_branch` and `seed_witness` always agree.
+    #[allow(clippy::type_complexity)]
+    fn branch_lineage(
+        partial: &Option<(CandidateSeed, WitnessRef, String)>,
+        continues: bool,
+        seed: Option<&CandidateSeed>,
+        accepted_root: &str,
+    ) -> (Option<CandidateSeed>, WitnessRef, Option<String>) {
+        match (partial, continues) {
+            (Some((seed, witness, producer)), true) => {
+                (Some(seed.clone()), witness.clone(), Some(producer.clone()))
+            }
+            _ => (seed.cloned(), WitnessRef::root(accepted_root), None),
+        }
     }
 
     /// Resolve the next branch's strategy and route. The first
