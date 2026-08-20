@@ -1,0 +1,1 @@
+{"goal":"Implement normalize_ranges in src/lib.rs. Discard empty half-open ranges, sort them, and merge overlapping or exactly adjacent ranges. Results must be canonical and must not overflow at u64::MAX.","hidden_check":["cargo","test","--quiet"],"tags":["medium","rust","algorithm"],"expect":"pass"}

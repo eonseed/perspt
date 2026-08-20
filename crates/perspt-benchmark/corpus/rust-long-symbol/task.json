@@ -1,0 +1,1 @@
+{"goal":"The generated src/catalog.rs is intentionally very large. Implement lookup in src/lib.rs so it returns the numeric value for an exact key and None otherwise. Locate and preserve the unusual release-channel entry; do not rewrite or duplicate the generated table.","hidden_check":["cargo","test","--quiet"],"tags":["large","rust","multi_file","paging"],"expect":"pass"}

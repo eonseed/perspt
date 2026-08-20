@@ -1,0 +1,1 @@
+{"goal":"The generated src/catalog.py is intentionally very large. Implement lookup in src/service.py using the table rather than copying it. Exact keys return their integer value, including the unusual release-channel record; missing keys return None.","hidden_check":["uv","run","--no-sync","pytest","-q","tests"],"tags":["large","python","multi_file","paging"],"expect":"pass"}

@@ -1,0 +1,18 @@
+{
+  "goal": "in the wcore crate, implement normalize(input: &str) -> String in wcore/src/lib.rs: trim the input, lowercase it, and collapse every run of whitespace to a single space; then in the wapi crate make respond(input) return format!(\"ok:{}\", wcore::normalize(input))",
+  "hidden_check": [
+    "cargo",
+    "test",
+    "--quiet"
+  ],
+  "tags": [
+    "large",
+    "rust",
+    "workspace",
+    "paging",
+    "multi_file",
+    "graph",
+    "api_contract"
+  ],
+  "expect": "pass"
+}

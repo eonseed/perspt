@@ -1,0 +1,3 @@
+[workspace]
+members = ["report-core", "report-api"]
+resolver = "2"

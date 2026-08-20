@@ -1,0 +1,1 @@
+{"goal":"Implement normalize_ranges in src/ranges.py. Inputs are integer half-open (start,end) pairs. Reject booleans and non-integers, discard empty ranges, reject reversed ranges, then sort and merge overlaps and adjacency into a canonical new list.","hidden_check":["uv","run","--no-sync","pytest","-q","tests"],"tags":["medium","python","algorithm"],"expect":"pass"}
