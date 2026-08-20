@@ -31,6 +31,7 @@ mod node;
 mod plan;
 mod prompt_bind;
 mod recorder;
+mod resume;
 mod search;
 mod settings;
 
@@ -410,88 +411,6 @@ impl Psp9AgentRuntime {
         Ok(candidate)
     }
 
-    /// Continue an interrupted model loop from its newest durable candidate
-    /// checkpoint (PSP-9 resolved decision 6). Nothing live is deserialized:
-    /// the accepted candidate is rebuilt from content-addressed artifacts, a
-    /// *fresh* capability is minted from the grant intersection at the
-    /// current durable authority epoch, and the loop re-enters with exactly
-    /// the checkpoint's remaining budgets. A bumped epoch refuses the resume.
-    pub async fn resume_session(mut self, session_id: String) -> Result<Psp9RunSummary> {
-        let recorder = Psp9Recorder::attach(
-            &session_id,
-            self.database_path.as_deref(),
-            self.shared_store.clone(),
-            self.event_sender.clone(),
-        )?;
-        let (control, seed) = load_candidate_checkpoint(&recorder, &session_id)?;
-        self.adopt_checkpoint(&recorder, &control, &seed)?;
-
-        // The checkpoint's real node identity (legacy checkpoints predate
-        // the field and keep the historical single-node name).
-        let node_id = if control.node_id.is_empty() {
-            "implement-1".to_string()
-        } else {
-            control.node_id.clone()
-        };
-        // Fold the recorded search state: exact no-goods stay suppressed
-        // and an interrupted forest's consumption is not silently refilled
-        // (spec :2340-2341, by ledger fold).
-        let fold = search::fold::fold_search_ledger(&recorder.store.get_psp9_events(&session_id)?)?;
-        let prior = fold
-            .interrupted
-            .filter(|forest| forest.accepted_root == control.accepted_state_root);
-        *self.search_seed.lock().unwrap() = Some(search::SearchSeed {
-            no_goods: fold.no_goods,
-            prior_usage: prior.as_ref().map(|forest| forest.last_usage.clone()),
-            resumed_from: prior.map(|forest| forest.forest_id),
-        });
-        let task = control.goal.clone();
-        let running_graph = resumed_running_graph(
-            &recorder,
-            &control.graph_revision,
-            &node_id,
-            control.node_generation,
-        )?;
-        let attempt = match self
-            .attempt_node(
-                &recorder,
-                &session_id,
-                &task,
-                &node_id,
-                control.node_generation,
-                &self.model.clone(),
-                &running_graph,
-                Some(&seed),
-                self.config.rejection_budget,
-            )
-            .await
-        {
-            Ok(attempt) => attempt,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
-        };
-        let verdict = match self
-            .conclude_attempt(&recorder, &attempt, &node_id, &task)
-            .await
-        {
-            Ok(verdict) => verdict,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
-        };
-        let (final_outcome, status, promoted_paths) = verdict;
-        if let Err(error) =
-            self.finish_node(&recorder, &running_graph, &node_id, &final_outcome, status)
-        {
-            return Err(self.fail_session(&recorder, error));
-        }
-        Ok(Psp9RunSummary {
-            session_id,
-            node_id,
-            outcome: final_outcome,
-            turns_used: attempt.outcome.turns_used,
-            ledger_head: recorder.head(),
-            promoted_paths,
-        })
-    }
-
     /// Recovery ladder (Theorem 6): the loop already consumed its retry and
     /// fallback levels; the runtime holds the higher rungs. Level 2 refines
     /// the work graph with the attempt's evidence and re-runs at a new
@@ -630,42 +549,6 @@ impl Psp9AgentRuntime {
             ledger_head: recorder.head(),
             promoted_paths: dispatched.promoted_paths,
         })
-    }
-
-    /// Adopt a durable checkpoint's exact remaining budgets and route state.
-    /// A resume never refills what the interrupted loop already spent.
-    fn adopt_checkpoint(
-        &mut self,
-        recorder: &Psp9Recorder,
-        control: &perspt_sdk::ControlFrame,
-        seed: &CandidateSeed,
-    ) -> Result<()> {
-        anyhow::ensure!(
-            control.remaining_turns > 0,
-            "the durable checkpoint has no model-turn budget remaining; resume cannot refill it"
-        );
-        self.config.max_turns = control.remaining_turns;
-        self.config.rejection_budget = control.remaining_rejection_budget;
-        self.model = control.active_model.clone();
-        self.fallback_models = control.remaining_fallback_models.clone();
-        anyhow::ensure!(
-            self.transport.capabilities(&self.model).tool_calling,
-            "checkpoint model route {} no longer supports native tool calling",
-            self.model
-        );
-        recorder.record_custom(
-            "session_resumed",
-            serde_json::json!({
-                "accepted_state_root": control.accepted_state_root,
-                "remaining_turns": self.config.max_turns,
-                "remaining_rejection_budget": self.config.rejection_budget,
-                "seed_files": seed.files.len(),
-                "model": self.model,
-                "remaining_fallback_models": self.fallback_models,
-                "activated_tools": control.activated_tools,
-            }),
-        )?;
-        Ok(())
     }
 
     /// Assemble the conclusion context for a finished attempt and decide the

@@ -428,3 +428,179 @@ async fn compatible_winners_promote_through_one_integration_root() {
         .unwrap()
         .contains("/// Alpha."));
 }
+
+/// A transport that delegates to the dependent-graph script but hangs
+/// forever on the downstream node's first request — freezing the session
+/// inside the crash window between "node-a staged" and "node-b ran".
+struct BetaHangs {
+    inner: Arc<GoalRouted>,
+    beta_reached: std::sync::atomic::AtomicBool,
+}
+
+impl ModelTransport for BetaHangs {
+    fn chat_turn<'a>(
+        &'a self,
+        model: &'a ModelId,
+        conversation: &'a Conversation,
+        tools: &'a [ToolSpec],
+        choice: ToolChoicePolicy,
+    ) -> TransportFuture<'a, TurnOutput> {
+        let text = conversation
+            .messages()
+            .iter()
+            .map(|message| format!("{message:?}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if text.contains("beta-part") {
+            self.beta_reached
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            return Box::pin(std::future::pending());
+        }
+        self.inner.chat_turn(model, conversation, tools, choice)
+    }
+
+    fn capabilities(&self, model: &ModelId) -> perspt_sdk::ProviderCapabilities {
+        self.inner.capabilities(model)
+    }
+
+    fn family_of(&self, model: &ModelId) -> perspt_sdk::ModelFamily {
+        self.inner.family_of(model)
+    }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
+}
+
+/// Phase 1 of the crash test: run until node-b's first model request,
+/// then drop the run future — the process-crash analogue. The dependency
+/// edge a → b guarantees node-a staged before node-b could be dispatched.
+async fn crash_after_node_a_staged(project: &std::path::Path, config: &Psp9RunConfig) {
+    let hanging = Arc::new(BetaHangs {
+        inner: dependent_graph_transport(),
+        beta_reached: std::sync::atomic::AtomicBool::new(false),
+    });
+    let runtime = Psp9AgentRuntime::with_transport(
+        project.to_path_buf(),
+        hanging.clone(),
+        ModelId::new("test", "scripted"),
+        config.clone(),
+    )
+    .with_database_path(project.join("runtime.db"));
+    let run = runtime.run("document then refine".into());
+    tokio::pin!(run);
+    loop {
+        tokio::select! {
+            result = &mut run => panic!("the session must hang on node-b, got {result:?}"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(25)) => {
+                if hanging.beta_reached.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// The kinds and payloads of the resumed rows, for failure diagnostics.
+fn resumed_payloads(rows: &[perspt_store::Psp9LedgerRow]) -> Vec<(String, serde_json::Value)> {
+    rows.iter()
+        .filter_map(|row| {
+            let value: serde_json::Value = serde_json::from_str(&row.event_json).ok()?;
+            let kind = value.get("kind")?.as_str()?.to_string();
+            let payload = value.get("payload").cloned().unwrap_or_default();
+            Some((kind, payload))
+        })
+        .collect()
+}
+
+/// Gate AA across a crash boundary: an interrupted multi-node session
+/// resumes through graph dispatch, never through single-node direct
+/// promotion. The crash lands after node-a staged and before node-b ran;
+/// nothing may reach the workspace at that point. Resume reconstructs the
+/// staging root from the durable ledger, re-runs only node-b (seeded with
+/// node-a's restored contribution — its edit anchors on node-a's output),
+/// and promotes the combined root through a fresh integration gate.
+/// The two-module fixture shared by the crash-resume test.
+fn write_resume_fixture(project: &std::path::Path) {
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname='integration-fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    std::fs::write(project.join("src/lib.rs"), "pub mod a;\n").unwrap();
+    std::fs::write(project.join("src/a.rs"), "pub fn alpha() -> u32 { 1 }\n").unwrap();
+}
+
+#[tokio::test]
+async fn a_multi_node_resume_promotes_only_through_the_integration_gate() {
+    let project = tempfile::tempdir().unwrap();
+    write_resume_fixture(project.path());
+    let database = project.path().join("runtime.db");
+    let config = Psp9RunConfig {
+        approval_policy: ApprovalPolicy::Auto,
+        max_turns: 4,
+        allow_unisolated_verifiers: true,
+        max_parallel_nodes: 2,
+        ..Psp9RunConfig::default()
+    };
+    crash_after_node_a_staged(project.path(), &config).await;
+
+    // Gate AA held through the crash: nothing was promoted.
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("src/a.rs")).unwrap(),
+        "pub fn alpha() -> u32 { 1 }\n",
+        "no partial promotion may precede the integration gate"
+    );
+    let (session_id, before) = {
+        let store = perspt_store::SessionStore::open(&database).unwrap();
+        let session_id = store.list_recent_sessions(1).unwrap()[0].session_id.clone();
+        let before = store.get_psp9_events(&session_id).unwrap().len();
+        (session_id, before)
+    };
+
+    // Phase 2: resume with a working transport. Only node-b may run.
+    let resumed = Psp9AgentRuntime::with_transport(
+        project.path().to_path_buf(),
+        dependent_graph_transport(),
+        ModelId::new("test", "scripted"),
+        config,
+    )
+    .with_database_path(database.clone())
+    .resume_session(session_id.clone())
+    .await
+    .unwrap();
+
+    let store = perspt_store::SessionStore::open(&database).unwrap();
+    let rows = store.get_psp9_events(&session_id).unwrap();
+    let payloads = resumed_payloads(&rows[before..]);
+    assert_eq!(resumed.node_id, "graph", "no single-node promotion path");
+    assert!(
+        matches!(resumed.outcome, NodeTerminalOutcome::HardPass),
+        "{:?}\n{payloads:#?}",
+        resumed.outcome
+    );
+    let mut promoted = resumed.promoted_paths.clone();
+    promoted.sort();
+    assert_eq!(promoted, ["src/a.rs", "src/notes.rs"], "the combined root");
+    let final_a = std::fs::read_to_string(project.path().join("src/a.rs")).unwrap();
+    assert!(final_a.contains("Alpha, refined."), "{final_a}");
+
+    let count = |needle: &str| payloads.iter().filter(|(kind, _)| kind == needle).count();
+    assert_eq!(count("graph_resumed"), 1, "{payloads:#?}");
+    assert_eq!(count("scheduler_dispatch"), 1, "only node-b re-runs");
+    assert_eq!(count("integration_measured"), 1, "the global gate ran");
+    assert_eq!(count("integration_promoted"), 1);
+    assert_eq!(count("integration_failed"), 0);
+
+    // The resumed record names the restored contribution.
+    let graph_resumed = payloads
+        .iter()
+        .find(|(kind, _)| kind == "graph_resumed")
+        .map(|(_, payload)| payload.clone())
+        .expect("graph_resumed payload");
+    assert_eq!(
+        graph_resumed.get("staged").unwrap(),
+        &serde_json::json!(["node-a"])
+    );
+}

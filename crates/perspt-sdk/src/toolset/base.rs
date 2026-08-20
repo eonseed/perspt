@@ -183,7 +183,12 @@ fn read_entries() -> Vec<ToolEntry> {
             schema(&[
                 ("path", "string", "Workspace-relative file path", true),
                 ("offset", "integer", "1-based first line to read", false),
-                ("limit", "integer", "Maximum number of lines (capped at 2000)", false),
+                (
+                    "limit",
+                    "integer",
+                    "Maximum number of lines (capped at 2000)",
+                    false,
+                ),
             ]),
             path_read(),
             false,

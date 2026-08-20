@@ -620,9 +620,8 @@ impl ToolLoop<'_> {
         let conversation = self.fit_composed_request(turn, &specs, context, assembled, state)?;
         self.bind_prompt_program(turn, &specs, state)?;
         // Gate AC: the turn's worst case is reserved before the transport
-        // call and settled with observed actuals after execution. Both
-        // sides snapshot the shared usage into the ledger, so a crash
-        // mid-turn can never refill what was already reserved.
+        // call and settled with actuals after; both sides snapshot the
+        // usage so a crash mid-turn never refills what was reserved.
         let turn_reservation = self.reserve_model_turn(&conversation)?;
         self.snapshot_search_usage(&mut state.log)?;
         let output = self

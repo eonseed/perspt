@@ -67,14 +67,34 @@ impl Psp9AgentRuntime {
         &self,
         recorder: &Psp9Recorder,
         session_id: &str,
+        graph: WorkGraphRevision,
+    ) -> Result<DispatchOutcome> {
+        self.run_dispatched_with(
+            recorder,
+            session_id,
+            graph,
+            super::integrate::StagingRoot::default(),
+            std::collections::BTreeMap::new(),
+        )
+        .await
+    }
+
+    /// `run_dispatched` with restored state: a pre-seeded staging root and
+    /// per-node resume seeds (graph resume rebuilds both from the ledger).
+    pub(super) async fn run_dispatched_with(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
         mut graph: WorkGraphRevision,
+        staging: super::integrate::StagingRoot,
+        resume_seeds: std::collections::BTreeMap<String, super::node::CandidateSeed>,
     ) -> Result<DispatchOutcome> {
         let scheduler = tokio::sync::Mutex::new(Scheduler::new(self.config.max_parallel_nodes));
         let mut leases = perspt_sdk::LeaseTable::default();
         let pool = SharedRecoveryPool::new(self.config.rejection_budget);
         // PSP-10 system 22: node winners stage here; only a hard-passing
         // integration root reaches the user workspace.
-        let mut staging = super::integrate::StagingRoot::default();
+        let mut staging = staging;
         let mut running: FuturesUnordered<futures::future::BoxFuture<'_, NodeDone>> =
             FuturesUnordered::new();
         let mut tokens: std::collections::BTreeMap<String, CancellationToken> = Default::default();
@@ -96,6 +116,7 @@ impl Psp9AgentRuntime {
                     &mut running,
                     &mut tokens,
                     &staging,
+                    &resume_seeds,
                 )
                 .await?;
             let Some(done) = running.next().await else {
@@ -185,6 +206,7 @@ impl Psp9AgentRuntime {
         running: &mut FuturesUnordered<futures::future::BoxFuture<'a, NodeDone>>,
         tokens: &mut std::collections::BTreeMap<String, CancellationToken>,
         staging: &super::integrate::StagingRoot,
+        resume_seeds: &std::collections::BTreeMap<String, super::node::CandidateSeed>,
     ) -> Result<WorkGraphRevision> {
         let mut updated = graph.clone();
         loop {
@@ -198,10 +220,18 @@ impl Psp9AgentRuntime {
             recorder.record_custom("graph_revision", serde_json::to_value(&updated)?)?;
             let graph_snapshot = updated.clone();
             // PSP-10 system 22: downstream work builds on the latest
-            // staging root, never on unstaged sibling state.
-            let seed = self
+            // staging root, never on unstaged sibling state. A resumed
+            // node continues from its durable candidate checkpoint only
+            // when it inherits nothing — a checkpoint cannot carry the
+            // predecessors' staged state, so a dependent node re-runs
+            // deterministically atop its staging seed instead.
+            let seed = match self
                 .staging_seed(&updated, staging, &selected.node_id)
-                .await?;
+                .await?
+            {
+                Some(seed) => Some(seed),
+                None => resume_seeds.get(&selected.node_id).cloned(),
+            };
             running.push(Box::pin(async move {
                 let node_id = selected.node_id.clone();
                 let generation = selected.generation;
@@ -396,9 +426,17 @@ impl Psp9AgentRuntime {
         let files = attempt.candidate.export_accepted().await?;
         let state_root = attempt.candidate.checkpoint(&[]).await?.witness.state_root;
         let paths: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
+        // The staged winner is persisted content-addressed: an interrupted
+        // graph session reconstructs the staging root from the ledger
+        // (Gate AA — resume must never promote one node without the rest
+        // of its verified integration root).
+        let durable = durable_staged_files(recorder, &files)?;
         staging.contributions.insert(
             node_id.to_string(),
-            super::integrate::StagedWinner { state_root, files },
+            super::integrate::StagedWinner {
+                state_root: state_root.clone(),
+                files,
+            },
         );
         recorder.record_custom(
             "staging_root_updated",
@@ -407,10 +445,38 @@ impl Psp9AgentRuntime {
                 "staging_root": staging.digest(),
                 "contributions": staging.contributions.len(),
                 "paths": paths,
+                "state_root": state_root,
+                "files": durable,
             }),
         )?;
         Ok((NodeTerminalOutcome::HardPass, "COMPLETED_PSP9", Vec::new()))
     }
+}
+
+/// Persist one staged winner's files as content-addressed artifacts and
+/// return their durable handles for the `staging_root_updated` event.
+fn durable_staged_files(
+    recorder: &Psp9Recorder,
+    files: &[crate::toolloop::SeedFile],
+) -> Result<Vec<crate::toolloop::DurableSeedFile>> {
+    let put = |bytes: Option<&[u8]>| -> Result<Option<String>> {
+        let Some(bytes) = bytes else { return Ok(None) };
+        let handle = perspt_sdk::ledger::content_hash(bytes);
+        recorder
+            .store
+            .put_psp9_artifact(&handle, bytes, "application/octet-stream")?;
+        Ok(Some(handle))
+    };
+    files
+        .iter()
+        .map(|file| {
+            Ok(crate::toolloop::DurableSeedFile {
+                path: file.path.clone(),
+                content_artifact: put(file.content.as_deref())?,
+                source_preimage_artifact: put(file.source_preimage.as_deref())?,
+            })
+        })
+        .collect()
 }
 
 /// Settle one finished lifecycle future: refund a cancelled node's claim,
