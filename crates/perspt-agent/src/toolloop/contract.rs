@@ -500,6 +500,12 @@ pub trait LoopRecorder: Send + Sync {
     fn record_artifact(&self, content: &[u8], _media_type: &str) -> Result<String> {
         Ok(perspt_sdk::ledger::content_hash(content))
     }
+
+    /// Retrieve previously recorded artifact bytes by content handle. The
+    /// default supports in-memory conformance fixtures, which never store.
+    fn fetch_artifact(&self, _handle: &str) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
 
 /// The loop's terminal report.

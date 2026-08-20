@@ -120,6 +120,32 @@ fn surface_entries() -> Vec<ToolEntry> {
             false,
         )
         .hot(),
+        entry(
+            "read_artifact",
+            "Read a window of a stored artifact by the artifact:<handle> shown in a \
+             truncated-output note; returns bytes offset..offset+limit with a \
+             continuation hint",
+            EffectKind::DataRead,
+            RiskClass::Low,
+            schema(&[
+                (
+                    "handle",
+                    "string",
+                    "The content handle from a [full output: artifact:…] note",
+                    true,
+                ),
+                (
+                    "offset",
+                    "integer",
+                    "0-based byte offset (default 0)",
+                    false,
+                ),
+                ("limit", "integer", "Bytes to return, capped at 7168", false),
+            ]),
+            FootprintSpec::opaque(),
+            false,
+        )
+        .hot(),
     ]
 }
 
@@ -146,12 +172,16 @@ fn read_entries() -> Vec<ToolEntry> {
             "List files in a directory, respecting ignore files",
             EffectKind::List,
             RiskClass::Low,
-            schema(&[(
-                "path",
-                "string",
-                "Directory to list (default workspace root)",
-                false,
-            )]),
+            schema(&[
+                (
+                    "path",
+                    "string",
+                    "Directory to list (default workspace root)",
+                    false,
+                ),
+                ("offset", "integer", "0-based entry to continue from", false),
+                ("limit", "integer", "Maximum entries to return", false),
+            ]),
             path_read(),
             false,
         ),
@@ -160,7 +190,11 @@ fn read_entries() -> Vec<ToolEntry> {
             "Match files by glob pattern, sorted by modification time",
             EffectKind::Search,
             RiskClass::Low,
-            schema(&[("pattern", "string", "Glob pattern, e.g. src/**/*.rs", true)]),
+            schema(&[
+                ("pattern", "string", "Glob pattern, e.g. src/**/*.rs", true),
+                ("offset", "integer", "0-based match to continue from", false),
+                ("limit", "integer", "Maximum matches to return", false),
+            ]),
             FootprintSpec::default(),
             false,
         )
