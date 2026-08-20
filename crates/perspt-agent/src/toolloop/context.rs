@@ -23,6 +23,13 @@ use super::{emit, EventLog, LoopEvent, LoopRecorder};
 /// The loop's sole owner of model context and deferred tool activation.
 pub(crate) struct LoopContext {
     projection: ConversationProjection,
+    /// The birth dependency of each message (parallel to the conversation):
+    /// the state the page was created under. Resident assembly stamps pages
+    /// from this log instead of relabelling them with the live root, so a
+    /// state change invalidates stale optional pages rather than silently
+    /// rewriting their provenance (Gate AF, spec :1438-1444).
+    birth_deps: Vec<perspt_sdk::prompt::StateDependency>,
+    current_dep: perspt_sdk::prompt::StateDependency,
 }
 
 impl LoopContext {
@@ -64,11 +71,72 @@ impl LoopContext {
         )?;
         let projection =
             ConversationProjection::from_seed(&seed).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let mut context = Self { projection };
+        // Seed messages (instructions, the task) are session-invariant;
+        // the loop switches the current dependency to the live root once
+        // the baseline checkpoint exists.
+        let initial = perspt_sdk::prompt::StateDependency::SessionInvariant;
+        let birth_deps = vec![initial.clone(); projection.conversation().messages().len()];
+        let mut context = Self {
+            projection,
+            birth_deps,
+            current_dep: initial,
+        };
         for name in activated {
             context.activate_tool(&name, recorder, log)?;
         }
         Ok(context)
+    }
+
+    /// Set the dependency stamped onto messages appended from now on —
+    /// called at the baseline and after every accepted checkpoint.
+    pub(crate) fn set_state_dependency(&mut self, dep: perspt_sdk::prompt::StateDependency) {
+        self.current_dep = dep;
+    }
+
+    /// Stamp the context after the loop opens it: pages appended from here
+    /// depend on the live state (the partial seed root under a continuing
+    /// branch, the accepted root otherwise); a resumed projection's
+    /// restored pages were validated against that root and depend on it.
+    pub(crate) fn stamp_after_open(
+        &mut self,
+        was_resumed: bool,
+        partial_seed_root: Option<&str>,
+        accepted_root: &str,
+    ) {
+        let dep = match partial_seed_root {
+            Some(root) => perspt_sdk::prompt::StateDependency::PartialCheckpointRoot(root.into()),
+            None => perspt_sdk::prompt::StateDependency::AcceptedRoot(accepted_root.into()),
+        };
+        if was_resumed {
+            self.restamp_existing(dep);
+        } else {
+            self.set_state_dependency(dep);
+        }
+    }
+
+    /// Restamp every existing message (resume: the restored projection was
+    /// validated against the accepted root, so its pages depend on it).
+    pub(crate) fn restamp_existing(&mut self, dep: perspt_sdk::prompt::StateDependency) {
+        for entry in &mut self.birth_deps {
+            *entry = dep.clone();
+        }
+        self.current_dep = dep;
+    }
+
+    /// The birth dependency per message, parallel to `conversation()`.
+    pub(crate) fn birth_deps(&self) -> &[perspt_sdk::prompt::StateDependency] {
+        &self.birth_deps
+    }
+
+    /// Keep the birth log parallel to the projection after a delta (a
+    /// compaction may replace messages; replacements carry the current
+    /// dependency).
+    fn sync_birth_deps(&mut self) {
+        let len = self.projection.conversation().messages().len();
+        while self.birth_deps.len() < len {
+            self.birth_deps.push(self.current_dep.clone());
+        }
+        self.birth_deps.truncate(len);
     }
 
     /// Write-ahead by construction: the delta record is ledgered before the
@@ -92,7 +160,9 @@ impl LoopContext {
         )?;
         self.projection
             .apply(&record)
-            .map_err(|e| anyhow::anyhow!("{e}"))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.sync_birth_deps();
+        Ok(())
     }
 
     pub(crate) fn push_message(

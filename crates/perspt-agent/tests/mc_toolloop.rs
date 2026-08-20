@@ -266,6 +266,7 @@ fn loop_with<'a>(
             ..Default::default()
         },
         recorder: None,
+        partial_seed_root: None,
     }
 }
 

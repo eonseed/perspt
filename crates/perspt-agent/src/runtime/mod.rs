@@ -425,6 +425,7 @@ impl Psp9AgentRuntime {
             seed,
             shared_recovery_budget,
             recorder,
+            None,
         )
         .await
     }
@@ -446,6 +447,7 @@ impl Psp9AgentRuntime {
         seed: Option<&CandidateSeed>,
         shared_recovery_budget: u32,
         loop_recorder: &dyn crate::toolloop::LoopRecorder,
+        partial_root: Option<String>,
     ) -> Result<NodeAttempt> {
         let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
         restore_seed(&candidate, seed).await?;
@@ -485,6 +487,7 @@ impl Psp9AgentRuntime {
             generation,
             system_prompt: envelope,
             recorder: Some(loop_recorder),
+            partial_seed_root: partial_root,
         };
         let outcome = run_seeded(tool_loop, goal, seed).await?;
         Ok(NodeAttempt {
