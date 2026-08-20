@@ -153,6 +153,27 @@ fn assert_abandoned_and_bounded(bodies: &[serde_json::Value], limits: &SearchLim
     });
     assert!(abandoned, "the refused reservation must be ledgered");
 
+    // Crash durability: the reserved model turn is snapshotted into the
+    // ledger *before* the branch settles, so a crash mid-branch replays
+    // with the charge — never with a refilled budget.
+    let abandoned_at = bodies
+        .iter()
+        .position(|body| event_name(body) == Some("branch_abandoned"))
+        .unwrap();
+    let charged_early = bodies[..abandoned_at].iter().any(|body| {
+        event_name(body) == Some("search_usage_snapshot")
+            && body
+                .get("usage")
+                .and_then(|usage| usage.get("model_turns"))
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+                >= 1
+    });
+    assert!(
+        charged_early,
+        "an in-branch usage snapshot must carry the reserved turn"
+    );
+
     // The closed forest's usage never sits above any limit (Gate AC's
     // falsifier is "usage above a limit").
     let closed = bodies

@@ -398,7 +398,7 @@ impl ToolLoop<'_> {
         &mut self,
         log: &mut EventLog,
     ) -> Result<(Measured, AcceptedTrajectory)> {
-        self.reserve_verifier_action()?;
+        self.reserve_verifier_action(log)?;
         let baseline = self.measurer.measure().await?;
         emit(
             self.recorder,
@@ -620,8 +620,11 @@ impl ToolLoop<'_> {
         let conversation = self.fit_composed_request(turn, &specs, context, assembled, state)?;
         self.bind_prompt_program(turn, &specs, state)?;
         // Gate AC: the turn's worst case is reserved before the transport
-        // call and settled with observed actuals after execution.
+        // call and settled with observed actuals after execution. Both
+        // sides snapshot the shared usage into the ledger, so a crash
+        // mid-turn can never refill what was already reserved.
         let turn_reservation = self.reserve_model_turn(&conversation)?;
+        self.snapshot_search_usage(&mut state.log)?;
         let output = self
             .chat_with_failover(&conversation, &specs, &mut state.recovery, &mut state.log)
             .await?;
@@ -651,6 +654,7 @@ impl ToolLoop<'_> {
             )
             .await?;
         self.settle_model_turn(turn_reservation, &output, mutations)?;
+        self.snapshot_search_usage(&mut state.log)?;
         Ok((output, mutations, immediate_boundary))
     }
 
@@ -860,7 +864,7 @@ impl ToolLoop<'_> {
         trajectory: &mut AcceptedTrajectory,
         log: &mut EventLog,
     ) -> Result<(Measured, GateDecision)> {
-        self.reserve_verifier_action()?;
+        self.reserve_verifier_action(log)?;
         let measured = self.measurer.measure().await?;
         emit(
             self.recorder,
@@ -1242,7 +1246,7 @@ impl ToolLoop<'_> {
         }
         if outcome.mutated {
             *mutations += 1;
-            self.reserve_verifier_action()?;
+            self.reserve_verifier_action(log)?;
             let boundary = self.measurer.measure_incremental().await?;
             emit(
                 self.recorder,

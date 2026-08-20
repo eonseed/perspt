@@ -235,6 +235,11 @@ pub struct SharedSearchBudget {
     inner: std::sync::Arc<std::sync::Mutex<SearchUsage>>,
     limits: SearchLimits,
     denied: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The owning forest's `(forest_id, epoch)`, so every holder of the
+    /// handle can ledger a usage snapshot under the right identity —
+    /// crash-durable accounting needs snapshots at action granularity,
+    /// not only at branch boundaries.
+    identity: std::sync::Arc<std::sync::Mutex<(String, u64)>>,
 }
 
 impl SharedSearchBudget {
@@ -249,7 +254,24 @@ impl SharedSearchBudget {
             inner: std::sync::Arc::new(std::sync::Mutex::new(usage)),
             limits,
             denied: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            identity: std::sync::Arc::new(std::sync::Mutex::new((String::new(), 0))),
         }
+    }
+
+    /// Bind the owning forest's identity (set once at forest opening).
+    pub fn bind_forest(&self, forest_id: &str) {
+        self.identity.lock().expect("identity lock").0 = forest_id.to_string();
+    }
+
+    /// Advance the identity's epoch (set at each frontier epoch opening).
+    pub fn set_epoch(&self, epoch: u64) {
+        self.identity.lock().expect("identity lock").1 = epoch;
+    }
+
+    /// The bound `(forest_id, epoch)`; the forest id is empty outside a
+    /// forest.
+    pub fn identity(&self) -> (String, u64) {
+        self.identity.lock().expect("identity lock").clone()
     }
 
     pub fn limits(&self) -> &SearchLimits {

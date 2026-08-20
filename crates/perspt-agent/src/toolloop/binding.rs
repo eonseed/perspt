@@ -3,7 +3,9 @@
 
 use anyhow::Result;
 
-use super::{emit, resident, LoopContext, LoopEvent, PromptEnvelope, ToolLoop, TurnState};
+use super::{
+    emit, resident, EventLog, LoopContext, LoopEvent, PromptEnvelope, ToolLoop, TurnState,
+};
 
 /// The serialized token and byte cost of one composed request.
 fn wire_cost(
@@ -244,9 +246,11 @@ impl ToolLoop<'_> {
     }
 
     /// Gate AC: reserve one verifier action from the shared search budget
-    /// before a measurement runs. A refusal aborts the branch before the
-    /// action executes; the forest observes it and abandons the branch.
-    pub(super) fn reserve_verifier_action(&self) -> Result<()> {
+    /// before a measurement runs, then snapshot the usage into the ledger
+    /// so the charge survives a crash during the run. A refusal aborts the
+    /// branch before the action executes; the forest observes it and
+    /// abandons the branch.
+    pub(super) fn reserve_verifier_action(&self, log: &mut EventLog) -> Result<()> {
         let Some(budget) = &self.search_budget else {
             return Ok(());
         };
@@ -258,7 +262,32 @@ impl ToolLoop<'_> {
             .map(|_ticket| ())
             .map_err(|error| {
                 anyhow::anyhow!("search budget refused the verifier reservation: {error}")
-            })
+            })?;
+        self.snapshot_search_usage(log)
+    }
+
+    /// Ledger the shared budget's current usage under the owning forest's
+    /// identity. Emitted after every reservation and settlement so the
+    /// durable record is always the reserved worst case or the settled
+    /// actuals — a crash between snapshots can only over-charge, never
+    /// refill (Gate AC: limits are never silently refilled).
+    pub(super) fn snapshot_search_usage(&self, log: &mut EventLog) -> Result<()> {
+        let Some(budget) = &self.search_budget else {
+            return Ok(());
+        };
+        let (forest_id, epoch) = budget.identity();
+        if forest_id.is_empty() {
+            return Ok(());
+        }
+        emit(
+            self.recorder,
+            log,
+            LoopEvent::SearchUsageSnapshot {
+                forest_id,
+                epoch,
+                usage: budget.snapshot(),
+            },
+        )
     }
 
     /// Gate AC: reserve one model turn's worst case from the shared search
