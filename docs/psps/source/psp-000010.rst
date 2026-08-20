@@ -2746,6 +2746,41 @@ residual gaps in the wired mechanisms; items 12–17 record how they close.
     is still reported (``SensorUnavailable``) and, being environmental,
     never supports a no-good.
 
+A third audit round found residual crash/resume gaps in genuinely
+concurrent paths; items 18–21 close them.
+
+18. **Checkpoints carry page provenance.** The durable candidate
+    checkpoint persists each message's birth dependency parallel to the
+    conversation, and a resumed loop restores those exact labels — never a
+    wholesale relabel with the live root, which would launder stale pages
+    as fresh (erratum 8's falsifier) and turn the session-invariant head
+    into a page the next acceptance stales, killing the continuation at
+    the fail-closed assembler. A pre-provenance checkpoint restores with
+    the legacy fallback: the instruction/task head is session-invariant,
+    the remaining pages carry the restored root (their true birth root is
+    unrecorded — a documented residual for old ledgers only).
+19. **The conversation refold routes by digest chain.** Concurrent node
+    loops (and search branches) interleave conversation events on the one
+    session ledger, so the Gate O refold no longer holds a single live
+    projection: it collects every seed and delta record, walks the
+    checkpoint's parent chain back to its seed, and replays that one
+    chain forward through the sole writer — a parallel graph's ledger is
+    exactly as refoldable as a serial one. A broken chain still fails
+    closed.
+20. **Resume judges the graph by its latest recorded state.** Sibling
+    terminality and staging reconstruction are evaluated against the last
+    recorded descendant of the checkpoint's graph revision, not the
+    checkpoint-era snapshot — a sibling whose terminal fold landed in a
+    later revision still refuses resume (erratum 12), and a resumed
+    node's mid-loop checkpoint continues only if the latest state shows
+    it unchanged at its recorded generation.
+21. **Every reservation is durable and every refusal is free.** The
+    fork's eager-copy reservation and the preview verifier reservation
+    are snapshotted into the ledger before the copy or the sweep runs, so
+    a crash in either window resumes with the charge. Fork admission
+    checks the exact no-good store and the turn-headroom probe **before**
+    reserving: a suppressed duplicate or refused fork consumes nothing.
+
 =========================
 Resolved Design Decisions
 =========================
