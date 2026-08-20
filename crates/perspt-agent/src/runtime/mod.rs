@@ -449,13 +449,37 @@ impl Psp9AgentRuntime {
         loop_recorder: &dyn crate::toolloop::LoopRecorder,
         partial_root: Option<String>,
     ) -> Result<NodeAttempt> {
-        let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
-        restore_seed(&candidate, seed).await?;
-        let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
-            .with_domain(self.domain.clone())
-            .with_max_parallel(self.config.max_parallel_verifiers)
-            .with_require_format(self.config.require_format)
-            .with_correction_packets(!self.config.ablate_correction_packets);
+        let prepared = self
+            .prepare_attempt(recorder, session_id, node_id, generation, model, graph)
+            .await?;
+        self.attempt_prepared(
+            prepared,
+            goal,
+            node_id,
+            generation,
+            model,
+            graph,
+            seed,
+            shared_recovery_budget,
+            loop_recorder,
+            partial_root,
+        )
+        .await
+    }
+
+    /// Assemble a node attempt without touching any workspace: the tool
+    /// catalog, capability, and compiled prompt envelope. The search forest
+    /// derives exact no-good components (Gate AB) from this before it even
+    /// admits the fork; the eager candidate copy stays after `admit_fork`.
+    pub(crate) async fn prepare_attempt(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        node_id: &str,
+        generation: u32,
+        model: &ModelId,
+        graph: &WorkGraphRevision,
+    ) -> Result<PreparedAttempt> {
         let assembly = {
             let external_entries = self.external_tool_entries(recorder).await?;
             self.assemble_node(
@@ -469,6 +493,40 @@ impl Psp9AgentRuntime {
         };
         let kernel_state = loop_kernel_state(&assembly.grant_policy, &graph.revision_id);
         let envelope = self.worker_prompt_envelope(recorder, &assembly, model)?;
+        Ok(PreparedAttempt {
+            assembly,
+            envelope,
+            kernel_state,
+        })
+    }
+
+    /// Run one prepared attempt: fresh candidate overlay, one tool loop.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn attempt_prepared(
+        &self,
+        prepared: PreparedAttempt,
+        goal: &str,
+        node_id: &str,
+        generation: u32,
+        model: &ModelId,
+        graph: &WorkGraphRevision,
+        seed: Option<&CandidateSeed>,
+        shared_recovery_budget: u32,
+        loop_recorder: &dyn crate::toolloop::LoopRecorder,
+        partial_root: Option<String>,
+    ) -> Result<NodeAttempt> {
+        let PreparedAttempt {
+            assembly,
+            envelope,
+            kernel_state,
+        } = prepared;
+        let candidate = self.open_candidate(node_id, generation, &graph.revision_id)?;
+        restore_seed(&candidate, seed).await?;
+        let measurer = CodingCandidateMeasurer::new(&candidate, node_id, generation)
+            .with_domain(self.domain.clone())
+            .with_max_parallel(self.config.max_parallel_verifiers)
+            .with_require_format(self.config.require_format)
+            .with_correction_packets(!self.config.ablate_correction_packets);
         let tool_loop = ToolLoop {
             transport: self.transport.as_ref(),
             model: model.clone(),
