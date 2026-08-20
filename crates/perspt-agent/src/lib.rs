@@ -15,7 +15,7 @@ pub mod toolloop;
 pub mod tools;
 pub mod transport;
 pub mod turn;
-pub(crate) mod verifier;
+pub mod verifier;
 
 pub use candidate::{CandidateWorkspace, CodingCandidateMeasurer};
 pub use external_tools::{

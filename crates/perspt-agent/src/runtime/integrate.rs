@@ -120,6 +120,7 @@ impl Psp9AgentRuntime {
             self.config.allow_unisolated_verifiers,
         )?;
         workspace.set_tool_handlers(self.tool_handlers.clone());
+        workspace.set_verifier_timeouts(self.config.verifier_timeouts);
         workspace.restore_exported(&staging.merged_files())?;
         let measured = CodingCandidateMeasurer::new(&workspace, "integration", 0)
             .with_domain(self.domain.clone())

@@ -50,6 +50,8 @@ pub struct CandidateWorkspace {
     generation: u32,
     graph_revision: String,
     allow_unisolated_verifiers: bool,
+    /// Per-stage wall-clock limits for governed verifier processes.
+    verifier_timeouts: crate::verifier::VerifierTimeouts,
     /// The open execution plane: exact-name handlers this candidate
     /// dispatches admitted calls through.
     handlers: Arc<crate::tools::handlers::CandidateHandlerRegistry>,
@@ -110,6 +112,7 @@ impl CandidateWorkspace {
             generation,
             graph_revision: graph_revision.into(),
             allow_unisolated_verifiers,
+            verifier_timeouts: crate::verifier::VerifierTimeouts::default(),
             handlers: Arc::new(crate::tools::handlers::CandidateHandlerRegistry::with_builtins()),
         })
     }
@@ -141,6 +144,16 @@ impl CandidateWorkspace {
 
     pub(crate) fn unisolated_verifiers_allowed(&self) -> bool {
         self.allow_unisolated_verifiers
+    }
+
+    /// Configure per-stage governed verifier timeouts
+    /// (`[verification] stage_timeout_secs` + overrides).
+    pub fn set_verifier_timeouts(&mut self, timeouts: crate::verifier::VerifierTimeouts) {
+        self.verifier_timeouts = timeouts;
+    }
+
+    pub(crate) fn verifier_timeouts(&self) -> crate::verifier::VerifierTimeouts {
+        self.verifier_timeouts
     }
 
     /// Validate a workspace-relative path exactly as admission does.
@@ -427,6 +440,7 @@ impl CandidateWorkspace {
             self.allow_unisolated_verifiers,
             "tool".into(),
             self.verifier_env(),
+            self.verifier_timeouts.for_stage(None),
         )
         .await
     }
@@ -841,6 +855,10 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
             let root = job.root.clone();
             let allow_unisolated = self.candidate.allow_unisolated_verifiers;
             let extra_env = self.candidate.verifier_env();
+            let timeout = self
+                .candidate
+                .verifier_timeouts()
+                .for_stage(Some(job.stage));
             workers.spawn(async move {
                 let _permit = semaphore.acquire_owned().await.expect("semaphore closed");
                 let execution = run_governed_verifier(
@@ -849,6 +867,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                     allow_unisolated,
                     format!("{}-{ordinal}", job.stage),
                     extra_env,
+                    timeout,
                 )
                 .await;
                 (job, execution)
@@ -905,6 +924,9 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                 self.candidate.allow_unisolated_verifiers,
                 "incremental-syntax".into(),
                 self.candidate.verifier_env(),
+                self.candidate
+                    .verifier_timeouts()
+                    .for_stage(Some(perspt_core::plugin::VerifierStage::SyntaxCheck)),
             )
             .await?;
             if let Some(adapter) = self.adapters.get(&adapter_id) {
