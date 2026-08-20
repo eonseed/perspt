@@ -18,6 +18,24 @@ use crate::candidate::CandidateWorkspace;
 use crate::toolloop::{CandidateMeasurer, Measured};
 use crate::verifier::{run_governed_verifier, VerifierExecution, VerifierJob};
 
+/// Every verifier process of one candidate shares this target-dir suffix:
+/// gate stages, interactive `run_*` tools, and the incremental syntax pass
+/// warm one another instead of each paying a cold build.
+pub(crate) const SHARED_TARGET_SUFFIX: &str = "shared";
+
+/// Execution order within one shared target dir: the cheap check warms the
+/// metadata, the build warms the full artifacts, tests/lints reuse them.
+fn stage_rank(stage: perspt_core::plugin::VerifierStage) -> u8 {
+    use perspt_core::plugin::VerifierStage;
+    match stage {
+        VerifierStage::SyntaxCheck => 0,
+        VerifierStage::Build => 1,
+        VerifierStage::Test => 2,
+        VerifierStage::Lint => 3,
+        VerifierStage::Format => 4,
+    }
+}
+
 /// Complete plugin-backed candidate measurement for one coding node.
 pub struct CodingCandidateMeasurer<'a> {
     candidate: &'a CandidateWorkspace,
@@ -208,6 +226,54 @@ impl<'a> CodingCandidateMeasurer<'a> {
         Ok(())
     }
 
+    /// One task per `(root, plugin)` group, its stages run **sequentially**
+    /// in stage order against one shared `CARGO_TARGET_DIR` (suffix
+    /// `shared`, the same warm pool the interactive tools and incremental
+    /// syntax pass use), so a gate pays one cold build plus incrementals
+    /// instead of a cold tree per stage. Groups still run in parallel under
+    /// the `max_parallel` semaphore; the immutable-test-oracle root is its
+    /// own group and stays isolated from candidate build artifacts.
+    fn spawn_verifier_groups(
+        &self,
+        jobs: Vec<VerifierJob>,
+    ) -> tokio::task::JoinSet<Vec<(VerifierJob, Result<VerifierExecution>)>> {
+        let mut groups: std::collections::BTreeMap<(std::path::PathBuf, String), Vec<VerifierJob>> =
+            std::collections::BTreeMap::new();
+        for job in jobs {
+            groups
+                .entry((job.root.clone(), job.plugin.clone()))
+                .or_default()
+                .push(job);
+        }
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel));
+        let mut workers = tokio::task::JoinSet::new();
+        for (_, mut group) in groups {
+            group.sort_by_key(|job| stage_rank(job.stage));
+            let semaphore = semaphore.clone();
+            let allow_unisolated = self.candidate.unisolated_verifiers_allowed();
+            let extra_env = self.candidate.verifier_env();
+            let timeouts = self.candidate.verifier_timeouts();
+            workers.spawn(async move {
+                let _permit = semaphore.acquire_owned().await.expect("semaphore closed");
+                let mut results = Vec::with_capacity(group.len());
+                for job in group {
+                    let execution = run_governed_verifier(
+                        job.root.clone(),
+                        job.command.clone(),
+                        allow_unisolated,
+                        SHARED_TARGET_SUFFIX.into(),
+                        extra_env.clone(),
+                        timeouts.for_stage(Some(job.stage)),
+                    )
+                    .await;
+                    results.push((job, execution));
+                }
+                results
+            });
+        }
+        workers
+    }
+
     /// The stages whose residuals block hard pass: the domain's
     /// `HardGatePolicy`, plus `format` when the run declares it
     /// (`[verification] require_format`).
@@ -319,50 +385,27 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         let ran = jobs.len();
         ran_stages.extend(jobs.iter().map(|job| job.stage.policy_name()));
         self.enforce_required_stages(&ran_stages, &mut residuals, &mut all_passed)?;
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(self.max_parallel));
-        let mut workers = tokio::task::JoinSet::new();
-        for (ordinal, job) in jobs.into_iter().enumerate() {
-            let semaphore = semaphore.clone();
-            let root = job.root.clone();
-            let allow_unisolated = self.candidate.unisolated_verifiers_allowed();
-            let extra_env = self.candidate.verifier_env();
-            let timeout = self
-                .candidate
-                .verifier_timeouts()
-                .for_stage(Some(job.stage));
-            workers.spawn(async move {
-                let _permit = semaphore.acquire_owned().await.expect("semaphore closed");
-                let execution = run_governed_verifier(
-                    root,
-                    job.command.clone(),
-                    allow_unisolated,
-                    format!("{}-{ordinal}", job.stage),
-                    extra_env,
-                    timeout,
-                )
-                .await;
-                (job, execution)
-            });
-        }
+        let mut workers = self.spawn_verifier_groups(jobs);
 
         while let Some(result) = workers.join_next().await {
-            let (job, execution) = result.context("verifier worker panicked")?;
-            match execution {
-                Ok(execution) => self.fold_execution(
-                    &job,
-                    execution,
-                    &mut residuals,
-                    &mut advisory,
-                    &mut all_passed,
-                    &required,
-                )?,
-                Err(error) => {
-                    residuals.push(sensor_unavailable(
-                        &self.node_id,
-                        self.generation,
-                        &format!("{}:{} ({error})", job.plugin, job.stage),
-                    )?);
-                    all_passed = false;
+            for (job, execution) in result.context("verifier worker panicked")? {
+                match execution {
+                    Ok(execution) => self.fold_execution(
+                        &job,
+                        execution,
+                        &mut residuals,
+                        &mut advisory,
+                        &mut all_passed,
+                        &required,
+                    )?,
+                    Err(error) => {
+                        residuals.push(sensor_unavailable(
+                            &self.node_id,
+                            self.generation,
+                            &format!("{}:{} ({error})", job.plugin, job.stage),
+                        )?);
+                        all_passed = false;
+                    }
                 }
             }
         }
@@ -402,7 +445,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                 self.candidate.overlay_root().to_path_buf(),
                 command,
                 self.candidate.unisolated_verifiers_allowed(),
-                "incremental-syntax".into(),
+                SHARED_TARGET_SUFFIX.into(),
                 self.candidate.verifier_env(),
                 self.candidate
                     .verifier_timeouts()

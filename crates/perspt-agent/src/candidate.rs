@@ -483,7 +483,7 @@ impl CandidateWorkspace {
             self.overlay_root.clone(),
             command.to_string(),
             self.allow_unisolated_verifiers,
-            "tool".into(),
+            crate::measure::SHARED_TARGET_SUFFIX.into(),
             self.verifier_env(),
             self.verifier_timeouts.for_stage(stage),
         )

@@ -183,6 +183,32 @@ async fn a_lint_only_warning_does_not_block_hard_pass() {
     );
 }
 
+/// Every gate stage of one candidate reuses one shared target dir — no
+/// `check-0`/`build-1` cold siblings — so a measurement pays one cold build
+/// plus incrementals.
+#[tokio::test]
+async fn gate_stages_share_one_warm_target_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    apply_lib(&workspace, "pub fn answer() -> u32 { 2 }\n").await;
+    CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    let target_root = workspace.overlay_root().join(".perspt-target");
+    let entries: Vec<String> = std::fs::read_dir(&target_root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(
+        entries,
+        vec!["shared".to_string()],
+        "gate stages must share one warm target dir"
+    );
+}
+
 /// A failing test still blocks hard pass — demoting lint never loosens the
 /// required stages.
 #[tokio::test]
@@ -190,11 +216,9 @@ async fn a_failing_test_still_blocks_hard_pass() {
     let dir = tempfile::tempdir().unwrap();
     rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
     let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
-    apply_lib(
-        &workspace,
-        "pub fn answer() -> u32 { 2 }\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn wrong() { assert_eq!(super::answer(), 3); }\n}\n",
-    )
-    .await;
+    let failing = "pub fn answer() -> u32 { 2 }\n#[cfg(test)]\nmod tests {\n    \
+         #[test]\n    fn wrong() { assert_eq!(super::answer(), 3); }\n}\n";
+    apply_lib(&workspace, failing).await;
     let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
         .measure()
         .await
