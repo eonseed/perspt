@@ -56,6 +56,7 @@ pub mod recovery;
 pub mod residual;
 pub mod routing;
 pub mod scheduler;
+pub mod scope;
 pub mod search;
 pub mod spectral;
 pub mod stability;

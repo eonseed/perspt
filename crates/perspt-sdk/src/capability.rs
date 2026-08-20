@@ -95,49 +95,7 @@ pub enum RiskClass {
     Critical,
 }
 
-/// A glob-like path pattern. `matches` uses a simple prefix/suffix/`*` rule.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PathPattern(pub String);
-
-impl PathPattern {
-    pub fn matches(&self, path: &str) -> bool {
-        glob_match(&self.0, path)
-    }
-}
-
-/// A command pattern matched against the canonical program name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommandPattern(pub String);
-
-impl CommandPattern {
-    pub fn matches(&self, program: &str) -> bool {
-        glob_match(&self.0, program)
-    }
-}
-
-/// A network host/URL pattern.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NetworkPattern(pub String);
-
-impl NetworkPattern {
-    pub fn matches(&self, target: &str) -> bool {
-        glob_match(&self.0, target)
-    }
-}
-
-/// Minimal glob: supports a single trailing `*`, leading `*`, or exact match.
-fn glob_match(pattern: &str, value: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-    if let Some(prefix) = pattern.strip_suffix('*') {
-        return value.starts_with(prefix);
-    }
-    if let Some(suffix) = pattern.strip_prefix('*') {
-        return value.ends_with(suffix);
-    }
-    pattern == value
-}
+pub use crate::scope::{CommandPattern, NetworkPattern, PathPattern};
 
 /// A recorded risk budget (PSP-8 System 7).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -446,10 +404,9 @@ pub struct Capability {
     pub holder: ActorId,
     pub effects: Vec<EffectKind>,
     pub path_scope: Vec<PathPattern>,
-    /// Mutation-only path ceiling (PSP-10 system 22): a work-graph node's
-    /// declared `output_targets`, enforced on mutating proposals while
-    /// reads stay governed by `path_scope` alone. Empty = unrestricted
-    /// (legacy and undeclared-target nodes).
+    /// Mutation-only path ceiling (PSP-10 system 22): the node's declared
+    /// `output_targets`. Reads stay governed by `path_scope` alone; empty
+    /// means unrestricted (undeclared targets).
     pub write_scope: Vec<PathPattern>,
     pub command_scope: Vec<CommandPattern>,
     pub network_scope: Vec<NetworkPattern>,
@@ -963,10 +920,8 @@ fn check_lifetime(
     None
 }
 
-/// Scope clause: path, write, command, and network scope of the effective
-/// `E_c`. The write scope applies to **mutating** proposals only — reads
-/// stay governed by `path_scope` alone, which is why a node's declared
-/// output footprint must never narrow `path_scope` itself.
+/// Scope clause: path, write (mutating proposals only), command, and
+/// network scope of the effective `E_c`.
 fn check_scope(proposal: &EffectProposal, cap: &Capability) -> Option<AdmissibilityWitness> {
     let mutating_proposal = matches!(
         proposal.effect,
@@ -977,18 +932,12 @@ fn check_scope(proposal: &EffectProposal, cap: &Capability) -> Option<Admissibil
             | EffectKind::MutateDependencies
     );
     for path in proposal.path.iter().chain(proposal.additional_paths.iter()) {
-        if !cap.path_scope.is_empty() && !cap.path_scope.iter().any(|p| p.matches(path)) {
-            return Some(deny(
-                proposal,
-                Some(cap),
-                DenyReason::PathOutOfScope,
-                RecoveryClass::NeedsApproval,
-            ));
-        }
-        if mutating_proposal
+        let out_of_path =
+            !cap.path_scope.is_empty() && !cap.path_scope.iter().any(|p| p.matches(path));
+        let out_of_write = mutating_proposal
             && !cap.write_scope.is_empty()
-            && !cap.write_scope.iter().any(|p| p.matches(path))
-        {
+            && !cap.write_scope.iter().any(|p| p.matches(path));
+        if out_of_path || out_of_write {
             return Some(deny(
                 proposal,
                 Some(cap),
@@ -1006,16 +955,8 @@ fn check_scope(proposal: &EffectProposal, cap: &Capability) -> Option<Admissibil
                 RecoveryClass::NeedsApproval,
             ));
         }
-        let mutation_effect = matches!(
-            proposal.effect,
-            EffectKind::WriteArtifact
-                | EffectKind::ApplyPatch
-                | EffectKind::MoveFile
-                | EffectKind::DeleteFile
-                | EffectKind::MutateDependencies
-        );
         if classify_tier(command) == CommandTier::Mutation
-            && !mutation_effect
+            && !mutating_proposal
             && proposal.effect.is_read_only()
         {
             return Some(deny(

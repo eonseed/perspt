@@ -180,50 +180,7 @@ async fn a_downstream_node_refines_its_predecessor_and_wins() {
     )
     .unwrap();
     let database = project.path().join("runtime.db");
-    let revision = serde_json::json!({
-        "nodes": [
-            {"node_id": "node-a", "goal": "alpha-part: document alpha",
-             "output_targets": ["src/a.rs", "src/notes.rs"]},
-            {"node_id": "node-b", "goal": "beta-part: refine the alpha doc",
-             "output_targets": ["src/a.rs"]},
-        ],
-        "edges": [["node-a", "node-b"]],
-    });
-    let plan = TurnOutput::ToolCalls(vec![ProviderToolCall {
-        call_id: "plan-1".into(),
-        name: "update_graph".into(),
-        arguments: serde_json::json!({"revision": revision.to_string()}),
-    }]);
-    let transport = Arc::new(GoalRouted {
-        plan: Mutex::new(Some(plan)),
-        alpha: Mutex::new(vec![
-            edit_turn(
-                "a-1",
-                "src/a.rs",
-                "pub fn alpha() -> u32 { 1 }",
-                "/// Alpha.\npub fn alpha() -> u32 { 1 }",
-            ),
-            TurnOutput::ToolCalls(vec![ProviderToolCall {
-                call_id: "a-2".into(),
-                name: "write_file".into(),
-                arguments: serde_json::json!({
-                    "path": "src/notes.rs", "content": "// notes\n"
-                }),
-            }]),
-        ]),
-        beta: Mutex::new(vec![
-            // Outside node-b's declared output_targets: must be denied.
-            edit_turn("b-0", "src/lib.rs", "pub mod a;\n", "pub mod a; // no\n"),
-            // Anchors on node-a's OUTPUT — only matches if the seed carried
-            // the predecessor's staged contribution.
-            edit_turn(
-                "b-1",
-                "src/a.rs",
-                "/// Alpha.\npub fn alpha() -> u32 { 1 }",
-                "/// Alpha, refined.\npub fn alpha() -> u32 { 1 }",
-            ),
-        ]),
-    });
+    let transport = dependent_graph_transport();
     let runtime = Psp9AgentRuntime::with_transport(
         project.path().to_path_buf(),
         transport,
@@ -247,10 +204,64 @@ async fn a_downstream_node_refines_its_predecessor_and_wins() {
     // The downstream refinement won the merged root.
     let final_a = std::fs::read_to_string(project.path().join("src/a.rs")).unwrap();
     assert!(final_a.contains("Alpha, refined."), "{final_a}");
-
     let store = perspt_store::SessionStore::open(&database).unwrap();
     let rows = store.get_psp9_events(&summary.session_id).unwrap();
-    let names = event_names(&rows);
+    assert_refinement_ledger(&rows);
+}
+
+/// The dependent-graph transport: node-a documents alpha and adds a notes
+/// file; node-b first tries a write outside its declared output_targets
+/// (denied), then refines the doc — anchoring on node-a's OUTPUT, which
+/// only matches if the seed carried the predecessor's contribution.
+fn dependent_graph_transport() -> Arc<GoalRouted> {
+    let revision = serde_json::json!({
+        "nodes": [
+            {"node_id": "node-a", "goal": "alpha-part: document alpha",
+             "output_targets": ["src/a.rs", "src/notes.rs"]},
+            {"node_id": "node-b", "goal": "beta-part: refine the alpha doc",
+             "output_targets": ["src/a.rs"]},
+        ],
+        "edges": [["node-a", "node-b"]],
+    });
+    let plan = TurnOutput::ToolCalls(vec![ProviderToolCall {
+        call_id: "plan-1".into(),
+        name: "update_graph".into(),
+        arguments: serde_json::json!({"revision": revision.to_string()}),
+    }]);
+    Arc::new(GoalRouted {
+        plan: Mutex::new(Some(plan)),
+        alpha: Mutex::new(vec![
+            edit_turn(
+                "a-1",
+                "src/a.rs",
+                "pub fn alpha() -> u32 { 1 }",
+                "/// Alpha.\npub fn alpha() -> u32 { 1 }",
+            ),
+            TurnOutput::ToolCalls(vec![ProviderToolCall {
+                call_id: "a-2".into(),
+                name: "write_file".into(),
+                arguments: serde_json::json!({
+                    "path": "src/notes.rs", "content": "// notes\n"
+                }),
+            }]),
+        ]),
+        beta: Mutex::new(vec![
+            edit_turn("b-0", "src/lib.rs", "pub mod a;\n", "pub mod a; // no\n"),
+            edit_turn(
+                "b-1",
+                "src/a.rs",
+                "/// Alpha.\npub fn alpha() -> u32 { 1 }",
+                "/// Alpha, refined.\npub fn alpha() -> u32 { 1 }",
+            ),
+        ]),
+    })
+}
+
+/// The refinement's ledger assertions: one promotion, no conflict, the
+/// downstream contribution excludes inherited unmodified files, and the
+/// out-of-footprint write was denied.
+fn assert_refinement_ledger(rows: &[perspt_store::Psp9LedgerRow]) {
+    let names = event_names(rows);
     let count = |needle: &str| names.iter().filter(|name| *name == needle).count();
     assert_eq!(count("integration_promoted"), 1);
     assert_eq!(
@@ -258,8 +269,6 @@ async fn a_downstream_node_refines_its_predecessor_and_wins() {
         0,
         "a downstream refinement is never a divergent-writers conflict"
     );
-    // node-b's contribution is its own work only — the unmodified
-    // inherited notes file is not re-exported.
     let b_paths = rows
         .iter()
         .filter_map(|row| {
@@ -275,8 +284,7 @@ async fn a_downstream_node_refines_its_predecessor_and_wins() {
         serde_json::json!(["src/a.rs"]),
         "inherited unmodified files must not re-export"
     );
-    // The out-of-footprint write was denied by the write scope.
-    let tool_events = tool_event_names(&rows);
+    let tool_events = tool_event_names(rows);
     assert!(
         tool_events.iter().any(|name| name == "effect_denied"),
         "the write outside output_targets must be denied"
