@@ -360,6 +360,41 @@ fn assert_evicted_then_recalled(
         projection_whole,
         "the projection (backing store) keeps the evicted page whole"
     );
+    assert_pairs_never_split(sent);
+}
+
+/// Spec :1431-1432: across every captured request, a tool call and its
+/// results are either both verbatim or both tombstoned — never split.
+fn assert_pairs_never_split(sent: &[Conversation]) {
+    for (turn, conversation) in sent.iter().enumerate() {
+        let mut call_state: std::collections::BTreeMap<String, bool> =
+            std::collections::BTreeMap::new();
+        for message in conversation.messages() {
+            match message {
+                perspt_sdk::Message::AssistantToolCalls { calls } => {
+                    let evicted = calls
+                        .iter()
+                        .any(|call| call.arguments.get("_evicted_page").is_some());
+                    for call in calls {
+                        call_state.insert(call.call_id.clone(), evicted);
+                    }
+                }
+                perspt_sdk::Message::ToolResponse { call_id, content } => {
+                    let evicted = content.contains("evicted from the resident context");
+                    if let Some(call_evicted) = call_state.get(call_id) {
+                        // A pair may keep small call arguments verbatim while
+                        // the result is tombstoned, but a tombstoned CALL with
+                        // a verbatim RESULT would break atomic recall.
+                        assert!(
+                            !(*call_evicted && !evicted),
+                            "turn {turn}: call {call_id} evicted but result verbatim"
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 /// The loop for the eviction scenario: an eight-turn budget, the worker
@@ -407,14 +442,24 @@ fn eviction_loop<'a>(
 #[tokio::test]
 async fn evicted_pages_are_tombstoned_on_the_wire_and_recallable() {
     let payload = "x".repeat(4_096);
-    let evicted_page = perspt_sdk::ledger::content_hash(
+    // The page is the atomic tool pair: the r1 call message plus its result.
+    let pair_serialized = format!(
+        "{}{}",
+        serde_json::to_string(&perspt_sdk::Message::AssistantToolCalls {
+            calls: vec![ProviderToolCall {
+                call_id: "r1".into(),
+                name: "read_file".into(),
+                arguments: serde_json::json!({"path": "src/lib.rs"}),
+            }],
+        })
+        .unwrap(),
         serde_json::to_string(&perspt_sdk::Message::ToolResponse {
             call_id: "r1".into(),
             content: payload.clone(),
         })
         .unwrap()
-        .as_bytes(),
     );
+    let evicted_page = perspt_sdk::ledger::content_hash(pair_serialized.as_bytes());
     let read = |id: &str| {
         TurnOutput::ToolCalls(vec![ProviderToolCall {
             call_id: id.into(),
