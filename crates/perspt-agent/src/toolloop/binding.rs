@@ -243,6 +243,68 @@ impl ToolLoop<'_> {
         Ok(())
     }
 
+    /// Gate AC: reserve one model turn's worst case from the shared search
+    /// budget **before** the transport call — the turn, its per-turn call
+    /// and mutation allowances, its bounded result bytes, and the composed
+    /// request's tokens plus the output reserve. `None` outside a forest.
+    pub(super) fn reserve_model_turn(
+        &self,
+        conversation: &perspt_sdk::Conversation,
+    ) -> Result<Option<(perspt_sdk::search::ReservationTicket, u64)>> {
+        let Some(budget) = &self.search_budget else {
+            return Ok(None);
+        };
+        let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
+        let (wire_tokens, _) = wire_cost(&accountant, conversation);
+        let per_call_result = 8 * 1024 + 256;
+        let request = perspt_sdk::search::ReservationRequest {
+            model_turns: 1,
+            tool_calls: self.budgets.max_calls_per_turn,
+            mutations: self.budgets.max_calls_per_turn,
+            tokens: wire_tokens + self.budgets.resident.output_reserve_tokens,
+            result_bytes: u64::from(self.budgets.max_calls_per_turn) * per_call_result,
+            ..Default::default()
+        };
+        let ticket = budget.reserve(request).map_err(|error| {
+            anyhow::anyhow!("search budget refused the model-turn reservation: {error}")
+        })?;
+        Ok(Some((ticket, wire_tokens)))
+    }
+
+    /// Settle the turn with observed actuals: the calls the model actually
+    /// returned, the mutations actually admitted, and each response's
+    /// bounded byte cost. Overshoot clamps at the limits and closes the
+    /// forest (never persisted above a limit).
+    pub(super) fn settle_model_turn(
+        &self,
+        held: Option<(perspt_sdk::search::ReservationTicket, u64)>,
+        output: &perspt_sdk::TurnOutput,
+        mutations: u32,
+    ) -> Result<()> {
+        let (Some(budget), Some((ticket, wire_tokens))) = (&self.search_budget, held) else {
+            return Ok(());
+        };
+        let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
+        let calls = output.tool_calls().len() as u32;
+        let output_tokens = match output {
+            perspt_sdk::TurnOutput::Text(text) => accountant.count_text(text),
+            perspt_sdk::TurnOutput::ToolCalls(calls) => {
+                accountant.count_text(&serde_json::to_string(calls).unwrap_or_default())
+            }
+        };
+        let actual = perspt_sdk::search::ReservationRequest {
+            model_turns: 1,
+            tool_calls: calls,
+            mutations,
+            tokens: wire_tokens + output_tokens,
+            result_bytes: u64::from(calls) * (8 * 1024 + 256),
+            ..Default::default()
+        };
+        budget
+            .settle(ticket, actual)
+            .map_err(|error| anyhow::anyhow!("search budget closed on settlement: {error}"))
+    }
+
     /// Ledger the exact prompt binding of this call (PSP-10 Gate Z):
     /// recompile through the SDK compiler when the offered tool surface or
     /// the failover route changed, then record one invocation per call.

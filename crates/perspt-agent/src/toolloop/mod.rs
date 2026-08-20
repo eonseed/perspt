@@ -122,6 +122,11 @@ pub struct ToolLoop<'a> {
     /// resident dependency environment so `PartialCheckpointRoot` pages
     /// validate (Definition 6).
     pub partial_seed_root: Option<String>,
+    /// The forest's shared budget when this loop runs as a search branch:
+    /// every model turn and verifier measurement reserves before it runs
+    /// and settles with observed actuals (Gate AC). `None` outside a
+    /// forest.
+    pub search_budget: Option<perspt_sdk::search::SharedSearchBudget>,
 }
 
 /// Where the last context checkpoint left off, so each new checkpoint covers
@@ -318,6 +323,24 @@ impl ToolLoop<'_> {
         Ok(state.finish(outcome))
     }
 
+    /// Gate AC: reserve one verifier action from the shared search budget
+    /// before a measurement runs. A refusal aborts the branch before the
+    /// action executes; the forest observes it and abandons the branch.
+    fn reserve_verifier_action(&self) -> Result<()> {
+        let Some(budget) = &self.search_budget else {
+            return Ok(());
+        };
+        budget
+            .reserve(perspt_sdk::search::ReservationRequest {
+                verifier_runs: 1,
+                ..Default::default()
+            })
+            .map(|_ticket| ())
+            .map_err(|error| {
+                anyhow::anyhow!("search budget refused the verifier reservation: {error}")
+            })
+    }
+
     /// Measure the baseline and open the loop's turn state around its real
     /// restore point.
     async fn open_turn_state(&mut self) -> Result<(Measured, TurnState)> {
@@ -393,6 +416,7 @@ impl ToolLoop<'_> {
         &mut self,
         log: &mut EventLog,
     ) -> Result<(Measured, AcceptedTrajectory)> {
+        self.reserve_verifier_action()?;
         let baseline = self.measurer.measure().await?;
         emit(
             self.recorder,
@@ -613,6 +637,9 @@ impl ToolLoop<'_> {
         let assembled = self.assemble_resident_context(turn, &specs, context, state)?;
         let conversation = self.fit_composed_request(turn, &specs, context, assembled, state)?;
         self.bind_prompt_program(turn, &specs, state)?;
+        // Gate AC: the turn's worst case is reserved before the transport
+        // call and settled with observed actuals after execution.
+        let turn_reservation = self.reserve_model_turn(&conversation)?;
         let output = self
             .chat_with_failover(&conversation, &specs, &mut state.recovery, &mut state.log)
             .await?;
@@ -641,6 +668,7 @@ impl ToolLoop<'_> {
                 &mut state.projection,
             )
             .await?;
+        self.settle_model_turn(turn_reservation, &output, mutations)?;
         Ok((output, mutations, immediate_boundary))
     }
 
@@ -849,6 +877,7 @@ impl ToolLoop<'_> {
         trajectory: &mut AcceptedTrajectory,
         log: &mut EventLog,
     ) -> Result<(Measured, GateDecision)> {
+        self.reserve_verifier_action()?;
         let measured = self.measurer.measure().await?;
         emit(
             self.recorder,
@@ -1230,6 +1259,7 @@ impl ToolLoop<'_> {
         }
         if outcome.mutated {
             *mutations += 1;
+            self.reserve_verifier_action()?;
             let boundary = self.measurer.measure_incremental().await?;
             emit(
                 self.recorder,

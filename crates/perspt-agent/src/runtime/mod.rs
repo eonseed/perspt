@@ -239,6 +239,12 @@ impl Psp9AgentRuntime {
         self
     }
 
+    /// Override the forest's Definition 5 limit vector (tests, embedders).
+    pub fn with_search_limits(mut self, limits: perspt_sdk::SearchLimits) -> Self {
+        self.search.limits = limits;
+        self
+    }
+
     pub fn with_fallback_models(mut self, models: Vec<ModelId>) -> Self {
         self.fallback_models = models;
         self
@@ -426,6 +432,7 @@ impl Psp9AgentRuntime {
             shared_recovery_budget,
             recorder,
             None,
+            None,
         )
         .await
     }
@@ -448,6 +455,7 @@ impl Psp9AgentRuntime {
         shared_recovery_budget: u32,
         loop_recorder: &dyn crate::toolloop::LoopRecorder,
         partial_root: Option<String>,
+        search_budget: Option<perspt_sdk::search::SharedSearchBudget>,
     ) -> Result<NodeAttempt> {
         let prepared = self
             .prepare_attempt(recorder, session_id, node_id, generation, model, graph)
@@ -463,6 +471,7 @@ impl Psp9AgentRuntime {
             shared_recovery_budget,
             loop_recorder,
             partial_root,
+            search_budget,
         )
         .await
     }
@@ -514,6 +523,7 @@ impl Psp9AgentRuntime {
         shared_recovery_budget: u32,
         loop_recorder: &dyn crate::toolloop::LoopRecorder,
         partial_root: Option<String>,
+        search_budget: Option<perspt_sdk::search::SharedSearchBudget>,
     ) -> Result<NodeAttempt> {
         let PreparedAttempt {
             assembly,
@@ -546,6 +556,7 @@ impl Psp9AgentRuntime {
             system_prompt: envelope,
             recorder: Some(loop_recorder),
             partial_seed_root: partial_root,
+            search_budget,
         };
         let outcome = run_seeded(tool_loop, goal, seed).await?;
         Ok(NodeAttempt {

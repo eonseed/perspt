@@ -188,6 +188,7 @@ async fn loop_decisions_never_exceed_the_bound() {
         },
         recorder: None,
         partial_seed_root: None,
+        search_budget: None,
     };
     let bound = perspt_agent::toolloop::loop_decision_bound(2.0, &budgets(40, 3)).unwrap();
     let outcome = toolloop.run("impossible goal").await.unwrap();
@@ -237,6 +238,7 @@ async fn loop_trajectory_carries_the_real_node_identity() {
         },
         recorder: None,
         partial_seed_root: None,
+        search_budget: None,
     };
     let outcome = toolloop.run("do it").await.unwrap();
     assert_eq!(outcome.trajectory.node_id, "node-7");
