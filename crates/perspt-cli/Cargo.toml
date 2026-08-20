@@ -25,6 +25,7 @@ bundled = [
     "perspt-tui/bundled",
     "perspt-dashboard/bundled",
 ]
+benchmark = ["dep:perspt-benchmark"]
 
 [dependencies]
 perspt-core = { workspace = true }
@@ -36,6 +37,7 @@ perspt-prompt-macros = { workspace = true }
 perspt-research = { workspace = true }
 perspt-store = { workspace = true }
 perspt-dashboard = { workspace = true }
+perspt-benchmark = { workspace = true, optional = true }
 
 # CLI
 clap = { workspace = true }
