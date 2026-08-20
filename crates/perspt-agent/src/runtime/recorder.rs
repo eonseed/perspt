@@ -268,6 +268,10 @@ impl LoopRecorder for Psp9Recorder {
         self.store.put_psp9_artifact(&handle, content, media_type)?;
         Ok(handle)
     }
+
+    fn fetch_artifact(&self, handle: &str) -> Result<Option<Vec<u8>>> {
+        self.store.get_psp9_artifact(handle)
+    }
 }
 
 /// The one-line human narration for a loop event, if any.

@@ -64,6 +64,10 @@ impl LoopRecorder for BranchRecorder<'_> {
     fn record_artifact(&self, content: &[u8], media_type: &str) -> Result<String> {
         self.inner.record_artifact(content, media_type)
     }
+
+    fn fetch_artifact(&self, handle: &str) -> Result<Option<Vec<u8>>> {
+        self.inner.fetch_artifact(handle)
+    }
 }
 
 /// Measure the fork cost of a workspace tree without following symlinks
