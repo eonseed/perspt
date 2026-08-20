@@ -338,6 +338,24 @@ impl CandidateWorkspace {
     /// exported files (mid-loop resume): each file is journaled and written
     /// into the overlay, and re-enters the mutated (promotable) set.
     pub fn restore_exported(&self, files: &[crate::toolloop::SeedFile]) -> Result<()> {
+        self.restore_files(files, true)
+    }
+
+    /// Seed inherited content (a staged predecessor's contribution) without
+    /// marking it promotable: files are journaled and tracked with their
+    /// pre-images (promotion overwrite-protection intact), but they enter
+    /// `mutated_paths` only when this node's own admitted effects touch
+    /// them — so a downstream export is exactly its own work, never a
+    /// re-export of everything it inherited (PSP-10 system 22).
+    pub fn restore_seeded(&self, files: &[crate::toolloop::SeedFile]) -> Result<()> {
+        self.restore_files(files, false)
+    }
+
+    fn restore_files(
+        &self,
+        files: &[crate::toolloop::SeedFile],
+        mark_promotable: bool,
+    ) -> Result<()> {
         for seed in files {
             let rel = validate_relative_path(&seed.path)?;
             reject_symlink_ancestor(&self.overlay_root, &rel)?;
@@ -358,8 +376,10 @@ impl CandidateWorkspace {
                 .lock()
                 .unwrap()
                 .insert(rel.clone(), seed.source_preimage.clone());
-            self.mutated_paths.lock().unwrap().insert(rel);
-            self.mutations.fetch_add(1, Ordering::SeqCst);
+            if mark_promotable {
+                self.mutated_paths.lock().unwrap().insert(rel);
+                self.mutations.fetch_add(1, Ordering::SeqCst);
+            }
         }
         Ok(())
     }
@@ -842,6 +862,32 @@ mod tests {
         let injected =
             candidate.commands_for("run_test", &serde_json::json!({"filter": "x; rm -rf /"}));
         assert!(injected.is_err(), "shell metacharacters must be refused");
+    }
+
+    /// Inherited staged content restores tracked and journaled but never
+    /// promotable; only the node's own admitted mutations export.
+    #[tokio::test]
+    async fn seeded_files_are_not_promotable_until_touched() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("Cargo.toml"), "[package]\n").unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        candidate
+            .restore_seeded(&[crate::toolloop::SeedFile {
+                path: "src/inherited.rs".into(),
+                content: Some(b"pub fn one() {}".to_vec()),
+                source_preimage: None,
+            }])
+            .unwrap();
+        assert!(!candidate.has_mutated(), "seeding is not a mutation");
+        assert!(candidate.touched_paths().is_empty());
+
+        candidate
+            .apply(&write_call("src/own.rs", "pub fn two() {}"), &write_entry())
+            .await
+            .unwrap();
+        assert_eq!(candidate.touched_paths(), vec!["src/own.rs".to_string()]);
+        // The inherited file is present in the overlay all the same.
+        assert!(candidate.overlay_root().join("src/inherited.rs").is_file());
     }
 
     #[test]

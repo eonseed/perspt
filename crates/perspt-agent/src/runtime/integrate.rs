@@ -10,7 +10,7 @@
 //! workspace never contains one winner without the rest of its verified
 //! root.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
 use perspt_sdk::canon::CanonicalEncoder;
@@ -54,15 +54,27 @@ impl StagingRoot {
         encoder.digest()
     }
 
-    /// Deterministic merge: overlapping non-identical paths are a typed
-    /// integration conflict, never silently last-writer-wins.
-    pub fn conflict(&self) -> Option<String> {
+    /// Dependency-aware conflict detection: two nodes writing the same
+    /// path with different content conflict only when they are
+    /// **topologically incomparable** (true siblings). A downstream node
+    /// legitimately refines its predecessor's file — edge order defines
+    /// precedence, so that pair is a refinement, never a divergence.
+    pub fn conflict(&self, graph: &perspt_sdk::WorkGraphRevision) -> Option<String> {
+        let ancestors: BTreeMap<&str, BTreeSet<String>> = self
+            .contributions
+            .keys()
+            .map(|node_id| (node_id.as_str(), transitive_predecessors(graph, node_id)))
+            .collect();
+        let comparable = |a: &str, b: &str| {
+            ancestors.get(a).is_some_and(|set| set.contains(b))
+                || ancestors.get(b).is_some_and(|set| set.contains(a))
+        };
         let mut owners: BTreeMap<&str, (&str, Option<&[u8]>)> = BTreeMap::new();
         for (node_id, winner) in &self.contributions {
             for file in &winner.files {
                 let content = file.content.as_deref();
                 if let Some((other_node, other_content)) = owners.get(file.path.as_str()) {
-                    if *other_content != content {
+                    if *other_content != content && !comparable(other_node, node_id) {
                         return Some(format!(
                             "path {} written divergently by {other_node} and {node_id}",
                             file.path
@@ -75,16 +87,57 @@ impl StagingRoot {
         None
     }
 
-    /// The merged file set, in deterministic path order.
-    pub fn merged_files(&self) -> Vec<SeedFile> {
+    /// The merged file set restricted to `contributors`, in topological
+    /// order so a downstream contribution overwrites its predecessor's
+    /// (deterministic downstream precedence); path order within.
+    pub fn merged_files_for(
+        &self,
+        graph: &perspt_sdk::WorkGraphRevision,
+        contributors: &BTreeSet<String>,
+    ) -> Vec<SeedFile> {
+        let topo: BTreeMap<&str, usize> = graph
+            .validation
+            .topo_order
+            .iter()
+            .enumerate()
+            .map(|(index, node_id)| (node_id.as_str(), index))
+            .collect();
+        let mut ordered: Vec<&String> = self
+            .contributions
+            .keys()
+            .filter(|node_id| contributors.contains(*node_id))
+            .collect();
+        ordered.sort_by_key(|node_id| topo.get(node_id.as_str()).copied().unwrap_or(usize::MAX));
         let mut merged: BTreeMap<String, SeedFile> = BTreeMap::new();
-        for winner in self.contributions.values() {
-            for file in &winner.files {
+        for node_id in ordered {
+            for file in &self.contributions[node_id].files {
                 merged.insert(file.path.clone(), file.clone());
             }
         }
         merged.into_values().collect()
     }
+
+    /// The full merged set (the global integration gate's combined state).
+    pub fn merged_files(&self, graph: &perspt_sdk::WorkGraphRevision) -> Vec<SeedFile> {
+        self.merged_files_for(graph, &self.contributions.keys().cloned().collect())
+    }
+}
+
+/// The transitive dependency closure of one node over the graph's edges.
+pub(super) fn transitive_predecessors(
+    graph: &perspt_sdk::WorkGraphRevision,
+    node_id: &str,
+) -> BTreeSet<String> {
+    let mut wanted = BTreeSet::new();
+    let mut frontier = vec![node_id.to_string()];
+    while let Some(current) = frontier.pop() {
+        for dependency in graph.dependencies_of(&current) {
+            if wanted.insert(dependency.to_string()) {
+                frontier.push(dependency.to_string());
+            }
+        }
+    }
+    wanted
 }
 
 impl Psp9AgentRuntime {
@@ -101,7 +154,7 @@ impl Psp9AgentRuntime {
         staging: &StagingRoot,
     ) -> Result<Option<Vec<String>>> {
         let staging_digest = staging.digest();
-        if let Some(conflict) = staging.conflict() {
+        if let Some(conflict) = staging.conflict(graph) {
             recorder.record_custom(
                 "integration_failed",
                 serde_json::json!({
@@ -121,7 +174,7 @@ impl Psp9AgentRuntime {
         )?;
         workspace.set_tool_handlers(self.tool_handlers.clone());
         workspace.set_verifier_timeouts(self.config.verifier_timeouts);
-        workspace.restore_exported(&staging.merged_files())?;
+        workspace.restore_exported(&staging.merged_files(graph))?;
         let measured = CodingCandidateMeasurer::new(&workspace, "integration", 0)
             .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers)
@@ -211,20 +264,31 @@ impl Psp9AgentRuntime {
         }
     }
 
-    /// The seed downstream nodes fork from: the latest staging root's
-    /// merged files, realized once so the seed's state root is verifiable.
+    /// The seed one downstream node forks from: only its **transitive
+    /// predecessors'** staged contributions (system 22) — an unrelated
+    /// sibling's state never leaks in — realized once so the seed's state
+    /// root is verifiable. The seed is inherited: it restores without
+    /// entering the node's promotable set.
     pub(super) async fn staging_seed(
         &self,
         graph: &perspt_sdk::WorkGraphRevision,
         staging: &StagingRoot,
+        node_id: &str,
     ) -> Result<Option<super::node::CandidateSeed>> {
-        if staging.is_empty() {
+        let predecessors = transitive_predecessors(graph, node_id);
+        let contributors: BTreeSet<String> = staging
+            .contributions
+            .keys()
+            .filter(|contributor| predecessors.contains(*contributor))
+            .cloned()
+            .collect();
+        if contributors.is_empty() {
             return Ok(None);
         }
         let scratch =
             CandidateWorkspace::create(&self.working_dir, "staging-seed", 0, &graph.revision_id)?;
-        let files = staging.merged_files();
-        scratch.restore_exported(&files)?;
+        let files = staging.merged_files_for(graph, &contributors);
+        scratch.restore_seeded(&files)?;
         let checkpoint = scratch.checkpoint(&[]).await?;
         Ok(Some(super::node::CandidateSeed {
             expected_state_root: checkpoint.witness.state_root,
@@ -232,6 +296,7 @@ impl Psp9AgentRuntime {
             files,
             conversation: perspt_sdk::Conversation::default(),
             activated_tools: Vec::new(),
+            inherited: true,
         }))
     }
 }

@@ -136,6 +136,153 @@ fn event_names(rows: &[perspt_store::Psp9LedgerRow]) -> Vec<String> {
         .collect()
 }
 
+/// Decode a tool-loop row's event name (the search/loop alphabet).
+fn tool_event_names(rows: &[perspt_store::Psp9LedgerRow]) -> Vec<String> {
+    use perspt_sdk::ledger::{tool_loop_body, LedgerEvent, ToolLoopBody};
+    rows.iter()
+        .filter_map(|row| {
+            let LedgerEvent::Custom { kind, payload } =
+                serde_json::from_str(&row.event_json).ok()?
+            else {
+                return None;
+            };
+            if kind != "tool_loop" {
+                return None;
+            }
+            let (ToolLoopBody::Legacy(body) | ToolLoopBody::V1(body)) =
+                tool_loop_body(&payload).ok()?;
+            body.get("event")
+                .and_then(|e| e.as_str())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// PSP-10 system 22, the dependent-graph half: a downstream node is seeded
+/// only with its predecessor's staged contribution (its edit anchors on
+/// the predecessor's output), legitimately refines the same file without a
+/// divergent-writers conflict, exports only its own work, and the
+/// downstream bytes win in the promoted integration root. A write outside
+/// the node's declared output_targets is denied while reads stay open.
+#[tokio::test]
+async fn a_downstream_node_refines_its_predecessor_and_wins() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join("src")).unwrap();
+    std::fs::write(
+        project.path().join("Cargo.toml"),
+        "[package]\nname='integration-fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("src/lib.rs"), "pub mod a;\n").unwrap();
+    std::fs::write(
+        project.path().join("src/a.rs"),
+        "pub fn alpha() -> u32 { 1 }\n",
+    )
+    .unwrap();
+    let database = project.path().join("runtime.db");
+    let revision = serde_json::json!({
+        "nodes": [
+            {"node_id": "node-a", "goal": "alpha-part: document alpha",
+             "output_targets": ["src/a.rs", "src/notes.rs"]},
+            {"node_id": "node-b", "goal": "beta-part: refine the alpha doc",
+             "output_targets": ["src/a.rs"]},
+        ],
+        "edges": [["node-a", "node-b"]],
+    });
+    let plan = TurnOutput::ToolCalls(vec![ProviderToolCall {
+        call_id: "plan-1".into(),
+        name: "update_graph".into(),
+        arguments: serde_json::json!({"revision": revision.to_string()}),
+    }]);
+    let transport = Arc::new(GoalRouted {
+        plan: Mutex::new(Some(plan)),
+        alpha: Mutex::new(vec![
+            edit_turn(
+                "a-1",
+                "src/a.rs",
+                "pub fn alpha() -> u32 { 1 }",
+                "/// Alpha.\npub fn alpha() -> u32 { 1 }",
+            ),
+            TurnOutput::ToolCalls(vec![ProviderToolCall {
+                call_id: "a-2".into(),
+                name: "write_file".into(),
+                arguments: serde_json::json!({
+                    "path": "src/notes.rs", "content": "// notes\n"
+                }),
+            }]),
+        ]),
+        beta: Mutex::new(vec![
+            // Outside node-b's declared output_targets: must be denied.
+            edit_turn("b-0", "src/lib.rs", "pub mod a;\n", "pub mod a; // no\n"),
+            // Anchors on node-a's OUTPUT — only matches if the seed carried
+            // the predecessor's staged contribution.
+            edit_turn(
+                "b-1",
+                "src/a.rs",
+                "/// Alpha.\npub fn alpha() -> u32 { 1 }",
+                "/// Alpha, refined.\npub fn alpha() -> u32 { 1 }",
+            ),
+        ]),
+    });
+    let runtime = Psp9AgentRuntime::with_transport(
+        project.path().to_path_buf(),
+        transport,
+        ModelId::new("test", "scripted"),
+        Psp9RunConfig {
+            approval_policy: ApprovalPolicy::Auto,
+            max_turns: 4,
+            allow_unisolated_verifiers: true,
+            max_parallel_nodes: 2,
+            ..Psp9RunConfig::default()
+        },
+    )
+    .with_database_path(database.clone());
+
+    let summary = runtime.run("document then refine".into()).await.unwrap();
+    assert!(
+        matches!(summary.outcome, NodeTerminalOutcome::HardPass),
+        "dependent refinement must integrate: {:?}",
+        summary.outcome
+    );
+    // The downstream refinement won the merged root.
+    let final_a = std::fs::read_to_string(project.path().join("src/a.rs")).unwrap();
+    assert!(final_a.contains("Alpha, refined."), "{final_a}");
+
+    let store = perspt_store::SessionStore::open(&database).unwrap();
+    let rows = store.get_psp9_events(&summary.session_id).unwrap();
+    let names = event_names(&rows);
+    let count = |needle: &str| names.iter().filter(|name| *name == needle).count();
+    assert_eq!(count("integration_promoted"), 1);
+    assert_eq!(
+        count("integration_failed"),
+        0,
+        "a downstream refinement is never a divergent-writers conflict"
+    );
+    // node-b's contribution is its own work only — the unmodified
+    // inherited notes file is not re-exported.
+    let b_paths = rows
+        .iter()
+        .filter_map(|row| {
+            let value: serde_json::Value = serde_json::from_str(&row.event_json).ok()?;
+            (value.get("kind")?.as_str()? == "staging_root_updated"
+                && value.get("payload")?.get("node_id")?.as_str()? == "node-b")
+                .then(|| value["payload"]["paths"].clone())
+        })
+        .next_back()
+        .expect("node-b staged");
+    assert_eq!(
+        b_paths,
+        serde_json::json!(["src/a.rs"]),
+        "inherited unmodified files must not re-export"
+    );
+    // The out-of-footprint write was denied by the write scope.
+    let tool_events = tool_event_names(&rows);
+    assert!(
+        tool_events.iter().any(|name| name == "effect_denied"),
+        "the write outside output_targets must be denied"
+    );
+}
+
 /// Gate AA falsifier: no user-workspace state may contain one node winner
 /// without the rest of its verified integration root. Two individually
 /// hard-passing winners whose combination fails are rejected whole.

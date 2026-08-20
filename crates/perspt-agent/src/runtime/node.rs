@@ -624,6 +624,21 @@ pub(crate) fn session_grant_policy(
     })
 }
 
+/// Declared node output targets as write-scope patterns; a directory
+/// target (trailing `/`) covers its subtree.
+pub(crate) fn write_scope_from_targets(targets: &[String]) -> Vec<PathPattern> {
+    targets
+        .iter()
+        .map(|target| {
+            if target.ends_with('/') {
+                PathPattern(format!("{target}*"))
+            } else {
+                PathPattern(target.clone())
+            }
+        })
+        .collect()
+}
+
 pub(crate) fn inspection_command_scope() -> Vec<CommandPattern> {
     [
         "rg", "grep", "find", "sort", "uniq", "wc", "comm", "cat", "head", "tail", "ls", "git",
@@ -696,6 +711,11 @@ pub(crate) struct CandidateSeed {
     pub(crate) files: Vec<crate::toolloop::SeedFile>,
     pub(crate) conversation: Conversation,
     pub(crate) activated_tools: Vec<String>,
+    /// True when the files are inherited staged predecessor state (system
+    /// 22): restored without entering the promotable set, so the node
+    /// exports only its own work. A node's own checkpoint restores as
+    /// promotable (false).
+    pub(crate) inherited: bool,
 }
 
 pub(crate) fn load_candidate_checkpoint(
@@ -759,6 +779,7 @@ pub(crate) fn load_candidate_checkpoint(
         current_epoch
     );
     let seed = CandidateSeed {
+        inherited: false,
         expected_state_root: value
             .get("state_root")
             .and_then(serde_json::Value::as_str)
@@ -796,6 +817,7 @@ pub(crate) async fn seed_from_attempt(
         }),
     )?;
     Ok(Some(CandidateSeed {
+        inherited: false,
         expected_state_root: checkpoint.witness.state_root,
         canonical_scope: checkpoint.witness.canonical_scope.clone(),
         files,
@@ -813,7 +835,11 @@ pub(crate) async fn restore_seed(
     let Some(seed) = seed else {
         return Ok(());
     };
-    candidate.restore_exported(&seed.files)?;
+    if seed.inherited {
+        candidate.restore_seeded(&seed.files)?;
+    } else {
+        candidate.restore_exported(&seed.files)?;
+    }
     let restored = candidate.checkpoint(&seed.canonical_scope).await?;
     anyhow::ensure!(
         restored.witness.state_root == seed.expected_state_root,
