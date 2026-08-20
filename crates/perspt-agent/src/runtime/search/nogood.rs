@@ -104,6 +104,18 @@ impl NoGoodStore {
         key
     }
 
+    /// Fold one ledgered `no_good_recorded` entry back into the store
+    /// (resume). Stale-root entries are harmless: `K_ng` embeds the
+    /// accepted root, so they simply never match.
+    pub fn fold_entry(&mut self, key: String, evidence_hash: String) {
+        self.entries.insert(key, evidence_hash);
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     /// Exact-equality lookup: any changed component permits a new attempt.
     pub fn suppresses(&self, components: &NoGoodComponents) -> bool {
         self.entries.contains_key(&components.key())

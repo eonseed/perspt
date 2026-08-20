@@ -41,6 +41,26 @@ fn legacy_rows_use_the_legacy_decoder_and_v1_rows_the_envelope() {
     ));
 }
 
+/// D2: `search_usage_snapshot` round-trips through the v1 envelope and,
+/// like every PSP-10 variant, is refused in an unversioned legacy row.
+#[test]
+fn search_usage_snapshot_is_a_v1_only_variant() {
+    let snapshot = serde_json::json!({
+        "event": "search_usage_snapshot",
+        "forest_id": "f1",
+        "epoch": 3,
+        "usage": perspt_sdk::SearchUsage::default(),
+    });
+    let error = decode_tool_loop(&snapshot).unwrap_err();
+    assert!(error.to_string().contains("unversioned"), "{error}");
+    let wrapped = serde_json::json!({"schema_version": 1, "body": snapshot});
+    let decoded = decode_tool_loop(&wrapped).unwrap();
+    assert!(matches!(
+        decoded.event,
+        LoopEvent::SearchUsageSnapshot { epoch: 3, .. }
+    ));
+}
+
 #[test]
 fn a_new_variant_in_an_unversioned_row_is_refused() {
     let smuggled = serde_json::json!({

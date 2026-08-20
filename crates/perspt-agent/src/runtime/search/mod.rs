@@ -17,6 +17,7 @@
 //! deterministically — branch workspaces are never resume points.
 
 mod branch;
+pub(crate) mod fold;
 mod nogood;
 mod strategy;
 
@@ -34,6 +35,16 @@ use crate::toolloop::{LoopEvent, LoopRecorder, Measured};
 use branch::{consumed_usage, measure_fork_cost, BranchRecorder};
 use nogood::{NoGoodComponents, NoGoodStore, NoGoodSupport};
 use strategy::{next_strategy, BranchStrategy, BranchSummary};
+
+/// Prior search state folded from the ledger at resume: the recorded
+/// no-goods (their exact repeated attempts stay suppressed), the
+/// interrupted forest's consumption (limits are not silently refilled),
+/// and its identity (the new forest links to it via `resumed_from`).
+pub(crate) struct SearchSeed {
+    pub no_goods: NoGoodStore,
+    pub prior_usage: Option<perspt_sdk::SearchUsage>,
+    pub resumed_from: Option<String>,
+}
 
 /// Runtime search settings, resolved from `[exploration]` at construction.
 #[derive(Debug, Clone)]
@@ -98,6 +109,27 @@ struct ForestRun<'a> {
 impl ForestRun<'_> {
     fn emit(&self, event: LoopEvent) -> Result<()> {
         self.recorder.record(&event)
+    }
+
+    /// Open the next frontier epoch and snapshot the budget at its start.
+    fn open_epoch(&mut self) -> Result<()> {
+        self.epoch += 1;
+        self.emit(LoopEvent::FrontierEpochStarted {
+            forest_id: self.forest_id.clone(),
+            epoch: self.epoch,
+            forest_digest: self.forest_digest(),
+        })?;
+        self.snapshot_usage()
+    }
+
+    /// Snapshot the shared budget into the ledger, so an interrupted
+    /// forest's consumption is reconstructible (Gate AC + resume).
+    fn snapshot_usage(&self) -> Result<()> {
+        self.emit(LoopEvent::SearchUsageSnapshot {
+            forest_id: self.forest_id.clone(),
+            epoch: self.epoch,
+            usage: self.budget.snapshot(),
+        })
     }
 
     /// The folded forest identity for this epoch; a deterministic resume
@@ -179,6 +211,7 @@ impl Psp9AgentRuntime {
             // content root, never a synthetic marker.
             None => crate::realize::snapshot_workspace(&self.working_dir, &[])?.root_hash(),
         };
+        let (resumed_from, no_goods, budget) = self.opening_state();
         let mut forest = ForestRun {
             recorder,
             forest_id: forest_id.clone(),
@@ -187,8 +220,8 @@ impl Psp9AgentRuntime {
             accepted_root: accepted_root.clone(),
             baseline_energy,
             rho_gate,
-            budget: perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
-            no_goods: NoGoodStore::default(),
+            budget,
+            no_goods,
             sensor_fingerprint: self.live_sensor_fingerprint(),
             started: std::time::Instant::now(),
             epoch: 0,
@@ -199,6 +232,7 @@ impl Psp9AgentRuntime {
             generation,
             accepted_root: accepted_root.clone(),
             limits: forest.budget.limits().clone(),
+            resumed_from,
         })?;
         let attempts = self
             .run_branches(
@@ -215,6 +249,37 @@ impl Psp9AgentRuntime {
         let usage = forest.budget.close();
         forest.emit(LoopEvent::SearchClosed { forest_id, usage })?;
         Ok(chosen)
+    }
+
+    /// The forest's opening state. A resume seed (the ledger fold's
+    /// no-goods and the interrupted forest's consumption) is consumed by
+    /// the first forest opened afterwards — a fresh identity, honest state.
+    fn opening_state(
+        &self,
+    ) -> (
+        Option<String>,
+        NoGoodStore,
+        perspt_sdk::search::SharedSearchBudget,
+    ) {
+        let seed_state = self.search_seed.lock().unwrap().take();
+        let resumed_from = seed_state.as_ref().and_then(|s| s.resumed_from.clone());
+        match seed_state {
+            Some(seeded) => {
+                let budget = match seeded.prior_usage {
+                    Some(usage) => perspt_sdk::search::SharedSearchBudget::with_usage(
+                        self.search.limits.clone(),
+                        usage,
+                    ),
+                    None => perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
+                };
+                (resumed_from, seeded.no_goods, budget)
+            }
+            None => (
+                None,
+                NoGoodStore::default(),
+                perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
+            ),
+        }
     }
 
     /// The live sensor-profile identity: detected plugin verifier commands
@@ -284,12 +349,7 @@ impl Psp9AgentRuntime {
                 &forest.accepted_root,
             );
             let goal_program = goal_program(goal, plan.strategy, &history);
-            forest.epoch += 1;
-            forest.emit(LoopEvent::FrontierEpochStarted {
-                forest_id: forest.forest_id.clone(),
-                epoch: forest.epoch,
-                forest_digest: forest.forest_digest(),
-            })?;
+            forest.open_epoch()?;
             let outcome = self
                 .run_one_branch(
                     forest,
@@ -309,6 +369,7 @@ impl Psp9AgentRuntime {
             };
             let accepted = eligible && measured.hard_pass;
             let over_budget = self.charge_attempt(forest, &attempt, &candidate).is_err();
+            forest.snapshot_usage()?;
             if !accepted && !over_budget && index + 1 < usize::from(self.search.max_branches) {
                 partial = self
                     .partial_checkpoint(

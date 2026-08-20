@@ -32,6 +32,11 @@ pub struct ControlFrame {
     /// runs per turn.
     #[serde(default)]
     pub resident_context_digest: String,
+    /// The work-graph node this checkpoint belongs to. Empty marks a
+    /// legacy checkpoint; resume falls back to the historical single-node
+    /// identity for those.
+    #[serde(default)]
+    pub node_id: String,
     pub goal: String,
     pub node_generation: u32,
     pub accepted_state_root: String,
@@ -118,6 +123,7 @@ mod tests {
                 prompt_invocation_digest: String::new(),
                 prompt_manifest_digest: String::new(),
                 resident_context_digest: String::new(),
+                node_id: "implement-1".into(),
                 event_schema_version: crate::CONVERSATION_EVENT_SCHEMA_VERSION,
                 goal: "fix the build".into(),
                 node_generation: 2,

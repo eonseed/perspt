@@ -253,6 +253,17 @@ pub enum LoopEvent {
         generation: u32,
         accepted_root: String,
         limits: perspt_sdk::SearchLimits,
+        /// The interrupted forest this one deterministically re-runs, when
+        /// resuming (additive; absent on fresh forests and legacy rows).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resumed_from: Option<String>,
+    },
+    /// The forest's consumption at an epoch boundary, so an interrupted
+    /// run's usage is reconstructible from the ledger (Gate AC + resume).
+    SearchUsageSnapshot {
+        forest_id: String,
+        epoch: u64,
+        usage: perspt_sdk::SearchUsage,
     },
     BranchForked {
         forest_id: String,
