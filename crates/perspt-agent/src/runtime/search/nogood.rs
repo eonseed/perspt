@@ -65,6 +65,17 @@ pub(crate) enum NoGoodSupport {
 }
 
 impl NoGoodSupport {
+    /// The Gate AB support-class label, ledgered beside the evidence hash.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            NoGoodSupport::CompilerCode(_) => "compiler-code",
+            NoGoodSupport::FailedTest(_) => "failed-test",
+            NoGoodSupport::ContractDiagnostic(_) => "contract-diagnostic",
+            NoGoodSupport::UnchangedStateHash(_) => "unchanged-state",
+            NoGoodSupport::DeniedCapability(_) => "denied-capability",
+        }
+    }
+
     pub fn evidence_hash(&self) -> String {
         let (kind, value) = match self {
             NoGoodSupport::CompilerCode(value) => ("compiler-code", value),
