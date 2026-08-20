@@ -61,10 +61,10 @@ pub struct DependencyEnv {
     pub path_blobs: BTreeMap<String, String>,
 }
 
-impl ContextPage {
-    /// Whether this page's declared dependency still holds.
-    pub fn dependency_holds(&self, env: &DependencyEnv) -> bool {
-        match &self.dependency {
+impl StateDependency {
+    /// Whether this dependency still holds against the live state.
+    pub fn holds(&self, env: &DependencyEnv) -> bool {
+        match self {
             StateDependency::SessionInvariant => true,
             StateDependency::AcceptedRoot(root) => *root == env.accepted_root,
             StateDependency::PartialCheckpointRoot(root) => {
@@ -74,6 +74,13 @@ impl ContextPage {
                 env.path_blobs.get(path) == Some(blob_hash)
             }
         }
+    }
+}
+
+impl ContextPage {
+    /// Whether this page's declared dependency still holds.
+    pub fn dependency_holds(&self, env: &DependencyEnv) -> bool {
+        self.dependency.holds(env)
     }
 }
 
@@ -221,6 +228,17 @@ pub fn assemble_resident(
 ) -> Result<ResidentOutcome> {
     let allowance = budget.input_allowance()?;
     let mandatory = mandatory_closure(pages, mandatory_ids);
+    // Gate AF fail-closed tripwire: a stale root-dependent page must never
+    // be admitted — mandatory status is no exemption. Producers demote
+    // stale pages before nominating the closure; reaching this branch is a
+    // producer defect, so the assembly refuses rather than transmits.
+    if let Some(stale) = mandatory.iter().find(|page| !page.dependency_holds(env)) {
+        return Err(SdkError::Domain(format!(
+            "gate-af: mandatory page {} depends on a state that no longer holds; \
+             a stale root-dependent page cannot be admitted",
+            stale.page_id
+        )));
+    }
     let mandatory_cost: u64 = mandatory.iter().map(|page| page.tokens).sum();
     if instruction_tokens + mandatory_cost > allowance {
         return Ok(ResidentOutcome::Infeasible {
@@ -291,6 +309,38 @@ mod tests {
             partial_root: None,
             path_blobs: BTreeMap::new(),
         }
+    }
+
+    /// Gate AF fail-closed tripwire: a mandatory page whose dependency no
+    /// longer holds refuses the assembly outright — mandatory status never
+    /// admits a stale root-dependent page. Producers demote stale pages
+    /// before nominating the closure; this branch firing is a producer
+    /// defect surfaced loudly, not a silent transmission.
+    #[test]
+    fn a_stale_mandatory_page_refuses_assembly() {
+        let budget = ContextBudget {
+            window_tokens: 2_000,
+            output_reserve: 400,
+            tool_reserve: 100,
+            guard_reserve: 100,
+        };
+        let pages = vec![page(
+            "m0",
+            10,
+            &["task"],
+            StateDependency::AcceptedRoot("old-root".into()),
+        )];
+        let outcome = assemble_resident(
+            &pages,
+            &["m0".to_string()],
+            &env(),
+            &budget,
+            0,
+            64,
+            &BTreeMap::new(),
+        );
+        let error = outcome.expect_err("a stale mandatory page must refuse");
+        assert!(error.to_string().contains("gate-af"), "{error}");
     }
 
     #[test]
