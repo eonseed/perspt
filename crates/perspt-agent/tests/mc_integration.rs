@@ -604,3 +604,95 @@ async fn a_multi_node_resume_promotes_only_through_the_integration_gate() {
         &serde_json::json!(["node-a"])
     );
 }
+
+/// Record `node`'s terminal fold in a NEW chain-valid revision descending
+/// from the newest recorded one — strictly later than the interrupted
+/// node's checkpoint binding, exactly like a sibling failure folded just
+/// before a crash. Returns the session and the appended revision id.
+fn record_post_checkpoint_stop(database: &std::path::Path, node: &str) -> (String, String) {
+    let store = perspt_store::SessionStore::open(&database.to_path_buf()).unwrap();
+    let session_id = store.list_recent_sessions(1).unwrap()[0].session_id.clone();
+    let rows = store.get_psp9_events(&session_id).unwrap();
+    let newest: perspt_sdk::WorkGraphRevision = rows
+        .iter()
+        .filter_map(|row| {
+            let value: serde_json::Value = serde_json::from_str(&row.event_json).ok()?;
+            (value.get("kind")?.as_str()? == "graph_revision")
+                .then(|| serde_json::from_value(value.get("payload")?.clone()).ok())?
+        })
+        .next_back()
+        .expect("a recorded revision");
+    let mut nodes = newest.nodes.clone();
+    nodes.iter_mut().find(|n| n.node_id == node).unwrap().state =
+        perspt_sdk::WorkNodeState::Stopped {
+            certificate_id: "cert-b".into(),
+        };
+    let stopped = perspt_sdk::WorkGraphRevision::build(
+        newest.sequence + 1,
+        Some(newest.revision_id.clone()),
+        perspt_sdk::GraphRevisionReason::ExecutionUpdate,
+        nodes,
+        newest.edges.clone(),
+    )
+    .unwrap();
+    let last = rows.last().unwrap();
+    let event = perspt_sdk::LedgerEvent::Custom {
+        kind: "graph_revision".into(),
+        payload: serde_json::to_value(&stopped).unwrap(),
+    };
+    let sequence = last.sequence + 1;
+    let hash = perspt_sdk::ledger::entry_chain_hash(&last.hash, sequence as u64, &event).unwrap();
+    store
+        .record_psp9_event(&perspt_store::Psp9LedgerRow {
+            session_id: session_id.clone(),
+            sequence,
+            event_json: serde_json::to_string(&event).unwrap(),
+            prev_hash: last.hash.clone(),
+            hash,
+        })
+        .unwrap();
+    (session_id, stopped.revision_id.clone())
+}
+
+/// Erratum 12 across the checkpoint boundary: a sibling whose terminal
+/// fold was recorded in a revision LATER than the resumed node's
+/// checkpoint still refuses resume. Terminality is judged against the
+/// latest recorded descendant of the checkpoint's revision, never the
+/// checkpoint-era snapshot — otherwise the failed node would silently be
+/// reset to pending and retried.
+#[tokio::test]
+async fn a_post_checkpoint_terminal_sibling_still_refuses_resume() {
+    let project = tempfile::tempdir().unwrap();
+    write_resume_fixture(project.path());
+    let database = project.path().join("runtime.db");
+    let config = Psp9RunConfig {
+        approval_policy: ApprovalPolicy::Auto,
+        max_turns: 4,
+        allow_unisolated_verifiers: true,
+        max_parallel_nodes: 2,
+        ..Psp9RunConfig::default()
+    };
+    crash_after_node_a_staged(project.path(), &config).await;
+
+    let (session_id, stopped_id) = record_post_checkpoint_stop(&database, "node-b");
+
+    let refused = Psp9AgentRuntime::with_transport(
+        project.path().to_path_buf(),
+        dependent_graph_transport(),
+        ModelId::new("test", "scripted"),
+        config,
+    )
+    .with_database_path(database.clone())
+    .resume_session(session_id)
+    .await;
+    let error = refused.expect_err("a terminal sibling must refuse resume");
+    assert!(
+        error.to_string().contains("terminal"),
+        "the refusal names the terminal node (latest revision {stopped_id}): {error}"
+    );
+    // Nothing was promoted by the refused resume.
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("src/a.rs")).unwrap(),
+        "pub fn alpha() -> u32 { 1 }\n"
+    );
+}
