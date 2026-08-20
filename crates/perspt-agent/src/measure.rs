@@ -147,13 +147,22 @@ impl<'a> CodingCandidateMeasurer<'a> {
         Ok(jobs)
     }
 
+    /// Fold one verifier run. A residual from a stage the domain's
+    /// `HardGatePolicy` does not require (e.g. lint) lands in `advisory` —
+    /// still scored, still steering corrections, never blocking the gate —
+    /// so a pre-existing repository warning cannot make hard pass
+    /// unreachable. Required-stage residuals stay blocking.
     fn fold_execution(
         &self,
         job: &VerifierJob,
         execution: VerifierExecution,
         residuals: &mut Vec<ResidualEvent>,
+        advisory: &mut Vec<ResidualEvent>,
         all_passed: &mut bool,
+        required: &BTreeSet<String>,
     ) -> Result<()> {
+        let blocking = required.contains(job.stage.policy_name());
+        let sink: &mut Vec<ResidualEvent> = if blocking { residuals } else { advisory };
         let mut output = execution.output.clone();
         // A stage that declared a JUnit report file (pytest `--junitxml`)
         // produced structured evidence on disk: fold it into the raw sensor
@@ -171,22 +180,24 @@ impl<'a> CodingCandidateMeasurer<'a> {
             ..execution
         };
         if let Some(adapter) = self.adapters.get(&job.adapter_id) {
-            residuals.extend(adapter.parse_diagnostics(
+            sink.extend(adapter.parse_diagnostics(
                 &self.node_id,
                 self.generation,
                 &execution.output,
             ));
         }
         if !execution.success {
-            *all_passed = false;
+            if blocking {
+                *all_passed = false;
+            }
             let class = match job.stage {
                 perspt_core::plugin::VerifierStage::Test => ResidualClass::TestFailure,
                 perspt_core::plugin::VerifierStage::Lint => ResidualClass::Lint,
                 perspt_core::plugin::VerifierStage::Format => ResidualClass::Format,
                 _ => ResidualClass::Build,
             };
-            if !residuals.iter().any(|r| r.class == class) {
-                residuals.push(tool_residual(
+            if !sink.iter().any(|r| r.class == class) {
+                sink.push(tool_residual(
                     &self.node_id,
                     self.generation,
                     class,
@@ -195,6 +206,26 @@ impl<'a> CodingCandidateMeasurer<'a> {
             }
         }
         Ok(())
+    }
+
+    /// The stages whose residuals block hard pass: the domain's
+    /// `HardGatePolicy`, plus `format` when the run declares it
+    /// (`[verification] require_format`).
+    fn required_stages(&self) -> BTreeSet<String> {
+        let scope = DomainScope {
+            label: self.node_id.clone(),
+            paths: Vec::new(),
+        };
+        let mut required: BTreeSet<String> = self
+            .domain
+            .hard_gate_policy(&scope)
+            .required_stages
+            .into_iter()
+            .collect();
+        if self.require_format {
+            required.insert("format".into());
+        }
+        required
     }
 
     /// Gate X / PSP-10 Phase 1: `HardGatePolicy::required_stages` is
@@ -271,6 +302,8 @@ impl<'a> CodingCandidateMeasurer<'a> {
 impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
     async fn measure(&self) -> Result<Measured> {
         let mut residuals = Vec::new();
+        let mut advisory = Vec::new();
+        let required = self.required_stages();
         let mut all_passed = false;
         let mut ran_stages: BTreeSet<&'static str> = BTreeSet::new();
         let immutable_oracle = self.candidate.immutable_test_oracle()?;
@@ -315,9 +348,14 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         while let Some(result) = workers.join_next().await {
             let (job, execution) = result.context("verifier worker panicked")?;
             match execution {
-                Ok(execution) => {
-                    self.fold_execution(&job, execution, &mut residuals, &mut all_passed)?
-                }
+                Ok(execution) => self.fold_execution(
+                    &job,
+                    execution,
+                    &mut residuals,
+                    &mut advisory,
+                    &mut all_passed,
+                    &required,
+                )?,
                 Err(error) => {
                     residuals.push(sensor_unavailable(
                         &self.node_id,
@@ -332,9 +370,13 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         if ran == 0 {
             all_passed = false;
         }
+        // Only required-stage residuals gate; advisory ones (lint outside
+        // the hard-gate policy) still enter the energy and corrections.
+        let hard_pass = self.candidate.has_mutated() && all_passed && residuals.is_empty();
+        residuals.extend(advisory);
         let (energy, correction, packet) = self.score(&residuals)?;
         Ok(Measured {
-            hard_pass: self.candidate.has_mutated() && all_passed && residuals.is_empty(),
+            hard_pass,
             energy,
             residuals,
             correction,
