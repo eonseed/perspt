@@ -60,34 +60,105 @@ fn labels(index: usize, message: &Message) -> Vec<String> {
     labels
 }
 
-/// One message's content-addressed page identity and its exact serialized
-/// form — the single hashing rule shared by assembly, the transport view,
-/// and recall.
-fn page_key(message: &Message) -> (String, String) {
-    let serialized = serde_json::to_string(message).unwrap_or_default();
-    let page_id = perspt_sdk::ledger::content_hash(serialized.as_bytes());
-    (page_id, serialized)
+/// The conversation partitioned into atomic pages: an assistant tool-call
+/// message and **all** of its result messages form one page (spec
+/// :1431-1432); every other message is its own page. A page is the unit of
+/// residency, eviction, and recall — a pair can never be half-evicted.
+pub(super) struct PageGroups {
+    /// Member message indices per page, in first-member order.
+    pub(super) members: Vec<Vec<usize>>,
+    /// Owning page id per message index (parallel to the conversation).
+    pub(super) owners: Vec<String>,
 }
 
-/// The model-facing content of one page, returned by `context_recall`.
-fn page_content(message: &Message) -> String {
-    match message {
-        Message::System { content }
-        | Message::User { content }
-        | Message::Assistant { content }
-        | Message::ToolResponse { content, .. } => content.clone(),
-        Message::AssistantToolCalls { calls } => serde_json::to_string(calls).unwrap_or_default(),
+/// Group the conversation's messages into atomic pages. A `ToolResponse`
+/// joins the most recent tool-call message that issued its `call_id`; an
+/// orphan response (none did) is its own page.
+pub(super) fn page_groups(conversation: &Conversation) -> PageGroups {
+    let messages = conversation.messages();
+    let mut members: Vec<Vec<usize>> = Vec::new();
+    let mut issued: BTreeMap<String, usize> = BTreeMap::new();
+    for (index, message) in messages.iter().enumerate() {
+        match message {
+            Message::AssistantToolCalls { calls } => {
+                let group = members.len();
+                members.push(vec![index]);
+                for call in calls {
+                    issued.insert(call.call_id.clone(), group);
+                }
+            }
+            Message::ToolResponse { call_id, .. } => match issued.get(call_id) {
+                Some(&group) => members[group].push(index),
+                None => members.push(vec![index]),
+            },
+            _ => members.push(vec![index]),
+        }
     }
+    let mut owners = vec![String::new(); messages.len()];
+    for group in &members {
+        let serialized: String = group
+            .iter()
+            .map(|&i| serialize_message(&messages[i]))
+            .collect();
+        let page_id = perspt_sdk::ledger::content_hash(serialized.as_bytes());
+        for &index in group {
+            owners[index] = page_id.clone();
+        }
+    }
+    PageGroups { members, owners }
+}
+
+/// The single serialization rule page identity hashes over.
+fn serialize_message(message: &Message) -> String {
+    serde_json::to_string(message).unwrap_or_default()
+}
+
+/// The page kind of one group.
+fn group_kind(messages: &[Message], group: &[usize]) -> &'static str {
+    match &messages[group[0]] {
+        Message::System { .. } => "instruction",
+        Message::User { .. } => "task",
+        Message::Assistant { .. } => "assistant",
+        Message::AssistantToolCalls { .. } | Message::ToolResponse { .. } => "tool_pair",
+    }
+}
+
+/// The model-facing content of one page, returned by `context_recall`. A
+/// pair page returns the call JSON plus each result labeled by call id.
+fn group_content(messages: &[Message], group: &[usize]) -> String {
+    let mut parts = Vec::new();
+    for &index in group {
+        match &messages[index] {
+            Message::System { content }
+            | Message::User { content }
+            | Message::Assistant { content } => parts.push(content.clone()),
+            Message::AssistantToolCalls { calls } => parts.push(format!(
+                "calls: {}",
+                serde_json::to_string(calls).unwrap_or_default()
+            )),
+            Message::ToolResponse { call_id, content } => {
+                parts.push(format!("result {call_id}:\n{content}"));
+            }
+        }
+    }
+    parts.join("\n")
 }
 
 /// Every page of the projection keyed by page id — the `context_recall`
 /// store. The projection is the backing store (Definition 6): eviction
 /// removes a page from the transport view, never from here.
 pub(super) fn page_contents(conversation: &Conversation) -> BTreeMap<String, String> {
-    conversation
-        .messages()
+    let groups = page_groups(conversation);
+    let messages = conversation.messages();
+    groups
+        .members
         .iter()
-        .map(|message| (page_key(message).0, page_content(message)))
+        .map(|group| {
+            (
+                groups.owners[group[0]].clone(),
+                group_content(messages, group),
+            )
+        })
         .collect()
 }
 
@@ -105,22 +176,26 @@ fn tombstone(page_id: &str, kind: &str) -> String {
 /// The transport view of the conversation under the assembled resident
 /// set: resident pages verbatim, evicted pages tombstoned **in place** so
 /// message structure and tool pairing survive every provider's validation.
+/// Membership is per owning page, so a tool pair is resident or evicted as
+/// one unit and its tombstones all name the same recallable page id.
 /// Returns the view and how many pages were tombstoned.
 pub(super) fn resident_view(
     conversation: &Conversation,
     resident: &std::collections::BTreeSet<String>,
 ) -> (Conversation, usize) {
+    let groups = page_groups(conversation);
     let mut view = Conversation::default();
-    let mut evicted = 0usize;
-    for message in conversation.messages() {
-        let (page_id, _) = page_key(message);
-        if resident.contains(&page_id) {
+    let mut evicted_pages: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (index, message) in conversation.messages().iter().enumerate() {
+        let page_id = &groups.owners[index];
+        if resident.contains(page_id) {
             view.push(message.clone());
             continue;
         }
-        evicted += 1;
-        view.push(evicted_message(message, &page_id));
+        evicted_pages.insert(page_id.as_str());
+        view.push(evicted_message(message, page_id));
     }
+    let evicted = evicted_pages.len();
     (view, evicted)
 }
 
@@ -139,7 +214,7 @@ fn evicted_message(message: &Message, page_id: &str) -> Message {
         },
         Message::ToolResponse { call_id, .. } => Message::ToolResponse {
             call_id: call_id.clone(),
-            content: tombstone(page_id, "tool_result"),
+            content: tombstone(page_id, "tool_pair"),
         },
         Message::AssistantToolCalls { calls } => Message::AssistantToolCalls {
             calls: calls
@@ -160,9 +235,10 @@ fn evicted_message(message: &Message, page_id: &str) -> Message {
     }
 }
 
-/// One page per message, plus the mandatory page-id set: the leading
+/// One atomic page per group, plus the mandatory page-id set: the leading
 /// instruction/task pages, every unresolved tool pair, and the pinned
-/// recency tail.
+/// recency tail. A pair page's cost, labels, and freshness are member
+/// aggregates, so residency decisions always account the whole pair.
 pub(super) fn conversation_pages(
     conversation: &Conversation,
     accepted_root: &str,
@@ -172,38 +248,43 @@ pub(super) fn conversation_pages(
     let messages = conversation.messages();
     let unresolved = conversation.unresolved_call_ids();
     let total = messages.len();
-    let mut pages = Vec::with_capacity(total);
+    let groups = page_groups(conversation);
+    let mut pages = Vec::with_capacity(groups.members.len());
     let mut mandatory = Vec::new();
-    for (index, message) in messages.iter().enumerate() {
-        let (page_id, serialized) = page_key(message);
-        let tokens = accountant.count_message(&serialized);
-        let pinned = index < 2
-            || index + pinned_tail >= total
-            || match message {
-                Message::AssistantToolCalls { calls } => {
-                    calls.iter().any(|call| unresolved.contains(&call.call_id))
-                }
-                _ => false,
-            };
+    for group in &groups.members {
+        let page_id = groups.owners[group[0]].clone();
+        let mut tokens = 0u64;
+        let mut bytes = 0u64;
+        let mut obligations = Vec::new();
+        let mut pinned = false;
+        for &index in group {
+            let message = &messages[index];
+            let serialized = serialize_message(message);
+            tokens += accountant.count_message(&serialized);
+            bytes += serialized.len() as u64;
+            obligations.extend(labels(index, message));
+            pinned = pinned
+                || index < 2
+                || index + pinned_tail >= total
+                || match message {
+                    Message::AssistantToolCalls { calls } => {
+                        calls.iter().any(|call| unresolved.contains(&call.call_id))
+                    }
+                    _ => false,
+                };
+        }
         if pinned {
             mandatory.push(page_id.clone());
         }
         pages.push(ContextPage {
             page_id,
-            kind: match message {
-                Message::System { .. } => "instruction",
-                Message::User { .. } => "task",
-                Message::Assistant { .. } => "assistant",
-                Message::AssistantToolCalls { .. } => "tool_call",
-                Message::ToolResponse { .. } => "tool_result",
-            }
-            .into(),
+            kind: group_kind(messages, group).into(),
             source_hashes: Vec::new(),
             dependency: StateDependency::AcceptedRoot(accepted_root.into()),
-            bytes: serialized.len() as u64,
+            bytes,
             tokens,
-            obligations: labels(index, message),
-            freshness_turn: index as u64,
+            obligations,
+            freshness_turn: group.iter().copied().max().unwrap_or(0) as u64,
             depends_on: Vec::new(),
         });
     }
