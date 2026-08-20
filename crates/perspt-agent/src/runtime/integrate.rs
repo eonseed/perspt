@@ -133,6 +133,59 @@ impl StagingRoot {
     }
 }
 
+/// Rebuild the staging root from the durable ledger: the newest
+/// `staging_root_updated` event per node, its files rehydrated from the
+/// content-addressed artifact store. Fails closed on a staged
+/// contribution that predates durable staging (no `files` field) — an
+/// unreconstructible staging root must refuse resume, never promote a
+/// partial one (Gate AA).
+pub(super) fn fold_staging(
+    recorder: &Psp9Recorder,
+    session_id: &str,
+    graph: &perspt_sdk::WorkGraphRevision,
+) -> Result<StagingRoot> {
+    use anyhow::Context;
+    let mut staging = StagingRoot::default();
+    for row in recorder.store.get_psp9_events(session_id)? {
+        let Ok(perspt_sdk::LedgerEvent::Custom { kind, payload }) =
+            serde_json::from_str::<perspt_sdk::LedgerEvent>(&row.event_json)
+        else {
+            continue;
+        };
+        if kind != "staging_root_updated" {
+            continue;
+        }
+        let node_id = payload
+            .get("node_id")
+            .and_then(|value| value.as_str())
+            .context("staged contribution names no node")?;
+        if graph.node(node_id).is_none() {
+            continue;
+        }
+        let files_value = payload.get("files").with_context(|| {
+            format!(
+                "staged contribution for {node_id} predates durable staging; \
+                 the staging root cannot be reconstructed"
+            )
+        })?;
+        let handles: Vec<crate::toolloop::DurableSeedFile> =
+            serde_json::from_value(files_value.clone())?;
+        let state_root = payload
+            .get("state_root")
+            .and_then(|value| value.as_str())
+            .context("staged contribution carries no state root")?
+            .to_string();
+        staging.contributions.insert(
+            node_id.to_string(),
+            StagedWinner {
+                state_root,
+                files: super::node::load_seed_files(recorder, handles)?,
+            },
+        );
+    }
+    Ok(staging)
+}
+
 /// The transitive dependency closure of one node over the graph's edges.
 pub(super) fn transitive_predecessors(
     graph: &perspt_sdk::WorkGraphRevision,

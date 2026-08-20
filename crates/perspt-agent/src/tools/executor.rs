@@ -77,7 +77,63 @@ fn capped_search_output(stdout: &[u8]) -> String {
     kept.join("\n")
 }
 
-/// Parse a 1-based positive integer line argument, defaulting when absent.
+/// The streamed line window of one `read_file` call.
+struct ReadWindow {
+    lines: Vec<String>,
+    total: usize,
+    truncated: bool,
+}
+
+/// Stream the requested window: only in-window lines are retained (each
+/// capped), lines outside it are counted without buffering — memory stays
+/// O(window) whatever the file size. Binary content (NUL bytes) refuses.
+fn collect_read_window(
+    path: &std::path::Path,
+    raw_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<ReadWindow, String> {
+    let file = fs::File::open(path).map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut window = ReadWindow {
+        lines: Vec::new(),
+        total: 0,
+        truncated: false,
+    };
+    loop {
+        let wanted = window.total + 1 >= offset && window.lines.len() < limit;
+        let cap = if wanted { READ_MAX_LINE_BYTES } else { 0 };
+        let Some((bytes, skipped)) = read_bounded_line(&mut reader, cap)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?
+        else {
+            return Ok(window);
+        };
+        window.total += 1;
+        if !wanted {
+            continue;
+        }
+        if bytes.contains(&0) {
+            return Err(format!("{raw_path} appears to be a binary file"));
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let rendered = match char_cap(&text, READ_MAX_LINE_CHARS) {
+            Some(cut) => {
+                window.truncated = true;
+                let more = skipped + (text.len() - cut.len());
+                format!("{cut}…[+{more} bytes on this line]")
+            }
+            None if skipped > 0 => {
+                window.truncated = true;
+                format!("{text}…[+{skipped} bytes on this line]")
+            }
+            None => text.into_owned(),
+        };
+        window
+            .lines
+            .push(format!("{:>6}\t{rendered}", window.total));
+    }
+}
+
 /// Read one line keeping at most `cap` bytes: `(kept, skipped)` where
 /// `skipped` counts the bytes beyond the cap (newline excluded), or `None`
 /// at EOF. The tail of an overlong line is consumed without buffering, so
@@ -119,6 +175,7 @@ fn char_cap(text: &str, cap: usize) -> Option<&str> {
     }
 }
 
+/// Parse a 1-based positive integer line argument, defaulting when absent.
 fn parse_line_argument(call: &ToolCall, name: &str, default: usize) -> Result<usize, String> {
     match call.arguments.get(name) {
         None => Ok(default),
@@ -197,61 +254,14 @@ impl AgentTools {
         };
 
         let limit = limit.min(READ_MAX_LIMIT);
-        let file = match fs::File::open(&path) {
-            Ok(file) => file,
-            Err(e) => {
-                return ToolResult::failure(
-                    "read_file",
-                    format!("Failed to read {:?}: {}", path, e),
-                )
-            }
+        let ReadWindow {
+            lines: window,
+            total,
+            truncated: any_truncated,
+        } = match collect_read_window(&path, raw_path, offset, limit) {
+            Ok(window) => window,
+            Err(message) => return ToolResult::failure("read_file", message),
         };
-        // Stream: only the requested window is retained (each line capped),
-        // lines outside it are counted without buffering — memory stays
-        // O(window) whatever the file size.
-        let mut reader = std::io::BufReader::new(file);
-        let mut window: Vec<String> = Vec::new();
-        let mut total = 0usize;
-        let mut any_truncated = false;
-        loop {
-            let wanted = total + 1 >= offset && window.len() < limit;
-            let cap = if wanted { READ_MAX_LINE_BYTES } else { 0 };
-            match read_bounded_line(&mut reader, cap) {
-                Err(e) => {
-                    return ToolResult::failure(
-                        "read_file",
-                        format!("Failed to read {:?}: {}", path, e),
-                    )
-                }
-                Ok(None) => break,
-                Ok(Some((bytes, skipped))) => {
-                    total += 1;
-                    if !wanted {
-                        continue;
-                    }
-                    if bytes.contains(&0) {
-                        return ToolResult::failure(
-                            "read_file",
-                            format!("{raw_path} appears to be a binary file"),
-                        );
-                    }
-                    let text = String::from_utf8_lossy(&bytes);
-                    let rendered = match char_cap(&text, READ_MAX_LINE_CHARS) {
-                        Some(cut) => {
-                            any_truncated = true;
-                            let more = skipped + (text.len() - cut.len());
-                            format!("{cut}…[+{more} bytes on this line]")
-                        }
-                        None if skipped > 0 => {
-                            any_truncated = true;
-                            format!("{text}…[+{skipped} bytes on this line]")
-                        }
-                        None => text.into_owned(),
-                    };
-                    window.push(format!("{:>6}\t{rendered}", total));
-                }
-            }
-        }
         if offset > total {
             return ToolResult::success(
                 "read_file",

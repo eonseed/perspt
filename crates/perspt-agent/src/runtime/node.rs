@@ -850,7 +850,7 @@ pub(crate) async fn restore_seed(
 
 /// Rehydrate checkpointed seed files from the content-addressed artifact
 /// store, verifying every artifact against its recorded hash.
-fn load_seed_files(
+pub(crate) fn load_seed_files(
     recorder: &Psp9Recorder,
     file_handles: Vec<crate::toolloop::DurableSeedFile>,
 ) -> Result<Vec<crate::toolloop::SeedFile>> {
