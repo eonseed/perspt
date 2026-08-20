@@ -19,6 +19,7 @@
 mod branch;
 pub(crate) mod fold;
 mod nogood;
+mod seed;
 mod strategy;
 
 use anyhow::{Context, Result};
@@ -34,17 +35,8 @@ use crate::candidate::CodingCandidateMeasurer;
 use crate::toolloop::{LoopEvent, LoopRecorder, Measured};
 use branch::{consumed_usage, measure_fork_cost, BranchRecorder};
 use nogood::{NoGoodComponents, NoGoodStore, NoGoodSupport};
+pub(crate) use seed::SearchSeed;
 use strategy::{next_strategy, BranchStrategy, BranchSummary};
-
-/// Prior search state folded from the ledger at resume: the recorded
-/// no-goods (their exact repeated attempts stay suppressed), the
-/// interrupted forest's consumption (limits are not silently refilled),
-/// and its identity (the new forest links to it via `resumed_from`).
-pub(crate) struct SearchSeed {
-    pub no_goods: NoGoodStore,
-    pub prior_usage: Option<perspt_sdk::SearchUsage>,
-    pub resumed_from: Option<String>,
-}
 
 /// Runtime search settings, resolved from `[exploration]` at construction.
 #[derive(Debug, Clone)]
@@ -212,7 +204,8 @@ impl Psp9AgentRuntime {
             // content root, never a synthetic marker.
             None => crate::realize::snapshot_workspace(&self.working_dir, &[])?.root_hash(),
         };
-        let (resumed_from, no_goods, budget) = self.opening_state();
+        let (resumed_from, no_goods, budget) =
+            self.opening_state(node_id, generation, &accepted_root);
         // Every holder of the shared handle (the branch tool loops) can now
         // ledger usage snapshots under this forest's identity — crash-time
         // durability at action granularity, not only at branch boundaries.
@@ -257,16 +250,36 @@ impl Psp9AgentRuntime {
     }
 
     /// The forest's opening state. A resume seed (the ledger fold's
-    /// no-goods and the interrupted forest's consumption) is consumed by
-    /// the first forest opened afterwards — a fresh identity, honest state.
+    /// no-goods and the interrupted forest's consumption) is consumed only
+    /// by the same node generation. Other parallel nodes get a fresh budget
+    /// and cannot steal the interrupted forest's reserved usage.
     fn opening_state(
         &self,
+        node_id: &str,
+        generation: u32,
+        accepted_root: &str,
     ) -> (
         Option<String>,
         NoGoodStore,
         perspt_sdk::search::SharedSearchBudget,
     ) {
-        let seed_state = self.search_seed.lock().unwrap().take();
+        let mut seed_slot = self.search_seed.lock().unwrap();
+        let matches_owner = seed_slot
+            .as_ref()
+            .is_some_and(|seed| seed.owns(node_id, generation, accepted_root));
+        if !matches_owner {
+            let no_goods = seed_slot
+                .as_ref()
+                .map(|seed| seed.no_goods.clone())
+                .unwrap_or_default();
+            return (
+                None,
+                no_goods,
+                perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
+            );
+        }
+        let seed_state = seed_slot.take();
+        drop(seed_slot);
         let resumed_from = seed_state.as_ref().and_then(|s| s.resumed_from.clone());
         match seed_state {
             Some(seeded) => {

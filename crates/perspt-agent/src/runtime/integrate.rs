@@ -136,9 +136,10 @@ impl StagingRoot {
 /// Rebuild the staging root from the durable ledger: the newest
 /// `staging_root_updated` event per node, its files rehydrated from the
 /// content-addressed artifact store. Fails closed on a staged
-/// contribution that predates durable staging (no `files` field) — an
-/// unreconstructible staging root must refuse resume, never promote a
-/// partial one (Gate AA).
+/// contribution that predates durable, generation-bound staging (no
+/// `files` or `generation` field) — an unreconstructible or ambiguously
+/// bound staging root must refuse resume, never promote a partial one
+/// (Gate AA).
 pub(super) fn fold_staging(
     recorder: &Psp9Recorder,
     session_id: &str,
@@ -159,7 +160,21 @@ pub(super) fn fold_staging(
             .get("node_id")
             .and_then(|value| value.as_str())
             .context("staged contribution names no node")?;
-        if graph.node(node_id).is_none() {
+        let Some(node) = graph.node(node_id) else {
+            continue;
+        };
+        let generation = payload
+            .get("generation")
+            .and_then(|value| value.as_u64())
+            .with_context(|| {
+                format!(
+                    "staged contribution for {node_id} predates generation-bound staging; \
+                     the staging root cannot be reconstructed safely"
+                )
+            })?;
+        if generation != u64::from(node.generation) {
+            // A refined/replaced node must never inherit a winner produced
+            // by its earlier generation. The current generation re-runs.
             continue;
         }
         let files_value = payload.get("files").with_context(|| {

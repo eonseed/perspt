@@ -32,7 +32,7 @@ impl Psp9AgentRuntime {
         } else {
             control.node_id.clone()
         };
-        self.seed_search_state(&recorder, &session_id, &control)?;
+        self.seed_search_state(&recorder, &session_id)?;
         let task = control.goal.clone();
         let running_graph = resumed_running_graph(
             &recorder,
@@ -163,8 +163,8 @@ impl Psp9AgentRuntime {
         .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
 
-    /// The newest recorded state of the graph: the last `graph_revision`
-    /// event (in ledger order) inside the descendant closure of `base`.
+    /// The newest recorded state of the graph: the unique linear
+    /// `graph_revision` chain after `base` in ledger order.
     /// The checkpoint binds the resumed node to its own revision, but a
     /// sibling's terminal fold — recorded in a *later* revision — must
     /// still be seen: judging terminality against the checkpoint-era
@@ -174,9 +174,10 @@ impl Psp9AgentRuntime {
         session_id: &str,
         base: &WorkGraphRevision,
     ) -> Result<WorkGraphRevision> {
-        let mut closure: std::collections::BTreeSet<String> =
+        let mut lineage: std::collections::BTreeSet<String> =
             [base.revision_id.clone()].into_iter().collect();
         let mut latest = base.clone();
+        let mut saw_base = false;
         for row in recorder.store.get_psp9_events(session_id)? {
             let Ok(perspt_sdk::LedgerEvent::Custom { kind, payload }) =
                 serde_json::from_str(&row.event_json)
@@ -187,14 +188,39 @@ impl Psp9AgentRuntime {
                 continue;
             }
             let graph: WorkGraphRevision = serde_json::from_value(payload)?;
-            let descends = graph
-                .parent_revision_id
-                .as_deref()
-                .is_some_and(|parent| closure.contains(parent));
-            if descends && closure.insert(graph.revision_id.clone()) {
+            if graph.revision_id == base.revision_id {
+                saw_base = true;
+                continue;
+            }
+            if !saw_base {
+                continue;
+            }
+            let Some(parent) = graph.parent_revision_id.as_deref() else {
+                continue;
+            };
+            if parent == latest.revision_id {
+                anyhow::ensure!(
+                    graph.sequence == latest.sequence + 1,
+                    "graph revision {} skips sequence after {}; refusing ambiguous resume",
+                    graph.revision_id,
+                    latest.revision_id
+                );
+                anyhow::ensure!(
+                    lineage.insert(graph.revision_id.clone()),
+                    "graph revision {} repeats in the resume lineage",
+                    graph.revision_id
+                );
                 latest = graph;
+            } else if lineage.contains(parent) {
+                anyhow::bail!(
+                    "graph history forks from revision {parent}; refusing ambiguous resume"
+                );
             }
         }
+        anyhow::ensure!(
+            saw_base,
+            "checkpoint graph revision is absent from the ledger"
+        );
         Ok(latest)
     }
 
@@ -251,9 +277,9 @@ impl Psp9AgentRuntime {
         // The mid-loop checkpoint continues only a node the latest state
         // still shows unchanged (same generation, not yet staged): a node
         // refined or folded after the checkpoint re-runs fresh.
-        let unchanged = latest
-            .node(resumed_node)
-            .is_some_and(|node| node.generation == resumed_generation);
+        let unchanged = latest.node(resumed_node).is_some_and(|node| {
+            node.generation == resumed_generation && node.state == WorkNodeState::Running
+        });
         if unchanged && !staging.contributions.contains_key(resumed_node) {
             resume_seeds.insert(resumed_node.to_string(), seed);
         }
@@ -321,20 +347,16 @@ impl Psp9AgentRuntime {
     /// Fold the recorded search state: exact no-goods stay suppressed and
     /// an interrupted forest's consumption is not silently refilled
     /// (spec :2340-2341, by ledger fold).
-    fn seed_search_state(
-        &self,
-        recorder: &Psp9Recorder,
-        session_id: &str,
-        control: &perspt_sdk::ControlFrame,
-    ) -> Result<()> {
+    fn seed_search_state(&self, recorder: &Psp9Recorder, session_id: &str) -> Result<()> {
         let fold = search::fold::fold_search_ledger(&recorder.store.get_psp9_events(session_id)?)?;
-        let prior = fold
-            .interrupted
-            .filter(|forest| forest.accepted_root == control.accepted_state_root);
+        let prior = fold.interrupted;
         *self.search_seed.lock().unwrap() = Some(search::SearchSeed {
             no_goods: fold.no_goods,
             prior_usage: prior.as_ref().map(|forest| forest.last_usage.clone()),
-            resumed_from: prior.map(|forest| forest.forest_id),
+            resumed_from: prior.as_ref().map(|forest| forest.forest_id.clone()),
+            node_id: prior.as_ref().map(|forest| forest.node_id.clone()),
+            generation: prior.as_ref().map(|forest| forest.generation),
+            accepted_root: prior.map(|forest| forest.accepted_root),
         });
         Ok(())
     }

@@ -1,6 +1,7 @@
 //! Deterministic, read-only repository orientation for the PSP-9 runtime.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::Path;
 
 use anyhow::Result;
@@ -19,11 +20,14 @@ pub struct WorkspaceMap {
     pub input_witnesses: Vec<String>,
 }
 
-const MAX_FILES: usize = 5_000;
+const MAX_PACKAGE_ROOTS: usize = 512;
+const MAX_ENTRY_POINTS: usize = 64;
+const MAX_RISK_HOTSPOTS: usize = 64;
+const MAX_MANIFEST_WITNESSES: usize = 512;
 
-/// Build a bounded project map from filesystem metadata and small manifest
-/// hashes. This phase has no mutation capability and is safe to run in
-/// parallel with other read-only preparation.
+/// Build a bounded project map from filesystem metadata and streamed
+/// manifest hashes. This phase has no mutation capability and is safe to
+/// run in parallel with other read-only preparation.
 pub fn map_workspace(root: &Path) -> Result<WorkspaceMap> {
     let mut scan = WorkspaceScan::default();
     let mut walker = WalkBuilder::new(root);
@@ -39,7 +43,6 @@ pub fn map_workspace(root: &Path) -> Result<WorkspaceMap> {
         .build()
         .flatten()
         .filter(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
-        .take(MAX_FILES)
     {
         scan.observe(root, entry.path());
     }
@@ -54,12 +57,16 @@ pub fn map_workspace(root: &Path) -> Result<WorkspaceMap> {
         languages,
         package_roots: scan.package_roots.into_iter().collect(),
         build_systems: scan.build_systems.into_iter().collect(),
-        entry_points: scan.entry_points.into_iter().take(64).collect(),
-        risk_hotspots: scan.risk_hotspots.into_iter().take(64).collect(),
+        entry_points: scan.entry_points.into_iter().collect(),
+        risk_hotspots: scan.risk_hotspots.into_iter().collect(),
     };
     Ok(WorkspaceMap {
         project_map: map,
-        input_witnesses: scan.witnesses,
+        input_witnesses: scan
+            .witnesses
+            .into_iter()
+            .map(|(path, hash)| format!("{path}:{hash}"))
+            .collect(),
     })
 }
 
@@ -67,7 +74,8 @@ fn include_entry(root: &Path, path: &Path) -> bool {
     if path == root {
         return true;
     }
-    !path.components().any(|component| {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    !relative.components().any(|component| {
         matches!(
             component.as_os_str().to_str(),
             Some(
@@ -92,7 +100,7 @@ struct WorkspaceScan {
     build_systems: BTreeSet<String>,
     entry_points: BTreeSet<String>,
     risk_hotspots: BTreeSet<String>,
-    witnesses: Vec<String>,
+    witnesses: BTreeMap<String, String>,
 }
 
 impl WorkspaceScan {
@@ -105,19 +113,22 @@ impl WorkspaceScan {
         if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
             if let Some(system) = build_system(name) {
                 self.build_systems.insert(system.to_string());
-                self.package_roots.insert(
+                bounded_insert(
+                    &mut self.package_roots,
                     relative
                         .parent()
                         .unwrap_or_else(|| Path::new("."))
                         .to_string_lossy()
                         .replace('\\', "/"),
+                    MAX_PACKAGE_ROOTS,
                 );
-                if let Ok(bytes) = std::fs::read(path) {
-                    self.witnesses.push(format!(
-                        "{}:{}",
-                        rendered,
-                        perspt_sdk::ledger::content_hash(&bytes)
-                    ));
+                if let Ok(hash) = hash_file(path) {
+                    bounded_insert_map(
+                        &mut self.witnesses,
+                        rendered.clone(),
+                        hash,
+                        MAX_MANIFEST_WITNESSES,
+                    );
                 }
             }
             if matches!(
@@ -125,7 +136,7 @@ impl WorkspaceScan {
                 "main.rs" | "main.py" | "main.ts" | "main.js" | "lib.rs"
             ) || name.starts_with("app.")
             {
-                self.entry_points.insert(rendered.clone());
+                bounded_insert(&mut self.entry_points, rendered.clone(), MAX_ENTRY_POINTS);
             }
         }
         if rendered.contains("migrations/")
@@ -135,9 +146,54 @@ impl WorkspaceScan {
             || rendered.ends_with("Cargo.lock")
             || rendered.ends_with("package-lock.json")
         {
-            self.risk_hotspots.insert(rendered);
+            bounded_insert(&mut self.risk_hotspots, rendered, MAX_RISK_HOTSPOTS);
         }
     }
+}
+
+/// Retain the lexicographically smallest `cap` values independent of
+/// traversal order. The whole repository is observed, while summary memory
+/// remains bounded and deterministic.
+fn bounded_insert(values: &mut BTreeSet<String>, value: String, cap: usize) {
+    values.insert(value);
+    if values.len() > cap {
+        values.pop_last();
+    }
+}
+
+fn bounded_insert_map(
+    values: &mut BTreeMap<String, String>,
+    key: String,
+    value: String,
+    cap: usize,
+) {
+    values.insert(key, value);
+    if values.len() > cap {
+        values.pop_last();
+    }
+}
+
+/// SHA-256 a manifest as a stream. Repository orientation never needs to
+/// materialize even an accidentally enormous manifest in memory.
+fn hash_file(path: &Path) -> std::io::Result<String> {
+    use sha2::Digest;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        write!(&mut hex, "{byte:02x}").expect("writing into a string cannot fail");
+    }
+    Ok(hex)
 }
 
 fn language_for(path: &Path) -> Option<&'static str> {
@@ -210,5 +266,35 @@ mod tests {
         let report = map_workspace(root.path()).unwrap();
         assert_eq!(report.project_map.languages, ["python:1"]);
         assert_eq!(report.project_map.entry_points, ["src/main.py"]);
+    }
+
+    #[test]
+    fn bounded_summaries_are_independent_of_traversal_order() {
+        let values: Vec<String> = (0..600).map(|index| format!("crate-{index:04}")).collect();
+        let mut forward = BTreeSet::new();
+        let mut reverse = BTreeSet::new();
+        for value in &values {
+            bounded_insert(&mut forward, value.clone(), MAX_PACKAGE_ROOTS);
+        }
+        for value in values.iter().rev() {
+            bounded_insert(&mut reverse, value.clone(), MAX_PACKAGE_ROOTS);
+        }
+        assert_eq!(forward, reverse);
+        assert_eq!(forward.len(), MAX_PACKAGE_ROOTS);
+        assert!(forward.contains("crate-0000"));
+        assert!(!forward.contains("crate-0599"));
+    }
+
+    #[test]
+    fn streamed_manifest_witness_matches_the_content_hash() {
+        let root = tempfile::tempdir().unwrap();
+        let mut manifest = b"[package]\nname='large'\n#".to_vec();
+        manifest.extend(std::iter::repeat_n(b'x', 200_000));
+        let path = root.path().join("Cargo.toml");
+        std::fs::write(&path, &manifest).unwrap();
+        assert_eq!(
+            hash_file(&path).unwrap(),
+            perspt_sdk::ledger::content_hash(&manifest)
+        );
     }
 }

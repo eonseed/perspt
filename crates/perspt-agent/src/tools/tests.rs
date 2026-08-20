@@ -279,6 +279,31 @@ async fn list_files_respects_gitignore_and_paginates() {
     assert!(page.output.contains("more entries; continue with offset=2"));
 }
 
+#[test]
+fn git_read_rejects_write_external_and_host_escape_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = AgentTools::new(dir.path().to_path_buf());
+    for argument in [
+        "--output=/tmp/leak",
+        "--ext-diff",
+        "--textconv",
+        "--no-index",
+        "--pathspec-from-file=/etc/passwd",
+    ] {
+        let result = tools.git_read(&ToolCall {
+            name: "git_read".into(),
+            arguments: [
+                ("subcommand".into(), "diff".into()),
+                ("args".into(), argument.into()),
+            ]
+            .into_iter()
+            .collect(),
+        });
+        assert!(!result.success, "{argument} must be denied");
+        assert!(result.error.unwrap_or_default().contains("not permitted"));
+    }
+}
+
 #[tokio::test]
 async fn glob_paginates_with_continuation_hint() {
     let dir = tempfile::tempdir().unwrap();

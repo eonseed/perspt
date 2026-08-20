@@ -721,28 +721,70 @@ pub(crate) struct CandidateSeed {
     pub(crate) inherited: bool,
 }
 
+struct DurableCandidateState {
+    state_root: String,
+    control: perspt_sdk::ControlFrame,
+    conversation: Conversation,
+    birth_deps: Vec<perspt_sdk::prompt::StateDependency>,
+    canonical_scope: Vec<String>,
+    files: Vec<crate::toolloop::DurableSeedFile>,
+}
+
+/// Select the last candidate event in ledger order. The side-table index
+/// may lag, timestamp-tie, or end in a different checkpoint kind.
+fn latest_candidate_state(rows: &[perspt_store::Psp9LedgerRow]) -> Result<DurableCandidateState> {
+    let mut latest = None;
+    for row in rows {
+        let Ok(perspt_sdk::LedgerEvent::Custom { kind, payload }) =
+            serde_json::from_str(&row.event_json)
+        else {
+            continue;
+        };
+        if kind != "tool_loop" {
+            continue;
+        }
+        if let LoopEvent::DurableCandidateCheckpoint {
+            state_root,
+            control,
+            conversation,
+            birth_deps,
+            canonical_scope,
+            files,
+            ..
+        } = crate::toolloop::decode_tool_loop(&payload)?.event
+        {
+            latest = Some(DurableCandidateState {
+                state_root,
+                control,
+                conversation,
+                birth_deps,
+                canonical_scope,
+                files,
+            });
+        }
+    }
+    latest.context("session has no durable candidate checkpoint in its verified ledger")
+}
+
 pub(crate) fn load_candidate_checkpoint(
     recorder: &Psp9Recorder,
     session_id: &str,
 ) -> Result<(perspt_sdk::ControlFrame, CandidateSeed)> {
-    let checkpoint_json = recorder
-        .store
-        .latest_psp9_checkpoint(session_id)?
-        .context("session has no durable candidate checkpoint to resume from")?;
-    let value: serde_json::Value = serde_json::from_str(&checkpoint_json)?;
-    anyhow::ensure!(
-        value.get("kind").and_then(|v| v.as_str()) == Some("candidate"),
-        "newest checkpoint is not a candidate checkpoint; exact continuation is unavailable"
-    );
-    let field = |name: &str| {
-        value
-            .get(name)
-            .cloned()
-            .context(format!("checkpoint {name}"))
-    };
-    let control: perspt_sdk::ControlFrame = serde_json::from_value(field("control")?)?;
-    let canonical_scope: Vec<String> = serde_json::from_value(field("canonical_scope")?)?;
-    let conversation: Conversation = serde_json::from_value(field("conversation")?)?;
+    // The hash-chained ledger is the resume authority. The checkpoint table
+    // is only a query accelerator and can lag the event (crash between the
+    // two writes), tie on timestamps, or contain a newer context checkpoint.
+    // Selecting the last durable candidate event in ledger order also makes
+    // parallel-node checkpoint ordering unambiguous.
+    let rows = recorder.store.get_psp9_events(session_id)?;
+    let durable = latest_candidate_state(&rows)?;
+    let DurableCandidateState {
+        state_root,
+        control,
+        conversation,
+        birth_deps,
+        canonical_scope,
+        files: file_handles,
+    } = durable;
     anyhow::ensure!(
         conversation.unresolved_call_ids() == control.unresolved_call_ids,
         "checkpoint conversation does not match its unresolved-call control frame"
@@ -751,19 +793,32 @@ pub(crate) fn load_candidate_checkpoint(
         control.event_schema_version == perspt_sdk::CONVERSATION_EVENT_SCHEMA_VERSION,
         "checkpoint conversation event schema is unsupported"
     );
+    anyhow::ensure!(
+        state_root == control.accepted_state_root,
+        "checkpoint state root does not match its control frame; refusing resume"
+    );
     // Gate O: the checkpointed conversation clone is only the cheap resume
     // path — it must be *derivable from the ledger*. Refold the recorded
     // deltas and refuse resume unless the fold reproduces both the rolling
     // digest the control frame committed to and the clone itself.
-    let rows = recorder.store.get_psp9_events(session_id)?;
     let folded = crate::toolloop::refold_session_context(&rows, &control.projection_digest)?
         .context("no ledger fold reaches the checkpoint digest; refusing resume")?;
     anyhow::ensure!(
         folded.conversation() == &conversation,
         "checkpoint conversation is not derivable from the recorded deltas; refusing resume"
     );
-    let file_handles: Vec<crate::toolloop::DurableSeedFile> =
-        serde_json::from_value(field("files")?)?;
+    let folded_tools: std::collections::BTreeSet<_> =
+        folded.activated_tools().iter().cloned().collect();
+    let control_tools: std::collections::BTreeSet<_> =
+        control.activated_tools.iter().cloned().collect();
+    anyhow::ensure!(
+        folded_tools == control_tools && control_tools.len() == control.activated_tools.len(),
+        "checkpoint activated tools are not derivable from the recorded deltas; refusing resume"
+    );
+    anyhow::ensure!(
+        birth_deps.is_empty() || birth_deps.len() == conversation.messages().len(),
+        "checkpoint birth provenance length does not match its conversation; refusing resume"
+    );
     let current_epoch = recorder.store.authority_epoch(session_id)?;
     anyhow::ensure!(
         control.authority_epoch == current_epoch,
@@ -774,32 +829,14 @@ pub(crate) fn load_candidate_checkpoint(
     );
     let seed = CandidateSeed {
         inherited: false,
-        expected_state_root: value
-            .get("state_root")
-            .and_then(serde_json::Value::as_str)
-            .context("checkpoint state root")?
-            .to_string(),
+        expected_state_root: state_root,
         canonical_scope,
         files: load_seed_files(recorder, file_handles)?,
         conversation,
-        birth_deps: checkpoint_birth_deps(&value)?,
+        birth_deps,
         activated_tools: control.activated_tools.clone(),
     };
     Ok((control, seed))
-}
-
-/// Birth provenance travels with the checkpointed projection (Gate AF); a
-/// pre-provenance checkpoint restores with an empty vector and takes the
-/// legacy stamping fallback.
-fn checkpoint_birth_deps(
-    value: &serde_json::Value,
-) -> Result<Vec<perspt_sdk::prompt::StateDependency>> {
-    Ok(value
-        .get("birth_deps")
-        .cloned()
-        .map(serde_json::from_value)
-        .transpose()?
-        .unwrap_or_default())
 }
 
 /// Export the previous attempt's best accepted state as a seed for the
