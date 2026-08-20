@@ -732,6 +732,7 @@ impl ToolLoop<'_> {
             },
             prompt_manifest_digest: self.system_prompt.manifest_digest.clone(),
             resident_context_digest: state.prompt.resident_digest.clone(),
+            node_id: self.node_id.clone(),
             goal: goal.to_string(),
             node_generation: self.generation,
             accepted_state_root: state.accepted_checkpoint.witness.state_root.clone(),

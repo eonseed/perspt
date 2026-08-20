@@ -71,6 +71,9 @@ pub struct Psp9AgentRuntime {
     external_entries: Mutex<Option<Vec<perspt_sdk::ToolEntry>>>,
     /// Bounded-search settings from `[exploration]` (PSP-10 system 20).
     search: search::SearchSettings,
+    /// Prior search state folded from the ledger at resume; consumed by
+    /// the first forest opened afterwards (deterministic re-run).
+    search_seed: Mutex<Option<search::SearchSeed>>,
     /// Experimental platform-section overrides from validated
     /// `[prompts].bundles`, loaded by the composition root only under
     /// `--allow-experimental-prompts` (PSP-10 system 25, Gate AE).
@@ -138,6 +141,7 @@ impl Psp9AgentRuntime {
             external,
             external_entries: Mutex::new(None),
             search: search::SearchSettings::from_config(config.exploration.as_ref()),
+            search_seed: Mutex::new(None),
             prompt_overrides: Default::default(),
         })
     }
@@ -171,6 +175,7 @@ impl Psp9AgentRuntime {
             external: None,
             external_entries: Mutex::new(None),
             search: search::SearchSettings::default(),
+            search_seed: Mutex::new(None),
             prompt_overrides: Default::default(),
         }
     }
@@ -421,7 +426,25 @@ impl Psp9AgentRuntime {
         let (control, seed) = load_candidate_checkpoint(&recorder, &session_id)?;
         self.adopt_checkpoint(&recorder, &control, &seed)?;
 
-        let node_id = "implement-1".to_string();
+        // The checkpoint's real node identity (legacy checkpoints predate
+        // the field and keep the historical single-node name).
+        let node_id = if control.node_id.is_empty() {
+            "implement-1".to_string()
+        } else {
+            control.node_id.clone()
+        };
+        // Fold the recorded search state: exact no-goods stay suppressed
+        // and an interrupted forest's consumption is not silently refilled
+        // (spec :2340-2341, by ledger fold).
+        let fold = search::fold::fold_search_ledger(&recorder.store.get_psp9_events(&session_id)?)?;
+        let prior = fold
+            .interrupted
+            .filter(|forest| forest.accepted_root == control.accepted_state_root);
+        *self.search_seed.lock().unwrap() = Some(search::SearchSeed {
+            no_goods: fold.no_goods,
+            prior_usage: prior.as_ref().map(|forest| forest.last_usage.clone()),
+            resumed_from: prior.map(|forest| forest.forest_id),
+        });
         let task = control.goal.clone();
         let running_graph = resumed_running_graph(
             &recorder,
