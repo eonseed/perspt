@@ -394,6 +394,7 @@ impl Psp9AgentRuntime {
             self.config.allow_unisolated_verifiers,
         )?;
         candidate.set_tool_handlers(self.tool_handlers.clone());
+        candidate.set_verifier_timeouts(self.config.verifier_timeouts);
         Ok(candidate)
     }
 

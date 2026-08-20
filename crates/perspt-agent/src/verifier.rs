@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+use std::time::Duration;
+
 use anyhow::{Context, Result};
 use perspt_coding::LanguageId;
 use tokio::process::Command;
@@ -15,6 +17,47 @@ use tokio::process::Command;
 pub(crate) struct VerifierExecution {
     pub(crate) success: bool,
     pub(crate) output: String,
+}
+
+/// Per-stage wall-clock limits for governed verifier processes
+/// (`[verification] stage_timeout_secs` plus per-stage overrides).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerifierTimeouts {
+    pub default_secs: u64,
+    pub syntax: Option<u64>,
+    pub build: Option<u64>,
+    pub test: Option<u64>,
+    pub lint: Option<u64>,
+    pub format: Option<u64>,
+}
+
+impl Default for VerifierTimeouts {
+    fn default() -> Self {
+        Self {
+            default_secs: 180,
+            syntax: None,
+            build: None,
+            test: None,
+            lint: None,
+            format: None,
+        }
+    }
+}
+
+impl VerifierTimeouts {
+    /// The limit for one stage; `None` means an interactive or untyped run.
+    pub fn for_stage(&self, stage: Option<perspt_core::plugin::VerifierStage>) -> Duration {
+        use perspt_core::plugin::VerifierStage;
+        let secs = match stage {
+            Some(VerifierStage::SyntaxCheck) => self.syntax,
+            Some(VerifierStage::Build) => self.build,
+            Some(VerifierStage::Test) => self.test,
+            Some(VerifierStage::Lint) => self.lint,
+            Some(VerifierStage::Format) => self.format,
+            None => None,
+        };
+        Duration::from_secs(secs.unwrap_or(self.default_secs).max(1))
+    }
 }
 
 pub(crate) struct VerifierJob {
@@ -31,6 +74,7 @@ pub(crate) async fn run_governed_verifier(
     allow_unisolated: bool,
     target_suffix: String,
     extra_env: Vec<(String, String)>,
+    timeout: Duration,
 ) -> Result<VerifierExecution> {
     let tmp = root.join(".perspt-tmp").join(&target_suffix);
     let target = root.join(".perspt-target").join(&target_suffix);
@@ -76,9 +120,15 @@ pub(crate) async fn run_governed_verifier(
     if let Some(path) = rustup_home.filter(|path| path.is_dir()) {
         process.env("RUSTUP_HOME", path);
     }
-    let output = tokio::time::timeout(std::time::Duration::from_secs(180), process.output())
+    let output = tokio::time::timeout(timeout, process.output())
         .await
-        .context("governed verifier exceeded 180 second limit")??;
+        .with_context(|| {
+            format!(
+                "governed verifier exceeded its {} second limit \
+                 ([verification] stage_timeout_secs raises it)",
+                timeout.as_secs()
+            )
+        })??;
     Ok(VerifierExecution {
         success: output.status.success(),
         output: format!(

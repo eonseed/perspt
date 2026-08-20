@@ -30,6 +30,9 @@ pub struct Psp9RunConfig {
     /// Declare the plugin `format` verifier stage as an acceptance sensor
     /// (`[verification] require_format`). Off by default.
     pub require_format: bool,
+    /// Per-stage governed verifier wall-clock limits
+    /// (`[verification] stage_timeout_secs` + per-stage overrides).
+    pub verifier_timeouts: crate::verifier::VerifierTimeouts,
     /// Definition 6 context reserves and working-set bounds (`[context]`).
     pub resident: crate::toolloop::ResidentReserves,
     /// Seven-arm evaluation ablation: drop typed correction packets and
@@ -56,6 +59,7 @@ impl Default for Psp9RunConfig {
             max_parallel_nodes: 1,
             turn_deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
             require_format: false,
+            verifier_timeouts: crate::verifier::VerifierTimeouts::default(),
             resident: crate::toolloop::ResidentReserves::default(),
             ablate_correction_packets: false,
             ablate_context_paging: false,
@@ -96,7 +100,23 @@ pub(super) fn apply_config_overrides(
     }
     if let Some(verification) = &config.verification {
         run_config.require_format = verification.require_format.unwrap_or(false);
+        let defaults = crate::verifier::VerifierTimeouts::default();
+        run_config.verifier_timeouts = crate::verifier::VerifierTimeouts {
+            default_secs: verification
+                .stage_timeout_secs
+                .unwrap_or(defaults.default_secs),
+            syntax: verification.syntax_timeout_secs,
+            build: verification.build_timeout_secs,
+            test: verification.test_timeout_secs,
+            lint: verification.lint_timeout_secs,
+            format: verification.format_timeout_secs,
+        };
     }
+    fold_context_overrides(&mut run_config, config);
+    run_config
+}
+
+fn fold_context_overrides(run_config: &mut Psp9RunConfig, config: &perspt_core::Config) {
     if let Some(context) = &config.context {
         let defaults = crate::toolloop::ResidentReserves::default();
         run_config.resident = crate::toolloop::ResidentReserves {
@@ -116,5 +136,42 @@ pub(super) fn apply_config_overrides(
                 .unwrap_or(defaults.pinned_tail),
         };
     }
-    run_config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verification_timeouts_fold_from_the_config_file() {
+        let mut config = perspt_core::Config::default();
+        config.verification = Some(perspt_core::config::VerificationConfig {
+            stage_timeout_secs: Some(240),
+            test_timeout_secs: Some(600),
+            ..Default::default()
+        });
+        let folded = apply_config_overrides(Psp9RunConfig::default(), &config);
+        assert_eq!(folded.verifier_timeouts.default_secs, 240);
+        assert_eq!(folded.verifier_timeouts.test, Some(600));
+        assert_eq!(folded.verifier_timeouts.build, None);
+        use perspt_core::plugin::VerifierStage;
+        let timeouts = folded.verifier_timeouts;
+        assert_eq!(timeouts.for_stage(Some(VerifierStage::Test)).as_secs(), 600);
+        assert_eq!(
+            timeouts.for_stage(Some(VerifierStage::Build)).as_secs(),
+            240
+        );
+        assert_eq!(timeouts.for_stage(None).as_secs(), 240);
+    }
+
+    #[test]
+    fn default_timeouts_stay_at_180_seconds() {
+        let timeouts = crate::verifier::VerifierTimeouts::default();
+        assert_eq!(
+            timeouts
+                .for_stage(Some(perspt_core::plugin::VerifierStage::Lint))
+                .as_secs(),
+            180
+        );
+    }
 }

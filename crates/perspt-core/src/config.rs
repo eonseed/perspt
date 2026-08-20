@@ -359,6 +359,38 @@ pub struct VerificationConfig {
     /// as an acceptance sensor. Off by default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub require_format: Option<bool>,
+    /// Wall-clock limit for every governed verifier stage (default 180).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage_timeout_secs: Option<u64>,
+    /// Per-stage overrides of `stage_timeout_secs`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub syntax_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub build_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lint_timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format_timeout_secs: Option<u64>,
+}
+
+impl VerificationConfig {
+    pub fn validate(&self) -> Result<()> {
+        for (name, value) in [
+            ("stage_timeout_secs", self.stage_timeout_secs),
+            ("syntax_timeout_secs", self.syntax_timeout_secs),
+            ("build_timeout_secs", self.build_timeout_secs),
+            ("test_timeout_secs", self.test_timeout_secs),
+            ("lint_timeout_secs", self.lint_timeout_secs),
+            ("format_timeout_secs", self.format_timeout_secs),
+        ] {
+            if value == Some(0) {
+                anyhow::bail!("[verification] {name} must be positive");
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The `[exploration]` search block (PSP-10 system 20). Sequential eager
@@ -487,6 +519,9 @@ impl Config {
         }
         if let Some(context) = &self.context {
             context.validate()?;
+        }
+        if let Some(verification) = &self.verification {
+            verification.validate()?;
         }
         let mut server_ids = std::collections::BTreeSet::new();
         for server in &self.external_tools {
