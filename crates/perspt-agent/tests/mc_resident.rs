@@ -623,6 +623,81 @@ async fn a_root_change_invalidates_stale_optional_pages() {
     assert_pairs_never_split(&sent);
 }
 
+/// Gate AF closes the recency loophole: mandatory status is no exemption
+/// from invalidation. Pages born under the old root that still sit inside
+/// the newest-eight pinned tail are demoted and tombstoned once the
+/// acceptance moves the root — while the session-invariant head stays
+/// verbatim and tool pairs stay atomic. Before this fix the recency pin
+/// admitted stale root-dependent pages, the Gate AF falsifier verbatim.
+#[tokio::test]
+async fn a_root_change_invalidates_stale_pages_even_inside_the_pinned_tail() {
+    let read = |id: &str| {
+        TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: id.into(),
+            name: "read_file".into(),
+            arguments: serde_json::json!({"path": "src/lib.rs"}),
+        }])
+    };
+    let turns = vec![
+        read("r1"),
+        read("r2"),
+        TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: "w1".into(),
+            name: "edit_file".into(),
+            arguments: serde_json::json!({
+                "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+            }),
+        }]),
+        TurnOutput::Text("checking".into()),
+        TurnOutput::Text("done".into()),
+    ];
+    let transport = Capturing {
+        inner: Scripted::new(turns),
+        sent: Mutex::new(Vec::new()),
+    };
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    // Baseline 10; the w1 mutation's incremental pass consumes 9.9; the
+    // first boundary descends (accepted, root 0 -> 1, staling every page
+    // born under root 0); the final boundary hard-passes.
+    let measurer = EnergyScript::new(vec![(false, 10.0), (false, 9.9), (false, 9.0), (true, 0.0)]);
+    let recording = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.budgets.max_turns = 8;
+    tool_loop.recorder = Some(&recording);
+
+    tool_loop.run("edit the file").await.unwrap();
+
+    let sent = transport.sent.lock().unwrap();
+    let last = sent.last().expect("at least one request");
+    // The whole conversation still fits the pinned tail, yet every pair
+    // born under root 0 is tombstoned on the post-acceptance request.
+    for stale in ["r1", "r2", "w1"] {
+        assert!(
+            last.messages().iter().any(|message| {
+                matches!(message, perspt_sdk::Message::ToolResponse { call_id, content }
+                    if call_id == stale && content.contains("evicted from the resident context"))
+            }),
+            "pair {stale} born under the old root must be tombstoned: {:?}",
+            last.messages()
+                .iter()
+                .map(|m| format!("{m:?}").chars().take(90).collect::<String>())
+                .collect::<Vec<_>>()
+        );
+    }
+    for message in last.messages().iter().take(2) {
+        let text = format!("{message:?}");
+        assert!(
+            !text.contains("evicted from the resident context"),
+            "the instruction/task head must stay verbatim"
+        );
+    }
+    assert_pairs_never_split(&sent);
+}
+
 /// Gate AF, the boundedness half: with a small context window and a stream
 /// of oversized tool results, **no transport request ever exceeds the
 /// input allowance or the dialect byte limit** — the composed request is

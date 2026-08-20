@@ -391,10 +391,19 @@ fn evicted_message(message: &Message, page_id: &str) -> Message {
 /// instruction/task pages, every unresolved tool pair, and the pinned
 /// recency tail. A pair page's cost, labels, and freshness are member
 /// aggregates, so residency decisions always account the whole pair.
+///
+/// Recency alone never pins a **stale** page: after an accepted root
+/// change, a tail page born under the old root loses its pin and falls to
+/// the optional pool, where `dependency_holds` excludes it (Gate AF — a
+/// stale root-dependent page must not be admitted). The head pages and
+/// unresolved pairs stay pinned unconditionally: the head is
+/// session-invariant and unresolved calls exist only within the turn that
+/// opened them, before any boundary can move the root.
 pub(super) fn conversation_pages(
     conversation: &Conversation,
     birth_deps: &[StateDependency],
     pinned_tail: usize,
+    env: &DependencyEnv,
 ) -> (Vec<ContextPage>, Vec<String>) {
     let accountant = TokenAccountantRef::approx_bytes_v1();
     let messages = conversation.messages();
@@ -405,6 +414,10 @@ pub(super) fn conversation_pages(
     let mut mandatory = Vec::new();
     for group in &groups.members {
         let page_id = groups.owners[group[0]].clone();
+        let dep_holds = birth_deps
+            .get(group[0])
+            .map(|dependency| dependency.holds(env))
+            .unwrap_or(true);
         let mut tokens = 0u64;
         let mut bytes = 0u64;
         let mut obligations = Vec::new();
@@ -417,7 +430,7 @@ pub(super) fn conversation_pages(
             obligations.extend(labels(index, message));
             pinned = pinned
                 || index < 2
-                || index + pinned_tail >= total
+                || (dep_holds && index + pinned_tail >= total)
                 || match message {
                     Message::AssistantToolCalls { calls } => {
                         calls.iter().any(|call| unresolved.contains(&call.call_id))
@@ -506,7 +519,13 @@ pub(super) fn assemble_worker_resident(
     reserves: &ResidentReserves,
 ) -> perspt_sdk::Result<ResidentOutcome> {
     let accountant = TokenAccountantRef::approx_bytes_v1();
-    let (mut pages, mandatory) = conversation_pages(conversation, birth_deps, reserves.pinned_tail);
+    let env = DependencyEnv {
+        accepted_root: accepted_root.into(),
+        partial_root: partial_root.map(Into::into),
+        path_blobs: BTreeMap::new(),
+    };
+    let (mut pages, mandatory) =
+        conversation_pages(conversation, birth_deps, reserves.pinned_tail, &env);
     let groups = page_groups(conversation);
     let messages = conversation.messages();
     let mut tombstone_base = INDEX_NOTE_RESERVE;
@@ -515,11 +534,6 @@ pub(super) fn assemble_worker_resident(
         tombstone_base += evicted;
         page.tokens = page.tokens.saturating_sub(evicted);
     }
-    let env = DependencyEnv {
-        accepted_root: accepted_root.into(),
-        partial_root: partial_root.map(Into::into),
-        path_blobs: BTreeMap::new(),
-    };
     let budget = ContextBudget {
         window_tokens: window_tokens.max(1),
         output_reserve: reserves.output_reserve_tokens,
