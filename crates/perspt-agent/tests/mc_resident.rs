@@ -682,6 +682,94 @@ async fn no_composed_request_ever_exceeds_the_allowance() {
     }
 }
 
+/// Typed recall (spec :1476-1478): after eviction the wire carries a page
+/// index naming evicted pages, `context_recall` restores a pair **by
+/// path**, and the index note never enters the durable projection.
+#[tokio::test]
+async fn typed_recall_by_path_restores_the_pair_and_the_index_stays_off_projection() {
+    let payload = "z".repeat(4_096);
+    let read = |id: &str, path: &str| {
+        TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: id.into(),
+            name: "read_file".into(),
+            arguments: serde_json::json!({"path": path}),
+        }])
+    };
+    let transport = Capturing {
+        inner: Scripted::new(vec![
+            read("r1", "src/target.rs"),
+            read("r2", "src/other.rs"),
+            read("r3", "src/other.rs"),
+            read("r4", "src/other.rs"),
+            TurnOutput::ToolCalls(vec![ProviderToolCall {
+                call_id: "w1".into(),
+                name: "edit_file".into(),
+                arguments: serde_json::json!({
+                    "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+                }),
+            }]),
+            TurnOutput::Text("checking".into()),
+            TurnOutput::ToolCalls(vec![ProviderToolCall {
+                call_id: "recall".into(),
+                name: "context_recall".into(),
+                arguments: serde_json::json!({"path": "src/target.rs"}),
+            }]),
+            TurnOutput::Text("done".into()),
+        ]),
+        sent: Mutex::new(Vec::new()),
+    };
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = PayloadReads {
+        payload: payload.clone(),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 10.0), (false, 9.9), (false, 9.0), (true, 0.0)]);
+    let recording = Recording::default();
+    let tool_loop = eviction_loop(&transport, &catalog, &executor, &measurer, &recording);
+
+    let outcome = tool_loop.run("say done").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+
+    let events = recording.events.lock().unwrap();
+    let sent = transport.sent.lock().unwrap();
+    assert_typed_recall_and_index(&events, &sent, &payload);
+}
+
+/// The typed-recall assertions: recall by path restores the pair, the
+/// recall is ledgered, the page index reaches the wire but never the
+/// durable projection.
+fn assert_typed_recall_and_index(events: &[LoopEvent], sent: &[Conversation], payload: &str) {
+    let restored = events.iter().any(|event| {
+        matches!(event, LoopEvent::EffectApplied { call_id, output, .. }
+            if call_id == "recall" && output.starts_with("recalled page ")
+               && output.contains(payload))
+    });
+    assert!(restored, "recall by path restores the evicted pair");
+    let recalled_event = events
+        .iter()
+        .any(|event| matches!(event, LoopEvent::ContextPageRecalled { .. }));
+    assert!(recalled_event, "the typed recall is ledgered");
+
+    let index_on_wire = sent.iter().any(|conversation| {
+        conversation.messages().iter().any(|message| {
+            matches!(message, perspt_sdk::Message::User { content }
+                if content.starts_with("[evicted page index"))
+        })
+    });
+    assert!(index_on_wire, "the evicted-page index reaches the model");
+    let index_in_projection = events.iter().any(|event| {
+        matches!(event, LoopEvent::DurableCandidateCheckpoint { conversation, .. }
+        if conversation.messages().iter().any(|message| {
+            matches!(message, perspt_sdk::Message::User { content }
+                if content.starts_with("[evicted page index"))
+        }))
+    });
+    assert!(
+        !index_in_projection,
+        "the index note is transport-only, never part of the projection"
+    );
+}
+
 /// A recall of an unknown page id is a typed miss, never an error.
 #[tokio::test]
 async fn an_unknown_page_recall_is_a_typed_miss() {

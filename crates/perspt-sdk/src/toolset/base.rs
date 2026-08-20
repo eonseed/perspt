@@ -115,16 +115,29 @@ fn recall_entries() -> Vec<ToolEntry> {
     vec![
         entry(
             "context_recall",
-            "Restore one evicted context page by the page id shown in a \
-             bracketed eviction note; returns the page's original content",
+            "Restore evicted context pages by page id (from an eviction note \
+             or the page index), by path, or by typed diagnostic/test key; \
+             returns the pages' original content",
             EffectKind::DataRead,
             RiskClass::Low,
-            schema(&[(
-                "page_id",
-                "string",
-                "The content-addressed page id from an eviction note",
-                true,
-            )]),
+            schema(&[
+                (
+                    "page_id",
+                    "string",
+                    "Content-addressed page id or its 16-hex prefix",
+                    false,
+                ),
+                ("path", "string", "A path a tool call named", false),
+                ("diagnostic_id", "string", "A typed diagnostic id", false),
+                ("test_id", "string", "A typed test id", false),
+                ("symbol", "string", "A typed symbol name", false),
+                (
+                    "provenance_key",
+                    "string",
+                    "A provenance key (the page's content address)",
+                    false,
+                ),
+            ]),
             FootprintSpec::opaque(),
             false,
         )

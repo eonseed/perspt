@@ -178,12 +178,15 @@ impl ToolLoop<'_> {
                 .iter()
                 .map(|page| page.page_id.clone())
                 .collect();
-            let (view, evicted) = resident::resident_view(context.conversation(), &ids);
-            let view = if evicted == 0 {
-                context.conversation().clone()
-            } else {
-                view
-            };
+            let (mut view, evicted) = resident::resident_view(context.conversation(), &ids);
+            if evicted == 0 {
+                view = context.conversation().clone();
+            } else if let Some(note) = resident::evicted_index_note(context.conversation(), &ids) {
+                // The transport-only page index: the model's typed view of
+                // what context_recall can restore. Never enters the
+                // projection; its cost is part of the composed request.
+                view.push(perspt_sdk::Message::User { content: note });
+            }
             let (tokens, bytes) = wire_cost(&accountant, &view);
             if tokens <= allowance && bytes <= byte_limit {
                 assembled.resident_digest = perspt_sdk::prompt::resident_page_digest(

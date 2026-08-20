@@ -137,12 +137,13 @@ impl ToolLoop<'_> {
             }
             return Ok((0, false));
         }
-        // The recall store: every projection page by id, built only when
-        // this turn actually asks for one (Definition 6 backing store).
+        // The recall store: every projection page by id and typed key,
+        // built only when this turn actually asks for one (Definition 6
+        // backing store).
         let recall = calls
             .iter()
             .any(|call| call.name == "context_recall")
-            .then(|| super::resident::page_contents(context.conversation()));
+            .then(|| super::resident::recall_index(context.conversation()));
         context.push_tool_calls(calls.clone(), self.recorder, log)?;
 
         let plan = plan_batch(&calls, self.catalog);
@@ -185,7 +186,7 @@ impl ToolLoop<'_> {
         &mut self,
         planned: &PlannedCall,
         turn: u32,
-        recall: Option<&std::collections::BTreeMap<String, String>>,
+        recall: Option<&super::resident::RecallIndex>,
         budget: &mut TurnBudget,
         deferred: &mut Vec<(ProviderToolCall, ToolEntry)>,
         responses: &mut std::collections::BTreeMap<String, String>,
@@ -296,7 +297,7 @@ impl ToolLoop<'_> {
         &mut self,
         call: &ProviderToolCall,
         turn: u32,
-        recall: Option<&std::collections::BTreeMap<String, String>>,
+        recall: Option<&super::resident::RecallIndex>,
         budget: &mut TurnBudget,
         context: &mut LoopContext,
         log: &mut EventLog,
@@ -421,18 +422,37 @@ impl ToolLoop<'_> {
         response: &str,
         log: &mut EventLog,
     ) -> Result<()> {
-        let page_id = call
-            .arguments
-            .get("page_id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        // The recall key: whichever typed argument the call named.
+        let page_id = [
+            "page_id",
+            "path",
+            "diagnostic_id",
+            "test_id",
+            "symbol",
+            "provenance_key",
+        ]
+        .iter()
+        .find_map(|field| {
+            call.arguments
+                .get(field)
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default()
+        .to_string();
         let event = if response.starts_with("recalled page ") {
+            // A typed lookup records the newest restored page's identity.
+            let restored = response
+                .trim_start_matches("recalled page ")
+                .split_whitespace()
+                .next()
+                .unwrap_or(&page_id)
+                .to_string();
             LoopEvent::ContextPageRecalled {
                 forest_id: String::new(),
                 branch_id: String::new(),
                 turn,
-                page_id,
+                page_id: restored,
             }
         } else {
             LoopEvent::ContextMiss {

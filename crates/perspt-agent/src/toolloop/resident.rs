@@ -144,22 +144,174 @@ fn group_content(messages: &[Message], group: &[usize]) -> String {
     parts.join("\n")
 }
 
-/// Every page of the projection keyed by page id — the `context_recall`
-/// store. The projection is the backing store (Definition 6): eviction
-/// removes a page from the transport view, never from here.
-pub(super) fn page_contents(conversation: &Conversation) -> BTreeMap<String, String> {
+/// The typed keys of one page, derived only from typed fields (tool names,
+/// call ids, path arguments, turn indices) — never from model prose.
+fn typed_keys(messages: &[Message], group: &[usize]) -> Vec<String> {
+    let mut keys = vec![format!("turn:{}", group[0])];
+    for &index in group {
+        if let Message::AssistantToolCalls { calls } = &messages[index] {
+            for call in calls {
+                keys.push(format!("tool:{}", call.name));
+                keys.push(format!("call:{}", call.call_id));
+                for field in ["path", "file"] {
+                    if let Some(path) = call.arguments.get(field).and_then(|v| v.as_str()) {
+                        keys.push(format!("path:{path}"));
+                    }
+                }
+            }
+        }
+    }
+    keys
+}
+
+/// The `context_recall` store: every projection page addressable by full
+/// id, 16-hex prefix, or typed key. The projection is the backing store
+/// (Definition 6): eviction removes a page from the transport view, never
+/// from here.
+pub(super) struct RecallIndex {
+    by_page: BTreeMap<String, String>,
+    by_prefix: BTreeMap<String, Vec<String>>,
+    /// Typed key -> page ids, oldest first.
+    by_key: BTreeMap<String, Vec<String>>,
+}
+
+pub(super) fn recall_index(conversation: &Conversation) -> RecallIndex {
     let groups = page_groups(conversation);
     let messages = conversation.messages();
-    groups
-        .members
-        .iter()
-        .map(|group| {
-            (
-                groups.owners[group[0]].clone(),
-                group_content(messages, group),
-            )
-        })
-        .collect()
+    let mut index = RecallIndex {
+        by_page: BTreeMap::new(),
+        by_prefix: BTreeMap::new(),
+        by_key: BTreeMap::new(),
+    };
+    for group in &groups.members {
+        let page_id = groups.owners[group[0]].clone();
+        index
+            .by_prefix
+            .entry(page_id.chars().take(16).collect())
+            .or_default()
+            .push(page_id.clone());
+        for key in typed_keys(messages, group) {
+            index.by_key.entry(key).or_default().push(page_id.clone());
+        }
+        index
+            .by_page
+            .insert(page_id, group_content(messages, group));
+    }
+    index
+}
+
+impl RecallIndex {
+    /// Resolve one `context_recall` call: by `page_id` (full or 16-hex
+    /// prefix, also accepted as `provenance_key` — pages are content
+    /// addresses), by `path`, `diagnostic_id`, `test_id`, or `symbol`.
+    /// Multi-hit typed lookups return the newest three pages. Every miss
+    /// message starts with "miss:" (the recall-event contract).
+    pub(super) fn lookup(&self, arguments: &serde_json::Value) -> String {
+        let arg = |name: &str| {
+            arguments
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+        };
+        if let Some(id) = arg("page_id").or_else(|| arg("provenance_key")) {
+            return self.by_id(id);
+        }
+        if let Some(path) = arg("path") {
+            return self.by_typed_key(&format!("path:{path}"), "path", path);
+        }
+        for (field, prefix) in [
+            ("diagnostic_id", "diagnostic:"),
+            ("test_id", "test:"),
+            ("symbol", "symbol:"),
+        ] {
+            if let Some(value) = arg(field) {
+                return self.by_typed_key(&format!("{prefix}{value}"), field, value);
+            }
+        }
+        "miss: context_recall needs one of page_id, path, diagnostic_id, \
+         test_id, symbol, or provenance_key"
+            .to_string()
+    }
+
+    fn by_id(&self, id: &str) -> String {
+        if let Some(content) = self.by_page.get(id) {
+            return format!("recalled page {id}\n{content}");
+        }
+        let prefix: String = id.chars().take(16).collect();
+        match self.by_prefix.get(&prefix).map(Vec::as_slice) {
+            Some([full]) => format!(
+                "recalled page {full}\n{}",
+                self.by_page.get(full).map(String::as_str).unwrap_or("")
+            ),
+            Some(many) => format!(
+                "miss: page prefix {prefix} is ambiguous between {} pages",
+                many.len()
+            ),
+            None => format!(
+                "miss: no context page {id} in this session; evicted page ids \
+                 appear in the bracketed eviction notes and the page index"
+            ),
+        }
+    }
+
+    fn by_typed_key(&self, key: &str, field: &str, value: &str) -> String {
+        let Some(ids) = self.by_key.get(key) else {
+            return format!("miss: no page indexed under {field} {value:?}");
+        };
+        let newest: Vec<&String> = ids.iter().rev().take(3).collect();
+        newest
+            .into_iter()
+            .map(|id| {
+                format!(
+                    "recalled page {id}\n{}",
+                    self.by_page.get(id).map(String::as_str).unwrap_or("")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n---\n")
+    }
+}
+
+/// The transport-only page index: one line per evicted page (newest ≤32),
+/// so the model can discover what `context_recall` can restore. Skipped
+/// while tool calls are unresolved (a trailing user message would break
+/// pairing on strict providers); never enters the projection.
+pub(super) fn evicted_index_note(
+    conversation: &Conversation,
+    resident: &std::collections::BTreeSet<String>,
+) -> Option<String> {
+    if !conversation.unresolved_call_ids().is_empty() {
+        return None;
+    }
+    let groups = page_groups(conversation);
+    let messages = conversation.messages();
+    let mut lines: Vec<String> = Vec::new();
+    for group in groups.members.iter().rev() {
+        let page_id = &groups.owners[group[0]];
+        if resident.contains(page_id) {
+            continue;
+        }
+        let prefix: String = page_id.chars().take(16).collect();
+        let keys = typed_keys(messages, group).join(" ");
+        lines.push(format!("{prefix}  {}  {keys}", group_kind(messages, group)));
+        if lines.len() >= 32 {
+            break;
+        }
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    let mut note =
+        String::from("[evicted page index — restore any with context_recall(page_id=<prefix>):\n");
+    for line in &lines {
+        if note.len() + line.len() > 2_048 {
+            break;
+        }
+        note.push_str(line);
+        note.push('\n');
+    }
+    note.push(']');
+    Some(note)
 }
 
 /// Tool-call arguments above this size are elided when their page is
