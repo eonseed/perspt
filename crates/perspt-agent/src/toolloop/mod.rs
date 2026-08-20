@@ -995,20 +995,12 @@ impl ToolLoop<'_> {
         &self,
         call: &ProviderToolCall,
         entry: &ToolEntry,
-        recall: Option<&std::collections::BTreeMap<String, String>>,
+        recall: Option<&resident::RecallIndex>,
     ) -> Result<String> {
         if call.name == "context_recall" {
-            let key = call
-                .arguments
-                .get("page_id")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            return Ok(match recall.and_then(|pages| pages.get(key)) {
-                Some(content) => format!("recalled page {key}\n{content}"),
-                None => format!(
-                    "miss: no context page {key} in this session; evicted page ids \
-                     appear in the bracketed eviction notes"
-                ),
+            return Ok(match recall {
+                Some(index) => index.lookup(&call.arguments),
+                None => "miss: no context pages exist yet in this session".to_string(),
             });
         }
         if call.name == "read_artifact" {
@@ -1083,7 +1075,7 @@ impl ToolLoop<'_> {
     async fn check_and_apply(
         &mut self,
         call: &ProviderToolCall,
-        recall: Option<&std::collections::BTreeMap<String, String>>,
+        recall: Option<&resident::RecallIndex>,
         log: &mut EventLog,
         projection: &mut ProjectionMismatch,
         mutations: &mut u32,
