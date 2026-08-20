@@ -1,0 +1,3 @@
+[workspace]
+members = ["wcore", "wapi"]
+resolver = "2"

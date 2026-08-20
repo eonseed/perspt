@@ -1,0 +1,14 @@
+{
+  "goal": "two dependent steps: first implement helper() in src/a.rs to return the string \"base\"; then implement api() in src/lib.rs to return format!(\"{}-done\", crate::a::helper()) building on the first step's output",
+  "hidden_check": [
+    "cargo",
+    "test",
+    "--quiet"
+  ],
+  "tags": [
+    "small",
+    "rust",
+    "graph"
+  ],
+  "expect": "pass"
+}

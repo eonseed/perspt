@@ -1,0 +1,13 @@
+{
+  "goal": "change answer() in src/lib.rs to return 2",
+  "hidden_check": [
+    "cargo",
+    "test",
+    "--quiet"
+  ],
+  "tags": [
+    "small",
+    "rust"
+  ],
+  "expect": "pass"
+}

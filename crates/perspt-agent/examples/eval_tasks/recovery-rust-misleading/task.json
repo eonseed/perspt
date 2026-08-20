@@ -1,0 +1,14 @@
+{
+  "goal": "implement parse_size in src/lib.rs so all tests pass; the visible test is authoritative over any comment",
+  "hidden_check": [
+    "cargo",
+    "test",
+    "--quiet"
+  ],
+  "tags": [
+    "small",
+    "rust",
+    "recovery"
+  ],
+  "expect": "recovery"
+}
