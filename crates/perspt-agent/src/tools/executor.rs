@@ -53,6 +53,24 @@ fn paged_listing(label: &str, entries: &[String], (offset, limit): (usize, usize
     output
 }
 
+/// Keep the first `GREP_MAX_LINES` output lines plus an omission note.
+fn capped_search_output(stdout: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stdout);
+    let lines: Vec<&str> = text.lines().collect();
+    let mut kept: Vec<String> = lines
+        .iter()
+        .take(GREP_MAX_LINES)
+        .map(|l| l.to_string())
+        .collect();
+    if lines.len() > GREP_MAX_LINES {
+        kept.push(format!(
+            "[{} more lines omitted; narrow the query, pass a file path, or lower context]",
+            lines.len() - GREP_MAX_LINES
+        ));
+    }
+    kept.join("\n")
+}
+
 /// Parse a 1-based positive integer line argument, defaulting when absent.
 fn parse_line_argument(call: &ToolCall, name: &str, default: usize) -> Result<usize, String> {
     match call.arguments.get(name) {
@@ -204,14 +222,39 @@ impl AgentTools {
                 }
             },
         };
-        let context_arg = format!("-C{context}");
+        match self.spawn_search(query, &target, context) {
+            Ok(out) if out.status.code() == Some(1) && out.stdout.is_empty() => {
+                ToolResult::success(
+                    "search_code",
+                    format!("no matches for {query:?} in {target}"),
+                )
+            }
+            Ok(out) if out.status.success() || out.status.code() == Some(1) => {
+                ToolResult::success("search_code", capped_search_output(&out.stdout))
+            }
+            Ok(out) => ToolResult::failure(
+                "search_code",
+                format!("Search failed: {}", String::from_utf8_lossy(&out.stderr)),
+            ),
+            Err(e) => ToolResult::failure("search_code", format!("Search failed: {}", e)),
+        }
+    }
 
+    /// Run ripgrep (plain grep fallback) from the workspace root against a
+    /// relative target so file and directory paths both work.
+    fn spawn_search(
+        &self,
+        query: &str,
+        target: &str,
+        context: usize,
+    ) -> std::io::Result<std::process::Output> {
+        let context_arg = format!("-C{context}");
         let mut rg_args = vec!["-n", "--no-heading", "--color", "never", "-H"];
         if context > 0 {
             rg_args.push(&context_arg);
         }
-        rg_args.extend(["--max-count", "50", "--", query.as_str(), target.as_str()]);
-        let output = Command::new("rg")
+        rg_args.extend(["--max-count", "50", "--", query, target]);
+        Command::new("rg")
             .args(&rg_args)
             .current_dir(&self.working_dir)
             .output()
@@ -220,42 +263,12 @@ impl AgentTools {
                 if context > 0 {
                     grep_args.push(&context_arg);
                 }
-                grep_args.extend(["--", query.as_str(), target.as_str()]);
+                grep_args.extend(["--", query, target]);
                 Command::new("grep")
                     .args(&grep_args)
                     .current_dir(&self.working_dir)
                     .output()
-            });
-
-        match output {
-            Ok(out) if out.status.code() == Some(1) && out.stdout.is_empty() => {
-                ToolResult::success(
-                    "search_code",
-                    format!("no matches for {query:?} in {target}"),
-                )
-            }
-            Ok(out) if out.status.success() || out.status.code() == Some(1) => {
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                let lines: Vec<&str> = stdout.lines().collect();
-                let mut kept: Vec<String> = lines
-                    .iter()
-                    .take(GREP_MAX_LINES)
-                    .map(|l| l.to_string())
-                    .collect();
-                if lines.len() > GREP_MAX_LINES {
-                    kept.push(format!(
-                        "[{} more lines omitted; narrow the query, pass a file path, or lower context]",
-                        lines.len() - GREP_MAX_LINES
-                    ));
-                }
-                ToolResult::success("search_code", kept.join("\n"))
-            }
-            Ok(out) => ToolResult::failure(
-                "search_code",
-                format!("Search failed: {}", String::from_utf8_lossy(&out.stderr)),
-            ),
-            Err(e) => ToolResult::failure("search_code", format!("Search failed: {}", e)),
-        }
+            })
     }
     /// Apply a unified diff patch to a file
     pub(crate) fn apply_diff(&self, call: &ToolCall) -> ToolResult {
