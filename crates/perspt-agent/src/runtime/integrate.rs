@@ -69,19 +69,29 @@ impl StagingRoot {
             ancestors.get(a).is_some_and(|set| set.contains(b))
                 || ancestors.get(b).is_some_and(|set| set.contains(a))
         };
-        let mut owners: BTreeMap<&str, (&str, Option<&[u8]>)> = BTreeMap::new();
+        type Writers<'a> = BTreeMap<&'a str, Vec<(&'a str, Option<&'a [u8]>)>>;
+        // The full writer set per path: the pairwise rule must compare
+        // every unordered pair, not each writer against one retained
+        // owner — a superseded upstream write can still diverge from an
+        // incomparable sibling's.
+        let mut writers: Writers = BTreeMap::new();
         for (node_id, winner) in &self.contributions {
             for file in &winner.files {
-                let content = file.content.as_deref();
-                if let Some((other_node, other_content)) = owners.get(file.path.as_str()) {
-                    if *other_content != content && !comparable(other_node, node_id) {
+                writers
+                    .entry(file.path.as_str())
+                    .or_default()
+                    .push((node_id, file.content.as_deref()));
+            }
+        }
+        for (path, entries) in &writers {
+            for (index, (first, first_content)) in entries.iter().enumerate() {
+                for (second, second_content) in &entries[index + 1..] {
+                    if first_content != second_content && !comparable(first, second) {
                         return Some(format!(
-                            "path {} written divergently by {other_node} and {node_id}",
-                            file.path
+                            "path {path} written divergently by {first} and {second}"
                         ));
                     }
                 }
-                owners.insert(file.path.as_str(), (node_id, content));
             }
         }
         None
@@ -298,5 +308,73 @@ impl Psp9AgentRuntime {
             activated_tools: Vec::new(),
             inherited: true,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::toolloop::SeedFile;
+
+    fn graph_a_to_b_with_sibling_z() -> perspt_sdk::WorkGraphRevision {
+        let node = |id: &str| {
+            perspt_sdk::WorkNode::new(id, format!("goal {id}"), perspt_sdk::NodeClass::Implement)
+        };
+        perspt_sdk::WorkGraphRevision::build(
+            1,
+            None,
+            perspt_sdk::GraphRevisionReason::InitialPlan,
+            vec![node("a"), node("b"), node("z")],
+            vec![perspt_sdk::WorkEdge::new(
+                "a",
+                "b",
+                perspt_sdk::EdgeKind::RequiresArtifact,
+            )],
+        )
+        .unwrap()
+    }
+
+    fn winner(content: &[u8]) -> StagedWinner {
+        StagedWinner {
+            state_root: format!("root-{}", perspt_sdk::ledger::content_hash(content)),
+            files: vec![SeedFile {
+                path: "src/shared.rs".into(),
+                content: Some(content.to_vec()),
+                source_preimage: None,
+            }],
+        }
+    }
+
+    /// The pairwise rule over the full writer set: with `a → b` and an
+    /// unrelated sibling `z`, `a` writing X, `b` refining it to Y, and `z`
+    /// independently writing Y must conflict on the incomparable divergent
+    /// pair (a, z) — even though the retained-owner walk (a/b comparable,
+    /// then b/z equal-content) sees nothing.
+    #[test]
+    fn a_superseded_upstream_write_still_conflicts_with_a_divergent_sibling() {
+        let graph = graph_a_to_b_with_sibling_z();
+        let mut staging = StagingRoot::default();
+        staging.contributions.insert("a".into(), winner(b"X"));
+        staging.contributions.insert("b".into(), winner(b"Y"));
+        staging.contributions.insert("z".into(), winner(b"Y"));
+        let conflict = staging.conflict(&graph).expect("a and z diverge");
+        assert!(
+            conflict.contains("a") && conflict.contains("z"),
+            "the incomparable divergent pair is named: {conflict}"
+        );
+    }
+
+    /// Refinement along an edge stays conflict-free, and an agreeing
+    /// sibling does not manufacture one.
+    #[test]
+    fn comparable_refinement_and_agreeing_siblings_do_not_conflict() {
+        let graph = graph_a_to_b_with_sibling_z();
+        let mut staging = StagingRoot::default();
+        staging.contributions.insert("a".into(), winner(b"X"));
+        staging.contributions.insert("b".into(), winner(b"Y"));
+        assert!(staging.conflict(&graph).is_none(), "a → b is a refinement");
+        staging.contributions.insert("z".into(), winner(b"X"));
+        let conflict = staging.conflict(&graph).expect("b and z diverge");
+        assert!(conflict.contains("b") && conflict.contains("z"));
     }
 }
