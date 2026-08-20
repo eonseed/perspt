@@ -906,7 +906,7 @@ impl Psp9AgentRuntime {
         let grant_policy = self.mint_grant(recorder, &running_graph.revision_id, &catalog)?;
         // Every live capability is the intersection of the worker template
         // with the grant ceilings — the ceilings are enforced, not decorative.
-        let capability = grant_policy
+        let mut capability = grant_policy
             .mint(worker_capability(
                 session_id,
                 &running_graph.revision_id,
@@ -916,6 +916,14 @@ impl Psp9AgentRuntime {
                 &self.opted_in_effects(),
             ))
             .map_err(|e| anyhow::anyhow!("grant intersection: {e}"))?;
+        // PSP-10 system 22: a node's declared output_targets become its
+        // enforced write ceiling — mutating proposals outside the declared
+        // footprint are denied while reads stay workspace-wide. Undeclared
+        // targets keep unrestricted writes (the opaque scheduler footprint
+        // still serializes such nodes).
+        if let Some(node) = running_graph.node(node_id) {
+            capability.write_scope = write_scope_from_targets(&node.output_targets);
+        }
         let contract = CodingContract {
             graph_revision: running_graph.revision_id.clone(),
             node_id: node_id.to_string(),

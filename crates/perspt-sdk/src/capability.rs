@@ -446,6 +446,11 @@ pub struct Capability {
     pub holder: ActorId,
     pub effects: Vec<EffectKind>,
     pub path_scope: Vec<PathPattern>,
+    /// Mutation-only path ceiling (PSP-10 system 22): a work-graph node's
+    /// declared `output_targets`, enforced on mutating proposals while
+    /// reads stay governed by `path_scope` alone. Empty = unrestricted
+    /// (legacy and undeclared-target nodes).
+    pub write_scope: Vec<PathPattern>,
     pub command_scope: Vec<CommandPattern>,
     pub network_scope: Vec<NetworkPattern>,
     /// Remaining call budget `q_c`. `None` means unbounded.
@@ -471,6 +476,7 @@ impl Capability {
             holder,
             effects,
             path_scope: Vec::new(),
+            write_scope: Vec::new(),
             command_scope: Vec::new(),
             network_scope: Vec::new(),
             max_calls: None,
@@ -533,6 +539,10 @@ impl Capability {
         }
         let path_wild = source.path_scope.iter().any(|sp| sp.0 == "*");
         if !scope_attenuates(&self.path_scope, &source.path_scope, path_wild) {
+            return false;
+        }
+        let write_wild = source.write_scope.iter().any(|sp| sp.0 == "*");
+        if !scope_attenuates(&self.write_scope, &source.write_scope, write_wild) {
             return false;
         }
         let cmd_wild = source.command_scope.iter().any(|sp| sp.0 == "*");
@@ -953,10 +963,32 @@ fn check_lifetime(
     None
 }
 
-/// Scope clause: path, command, and network scope of the effective `E_c`.
+/// Scope clause: path, write, command, and network scope of the effective
+/// `E_c`. The write scope applies to **mutating** proposals only — reads
+/// stay governed by `path_scope` alone, which is why a node's declared
+/// output footprint must never narrow `path_scope` itself.
 fn check_scope(proposal: &EffectProposal, cap: &Capability) -> Option<AdmissibilityWitness> {
+    let mutating_proposal = matches!(
+        proposal.effect,
+        EffectKind::WriteArtifact
+            | EffectKind::ApplyPatch
+            | EffectKind::MoveFile
+            | EffectKind::DeleteFile
+            | EffectKind::MutateDependencies
+    );
     for path in proposal.path.iter().chain(proposal.additional_paths.iter()) {
         if !cap.path_scope.is_empty() && !cap.path_scope.iter().any(|p| p.matches(path)) {
+            return Some(deny(
+                proposal,
+                Some(cap),
+                DenyReason::PathOutOfScope,
+                RecoveryClass::NeedsApproval,
+            ));
+        }
+        if mutating_proposal
+            && !cap.write_scope.is_empty()
+            && !cap.write_scope.iter().any(|p| p.matches(path))
+        {
             return Some(deny(
                 proposal,
                 Some(cap),

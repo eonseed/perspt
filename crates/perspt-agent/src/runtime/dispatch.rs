@@ -199,7 +199,9 @@ impl Psp9AgentRuntime {
             let graph_snapshot = updated.clone();
             // PSP-10 system 22: downstream work builds on the latest
             // staging root, never on unstaged sibling state.
-            let seed = self.staging_seed(&updated, staging).await?;
+            let seed = self
+                .staging_seed(&updated, staging, &selected.node_id)
+                .await?;
             running.push(Box::pin(async move {
                 let node_id = selected.node_id.clone();
                 let generation = selected.generation;
@@ -393,6 +395,7 @@ impl Psp9AgentRuntime {
         }
         let files = attempt.candidate.export_accepted().await?;
         let state_root = attempt.candidate.checkpoint(&[]).await?.witness.state_root;
+        let paths: Vec<String> = files.iter().map(|file| file.path.clone()).collect();
         staging.contributions.insert(
             node_id.to_string(),
             super::integrate::StagedWinner { state_root, files },
@@ -403,6 +406,7 @@ impl Psp9AgentRuntime {
                 "node_id": node_id,
                 "staging_root": staging.digest(),
                 "contributions": staging.contributions.len(),
+                "paths": paths,
             }),
         )?;
         Ok((NodeTerminalOutcome::HardPass, "COMPLETED_PSP9", Vec::new()))
