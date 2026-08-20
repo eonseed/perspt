@@ -2688,6 +2688,64 @@ Design Closure, a design change would require a new PSP).
     energy and correction packets but cannot block hard pass — a
     pre-existing repository warning cannot make hard pass unreachable.
 
+A second audit round on the remediated implementation (same date) found
+residual gaps in the wired mechanisms; items 12–17 record how they close.
+
+12. **Gate AA across resume.** An interrupted **multi-node** session never
+    resumes into single-node direct promotion. Staged winners are
+    persisted content-addressed at staging time; resume reconstructs the
+    staging root by ledger fold, marks staged nodes stable, resets the
+    rest to pending, and re-enters ordinary dispatch — the combined root
+    reaches the user workspace only through a fresh run of the global
+    integration gate. The interrupted node continues its durable
+    mid-loop checkpoint only when it inherits nothing (a checkpoint
+    cannot carry predecessors' staged state); a dependent node re-runs
+    deterministically atop its staging seed. Route state carries over;
+    per-node loop budgets are the configured ones — a graph resume
+    re-dispatches nodes as fresh attempts, while search usage and
+    no-goods are still preserved by the ledger fold. A graph with a
+    terminally failed node refuses resume (its staged winners were
+    already discarded), and a staged contribution that predates durable
+    staging refuses reconstruction — fail closed, never a partial
+    promotion. The exact remaining-budget continuation of resolved
+    decision 6 applies to single-node sessions.
+13. **The recency pin honors invalidation.** Erratum 8's invalidation
+    admits no mandatory exemption: a pinned-tail page born under a
+    superseded root is demoted to the invalidated pool (tombstoned,
+    recallable) rather than kept resident. The instruction/task head is
+    session-invariant and unresolved tool pairs exist only within the
+    turn that opened them, so both stay pinned unconditionally. The
+    assembler additionally refuses outright any mandatory page whose
+    dependency fails — a stale root-dependent page cannot be admitted by
+    any producer defect.
+14. **Usage snapshots at action granularity.** ``search_usage_snapshot``
+    is emitted after every reservation and every settlement (plus the
+    epoch and branch boundaries), so the durable record is always the
+    reserved worst case or the settled actuals. A crash inside a branch
+    resumes with at least the reserved consumption — an interruption can
+    over-charge, never refill.
+15. **Exact no-good identity, tightened.** ``d`` digests the domain
+    **manifest** (residual schema, energy model, hard-gate policy,
+    verifier suite) — not the bare domain id. ``c`` includes the enforced
+    ``write_scope`` and the capability's graph-revision/node-generation
+    binding. ``b`` carries the build's git commit, stamped by the build
+    script (an externally supplied ``PERSPT_GIT_SHA`` wins; a build
+    without git falls back to the version-only identity). Clustered
+    structured evidence (an array of diagnostics) contributes its sorted
+    distinct codes as the evidence value.
+16. **Pairwise conflicts over the full writer set.** Erratum 9's
+    incomparability rule is evaluated over **every** unordered pair of
+    same-path writers: a divergent write by two incomparable nodes
+    conflicts even when a downstream refinement superseded one of them
+    (``a → b`` with sibling ``z``: ``a``:X, ``b``:Y, ``z``:Y still
+    conflicts on the pair ``(a, z)``).
+17. **Infrastructure failures are stage-routed.** Erratum 11 extends to
+    verifier infrastructure: an unavailable capability, launch error, or
+    timeout blocks hard pass only when its stage is required. A lint
+    timeout or missing lint binary is as advisory as a lint finding — it
+    is still reported (``SensorUnavailable``) and, being environmental,
+    never supports a no-good.
+
 =========================
 Resolved Design Decisions
 =========================
