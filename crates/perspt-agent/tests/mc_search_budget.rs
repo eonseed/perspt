@@ -138,6 +138,12 @@ async fn a_refused_turn_reservation_abandons_the_branch_within_limits() {
     let rows = store.get_psp9_events(&summary.session_id).unwrap();
     let bodies: Vec<serde_json::Value> = rows.iter().filter_map(event_body).collect();
 
+    assert_abandoned_and_bounded(&bodies, &limits);
+}
+
+/// The Gate AC assertions: the refusal is ledgered, closed usage sits at
+/// or under every limit, and nothing follows `search_closed`.
+fn assert_abandoned_and_bounded(bodies: &[serde_json::Value], limits: &SearchLimits) {
     let abandoned = bodies.iter().any(|body| {
         event_name(body) == Some("branch_abandoned")
             && body
