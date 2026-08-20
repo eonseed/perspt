@@ -232,14 +232,20 @@ impl Psp9AgentRuntime {
     ) -> Result<Vec<(BranchCandidate, NodeAttempt, bool)>> {
         let routes = self.branch_routes(model);
         let mut attempts: Vec<(BranchCandidate, NodeAttempt, bool)> = Vec::new();
-        let mut partial: Option<(CandidateSeed, WitnessRef)> = None;
+        let mut partial: Option<(CandidateSeed, WitnessRef, String)> = None;
         let mut history: Vec<PreviousBranch> = Vec::new();
         for index in 0..usize::from(self.search.max_branches) {
             let plan = self.plan_branch(index, &routes, &history, forest.baseline_energy);
-            let (branch_seed, witness) = match (&partial, plan.strategy.continues_partial()) {
-                (Some((seed, witness)), true) => (Some(seed.clone()), witness.clone()),
-                _ => (seed.cloned(), WitnessRef::root(&forest.accepted_root)),
-            };
+            // Real seed lineage: a continuing strategy inherits the partial
+            // (its producer becomes the parent); every other strategy
+            // restarts from the accepted root with no parent branch.
+            let (branch_seed, witness, parent_branch) =
+                match (&partial, plan.strategy.continues_partial()) {
+                    (Some((seed, witness, producer)), true) => {
+                        (Some(seed.clone()), witness.clone(), Some(producer.clone()))
+                    }
+                    _ => (seed.cloned(), WitnessRef::root(&forest.accepted_root), None),
+                };
             let goal_text = branch_goal(goal, plan.strategy, history.last());
             forest.epoch += 1;
             forest.emit(LoopEvent::FrontierEpochStarted {
@@ -257,6 +263,7 @@ impl Psp9AgentRuntime {
                     &witness,
                     &plan,
                     index,
+                    parent_branch,
                     remaining_budget,
                 )
                 .await?;
@@ -266,7 +273,15 @@ impl Psp9AgentRuntime {
             let accepted = eligible && measured.hard_pass;
             let over_budget = self.charge_attempt(forest, &attempt, &candidate).is_err();
             if !accepted && !over_budget && index + 1 < usize::from(self.search.max_branches) {
-                partial = self.partial_checkpoint(forest, &attempt, &measured).await?;
+                partial = self
+                    .partial_checkpoint(
+                        forest,
+                        &attempt,
+                        &measured,
+                        &witness,
+                        &candidate.measurement.branch_id,
+                    )
+                    .await?;
             }
             history.push(PreviousBranch {
                 support_key,
@@ -384,6 +399,7 @@ impl Psp9AgentRuntime {
         witness: &WitnessRef,
         plan: &BranchPlan,
         index: usize,
+        parent_branch: Option<String>,
         remaining_budget: u32,
     ) -> Result<Option<(BranchCandidate, NodeAttempt, bool, Measured, String)>> {
         let branch_id = format!("{}/b{}", forest.forest_id, index + 1);
@@ -394,7 +410,9 @@ impl Psp9AgentRuntime {
         forest.emit(LoopEvent::BranchForked {
             forest_id: forest.forest_id.clone(),
             branch_id: branch_id.clone(),
-            parent_branch: (index > 0).then(|| format!("{}/b{index}", forest.forest_id)),
+            // The real seed lineage, mutually consistent with seed_witness:
+            // Some(producer) only when this branch continues its partial.
+            parent_branch,
             seed_checkpoint: witness.chain.first().cloned().unwrap_or_default(),
             seed_witness: witness.clone(),
         })?;
@@ -541,17 +559,22 @@ impl Psp9AgentRuntime {
     /// Persist an ineligible-but-actionable branch as a private partial
     /// checkpoint the next quantum may continue (system 19). The checkpoint
     /// carries the correction packet and the remaining obligations, so a
-    /// continuation knows exactly what is left.
+    /// continuation knows exactly what is left. The witness chain extends
+    /// the **producing branch's** seed witness, so a partial-of-partial
+    /// keeps its complete ancestry back to the accepted root (spec
+    /// :2342-2343), and the event names the real producing branch.
     async fn partial_checkpoint(
         &self,
         forest: &mut ForestRun<'_>,
         attempt: &NodeAttempt,
         measured: &Measured,
-    ) -> Result<Option<(CandidateSeed, WitnessRef)>> {
+        seed_witness: &WitnessRef,
+        branch_id: &str,
+    ) -> Result<Option<(CandidateSeed, WitnessRef, String)>> {
         let Some(seed) = seed_from_attempt(forest.recorder, &forest.node_id, attempt).await? else {
             return Ok(None);
         };
-        let witness = WitnessRef::root(&forest.accepted_root).extend(&seed.expected_state_root);
+        let witness = seed_witness.extend(&seed.expected_state_root);
         let correction = measured.packet.as_ref().map(|packet| {
             perspt_sdk::CorrectionPacketRef(perspt_sdk::ledger::content_hash(
                 serde_json::to_string(packet).unwrap_or_default().as_bytes(),
@@ -571,17 +594,17 @@ impl Psp9AgentRuntime {
         let checkpoint = perspt_sdk::PartialCheckpointRef {
             state_root: seed.expected_state_root.clone(),
             accepted_ancestor: forest.accepted_root.clone(),
-            parent_witness: witness.clone(),
+            parent_witness: seed_witness.clone(),
             correction,
             remaining_obligations,
             evidence_digest: seed.expected_state_root.clone(),
         };
         forest.emit(LoopEvent::PartialCheckpointed {
             forest_id: forest.forest_id.clone(),
-            branch_id: format!("{}/partial", forest.forest_id),
+            branch_id: branch_id.to_string(),
             checkpoint,
         })?;
-        Ok(Some((seed, witness)))
+        Ok(Some((seed, witness, branch_id.to_string())))
     }
 
     /// Proposition 5 selection, then exactly one authoritative commit whose

@@ -170,6 +170,47 @@ fn assert_fold_invariant(rows: &[perspt_store::Psp9LedgerRow]) {
     }
 }
 
+/// D1 lineage consistency: `parent_branch` and `seed_witness` must tell
+/// the same story on every `branch_forked` — a parent only with a chain
+/// longer than `[root]` (a continued partial), a bare-root chain only with
+/// no parent. Before this fix `parent_branch` was index arithmetic.
+fn assert_lineage_consistency(rows: &[perspt_store::Psp9LedgerRow]) {
+    for row in rows {
+        if event_name(row).as_deref() != Some("branch_forked") {
+            continue;
+        }
+        let LedgerEvent::Custom { payload, .. } = serde_json::from_str(&row.event_json).unwrap()
+        else {
+            continue;
+        };
+        let (ToolLoopBody::Legacy(body) | ToolLoopBody::V1(body)) =
+            tool_loop_body(&payload).unwrap();
+        let parent = body.get("parent_branch").and_then(|v| v.as_str());
+        let chain_len = body
+            .get("seed_witness")
+            .and_then(|w| w.get("chain"))
+            .and_then(|c| c.as_array())
+            .map(Vec::len)
+            .unwrap_or(0);
+        match parent {
+            Some(producer) => {
+                assert!(
+                    chain_len > 1,
+                    "branch with parent {producer} must carry a partial witness chain"
+                );
+                assert!(
+                    producer.contains("/b"),
+                    "parent must name a real branch: {producer}"
+                );
+            }
+            None => assert_eq!(
+                chain_len, 1,
+                "a root restart must carry the bare accepted-root chain"
+            ),
+        }
+    }
+}
+
 fn runtime_with(
     project: &std::path::Path,
     transport: Arc<ScriptedTransport>,
@@ -236,6 +277,7 @@ async fn single_branch_search_matches_the_ensemble_baseline() {
         .unwrap();
     assert!(committed.event_json.contains("hard_pass"));
     assert_fold_invariant(&rows);
+    assert_lineage_consistency(&rows);
 }
 
 /// Gate W + AB: an unproductive branch is not selected, records an exact
@@ -285,6 +327,7 @@ async fn a_failed_branch_is_discarded_and_a_diverse_branch_commits() {
     assert_ne!(source_before, source_after, "the winner promoted");
     assert!(source_after.contains("{ 2 }"));
     assert_fold_invariant(&rows);
+    assert_lineage_consistency(&rows);
 }
 
 /// Seeded randomized interleavings: splicing search-alphabet streams into
@@ -399,6 +442,7 @@ async fn the_forest_is_domain_generic_under_the_research_domain() {
     assert_eq!(count("branch_committed"), 0, "no eligible candidate");
     assert!(count("branch_ineligible") >= 1);
     assert_fold_invariant(&rows);
+    assert_lineage_consistency(&rows);
 }
 
 /// A permanently rate-limited route never opens the forest: the attempt is
