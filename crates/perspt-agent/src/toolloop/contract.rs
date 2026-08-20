@@ -224,6 +224,12 @@ pub enum LoopEvent {
         control: ControlFrame,
         /// Exact provider-neutral projection selected for the next model turn.
         conversation: Conversation,
+        /// Per-message birth dependencies, parallel to the conversation
+        /// (Gate AF): a resumed loop restores each page's real birth state
+        /// instead of relabelling everything with the live root. Empty on
+        /// pre-provenance rows.
+        #[serde(default)]
+        birth_deps: Vec<perspt_sdk::prompt::StateDependency>,
         /// Exact scope used to compute `state_root`, including read paths.
         canonical_scope: Vec<String>,
         files: Vec<DurableSeedFile>,

@@ -223,6 +223,7 @@ impl LoopRecorder for Psp9Recorder {
             state_root,
             control,
             conversation,
+            birth_deps,
             canonical_scope,
             files,
         } = event
@@ -238,6 +239,7 @@ impl LoopRecorder for Psp9Recorder {
                     "state_root": state_root,
                     "control": control,
                     "conversation": conversation,
+                    "birth_deps": birth_deps,
                     "canonical_scope": canonical_scope,
                     "files": files,
                 }))?,

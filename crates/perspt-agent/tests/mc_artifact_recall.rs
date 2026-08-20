@@ -304,6 +304,7 @@ async fn oversized_output_pages_back_in_full_through_read_artifact() {
         },
         recorder: Some(&recorder),
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     };
 

@@ -202,6 +202,7 @@ async fn run_family(family: ModelFamily) -> (NodeTerminalOutcome, Vec<GateDecisi
         },
         recorder: None,
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     };
     let outcome = tool_loop.run("portability fixture").await.unwrap();

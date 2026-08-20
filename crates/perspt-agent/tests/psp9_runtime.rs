@@ -292,3 +292,198 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
         .iter()
         .any(|row| row.event_json.contains("graph_revision_resumed")));
 }
+
+/// A transport that plays its script and then parks forever — the crash
+/// window for mid-loop resume tests.
+struct ScriptThenHang {
+    turns: Mutex<Vec<TurnOutput>>,
+}
+
+impl ModelTransport for ScriptThenHang {
+    fn chat_turn<'a>(
+        &'a self,
+        _model: &'a ModelId,
+        _conversation: &'a Conversation,
+        _tools: &'a [ToolSpec],
+        _choice: ToolChoicePolicy,
+    ) -> TransportFuture<'a, TurnOutput> {
+        let mut turns = self.turns.lock().unwrap();
+        if turns.is_empty() {
+            return Box::pin(std::future::pending());
+        }
+        let output = turns.remove(0);
+        Box::pin(async move { Ok(output) })
+    }
+
+    fn capabilities(&self, _model: &ModelId) -> ProviderCapabilities {
+        ProviderCapabilities {
+            tool_calling: true,
+            strict_schema: true,
+            parallel_tool_calls: false,
+            streaming_tool_calls: false,
+            prompt_caching: false,
+            structured_output: true,
+            max_context_tokens: 32_000,
+        }
+    }
+
+    fn family_of(&self, _model: &ModelId) -> ModelFamily {
+        ModelFamily::Other("scripted".into())
+    }
+
+    fn adapter_kind(&self) -> &'static str {
+        "scripted"
+    }
+}
+
+fn fix_edit(call_id: &str, name: &str, from: u32, to: u32) -> TurnOutput {
+    TurnOutput::ToolCalls(vec![ProviderToolCall {
+        call_id: call_id.into(),
+        name: "edit_file".into(),
+        arguments: serde_json::json!({
+            "path": "src/lib.rs",
+            "old_string": format!("pub fn {name}() -> u32 {{ {from} }}"),
+            "new_string": format!("pub fn {name}() -> u32 {{ {to} }}"),
+        }),
+    }])
+}
+
+/// Gate AF across resume: the durable checkpoint carries each page's birth
+/// dependency, so a resumed loop restores real provenance instead of
+/// relabelling everything with the live root — and the session-invariant
+/// head survives further acceptances. Before this fix the first
+/// post-resume descent staled the relabelled head, the fail-closed
+/// assembler refused the next turn, and the continuation escalated.
+/// The three-failure fixture: each edit fixes one test — descent,
+/// descent, then hard pass.
+fn write_three_fix_fixture(project: &std::path::Path) {
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname='runtime-fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/lib.rs"),
+        "pub fn answer() -> u32 { 1 }\npub fn twice() -> u32 { 3 }\n\
+         pub fn thrice() -> u32 { 5 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    \
+         fn answer_is_two() { assert_eq!(super::answer(), 2); }\n    #[test]\n    \
+         fn twice_is_four() { assert_eq!(super::twice(), 4); }\n    #[test]\n    \
+         fn thrice_is_six() { assert_eq!(super::thrice(), 6); }\n}\n",
+    )
+    .unwrap();
+}
+
+fn hanging_runtime(
+    project: &std::path::Path,
+    store: Arc<perspt_store::SessionStore>,
+    turns: Vec<TurnOutput>,
+) -> Psp9AgentRuntime {
+    Psp9AgentRuntime::with_transport(
+        project.to_path_buf(),
+        Arc::new(ScriptThenHang {
+            turns: Mutex::new(turns),
+        }),
+        ModelId::new("test", "scripted"),
+        Psp9RunConfig {
+            approval_policy: ApprovalPolicy::Auto,
+            max_turns: 6,
+            allow_unisolated_verifiers: true,
+            ..Psp9RunConfig::default()
+        },
+    )
+    .with_session_store(store)
+}
+
+/// Wait for the durable candidate checkpoint; on timeout, dump the
+/// session's event kinds so the failure is diagnosable.
+async fn wait_for_checkpoint_or_dump(store: &perspt_store::SessionStore) -> String {
+    for _ in 0..600 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let Some(session) = store.list_recent_sessions(1).unwrap_or_default().pop() else {
+            continue;
+        };
+        let checkpoint = store
+            .latest_psp9_checkpoint(&session.session_id)
+            .unwrap_or(None);
+        let is_candidate = checkpoint
+            .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+            .is_some_and(|v| v.get("kind").and_then(|k| k.as_str()) == Some("candidate"));
+        if is_candidate {
+            return session.session_id.clone();
+        }
+    }
+    let session = store.list_recent_sessions(1).unwrap_or_default().pop();
+    let events: Vec<String> = session
+        .as_ref()
+        .map(|s| store.get_psp9_events(&s.session_id).unwrap())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|row| {
+            let v: serde_json::Value = serde_json::from_str(&row.event_json).ok()?;
+            let kind = v.get("kind")?.as_str()?.to_string();
+            if kind == "tool_loop" {
+                let body = v.get("payload")?.get("body").or(v.get("payload"))?;
+                return Some(format!(
+                    "tool_loop:{}",
+                    body.get("event")?.as_str().unwrap_or("?")
+                ));
+            }
+            Some(kind)
+        })
+        .collect();
+    panic!("no candidate checkpoint; events: {events:#?}");
+}
+
+#[tokio::test]
+async fn a_resumed_session_survives_further_acceptances() {
+    let project = tempfile::tempdir().unwrap();
+    write_three_fix_fixture(project.path());
+    let database = project.path().join("runtime.db");
+    let store = Arc::new(perspt_store::SessionStore::open(&database).unwrap());
+
+    // Phase 1: one accepted descent (answer fixed, two tests still fail),
+    // durable checkpoint, then the transport hangs and the task is killed.
+    let runtime = hanging_runtime(
+        project.path(),
+        store.clone(),
+        vec![
+            fix_edit("e1", "answer", 1, 2),
+            TurnOutput::Text("verify the first fix".into()),
+        ],
+    );
+    let handle = tokio::spawn(async move { runtime.run("fix all three".into()).await });
+    let session_id = wait_for_checkpoint_or_dump(&store).await;
+    handle.abort();
+    let _ = handle.await;
+
+    // The checkpoint carries per-page birth provenance.
+    let checkpoint: serde_json::Value =
+        serde_json::from_str(&store.latest_psp9_checkpoint(&session_id).unwrap().unwrap()).unwrap();
+    let birth_deps = checkpoint
+        .get("birth_deps")
+        .and_then(|value| value.as_array())
+        .expect("durable checkpoints persist birth dependencies");
+    assert!(!birth_deps.is_empty());
+
+    // Phase 2: the resumed loop accepts a further descent (twice fixed)
+    // and must reach the next turn alive — then hard-passes (thrice).
+    let resumed = hanging_runtime(
+        project.path(),
+        store.clone(),
+        vec![
+            fix_edit("e2", "twice", 3, 4),
+            TurnOutput::Text("verify the second fix".into()),
+            fix_edit("e3", "thrice", 5, 6),
+            TurnOutput::Text("verify the third fix".into()),
+        ],
+    );
+    let summary = resumed.resume_session(session_id.clone()).await.unwrap();
+    assert!(
+        matches!(summary.outcome, NodeTerminalOutcome::HardPass),
+        "a post-resume acceptance must not stale the mandatory head: {:?}",
+        summary.outcome
+    );
+    let promoted = std::fs::read_to_string(project.path().join("src/lib.rs")).unwrap();
+    assert!(promoted.contains("{ 2 }") && promoted.contains("{ 4 }") && promoted.contains("{ 6 }"));
+}

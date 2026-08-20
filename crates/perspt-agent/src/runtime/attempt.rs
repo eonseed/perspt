@@ -166,6 +166,7 @@ impl Psp9AgentRuntime {
             system_prompt: envelope,
             recorder: Some(loop_recorder),
             partial_seed_root: partial_root,
+            resumed_birth_deps: Vec::new(),
             search_budget,
         };
         let outcome = run_seeded(tool_loop, goal, seed).await?;

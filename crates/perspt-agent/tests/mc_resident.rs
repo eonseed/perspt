@@ -237,6 +237,7 @@ fn loop_with<'a>(
         },
         recorder: None,
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     }
 }
@@ -471,6 +472,7 @@ fn eviction_loop<'a>(
         },
         recorder: Some(recording),
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     }
 }
@@ -943,6 +945,7 @@ async fn sensor_only_residuals_steer_with_the_environment_gap() {
         },
         recorder: Some(&recording),
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     };
     let _ = tool_loop.run("do the task").await.unwrap();
