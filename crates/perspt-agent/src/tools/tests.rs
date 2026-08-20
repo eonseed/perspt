@@ -132,6 +132,55 @@ async fn read_file_strips_crlf_and_refuses_binary() {
     assert!(refused.error.unwrap_or_default().contains("binary"));
 }
 
+/// Binary detection covers the whole stream: a NUL outside the requested
+/// window (a skipped line) or beyond a line's retained prefix still
+/// refuses the read.
+#[tokio::test]
+async fn read_file_refuses_binary_outside_the_retained_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = AgentTools::new(dir.path().to_path_buf());
+
+    // NUL on a line after the requested window.
+    let late = dir.path().join("late.bin");
+    fs::write(&late, b"clean one\nclean two\nbad\x00tail\n").unwrap();
+    let refused = tools.read_file(&read_call(&late, &[("limit", "1")]));
+    assert!(!refused.success, "{:?}", refused.output);
+    assert!(refused.error.unwrap_or_default().contains("binary"));
+
+    // NUL beyond the retained byte prefix of one overlong line.
+    let deep = dir.path().join("deep.bin");
+    let mut body = vec![b'x'; 20_000];
+    body.push(0);
+    body.push(b'\n');
+    fs::write(&deep, body).unwrap();
+    let refused = tools.read_file(&read_call(&deep, &[]));
+    assert!(!refused.success);
+    assert!(refused.error.unwrap_or_default().contains("binary"));
+}
+
+/// A search whose matches exceed the stdout cap returns the capped prefix
+/// with a truncation note instead of materializing the child's whole
+/// output.
+#[tokio::test]
+async fn search_code_bounds_child_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("wide.txt");
+    let mut body = String::from("needle");
+    body.push_str(&"y".repeat(3 * 1024 * 1024));
+    body.push('\n');
+    fs::write(&file, body).unwrap();
+    let tools = AgentTools::new(dir.path().to_path_buf());
+
+    let result = tools.search_code(&search_call(&[("query", "needle"), ("path", "wide.txt")]));
+    assert!(result.success, "{:?}", result.error);
+    assert!(
+        result.output.len() <= 3 * 1024 * 1024,
+        "stdout must be capped, got {} bytes",
+        result.output.len()
+    );
+    assert!(result.output.contains("truncated"), "the cap is reported");
+}
+
 fn search_call(args: &[(&str, &str)]) -> ToolCall {
     ToolCall {
         name: "grep".to_string(),

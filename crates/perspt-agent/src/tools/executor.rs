@@ -77,6 +77,64 @@ fn capped_search_output(stdout: &[u8]) -> String {
     kept.join("\n")
 }
 
+/// Largest stdout volume retained from a search child; past it the child
+/// is killed and the result marked truncated, so one pathological match
+/// (a multi-gigabyte line) cannot balloon host memory.
+const GREP_MAX_STDOUT_BYTES: usize = 2 * 1024 * 1024;
+
+/// A search child's bounded result.
+struct SearchOutput {
+    /// Exit status success, or a deliberate truncation kill (matches were
+    /// flowing when the cap hit — that is a successful, capped search).
+    success: bool,
+    code: Option<i32>,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
+/// Run a child capturing at most [`GREP_MAX_STDOUT_BYTES`] of stdout; the
+/// rest is never buffered — the child is killed once the cap is reached.
+fn bounded_command_output(mut command: Command) -> std::io::Result<SearchOutput> {
+    use std::io::Read;
+    let mut child = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    let mut stdout = Vec::new();
+    let mut truncated = false;
+    if let Some(mut pipe) = child.stdout.take() {
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            let n = pipe.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            let room = GREP_MAX_STDOUT_BYTES - stdout.len();
+            stdout.extend_from_slice(&buf[..n.min(room)]);
+            if n > room {
+                truncated = true;
+                break;
+            }
+        }
+    }
+    if truncated {
+        let _ = child.kill();
+    }
+    let mut stderr = Vec::new();
+    if let Some(pipe) = child.stderr.take() {
+        pipe.take(64 * 1024).read_to_end(&mut stderr)?;
+    }
+    let status = child.wait()?;
+    Ok(SearchOutput {
+        success: status.success() || truncated,
+        code: status.code(),
+        stdout,
+        stderr,
+        truncated,
+    })
+}
+
 /// The streamed line window of one `read_file` call.
 struct ReadWindow {
     lines: Vec<String>,
@@ -103,17 +161,19 @@ fn collect_read_window(
     loop {
         let wanted = window.total + 1 >= offset && window.lines.len() < limit;
         let cap = if wanted { READ_MAX_LINE_BYTES } else { 0 };
-        let Some((bytes, skipped)) = read_bounded_line(&mut reader, cap)
+        let Some((bytes, skipped, saw_nul)) = read_bounded_line(&mut reader, cap)
             .map_err(|e| format!("Failed to read {:?}: {}", path, e))?
         else {
             return Ok(window);
         };
         window.total += 1;
+        // Binary refusal covers the whole stream: skipped lines and the
+        // unretained tails of overlong lines are scanned too.
+        if saw_nul {
+            return Err(format!("{raw_path} appears to be a binary file"));
+        }
         if !wanted {
             continue;
-        }
-        if bytes.contains(&0) {
-            return Err(format!("{raw_path} appears to be a binary file"));
         }
         let text = String::from_utf8_lossy(&bytes);
         let rendered = match char_cap(&text, READ_MAX_LINE_CHARS) {
@@ -134,25 +194,29 @@ fn collect_read_window(
     }
 }
 
-/// Read one line keeping at most `cap` bytes: `(kept, skipped)` where
-/// `skipped` counts the bytes beyond the cap (newline excluded), or `None`
-/// at EOF. The tail of an overlong line is consumed without buffering, so
-/// a single multi-gigabyte line costs O(cap) memory.
+/// Read one line keeping at most `cap` bytes: `(kept, skipped, saw_nul)`
+/// where `skipped` counts the bytes beyond the cap (newline excluded) and
+/// `saw_nul` reports a NUL anywhere in the line — retained or skipped — so
+/// binary detection covers the whole stream, not just kept prefixes.
+/// `None` at EOF. The tail of an overlong line is consumed without
+/// buffering, so a single multi-gigabyte line costs O(cap) memory.
 fn read_bounded_line(
     reader: &mut impl std::io::BufRead,
     cap: usize,
-) -> std::io::Result<Option<(Vec<u8>, usize)>> {
+) -> std::io::Result<Option<(Vec<u8>, usize, bool)>> {
     let mut kept = Vec::new();
     let mut skipped = 0usize;
     let mut saw_any = false;
+    let mut saw_nul = false;
     loop {
         let buf = reader.fill_buf()?;
         if buf.is_empty() {
-            return Ok(saw_any.then_some((kept, skipped)));
+            return Ok(saw_any.then_some((kept, skipped, saw_nul)));
         }
         saw_any = true;
         let newline = buf.iter().position(|&byte| byte == b'\n');
         let take = newline.unwrap_or(buf.len());
+        saw_nul = saw_nul || buf[..take].contains(&0);
         let keep = take.min(cap.saturating_sub(kept.len()));
         kept.extend_from_slice(&buf[..keep]);
         skipped += take - keep;
@@ -161,7 +225,7 @@ fn read_bounded_line(
             if skipped == 0 && kept.last() == Some(&b'\r') {
                 kept.pop();
             }
-            return Ok(Some((kept, skipped)));
+            return Ok(Some((kept, skipped, saw_nul)));
         }
     }
 }
@@ -321,14 +385,16 @@ impl AgentTools {
             },
         };
         match self.spawn_search(query, &target, context) {
-            Ok(out) if out.status.code() == Some(1) && out.stdout.is_empty() => {
-                ToolResult::success(
-                    "search_code",
-                    format!("no matches for {query:?} in {target}"),
-                )
-            }
-            Ok(out) if out.status.success() || out.status.code() == Some(1) => {
-                ToolResult::success("search_code", capped_search_output(&out.stdout))
+            Ok(out) if out.code == Some(1) && out.stdout.is_empty() => ToolResult::success(
+                "search_code",
+                format!("no matches for {query:?} in {target}"),
+            ),
+            Ok(out) if out.success || out.code == Some(1) => {
+                let mut rendered = capped_search_output(&out.stdout);
+                if out.truncated {
+                    rendered.push_str("\n[search output truncated; narrow the query]");
+                }
+                ToolResult::success("search_code", rendered)
             }
             Ok(out) => ToolResult::failure(
                 "search_code",
@@ -339,34 +405,33 @@ impl AgentTools {
     }
 
     /// Run ripgrep (plain grep fallback) from the workspace root against a
-    /// relative target so file and directory paths both work.
+    /// relative target so file and directory paths both work. Output is
+    /// read through the bounded runner, so a match on a multi-gigabyte
+    /// line cannot materialize the child's whole stdout.
     fn spawn_search(
         &self,
         query: &str,
         target: &str,
         context: usize,
-    ) -> std::io::Result<std::process::Output> {
+    ) -> std::io::Result<SearchOutput> {
         let context_arg = format!("-C{context}");
         let mut rg_args = vec!["-n", "--no-heading", "--color", "never", "-H"];
         if context > 0 {
             rg_args.push(&context_arg);
         }
         rg_args.extend(["--max-count", "50", "--", query, target]);
-        Command::new("rg")
-            .args(&rg_args)
-            .current_dir(&self.working_dir)
-            .output()
-            .or_else(|_| {
-                let mut grep_args = vec!["-rn"];
-                if context > 0 {
-                    grep_args.push(&context_arg);
-                }
-                grep_args.extend(["--", query, target]);
-                Command::new("grep")
-                    .args(&grep_args)
-                    .current_dir(&self.working_dir)
-                    .output()
-            })
+        let mut rg = Command::new("rg");
+        rg.args(&rg_args).current_dir(&self.working_dir);
+        bounded_command_output(rg).or_else(|_| {
+            let mut grep_args = vec!["-rn"];
+            if context > 0 {
+                grep_args.push(&context_arg);
+            }
+            grep_args.extend(["--", query, target]);
+            let mut grep = Command::new("grep");
+            grep.args(&grep_args).current_dir(&self.working_dir);
+            bounded_command_output(grep)
+        })
     }
     /// Apply a unified diff patch to a file
     pub(crate) fn apply_diff(&self, call: &ToolCall) -> ToolResult {
