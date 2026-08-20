@@ -114,6 +114,7 @@ impl ForestRun<'_> {
     /// Open the next frontier epoch and snapshot the budget at its start.
     fn open_epoch(&mut self) -> Result<()> {
         self.epoch += 1;
+        self.budget.set_epoch(self.epoch);
         self.emit(LoopEvent::FrontierEpochStarted {
             forest_id: self.forest_id.clone(),
             epoch: self.epoch,
@@ -212,6 +213,10 @@ impl Psp9AgentRuntime {
             None => crate::realize::snapshot_workspace(&self.working_dir, &[])?.root_hash(),
         };
         let (resumed_from, no_goods, budget) = self.opening_state();
+        // Every holder of the shared handle (the branch tool loops) can now
+        // ledger usage snapshots under this forest's identity — crash-time
+        // durability at action granularity, not only at branch boundaries.
+        budget.bind_forest(&forest_id);
         let mut forest = ForestRun {
             recorder,
             forest_id: forest_id.clone(),
