@@ -933,7 +933,7 @@ impl Psp9AgentRuntime {
         }
         NoGoodComponents {
             accepted_root: forest.accepted_root.clone(),
-            domain_digest: digest("domain", &self.domain.domain_id().0),
+            domain_digest: digest("domain", &self.domain_manifest(&forest.node_id)),
             strategy_digest: digest("strategy", strategy_id),
             prompt_digest,
             proposal_digest: proposal.digest(),
@@ -942,6 +942,28 @@ impl Psp9AgentRuntime {
             sensor_fingerprint: forest.sensor_fingerprint.clone(),
             build_digest: digest("build", &runtime_build_id()),
         }
+    }
+}
+
+impl Psp9AgentRuntime {
+    /// `d`: the domain **manifest** — not the bare id. The parts of the
+    /// domain that shape what an attempt means (residual schema, energy
+    /// model, hard-gate policy, verifier suite) are canonically serialized
+    /// so a changed domain definition never shares a no-good key; the tool
+    /// catalog is covered by `t` and prompt programs by `q`.
+    fn domain_manifest(&self, node_id: &str) -> String {
+        let scope = perspt_sdk::DomainScope {
+            label: node_id.to_string(),
+            paths: Vec::new(),
+        };
+        serde_json::json!({
+            "domain_id": self.domain.domain_id().0,
+            "residual_schema": self.domain.residual_schema(&scope),
+            "energy_model": self.domain.energy_model(&scope),
+            "hard_gate_policy": self.domain.hard_gate_policy(&scope),
+            "verifier_suite": self.domain.verifier_suite(&scope),
+        })
+        .to_string()
     }
 }
 
@@ -1011,6 +1033,13 @@ fn grant_capability_digest(assembly: &super::node::NodeAssembly) -> String {
         "role": capability.role,
         "approval_policy": capability.approval_policy,
         "max_calls": capability.max_calls,
+        // The enforced mutation ceiling and the node/graph binding: an
+        // attempt with a different output scope, graph revision, or node
+        // generation is a different configuration and must never be
+        // suppressed by the other's no-good.
+        "write_scope": capability.write_scope,
+        "graph_revision": capability.graph_revision,
+        "node_generation": capability.node_generation,
     });
     component_digest("grant", &surface.to_string())
 }
@@ -1101,23 +1130,51 @@ fn candidate_preview_accepted(forest: &ForestRun<'_>, measurement: &BranchMeasur
     )
 }
 
-/// The typed evidence value of one residual: the structured tool code
-/// (`E0432`, a test id) when the sensor preserved one, else a class-tagged
-/// content hash of the summary — never free prose.
+/// The typed evidence value of one residual: the structured tool codes
+/// (`E0432`, a test id) when the sensor preserved them, else a class-tagged
+/// content hash of the summary — never free prose. Live structured
+/// evidence is an **array** of clustered diagnostics
+/// (`[{"code": "E0432", ...}, ...]`); the sorted distinct codes form the
+/// value so it stays stable across cluster-size prose changes.
 fn evidence_value(residual: &ResidualEvent) -> String {
     let code = residual
         .evidence
         .structured
         .as_ref()
-        .and_then(|value| value.get("code"))
-        .and_then(|code| code.as_str());
+        .and_then(structured_codes);
     match code {
-        Some(code) => code.to_string(),
+        Some(code) => code,
         None => format!(
             "{:?}:{}",
             residual.class,
             perspt_sdk::ledger::content_hash(residual.evidence.summary.as_bytes())
         ),
+    }
+}
+
+/// The typed code(s) inside structured evidence: a bare object's `code`,
+/// or a diagnostic cluster's sorted distinct codes (capped at 8).
+fn structured_codes(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => map
+            .get("code")
+            .and_then(|code| code.as_str())
+            .map(str::to_string),
+        serde_json::Value::Array(items) => {
+            let mut codes: Vec<&str> = items
+                .iter()
+                .filter_map(|item| item.get("code").and_then(|code| code.as_str()))
+                .filter(|code| !code.is_empty())
+                .collect();
+            if codes.is_empty() {
+                return None;
+            }
+            codes.sort_unstable();
+            codes.dedup();
+            codes.truncate(8);
+            Some(codes.join(","))
+        }
+        _ => None,
     }
 }
 
@@ -1262,6 +1319,26 @@ mod tests {
         let value = evidence_value(&without);
         assert!(value.starts_with("Build:"), "{value}");
         assert!(!value.contains("happened"), "prose must not enter");
+    }
+
+    /// Live structured evidence is an array of clustered diagnostics; its
+    /// sorted distinct codes (not the summary hash) form the value, so the
+    /// repeat-detection signature survives cluster-size prose changes.
+    #[test]
+    fn evidence_value_reads_clustered_diagnostic_arrays() {
+        let mut clustered = residual(ResidualClass::Build);
+        clustered.evidence.structured = Some(serde_json::json!([
+            {"code": "E0433", "message": "failed to resolve", "line": 3},
+            {"code": "E0432", "message": "unresolved import", "line": 1},
+            {"code": "E0432", "message": "unresolved import", "line": 2},
+        ]));
+        assert_eq!(evidence_value(&clustered), "E0432,E0433");
+        let mut empty = residual(ResidualClass::Build);
+        empty.evidence.structured = Some(serde_json::json!([]));
+        assert!(
+            evidence_value(&empty).starts_with("Build:"),
+            "an empty cluster falls back to the class-tagged hash"
+        );
     }
 
     /// The build identity carries the crate version (plus the git sha when
