@@ -301,22 +301,28 @@ impl Psp9AgentRuntime {
             // refusing (rate limit, outage): opening more branches against
             // it multiplies the retry storm for nothing. Close the forest.
             let transport_dead = attempt.outcome.contained_by_transport;
-            // A refused in-loop reservation aborted the branch before the
-            // action ran: ledger the abandonment and close gracefully.
-            let budget_denied = forest.budget.take_denied();
-            if budget_denied {
-                forest.emit(LoopEvent::BranchAbandoned {
-                    forest_id: forest.forest_id.clone(),
-                    branch_id: candidate.measurement.branch_id.clone(),
-                    reason: "the search budget refused a reservation; branch aborted".into(),
-                })?;
-            }
+            let budget_denied =
+                Self::note_denied_reservation(forest, &candidate.measurement.branch_id)?;
             attempts.push((candidate, attempt, eligible));
             if accepted || over_budget || transport_dead || budget_denied {
                 break;
             }
         }
         Ok(attempts)
+    }
+
+    /// A refused in-loop reservation aborted the branch before the action
+    /// ran: ledger the abandonment so the forest closes gracefully.
+    fn note_denied_reservation(forest: &ForestRun<'_>, branch_id: &str) -> Result<bool> {
+        if !forest.budget.take_denied() {
+            return Ok(false);
+        }
+        forest.emit(LoopEvent::BranchAbandoned {
+            forest_id: forest.forest_id.clone(),
+            branch_id: branch_id.to_string(),
+            reason: "the search budget refused a reservation; branch aborted".into(),
+        })?;
+        Ok(true)
     }
 
     /// Real seed lineage for the next branch: a continuing strategy

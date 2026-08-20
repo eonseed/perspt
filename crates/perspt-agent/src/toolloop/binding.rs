@@ -243,6 +243,24 @@ impl ToolLoop<'_> {
         Ok(())
     }
 
+    /// Gate AC: reserve one verifier action from the shared search budget
+    /// before a measurement runs. A refusal aborts the branch before the
+    /// action executes; the forest observes it and abandons the branch.
+    pub(super) fn reserve_verifier_action(&self) -> Result<()> {
+        let Some(budget) = &self.search_budget else {
+            return Ok(());
+        };
+        budget
+            .reserve(perspt_sdk::search::ReservationRequest {
+                verifier_runs: 1,
+                ..Default::default()
+            })
+            .map(|_ticket| ())
+            .map_err(|error| {
+                anyhow::anyhow!("search budget refused the verifier reservation: {error}")
+            })
+    }
+
     /// Gate AC: reserve one model turn's worst case from the shared search
     /// budget **before** the transport call — the turn, its per-turn call
     /// and mutation allowances, its bounded result bytes, and the composed

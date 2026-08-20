@@ -323,24 +323,6 @@ impl ToolLoop<'_> {
         Ok(state.finish(outcome))
     }
 
-    /// Gate AC: reserve one verifier action from the shared search budget
-    /// before a measurement runs. A refusal aborts the branch before the
-    /// action executes; the forest observes it and abandons the branch.
-    fn reserve_verifier_action(&self) -> Result<()> {
-        let Some(budget) = &self.search_budget else {
-            return Ok(());
-        };
-        budget
-            .reserve(perspt_sdk::search::ReservationRequest {
-                verifier_runs: 1,
-                ..Default::default()
-            })
-            .map(|_ticket| ())
-            .map_err(|error| {
-                anyhow::anyhow!("search budget refused the verifier reservation: {error}")
-            })
-    }
-
     /// Measure the baseline and open the loop's turn state around its real
     /// restore point.
     async fn open_turn_state(&mut self) -> Result<(Measured, TurnState)> {
