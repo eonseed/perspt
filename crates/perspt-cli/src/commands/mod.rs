@@ -3,6 +3,8 @@
 pub mod abort;
 pub mod agent;
 pub mod audit;
+#[cfg(feature = "benchmark")]
+pub mod benchmark;
 pub mod chat;
 pub mod config;
 pub mod dashboard;

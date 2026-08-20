@@ -271,6 +271,58 @@ enum Commands {
         #[command(subcommand)]
         command: ContextCommands,
     },
+
+    /// Run optional model-backed evaluation tooling
+    #[cfg(feature = "benchmark")]
+    Benchmark {
+        #[command(subcommand)]
+        command: BenchmarkCommands,
+    },
+}
+
+#[cfg(feature = "benchmark")]
+#[derive(clap::ValueEnum, Clone, Copy)]
+enum BenchmarkSuiteArg {
+    /// One production-topology arm over eight tasks by default
+    Smoke,
+    /// Paging versus adaptive search over the corpus
+    Adaptive,
+    /// Complete seven-arm diagnostic ladder
+    Full,
+}
+
+#[cfg(feature = "benchmark")]
+impl From<BenchmarkSuiteArg> for perspt_benchmark::BenchmarkSuite {
+    fn from(value: BenchmarkSuiteArg) -> Self {
+        match value {
+            BenchmarkSuiteArg::Smoke => Self::Smoke,
+            BenchmarkSuiteArg::Adaptive => Self::Adaptive,
+            BenchmarkSuiteArg::Full => Self::Full,
+        }
+    }
+}
+
+#[cfg(feature = "benchmark")]
+#[derive(Subcommand)]
+enum BenchmarkCommands {
+    /// Validate corpus structure and fail-before/pass-after hidden oracles
+    Validate,
+    /// Run a suite using the configured production topology
+    Run {
+        #[arg(long, value_enum, default_value = "smoke")]
+        suite: BenchmarkSuiteArg,
+        /// Override the suite's task count
+        #[arg(long)]
+        tasks: Option<usize>,
+        /// Also write the JSON report to this path
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Aggregate two or more completed reports
+    Aggregate {
+        #[arg(required = true, num_args = 2..)]
+        reports: Vec<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -482,6 +534,16 @@ async fn main() -> Result<()> {
                 db_path,
                 discard_wal,
             } => commands::db::repair(db_path, discard_wal).await,
+        },
+        #[cfg(feature = "benchmark")]
+        Some(Commands::Benchmark { command }) => match command {
+            BenchmarkCommands::Validate => commands::benchmark::validate(),
+            BenchmarkCommands::Run {
+                suite,
+                tasks,
+                output,
+            } => commands::benchmark::run(config_override, suite.into(), tasks, output).await,
+            BenchmarkCommands::Aggregate { reports } => commands::benchmark::aggregate(&reports),
         },
     }
 }

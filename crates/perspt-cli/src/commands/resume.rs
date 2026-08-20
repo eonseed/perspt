@@ -192,10 +192,23 @@ async fn resume_psp9(
 }
 
 fn has_candidate_checkpoint(store: &perspt_store::SessionStore, session_id: &str) -> Result<bool> {
-    Ok(store
-        .latest_psp9_checkpoint(session_id)?
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-        .is_some_and(|value| value.get("kind").and_then(|kind| kind.as_str()) == Some("candidate")))
+    for row in store.get_psp9_events(session_id)? {
+        let Ok(perspt_sdk::LedgerEvent::Custom { kind, payload }) =
+            serde_json::from_str(&row.event_json)
+        else {
+            continue;
+        };
+        if kind != "tool_loop" {
+            continue;
+        }
+        let body = payload.get("body").unwrap_or(&payload);
+        if body.get("event").and_then(serde_json::Value::as_str)
+            == Some("durable_candidate_checkpoint")
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Continue an interrupted model loop from its durable candidate checkpoint:
