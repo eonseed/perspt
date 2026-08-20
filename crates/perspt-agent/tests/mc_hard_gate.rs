@@ -122,6 +122,86 @@ async fn covered_required_stages_add_no_residual() {
     );
 }
 
+fn rust_fixture(dir: &std::path::Path, lib_body: &str) {
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]\nname='lint-gate-fixture'\nversion='0.1.0'\nedition='2021'\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src/lib.rs"), lib_body).unwrap();
+}
+
+async fn apply_lib(workspace: &CandidateWorkspace, content: &str) {
+    let entry = perspt_sdk::base_entries()
+        .into_iter()
+        .find(|entry| entry.name == "write_file")
+        .unwrap();
+    let call = perspt_sdk::ProviderToolCall {
+        call_id: "w1".into(),
+        name: "write_file".into(),
+        arguments: serde_json::json!({"path": "src/lib.rs", "content": content}),
+    };
+    use perspt_agent::toolloop::EffectExecutor;
+    workspace.apply(&call, &entry).await.unwrap();
+}
+
+/// A clippy warning is advisory: it surfaces as a Lint residual with
+/// positive energy but no longer blocks hard pass, which gates only on the
+/// `HardGatePolicy` stages (syntax, build, test). Before this fix any
+/// pre-existing repository warning made hard pass permanently unreachable.
+#[tokio::test]
+async fn a_lint_only_warning_does_not_block_hard_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    // `return 2;` trips clippy::needless_return under `-D warnings`.
+    apply_lib(&workspace, "pub fn answer() -> u32 {\n    return 2;\n}\n").await;
+    let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    assert!(
+        measured.hard_pass,
+        "lint must not gate: {:?}",
+        measured
+            .residuals
+            .iter()
+            .map(|r| (r.class, r.evidence.summary.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        measured
+            .residuals
+            .iter()
+            .any(|r| r.class == ResidualClass::Lint || r.evidence.summary.contains("lint")),
+        "the lint finding must still be reported as an advisory residual"
+    );
+    assert!(
+        measured.energy > 0.0,
+        "advisory residuals still cost energy"
+    );
+}
+
+/// A failing test still blocks hard pass — demoting lint never loosens the
+/// required stages.
+#[tokio::test]
+async fn a_failing_test_still_blocks_hard_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    apply_lib(
+        &workspace,
+        "pub fn answer() -> u32 { 2 }\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn wrong() { assert_eq!(super::answer(), 3); }\n}\n",
+    )
+    .await;
+    let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    assert!(!measured.hard_pass, "a failing test must block hard pass");
+}
+
 /// A plugin's declared no-op stage (Python has no build step) *satisfies*
 /// its required-stage obligation. Before this fix `required-stage:build`
 /// blocked hard pass on every Python project forever — the model would fix
