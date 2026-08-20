@@ -95,30 +95,49 @@ impl LoopContext {
 
     /// Stamp the context after the loop opens it: pages appended from here
     /// depend on the live state (the partial seed root under a continuing
-    /// branch, the accepted root otherwise); a resumed projection's
-    /// restored pages were validated against that root and depend on it.
+    /// branch, the accepted root otherwise). A resumed projection restores
+    /// each page's **recorded birth dependency** when the checkpoint
+    /// carried one — never a wholesale relabel with the live root, which
+    /// would launder stale pages as fresh (Gate AF) and turn the
+    /// session-invariant head into a page the next acceptance kills.
     pub(crate) fn stamp_after_open(
         &mut self,
         was_resumed: bool,
         partial_seed_root: Option<&str>,
         accepted_root: &str,
+        restored_birth_deps: &[perspt_sdk::prompt::StateDependency],
     ) {
         let dep = match partial_seed_root {
             Some(root) => perspt_sdk::prompt::StateDependency::PartialCheckpointRoot(root.into()),
             None => perspt_sdk::prompt::StateDependency::AcceptedRoot(accepted_root.into()),
         };
-        if was_resumed {
-            self.restamp_existing(dep);
-        } else {
+        if !was_resumed {
             self.set_state_dependency(dep);
+            return;
+        }
+        if restored_birth_deps.len() == self.birth_deps.len() {
+            // Exact provenance from the durable checkpoint: pages keep the
+            // roots they were born under; new pages depend on the live
+            // state.
+            self.birth_deps = restored_birth_deps.to_vec();
+            self.current_dep = dep;
+        } else {
+            self.restamp_existing(dep);
         }
     }
 
-    /// Restamp every existing message (resume: the restored projection was
-    /// validated against the accepted root, so its pages depend on it).
+    /// Legacy fallback for pre-provenance checkpoints: the instruction and
+    /// task head is session-invariant (a later acceptance must never stale
+    /// the mandatory head); the remaining restored pages carry the
+    /// restored root — their true birth root is unrecorded, so this is
+    /// the closest available label (documented residual for old ledgers).
     pub(crate) fn restamp_existing(&mut self, dep: perspt_sdk::prompt::StateDependency) {
-        for entry in &mut self.birth_deps {
-            *entry = dep.clone();
+        for (index, entry) in self.birth_deps.iter_mut().enumerate() {
+            *entry = if index < 2 {
+                perspt_sdk::prompt::StateDependency::SessionInvariant
+            } else {
+                dep.clone()
+            };
         }
         self.current_dep = dep;
     }
@@ -262,8 +281,18 @@ pub(crate) fn refold_session_context(
     rows: &[perspt_store::Psp9LedgerRow],
     target_digest: &str,
 ) -> Result<Option<ConversationProjection>> {
-    let mut live: Option<ConversationProjection> = None;
-    let mut matched: Option<ConversationProjection> = None;
+    // Concurrent node loops (and search branches) interleave their
+    // conversation events on the one session ledger, so the fold routes
+    // by **digest chain** instead of holding a single live projection:
+    // collect every seed and delta record, walk the target's parent chain
+    // back to its seed, and replay that one chain forward through the
+    // sole writer (`apply`, which re-verifies digest continuity). A
+    // parallel graph's ledger is then exactly as refoldable as a serial
+    // one.
+    let mut seeds: std::collections::BTreeMap<String, perspt_sdk::ConversationSeeded> =
+        Default::default();
+    let mut records: std::collections::BTreeMap<String, perspt_sdk::ConversationDeltaRecord> =
+        Default::default();
     for row in rows {
         let Ok(LedgerEvent::Custom { kind, payload }) = serde_json::from_str(&row.event_json)
         else {
@@ -278,28 +307,44 @@ pub(crate) fn refold_session_context(
         let decoded = super::envelope::decode_tool_loop(&payload)?;
         match decoded.event {
             LoopEvent::ConversationSeeded { seed } => {
-                let projection =
-                    ConversationProjection::from_seed(&seed).map_err(|e| anyhow::anyhow!("{e}"))?;
-                if projection.digest() == target_digest {
-                    matched = Some(projection.clone());
-                }
-                live = Some(projection);
+                seeds.insert(seed.digest.clone(), seed);
             }
             LoopEvent::ConversationDelta { record } => {
-                let projection = live
-                    .as_mut()
-                    .context("conversation delta recorded before any seed")?;
-                projection
-                    .apply(&record)
-                    .map_err(|e| anyhow::anyhow!("{e}"))?;
-                if projection.digest() == target_digest {
-                    matched = Some(projection.clone());
-                }
+                records.insert(record.digest.clone(), record);
             }
             _ => {}
         }
     }
-    Ok(matched)
+    if !seeds.contains_key(target_digest) && !records.contains_key(target_digest) {
+        // The session predates conversation deltas, or the checkpoint is
+        // not derivable — the caller refuses resume either way.
+        return Ok(None);
+    }
+    let mut chain: Vec<&perspt_sdk::ConversationDeltaRecord> = Vec::new();
+    let mut cursor = target_digest.to_string();
+    while !seeds.contains_key(&cursor) {
+        let record = records.get(&cursor).with_context(|| {
+            format!("conversation chain to {target_digest} is broken at {cursor}")
+        })?;
+        chain.push(record);
+        cursor = record.prior_digest.clone();
+        anyhow::ensure!(
+            chain.len() <= records.len(),
+            "conversation delta chain contains a cycle"
+        );
+    }
+    let mut projection =
+        ConversationProjection::from_seed(&seeds[&cursor]).map_err(|e| anyhow::anyhow!("{e}"))?;
+    for record in chain.iter().rev() {
+        projection
+            .apply(record)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+    }
+    anyhow::ensure!(
+        projection.digest() == target_digest,
+        "refolded conversation does not reproduce the checkpoint digest"
+    );
+    Ok(Some(projection))
 }
 
 #[cfg(test)]
@@ -365,6 +410,45 @@ mod tests {
             refold_session_context(&rows, &digest).is_err(),
             "a delta with a missing parent must fail closed, not skip"
         );
+    }
+
+    /// Concurrent node loops interleave conversation events on one
+    /// ledger (A seed → B seed → A delta → B delta → A delta). The
+    /// digest-chain fold reaches BOTH checkpoints; a single-live-projection
+    /// fold would apply A's delta to B's projection and refuse the whole
+    /// session.
+    #[test]
+    fn interleaved_parallel_conversations_refold_by_digest_chain() {
+        let mut log_a = EventLog::new(true);
+        let mut a = LoopContext::seed("system", "goal A", None, &mut log_a).unwrap();
+        let mut log_b = EventLog::new(true);
+        let mut b = LoopContext::seed("system", "goal B", None, &mut log_b).unwrap();
+        a.push_user("a-one", None, &mut log_a).unwrap();
+        b.push_user("b-one", None, &mut log_b).unwrap();
+        a.push_user("a-two", None, &mut log_a).unwrap();
+        let digest_a = a.digest().to_string();
+        let digest_b = b.digest().to_string();
+
+        let events_a = log_a.into_events();
+        let events_b = log_b.into_events();
+        // Ledger order: A seed, B seed, A delta, B delta, A delta.
+        let interleaved = vec![
+            events_a[0].clone(),
+            events_b[0].clone(),
+            events_a[1].clone(),
+            events_b[1].clone(),
+            events_a[2].clone(),
+        ];
+        let rows = rows_from(interleaved);
+
+        let folded_a = refold_session_context(&rows, &digest_a)
+            .unwrap()
+            .expect("A's chain folds");
+        assert_eq!(folded_a.conversation(), a.conversation());
+        let folded_b = refold_session_context(&rows, &digest_b)
+            .unwrap()
+            .expect("B's chain folds");
+        assert_eq!(folded_b.conversation(), b.conversation());
     }
 
     #[test]

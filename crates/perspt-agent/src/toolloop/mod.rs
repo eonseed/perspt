@@ -117,15 +117,14 @@ pub struct ToolLoop<'a> {
     /// every control frame.
     pub system_prompt: PromptEnvelope,
     pub recorder: Option<&'a dyn LoopRecorder>,
-    /// The partial-checkpoint root this loop was seeded from, when the
-    /// branch continues a partial rather than the accepted root. Enters the
-    /// resident dependency environment so `PartialCheckpointRoot` pages
-    /// validate (Definition 6).
+    /// The partial-checkpoint root this loop was seeded from (a branch
+    /// continuing a partial); enters the resident dependency environment.
     pub partial_seed_root: Option<String>,
-    /// The forest's shared budget when this loop runs as a search branch:
-    /// every model turn and verifier measurement reserves before it runs
-    /// and settles with observed actuals (Gate AC). `None` outside a
-    /// forest.
+    /// Birth dependencies restored from a durable checkpoint, parallel to
+    /// the resumed conversation (Gate AF): pages keep their birth roots.
+    pub resumed_birth_deps: Vec<perspt_sdk::prompt::StateDependency>,
+    /// The forest's shared budget when this loop is a search branch: every
+    /// model turn and verifier run reserves first (Gate AC); `None` outside.
     pub search_budget: Option<perspt_sdk::search::SharedSearchBudget>,
 }
 
@@ -281,6 +280,7 @@ impl ToolLoop<'_> {
             was_resumed,
             self.partial_seed_root.as_deref(),
             &state.accepted_checkpoint.witness.state_root,
+            &self.resumed_birth_deps,
         );
 
         let mut mutations_since_boundary = 0u32;
@@ -611,17 +611,15 @@ impl ToolLoop<'_> {
         let specs =
             self.catalog
                 .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
-        // Definition 6, transport half: the model sees the resident view —
-        // evicted pages tombstoned in place, recallable via context_recall —
-        // and the composed request is verified against the input allowance
-        // and dialect byte limit before any transport call. The projection
-        // itself stays whole as the backing store.
+        // Definition 6, transport half: the model sees the resident view
+        // (evictions tombstoned, recallable) and the composed request is
+        // verified against the allowance and dialect byte limit before any
+        // transport call; the whole projection stays the backing store.
         let assembled = self.assemble_resident_context(turn, &specs, context, state)?;
         let conversation = self.fit_composed_request(turn, &specs, context, assembled, state)?;
         self.bind_prompt_program(turn, &specs, state)?;
-        // Gate AC: the turn's worst case is reserved before the transport
-        // call and settled with actuals after; both sides snapshot the
-        // usage so a crash mid-turn never refills what was reserved.
+        // Gate AC: reserve the worst case before transport, settle actuals
+        // after; both sides snapshot so a crash never refills the turn.
         let turn_reservation = self.reserve_model_turn(&conversation)?;
         self.snapshot_search_usage(&mut state.log)?;
         let output = self
@@ -707,6 +705,7 @@ impl ToolLoop<'_> {
                 state_root: state.accepted_checkpoint.witness.state_root.clone(),
                 control,
                 conversation: context.conversation().clone(),
+                birth_deps: context.birth_deps().to_vec(),
                 canonical_scope: state.accepted_checkpoint.witness.canonical_scope.clone(),
                 files,
             },

@@ -710,6 +710,9 @@ pub(crate) struct CandidateSeed {
     pub(crate) canonical_scope: Vec<String>,
     pub(crate) files: Vec<crate::toolloop::SeedFile>,
     pub(crate) conversation: Conversation,
+    /// Per-message birth dependencies parallel to `conversation` (Gate
+    /// AF); empty for files-only seeds and pre-provenance checkpoints.
+    pub(crate) birth_deps: Vec<perspt_sdk::prompt::StateDependency>,
     pub(crate) activated_tools: Vec<String>,
     /// True when the files are inherited staged predecessor state (system
     /// 22): restored without entering the promotable set, so the node
@@ -731,24 +734,15 @@ pub(crate) fn load_candidate_checkpoint(
         value.get("kind").and_then(|v| v.as_str()) == Some("candidate"),
         "newest checkpoint is not a candidate checkpoint; exact continuation is unavailable"
     );
-    let control: perspt_sdk::ControlFrame = serde_json::from_value(
+    let field = |name: &str| {
         value
-            .get("control")
+            .get(name)
             .cloned()
-            .context("checkpoint control")?,
-    )?;
-    let canonical_scope: Vec<String> = serde_json::from_value(
-        value
-            .get("canonical_scope")
-            .cloned()
-            .context("checkpoint canonical scope")?,
-    )?;
-    let conversation: Conversation = serde_json::from_value(
-        value
-            .get("conversation")
-            .cloned()
-            .context("checkpoint conversation projection")?,
-    )?;
+            .context(format!("checkpoint {name}"))
+    };
+    let control: perspt_sdk::ControlFrame = serde_json::from_value(field("control")?)?;
+    let canonical_scope: Vec<String> = serde_json::from_value(field("canonical_scope")?)?;
+    let conversation: Conversation = serde_json::from_value(field("conversation")?)?;
     anyhow::ensure!(
         conversation.unresolved_call_ids() == control.unresolved_call_ids,
         "checkpoint conversation does not match its unresolved-call control frame"
@@ -769,7 +763,7 @@ pub(crate) fn load_candidate_checkpoint(
         "checkpoint conversation is not derivable from the recorded deltas; refusing resume"
     );
     let file_handles: Vec<crate::toolloop::DurableSeedFile> =
-        serde_json::from_value(value.get("files").cloned().context("checkpoint files")?)?;
+        serde_json::from_value(field("files")?)?;
     let current_epoch = recorder.store.authority_epoch(session_id)?;
     anyhow::ensure!(
         control.authority_epoch == current_epoch,
@@ -788,9 +782,24 @@ pub(crate) fn load_candidate_checkpoint(
         canonical_scope,
         files: load_seed_files(recorder, file_handles)?,
         conversation,
+        birth_deps: checkpoint_birth_deps(&value)?,
         activated_tools: control.activated_tools.clone(),
     };
     Ok((control, seed))
+}
+
+/// Birth provenance travels with the checkpointed projection (Gate AF); a
+/// pre-provenance checkpoint restores with an empty vector and takes the
+/// legacy stamping fallback.
+fn checkpoint_birth_deps(
+    value: &serde_json::Value,
+) -> Result<Vec<perspt_sdk::prompt::StateDependency>> {
+    Ok(value
+        .get("birth_deps")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()?
+        .unwrap_or_default())
 }
 
 /// Export the previous attempt's best accepted state as a seed for the
@@ -822,6 +831,7 @@ pub(crate) async fn seed_from_attempt(
         canonical_scope: checkpoint.witness.canonical_scope.clone(),
         files,
         conversation: Conversation::default(),
+        birth_deps: Vec::new(),
         activated_tools: Vec::new(),
     }))
 }
@@ -1036,6 +1046,8 @@ pub(crate) async fn run_seeded(
 ) -> Result<crate::toolloop::LoopOutcome> {
     match seed {
         Some(seed) if !seed.conversation.messages().is_empty() => {
+            let mut tool_loop = tool_loop;
+            tool_loop.resumed_birth_deps = seed.birth_deps.clone();
             tool_loop
                 .run_with_conversation(
                     goal,

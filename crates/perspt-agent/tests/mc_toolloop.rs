@@ -267,6 +267,7 @@ fn loop_with<'a>(
         },
         recorder: None,
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     }
 }

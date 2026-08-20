@@ -188,6 +188,7 @@ async fn loop_decisions_never_exceed_the_bound() {
         },
         recorder: None,
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     };
     let bound = perspt_agent::toolloop::loop_decision_bound(2.0, &budgets(40, 3)).unwrap();
@@ -238,6 +239,7 @@ async fn loop_trajectory_carries_the_real_node_identity() {
         },
         recorder: None,
         partial_seed_root: None,
+        resumed_birth_deps: Vec::new(),
         search_budget: None,
     };
     let outcome = toolloop.run("do it").await.unwrap();

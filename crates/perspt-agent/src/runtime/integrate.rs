@@ -358,6 +358,7 @@ impl Psp9AgentRuntime {
             canonical_scope: checkpoint.witness.canonical_scope.clone(),
             files,
             conversation: perspt_sdk::Conversation::default(),
+            birth_deps: Vec::new(),
             activated_tools: Vec::new(),
             inherited: true,
         }))
