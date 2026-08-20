@@ -201,6 +201,7 @@ async fn run_family(family: ModelFamily) -> (NodeTerminalOutcome, Vec<GateDecisi
             ..Default::default()
         },
         recorder: None,
+        partial_seed_root: None,
     };
     let outcome = tool_loop.run("portability fixture").await.unwrap();
     let denials = outcome

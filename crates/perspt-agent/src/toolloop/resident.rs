@@ -241,7 +241,7 @@ fn evicted_message(message: &Message, page_id: &str) -> Message {
 /// aggregates, so residency decisions always account the whole pair.
 pub(super) fn conversation_pages(
     conversation: &Conversation,
-    accepted_root: &str,
+    birth_deps: &[StateDependency],
     pinned_tail: usize,
 ) -> (Vec<ContextPage>, Vec<String>) {
     let accountant = TokenAccountantRef::approx_bytes_v1();
@@ -280,7 +280,12 @@ pub(super) fn conversation_pages(
             page_id,
             kind: group_kind(messages, group).into(),
             source_hashes: Vec::new(),
-            dependency: StateDependency::AcceptedRoot(accepted_root.into()),
+            // The page's birth dependency (of its first member), never the
+            // live root — a state change invalidates, it does not rewrite.
+            dependency: birth_deps
+                .get(group[0])
+                .cloned()
+                .unwrap_or(StateDependency::SessionInvariant),
             bytes,
             tokens,
             obligations,
@@ -313,15 +318,17 @@ fn weights(pages: &[ContextPage]) -> BTreeMap<String, f64> {
 /// Assemble the worker's resident set for one model call.
 pub(super) fn assemble_worker_resident(
     conversation: &Conversation,
+    birth_deps: &[StateDependency],
     accepted_root: &str,
+    partial_root: Option<&str>,
     window_tokens: u64,
     tool_reserve: u64,
     reserves: &ResidentReserves,
 ) -> perspt_sdk::Result<ResidentOutcome> {
-    let (pages, mandatory) = conversation_pages(conversation, accepted_root, reserves.pinned_tail);
+    let (pages, mandatory) = conversation_pages(conversation, birth_deps, reserves.pinned_tail);
     let env = DependencyEnv {
         accepted_root: accepted_root.into(),
-        partial_root: None,
+        partial_root: partial_root.map(Into::into),
         path_blobs: BTreeMap::new(),
     };
     let budget = ContextBudget {

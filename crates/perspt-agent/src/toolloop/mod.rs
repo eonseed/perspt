@@ -117,6 +117,11 @@ pub struct ToolLoop<'a> {
     /// every control frame.
     pub system_prompt: PromptEnvelope,
     pub recorder: Option<&'a dyn LoopRecorder>,
+    /// The partial-checkpoint root this loop was seeded from, when the
+    /// branch continues a partial rather than the accepted root. Enters the
+    /// resident dependency environment so `PartialCheckpointRoot` pages
+    /// validate (Definition 6).
+    pub partial_seed_root: Option<String>,
 }
 
 /// Where the last context checkpoint left off, so each new checkpoint covers
@@ -257,33 +262,21 @@ impl ToolLoop<'_> {
         restored_activated_tools: Vec<String>,
     ) -> Result<LoopOutcome> {
         self.budgets.validate(&self.cadence)?;
-        let mut log = EventLog::new(self.recorder.is_none());
-
-        // 1. Measured baseline and its real restore point.
-        let accepted_checkpoint = self.executor.checkpoint(&[]).await?;
-        let (baseline, trajectory) = self.measured_baseline(&mut log).await?;
-        let decision_bound = loop_decision_bound(baseline.energy, &self.budgets)?;
-        let mut state = TurnState {
-            log,
-            projection: ProjectionMismatch::default(),
-            recovery: RecoveryCascade::new(self.budgets.recovery_budget),
-            cursor: CompactionCursor::default(),
-            accepted_checkpoint,
-            trajectory,
-            decision_bound,
-            candidate_seq: 1,
-            current_candidate: format!("{}/{}/c0", self.node_id, self.generation),
-            turns_used: 0,
-            prompt: PromptBinding::seed(&self.system_prompt, &self.model),
-        };
+        let (baseline, mut state) = self.open_turn_state().await?;
         if let Some(outcome) = self.baseline_terminal(&baseline) {
             return Ok(state.finish(outcome));
         }
         // The first call carries the measured baseline diagnostics: the
         // model starts from evidence, not from a blind read of the tree.
         let seeded_goal = goal_with_baseline(goal, &baseline);
+        let was_resumed = resumed.is_some();
         let mut context =
             self.open_context(&seeded_goal, resumed, restored_activated_tools, &mut state)?;
+        context.stamp_after_open(
+            was_resumed,
+            self.partial_seed_root.as_deref(),
+            &state.accepted_checkpoint.witness.state_root,
+        );
 
         let mut mutations_since_boundary = 0u32;
         for turn in 1..=self.budgets.max_turns {
@@ -323,6 +316,29 @@ impl ToolLoop<'_> {
             certificate_id: uuid::Uuid::new_v4().to_string(),
         };
         Ok(state.finish(outcome))
+    }
+
+    /// Measure the baseline and open the loop's turn state around its real
+    /// restore point.
+    async fn open_turn_state(&mut self) -> Result<(Measured, TurnState)> {
+        let mut log = EventLog::new(self.recorder.is_none());
+        let accepted_checkpoint = self.executor.checkpoint(&[]).await?;
+        let (baseline, trajectory) = self.measured_baseline(&mut log).await?;
+        let decision_bound = loop_decision_bound(baseline.energy, &self.budgets)?;
+        let state = TurnState {
+            log,
+            projection: ProjectionMismatch::default(),
+            recovery: RecoveryCascade::new(self.budgets.recovery_budget),
+            cursor: CompactionCursor::default(),
+            accepted_checkpoint,
+            trajectory,
+            decision_bound,
+            candidate_seq: 1,
+            current_candidate: format!("{}/{}/c0", self.node_id, self.generation),
+            turns_used: 0,
+            prompt: PromptBinding::seed(&self.system_prompt, &self.model),
+        };
+        Ok((baseline, state))
     }
 
     /// Seed a fresh model context or re-enter a resumed one.
@@ -422,6 +438,11 @@ impl ToolLoop<'_> {
         let accepted = decision.is_accepted();
         if accepted {
             state.accepted_checkpoint = self.executor.checkpoint(&[]).await?;
+            // New pages depend on the new root; older root-dependent pages
+            // are now stale as optionals (still pinned/recallable).
+            context.set_state_dependency(perspt_sdk::prompt::StateDependency::AcceptedRoot(
+                state.accepted_checkpoint.witness.state_root.clone(),
+            ));
         } else if !matches!(decision, GateDecision::StoppedAtDeclaredFloor) {
             self.executor.restore(&state.accepted_checkpoint).await?;
             emit(

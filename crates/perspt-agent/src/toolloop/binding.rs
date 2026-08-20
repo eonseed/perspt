@@ -66,7 +66,9 @@ impl ToolLoop<'_> {
         );
         let outcome = resident::assemble_worker_resident(
             context.conversation(),
+            context.birth_deps(),
             &state.accepted_checkpoint.witness.state_root,
+            self.partial_seed_root.as_deref(),
             window,
             tool_reserve,
             &self.budgets.resident,

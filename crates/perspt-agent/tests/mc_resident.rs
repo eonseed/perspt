@@ -236,6 +236,7 @@ fn loop_with<'a>(
             ..Default::default()
         },
         recorder: None,
+        partial_seed_root: None,
     }
 }
 
@@ -432,6 +433,7 @@ fn eviction_loop<'a>(
             ..Default::default()
         },
         recorder: Some(recording),
+        partial_seed_root: None,
     }
 }
 
@@ -497,6 +499,78 @@ async fn evicted_pages_are_tombstoned_on_the_wire_and_recallable() {
     let sent = transport.sent.lock().unwrap();
     let events = recording.events.lock().unwrap();
     assert_evicted_then_recalled(&sent, &events, &evicted_page, &payload);
+}
+
+/// Gate AF provenance: pages carry the root they were born under, so an
+/// accepted-root change invalidates older optional pages — they are
+/// tombstoned on the wire even though they are small enough to stay — while
+/// the session-invariant head stays verbatim. Before this fix every page
+/// was relabelled with the live root at assembly time, so no page ever went
+/// stale.
+#[tokio::test]
+async fn a_root_change_invalidates_stale_optional_pages() {
+    let read = |id: &str| {
+        TurnOutput::ToolCalls(vec![ProviderToolCall {
+            call_id: id.into(),
+            name: "read_file".into(),
+            arguments: serde_json::json!({"path": "src/lib.rs"}),
+        }])
+    };
+    let mut turns: Vec<TurnOutput> = (1..=6).map(|i| read(&format!("r{i}"))).collect();
+    turns.push(TurnOutput::ToolCalls(vec![ProviderToolCall {
+        call_id: "w1".into(),
+        name: "edit_file".into(),
+        arguments: serde_json::json!({
+            "path": "src/lib.rs", "old_string": "a", "new_string": "b"
+        }),
+    }]));
+    turns.push(TurnOutput::Text("checking".into()));
+    turns.push(read("r7"));
+    turns.push(TurnOutput::Text("done".into()));
+    let transport = Capturing {
+        inner: Scripted::new(turns),
+        sent: Mutex::new(Vec::new()),
+    };
+    let catalog = StaticCatalog::with_base(vec![]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    // Baseline 10; the w1 mutation's incremental pass consumes 9.9; the
+    // first boundary descends (accepted, root 0 -> 1); the final boundary
+    // hard-passes.
+    let measurer = EnergyScript::new(vec![(false, 10.0), (false, 9.9), (false, 9.0), (true, 0.0)]);
+    let recording = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.budgets.max_turns = 12;
+    tool_loop.recorder = Some(&recording);
+
+    tool_loop.run("edit the file").await.unwrap();
+
+    let sent = transport.sent.lock().unwrap();
+    let last = sent.last().expect("at least one request");
+    let stale_tombstoned = last.messages().iter().any(|message| {
+        matches!(message, perspt_sdk::Message::ToolResponse { call_id, content }
+            if (call_id == "r1" || call_id == "r2")
+               && content.contains("evicted from the resident context"))
+    });
+    assert!(
+        stale_tombstoned,
+        "small pages born under the old root must go stale after acceptance: {:?}",
+        last.messages()
+            .iter()
+            .map(|m| format!("{m:?}").chars().take(80).collect::<String>())
+            .collect::<Vec<_>>()
+    );
+    // The session-invariant head is mandatory and never tombstoned.
+    for message in last.messages().iter().take(2) {
+        let text = format!("{message:?}");
+        assert!(
+            !text.contains("evicted from the resident context"),
+            "the instruction/task head must stay verbatim"
+        );
+    }
+    assert_pairs_never_split(&sent);
 }
 
 /// A recall of an unknown page id is a typed miss, never an error.
@@ -594,6 +668,7 @@ async fn sensor_only_residuals_steer_with_the_environment_gap() {
             ..Default::default()
         },
         recorder: Some(&recording),
+        partial_seed_root: None,
     };
     let _ = tool_loop.run("do the task").await.unwrap();
 

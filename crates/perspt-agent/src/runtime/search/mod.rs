@@ -413,6 +413,11 @@ impl Psp9AgentRuntime {
             forest_id: forest.forest_id.clone(),
             branch_id: branch_id.clone(),
         };
+        // A witness chain longer than [root] means this branch continues a
+        // partial checkpoint; its root enters the loop's dependency env.
+        let partial_root = (witness.chain.len() > 1)
+            .then(|| seed.map(|s| s.expected_state_root.clone()))
+            .flatten();
         let attempt = self
             .attempt_node_with_recorder(
                 forest.recorder,
@@ -425,6 +430,7 @@ impl Psp9AgentRuntime {
                 seed,
                 remaining_budget,
                 &branch_recorder,
+                partial_root,
             )
             .await?;
         let previewed = self
