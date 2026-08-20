@@ -122,21 +122,23 @@ impl LoopContext {
             self.birth_deps = restored_birth_deps.to_vec();
             self.current_dep = dep;
         } else {
-            self.restamp_existing(dep);
+            self.restamp_legacy(dep);
         }
     }
 
     /// Legacy fallback for pre-provenance checkpoints: the instruction and
     /// task head is session-invariant (a later acceptance must never stale
-    /// the mandatory head); the remaining restored pages carry the
-    /// restored root — their true birth root is unrecorded, so this is
-    /// the closest available label (documented residual for old ledgers).
-    pub(crate) fn restamp_existing(&mut self, dep: perspt_sdk::prompt::StateDependency) {
+    /// the mandatory head); every remaining restored page is deliberately
+    /// stale because its true birth root is unknowable. Relabelling those
+    /// pages with the current root would launder stale evidence as fresh.
+    pub(crate) fn restamp_legacy(&mut self, dep: perspt_sdk::prompt::StateDependency) {
         for (index, entry) in self.birth_deps.iter_mut().enumerate() {
             *entry = if index < 2 {
                 perspt_sdk::prompt::StateDependency::SessionInvariant
             } else {
-                dep.clone()
+                perspt_sdk::prompt::StateDependency::AcceptedRoot(
+                    "legacy-unavailable-provenance".into(),
+                )
             };
         }
         self.current_dep = dep;
@@ -449,6 +451,34 @@ mod tests {
             .unwrap()
             .expect("B's chain folds");
         assert_eq!(folded_b.conversation(), b.conversation());
+    }
+
+    #[test]
+    fn legacy_resume_never_launders_unknown_pages_as_current() {
+        let mut log = EventLog::new(true);
+        let mut context = LoopContext::seed("system", "goal", None, &mut log).unwrap();
+        context
+            .push_user("old observation", None, &mut log)
+            .unwrap();
+        context.stamp_after_open(true, None, "live-root", &[]);
+
+        assert_eq!(
+            &context.birth_deps()[..2],
+            &[
+                perspt_sdk::prompt::StateDependency::SessionInvariant,
+                perspt_sdk::prompt::StateDependency::SessionInvariant,
+            ]
+        );
+        assert_eq!(
+            context.birth_deps()[2],
+            perspt_sdk::prompt::StateDependency::AcceptedRoot(
+                "legacy-unavailable-provenance".into()
+            )
+        );
+        assert_ne!(
+            context.birth_deps()[2],
+            perspt_sdk::prompt::StateDependency::AcceptedRoot("live-root".into())
+        );
     }
 
     #[test]

@@ -191,6 +191,25 @@ fn inspect_candidate_checkpoint(
     control
 }
 
+/// Put a later non-candidate row in the auxiliary checkpoint index. Resume
+/// must still select its candidate from verified ledger order.
+fn hide_candidate_in_side_table(store: &perspt_store::SessionStore, session_id: &str) {
+    store
+        .record_psp9_checkpoint(
+            session_id,
+            "zzzz-later-context-row",
+            &serde_json::json!({"covered_event_root": "zzzz-later-context-row"}).to_string(),
+        )
+        .unwrap();
+    let newest: serde_json::Value =
+        serde_json::from_str(&store.latest_psp9_checkpoint(session_id).unwrap().unwrap()).unwrap();
+    assert_ne!(
+        newest.get("kind").and_then(|kind| kind.as_str()),
+        Some("candidate"),
+        "fixture must put a non-candidate row first in the side-table index"
+    );
+}
+
 /// Poll until a session has a durable *candidate* checkpoint, returning its
 /// session id.
 async fn wait_for_candidate_checkpoint(store: &perspt_store::SessionStore) -> String {
@@ -261,6 +280,10 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
         "RUNNING_PSP9",
         "a killed task leaves the session running — the crash fixture"
     );
+    // A later auxiliary context checkpoint must not hide the candidate
+    // resume point. The verified ledger, not timestamp ordering in this
+    // side table, is authoritative.
+    hide_candidate_in_side_table(&store, &session_id);
 
     // Phase 2: resume with a fresh runtime; the seeded candidate already
     // passes, so the loop hard-passes at baseline and promotes.

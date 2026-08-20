@@ -442,6 +442,7 @@ impl Psp9AgentRuntime {
             "staging_root_updated",
             serde_json::json!({
                 "node_id": node_id,
+                "generation": attempt.candidate.node_generation(),
                 "staging_root": staging.digest(),
                 "contributions": staging.contributions.len(),
                 "paths": paths,

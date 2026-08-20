@@ -91,7 +91,7 @@ impl NoGoodSupport {
 }
 
 /// The in-memory exact-key store, folded from `no_good_recorded` events.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct NoGoodStore {
     entries: BTreeMap<String, String>,
 }

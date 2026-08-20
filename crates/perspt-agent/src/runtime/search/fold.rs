@@ -17,6 +17,8 @@ use crate::toolloop::{decode_tool_loop, LoopEvent};
 /// snapshot usage — the honest starting point for a deterministic re-run.
 pub(crate) struct InterruptedForest {
     pub forest_id: String,
+    pub node_id: String,
+    pub generation: u32,
     pub accepted_root: String,
     pub last_usage: perspt_sdk::SearchUsage,
 }
@@ -51,13 +53,21 @@ pub(crate) fn fold_search_ledger(rows: &[perspt_store::Psp9LedgerRow]) -> Result
             }
             LoopEvent::SearchOpened {
                 forest_id,
+                node_id,
+                generation,
                 accepted_root,
                 ..
             } => {
+                anyhow::ensure!(
+                    !open.contains_key(&forest_id),
+                    "search forest {forest_id} was opened twice without closing"
+                );
                 open.insert(
                     forest_id.clone(),
                     InterruptedForest {
                         forest_id,
+                        node_id,
+                        generation,
                         accepted_root,
                         last_usage: perspt_sdk::SearchUsage::default(),
                     },
@@ -76,9 +86,13 @@ pub(crate) fn fold_search_ledger(rows: &[perspt_store::Psp9LedgerRow]) -> Result
             _ => {}
         }
     }
-    // At most one forest can be open when a session is interrupted
-    // (branches are sequential); keep the newest by insertion order.
-    fold.interrupted = open.into_values().last();
+    // Recovery forests are serialized by the runtime. More than one open
+    // forest means the usage cannot be assigned to one node honestly.
+    anyhow::ensure!(
+        open.len() <= 1,
+        "multiple interrupted search forests make resume usage ambiguous"
+    );
+    fold.interrupted = open.into_values().next();
     Ok(fold)
 }
 
@@ -155,6 +169,8 @@ mod tests {
         assert_eq!(fold.no_goods.len(), 1);
         let interrupted = fold.interrupted.expect("f1 never closed");
         assert_eq!(interrupted.forest_id, "f1");
+        assert_eq!(interrupted.node_id, "n1");
+        assert_eq!(interrupted.generation, 1);
         assert_eq!(interrupted.accepted_root, "root-1");
         assert_eq!(interrupted.last_usage.model_turns, 3);
     }
@@ -175,5 +191,15 @@ mod tests {
             hash: String::new(),
         }];
         assert!(fold_search_ledger(&rows).is_err());
+    }
+
+    #[test]
+    fn multiple_interrupted_forests_refuse_ambiguous_usage() {
+        let rows = vec![row(1, &opened("f-a")), row(2, &opened("f-b"))];
+        let error = match fold_search_ledger(&rows) {
+            Ok(_) => panic!("usage has no unique owner"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("multiple interrupted"));
     }
 }
