@@ -193,6 +193,17 @@ pub fn select_working_set(
     chosen
 }
 
+/// The canonical digest over a resident page-id sequence — the single rule
+/// shared by assembly and any post-assembly refit, so a fitted set and an
+/// assembled set with the same pages carry the same digest.
+pub fn resident_page_digest<'a>(ids: impl Iterator<Item = &'a str>) -> String {
+    let ids: Vec<&str> = ids.collect();
+    let mut encoder = CanonicalEncoder::new(PROMPT_DIGEST_TAG);
+    encoder.text("resident-context");
+    encoder.list(ids.into_iter());
+    encoder.digest()
+}
+
 /// Assemble the resident context per Definition 6.
 ///
 /// `instruction_tokens` is `c(I_t)` for the compiled programs; `frame_tokens`
@@ -234,10 +245,7 @@ pub fn assemble_resident(
     let mut resident = mandatory;
     let mandatory_len = resident.len();
     resident.extend(selected);
-    let mut encoder = CanonicalEncoder::new(PROMPT_DIGEST_TAG);
-    encoder.text("resident-context");
-    encoder.list(resident.iter().map(|page| page.page_id.as_str()));
-    let resident_digest = encoder.digest();
+    let resident_digest = resident_page_digest(resident.iter().map(|page| page.page_id.as_str()));
     Ok(ResidentOutcome::Assembled(ResidentContext {
         pages: resident,
         mandatory_len,

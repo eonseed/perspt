@@ -24,8 +24,8 @@ pub use accountant::{AccountingMode, TokenAccountantRef};
 pub use budget::{fit_budget, BudgetFit};
 pub use compose::StageComposition;
 pub use context::{
-    assemble_resident, mandatory_closure, select_working_set, ContextBudget, ContextPage,
-    DependencyEnv, ResidentContext, ResidentOutcome, StateDependency,
+    assemble_resident, mandatory_closure, resident_page_digest, select_working_set, ContextBudget,
+    ContextPage, DependencyEnv, ResidentContext, ResidentOutcome, StateDependency,
 };
 pub use dialect::{
     DialectRef, ModelDialect, ReasoningTracePolicy, SystemSlotPolicy, ToolCallConvention,
