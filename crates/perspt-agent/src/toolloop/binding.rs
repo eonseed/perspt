@@ -5,6 +5,21 @@ use anyhow::Result;
 
 use super::{emit, resident, LoopContext, LoopEvent, PromptEnvelope, ToolLoop, TurnState};
 
+/// The serialized token and byte cost of one composed request.
+fn wire_cost(
+    accountant: &perspt_sdk::prompt::TokenAccountantRef,
+    conversation: &perspt_sdk::Conversation,
+) -> (u64, u64) {
+    let mut tokens = 0u64;
+    let mut bytes = 0u64;
+    for message in conversation.messages() {
+        let serialized = serde_json::to_string(message).unwrap_or_default();
+        tokens += accountant.count_message(&serialized);
+        bytes += serialized.len() as u64;
+    }
+    (tokens, bytes)
+}
+
 /// The live per-call prompt identity (recompiled when the tool surface or
 /// the failover route changes).
 #[derive(Default)]
@@ -35,29 +50,47 @@ impl PromptBinding {
 }
 
 impl ToolLoop<'_> {
+    /// The token reserve the offered tool schemas consume on the wire.
+    pub(super) fn tool_schema_reserve(&self, specs: &[perspt_sdk::ToolSpec]) -> u64 {
+        let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
+        specs
+            .iter()
+            .map(|spec| {
+                accountant.count_text(&format!("{}{}{}", spec.name, spec.description, spec.schema))
+            })
+            .sum()
+    }
+
+    /// Definition 6's input allowance for this call.
+    fn input_allowance(&self, tool_reserve: u64) -> u64 {
+        let window = u64::from(
+            self.transport
+                .capabilities(&self.model)
+                .max_context_tokens
+                .max(1),
+        );
+        window
+            .saturating_sub(self.budgets.resident.output_reserve_tokens)
+            .saturating_sub(tool_reserve)
+            .saturating_sub(self.budgets.resident.guard_reserve_tokens)
+    }
+
     /// Definition 6, live: assemble the resident working set over the
     /// conversation's content-addressed pages before every transport call.
     /// An infeasible mandatory closure records `ContextInfeasible` and
-    /// makes no model call; the resident digest enters the control frame
-    /// and the per-call invocation record. Returns the resident page-id
-    /// set for the transport view (`None` when paging is off).
+    /// makes no model call. Recording happens after the composed-request
+    /// fit, so the ledger carries exactly what was transmitted.
     pub(super) fn assemble_resident_context(
         &self,
         turn: u32,
         specs: &[perspt_sdk::ToolSpec],
         context: &LoopContext,
         state: &mut TurnState,
-    ) -> Result<Option<std::collections::BTreeSet<String>>> {
+    ) -> Result<Option<perspt_sdk::prompt::ResidentContext>> {
         if !self.budgets.resident.paging_enabled {
             return Ok(None);
         }
-        let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
-        let tool_reserve: u64 = specs
-            .iter()
-            .map(|spec| {
-                accountant.count_text(&format!("{}{}{}", spec.name, spec.description, spec.schema))
-            })
-            .sum();
+        let tool_reserve = self.tool_schema_reserve(specs);
         let window = u64::from(
             self.transport
                 .capabilities(&self.model)
@@ -78,34 +111,92 @@ impl ToolLoop<'_> {
             perspt_sdk::prompt::ResidentOutcome::Infeasible {
                 required,
                 allowance,
-            } => {
-                emit(
-                    self.recorder,
-                    &mut state.log,
-                    LoopEvent::ContextInfeasible {
-                        forest_id: String::new(),
-                        branch_id: String::new(),
-                        turn,
-                        required,
-                        allowance,
-                    },
-                )?;
-                anyhow::bail!(
-                    "context budget infeasible: the mandatory closure needs {required} \
-                     tokens over the {allowance}-token input allowance; no model call \
-                     was made"
+            } => self.refuse_infeasible(turn, required, allowance, state),
+            perspt_sdk::prompt::ResidentOutcome::Assembled(assembled) => Ok(Some(assembled)),
+        }
+    }
+
+    /// Record `ContextInfeasible` and fail closed — no model call is made.
+    fn refuse_infeasible<T>(
+        &self,
+        turn: u32,
+        required: u64,
+        allowance: u64,
+        state: &mut TurnState,
+    ) -> Result<T> {
+        emit(
+            self.recorder,
+            &mut state.log,
+            LoopEvent::ContextInfeasible {
+                forest_id: String::new(),
+                branch_id: String::new(),
+                turn,
+                required,
+                allowance,
+            },
+        )?;
+        anyhow::bail!(
+            "context budget infeasible: the composed request needs {required} \
+             tokens over the {allowance}-token input allowance; no model call \
+             was made"
+        );
+    }
+
+    /// Enforce Definition 6 on the **composed transport request**: the
+    /// serialized view (tombstones included) must fit the input allowance
+    /// and the dialect's byte limit. On overflow, optional pages are popped
+    /// in reverse selection order and the view rebuilt; a mandatory-only
+    /// view that still overflows fails closed with `ContextInfeasible`.
+    /// Only then is the working set ledgered — the record is exactly what
+    /// was transmitted.
+    pub(super) fn fit_composed_request(
+        &self,
+        turn: u32,
+        specs: &[perspt_sdk::ToolSpec],
+        context: &LoopContext,
+        assembled: Option<perspt_sdk::prompt::ResidentContext>,
+        state: &mut TurnState,
+    ) -> Result<perspt_sdk::Conversation> {
+        let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
+        let allowance = self.input_allowance(self.tool_schema_reserve(specs));
+        let byte_limit = crate::turn::route_dialect(self.transport, &self.model)
+            .1
+            .max_prompt_bytes;
+        let Some(mut assembled) = assembled else {
+            // Paging off (evaluation ablation): the bound still holds per
+            // Gate AF — an oversized request fails closed, it is not sent.
+            let conversation = context.conversation().clone();
+            let (tokens, bytes) = wire_cost(&accountant, &conversation);
+            if tokens > allowance || bytes > byte_limit {
+                return self.refuse_infeasible(turn, tokens, allowance, state);
+            }
+            return Ok(conversation);
+        };
+        loop {
+            let ids: std::collections::BTreeSet<String> = assembled
+                .pages
+                .iter()
+                .map(|page| page.page_id.clone())
+                .collect();
+            let (view, evicted) = resident::resident_view(context.conversation(), &ids);
+            let view = if evicted == 0 {
+                context.conversation().clone()
+            } else {
+                view
+            };
+            let (tokens, bytes) = wire_cost(&accountant, &view);
+            if tokens <= allowance && bytes <= byte_limit {
+                assembled.resident_digest = perspt_sdk::prompt::resident_page_digest(
+                    assembled.pages.iter().map(|page| page.page_id.as_str()),
                 );
-            }
-            perspt_sdk::prompt::ResidentOutcome::Assembled(assembled) => {
                 self.record_working_set(turn, &assembled, state)?;
-                Ok(Some(
-                    assembled
-                        .pages
-                        .iter()
-                        .map(|page| page.page_id.clone())
-                        .collect(),
-                ))
+                return Ok(view);
             }
+            if assembled.pages.len() > assembled.mandatory_len {
+                assembled.pages.pop();
+                continue;
+            }
+            return self.refuse_infeasible(turn, tokens, allowance, state);
         }
     }
 

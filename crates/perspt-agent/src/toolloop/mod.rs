@@ -605,22 +605,14 @@ impl ToolLoop<'_> {
         let specs =
             self.catalog
                 .deferred_specs_for(&self.capabilities, context.activated_tools(), false);
-        let resident_ids = self.assemble_resident_context(turn, &specs, context, state)?;
-        self.bind_prompt_program(turn, &specs, state)?;
         // Definition 6, transport half: the model sees the resident view —
-        // evicted pages tombstoned in place, recallable via context_recall.
-        // The projection itself stays whole as the backing store.
-        let conversation = match &resident_ids {
-            Some(ids) => {
-                let (view, evicted) = resident::resident_view(context.conversation(), ids);
-                if evicted == 0 {
-                    context.conversation().clone()
-                } else {
-                    view
-                }
-            }
-            None => context.conversation().clone(),
-        };
+        // evicted pages tombstoned in place, recallable via context_recall —
+        // and the composed request is verified against the input allowance
+        // and dialect byte limit before any transport call. The projection
+        // itself stays whole as the backing store.
+        let assembled = self.assemble_resident_context(turn, &specs, context, state)?;
+        let conversation = self.fit_composed_request(turn, &specs, context, assembled, state)?;
+        self.bind_prompt_program(turn, &specs, state)?;
         let output = self
             .chat_with_failover(&conversation, &specs, &mut state.recovery, &mut state.log)
             .await?;

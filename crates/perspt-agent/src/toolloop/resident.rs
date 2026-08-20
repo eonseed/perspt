@@ -315,7 +315,35 @@ fn weights(pages: &[ContextPage]) -> BTreeMap<String, f64> {
     weights
 }
 
-/// Assemble the worker's resident set for one model call.
+/// Conservative reserve for the transport-only page-index note appended
+/// when pages are evicted (C4); charged inside the allowance like the
+/// tombstones, and bounded by the note's own size cap.
+const INDEX_NOTE_RESERVE: u64 = 768;
+
+/// The exact token cost the page contributes to the wire **when evicted**:
+/// every member message rendered in tombstone form. Wire cost of a request
+/// is `Σ_all evicted_cost + Σ_resident (tokens − evicted_cost)`, so passing
+/// the first sum as instruction cost and charging marginals per page makes
+/// Definition 6's allowance bound the real composed request.
+fn evicted_cost(
+    accountant: &TokenAccountantRef,
+    messages: &[Message],
+    group: &[usize],
+    page_id: &str,
+) -> u64 {
+    group
+        .iter()
+        .map(|&index| {
+            let rendered = evicted_message(&messages[index], page_id);
+            accountant.count_message(&serialize_message(&rendered))
+        })
+        .sum()
+}
+
+/// Assemble the worker's resident set for one model call, budgeting the
+/// composed request: tombstones for every page plus the index-note reserve
+/// form the base cost, and each page is charged its marginal cost over its
+/// own tombstone (`saturating_sub` keeps the bound conservative).
 pub(super) fn assemble_worker_resident(
     conversation: &Conversation,
     birth_deps: &[StateDependency],
@@ -325,7 +353,16 @@ pub(super) fn assemble_worker_resident(
     tool_reserve: u64,
     reserves: &ResidentReserves,
 ) -> perspt_sdk::Result<ResidentOutcome> {
-    let (pages, mandatory) = conversation_pages(conversation, birth_deps, reserves.pinned_tail);
+    let accountant = TokenAccountantRef::approx_bytes_v1();
+    let (mut pages, mandatory) = conversation_pages(conversation, birth_deps, reserves.pinned_tail);
+    let groups = page_groups(conversation);
+    let messages = conversation.messages();
+    let mut tombstone_base = INDEX_NOTE_RESERVE;
+    for (page, group) in pages.iter_mut().zip(&groups.members) {
+        let evicted = evicted_cost(&accountant, messages, group, &page.page_id);
+        tombstone_base += evicted;
+        page.tokens = page.tokens.saturating_sub(evicted);
+    }
     let env = DependencyEnv {
         accepted_root: accepted_root.into(),
         partial_root: partial_root.map(Into::into),
@@ -337,22 +374,82 @@ pub(super) fn assemble_worker_resident(
         tool_reserve,
         guard_reserve: reserves.guard_reserve_tokens,
     };
-    if budget.input_allowance().is_err() {
+    let Ok(allowance) = budget.input_allowance() else {
         // Reserves alone exceed the window: the same refusal as an
         // unfittable mandatory closure — no model call.
         return Ok(ResidentOutcome::Infeasible {
             required: reserves.output_reserve_tokens + tool_reserve + reserves.guard_reserve_tokens,
             allowance: 0,
         });
-    }
+    };
     let weights = weights(&pages);
-    assemble_resident(
+    let outcome = assemble_resident(
         &pages,
         &mandatory,
         &env,
         &budget,
-        0,
+        tombstone_base,
         reserves.frame_tokens.max(1),
         &weights,
-    )
+    )?;
+    Ok(match outcome {
+        ResidentOutcome::Assembled(assembled) => ResidentOutcome::Assembled(admit_large_pages(
+            assembled,
+            &pages,
+            &env,
+            allowance,
+            tombstone_base,
+            reserves.frame_tokens.max(1),
+        )),
+        infeasible => infeasible,
+    })
+}
+
+/// Large-page admission: a page whose marginal cost exceeds the synopsis
+/// frame bound `q` is never an optional candidate for greedy selection, so
+/// a big fresh tool result would otherwise always be evicted. Admit such
+/// pages newest-first while the composed request still fits.
+fn admit_large_pages(
+    assembled: perspt_sdk::prompt::ResidentContext,
+    pages: &[ContextPage],
+    env: &DependencyEnv,
+    allowance: u64,
+    tombstone_base: u64,
+    frame_tokens: u64,
+) -> perspt_sdk::prompt::ResidentContext {
+    let mut resident = assembled;
+    let mut used: u64 = tombstone_base + resident.pages.iter().map(|p| p.tokens).sum::<u64>();
+    let resident_ids: std::collections::BTreeSet<&str> = resident
+        .pages
+        .iter()
+        .map(|page| page.page_id.as_str())
+        .collect();
+    let mut large: Vec<&ContextPage> = pages
+        .iter()
+        .filter(|page| {
+            !resident_ids.contains(page.page_id.as_str())
+                && page.tokens > frame_tokens
+                && page.dependency_holds(env)
+        })
+        .collect();
+    large.sort_by(|a, b| {
+        b.freshness_turn
+            .cmp(&a.freshness_turn)
+            .then_with(|| a.page_id.cmp(&b.page_id))
+    });
+    let mut admitted = false;
+    for page in large {
+        if used + page.tokens > allowance {
+            continue;
+        }
+        used += page.tokens;
+        resident.pages.push(page.clone());
+        admitted = true;
+    }
+    if admitted {
+        resident.resident_digest = perspt_sdk::prompt::resident_page_digest(
+            resident.pages.iter().map(|page| page.page_id.as_str()),
+        );
+    }
+    resident
 }
