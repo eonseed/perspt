@@ -982,6 +982,16 @@ pub(crate) struct NodeAssembly {
     pub(crate) calibration: CalibrationBinding,
 }
 
+/// A node attempt prepared before any workspace exists: the assembled
+/// surfaces, the compiled prompt envelope, and the kernel state. Built
+/// exactly once per attempt; the search forest derives exact no-good
+/// components from it before admitting the fork (Gate AB).
+pub(crate) struct PreparedAttempt {
+    pub(crate) assembly: NodeAssembly,
+    pub(crate) envelope: crate::toolloop::PromptEnvelope,
+    pub(crate) kernel_state: perspt_sdk::KernelState,
+}
+
 /// One completed governed attempt at a node generation.
 pub(crate) struct NodeAttempt {
     pub(crate) outcome: crate::toolloop::LoopOutcome,
