@@ -3438,6 +3438,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "perspt-benchmark"
+version = "0.6.6"
+dependencies = [
+ "anyhow",
+ "perspt-agent",
+ "perspt-core",
+ "perspt-sdk",
+ "perspt-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "perspt-cli"
 version = "0.6.6"
 dependencies = [
@@ -3448,6 +3463,7 @@ dependencies = [
  "env_logger",
  "log",
  "perspt-agent",
+ "perspt-benchmark",
  "perspt-coding",
  "perspt-core",
  "perspt-dashboard",

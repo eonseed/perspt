@@ -1,0 +1,17 @@
+{
+  "goal": "change answer() in src/t/lib.py to return 2",
+  "hidden_check": [
+    "uv",
+    "run",
+    "--no-sync",
+    "pytest",
+    "-q",
+    "tests"
+  ],
+  "tags": [
+    "small",
+    "python",
+    "api_contract"
+  ],
+  "expect": "pass"
+}

@@ -1,0 +1,4 @@
+[package]
+name = "mixed-long-registry"
+version = "0.1.0"
+edition = "2021"

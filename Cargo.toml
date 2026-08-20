@@ -14,6 +14,7 @@ members = [
     "crates/perspt-store",
     "crates/perspt-dashboard",
     "crates/perspt-prompt-macros",
+    "crates/perspt-benchmark",
     "crates/perspt",
     # Dev-only repository automation (PSP code check). Never published.
     "xtask",
@@ -41,6 +42,7 @@ perspt-sandbox = { version = "0.6.6", path = "crates/perspt-sandbox" }
 perspt-store = { version = "0.6.6", path = "crates/perspt-store" }
 perspt-cli = { version = "0.6.6", path = "crates/perspt-cli" }
 perspt-dashboard = { version = "0.6.6", path = "crates/perspt-dashboard" }
+perspt-benchmark = { version = "0.6.6", path = "crates/perspt-benchmark" }
 perspt = { version = "0.6.6", path = "crates/perspt" }
 
 # Exact-pinned to avoid libduckdb-sys recompilation on `cargo update`.

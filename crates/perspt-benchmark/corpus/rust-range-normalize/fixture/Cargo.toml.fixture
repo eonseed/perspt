@@ -1,0 +1,4 @@
+[package]
+name = "rust_range_normalize"
+version = "0.1.0"
+edition = "2021"

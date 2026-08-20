@@ -1,0 +1,23 @@
+[package]
+name = "perspt-benchmark"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Optional, credentialed evaluation tooling for Perspt"
+repository.workspace = true
+homepage.workspace = true
+# Explicit inclusion keeps nested Rust fixture packages in the crate archive.
+include = ["src/**", "build.rs", "corpus/**"]
+
+[dependencies]
+perspt-agent = { workspace = true }
+perspt-core = { workspace = true }
+perspt-sdk = { workspace = true }
+perspt-store = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
