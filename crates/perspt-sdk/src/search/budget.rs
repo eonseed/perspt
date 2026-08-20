@@ -212,6 +212,169 @@ impl SearchUsage {
     }
 }
 
+/// Add with a ceiling; reports whether the ceiling truncated the add.
+fn add_capped_u32(current: &mut u32, extra: u32, cap: u32) -> bool {
+    let target = current.saturating_add(extra);
+    *current = target.min(cap);
+    target > cap
+}
+
+fn add_capped_u64(current: &mut u64, extra: u64, cap: u64) -> bool {
+    let target = current.saturating_add(extra);
+    *current = target.min(cap);
+    target > cap
+}
+
+/// One forest's usage behind a shared handle, so the branch tool loops can
+/// reserve before every action while the forest holds the same ledgered
+/// totals (Gate AC: reservations precede actions; usage never decreases;
+/// usage never persists above a limit — overflow clamps at the limit and
+/// closes the forest).
+#[derive(Debug, Clone)]
+pub struct SharedSearchBudget {
+    inner: std::sync::Arc<std::sync::Mutex<SearchUsage>>,
+    limits: SearchLimits,
+    denied: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SharedSearchBudget {
+    pub fn new(limits: SearchLimits) -> Self {
+        Self::with_usage(limits, SearchUsage::default())
+    }
+
+    /// Open with prior usage (resume: an interrupted forest's consumption
+    /// is not silently forgotten).
+    pub fn with_usage(limits: SearchLimits, usage: SearchUsage) -> Self {
+        Self {
+            inner: std::sync::Arc::new(std::sync::Mutex::new(usage)),
+            limits,
+            denied: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    pub fn limits(&self) -> &SearchLimits {
+        &self.limits
+    }
+
+    /// Reserve one action's resources before it starts. A refusal marks
+    /// the handle denied so the forest can abandon the branch gracefully.
+    pub fn reserve(&self, request: ReservationRequest) -> Result<ReservationTicket> {
+        let mut usage = self.inner.lock().expect("budget lock");
+        usage.reserve(&self.limits, request).inspect_err(|_| {
+            self.denied.store(true, std::sync::atomic::Ordering::SeqCst);
+        })
+    }
+
+    /// Settle one action: release the unused part of the ticket; charge any
+    /// overshoot clamped at the limits. Overshoot closes the forest and
+    /// errs — the caller ledgers the overflow as an observation.
+    pub fn settle(&self, ticket: ReservationTicket, actual: ReservationRequest) -> Result<()> {
+        let mut usage = self.inner.lock().expect("budget lock");
+        let held = *ticket.request();
+        usage.release_unused(ticket, actual);
+        let overshoot = ReservationRequest {
+            model_turns: actual.model_turns.saturating_sub(held.model_turns),
+            tool_calls: actual.tool_calls.saturating_sub(held.tool_calls),
+            mutations: actual.mutations.saturating_sub(held.mutations),
+            verifier_runs: actual.verifier_runs.saturating_sub(held.verifier_runs),
+            tokens: actual.tokens.saturating_sub(held.tokens),
+            result_bytes: actual.result_bytes.saturating_sub(held.result_bytes),
+            workspace_files: actual.workspace_files.saturating_sub(held.workspace_files),
+            workspace_bytes: actual.workspace_bytes.saturating_sub(held.workspace_bytes),
+        };
+        if overshoot == ReservationRequest::default() {
+            return Ok(());
+        }
+        self.charge_clamped(&mut usage, overshoot)
+    }
+
+    fn charge_clamped(&self, usage: &mut SearchUsage, extra: ReservationRequest) -> Result<()> {
+        let limits = &self.limits;
+        let mut over = false;
+        over |= add_capped_u32(
+            &mut usage.model_turns,
+            extra.model_turns,
+            limits.model_turns,
+        );
+        over |= add_capped_u32(&mut usage.tool_calls, extra.tool_calls, limits.tool_calls);
+        over |= add_capped_u32(&mut usage.mutations, extra.mutations, limits.mutations);
+        over |= add_capped_u32(
+            &mut usage.verifier_runs,
+            extra.verifier_runs,
+            limits.verifier_runs,
+        );
+        over |= add_capped_u64(&mut usage.tokens, extra.tokens, limits.tokens);
+        over |= add_capped_u64(
+            &mut usage.result_bytes,
+            extra.result_bytes,
+            limits.result_bytes,
+        );
+        over |= add_capped_u64(
+            &mut usage.workspace_files,
+            extra.workspace_files,
+            limits.workspace_files,
+        );
+        over |= add_capped_u64(
+            &mut usage.workspace_bytes,
+            extra.workspace_bytes,
+            limits.workspace_bytes,
+        );
+        if over {
+            usage.close();
+            return Err(SdkError::Domain(
+                "consumed actuals crossed a search limit; charged to the limit and closed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Charge one wall-clock interval, clamped at the limit; crossing it
+    /// closes the forest.
+    pub fn charge_elapsed(&self, seconds: u64) -> Result<()> {
+        let mut usage = self.inner.lock().expect("budget lock");
+        let over = add_capped_u64(&mut usage.elapsed_secs, seconds, self.limits.elapsed_secs);
+        if over {
+            usage.close();
+            return Err(SdkError::Domain(
+                "elapsed time crossed the search limit; the forest closed".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Non-consuming check: would this reservation be admitted right now?
+    pub fn headroom(&self, request: &ReservationRequest) -> bool {
+        let usage = self.inner.lock().expect("budget lock");
+        let limits = &self.limits;
+        !usage.is_closed()
+            && usage.actions < limits.actions
+            && usage.model_turns + request.model_turns <= limits.model_turns
+            && usage.tool_calls + request.tool_calls <= limits.tool_calls
+            && usage.verifier_runs + request.verifier_runs <= limits.verifier_runs
+            && usage.tokens + request.tokens <= limits.tokens
+    }
+
+    pub fn snapshot(&self) -> SearchUsage {
+        self.inner.lock().expect("budget lock").clone()
+    }
+
+    /// Terminal snapshot for `SearchClosed`; the forest cannot reopen.
+    pub fn close(&self) -> SearchUsage {
+        let mut usage = self.inner.lock().expect("budget lock");
+        usage.close();
+        usage.clone()
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.inner.lock().expect("budget lock").is_closed()
+    }
+
+    /// Whether a reservation was refused since the last call (one-shot).
+    pub fn take_denied(&self) -> bool {
+        self.denied.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +470,59 @@ mod tests {
         assert!(usage
             .reserve(&limits(), ReservationRequest::default())
             .is_err());
+    }
+
+    #[test]
+    fn shared_budget_reserves_settles_and_never_persists_over_limit() {
+        let shared = SharedSearchBudget::new(limits());
+        let ticket = shared
+            .reserve(ReservationRequest {
+                model_turns: 1,
+                tokens: 400,
+                ..Default::default()
+            })
+            .unwrap();
+        // Actuals overshoot the ticket's tokens past the 1_000 limit:
+        // charged to the limit, closed, and reported.
+        let result = shared.settle(
+            ticket,
+            ReservationRequest {
+                model_turns: 1,
+                tokens: 1_500,
+                ..Default::default()
+            },
+        );
+        assert!(result.is_err());
+        let usage = shared.snapshot();
+        assert!(
+            usage.tokens <= limits().tokens,
+            "usage never sits above a limit"
+        );
+        assert!(shared.is_closed());
+        assert!(shared.reserve(ReservationRequest::default()).is_err());
+    }
+
+    #[test]
+    fn shared_budget_denial_is_observable_once() {
+        let shared = SharedSearchBudget::new(limits());
+        assert!(!shared.take_denied());
+        let _ = shared.reserve(ReservationRequest {
+            tokens: 5_000,
+            ..Default::default()
+        });
+        assert!(shared.take_denied(), "the refusal is observable");
+        assert!(!shared.take_denied(), "and one-shot");
+    }
+
+    #[test]
+    fn shared_budget_headroom_is_non_consuming() {
+        let shared = SharedSearchBudget::new(limits());
+        let probe = ReservationRequest {
+            model_turns: 1,
+            ..Default::default()
+        };
+        assert!(shared.headroom(&probe));
+        assert_eq!(shared.snapshot(), SearchUsage::default());
     }
 
     #[test]

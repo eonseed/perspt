@@ -11,7 +11,9 @@ pub mod domain_types;
 pub mod forest;
 pub mod select;
 
-pub use budget::{ReservationRequest, ReservationTicket, SearchLimits, SearchUsage};
+pub use budget::{
+    ReservationRequest, ReservationTicket, SearchLimits, SearchUsage, SharedSearchBudget,
+};
 pub use context::{exploration_capability, is_read_only_capability, ProjectMap};
 pub use domain_types::{
     BranchMeasurement, BranchSelection, DomainMeasurement, SearchContext, SearchStrategy,
