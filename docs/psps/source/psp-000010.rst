@@ -2528,12 +2528,18 @@ arms already show zero. The default stays ``initial_branches = 1``.
        carry real behavior — local repair continues the witnessed
        partial, a repeated signature forces an alternative approach,
        stagnation expands to a distinct family, and the diagnostic probe
-       localizes before editing. Every consumed dimension (turns, calls,
-       mutations, verifier runs, tokens, bytes, wall-clock seconds) is
-       charged against ``SearchLimits``; partial checkpoints carry the
-       correction packet and remaining obligations. Quantum granularity
-       v1 is one full branch attempt; forest resume is a deterministic
-       re-run from the node durable checkpoint.
+       localizes before editing. Every action (model turn, verifier
+       measurement, fork) **reserves before it runs** against the shared
+       ``SharedSearchBudget`` and settles with observed actuals; overflow
+       clamps at the limits and closes the forest (erratum 3). No-good
+       keys use the real compiled prompt invocation, tool-surface hash,
+       and typed grant scopes; support follows the Gate AB eligibility
+       table (erratum 4). Partial witness chains extend the producing
+       branch's seed witness (partial-of-partial ancestry survives) and
+       ``parent_branch`` derives from actual seed lineage. Quantum
+       granularity v1 is one full branch attempt; resume folds no-goods
+       and the interrupted forest's usage from the ledger and re-opens a
+       new forest linked via ``resumed_from`` (erratum 1).
    * - 9 - ActorTurnRunner
      - Z, AD, AF
      - SDK + Wired
@@ -2546,18 +2552,27 @@ arms already show zero. The default stays ``initial_branches = 1``.
        digest lands in the control frame and the invocation record; an
        infeasible mandatory closure makes no transport call. Paging is
        live on the wire: pages outside the assembled resident set are
-       tombstoned in place in the transported conversation (structure
-       and tool pairing preserved; the projection stays whole as the
-       backing store), and the governed ``context_recall`` tool restores
-       an evicted page by id with ledgered
-       ``context_page_recalled``/``context_miss`` events. The TUI chat
-       loop (``external_tools/chat.rs``) is out of scope.
+       tombstoned in place in the transported conversation (tool pairs
+       are one atomic page; the projection stays whole as the backing
+       store), the **composed request** is verified against the input
+       allowance and dialect byte limit before any call (tombstones and
+       the page-index note charged inside it; erratum 5), pages carry
+       birth-state provenance so an accepted-root change invalidates
+       stale optionals (erratum 8), and the governed ``context_recall``
+       tool restores evicted pages by id/prefix/path/typed key with
+       ledgered ``context_page_recalled``/``context_miss`` events and a
+       transport-only page index (erratum 7). Oversized tool outputs page
+       back through the hot ``read_artifact`` tool. The TUI chat loop
+       (``external_tools/chat.rs``) is out of scope.
    * - 10 - Graph staging
      - AA
      - SDK + Wired
-     - Content-addressed staging root, divergent-path conflict
-       detection, one global integration gate, atomic promotion;
-       failure leaves the user workspace byte-identical.
+     - Content-addressed staging root, dependency-aware conflict
+       detection (siblings only; downstream refinements win by edge
+       precedence), predecessor-scoped inherited seeding, enforced
+       ``output_targets`` write scopes (erratum 9), one global
+       integration gate, atomic promotion; failure leaves the user
+       workspace byte-identical.
    * - 11 - CLI, bundles, and evaluation
      - Z, AE, AF
      - SDK + Wired
@@ -2569,8 +2584,11 @@ arms already show zero. The default stays ``initial_branches = 1``.
        repair`` guidance on a corrupted store. The seven-arm ladder in
        ``examples/psp10_eval.rs`` (live, credential-gated, never CI) has
        a real ungoverned direct arm, real packet/paging ablation
-       toggles, matched Rust and Python tasks, and per-cell process
-       metrics. Live bundle substitution is wired: a validated
+       toggles, matched Rust and Python tasks loaded from the
+       ``examples/eval_tasks/`` corpus with **withheld** oracle overlays
+       (erratum 10), per-cell process metrics plus search/paging
+       counters, and a ``gate_ae_ready`` flag that stays false below 30
+       paired tasks. Live bundle substitution is wired: a validated
        replacement body substitutes into the composed platform programs
        under exactly the compiled schema, only with
        ``--allow-experimental-prompts``, with every active override
@@ -2579,6 +2597,96 @@ arms already show zero. The default stays ``initial_branches = 1``.
        skipped. The adaptive default stays ``initial_branches = 1``
        until the recorded evaluation meets the acceptance rule — the
        flip is a separate reviewed commit.
+
+====================
+Errata (2026-08-20)
+====================
+
+An independent conformance audit of the first implementation confirmed
+several places where the wired code fell short of this specification's own
+gates, and a small number of places where the specification's text was
+internally in tension or under-specified. The code defects are fixed; the
+clarifications below tighten definitions without changing the design (per
+Design Closure, a design change would require a new PSP).
+
+1. **Resume invariant vs. Phase 8 note.** "Crash and resume reconstruct
+   the forest, usage, prompt programs, and accepted root" is satisfied *by
+   ledger fold*: resume folds every ``no_good_recorded`` row back into the
+   exact-key store and seeds the interrupted forest's consumption from its
+   last ``search_usage_snapshot`` (limits are never silently refilled).
+   The forest itself deterministically re-opens as a **new** forest linked
+   to the interrupted one through ``SearchOpened.resumed_from`` — it is
+   never resurrected mid-epoch. Quantum granularity remains one full
+   branch attempt. ``ControlFrame`` carries the node identity
+   (``node_id``); an empty value marks a legacy checkpoint.
+2. **Definition 5 action granularity.** One action is one fork, one model
+   turn (with its per-turn tool-call, mutation, and bounded result-byte
+   allowances), or one verifier measurement. Every action reserves before
+   it runs and settles with observed actuals; the fork's eager-copy
+   reservation is held for the forest's lifetime. Elapsed time has no
+   pre-action hook: it is charged at branch boundaries under the per-call
+   deadline.
+3. **Gate AC overflow rule.** When settled actuals cross a limit, usage is
+   charged **to the limit**, the forest closes, and the overflow is
+   ledgered as an observation — recorded usage never sits above a limit
+   (the falsifying predicate is unreachable by construction, not merely
+   detected after the fact).
+4. **Gate AB support eligibility.** Evidence classes map from typed
+   residual classes: test/regression/runtime failures support
+   ``failed-test``; compiler-diagnostic classes support ``compiler-code``
+   (the structured tool code when the sensor preserved one, else a
+   class-tagged content hash — never prose); contract-shaped classes
+   support ``contract-diagnostic``; policy/capability denials support
+   ``denied-capability``. Environmental classes (sensor unavailable, tool
+   failure, provider unavailable, budget classes) and model interpretation
+   **cannot** support a no-good — recording one would wrongly suppress a
+   valid retry. The unchanged-state class carries the realized candidate
+   state root, never a derived score. ``no_good_recorded`` additionally
+   carries its ``support_kind`` for replay verification.
+5. **Definition 6 covers the composed transport request.** The input
+   allowance bounds the request actually serialized to the wire: eviction
+   tombstones and the transport-only page-index note are charged inside
+   :math:`\beta_{in}` (each resident page costs its marginal over its own
+   tombstone), and the dialect's independent byte limit applies to the
+   composed request. An over-allowance composed request is refitted by
+   dropping optional pages or refused with ``context_infeasible`` — it is
+   never sent.
+6. **Atomic tool pages.** A multi-call batch message and **all** of its
+   result messages form one atomic page: one page id, one residency
+   decision, one recall.
+7. **Typed recall keys, v1.** ``context_recall`` resolves by page id or
+   its 16-hex prefix, by ``path`` (from typed tool-call arguments), and by
+   tool/call/turn keys; the provenance key is the page's content address.
+   ``diagnostic_id``/``test_id``/``symbol`` arguments are declared and
+   resolve only where a typed source field exists — symbol keys are
+   deferred until one does. Evicted requests carry a bounded, transport-
+   only page index (never part of the projection or the compiled
+   program).
+8. **Page provenance is birth state.** A page's declared dependency is the
+   state it was created under (session-invariant for the instruction/task
+   head, the accepted root at append time, the partial root under a
+   continuing branch). Assembly validates that dependency against the
+   live environment; a state change invalidates stale optional pages — it
+   never relabels them.
+9. **System 22, dependent graphs.** A downstream node's seed is exactly
+   its transitive predecessors' staged contributions, restored as
+   *inherited* (non-promotable) state so its export carries only its own
+   work. Same-path divergence is a conflict only between topologically
+   incomparable nodes; a downstream refinement of a predecessor's file
+   wins by edge precedence. A node's declared ``output_targets`` are its
+   enforced mutation-only write scope (reads stay workspace-wide);
+   undeclared targets keep unrestricted writes under the opaque scheduler
+   footprint.
+10. **Withheld oracles.** The evaluation's hidden suites are genuinely
+    withheld: oracle files live outside the fixture and are overlaid onto
+    a fresh copy of the post-run tree at verification time, overwriting
+    any visible test the agent may have weakened. Fixtures may contain
+    weak smoke tests, never oracle content.
+11. **Lint is advisory at the hard gate.** ``HardGatePolicy``'s required
+    stages are the complete gating set (plus ``format`` when the run
+    declares it); residuals from non-required stages still enter the
+    energy and correction packets but cannot block hard pass — a
+    pre-existing repository warning cannot make hard pass unreachable.
 
 =========================
 Resolved Design Decisions
