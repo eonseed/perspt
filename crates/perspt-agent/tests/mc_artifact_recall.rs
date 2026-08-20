@@ -304,6 +304,7 @@ async fn oversized_output_pages_back_in_full_through_read_artifact() {
         },
         recorder: Some(&recorder),
         partial_seed_root: None,
+        search_budget: None,
     };
 
     toolloop.run("read the big file").await.unwrap();

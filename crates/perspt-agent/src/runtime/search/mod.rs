@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use perspt_sdk::search::{BranchCandidate, ReservationTicket};
 use perspt_sdk::{
     evaluate_gate_with_floor, AcceptedTrajectory, BranchMeasurement, GateDecision, ModelId,
-    ResidualClass, SearchLimits, SearchUsage, WitnessRef,
+    ResidualClass, SearchLimits, WitnessRef,
 };
 
 use super::node::{seed_from_attempt, CandidateSeed};
@@ -84,8 +84,9 @@ struct ForestRun<'a> {
     /// single commit both measure against it.
     baseline_energy: f64,
     rho_gate: f64,
-    usage: SearchUsage,
-    limits: SearchLimits,
+    /// The one shared budget every branch action reserves against before
+    /// it runs (Gate AC).
+    budget: perspt_sdk::search::SharedSearchBudget,
     no_goods: NoGoodStore,
     /// The live verifier-suite identity, derived from the detected plugin
     /// profiles and the cluster profile — never a hardcoded constant.
@@ -108,7 +109,7 @@ impl ForestRun<'_> {
             .u64(u64::from(self.generation))
             .text(&self.accepted_root)
             .u64(self.epoch)
-            .u64(u64::from(self.usage.actions));
+            .u64(u64::from(self.budget.snapshot().actions));
         encoder.digest()
     }
 }
@@ -163,8 +164,7 @@ impl Psp9AgentRuntime {
             accepted_root: accepted_root.clone(),
             baseline_energy,
             rho_gate,
-            usage: SearchUsage::default(),
-            limits: self.search.limits.clone(),
+            budget: perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
             no_goods: NoGoodStore::default(),
             sensor_fingerprint: self.live_sensor_fingerprint(),
             started: std::time::Instant::now(),
@@ -175,7 +175,7 @@ impl Psp9AgentRuntime {
             node_id: node_id.to_string(),
             generation,
             accepted_root: accepted_root.clone(),
-            limits: forest.limits.clone(),
+            limits: forest.budget.limits().clone(),
         })?;
         let attempts = self
             .run_branches(
@@ -189,11 +189,8 @@ impl Psp9AgentRuntime {
             )
             .await?;
         let chosen = self.select_and_commit(&mut forest, attempts)?;
-        forest.usage.close();
-        forest.emit(LoopEvent::SearchClosed {
-            forest_id,
-            usage: forest.usage.clone(),
-        })?;
+        let usage = forest.budget.close();
+        forest.emit(LoopEvent::SearchClosed { forest_id, usage })?;
         Ok(chosen)
     }
 
@@ -239,6 +236,7 @@ impl Psp9AgentRuntime {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_branches(
         &self,
         forest: &mut ForestRun<'_>,
@@ -303,8 +301,18 @@ impl Psp9AgentRuntime {
             // refusing (rate limit, outage): opening more branches against
             // it multiplies the retry storm for nothing. Close the forest.
             let transport_dead = attempt.outcome.contained_by_transport;
+            // A refused in-loop reservation aborted the branch before the
+            // action ran: ledger the abandonment and close gracefully.
+            let budget_denied = forest.budget.take_denied();
+            if budget_denied {
+                forest.emit(LoopEvent::BranchAbandoned {
+                    forest_id: forest.forest_id.clone(),
+                    branch_id: candidate.measurement.branch_id.clone(),
+                    reason: "the search budget refused a reservation; branch aborted".into(),
+                })?;
+            }
             attempts.push((candidate, attempt, eligible));
-            if accepted || over_budget || transport_dead {
+            if accepted || over_budget || transport_dead || budget_denied {
                 break;
             }
         }
@@ -357,30 +365,35 @@ impl Psp9AgentRuntime {
         }
     }
 
-    /// Charge the branch's consumed actuals and its wall-clock interval
-    /// against the declared limit vector (Definition 5 — every dimension,
-    /// not only the fork's file/byte cost).
+    /// Charge the branch's wall-clock interval. Turns, calls, mutations,
+    /// verifier runs, tokens, and result bytes were already reserved and
+    /// settled **inside** the loop as each action ran (Gate AC); a debug
+    /// cross-check confirms the settled totals cover the observed outcome.
     fn charge_attempt(
         &self,
         forest: &mut ForestRun<'_>,
         attempt: &NodeAttempt,
         candidate: &BranchCandidate,
     ) -> Result<()> {
-        let consumed = consumed_usage(&attempt.outcome);
+        if cfg!(debug_assertions) {
+            let observed = consumed_usage(&attempt.outcome);
+            let settled = forest.budget.snapshot();
+            debug_assert!(
+                settled.model_turns >= observed.model_turns
+                    && settled.tool_calls >= observed.tool_calls,
+                "in-loop reservations must cover the observed outcome"
+            );
+        }
         let elapsed = forest.started.elapsed().as_secs();
-        let interval = elapsed.saturating_sub(forest.usage.elapsed_secs);
-        forest
-            .usage
-            .charge(&forest.limits, consumed)
-            .and_then(|()| forest.usage.charge_elapsed(&forest.limits, interval))
-            .map_err(|error| {
-                let _ = forest.emit(LoopEvent::BranchObservation {
-                    forest_id: forest.forest_id.clone(),
-                    branch_id: candidate.measurement.branch_id.clone(),
-                    observation: format!("budget exhausted after branch: {error}"),
-                });
-                anyhow::anyhow!("{error}")
-            })
+        let interval = elapsed.saturating_sub(forest.budget.snapshot().elapsed_secs);
+        forest.budget.charge_elapsed(interval).map_err(|error| {
+            let _ = forest.emit(LoopEvent::BranchObservation {
+                forest_id: forest.forest_id.clone(),
+                branch_id: candidate.measurement.branch_id.clone(),
+                observation: format!("budget exhausted after branch: {error}"),
+            });
+            anyhow::anyhow!("{error}")
+        })
     }
 
     /// The deliberately diverse route plan: primary first, then fallbacks
@@ -473,6 +486,7 @@ impl Psp9AgentRuntime {
                 remaining_budget,
                 &branch_recorder,
                 partial_root,
+                Some(forest.budget.clone()),
             )
             .await?;
         let previewed = self
@@ -482,8 +496,11 @@ impl Psp9AgentRuntime {
         Ok(Some((candidate, attempt, eligible, measured, support_key)))
     }
 
-    /// Reserve the fork's eager-copy cost plus the branch's turn quota, and
-    /// check the exact no-good store; a refused reservation or a suppressed
+    /// Reserve the fork's eager-copy cost — **held for the forest's
+    /// lifetime**, so the reservation precedes the copy and stands while
+    /// the branch exists — check turn headroom without consuming it (the
+    /// in-loop reservation takes each turn as it happens), and check the
+    /// exact no-good store. A refused reservation or a suppressed
     /// duplicate creates no branch (Gates AC and AB).
     fn admit_fork(
         &self,
@@ -492,9 +509,8 @@ impl Psp9AgentRuntime {
         remaining_budget: u32,
         no_good: &NoGoodComponents,
     ) -> Result<bool> {
-        let mut request = measure_fork_cost(&self.working_dir);
-        request.model_turns = remaining_budget.min(self.config.max_turns);
-        let ticket: ReservationTicket = match forest.usage.reserve(&forest.limits, request) {
+        let request = measure_fork_cost(&self.working_dir);
+        let _ticket: ReservationTicket = match forest.budget.reserve(request) {
             Ok(ticket) => ticket,
             Err(error) => {
                 forest.emit(LoopEvent::BranchObservation {
@@ -505,12 +521,21 @@ impl Psp9AgentRuntime {
                 return Ok(false);
             }
         };
-        // The turn quota is released here and re-charged from observed
-        // actuals after the branch runs; the fork's file/byte reservation
-        // stands for the branch's lifetime.
-        let mut consumed = *ticket.request();
-        consumed.model_turns = 0;
-        forest.usage.release_unused(ticket, consumed);
+        // The ticket is deliberately never released: the eager copy's
+        // file/byte cost stays reserved for the forest's lifetime.
+        let turn_probe = perspt_sdk::search::ReservationRequest {
+            model_turns: remaining_budget.min(self.config.max_turns).max(1),
+            ..Default::default()
+        };
+        if !forest.budget.headroom(&turn_probe) {
+            let _ = forest.budget.take_denied();
+            forest.emit(LoopEvent::BranchObservation {
+                forest_id: forest.forest_id.clone(),
+                branch_id: branch_id.to_string(),
+                observation: "fork refused: no model-turn headroom remains".into(),
+            })?;
+            return Ok(false);
+        }
         if forest.no_goods.suppresses(no_good) {
             forest.emit(LoopEvent::BranchObservation {
                 forest_id: forest.forest_id.clone(),
@@ -532,6 +557,21 @@ impl Psp9AgentRuntime {
         attempt: &NodeAttempt,
         no_good: &NoGoodComponents,
     ) -> Result<(BranchCandidate, bool, Measured, String)> {
+        // The preview sweep is a verifier action: reserved before it runs.
+        let sweep = forest
+            .budget
+            .reserve(perspt_sdk::search::ReservationRequest {
+                verifier_runs: 1,
+                ..Default::default()
+            });
+        if let Err(error) = sweep {
+            forest.emit(LoopEvent::BranchIneligible {
+                forest_id: forest.forest_id.clone(),
+                branch_id: branch_id.to_string(),
+                reason: format!("preview refused: {error}"),
+            })?;
+            anyhow::bail!("the budget refused the preview sweep: {error}");
+        }
         let measurer =
             CodingCandidateMeasurer::new(&attempt.candidate, &forest.node_id, forest.generation)
                 .with_domain(self.domain.clone())

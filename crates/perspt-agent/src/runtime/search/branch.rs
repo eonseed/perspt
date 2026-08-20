@@ -130,10 +130,7 @@ pub(crate) fn consumed_usage(
     outcome: &crate::toolloop::LoopOutcome,
 ) -> perspt_sdk::search::ReservationRequest {
     let accountant = perspt_sdk::prompt::TokenAccountantRef::approx_bytes_v1();
-    let mut consumed = ReservationRequest {
-        model_turns: outcome.turns_used,
-        ..Default::default()
-    };
+    let mut consumed = ReservationRequest::default();
     for event in &outcome.events {
         match event {
             LoopEvent::ToolCallObserved { .. } => consumed.tool_calls += 1,
@@ -148,7 +145,10 @@ pub(crate) fn consumed_usage(
             LoopEvent::CandidateMeasured { .. } | LoopEvent::EffectBoundaryMeasured { .. } => {
                 consumed.verifier_runs += 1;
             }
+            // A turn is consumed when the transport actually answered — a
+            // turn aborted by a refused reservation made no call.
             LoopEvent::TurnObserved { output, .. } => {
+                consumed.model_turns += 1;
                 let serialized = serde_json::to_string(output).unwrap_or_default();
                 consumed.tokens += accountant.count_message(&serialized);
             }
