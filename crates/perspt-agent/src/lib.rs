@@ -7,6 +7,7 @@ pub mod exploration;
 pub mod external_tools;
 pub mod grant;
 pub mod lsp;
+pub mod measure;
 pub mod probe;
 pub mod promote;
 pub mod realize;
@@ -17,12 +18,13 @@ pub mod transport;
 pub mod turn;
 pub mod verifier;
 
-pub use candidate::{CandidateWorkspace, CodingCandidateMeasurer};
+pub use candidate::CandidateWorkspace;
 pub use external_tools::{
     ExternalConnectionState, ExternalToolEvent, ExternalToolObserver, ExternalToolResult,
     ExternalToolRuntime, McpTransport, MCP_PROTOCOL_VERSION,
 };
 pub use lsp::{DocumentSymbolInfo, LspClient};
+pub use measure::CodingCandidateMeasurer;
 pub use probe::{probe_route, ProbeReport};
 pub use realize::{snapshot_workspace, ProjectionMismatch, SnapshotRealizer, WorkspaceState};
 pub use runtime::{Psp9AgentRuntime, Psp9ModelRoutes, Psp9Recorder, Psp9RunConfig, Psp9RunSummary};

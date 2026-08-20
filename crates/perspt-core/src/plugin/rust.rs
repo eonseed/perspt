@@ -72,6 +72,13 @@ impl LanguagePlugin for RustPlugin {
         "cargo test".to_string()
     }
 
+    fn test_command_with_filter(&self, filter: Option<&str>) -> String {
+        match filter {
+            Some(filter) => format!("cargo test {filter}"),
+            None => self.test_command(),
+        }
+    }
+
     fn run_command(&self) -> String {
         "cargo run".to_string()
     }
