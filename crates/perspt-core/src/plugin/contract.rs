@@ -276,6 +276,15 @@ pub trait LanguagePlugin: Send + Sync {
     /// Get the command to run tests
     fn test_command(&self) -> String;
 
+    /// The test command narrowed to an already-sanitized name filter. The
+    /// default ignores the filter; plugins with a native filter form
+    /// override it. Acceptance gates always use the unfiltered
+    /// [`test_command`](Self::test_command) — only interactive `run_test`
+    /// calls narrow.
+    fn test_command_with_filter(&self, _filter: Option<&str>) -> String {
+        self.test_command()
+    }
+
     /// Get the command to run the project (for verification)
     fn run_command(&self) -> String;
 

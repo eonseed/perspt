@@ -139,6 +139,15 @@ impl LanguagePlugin for PythonPlugin {
         "uv run --no-sync pytest -q --junitxml .perspt-junit.xml".to_string()
     }
 
+    fn test_command_with_filter(&self, filter: Option<&str>) -> String {
+        match filter {
+            Some(filter) => {
+                format!("uv run --no-sync pytest -q -k {filter} --junitxml .perspt-junit.xml")
+            }
+            None => self.test_command(),
+        }
+    }
+
     fn run_command(&self) -> String {
         "uv run python -m main".to_string()
     }

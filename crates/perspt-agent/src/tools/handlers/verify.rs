@@ -19,13 +19,26 @@ impl CandidateToolHandler for VerifierCommand {
         call: &perspt_sdk::ProviderToolCall,
         _entry: &perspt_sdk::ToolEntry,
     ) -> Result<EffectOutcome> {
-        let command = workspace.command_for(&call.name)?;
-        let execution = workspace.run_governed_verifier(&command).await?;
+        let commands = workspace.commands_for(&call.name, &call.arguments)?;
+        let multi = commands.len() > 1;
+        let mut success = true;
+        let mut output = String::new();
+        for (plugin, command, stage) in commands {
+            let execution = workspace
+                .run_governed_verifier(&command, Some(stage))
+                .await?;
+            if multi {
+                output.push_str(&format!("== {plugin} ==\n"));
+            }
+            output.push_str(&execution.output);
+            output.push('\n');
+            success &= execution.success;
+        }
         Ok(EffectOutcome {
-            output: if execution.success {
-                execution.output
+            output: if success {
+                output
             } else {
-                format!("tool failed: {}", execution.output)
+                format!("tool failed: {output}")
             },
             mutated: false,
         })
