@@ -592,12 +592,15 @@ impl Psp9AgentRuntime {
         Ok(Some((candidate, attempt, eligible, measured, support_key)))
     }
 
-    /// Reserve the fork's eager-copy cost — **held for the forest's
+    /// Admit one fork, cost-free checks first: the exact no-good store
+    /// (a suppressed duplicate creates no branch and consumes nothing —
+    /// Gate AB), then the non-consuming turn-headroom probe, and only then
+    /// the fork's eager-copy reservation — **held for the forest's
     /// lifetime**, so the reservation precedes the copy and stands while
-    /// the branch exists — check turn headroom without consuming it (the
-    /// in-loop reservation takes each turn as it happens), and check the
-    /// exact no-good store. A refused reservation or a suppressed
-    /// duplicate creates no branch (Gates AC and AB).
+    /// the branch exists. Every refusal happens before anything was
+    /// reserved; a successful reservation is snapshotted into the ledger
+    /// before the copy so a crash during realization cannot refill it
+    /// (Gate AC).
     fn admit_fork(
         &self,
         forest: &mut ForestRun<'_>,
@@ -605,20 +608,14 @@ impl Psp9AgentRuntime {
         remaining_budget: u32,
         no_good: &NoGoodComponents,
     ) -> Result<bool> {
-        let request = measure_fork_cost(&self.working_dir);
-        let _ticket: ReservationTicket = match forest.budget.reserve(request) {
-            Ok(ticket) => ticket,
-            Err(error) => {
-                forest.emit(LoopEvent::BranchObservation {
-                    forest_id: forest.forest_id.clone(),
-                    branch_id: branch_id.to_string(),
-                    observation: format!("fork refused: {error}; no branch created"),
-                })?;
-                return Ok(false);
-            }
-        };
-        // The ticket is deliberately never released: the eager copy's
-        // file/byte cost stays reserved for the forest's lifetime.
+        if forest.no_goods.suppresses(no_good) {
+            forest.emit(LoopEvent::BranchObservation {
+                forest_id: forest.forest_id.clone(),
+                branch_id: branch_id.to_string(),
+                observation: "exact no-good suppressed a duplicate attempt".into(),
+            })?;
+            return Ok(false);
+        }
         let turn_probe = perspt_sdk::search::ReservationRequest {
             model_turns: remaining_budget.min(self.config.max_turns).max(1),
             ..Default::default()
@@ -632,14 +629,22 @@ impl Psp9AgentRuntime {
             })?;
             return Ok(false);
         }
-        if forest.no_goods.suppresses(no_good) {
-            forest.emit(LoopEvent::BranchObservation {
-                forest_id: forest.forest_id.clone(),
-                branch_id: branch_id.to_string(),
-                observation: "exact no-good suppressed a duplicate attempt".into(),
-            })?;
-            return Ok(false);
-        }
+        let request = measure_fork_cost(&self.working_dir);
+        let _ticket: ReservationTicket = match forest.budget.reserve(request) {
+            Ok(ticket) => ticket,
+            Err(error) => {
+                forest.emit(LoopEvent::BranchObservation {
+                    forest_id: forest.forest_id.clone(),
+                    branch_id: branch_id.to_string(),
+                    observation: format!("fork refused: {error}; no branch created"),
+                })?;
+                return Ok(false);
+            }
+        };
+        // The ticket is deliberately never released: the eager copy's
+        // file/byte cost stays reserved for the forest's lifetime. The
+        // snapshot makes that charge durable before the copy begins.
+        forest.snapshot_usage()?;
         Ok(true)
     }
 
@@ -668,6 +673,9 @@ impl Psp9AgentRuntime {
             })?;
             anyhow::bail!("the budget refused the preview sweep: {error}");
         }
+        // Durable before the verifier runs: a crash mid-sweep resumes
+        // with the reserved run charged, never refilled (Gate AC).
+        forest.snapshot_usage()?;
         let measurer =
             CodingCandidateMeasurer::new(&attempt.candidate, &forest.node_id, forest.generation)
                 .with_domain(self.domain.clone())
