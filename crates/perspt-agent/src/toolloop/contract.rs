@@ -327,6 +327,12 @@ pub enum LoopEvent {
         /// separately.
         key: String,
         evidence_hash: String,
+        /// The Gate AB support class this record's evidence belongs to
+        /// (compiler-code, failed-test, contract-diagnostic,
+        /// unchanged-state, denied-capability); additive for replay
+        /// verification, empty on legacy rows.
+        #[serde(default)]
+        support_kind: String,
     },
     SearchClosed {
         forest_id: String,

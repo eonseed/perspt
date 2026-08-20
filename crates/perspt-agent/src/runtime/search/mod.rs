@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use perspt_sdk::search::{BranchCandidate, ReservationTicket};
 use perspt_sdk::{
     evaluate_gate_with_floor, AcceptedTrajectory, BranchMeasurement, GateDecision, ModelId,
-    ResidualClass, SearchLimits, WitnessRef,
+    ResidualClass, ResidualEvent, SearchLimits, WitnessRef,
 };
 
 use super::node::{seed_from_attempt, CandidateSeed};
@@ -121,6 +121,29 @@ struct PreviousBranch {
     residual_count: usize,
     energy: f64,
     residual_summaries: Vec<String>,
+    /// Typed obligation refs (`class:hash`) — the only correction state
+    /// that may enter the next attempt's no-good key (Gate AB).
+    obligation_refs: Vec<String>,
+}
+
+/// The branch's goal program inputs: the strategy-conditioned text the
+/// model sees, and the typed parts that enter the no-good proposal key.
+struct BranchGoal {
+    text: String,
+    base: String,
+    previous_obligations: Vec<String>,
+}
+
+/// Resolve one branch's goal program from the base goal and the history.
+fn goal_program(goal: &str, strategy: BranchStrategy, history: &[PreviousBranch]) -> BranchGoal {
+    BranchGoal {
+        text: branch_goal(goal, strategy, history.last()),
+        base: goal.to_string(),
+        previous_obligations: history
+            .last()
+            .map(|previous| previous.obligation_refs.clone())
+            .unwrap_or_default(),
+    }
 }
 
 /// The next branch's resolved plan.
@@ -233,6 +256,7 @@ impl Psp9AgentRuntime {
                 .take(6)
                 .map(|residual| residual.evidence.summary.clone())
                 .collect(),
+            obligation_refs: obligation_refs(measured),
         }
     }
 
@@ -259,7 +283,7 @@ impl Psp9AgentRuntime {
                 seed,
                 &forest.accepted_root,
             );
-            let goal_text = branch_goal(goal, plan.strategy, history.last());
+            let goal_program = goal_program(goal, plan.strategy, &history);
             forest.epoch += 1;
             forest.emit(LoopEvent::FrontierEpochStarted {
                 forest_id: forest.forest_id.clone(),
@@ -270,7 +294,7 @@ impl Psp9AgentRuntime {
                 .run_one_branch(
                     forest,
                     session_id,
-                    &goal_text,
+                    &goal_program,
                     graph,
                     branch_seed.as_ref(),
                     &witness,
@@ -436,7 +460,7 @@ impl Psp9AgentRuntime {
         &self,
         forest: &mut ForestRun<'_>,
         session_id: &str,
-        goal: &str,
+        goal: &BranchGoal,
         graph: &perspt_sdk::WorkGraphRevision,
         seed: Option<&CandidateSeed>,
         witness: &WitnessRef,
@@ -446,29 +470,30 @@ impl Psp9AgentRuntime {
         remaining_budget: u32,
     ) -> Result<Option<(BranchCandidate, NodeAttempt, bool, Measured, String)>> {
         let branch_id = format!("{}/b{}", forest.forest_id, index + 1);
-        let no_good = self.no_good_components(forest, goal, plan.strategy.id(), &plan.route);
+        // Assemble first (no workspace is touched): the exact no-good
+        // components need the real compiled prompt, grant, and catalog
+        // identities before the fork is even admitted (Gate AB).
+        let prepared = self
+            .prepare_attempt(
+                forest.recorder,
+                session_id,
+                &forest.node_id,
+                forest.generation,
+                &plan.route,
+                graph,
+            )
+            .await?;
+        let no_good = self.no_good_components(
+            forest,
+            &goal.base,
+            plan.strategy.id(),
+            &prepared,
+            &goal.previous_obligations,
+        );
         if !self.admit_fork(forest, &branch_id, remaining_budget, &no_good)? {
             return Ok(None);
         }
-        forest.emit(LoopEvent::BranchForked {
-            forest_id: forest.forest_id.clone(),
-            branch_id: branch_id.clone(),
-            // The real seed lineage, mutually consistent with seed_witness:
-            // Some(producer) only when this branch continues its partial.
-            parent_branch,
-            seed_checkpoint: witness.chain.first().cloned().unwrap_or_default(),
-            seed_witness: witness.clone(),
-        })?;
-        forest.emit(LoopEvent::BranchStrategySelected {
-            forest_id: forest.forest_id.clone(),
-            branch_id: branch_id.clone(),
-            strategy_id: plan.strategy.id().into(),
-        })?;
-        forest.emit(LoopEvent::FrontierEntryServed {
-            forest_id: forest.forest_id.clone(),
-            branch_id: branch_id.clone(),
-            epoch: forest.epoch,
-        })?;
+        emit_branch_opened(forest, &branch_id, parent_branch, witness, plan)?;
         let branch_recorder = BranchRecorder {
             inner: forest.recorder,
             forest_id: forest.forest_id.clone(),
@@ -480,10 +505,9 @@ impl Psp9AgentRuntime {
             .then(|| seed.map(|s| s.expected_state_root.clone()))
             .flatten();
         let attempt = self
-            .attempt_node_with_recorder(
-                forest.recorder,
-                session_id,
-                goal,
+            .attempt_prepared(
+                prepared,
+                &goal.text,
                 &forest.node_id,
                 forest.generation,
                 &plan.route,
@@ -608,15 +632,9 @@ impl Psp9AgentRuntime {
                 branch_id: branch_id.to_string(),
                 reason: "preview did not accept (no hard pass or measured descent)".into(),
             })?;
-            let support = no_good_support(&measured);
-            support_key = support.evidence_hash();
-            let key = forest.no_goods.record(no_good, &support);
-            forest.emit(LoopEvent::NoGoodRecorded {
-                forest_id: forest.forest_id.clone(),
-                branch_id: branch_id.to_string(),
-                key,
-                evidence_hash: support.evidence_hash(),
-            })?;
+            support_key = self
+                .record_no_good(forest, branch_id, attempt, &measured, no_good)
+                .await?;
         }
         let eligible = candidate_eligible(forest, &measurement);
         let candidate = BranchCandidate {
@@ -624,6 +642,45 @@ impl Psp9AgentRuntime {
             measurement,
         };
         Ok((candidate, eligible, measured, support_key))
+    }
+
+    /// Record a failed preview's exact no-good when Gate AB admits its
+    /// evidence; an environmental failure records only an observation, so a
+    /// retry stays legal and the repeated-signature trigger never fires on
+    /// it. Returns the support key (empty when nothing was recorded).
+    async fn record_no_good(
+        &self,
+        forest: &mut ForestRun<'_>,
+        branch_id: &str,
+        attempt: &NodeAttempt,
+        measured: &Measured,
+        no_good: &NoGoodComponents,
+    ) -> Result<String> {
+        let state_root = crate::toolloop::EffectExecutor::checkpoint(&attempt.candidate, &[])
+            .await?
+            .witness
+            .state_root;
+        match no_good_support(measured, &state_root) {
+            Some(support) => {
+                let key = forest.no_goods.record(no_good, &support);
+                forest.emit(LoopEvent::NoGoodRecorded {
+                    forest_id: forest.forest_id.clone(),
+                    branch_id: branch_id.to_string(),
+                    key,
+                    evidence_hash: support.evidence_hash(),
+                    support_kind: support.kind().to_string(),
+                })?;
+                Ok(support.evidence_hash())
+            }
+            None => {
+                forest.emit(LoopEvent::BranchObservation {
+                    forest_id: forest.forest_id.clone(),
+                    branch_id: branch_id.to_string(),
+                    observation: "no deterministic support; no-good not recorded".into(),
+                })?;
+                Ok(String::new())
+            }
+        }
     }
 
     /// Persist an ineligible-but-actionable branch as a private partial
@@ -650,17 +707,11 @@ impl Psp9AgentRuntime {
                 serde_json::to_string(packet).unwrap_or_default().as_bytes(),
             ))
         });
-        let remaining_obligations: Vec<perspt_sdk::search::ObligationRef> = measured
-            .residuals
-            .iter()
-            .map(|residual| {
-                perspt_sdk::search::ObligationRef(format!(
-                    "{:?}:{}",
-                    residual.class,
-                    perspt_sdk::ledger::content_hash(residual.evidence.summary.as_bytes())
-                ))
-            })
-            .collect();
+        let remaining_obligations: Vec<perspt_sdk::search::ObligationRef> =
+            obligation_refs(measured)
+                .into_iter()
+                .map(perspt_sdk::search::ObligationRef)
+                .collect();
         let checkpoint = perspt_sdk::PartialCheckpointRef {
             state_root: seed.expected_state_root.clone(),
             accepted_ancestor: forest.accepted_root.clone(),
@@ -787,32 +838,136 @@ impl Psp9AgentRuntime {
         Ok(())
     }
 
-    /// The exact no-good components for one attempt configuration. The
-    /// sensor fingerprint is the forest's live verifier identity.
+    /// The exact no-good components for one attempt configuration (Gate
+    /// AB): `q` is the compiled prompt invocation's real digest, `t` the
+    /// effective tool-surface hash, `c` the typed grant/capability scopes,
+    /// and `p` the base goal + strategy + the previous branch's **typed**
+    /// obligation refs — natural-language residual prose never enters the
+    /// key. The sensor fingerprint is the forest's live verifier identity.
     fn no_good_components(
         &self,
         forest: &ForestRun<'_>,
-        goal: &str,
+        base_goal: &str,
         strategy_id: &str,
-        route: &ModelId,
+        prepared: &super::node::PreparedAttempt,
+        previous_obligations: &[String],
     ) -> NoGoodComponents {
-        let digest = |label: &str, value: &str| {
-            let mut encoder = perspt_sdk::canon::CanonicalEncoder::new(b"perspt.no-good.v1");
-            encoder.text(label).text(value);
-            encoder.digest()
+        let digest = component_digest;
+        let (prompt_digest, catalog_digest) = match &prepared.envelope.invocation {
+            Some(invocation) => (
+                invocation.invocation_digest.clone(),
+                digest("catalog", &invocation.platform.tool_spec_hash),
+            ),
+            // Scripted transports without a compiled program still get an
+            // exact (if coarser) identity from the envelope text.
+            None => (
+                digest("prompt-text", &prepared.envelope.text),
+                digest("catalog", "uncompiled"),
+            ),
         };
+        let mut proposal = perspt_sdk::canon::CanonicalEncoder::new(b"perspt.no-good.v1");
+        proposal.text("proposal").text(base_goal).text(strategy_id);
+        for obligation in previous_obligations {
+            proposal.text(obligation);
+        }
         NoGoodComponents {
             accepted_root: forest.accepted_root.clone(),
             domain_digest: digest("domain", &self.domain.domain_id().0),
             strategy_digest: digest("strategy", strategy_id),
-            prompt_digest: digest("prompt", &format!("{route}")),
-            proposal_digest: digest("proposal", goal),
-            grant_digest: digest("grant", &self.working_dir.display().to_string()),
-            catalog_digest: digest("catalog", "base+domain"),
+            prompt_digest,
+            proposal_digest: proposal.digest(),
+            grant_digest: grant_capability_digest(&prepared.assembly),
+            catalog_digest,
             sensor_fingerprint: forest.sensor_fingerprint.clone(),
-            build_digest: digest("build", env!("CARGO_PKG_VERSION")),
+            build_digest: digest("build", &runtime_build_id()),
         }
     }
+}
+
+/// The three fork-opening events, in the alphabet's order. `parent_branch`
+/// is the real seed lineage, mutually consistent with `seed_witness`:
+/// `Some(producer)` only when this branch continues its partial.
+fn emit_branch_opened(
+    forest: &ForestRun<'_>,
+    branch_id: &str,
+    parent_branch: Option<String>,
+    witness: &WitnessRef,
+    plan: &BranchPlan,
+) -> Result<()> {
+    forest.emit(LoopEvent::BranchForked {
+        forest_id: forest.forest_id.clone(),
+        branch_id: branch_id.to_string(),
+        parent_branch,
+        seed_checkpoint: witness.chain.first().cloned().unwrap_or_default(),
+        seed_witness: witness.clone(),
+    })?;
+    forest.emit(LoopEvent::BranchStrategySelected {
+        forest_id: forest.forest_id.clone(),
+        branch_id: branch_id.to_string(),
+        strategy_id: plan.strategy.id().into(),
+    })?;
+    forest.emit(LoopEvent::FrontierEntryServed {
+        forest_id: forest.forest_id.clone(),
+        branch_id: branch_id.to_string(),
+        epoch: forest.epoch,
+    })
+}
+
+fn component_digest(label: &str, value: &str) -> String {
+    let mut encoder = perspt_sdk::canon::CanonicalEncoder::new(b"perspt.no-good.v1");
+    encoder.text(label).text(value);
+    encoder.digest()
+}
+
+/// `b`: the runtime build identity — crate version plus the git commit
+/// when the build exported one (`PERSPT_GIT_SHA`).
+fn runtime_build_id() -> String {
+    format!(
+        "{}+{}",
+        env!("CARGO_PKG_VERSION"),
+        option_env!("PERSPT_GIT_SHA").unwrap_or("dev")
+    )
+}
+
+/// `c`: the typed ceilings and scopes governing what the branch may do.
+/// Per-mint identifiers (policy id, capability id, session id, integrity
+/// binding) are excluded — per-mint noise would defeat exact matching.
+fn grant_capability_digest(assembly: &super::node::NodeAssembly) -> String {
+    let policy = &assembly.grant_policy;
+    let capability = &assembly.capability;
+    let surface = serde_json::json!({
+        "effect_ceiling": policy.effect_ceiling,
+        "path_ceiling": policy.path_ceiling,
+        "command_ceiling": policy.command_ceiling,
+        "network_ceiling": policy.network_ceiling,
+        "approval_ceiling": policy.approval_ceiling,
+        "authority_epoch": policy.authority_epoch,
+        "persistent": policy.persistent,
+        "effects": capability.effects,
+        "path_scope": capability.path_scope,
+        "command_scope": capability.command_scope,
+        "network_scope": capability.network_scope,
+        "role": capability.role,
+        "approval_policy": capability.approval_policy,
+        "max_calls": capability.max_calls,
+    });
+    component_digest("grant", &surface.to_string())
+}
+
+/// Typed obligation refs from a measurement: `{class:?}:{hash(summary)}` —
+/// the shared shape for partial checkpoints and no-good proposal keys.
+fn obligation_refs(measured: &Measured) -> Vec<String> {
+    measured
+        .residuals
+        .iter()
+        .map(|residual| {
+            format!(
+                "{:?}:{}",
+                residual.class,
+                perspt_sdk::ledger::content_hash(residual.evidence.summary.as_bytes())
+            )
+        })
+        .collect()
 }
 
 /// Fold the branch history into the next branch's trigger inputs: the
@@ -885,17 +1040,174 @@ fn candidate_preview_accepted(forest: &ForestRun<'_>, measurement: &BranchMeasur
     )
 }
 
-/// Deterministic support for a failed attempt's no-good (Gate AB): the
-/// dominant compiler code or failed test when present, else the unchanged
-/// realized-state hash class.
-fn no_good_support(measured: &Measured) -> NoGoodSupport {
+/// The typed evidence value of one residual: the structured tool code
+/// (`E0432`, a test id) when the sensor preserved one, else a class-tagged
+/// content hash of the summary — never free prose.
+fn evidence_value(residual: &ResidualEvent) -> String {
+    let code = residual
+        .evidence
+        .structured
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(|code| code.as_str());
+    match code {
+        Some(code) => code.to_string(),
+        None => format!(
+            "{:?}:{}",
+            residual.class,
+            perspt_sdk::ledger::content_hash(residual.evidence.summary.as_bytes())
+        ),
+    }
+}
+
+/// Deterministic support for a failed attempt's no-good, or `None` when no
+/// residual class Gate AB admits is present (environmental gaps and model
+/// interpretation cannot support a no-good — recording one would wrongly
+/// suppress a valid retry). An empty residual set supports the unchanged
+/// realized-state hash — the actual candidate root, never an energy string.
+fn no_good_support(measured: &Measured, state_root: &str) -> Option<NoGoodSupport> {
+    use ResidualClass as C;
+    if measured.residuals.is_empty() {
+        return Some(NoGoodSupport::UnchangedStateHash(state_root.to_string()));
+    }
+    let mut best: Option<(u8, NoGoodSupport)> = None;
     for residual in &measured.residuals {
-        if residual.class == ResidualClass::TestFailure {
-            return NoGoodSupport::FailedTest(residual.evidence.summary.clone());
+        let ranked = match residual.class {
+            C::TestFailure | C::Regression | C::Runtime => {
+                Some((0, NoGoodSupport::FailedTest(evidence_value(residual))))
+            }
+            C::Syntax
+            | C::Type
+            | C::Build
+            | C::Lint
+            | C::Format
+            | C::ImportGraph
+            | C::SymbolMismatch
+            | C::Manifest
+            | C::Dependency => Some((1, NoGoodSupport::CompilerCode(evidence_value(residual)))),
+            C::InterfaceMismatch
+            | C::OwnershipViolation
+            | C::SheafInconsistency
+            | C::ContextDrift
+            | C::WitnessStale
+            | C::ToolArgumentInvalid => Some((
+                2,
+                NoGoodSupport::ContractDiagnostic(evidence_value(residual)),
+            )),
+            C::Policy | C::CapabilityDenied => {
+                Some((3, NoGoodSupport::DeniedCapability(evidence_value(residual))))
+            }
+            // Environmental / budget / model-plane classes: no support.
+            _ => None,
+        };
+        if let Some((rank, support)) = ranked {
+            if best.as_ref().is_none_or(|(current, _)| rank < *current) {
+                best = Some((rank, support));
+            }
         }
     }
-    if let Some(residual) = measured.residuals.first() {
-        return NoGoodSupport::CompilerCode(residual.evidence.summary.clone());
+    best.map(|(_, support)| support)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn residual(class: ResidualClass) -> ResidualEvent {
+        let mut residual = ResidualEvent::new(
+            "n1",
+            0,
+            class,
+            perspt_sdk::ResidualSeverity::Error,
+            1.0,
+            perspt_sdk::SensorRef::new(
+                "governed-verifier",
+                perspt_sdk::IndependenceRoute::DeterministicTool,
+            ),
+        )
+        .unwrap();
+        residual.evidence.summary = format!("{class:?} happened");
+        residual
     }
-    NoGoodSupport::UnchangedStateHash(format!("V={:.6}", measured.energy))
+
+    fn measured(residuals: Vec<ResidualEvent>) -> Measured {
+        Measured {
+            hard_pass: false,
+            energy: 4.0,
+            residuals,
+            correction: None,
+            packet: None,
+        }
+    }
+
+    /// Gate AB's admitted evidence classes, and only those, support a
+    /// no-good; environmental and model-plane classes never do.
+    #[test]
+    fn support_classification_follows_gate_ab() {
+        use ResidualClass as C;
+        let cases = [
+            (C::TestFailure, Some("failed-test")),
+            (C::Runtime, Some("failed-test")),
+            (C::Build, Some("compiler-code")),
+            (C::Type, Some("compiler-code")),
+            (C::Lint, Some("compiler-code")),
+            (C::WitnessStale, Some("contract-diagnostic")),
+            (C::ToolArgumentInvalid, Some("contract-diagnostic")),
+            (C::Policy, Some("denied-capability")),
+            (C::CapabilityDenied, Some("denied-capability")),
+            (C::SensorUnavailable, None),
+            (C::ToolFailure, None),
+            (C::ProviderUnavailable, None),
+            (C::BudgetExhausted, None),
+            (C::AdjudicatorObjection, None),
+        ];
+        for (class, expected) in cases {
+            let support = no_good_support(&measured(vec![residual(class)]), "root-1");
+            assert_eq!(
+                support.as_ref().map(NoGoodSupport::kind),
+                expected,
+                "class {class:?}"
+            );
+        }
+    }
+
+    /// A failed test outranks a compiler code; an empty residual set
+    /// supports the real state root, never an energy string.
+    #[test]
+    fn support_precedence_and_state_root_fallback() {
+        let mixed = measured(vec![
+            residual(ResidualClass::Build),
+            residual(ResidualClass::TestFailure),
+        ]);
+        assert_eq!(
+            no_good_support(&mixed, "root-1").unwrap().kind(),
+            "failed-test"
+        );
+        let empty = no_good_support(&measured(vec![]), "root-xyz").unwrap();
+        assert!(matches!(
+            empty,
+            NoGoodSupport::UnchangedStateHash(ref root) if root == "root-xyz"
+        ));
+    }
+
+    /// A structured tool code is the evidence value when the sensor
+    /// preserved one; prose only ever enters as a class-tagged hash.
+    #[test]
+    fn evidence_value_prefers_structured_codes() {
+        let mut with_code = residual(ResidualClass::Build);
+        with_code.evidence.structured = Some(serde_json::json!({"code": "E0432"}));
+        assert_eq!(evidence_value(&with_code), "E0432");
+        let without = residual(ResidualClass::Build);
+        let value = evidence_value(&without);
+        assert!(value.starts_with("Build:"), "{value}");
+        assert!(!value.contains("happened"), "prose must not enter");
+    }
+
+    /// The build identity carries the crate version (plus the git sha when
+    /// exported), so every dev build shares one digest only within one
+    /// version+commit.
+    #[test]
+    fn build_id_carries_version() {
+        assert!(runtime_build_id().starts_with(env!("CARGO_PKG_VERSION")));
+    }
 }
