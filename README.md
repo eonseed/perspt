@@ -289,8 +289,25 @@ locally and never sent to an LLM. It prints Perspt's family dedication.
 | `ledger` | Query the ledger; `--rollback <SESSION>` undoes the newest promotion and labels it unsafe |
 | `config` | Inspect or edit configuration |
 | `init` | Initialize project memory and policy |
+| `benchmark` | Optional configured-topology evaluation (`benchmark` Cargo feature only) |
 
 Run `perspt <COMMAND> --help` for the current interface.
+
+The benchmark is deliberately outside normal runtime validation. Build the
+CLI with `--features benchmark`, validate the bundled corpus without model
+credentials, or explicitly start a live suite:
+
+```bash
+cargo run -p perspt-cli --features benchmark -- benchmark validate
+cargo run -p perspt-cli --features benchmark -- \
+  --config config.local.toml benchmark run --suite smoke --output report.json
+```
+
+Live suites use the production role resolution from the selected configuration
+and record the full configured topology. Coding verification itself remains
+deterministic; a configured verifier route is recorded but does not create a
+model call. The benchmark CLI does not hard-code or accept Qwen, Gemini, or any
+other model names.
 
 ## Workspace
 
@@ -309,6 +326,7 @@ Perspt is a Cargo workspace with these published implementation layers:
 | `perspt-tui` | Ratatui interfaces |
 | `perspt-dashboard` | Axum/HTMX observability UI |
 | `perspt-cli` | Command-line entry point |
+| `perspt-benchmark` | Unpublished optional corpus and live evaluation runner |
 | `perspt` | Re-exporting meta-crate |
 
 The implementation uses the published [`srbn`](https://crates.io/crates/srbn),
