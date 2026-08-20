@@ -9,12 +9,20 @@
 //! branches). Each task keeps its paired per-arm results; the report
 //! publishes paired differences with a seeded 10,000-resample percentile
 //! bootstrap plus per-cell wall time, time-to-first-mutation,
-//! time-to-first-test, denied and repeated calls, and every
+//! time-to-first-test, denied/repeated calls, search counters, and every
 //! infrastructure failure. The primary outcome is hidden-test hard pass.
+//!
+//! Tasks live in `examples/eval_tasks/<id>/`: a `task.json` (goal, hidden
+//! check argv, tags, expectation), a `fixture/` tree the agent works in
+//! (weak smoke tests at most), and a `hidden/` tree of **withheld** oracle
+//! files. The hidden suite runs in a fresh copy of the post-run fixture
+//! with `hidden/` overlaid on top — overwriting any visible test the agent
+//! may have weakened — so the oracle is genuinely unseen and untouchable.
+//!
 //! Adaptive search becomes the default only if the paired CI lower bound
-//! for `p_adaptive - p_single` clears the predeclared margin, repeated
-//! identical failures drop, and no hard-gate regression escapes — the
-//! flip itself is a separate reviewed commit, never automatic.
+//! for `p_adaptive - p_single` clears the predeclared margin on >= 30
+//! tasks (Gate AE), repeated identical failures drop, and no hard-gate
+//! regression escapes — the flip itself is a separate reviewed commit.
 //!
 //! Usage: `cargo run --example psp10_eval -- <provider::model> [task-limit]`
 //! with routes configured in `config.local.toml`.
@@ -113,118 +121,59 @@ const ARMS: [EvalArm; 7] = [
     },
 ];
 
-/// One matched task: a fixture layout, a goal, and a hidden verification
-/// command the arms never see in their goal text.
-struct Task {
-    id: &'static str,
-    goal: &'static str,
-    files: &'static [(&'static str, &'static str)],
-    /// The hidden suite, run identically for every arm.
-    hidden_check: &'static [&'static str],
+/// One matched task loaded from `examples/eval_tasks/<id>/`.
+#[derive(serde::Deserialize)]
+struct TaskSpec {
+    goal: String,
+    /// The hidden suite's argv, run identically for every arm. Python
+    /// oracles always run through `uv run --no-sync` — never bare python.
+    hidden_check: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    /// "pass" (a straightforward task) or "recovery" (deliberately
+    /// misleading; exercises search and no-good non-suppression).
+    #[serde(default = "default_expect")]
+    expect: String,
 }
 
-const RUST_MANIFEST: &str = "[package]\nname='t'\nversion='0.1.0'\nedition='2021'\n";
+fn default_expect() -> String {
+    "pass".into()
+}
 
-const TASKS: &[Task] = &[
-    Task {
-        id: "rust-off-by-one",
-        goal: "fix the answer function in src/lib.rs so the test suite passes",
-        files: &[
-            ("Cargo.toml", RUST_MANIFEST),
-            (
-                "src/lib.rs",
-                "pub fn answer() -> u32 { 1 }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    \
-                 fn answer_is_two() { assert_eq!(super::answer(), 2); }\n}\n",
-            ),
-        ],
-        hidden_check: &["cargo", "test", "--quiet"],
-    },
-    Task {
-        id: "rust-dedup-sorted",
-        goal: "implement dedup_sorted in src/lib.rs: remove consecutive duplicates from a \
-               sorted Vec<i64> in place, preserving order; make the tests pass",
-        files: &[
-            ("Cargo.toml", RUST_MANIFEST),
-            (
-                "src/lib.rs",
-                "pub fn dedup_sorted(values: &mut Vec<i64>) { let _ = values; todo!() }\n\n\
-                 #[cfg(test)]\nmod tests {\n    #[test]\n    fn removes_consecutive() {\n        \
-                 let mut v = vec![1, 1, 2, 3, 3, 3];\n        super::dedup_sorted(&mut v);\n        \
-                 assert_eq!(v, vec![1, 2, 3]);\n    }\n    #[test]\n    fn empty_ok() {\n        \
-                 let mut v: Vec<i64> = vec![];\n        super::dedup_sorted(&mut v);\n        \
-                 assert!(v.is_empty());\n    }\n}\n",
-            ),
-        ],
-        hidden_check: &["cargo", "test", "--quiet"],
-    },
-    Task {
-        id: "rust-dependency-order",
-        goal: "implement topo_order in src/graph.rs: deterministic topological order of the \
-               dependency edges (lexicographic among ready nodes), returning None on a cycle; \
-               make the tests pass",
-        files: &[
-            ("Cargo.toml", RUST_MANIFEST),
-            ("src/lib.rs", "pub mod graph;\n"),
-            (
-                "src/graph.rs",
-                "use std::collections::BTreeMap;\n\npub fn topo_order(edges: &[(String, String)]) \
-                 -> Option<Vec<String>> {\n    let _ = edges;\n    let _unused: BTreeMap<String, \
-                 u32> = BTreeMap::new();\n    todo!()\n}\n\n#[cfg(test)]\nmod tests {\n    use \
-                 super::*;\n    fn edge(a: &str, b: &str) -> (String, String) { (a.into(), \
-                 b.into()) }\n    #[test]\n    fn orders_dependencies_first() {\n        let \
-                 order = topo_order(&[edge(\"a\", \"b\"), edge(\"b\", \"c\")]).unwrap();\n        \
-                 assert_eq!(order, vec![\"a\", \"b\", \"c\"]);\n    }\n    #[test]\n    fn \
-                 cycles_return_none() {\n        assert!(topo_order(&[edge(\"a\", \"b\"), \
-                 edge(\"b\", \"a\")]).is_none());\n    }\n}\n",
-            ),
-        ],
-        hidden_check: &["cargo", "test", "--quiet"],
-    },
-    Task {
-        id: "py-off-by-one",
-        goal: "fix answer() in src/t/lib.py so the test suite passes",
-        files: &[
-            (
-                "pyproject.toml",
-                "[project]\nname='t'\nversion='0.1.0'\nrequires-python='>=3.10'\n",
-            ),
-            ("src/t/__init__.py", ""),
-            ("src/t/lib.py", "def answer() -> int:\n    return 1\n"),
-            (
-                "tests/test_lib.py",
-                "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).\
-                 resolve().parents[1] / 'src'))\nfrom t.lib import answer\n\n\ndef \
-                 test_answer():\n    assert answer() == 2\n",
-            ),
-        ],
-        hidden_check: &["uv", "run", "--no-sync", "pytest", "-q", "tests"],
-    },
-    Task {
-        id: "py-dependency-order",
-        goal: "implement topo_order(edges) in src/t/graph.py: deterministic topological order \
-               (lexicographic among ready nodes), returning None on a cycle; make the tests pass",
-        files: &[
-            (
-                "pyproject.toml",
-                "[project]\nname='t'\nversion='0.1.0'\nrequires-python='>=3.10'\n",
-            ),
-            ("src/t/__init__.py", ""),
-            (
-                "src/t/graph.py",
-                "def topo_order(edges):\n    raise NotImplementedError\n",
-            ),
-            (
-                "tests/test_graph.py",
-                "import sys, pathlib\nsys.path.insert(0, str(pathlib.Path(__file__).\
-                 resolve().parents[1] / 'src'))\nfrom t.graph import topo_order\n\n\ndef \
-                 test_orders_dependencies_first():\n    assert topo_order([('a', 'b'), ('b', \
-                 'c')]) == ['a', 'b', 'c']\n\n\ndef test_cycles_return_none():\n    assert \
-                 topo_order([('a', 'b'), ('b', 'a')]) is None\n",
-            ),
-        ],
-        hidden_check: &["uv", "run", "--no-sync", "pytest", "-q", "tests"],
-    },
-];
+struct Task {
+    id: String,
+    spec: TaskSpec,
+    fixture_dir: PathBuf,
+    hidden_dir: PathBuf,
+}
+
+/// Load every task directory (sorted by id for determinism).
+fn load_tasks(root: &Path) -> anyhow::Result<Vec<Task>> {
+    let mut tasks = Vec::new();
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        let spec: TaskSpec =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("task.json"))?)?;
+        anyhow::ensure!(
+            !spec.hidden_check.is_empty(),
+            "{}: hidden_check must not be empty",
+            dir.display()
+        );
+        tasks.push(Task {
+            id: entry.file_name().to_string_lossy().to_string(),
+            spec,
+            fixture_dir: dir.join("fixture"),
+            hidden_dir: dir.join("hidden"),
+        });
+    }
+    tasks.sort_by(|a, b| a.id.cmp(&b.id));
+    anyhow::ensure!(!tasks.is_empty(), "no tasks under {}", root.display());
+    Ok(tasks)
+}
 
 /// Deterministic SplitMix64 for the seeded bootstrap.
 struct SplitMix64(u64);
@@ -271,31 +220,106 @@ struct CellResult {
     turns_to_first_test: Option<u64>,
     denied_calls: u64,
     repeated_calls: u64,
+    /// Search and paging counters (PSP-10 Phase 11 exit evidence).
+    branches_opened: u64,
+    no_goods_recorded: u64,
+    suppressed_duplicates: u64,
+    branches_abandoned: u64,
+    pages_selected: u64,
     failure: Option<String>,
 }
 
-/// The hidden suite, identical for every arm.
-fn hidden_pass(dir: &Path, check: &[&str]) -> bool {
-    Command::new(check[0])
+/// Directories never copied into the hidden-verification tree.
+const SKIP_DIRS: &[&str] = &[
+    "target",
+    ".venv",
+    ".perspt",
+    ".perspt-target",
+    ".perspt-tmp",
+    ".perspt-home",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "node_modules",
+];
+
+fn copy_tree(source: &Path, destination: &Path) -> anyhow::Result<()> {
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if SKIP_DIRS.contains(&name.as_str()) || name == "eval-ledger.db" {
+            continue;
+        }
+        let target = destination.join(&name);
+        if entry.file_type()?.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// The hidden suite: a fresh copy of the post-run fixture with the
+/// withheld `hidden/` tree overlaid on top (overwriting any weakened
+/// visible test), run identically for every arm. The fixture's synced
+/// `.venv` is reused read-only for Python oracles.
+fn hidden_pass(fixture: &Path, task: &Task) -> bool {
+    let Ok(verify) = tempfile::tempdir() else {
+        return false;
+    };
+    if copy_tree(fixture, verify.path()).is_err() {
+        return false;
+    }
+    if task.hidden_dir.is_dir() && copy_tree(&task.hidden_dir, verify.path()).is_err() {
+        return false;
+    }
+    let check = &task.spec.hidden_check;
+    let mut command = Command::new(&check[0]);
+    command
         .args(&check[1..])
-        .current_dir(dir)
-        .env("CARGO_INCREMENTAL", "0")
+        .current_dir(verify.path())
+        .env("CARGO_INCREMENTAL", "0");
+    let venv = fixture.join(".venv");
+    if venv.is_dir() {
+        command.env("UV_PROJECT_ENVIRONMENT", venv);
+    }
+    command
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
 
+/// Copy the visible fixture into the working directory; synthesize any
+/// declared large modules; pre-sync the Python environment.
 fn write_fixture(dir: &Path, task: &Task) -> anyhow::Result<()> {
-    let mut python = false;
-    for (path, content) in task.files {
-        let full = dir.join(path);
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent)?;
+    copy_tree(&task.fixture_dir, dir)?;
+    let generate = dir.join("__generate__.json");
+    if generate.is_file() {
+        let specs: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&generate)?)?;
+        std::fs::remove_file(&generate)?;
+        for spec in specs {
+            let path = spec["path"].as_str().unwrap_or_default();
+            let entries = spec["entries"].as_u64().unwrap_or(0);
+            let full = dir.join(path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            // A large generated const table: exercises paged reads on a
+            // 100 KiB+ file without checking a blob into the repository.
+            let mut module = String::from(
+                "/// Generated lookup table.\npub const ENTRIES: &[(&str, u64)] = &[\n",
+            );
+            for index in 0..entries {
+                module.push_str(&format!("    (\"entry-{index:06}\", {index}),\n"));
+            }
+            module.push_str("];\n");
+            std::fs::write(full, module)?;
         }
-        std::fs::write(full, content)?;
-        python |= *path == "pyproject.toml";
     }
-    if python {
+    if dir.join("pyproject.toml").is_file() {
         // The synced environment is part of the fixture, not the agent's
         // job: verification is offline (`uv run --no-sync`), so pytest
         // must already be importable from the project's `.venv`.
@@ -339,9 +363,9 @@ async fn run_direct(
         "You are a coding agent. Read and write files with the provided tools \
          until the task is complete, then reply DONE.",
     );
-    conversation.push_user(task.goal.to_string());
+    conversation.push_user(task.spec.goal.clone());
     let mut cell = CellResult {
-        task: task.id.into(),
+        task: task.id.clone(),
         arm: "direct".into(),
         ..Default::default()
     };
@@ -448,11 +472,11 @@ async fn run_governed(
     )?
     .with_database_path(database.clone());
     let mut cell = CellResult {
-        task: task.id.into(),
+        task: task.id.clone(),
         arm: arm.name.into(),
         ..Default::default()
     };
-    match runtime.run(task.goal.into()).await {
+    match runtime.run(task.spec.goal.clone()).await {
         Ok(summary) => {
             cell.model_turns = u64::from(summary.turns_used);
             fold_ledger_metrics(&database, &summary.session_id, &mut cell);
@@ -462,7 +486,7 @@ async fn run_governed(
     Ok(cell)
 }
 
-/// Ledger-derived process metrics for a governed cell.
+/// Ledger-derived process and search metrics for a governed cell.
 fn fold_ledger_metrics(database: &Path, session_id: &str, cell: &mut CellResult) {
     let Ok(store) = perspt_store::SessionStore::open(&database.to_path_buf()) else {
         return;
@@ -509,6 +533,19 @@ fn fold_ledger_metrics(database: &Path, session_id: &str, cell: &mut CellResult)
                 }
             }
             Some("effect_denied") => cell.denied_calls += 1,
+            Some("branch_forked") => cell.branches_opened += 1,
+            Some("no_good_recorded") => cell.no_goods_recorded += 1,
+            Some("branch_abandoned") => cell.branches_abandoned += 1,
+            Some("branch_observation") => {
+                let observation = body
+                    .get("observation")
+                    .and_then(|o| o.as_str())
+                    .unwrap_or_default();
+                if observation.contains("suppressed") {
+                    cell.suppressed_duplicates += 1;
+                }
+            }
+            Some("context_pages_selected") => cell.pages_selected += 1,
             _ => {}
         }
     }
@@ -519,10 +556,12 @@ async fn main() -> anyhow::Result<()> {
     let model = std::env::args()
         .nth(1)
         .expect("usage: psp10_eval <provider::model> [task-limit]");
+    let tasks_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/eval_tasks");
+    let tasks = load_tasks(&tasks_root)?;
     let limit: usize = std::env::args()
         .nth(2)
         .and_then(|value| value.parse().ok())
-        .unwrap_or(TASKS.len());
+        .unwrap_or(tasks.len());
     let config = perspt_core::Config::load_from_path(&PathBuf::from("config.local.toml"))?;
     let portfolio = std::sync::Arc::new(perspt_core::ModelPortfolio::from_config(&config)?);
     let direct_transport = GenAiTransport::new(portfolio);
@@ -530,7 +569,7 @@ async fn main() -> anyhow::Result<()> {
     let direct_model = ModelId::new(provider, bare_model);
 
     let mut results: Vec<CellResult> = Vec::new();
-    for task in TASKS.iter().take(limit) {
+    for task in tasks.iter().take(limit) {
         for arm in &ARMS {
             let dir = tempfile::tempdir()?;
             write_fixture(dir.path(), task)?;
@@ -541,20 +580,35 @@ async fn main() -> anyhow::Result<()> {
                 run_governed(arm, &model, &config, dir.path(), task).await?
             };
             cell.wall_secs = started.elapsed().as_secs_f64();
-            // The hidden suite decides hard pass for every arm identically.
-            cell.hard_pass = hidden_pass(dir.path(), task.hidden_check);
+            // The WITHHELD suite decides hard pass for every arm identically.
+            cell.hard_pass = hidden_pass(dir.path(), task);
             eprintln!(
-                "{}/{}: hard_pass={} wall={:.1}s turns={}",
-                task.id, arm.name, cell.hard_pass, cell.wall_secs, cell.model_turns
+                "{}/{}: hard_pass={} wall={:.1}s turns={} branches={}",
+                task.id,
+                arm.name,
+                cell.hard_pass,
+                cell.wall_secs,
+                cell.model_turns,
+                cell.branches_opened,
             );
             results.push(cell);
         }
     }
 
-    // Paired primary contrast: adaptive (arm 5) vs governed single (arm 4:
-    // the full non-search stack, so the contrast isolates search).
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&build_report(&tasks, limit, results))?
+    );
+    Ok(())
+}
+
+/// Assemble the published report: paired primary contrast (adaptive vs the
+/// full non-search stack, isolating search), per-task tags, and the Gate AE
+/// readiness flag (>= 30 paired tasks; this corpus is scaffolding until
+/// the authoring effort reaches that).
+fn build_report(tasks: &[Task], limit: usize, results: Vec<CellResult>) -> serde_json::Value {
     let passes = |arm: &str| -> Vec<f64> {
-        TASKS
+        tasks
             .iter()
             .take(limit)
             .map(|task| {
@@ -570,16 +624,21 @@ async fn main() -> anyhow::Result<()> {
     let single = passes("paging");
     let differences: Vec<f64> = adaptive.iter().zip(&single).map(|(a, s)| a - s).collect();
     let (lower, upper) = bootstrap_ci(&differences, 11, 10_000);
-
-    let report = serde_json::json!({
+    let task_count = tasks.len().min(limit);
+    serde_json::json!({
         "results": results,
+        "tasks": tasks.iter().take(limit).map(|task| serde_json::json!({
+            "id": task.id,
+            "tags": task.spec.tags,
+            "expect": task.spec.expect,
+        })).collect::<Vec<_>>(),
+        "task_count": task_count,
+        "gate_ae_ready": task_count >= 30,
         "paired_contrast": {
             "arms": ["adaptive", "paging"],
             "bootstrap_seed": 11,
             "resamples": 10_000,
             "ci95": [lower, upper],
         },
-    });
-    println!("{}", serde_json::to_string_pretty(&report)?);
-    Ok(())
+    })
 }

@@ -1,0 +1,13 @@
+{
+  "goal": "implement topo_order in src/graph.rs: deterministic topological order of the dependency edges (lexicographic among ready nodes), returning None on a cycle",
+  "hidden_check": [
+    "cargo",
+    "test",
+    "--quiet"
+  ],
+  "tags": [
+    "small",
+    "rust"
+  ],
+  "expect": "pass"
+}
