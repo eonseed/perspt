@@ -137,6 +137,14 @@ pub struct LedgerRecord {
 }
 
 /// Compute the chained hash for a record.
+/// The chain hash of one ledger entry — `sha256(prev_hash || sequence ||
+/// canonical(event))`. Public so external tooling and tests appending rows
+/// produce chain-valid entries; the ledger's integrity comes from
+/// verification on read, never from this function being private.
+pub fn entry_chain_hash(prev_hash: &str, sequence: u64, event: &LedgerEvent) -> Result<String> {
+    chain_hash(prev_hash, sequence, event)
+}
+
 fn chain_hash(prev_hash: &str, sequence: u64, event: &LedgerEvent) -> Result<String> {
     let canonical = serde_json::to_vec(event)
         .map_err(|e| SdkError::Domain(format!("event serialization failed: {e}")))?;

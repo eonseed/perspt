@@ -48,18 +48,50 @@ impl Psp9AgentRuntime {
         if running_graph.nodes.len() > 1 {
             self.adopt_route_state(&control)?;
             return self
-                .resume_graph_session(&recorder, &session_id, running_graph, &node_id, seed)
+                .resume_graph_session(
+                    &recorder,
+                    &session_id,
+                    running_graph,
+                    &node_id,
+                    control.node_generation,
+                    seed,
+                )
                 .await;
         }
         // Single-node continuation: adopt the checkpoint's exact remaining
         // budgets — a resumed loop never refills what it already spent.
         self.adopt_checkpoint(&recorder, &control, &seed)?;
+        self.resume_single_node(
+            &recorder,
+            session_id,
+            &task,
+            &node_id,
+            &control,
+            seed,
+            running_graph,
+        )
+        .await
+    }
+
+    /// The single-node continuation: re-enter the interrupted loop with
+    /// the restored seed, conclude, and promote through the ordinary gate.
+    #[allow(clippy::too_many_arguments)]
+    async fn resume_single_node(
+        &self,
+        recorder: &Psp9Recorder,
+        session_id: String,
+        task: &str,
+        node_id: &str,
+        control: &perspt_sdk::ControlFrame,
+        seed: CandidateSeed,
+        running_graph: WorkGraphRevision,
+    ) -> Result<Psp9RunSummary> {
         let attempt = match self
             .attempt_node(
-                &recorder,
+                recorder,
                 &session_id,
-                &task,
-                &node_id,
+                task,
+                node_id,
                 control.node_generation,
                 &self.model.clone(),
                 &running_graph,
@@ -69,24 +101,24 @@ impl Psp9AgentRuntime {
             .await
         {
             Ok(attempt) => attempt,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
+            Err(error) => return Err(self.fail_session(recorder, error)),
         };
         let verdict = match self
-            .conclude_attempt(&recorder, &attempt, &node_id, &task)
+            .conclude_attempt(recorder, &attempt, node_id, task)
             .await
         {
             Ok(verdict) => verdict,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
+            Err(error) => return Err(self.fail_session(recorder, error)),
         };
         let (final_outcome, status, promoted_paths) = verdict;
         if let Err(error) =
-            self.finish_node(&recorder, &running_graph, &node_id, &final_outcome, status)
+            self.finish_node(recorder, &running_graph, node_id, &final_outcome, status)
         {
-            return Err(self.fail_session(&recorder, error));
+            return Err(self.fail_session(recorder, error));
         }
         Ok(Psp9RunSummary {
             session_id,
-            node_id,
+            node_id: node_id.to_string(),
             outcome: final_outcome,
             turns_used: attempt.outcome.turns_used,
             ledger_head: recorder.head(),
@@ -131,23 +163,62 @@ impl Psp9AgentRuntime {
         .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
 
+    /// The newest recorded state of the graph: the last `graph_revision`
+    /// event (in ledger order) inside the descendant closure of `base`.
+    /// The checkpoint binds the resumed node to its own revision, but a
+    /// sibling's terminal fold — recorded in a *later* revision — must
+    /// still be seen: judging terminality against the checkpoint-era
+    /// snapshot would silently retry a node erratum 12 requires refusing.
+    fn latest_graph_state(
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        base: &WorkGraphRevision,
+    ) -> Result<WorkGraphRevision> {
+        let mut closure: std::collections::BTreeSet<String> =
+            [base.revision_id.clone()].into_iter().collect();
+        let mut latest = base.clone();
+        for row in recorder.store.get_psp9_events(session_id)? {
+            let Ok(perspt_sdk::LedgerEvent::Custom { kind, payload }) =
+                serde_json::from_str(&row.event_json)
+            else {
+                continue;
+            };
+            if kind != "graph_revision" {
+                continue;
+            }
+            let graph: WorkGraphRevision = serde_json::from_value(payload)?;
+            let descends = graph
+                .parent_revision_id
+                .as_deref()
+                .is_some_and(|parent| closure.contains(parent));
+            if descends && closure.insert(graph.revision_id.clone()) {
+                latest = graph;
+            }
+        }
+        Ok(latest)
+    }
+
     /// Resume an interrupted multi-node graph (Gate AA): rebuild the
     /// staging root from the durable ledger, mark staged nodes stable,
     /// reset the rest to pending, and re-enter ordinary dispatch — the
     /// interrupted node continues from its candidate checkpoint when it
     /// inherits nothing, and every winner reaches the user workspace only
-    /// through the global integration gate. A graph with a terminally
-    /// failed node refuses resume: its staged winners were already
-    /// discarded by the sibling-failure rule.
+    /// through the global integration gate. Sibling terminality and
+    /// staging are judged against the **latest** recorded descendant of
+    /// the checkpoint's revision: a graph with a terminally failed node
+    /// refuses resume — its staged winners were already discarded by the
+    /// sibling-failure rule.
     async fn resume_graph_session(
         &self,
         recorder: &Psp9Recorder,
         session_id: &str,
         graph: WorkGraphRevision,
         resumed_node: &str,
+        resumed_generation: u32,
         seed: node::CandidateSeed,
     ) -> Result<Psp9RunSummary> {
-        if let Some(failed) = graph.nodes.iter().find(|node| {
+        let latest = Self::latest_graph_state(recorder, session_id, &graph)?;
+        if let Some(failed) = latest.nodes.iter().find(|node| {
             !matches!(
                 node.state,
                 WorkNodeState::Pending
@@ -164,8 +235,8 @@ impl Psp9AgentRuntime {
                 failed.state
             );
         }
-        let staging = integrate::fold_staging(recorder, session_id, &graph)?;
-        let resumed = Self::resumed_revision(&graph, &staging)?;
+        let staging = integrate::fold_staging(recorder, session_id, &latest)?;
+        let resumed = Self::resumed_revision(&latest, &staging)?;
         recorder.record_custom("graph_revision", serde_json::to_value(&resumed)?)?;
         recorder.record_custom(
             "graph_resumed",
@@ -173,11 +244,17 @@ impl Psp9AgentRuntime {
                 "resumed_node": resumed_node,
                 "staged": staging.contributions.keys().collect::<Vec<_>>(),
                 "staging_root": staging.digest(),
+                "latest_revision": latest.revision_id,
             }),
         )?;
         let mut resume_seeds = std::collections::BTreeMap::new();
-        // A node already staged before the crash has nothing to re-run.
-        if !staging.contributions.contains_key(resumed_node) {
+        // The mid-loop checkpoint continues only a node the latest state
+        // still shows unchanged (same generation, not yet staged): a node
+        // refined or folded after the checkpoint re-runs fresh.
+        let unchanged = latest
+            .node(resumed_node)
+            .is_some_and(|node| node.generation == resumed_generation);
+        if unchanged && !staging.contributions.contains_key(resumed_node) {
             resume_seeds.insert(resumed_node.to_string(), seed);
         }
         let dispatched = match self
