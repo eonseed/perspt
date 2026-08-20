@@ -307,7 +307,19 @@ async fn oversized_output_pages_back_in_full_through_read_artifact() {
 
     toolloop.run("read the big file").await.unwrap();
 
-    // Every model-facing effect output respected the preview bound.
+    assert_outputs_bounded_with_truncation_note(&recorder);
+    assert_pages_reassemble(&transport);
+
+    // A miss is a plain message, not an error.
+    assert!(recorder
+        .fetch_artifact("0000000000000000000000000000000000000000000000000000000000000000")
+        .unwrap()
+        .is_none());
+}
+
+/// Every model-facing effect output respected the preview bound and the
+/// oversized read carried an artifact note.
+fn assert_outputs_bounded_with_truncation_note(recorder: &ArtifactStore) {
     let events = recorder.events.lock().unwrap();
     let outputs: Vec<&String> = events
         .iter()
@@ -328,9 +340,11 @@ async fn oversized_output_pages_back_in_full_through_read_artifact() {
         .iter()
         .find(|output| output.contains("[full output: artifact:"))
         .expect("the oversized read must carry a truncation note");
-    let handle = parse_handle(truncated).expect("note names a handle");
+    parse_handle(truncated).expect("note names a handle");
+}
 
-    // The pages the transport collected reassemble the original payload.
+/// The pages the transport collected reassemble the original payload.
+fn assert_pages_reassemble(transport: &Prober) {
     let pages = transport.pages.lock().unwrap();
     assert!(pages.len() >= 2, "paging must take more than one window");
     let mut reassembled = String::new();
@@ -347,12 +361,4 @@ async fn oversized_output_pages_back_in_full_through_read_artifact() {
         big_payload(),
         "windows must reassemble losslessly"
     );
-
-    // A miss is a plain message, not an error.
-    drop(events);
-    assert!(recorder
-        .fetch_artifact("0000000000000000000000000000000000000000000000000000000000000000")
-        .unwrap()
-        .is_none());
-    let _ = handle;
 }

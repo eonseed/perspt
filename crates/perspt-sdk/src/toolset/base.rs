@@ -104,6 +104,15 @@ fn surface_entries() -> Vec<ToolEntry> {
             false,
         )
         .hot(),
+    ]
+    .into_iter()
+    .chain(recall_entries())
+    .collect()
+}
+
+/// Host-side retrieval of evicted context and stored artifacts.
+fn recall_entries() -> Vec<ToolEntry> {
+    vec![
         entry(
             "context_recall",
             "Restore one evicted context page by the page id shown in a \
@@ -185,6 +194,14 @@ fn read_entries() -> Vec<ToolEntry> {
             path_read(),
             false,
         ),
+    ]);
+    entries.extend(search_read_entries());
+    entries
+}
+
+/// The pattern-search half of the read catalog.
+fn search_read_entries() -> Vec<ToolEntry> {
+    vec![
         entry(
             "glob",
             "Match files by glob pattern, sorted by modification time",
@@ -218,8 +235,7 @@ fn read_entries() -> Vec<ToolEntry> {
             false,
         )
         .hot(),
-    ]);
-    entries
+    ]
 }
 
 /// Language-intelligence read entries.
