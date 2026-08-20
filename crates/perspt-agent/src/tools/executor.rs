@@ -2,8 +2,14 @@ use super::*;
 
 /// Default `read_file` window when the model passes no `limit`.
 const READ_DEFAULT_LIMIT: usize = 300;
+/// Largest honored `limit` for one read window; bigger requests clamp so a
+/// single call can never stage an unbounded window in memory.
+const READ_MAX_LIMIT: usize = 2000;
 /// Individual lines longer than this are truncated with an ellipsis.
 const READ_MAX_LINE_CHARS: usize = 2000;
+/// Bytes retained per line while streaming (the char cap applies after
+/// decoding); the rest of an overlong line is counted, never buffered.
+const READ_MAX_LINE_BYTES: usize = 4 * READ_MAX_LINE_CHARS + 4;
 /// Search output is capped at this many lines before the omission note.
 const GREP_MAX_LINES: usize = 200;
 /// Largest honored `-C` context value for a search.
@@ -72,6 +78,47 @@ fn capped_search_output(stdout: &[u8]) -> String {
 }
 
 /// Parse a 1-based positive integer line argument, defaulting when absent.
+/// Read one line keeping at most `cap` bytes: `(kept, skipped)` where
+/// `skipped` counts the bytes beyond the cap (newline excluded), or `None`
+/// at EOF. The tail of an overlong line is consumed without buffering, so
+/// a single multi-gigabyte line costs O(cap) memory.
+fn read_bounded_line(
+    reader: &mut impl std::io::BufRead,
+    cap: usize,
+) -> std::io::Result<Option<(Vec<u8>, usize)>> {
+    let mut kept = Vec::new();
+    let mut skipped = 0usize;
+    let mut saw_any = false;
+    loop {
+        let buf = reader.fill_buf()?;
+        if buf.is_empty() {
+            return Ok(saw_any.then_some((kept, skipped)));
+        }
+        saw_any = true;
+        let newline = buf.iter().position(|&byte| byte == b'\n');
+        let take = newline.unwrap_or(buf.len());
+        let keep = take.min(cap.saturating_sub(kept.len()));
+        kept.extend_from_slice(&buf[..keep]);
+        skipped += take - keep;
+        reader.consume(take + usize::from(newline.is_some()));
+        if newline.is_some() {
+            if skipped == 0 && kept.last() == Some(&b'\r') {
+                kept.pop();
+            }
+            return Ok(Some((kept, skipped)));
+        }
+    }
+}
+
+/// The first `cap` characters when the text is longer, `None` otherwise.
+fn char_cap(text: &str, cap: usize) -> Option<&str> {
+    let mut indices = text.char_indices();
+    match indices.nth(cap) {
+        Some((byte_index, _)) => Some(&text[..byte_index]),
+        None => None,
+    }
+}
+
 fn parse_line_argument(call: &ToolCall, name: &str, default: usize) -> Result<usize, String> {
     match call.arguments.get(name) {
         None => Ok(default),
@@ -149,8 +196,9 @@ impl AgentTools {
             Err(e) => return ToolResult::failure("read_file", e),
         };
 
-        let content = match fs::read_to_string(&path) {
-            Ok(content) => content,
+        let limit = limit.min(READ_MAX_LIMIT);
+        let file = match fs::File::open(&path) {
+            Ok(file) => file,
             Err(e) => {
                 return ToolResult::failure(
                     "read_file",
@@ -158,24 +206,64 @@ impl AgentTools {
                 )
             }
         };
-        let lines: Vec<&str> = content.lines().collect();
-        let total = lines.len();
+        // Stream: only the requested window is retained (each line capped),
+        // lines outside it are counted without buffering — memory stays
+        // O(window) whatever the file size.
+        let mut reader = std::io::BufReader::new(file);
+        let mut window: Vec<String> = Vec::new();
+        let mut total = 0usize;
+        let mut any_truncated = false;
+        loop {
+            let wanted = total + 1 >= offset && window.len() < limit;
+            let cap = if wanted { READ_MAX_LINE_BYTES } else { 0 };
+            match read_bounded_line(&mut reader, cap) {
+                Err(e) => {
+                    return ToolResult::failure(
+                        "read_file",
+                        format!("Failed to read {:?}: {}", path, e),
+                    )
+                }
+                Ok(None) => break,
+                Ok(Some((bytes, skipped))) => {
+                    total += 1;
+                    if !wanted {
+                        continue;
+                    }
+                    if bytes.contains(&0) {
+                        return ToolResult::failure(
+                            "read_file",
+                            format!("{raw_path} appears to be a binary file"),
+                        );
+                    }
+                    let text = String::from_utf8_lossy(&bytes);
+                    let rendered = match char_cap(&text, READ_MAX_LINE_CHARS) {
+                        Some(cut) => {
+                            any_truncated = true;
+                            let more = skipped + (text.len() - cut.len());
+                            format!("{cut}…[+{more} bytes on this line]")
+                        }
+                        None if skipped > 0 => {
+                            any_truncated = true;
+                            format!("{text}…[+{skipped} bytes on this line]")
+                        }
+                        None => text.into_owned(),
+                    };
+                    window.push(format!("{:>6}\t{rendered}", total));
+                }
+            }
+        }
         if offset > total {
             return ToolResult::success(
                 "read_file",
                 format!("file {raw_path}: {total} lines total; offset {offset} is past the end"),
             );
         }
-        let end = total.min(offset - 1 + limit);
+        let end = offset - 1 + window.len();
         let mut output = format!("file {raw_path}: lines {offset}-{end} of {total}\n");
-        for (index, line) in lines[offset - 1..end].iter().enumerate() {
-            let rendered = if line.chars().count() > READ_MAX_LINE_CHARS {
-                let cut: String = line.chars().take(READ_MAX_LINE_CHARS).collect();
-                format!("{cut}…")
-            } else {
-                (*line).to_string()
-            };
-            output.push_str(&format!("{:>6}\t{rendered}\n", offset + index));
+        output.push_str(&window.join("\n"));
+        output.push('\n');
+        if any_truncated {
+            output.push_str("[overlong lines truncated; grep returns full lines]\n");
         }
         if end < total {
             output.push_str(&format!(

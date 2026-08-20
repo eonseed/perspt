@@ -86,6 +86,52 @@ async fn read_file_truncates_very_long_lines() {
     assert!(result.output.len() < 3000);
 }
 
+/// Streaming boundedness: an overlong line keeps only its capped prefix
+/// (with the omitted byte count), a huge `limit` clamps, and the total is
+/// still exact — the file is never staged whole in the window.
+#[tokio::test]
+async fn read_file_bounds_overlong_lines_and_clamps_the_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("wide.txt");
+    let mut body = String::from("short first line\n");
+    body.push_str(&"y".repeat(50_000));
+    body.push('\n');
+    body.push_str("short last line\n");
+    fs::write(&file, body).unwrap();
+    let tools = AgentTools::new(dir.path().to_path_buf());
+
+    let result = tools.read_file(&read_call(&file, &[("limit", "999999999")]));
+    assert!(result.success);
+    assert!(result.output.contains("lines 1-3 of 3"));
+    assert!(result.output.contains("bytes on this line]"));
+    assert!(result.output.contains("overlong lines truncated"));
+    assert!(result.output.contains("short last line"));
+    assert!(
+        result.output.len() < 20_000,
+        "the 50KB line must not be returned whole"
+    );
+}
+
+/// CRLF endings render without the carriage return, and a binary file is
+/// refused instead of streamed.
+#[tokio::test]
+async fn read_file_strips_crlf_and_refuses_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("crlf.txt");
+    fs::write(&file, "one\r\ntwo\r\n").unwrap();
+    let tools = AgentTools::new(dir.path().to_path_buf());
+    let result = tools.read_file(&read_call(&file, &[]));
+    assert!(result.success);
+    assert!(result.output.contains("     1\tone\n"));
+    assert!(!result.output.contains('\r'));
+
+    let binary = dir.path().join("blob.bin");
+    fs::write(&binary, b"ab\x00cd\n").unwrap();
+    let refused = tools.read_file(&read_call(&binary, &[]));
+    assert!(!refused.success);
+    assert!(refused.error.unwrap_or_default().contains("binary"));
+}
+
 fn search_call(args: &[(&str, &str)]) -> ToolCall {
     ToolCall {
         name: "grep".to_string(),
