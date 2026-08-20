@@ -2449,6 +2449,12 @@ improvement* is separable, and the spec's adaptive-default rule
 ("must also reduce repeated identical failures") is not met when both
 arms already show zero. The default stays ``initial_branches = 1``.
 
+Those 2026-08-19 reports are retained as historical harness evidence only.
+They predate the content-addressed 30-task corpus introduced on 2026-08-21,
+so their five-task corpus digest cannot be aggregated with the release
+corpus and they do not satisfy Gate AE's sample floor. New live reports are
+required; **Accepted** remains unclaimed.
+
 .. note::
 
    Updated as each phase lands. This PSP ships within the v0.6.6 release
@@ -2581,14 +2587,16 @@ arms already show zero. The default stays ``initial_branches = 1``.
        session start (invalid refuses startup); research-domain search
        conformance test; nonzero process exit for escalation or
        incomplete work; headless progress narration; ``perspt db
-       repair`` guidance on a corrupted store. The seven-arm ladder in
-       ``examples/psp10_eval.rs`` (live, credential-gated, never CI) has
+       repair`` guidance on a corrupted store. The optional seven-arm ladder
+       in the separate ``perspt-benchmark`` crate (live, credential-gated,
+       never CI) has
        a real ungoverned direct arm, real packet/paging ablation
        toggles, matched Rust and Python tasks loaded from the
-       ``examples/eval_tasks/`` corpus with **withheld** oracle overlays
-       (erratum 10), per-cell process metrics plus search/paging
-       counters, and a ``gate_ae_ready`` flag that stays false below 30
-       paired tasks. Live bundle substitution is wired: a validated
+       crate's ``corpus/`` directory with **withheld** oracle overlays
+       (erratum 10), per-cell process metrics plus search/paging counters,
+       and a composition/solvability gate over 30 heterogeneous tasks
+       (errata 29–31). ``gate_ae_ready`` stays false below 30 paired tasks
+       or when a cell is missing. Live bundle substitution is wired: a validated
        replacement body substitutes into the composed platform programs
        under exactly the compiled schema, only with
        ``--allow-experimental-prompts``, with every active override
@@ -2757,8 +2765,9 @@ concurrent paths; items 18–21 close them.
     into a page the next acceptance stales, killing the continuation at
     the fail-closed assembler. A pre-provenance checkpoint restores with
     the legacy fallback: the instruction/task head is session-invariant,
-    the remaining pages carry the restored root (their true birth root is
-    unrecorded — a documented residual for old ledgers only).
+    and every remaining page is deliberately stale/tombstoned because its
+    true birth root is unknowable. It is never labelled with the restored
+    root, which would launder unknown evidence as current.
 19. **The conversation refold routes by digest chain.** Concurrent node
     loops (and search branches) interleave conversation events on the one
     session ledger, so the Gate O refold no longer holds a single live
@@ -2780,6 +2789,115 @@ concurrent paths; items 18–21 close them.
     a crash in either window resumes with the charge. Fork admission
     checks the exact no-good store and the turn-headroom probe **before**
     reserving: a suppressed duplicate or refused fork consumes nothing.
+
+A fourth audit round exercised durable-record ambiguity and parallel
+large-project paths; items 22–26 close those residuals.
+
+22. **The ledger is the checkpoint authority.** Resume selects the last
+    ``durable_candidate_checkpoint`` in verified ledger order, not the
+    newest row of the auxiliary checkpoint table. The table may lag the
+    event across a crash, tie on timestamps, or contain a later context
+    checkpoint; none can hide or replace the hash-chained resume point.
+    The event's conversation, provenance, control frame, scope, and file
+    handles are used directly. The conversation and activated-tool set
+    must refold from their digest chain, the event state root must equal the
+    control frame's accepted root, and a non-empty provenance vector must be
+    exactly parallel to the conversation; disagreement refuses resume.
+23. **Graph resume requires one unambiguous lineage.** Starting at the
+    checkpoint revision, later graph revisions must form one contiguous
+    parent/sequence chain. A fork from an earlier ancestor refuses resume
+    rather than selecting whichever branch happened to be recorded last.
+    A node's mid-loop checkpoint is eligible only while the latest graph
+    still marks that exact generation ``Running``; a later state fold or
+    generation change causes a fresh governed attempt.
+24. **Staged winners are generation-bound.** Every
+    ``staging_root_updated`` event records the producing node generation.
+    Reconstruction admits a contribution only for the latest graph's same
+    generation; a superseded generation is ignored and re-runs. Staging
+    records predating this binding refuse reconstruction because assigning
+    them to a replacement node would be ambiguous.
+25. **Interrupted search usage has one owner.** ``SearchOpened`` already
+    records node, generation, and accepted root; the resume fold carries
+    that complete binding into ``SearchSeed`` independently of which
+    parallel node wrote the latest candidate checkpoint. A different node,
+    generation, or root may open a forest first, but receives a fresh
+    budget and cannot consume the interrupted forest's reserved usage. More
+    than one unclosed forest is itself ambiguous and refuses the fold
+    instead of choosing by map order.
+26. **Search subprocess bounds include liveness.** Search stdout and stderr
+    are drained concurrently, each with a retained-byte cap; bytes past the
+    cap are discarded while the pipe continues to drain, so a full stderr
+    pipe cannot deadlock a stdout reader or ``wait``. A 30-second process
+    deadline kills a hung search. Hitting the 2 MiB stdout cap remains a
+    successful truncated observation; timeout and launch failures remain
+    stage-routed infrastructure failures.
+27. **Large repository maps are prefix-unbiased.** Repository orientation
+    walks every non-ignored file's metadata instead of stopping after the
+    first 5,000 paths, so a Cargo workspace or Python package later in a
+    large monorepo cannot disappear from the architect's map. Language and
+    build-system summaries observe the complete walk; package roots, entry
+    points, risk hotspots, and manifest witnesses retain deterministic
+    lexicographically bounded sets. Manifest witnesses are SHA-256 streamed,
+    keeping memory bounded even for a pathological manifest.
+28. **Read-only discovery stays bounded on large trees.** ``glob`` uses the
+    ignore-aware non-symlink-following walker, counts the complete match set,
+    and retains at most the newest 10,000 paths for pagination; one generated
+    tree cannot consume memory proportional to all matches or recurse through
+    a symlink cycle. ``list_files`` likewise counts all direct entries while
+    retaining a deterministic 10,000-entry prefix, and listing page sizes
+    clamp at 1,000. ``git_read`` shares the concurrent 2 MiB/30-second
+    subprocess bound and reports truncation, so an unconstrained log or diff
+    cannot materialize unbounded output. Git output-file, external-diff,
+    text-conversion, no-index, and pathspec-file options are refused; pagers
+    and inherited external-diff commands are disabled, preserving the
+    tool's declared read-only effect.
+
+A fifth audit round replaced the small scaffolding benchmark with a release
+corpus and made the evaluator's own acceptance claim fail closed; items
+29–31 record that closure.
+
+29. **Corpus readiness is structural and executable.** A count of task
+    directories is not Gate AE evidence. The committed corpus contains 30
+    matched tasks (16 Rust, 10 Python, and 4 mixed Rust/Python; 7 small, 16
+    medium, and 7 large) with enforced floors for workspaces, multi-file
+    changes, graph planning, recovery, long-context paging, API contracts,
+    algorithms, state machines, concurrency, and serialization. Every task
+    has a ``fixture/``, withheld ``hidden/`` oracle, and withheld
+    ``solution/`` overlay. ``perspt benchmark validate`` proves the unfinished
+    fixture fails and the reference overlay passes; any exception refuses a
+    live run. A digest binds the semantic task records and every file in all
+    three trees.
+30. **The seven arms share task affordances and time bounds.** The direct
+    arm exposes read, list, search, exact edit, whole-file write, build, and
+    test operations rather than being artificially restricted to whole-file
+    reads and writes. All arms keep the same turn and per-call limits and now
+    share a 600-second whole-cell deadline. Task order is a published seeded
+    shuffle, while every task's seven arms remain adjacent and paired. The
+    report records the order seed, expected/completed cell count, predeclared
+    0.05 noninferiority margin, repeated-call contrast, and escaped hard-gate
+    regressions.
+31. **One route cannot declare the adaptive default accepted.** Each live
+    report carries its resolved configured topology, derived actuator family,
+    the corpus digest, and
+    only an ``adaptive_route_accepted`` result. ``adaptive_default_accepted``
+    remains false in a single-route report. ``perspt benchmark aggregate``
+    requires full
+    accepted reports with one identical corpus digest from at least two
+    distinct model families; a failed route, missing digest, changed corpus,
+    noninferiority miss, escaped hard-gate regression, or failure to strictly
+    reduce repeated calls keeps the aggregate false.
+32. **Benchmarking is optional and configuration-driven.** The corpus and
+    runner live in ``perspt-benchmark`` rather than an agent example. The
+    ordinary runtime, SDK, conformance suite, and default CLI build do not
+    depend on live evaluation or credentials. ``perspt benchmark`` is exposed
+    only by the CLI's ``benchmark`` feature and provides ``validate``, ``run``,
+    and ``aggregate``. A run accepts suite/task/output controls but no model
+    names: applicable model roles are resolved from the same Perspt
+    configuration used in production and the complete configured topology is
+    bound into the report (the coding verifier remains deterministic, so its
+    configured route is provenance rather than a model call). ``smoke`` is the cheap
+    default; ``adaptive`` and ``full`` are explicit, potentially long-running
+    evidence modes.
 
 =========================
 Resolved Design Decisions

@@ -157,6 +157,26 @@ total retries. The ``BudgetEnvelope`` (step/cost/revision caps) is restored from
 the database so limits continue from the interrupted session.
 
 
+``benchmark`` (optional)
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Build ``perspt-cli`` with the Cargo feature ``benchmark`` to expose the
+separate evaluation runner. It is absent from the default CLI build.
+
+.. code-block:: bash
+
+   perspt benchmark validate
+   perspt --config config.local.toml benchmark run --suite smoke --output report.json
+   perspt benchmark aggregate report-a.json report-b.json
+
+``validate`` is credential-free. ``run`` is explicit and credentialed; its
+``smoke``, ``adaptive``, and ``full`` suites use production role resolution
+from the selected Perspt configuration and record the configured topology.
+Coding verification stays deterministic, so a configured verifier route is
+provenance rather than a model call. Model names and family labels are not
+benchmark arguments.
+
+
 ``logs``
 ~~~~~~~~
 
