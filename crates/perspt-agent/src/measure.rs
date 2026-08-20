@@ -105,8 +105,10 @@ impl<'a> CodingCandidateMeasurer<'a> {
         &self,
         immutable_oracle_root: Option<&Path>,
         residuals: &mut Vec<ResidualEvent>,
+        advisory: &mut Vec<ResidualEvent>,
         satisfied_stages: &mut BTreeSet<&'static str>,
         all_passed: &mut bool,
+        required: &BTreeSet<String>,
     ) -> Result<Vec<VerifierJob>> {
         let registry = perspt_core::PluginRegistry::new();
         let mut jobs = Vec::new();
@@ -136,12 +138,16 @@ impl<'a> CodingCandidateMeasurer<'a> {
                         satisfied_stages.insert(capability.stage.policy_name());
                         continue;
                     }
-                    residuals.push(sensor_unavailable(
+                    fold_infra_failure(
                         &self.node_id,
                         self.generation,
+                        capability.stage,
                         &format!("{}:{}", plugin.name(), capability.stage),
-                    )?);
-                    *all_passed = false;
+                        residuals,
+                        advisory,
+                        all_passed,
+                        required,
+                    )?;
                     continue;
                 };
                 jobs.push(VerifierJob {
@@ -378,8 +384,10 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                 .as_ref()
                 .map(|oracle| oracle.root.as_path()),
             &mut residuals,
+            &mut advisory,
             &mut ran_stages,
             &mut all_passed,
+            &required,
         )?;
 
         let ran = jobs.len();
@@ -398,14 +406,16 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
                         &mut all_passed,
                         &required,
                     )?,
-                    Err(error) => {
-                        residuals.push(sensor_unavailable(
-                            &self.node_id,
-                            self.generation,
-                            &format!("{}:{} ({error})", job.plugin, job.stage),
-                        )?);
-                        all_passed = false;
-                    }
+                    Err(error) => fold_infra_failure(
+                        &self.node_id,
+                        self.generation,
+                        job.stage,
+                        &format!("{}:{} ({error})", job.plugin, job.stage),
+                        &mut residuals,
+                        &mut advisory,
+                        &mut all_passed,
+                        &required,
+                    )?,
                 }
             }
         }
@@ -513,6 +523,32 @@ fn junit_report_path(command: &str) -> Option<String> {
     None
 }
 
+/// Route one verifier *infrastructure* failure (unavailable capability,
+/// launch error, timeout) by stage: it blocks hard pass only when the
+/// stage is in the domain's required set — a lint timeout or a missing
+/// lint binary is as advisory as a lint finding (erratum 11: non-required
+/// stages cannot block acceptance), while a build or test failure to run
+/// still blocks.
+#[allow(clippy::too_many_arguments)]
+fn fold_infra_failure(
+    node_id: &str,
+    generation: u32,
+    stage: perspt_core::plugin::VerifierStage,
+    detail: &str,
+    residuals: &mut Vec<ResidualEvent>,
+    advisory: &mut Vec<ResidualEvent>,
+    all_passed: &mut bool,
+    required: &BTreeSet<String>,
+) -> Result<()> {
+    let blocking = required.contains(stage.policy_name());
+    let sink = if blocking { residuals } else { advisory };
+    sink.push(sensor_unavailable(node_id, generation, detail)?);
+    if blocking {
+        *all_passed = false;
+    }
+    Ok(())
+}
+
 fn sensor_unavailable(node: &str, generation: u32, sensor: &str) -> Result<ResidualEvent> {
     tool_residual(
         node,
@@ -529,4 +565,57 @@ fn concise(output: &str) -> String {
         .take(8)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn required() -> BTreeSet<String> {
+        ["syntax", "build", "test"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    }
+
+    /// Erratum 11 covers infrastructure too: a lint-stage timeout or
+    /// missing lint binary lands in the advisory sink and leaves
+    /// `all_passed` alone, while the same failure on a required stage
+    /// still blocks.
+    #[test]
+    fn infra_failures_block_only_on_required_stages() {
+        use perspt_core::plugin::VerifierStage;
+        let mut residuals = Vec::new();
+        let mut advisory = Vec::new();
+        let mut all_passed = true;
+        fold_infra_failure(
+            "n1",
+            0,
+            VerifierStage::Lint,
+            "rust:lint (deadline elapsed)",
+            &mut residuals,
+            &mut advisory,
+            &mut all_passed,
+            &required(),
+        )
+        .unwrap();
+        assert!(all_passed, "a lint infra failure must not clear all_passed");
+        assert!(residuals.is_empty(), "nothing enters the blocking sink");
+        assert_eq!(advisory.len(), 1, "the failure is still reported");
+        assert_eq!(advisory[0].class, ResidualClass::SensorUnavailable);
+
+        fold_infra_failure(
+            "n1",
+            0,
+            VerifierStage::Test,
+            "rust:test (deadline elapsed)",
+            &mut residuals,
+            &mut advisory,
+            &mut all_passed,
+            &required(),
+        )
+        .unwrap();
+        assert!(!all_passed, "a required-stage infra failure still blocks");
+        assert_eq!(residuals.len(), 1);
+    }
 }
