@@ -56,6 +56,19 @@ impl SimpleInput {
         }
     }
 
+    /// Insert a bracketed-paste payload at the cursor, preserving line
+    /// breaks and Unicode scalar boundaries.
+    pub fn insert_text(&mut self, text: &str) {
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        for character in normalized.chars() {
+            if character == '\n' {
+                self.insert_newline();
+            } else if character != '\0' {
+                self.insert_char(character);
+            }
+        }
+    }
+
     /// Insert a newline at the cursor position
     pub fn insert_newline(&mut self) {
         if self.cursor_line < self.lines.len() {
@@ -369,6 +382,19 @@ mod tests {
         input.insert_char('b');
         assert_eq!(input.text(), "a\nb");
         assert_eq!(input.line_count(), 2);
+    }
+
+    #[test]
+    fn multiline_paste_works() {
+        let mut input = SimpleInput::new();
+        input.set_text("left-right");
+        for _ in 0..6 {
+            input.move_left();
+        }
+        input.insert_text("α\r\nβ\rγ\0");
+        assert_eq!(input.text(), "leftα\nβ\nγ-right");
+        assert_eq!(input.cursor_line(), 2);
+        assert_eq!(input.cursor_col, 1);
     }
 
     #[test]

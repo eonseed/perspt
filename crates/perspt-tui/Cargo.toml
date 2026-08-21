@@ -29,6 +29,7 @@ pulldown-cmark = "0.13"
 # Async
 tokio = { version = "1.42", features = ["full"] }
 tokio-stream = "0.1"
+serde_json = { workspace = true }
 futures = { workspace = true }
 
 # Rich Input
