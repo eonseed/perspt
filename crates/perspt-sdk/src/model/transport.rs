@@ -23,6 +23,14 @@ use super::tool::{ToolChoicePolicy, ToolSpec, TurnOutput};
 use crate::error::Result;
 use crate::prompt::PromptRoute;
 
+/// Provider-neutral generation controls for a single model turn.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GenerationOptions {
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub stop_sequences: Vec<String>,
+}
+
 /// Boxed future returned by transport calls.
 pub type TransportFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
@@ -40,6 +48,19 @@ pub trait ModelTransport: Send + Sync {
         tools: &'a [ToolSpec],
         choice: ToolChoicePolicy,
     ) -> TransportFuture<'a, TurnOutput>;
+
+    /// Run one turn with explicit generation controls. Implementations that
+    /// cannot express them retain their ordinary turn behavior.
+    fn chat_turn_with_options<'a>(
+        &'a self,
+        model: &'a ModelId,
+        conversation: &'a Conversation,
+        tools: &'a [ToolSpec],
+        choice: ToolChoicePolicy,
+        _options: GenerationOptions,
+    ) -> TransportFuture<'a, TurnOutput> {
+        self.chat_turn(model, conversation, tools, choice)
+    }
 
     /// The route's capability record (declared or probed).
     fn capabilities(&self, model: &ModelId) -> ProviderCapabilities;
