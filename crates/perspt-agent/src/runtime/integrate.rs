@@ -254,12 +254,14 @@ impl Psp9AgentRuntime {
             return Ok(None);
         }
         // Realize the combined state in an isolated integration workspace.
-        let mut workspace = CandidateWorkspace::create_with_policy(
+        let exclusions = self.candidate_exclusions();
+        let mut workspace = CandidateWorkspace::create_filtered(
             &self.working_dir,
             "integration",
             0,
             &graph.revision_id,
             self.config.allow_unisolated_verifiers,
+            &exclusions,
         )?;
         workspace.set_tool_handlers(self.tool_handlers.clone());
         workspace.set_verifier_timeouts(self.config.verifier_timeouts);
