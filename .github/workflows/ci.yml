@@ -73,6 +73,8 @@ jobs:
           cargo_bin_root="${CARGO_HOME:-$HOME/.cargo}/bin"
           rustup_root="${RUSTUP_HOME:-$HOME/.rustup}"
           rustc_path="$(rustup which rustc)"
+          cargo init --lib --quiet "$probe_root"
+          mkdir -p "$probe_root/.perspt-home" "$probe_root/.perspt-target" "$probe_root/.perspt-tmp"
           bwrap \
             --die-with-parent \
             --unshare-net \
@@ -93,7 +95,13 @@ jobs:
               ls -l "$1"
               "$1" -vV
               rustc -vV
-            ' probe "$rustc_path"
+              HOME="$2/.perspt-home" \
+                CARGO_HOME="$3" \
+                RUSTUP_HOME="$4" \
+                CARGO_TARGET_DIR="$2/.perspt-target" \
+                TMPDIR="$2/.perspt-tmp" \
+                cargo check --offline
+            ' probe "$rustc_path" "$probe_root" "${CARGO_HOME:-$HOME/.cargo}" "$rustup_root"
 
       - name: Cache Cargo downloads
         uses: actions/cache@v6
