@@ -9,9 +9,10 @@ for CI/CD pipelines, batch code generation, and automated workflows.
 Overview
 --------
 
-In headless mode (``--yes`` flag), the agent auto-approves all changes, skipping
-the interactive review modal. Combined with ``--workdir``, it enables fully
-autonomous project generation.
+In headless mode (``--yes`` flag), the agent auto-approves final promotion,
+skipping the interactive review modal. Combined with ``--workdir``, it enables
+bounded autonomous project generation. It does not bypass capability grants,
+verification gates, budgets, the ledger, or workspace confinement.
 
 .. code-block:: bash
 
@@ -50,7 +51,7 @@ The agent will:
 2. Plan the work graph — a single node by default; with
    ``--max-parallel-nodes`` above 1, one governed architect turn may
    decompose the task
-3. Execute all nodes, auto-approving each
+3. Execute all nodes within their capability grants
 4. Run verification (LSP + tests) on each node
 5. Commit stable nodes to the ledger
 6. Print a summary
@@ -66,7 +67,7 @@ Key Flags
    * - Flag
      - Description
    * - ``--yes`` / ``-y``
-     - Auto-approve all changes (headless mode)
+     - Auto-approve final promotion (headless mode)
    * - ``-w, --workdir <DIR>``
      - Working directory for the project
    * - ``--max-turns <N>``
