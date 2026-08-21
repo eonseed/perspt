@@ -16,8 +16,8 @@ pub mod types;
 
 pub use config::{
     Config, ContextConfig, ExplorationConfig, ExternalOracleConfig, ExternalToolConfig,
-    ExternalToolMode, ExternalToolPolicy, ExternalToolTransport, ModelsConfig, PromptsConfig,
-    ProviderEntry, TestPolicy,
+    ExternalToolMode, ExternalToolPolicy, ExternalToolTransport, McpRootConfig, ModelsConfig,
+    PromptsConfig, ProviderEntry, TestPolicy,
 };
 pub use events::{ActionType, AgentAction, AgentEvent, NodeStatus};
 pub use llm_provider::{

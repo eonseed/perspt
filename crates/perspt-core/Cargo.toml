@@ -49,6 +49,7 @@ dirs = { workspace = true }
 
 # Utilities
 anyhow = { workspace = true }
+url = { workspace = true }
 
 [build-dependencies]
 perspt-prompt-macros = { workspace = true }

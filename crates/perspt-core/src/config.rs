@@ -93,7 +93,6 @@ fn default_external_modes() -> Vec<ExternalToolMode> {
 #[serde(rename_all = "snake_case")]
 pub enum ExternalToolTransport {
     Stdio,
-    #[serde(alias = "http")]
     StreamableHttp,
 }
 
@@ -107,6 +106,32 @@ fn default_external_result_bytes() -> usize {
 
 fn default_external_stderr_bytes() -> usize {
     65_536
+}
+
+fn default_subscriptions() -> bool {
+    true
+}
+
+fn default_tasks() -> bool {
+    true
+}
+
+fn default_task_wait_ms() -> u64 {
+    300_000
+}
+
+fn default_sampling_tokens() -> u32 {
+    4096
+}
+
+/// One filesystem root that an MCP server may learn through ``roots/list``.
+/// Roots are never inferred: each URI is an explicit disclosure boundary.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct McpRootConfig {
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Locally trusted governance declaration for one discovered remote tool.
@@ -143,6 +168,30 @@ pub struct ExternalToolConfig {
     pub max_stderr_bytes: usize,
     #[serde(default = "default_external_modes")]
     pub modes: Vec<ExternalToolMode>,
+    /// Explicit roots returned to server-initiated ``roots/list`` requests.
+    /// An empty list means that the roots capability is not advertised.
+    pub roots: Vec<McpRootConfig>,
+    /// Allow server-initiated model sampling. This is opt-in because it spends
+    /// the configured provider's model budget.
+    pub sampling: bool,
+    /// Allow server-initiated elicitation. A product surface must also install
+    /// an interactive handler; otherwise connection fails closed.
+    pub elicitation: bool,
+    /// Open the MCP 2026-07-28 ``subscriptions/listen`` stream for advertised
+    /// list-change notifications and the resource URIs below.
+    #[serde(default = "default_subscriptions")]
+    pub subscriptions: bool,
+    pub resource_subscriptions: Vec<String>,
+    /// Advertise and drive the official tasks extension for long-running calls.
+    #[serde(default = "default_tasks")]
+    pub tasks: bool,
+    /// Overall deadline for one asynchronous MCP task, across every poll and
+    /// input-required round. Individual requests still use ``timeout_ms``.
+    #[serde(default = "default_task_wait_ms")]
+    pub max_task_wait_ms: u64,
+    /// Local upper bound on a server sampling request.
+    #[serde(default = "default_sampling_tokens")]
+    pub max_sampling_tokens: u32,
     pub tools: BTreeMap<String, ExternalToolPolicy>,
 }
 
@@ -159,6 +208,14 @@ impl Default for ExternalToolConfig {
             max_result_bytes: default_external_result_bytes(),
             max_stderr_bytes: default_external_stderr_bytes(),
             modes: default_external_modes(),
+            roots: Vec::new(),
+            sampling: false,
+            elicitation: false,
+            subscriptions: default_subscriptions(),
+            resource_subscriptions: Vec::new(),
+            tasks: default_tasks(),
+            max_task_wait_ms: default_task_wait_ms(),
+            max_sampling_tokens: default_sampling_tokens(),
             tools: BTreeMap::new(),
         }
     }
@@ -188,6 +245,7 @@ impl ExternalToolConfig {
             "external tool {:?}: result and stderr caps must be positive",
             self.id
         );
+        self.validate_mcp()?;
         anyhow::ensure!(
             !self.modes.is_empty(),
             "external tool {:?}: modes cannot be empty",
@@ -211,6 +269,36 @@ impl ExternalToolConfig {
                 "external tool {:?}: Streamable HTTP requires url and forbids command",
                 self.id
             ),
+        }
+        Ok(())
+    }
+
+    fn validate_mcp(&self) -> Result<()> {
+        anyhow::ensure!(
+            self.max_sampling_tokens > 0,
+            "external tool {:?}: max_sampling_tokens must be positive",
+            self.id
+        );
+        anyhow::ensure!(
+            self.max_task_wait_ms > 0,
+            "external tool {:?}: max_task_wait_ms must be positive",
+            self.id
+        );
+        for root in &self.roots {
+            let uri = url::Url::parse(&root.uri)
+                .with_context(|| format!("external tool {:?}: invalid MCP root URI", self.id))?;
+            anyhow::ensure!(
+                uri.scheme() == "file" && uri.path().starts_with('/'),
+                "external tool {:?}: MCP roots must be absolute file:// URIs",
+                self.id
+            );
+        }
+        for uri in &self.resource_subscriptions {
+            anyhow::ensure!(
+                url::Url::parse(uri).is_ok(),
+                "external tool {:?}: invalid resource subscription URI {uri:?}",
+                self.id
+            );
         }
         Ok(())
     }
@@ -860,6 +948,64 @@ mod tests {
         assert!(server.supports(ExternalToolMode::Agent));
         assert!(server.supports(ExternalToolMode::Chat));
         assert_eq!(server.tools["lookup"].effect, Some(EffectKind::DataRead));
+    }
+
+    #[test]
+    fn mcp_options_validate() {
+        let config = Config::from_toml_str(
+            r#"
+            [[external_tools]]
+            id = "complete"
+            transport = "stdio"
+            command = ["server"]
+            sampling = true
+            elicitation = true
+            subscriptions = true
+            resource_subscriptions = ["file:///workspace/guide.md"]
+            tasks = true
+            max_sampling_tokens = 2048
+            max_task_wait_ms = 45000
+            roots = [{ uri = "file:///workspace", name = "Project" }]
+            "#,
+        )
+        .unwrap();
+        let server = &config.external_tools[0];
+        assert!(server.sampling && server.elicitation && server.subscriptions && server.tasks);
+        assert_eq!(server.roots[0].name.as_deref(), Some("Project"));
+        assert_eq!(server.max_task_wait_ms, 45_000);
+    }
+
+    #[test]
+    fn invalid_mcp_config_is_rejected() {
+        assert!(Config::from_toml_str(
+            r#"
+            [[external_tools]]
+            id = "legacy"
+            transport = "http"
+            url = "https://example.test/mcp"
+            "#,
+        )
+        .is_err());
+        assert!(Config::from_toml_str(
+            r#"
+            [[external_tools]]
+            id = "bad-root"
+            transport = "stdio"
+            command = ["server"]
+            roots = [{ uri = "https://example.test/not-a-root" }]
+            "#,
+        )
+        .is_err());
+        assert!(Config::from_toml_str(
+            r#"
+            [[external_tools]]
+            id = "bad-task-bound"
+            transport = "stdio"
+            command = ["server"]
+            max_task_wait_ms = 0
+            "#,
+        )
+        .is_err());
     }
 
     #[test]
