@@ -2898,6 +2898,40 @@ corpus and made the evaluator's own acceptance claim fail closed; items
     configured route is provenance rather than a model call). ``smoke`` is the cheap
     default; ``adaptive`` and ``full`` are explicit, potentially long-running
     evidence modes.
+33. **The hidden oracle judges under the fixture's harness declaration.**
+    The verification tree restores the pristine fixture's build manifests
+    (``Cargo.toml``, ``pyproject.toml``), removes test-configuration files
+    the agent added that neither the fixture nor the overlay ships
+    (``conftest.py``, ``pytest.ini``, ``tox.ini``, ``setup.cfg``), overlays
+    ``hidden/``, and syncs a fresh Python environment the agent never
+    touched. An agent may edit a manifest while solving the task; the edit
+    cannot silence or redirect the oracle that judges it.
+34. **Infrastructure failures are reported, never scored.** A cell whose
+    harness fails — fixture setup, arm execution, or hidden verification —
+    records an explicit infrastructure failure and the run continues with
+    the remaining cells. A hidden-test failure is recorded only for a
+    completed oracle run; a missing toolchain or a filesystem error can
+    never masquerade as a scored test failure or discard a live run's
+    prior cells.
+35. **The resumed no-good store outlives its first claimant.** The ledger
+    fold's exact-key no-goods seed **every** forest opened in the resumed
+    session. Only the interrupted forest's consumption and its
+    ``resumed_from`` link are claimed exactly once, by the owning node
+    generation at the same accepted root; a forest that opens while that
+    consumption stays unclaimed ledgers the bypass as an observation
+    instead of silently refilling the budget.
+36. **Legacy state resumes fail closed but stay assemblable.** A
+    pre-provenance checkpoint restores its pages as deliberately stale
+    (their birth root is unknowable and must not be laundered as fresh),
+    except the messages of an unresolved tool-call pair: that pair is
+    pinned mandatory unconditionally, so it carries the live dependency —
+    otherwise every assembly would refuse and the session could never
+    continue. A staging row that predates generation binding refuses
+    resume only when no later, generation-bound row for the same node
+    supersedes it (newest wins; an unsuperseded legacy row still fails
+    closed). The recovery ladder continues from the node's recorded graph
+    generation, so a node dispatched at a later generation after resume
+    refines to its successor instead of colliding with a stale one.
 
 =========================
 Resolved Design Decisions
