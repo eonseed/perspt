@@ -44,13 +44,16 @@ Concise, repo-specific guidance for the current multi-crate workspace.
 - The pull-request gate is `.github/workflows/ci.yml`.
 - Run these exact Rust checks before handing off code that can affect CI:
   - `cargo fmt --all -- --check`
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-  - `cargo build --verbose --all-features`
-  - `cargo test --verbose --all-features -- --test-threads=1`
-  - `cargo doc --no-deps --all-features`
+  - `cargo clippy --locked --workspace --all-targets -- -D warnings`
+  - `cargo test --locked --workspace --all-targets -- --test-threads=1`
+  - `cargo check --locked -p perspt-cli --features benchmark`
+  - `cargo doc --locked --workspace --no-deps`
   - `./check-rules.sh check`
-- CI runs formatting on stable Ubuntu only, clippy on stable across the OS matrix, and build/tests on all configured matrix entries. Avoid OS-specific assumptions.
-- CI also runs a separate `cargo audit` job, the `PSP Code Check` job, and a Sphinx documentation build stage. If you change dependencies or docs, validate the relevant parts locally when practical.
+- Pull requests run the full credential-free gate once on Ubuntu. Merge-group,
+  protected-branch push, and manual full runs add Windows and macOS tests.
+  Avoid OS-specific assumptions.
+- The Documentation workflow validates both Sphinx trees on relevant PRs and
+  publishes one atomic Pages artifact from `master`.
 - Clippy warnings are CI failures. Keep Rust test modules at the end of files, and prefer arrays/slices over unnecessary `vec![]` allocations in tests.
 
 ## PSP code check (enforced)
@@ -79,21 +82,26 @@ Perspt is held to the PSP code check rules. Three constraints are measured by `x
 `PSP-2` is measured with `syn` rather than by counting braces, because braces inside string literals (`"\\mathbf{"` in `perspt-tui`) make text-based counting wrong by two orders of magnitude. If you extend the tool, keep it parsing.
 
 ## DuckDB build: bundled vs system
-- DuckDB is pinned in the workspace root `Cargo.toml` (`duckdb = "=1.10501.0"`) **without** the `bundled` feature by default.
+- DuckDB is pinned in the workspace root `Cargo.toml` (`duckdb = "=1.10505.0"`) **without** the `bundled` feature by default.
 - Each crate that (transitively) depends on DuckDB exposes a `bundled` cargo feature that activates `duckdb/bundled` through `perspt-store/bundled`. The chain: `perspt-store → perspt-agent, perspt-tui, perspt-dashboard, perspt-cli, perspt`.
 - **Local dev** (default features): links against a system-installed DuckDB library. On macOS with Homebrew: `brew install duckdb`. The `.cargo/config.toml` sets `DUCKDB_LIB_DIR` and `DUCKDB_INCLUDE_DIR` to Homebrew paths (override via env vars if needed).
-- **CI / release** (`--all-features` or `--features bundled`): compiles DuckDB from C source for a fully self-contained binary.
-- For fast iteration use `cargo clippy --all-targets`, `cargo test`, or `cargo test -p <crate>` (no `--all-features`). Only add `--all-features` when validating the full CI gate.
+- **CI** downloads and checksum-verifies the official DuckDB 1.5.5 shared
+  library. **Release** builds use `--features bundled` for self-contained
+  binaries.
+- For fast iteration use `cargo clippy --all-targets`, `cargo test`, or
+  `cargo test -p <crate>`. Do not use `--all-features` for routine validation;
+  it couples the expensive release-only native build to the optional benchmark.
 
 ## Docs and local workflows
-- Rust API docs: `cargo doc --open --no-deps --all-features`.
+- Rust API docs: `cargo doc --open --no-deps`.
 - Sphinx book: `cd docs/perspt_book && uv run make html`.
 - VS Code tasks already expose doc generation, PDF build, and link validation; prefer those tasks when working on documentation.
 
 ## Editing tips
 - Keep provider/config changes centralized in `perspt-core`; avoid duplicating env/config logic in CLI or TUI crates.
 - Respect the streaming/EOT contract and avoid blocking TUI event loops.
-- When changing manifests, features, or workspace-level dependencies, make sure the checked-in workspace crates still compile under `--all-features`.
+- When changing manifests, features, or workspace-level dependencies, run the
+  workspace gate and compile `perspt-cli` with `--features benchmark`.
 - Avoid editing generated logs, `target/`, conversation transcripts, or scratch sandbox data unless the task explicitly targets them.
 
 Questions or mismatches in these instructions should be resolved in favor of the checked-in workspace layout and `.github/workflows/ci.yml`.

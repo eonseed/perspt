@@ -97,16 +97,17 @@ jobs:
     steps:
     - name: Extract PSP number from issue
       id: extract_psp
+      env:
+        ISSUE_TITLE: ${{ github.event.issue.title }}
       run: |
-        title="${{ github.event.issue.title }}"
         # Extract PSP number from title like "[PSP DISCUSSION] PSP-000042: Title"
-        psp_number=$(echo "$title" | grep -oE 'PSP-[0-9]{6}' | sed 's/PSP-//')
+        psp_number=$(echo "$ISSUE_TITLE" | grep -oE 'PSP-[0-9]{6}' | sed 's/PSP-//')
         
         if [ -n "$psp_number" ]; then
-          echo "psp_number=$psp_number" >> $GITHUB_OUTPUT
+          echo "psp_number=$psp_number" >> "$GITHUB_OUTPUT"
           echo "🔍 Extracted PSP number: $psp_number"
         else
-          echo "⚠️  Could not extract PSP number from title: $title"
+          echo "⚠️  Could not extract PSP number from title: $ISSUE_TITLE"
         fi
     
     - name: Determine outcome and update PSP

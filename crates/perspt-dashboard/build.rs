@@ -8,6 +8,11 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=PERSPT_SKIP_DASHBOARD_ASSETS");
+    if std::env::var_os("PERSPT_SKIP_DASHBOARD_ASSETS").is_some() {
+        return;
+    }
+
     let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let crate_dir = Path::new(&crate_dir);
 
@@ -39,7 +44,7 @@ fn main() {
         }
     }
 
-    // ── 2. npm install (only when node_modules is missing) ───────────────
+    // ── 2. npm ci (only when node_modules is missing) ────────────────────
     let node_modules = crate_dir.join("node_modules");
     if !node_modules.exists() {
         let npm = if cfg!(target_os = "windows") {
@@ -47,12 +52,8 @@ fn main() {
         } else {
             "npm"
         };
-        println!("cargo:warning=Installing dashboard CSS dependencies (npm install)…");
-        match Command::new(npm)
-            .arg("install")
-            .current_dir(crate_dir)
-            .output()
-        {
+        println!("cargo:warning=Installing dashboard CSS dependencies (npm ci)…");
+        match Command::new(npm).arg("ci").current_dir(crate_dir).output() {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);

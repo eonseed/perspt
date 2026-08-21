@@ -97,6 +97,7 @@ target/doc/
 *.css.bak
 *.js.bak
 !docs/header.html
+!docs/pages-index.html
 !docs/psps/psp_sphinx_extensions/psp_theme/** 
 !crates/perspt-dashboard/templates/**
 

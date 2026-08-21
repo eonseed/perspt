@@ -32,6 +32,11 @@ def create_parser():
         action="store_true",
         help="Verbose output"
     )
+    parser.add_argument(
+        "--fail-on-warning",
+        action="store_true",
+        help="Return a non-zero status when Sphinx emits a warning",
+    )
     return parser.parse_args()
 
 
@@ -64,8 +69,8 @@ if __name__ == "__main__":
         outdir=build_directory / sphinx_builder,
         doctreedir=build_directory / "doctrees",
         buildername=sphinx_builder,
-        warningiserror=False,  # Temporarily disable warnings as errors
-        parallel=1,  # Disable parallel processing to get better error messages
+        warningiserror=args.fail_on_warning,
+        parallel=args.jobs,
         tags=["internal_builder"],
         keep_going=True,
         verbosity=1 if args.verbose else 0,
@@ -74,3 +79,5 @@ if __name__ == "__main__":
 
     if sphinx_builder in ["html", "dirhtml"]:
         create_index_file(build_directory / sphinx_builder, sphinx_builder)
+
+    raise SystemExit(app.statuscode)
