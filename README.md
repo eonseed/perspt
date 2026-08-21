@@ -15,10 +15,11 @@ verification-driven agent platform. It provides:
 
 [![Perspt in Action](docs/screencast/perspt_terminal_ui.jpg)](https://github.com/user-attachments/assets/f80f7109-1615-487b-b2a8-b76e16ebf6a7)
 
-Perspt is pre-1.0. The coding path works end to end, but the full PSP-9 roadmap
-is not complete. See [PSP 9](docs/psps/source/psp-000009.rst), especially its
-Implementation Status table, for the authoritative boundary between live code,
-tested SDK mechanisms, and future work.
+Perspt is pre-1.0. The coding path works end to end, but the full roadmap is
+not complete. See [PSP 9](docs/psps/source/psp-000009.rst) and
+[PSP 10](docs/psps/source/psp-000010.rst), especially their Implementation
+Status tables, for the authoritative boundary between live code, tested SDK
+mechanisms, and future work.
 
 ## Quick Start
 
@@ -54,8 +55,8 @@ perspt agent --dashboard --dashboard-port 3000 -w ./project "Add tests"
 
 ## Providers
 
-Perspt supports OpenAI, Anthropic, Gemini, Groq, Cohere, xAI, DeepSeek, AWS
-Bedrock, Vertex AI, Ollama, and OpenAI-compatible endpoints through the `genai`
+Perspt supports OpenAI, Anthropic, Gemini, Groq, Cohere, xAI, DeepSeek,
+Vertex AI, Ollama, and OpenAI-compatible endpoints through the `genai`
 transport.
 
 | Provider | Common credential |
@@ -67,7 +68,6 @@ transport.
 | Cohere | `COHERE_API_KEY` |
 | xAI | `XAI_API_KEY` |
 | DeepSeek | `DEEPSEEK_API_KEY` |
-| AWS Bedrock | AWS credential chain and region |
 | Vertex AI | Google Cloud Application Default Credentials |
 | Ollama | none |
 
@@ -151,7 +151,17 @@ Governed dependency mutation (`cargo add`, `uv add`, `npm install`) is an
 explicit opt-in via `--allow-dependency-mutation`. Gate failures can open a
 bounded search forest (`[exploration]` in config): isolated branches measured
 against the same accepted root, with exactly one candidate committed through
-the ordinary gate by a deterministic rule.
+the ordinary gate by a deterministic rule. Every search action reserves its
+cost before it runs and settles with observed actuals; exact-keyed no-goods
+suppress repeated identical attempts without ever suppressing a valid retry.
+
+Every model call compiles through a typed prompt program whose route, dialect,
+section provenance, and tool-surface hash are ledgered
+(`perspt prompts explain-session`). The transported conversation is paged:
+content-addressed pages outside the assembled resident set are tombstoned in
+place, the composed request is checked against the input allowance and dialect
+byte limit before any call, and the governed `context_recall` tool restores
+evicted pages (`perspt context explain-turn` explains the recorded decisions).
 
 On macOS and Linux, model-triggered processes require OS isolation. Inspection
 processes cannot write the candidate, access unrelated user home directories,
@@ -178,6 +188,8 @@ perspt agent [OPTIONS] <TASK>
       --max-parallel-nodes <N>  Concurrent work-graph nodes (default: 1; needs --yes)
       --domain <ID>             Domain package (coding, research); default: detect
       --allow-dependency-mutation  Grant governed dependency mutation
+      --exploration-only        Read-only exploration phase; nothing is mutated
+      --allow-experimental-prompts  Substitute validated [prompts] bundle sections
       --persistent-grants       Persist signed grant intent
       --output-summary <FILE>   Write the terminal summary as JSON
       --db-path <FILE>          Use a specific PSP-9 ledger database
@@ -229,10 +241,12 @@ implementation must not turn an unmeasured assumption into a guarantee.
 
 The work graph is revisioned rather than permanently fixed. New nodes and edges
 can be added, replaced, or retired while preserving acyclicity and generation
-bindings. Evidence-driven refinement is live in the recovery ladder. Live
-multi-node worker dispatch remains a roadmap item; the current authoritative
-coding runtime executes one governed node while verifier sensors run in
-parallel.
+bindings. Evidence-driven refinement is live in the recovery ladder. Multi-node
+worker dispatch is live behind `--max-parallel-nodes` (above 1 requires
+`--yes`): each node's winner is staged content-addressed, dependency-aware
+conflict detection lets downstream refinements win by edge precedence, and the
+combined root reaches the user workspace only through one global integration
+gate.
 
 ## Reliability and Recovery
 
@@ -251,7 +265,9 @@ parallel.
   It can also reconstruct the last accepted candidate from content-addressed
   artifacts, restore its provider-neutral conversation, graph revision, sticky
   route and activated tool set, re-mint epoch-bound capabilities, and continue
-  with exactly its remaining turn and rejection budgets.
+  with exactly its remaining turn and rejection budgets. An interrupted
+  multi-node session rebuilds its staging root by ledger fold and re-enters
+  graph dispatch; the combined root still passes a fresh integration gate.
 
 External MCP tools are an optional edge integration, not the default coding
 tool plane. The shared runtime supports lazy stdio and Streamable HTTP
@@ -280,28 +296,39 @@ locally and never sent to an LLM. It prints Perspt's family dedication.
 | `chat` | Interactive TUI chat |
 | `simple-chat` | Plain terminal chat |
 | `agent` | Governed PSP-9 coding agent |
-| `providers` | Show configured portfolio capabilities |
+| `providers` | Show configured portfolio capabilities; `--probe` runs live route probes |
 | `replay` | Provider-free PSP-9 audit replay |
 | `resume` | Resume or finish recoverable session state |
+| `abort` | Revoke a running session's authority epoch |
+| `audit` | Delayed audit labels and conformal activation |
 | `dashboard` | Web monitoring UI |
 | `db repair` | Back up and quarantine a poisoned DuckDB WAL |
 | `status` | Session and stability status |
 | `ledger` | Query the ledger; `--rollback <SESSION>` undoes the newest promotion and labels it unsafe |
+| `prompts` | Inspect compiled prompt section libraries and per-session programs |
+| `context` | Explain a session's recorded resident-context events |
 | `config` | Inspect or edit configuration |
 | `init` | Initialize project memory and policy |
 | `benchmark` | Optional configured-topology evaluation (`benchmark` Cargo feature only) |
 
 Run `perspt <COMMAND> --help` for the current interface.
 
-The benchmark is deliberately outside normal runtime validation. Build the
-CLI with `--features benchmark`, validate the bundled corpus without model
-credentials, or explicitly start a live suite:
+The benchmark is deliberately outside normal runtime validation and CI. It
+exists to evaluate Perspt and compare it with other coding agents, and it runs
+only when started manually. Build the CLI with `--features benchmark`,
+validate the bundled 30-task corpus without model credentials, or explicitly
+start a live suite:
 
 ```bash
 cargo run -p perspt-cli --features benchmark -- benchmark validate
 cargo run -p perspt-cli --features benchmark -- \
   --config config.local.toml benchmark run --suite smoke --output report.json
 ```
+
+`--suite adaptive` runs the paging/adaptive pair and `--suite full` the
+complete seven-arm diagnostic ladder; `benchmark aggregate` combines two or
+more completed full reports whose configured actuator routes belong to
+distinct model families.
 
 Live suites use the production role resolution from the selected configuration
 and record the full configured topology. Coding verification itself remains
@@ -316,6 +343,7 @@ Perspt is a Cargo workspace with these published implementation layers:
 | Crate | Responsibility |
 |---|---|
 | `perspt-sdk` | Domain-neutral SRBN control plane |
+| `perspt-prompt-macros` | Compile-time codegen for typed prompt section libraries |
 | `perspt-coding` | Coding residuals, barriers, adapters, and verifier policy |
 | `perspt-research` | Research domain package |
 | `perspt-agent` | Candidate runtime, exploration, tool loop, LSP, scheduling |
@@ -354,6 +382,7 @@ make -C docs/psps html
 - [Perspt Book](https://eonseed.github.io/perspt/book/index.html)
 - [PSP 8: SRBN SDK and domain packages](docs/psps/source/psp-000008.rst)
 - [PSP 9: governed tool-loop platform](docs/psps/source/psp-000009.rst)
+- [PSP 10: bounded search trajectories and model-conditioned prompt programs](docs/psps/source/psp-000010.rst)
 
 The *Stability is All You Need* papers I, II, and III are forthcoming. PSP 9's
 bibliography names the paper-level definitions and theorems used by each
