@@ -70,7 +70,11 @@ model = "gpt-4o-mini"
 # ---------------------------------------------------------------------------
 # Servers are lazy: they start only after deferred discovery in an eligible
 # mode. Omitted modes mean ["agent"]. Agent and chat always use separate
-# process/session lifecycles and separately minted capabilities.
+# process/session lifecycles and separately minted capabilities. In the chat
+# TUI, `/mcp` reports discovery, rejection reasons, and admitted tool names.
+# Every remote tool must have an exact local policy table; omissions fail
+# closed. Stdio children inherit PATH only (plus SystemRoot on Windows), so
+# explicitly map every other required variable with env_from_env.
 #
 # [[external_tools]]
 # id = "workspace-index"
@@ -80,7 +84,15 @@ model = "gpt-4o-mini"
 # timeout_ms = 30000
 # max_result_bytes = 1048576
 # max_stderr_bytes = 65536
+# max_task_wait_ms = 300000
 # env_from_env = { INDEX_TOKEN = "WORKSPACE_INDEX_TOKEN" }
+# roots = [{ uri = "file:///absolute/path/to/project", name = "Project" }]
+# sampling = false
+# max_sampling_tokens = 4096
+# elicitation = false
+# subscriptions = true
+# resource_subscriptions = ["file:///absolute/path/to/project/guide.md"]
+# tasks = true
 #
 # [external_tools.tools.search]
 # effect = "data_read"
