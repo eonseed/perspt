@@ -300,8 +300,11 @@ The TUI supports markdown, tables, math rendering, conversation export, model
 switching, streaming, and Unicode/multiline bracketed clipboard paste. Common
 commands include `/help`, `/clear`, `/model`, `/save`, `/mcp`, and `/quit`.
 With chat-enabled `[[external_tools]]` servers, turns can use admitted
-read-only MCP operations; tool activity and elicitation are shown inline and
-results are labeled untrusted.
+read-only MCP operations. Qwen or the selected chat model chooses those tools
+with automatic tool choice; a concise activity label is transient, while MCP
+protocol events, arguments, and results never become chat-interface artifacts.
+Server elicitation remains an explicit user-facing request, and results are
+labeled untrusted before they return to the model.
 
 ## MCP Client
 
@@ -331,6 +334,9 @@ footprint = { selectors = [{ kind = "scoped_argument", family = "company-docs", 
 Restart `perspt chat`, then type `/mcp`. It reports server failures, local
 policy rejections, and namespaced admitted tools such as `mcp.docs.search`.
 The model invokes those tools automatically; `/mcp` only shows local status.
+Discovery and policy detail is kept behind `/mcp` instead of filling a new
+conversation. Ctrl+R continues to show or hide genuine model reasoning only;
+MCP lifecycle traces are written to debug logs, not the reasoning panel.
 
 Three details are intentionally fail-closed:
 
