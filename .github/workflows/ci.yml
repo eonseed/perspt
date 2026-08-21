@@ -52,6 +52,9 @@ jobs:
           if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
             sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
           fi
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined ]]; then
+            sudo sysctl --write kernel.apparmor_restrict_unprivileged_unconfined=0
+          fi
           bwrap --die-with-parent --unshare-net --ro-bind / / /bin/true
 
       - name: Install pinned DuckDB
