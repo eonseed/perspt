@@ -4,7 +4,12 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 /// Resume a paused or crashed session
-pub async fn run(session_id: Option<String>, last: bool, db_path: Option<PathBuf>) -> Result<()> {
+pub async fn run(
+    session_id: Option<String>,
+    last: bool,
+    db_path: Option<PathBuf>,
+    config_override: Option<PathBuf>,
+) -> Result<()> {
     let store = std::sync::Arc::new(super::psp9_chain::open_store(db_path.as_deref(), false)?);
 
     let target = if last {
@@ -15,7 +20,7 @@ pub async fn run(session_id: Option<String>, last: bool, db_path: Option<PathBuf
         session_id
     };
     match target {
-        Some(id) => resume_session(store, &id).await,
+        Some(id) => resume_session(store, &id, config_override).await,
         None => list_sessions(&store).await,
     }
 }
@@ -77,6 +82,7 @@ async fn list_sessions(store: &perspt_store::SessionStore) -> Result<()> {
 async fn resume_session(
     store: std::sync::Arc<perspt_store::SessionStore>,
     session_id: &str,
+    config_override: Option<PathBuf>,
 ) -> Result<()> {
     let actual_id = session_id.to_string();
 
@@ -96,7 +102,7 @@ async fn resume_session(
          available as inert forensic data, but it cannot be resumed",
         session.session_id
     );
-    resume_psp9(store, &session).await
+    resume_psp9(store, &session, config_override).await
 }
 
 /// PSP-9 resume verifies the ledger and completes bracketed promotion intents
@@ -106,6 +112,7 @@ async fn resume_session(
 async fn resume_psp9(
     store: std::sync::Arc<perspt_store::SessionStore>,
     session: &perspt_store::SessionRecord,
+    config_override: Option<PathBuf>,
 ) -> Result<()> {
     verify_psp9_chain(&store, &session.session_id)?;
     let pending = store.pending_external_effects(&session.session_id)?;
@@ -120,7 +127,7 @@ async fn resume_psp9(
                  checkpoint; exact continuation is unavailable, and Perspt will not silently \
                  restart the task"
             );
-            return resume_mid_loop(store, session).await;
+            return resume_mid_loop(store, session, config_override).await;
         }
         println!("This session is terminal; start a new agent session for additional work.");
         return Ok(());
@@ -217,8 +224,9 @@ fn has_candidate_checkpoint(store: &perspt_store::SessionStore, session_id: &str
 async fn resume_mid_loop(
     store: std::sync::Arc<perspt_store::SessionStore>,
     session: &perspt_store::SessionRecord,
+    config_override: Option<PathBuf>,
 ) -> Result<()> {
-    let config_path = perspt_core::paths::resolve_config_file();
+    let config_path = config_override.or_else(perspt_core::paths::resolve_config_file);
     let config = match config_path {
         Some(path) => perspt_core::Config::load_from_path(&path)?,
         None => perspt_core::Config::default(),
