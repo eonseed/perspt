@@ -151,11 +151,16 @@ candidate, or the node assembly:
 - **Languages** register `LanguageAdapter`s (diagnostics) and
   `LanguagePlugin`s (commands, incl. governed dependency mutation) by id.
 - **External MCP servers** are configured under `[[external_tools]]` (stdio
-  or Streamable HTTP). Every listed tool passes admission against the
+  or stateless Streamable HTTP, MCP 2026-07-28 only). Tools, resources,
+  prompts, completions, roots, sampling, elicitation, subscriptions,
+  multi-round results, and tasks are handled by the official Rust SDK. Every
+  listed remote tool passes admission against the
   session's grant surface — a server can never exceed what the user could
   grant — and each call is write-ahead bracketed in the ledger. The
   interactive `perspt chat` reuses the same servers with a read-only
-  admission ceiling; `simple-chat` keeps the plain streaming path.
+  admission ceiling; `simple-chat` keeps the plain streaming path. Server
+  entries default to agent-only, so chat must be included explicitly with
+  `modes = ["agent", "chat"]`.
 
 Governed dependency mutation (`cargo add`, `uv add`, `npm install`) is an
 explicit opt-in via `--allow-dependency-mutation`. Gate failures can open a
@@ -279,10 +284,11 @@ gate.
   multi-node session rebuilds its staging root by ledger fold and re-enters
   graph dispatch; the combined root still passes a fresh integration gate.
 
-External MCP tools are an optional edge integration, not the default coding
-tool plane. The shared runtime supports lazy stdio and Streamable HTTP
-lifecycles, paginated discovery, local schema/admission checks, namespaced
-tools, bounded observations, and provider-free replay. An external server
+MCP is an optional edge integration, not the default coding tool plane. The
+shared runtime supports latest-only discovery, lazy stdio and stateless
+Streamable HTTP, tools/resources/prompts/completions, roots, opt-in
+sampling/elicitation, subscriptions, MRTR/tasks, local admission, bounded
+observations, and provider-free replay. An external server
 cannot mint authority or classify its own effects. Agent and chat construct
 separate lifecycles from the same `[[external_tools]]` configuration: the
 governed loop admits against the session's grant surface, while the TUI chat
@@ -291,10 +297,63 @@ admits read-only effects only.
 ## Chat and Local Commands
 
 The TUI supports markdown, tables, math rendering, conversation export, model
-switching, and streaming. Common commands include `/help`, `/clear`, `/model`,
-`/save`, and `/quit`. With chat-enabled `[[external_tools]]` servers, chat
-turns can call the admitted read-only MCP tools; tool activity is shown
-inline and results are labeled untrusted.
+switching, streaming, and Unicode/multiline bracketed clipboard paste. Common
+commands include `/help`, `/clear`, `/model`, `/save`, `/mcp`, and `/quit`.
+With chat-enabled `[[external_tools]]` servers, turns can use admitted
+read-only MCP operations; tool activity and elicitation are shown inline and
+results are labeled untrusted.
+
+## MCP Client
+
+MCP is optional and configured in the same `config.toml` used by chat and the
+agent. This minimal example assumes the server advertises a `search` tool with
+a string `query` argument:
+
+```toml
+[[external_tools]]
+id = "docs"
+transport = "stdio"
+command = ["company-docs-mcp", "--stdio"]
+modes = ["agent", "chat"]
+env_from_env = { DOCS_TOKEN = "COMPANY_DOCS_TOKEN" }
+roots = [{ uri = "file:///absolute/path/to/project", name = "Project" }]
+sampling = true
+elicitation = true
+subscriptions = true
+tasks = true
+
+[external_tools.tools.search]
+effect = "search"
+risk = "low"
+footprint = { selectors = [{ kind = "scoped_argument", family = "company-docs", field = "query", access = "read" }] }
+```
+
+Restart `perspt chat`, then type `/mcp`. It reports server failures, local
+policy rejections, and namespaced admitted tools such as `mcp.docs.search`.
+The model invokes those tools automatically; `/mcp` only shows local status.
+
+Three details are intentionally fail-closed:
+
+- `modes` is plural. If omitted, the server is agent-only; chat must be named
+  explicitly.
+- Every allowed remote tool needs an exact
+  `[external_tools.tools.<remote-name>]` policy. Omitting the effect or
+  footprint classifies it as high-risk opaque shell activity and it is not
+  admitted by default.
+- Chat accepts read-only effects only. Agent tools additionally remain behind
+  the normal capability/kernel checks and deferred `tool_search` discovery.
+
+Perspt uses the official Rust SDK and negotiates MCP 2026-07-28 through
+`server/discover`; older servers are rejected without fallback. Stdio children
+inherit only `PATH` (plus `SystemRoot` on Windows); credentials
+and other variables must be mapped explicitly with `env_from_env`. Streamable
+HTTP uses `headers_from_env`, requires HTTPS outside localhost, and disables
+redirects. MCP descriptions/results are untrusted observations and result
+sizes are bounded. Configure only server processes/operators you trust: call
+admission does not sandbox an arbitrary server implementation. Resources and
+prompts are exposed as namespaced read-only operations; roots are explicit;
+sampling and elicitation are opt-in; subscriptions and tasks are bounded. See
+the [MCP guide](docs/perspt_book/source/user-guide/mcp.rst).
 
 Entering `l-o-v-e` in chat, agent mode, the TUI, or simple CLI mode is handled
 locally and never sent to an LLM. It prints Perspt's family dedication.

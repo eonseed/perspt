@@ -32,6 +32,12 @@ In-depth coverage of every Perspt feature.
 
       Configure OpenAI, Anthropic, Gemini, Ollama, and more.
 
+   .. grid-item-card:: Model Context Protocol
+      :link: mcp
+      :link-type: doc
+
+      Connect governed external tools to agent mode and the chat TUI.
+
    .. grid-item-card:: Troubleshooting
       :link: troubleshooting
       :link-type: doc
@@ -52,5 +58,6 @@ In-depth coverage of every Perspt feature.
    agent-mode
    advanced-features
    providers
+   mcp
    troubleshooting
    dashboard

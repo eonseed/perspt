@@ -99,6 +99,8 @@ development.
         - Ratatui-based with diff viewer, task tree, dashboard, and review modal
       * - **Security**
         - Starlark policy engine with command sanitization and workspace-bound enforcement
+      * - **MCP 2026-07-28 Client**
+        - Official-SDK stdio/Streamable HTTP support for tools, context primitives, client requests, subscriptions and tasks, with local admission and ``/mcp`` diagnostics
       * - **Merkle Ledger**
         - Cryptographic change tracking with session resume and rollback
       * - **Headless Mode**
