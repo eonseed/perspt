@@ -228,7 +228,15 @@ fn isolated_command(root: &Path, command: &str, read_roots: &[PathBuf]) -> Resul
         .find(|path| Path::new(path).is_file())
         .context("bubblewrap is required for governed verifier execution")?;
     let mut process = Command::new(bwrap);
-    process.args(["--die-with-parent", "--unshare-net", "--ro-bind", "/", "/"]);
+    process.args([
+        "--die-with-parent",
+        "--unshare-net",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+    ]);
     for sensitive in ["/home", "/root", "/Users"] {
         if Path::new(sensitive).exists() {
             process.arg("--tmpfs").arg(sensitive);
