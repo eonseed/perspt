@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use perspt_core::tools_driver::CoreGenerationConfig;
-use perspt_core::tools_driver::{CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec};
+use perspt_core::tools_driver::{
+    CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec, CoreTurnStreamEvent,
+};
 use perspt_core::{Config, ExternalToolMode, GenAIProvider};
 use perspt_sdk::{ActorId, Capability, EffectKind};
 
@@ -23,6 +25,17 @@ use super::{
 
 /// Bounded tool rounds per chat message.
 const MAX_TOOL_ROUNDS: usize = 4;
+
+/// Private channel marker consumed by the chat TUI as transient status.
+pub const MCP_ACTIVITY_PREFIX: &str = "__PERSPT_MCP_ACTIVITY__:";
+
+fn tool_label(name: &str) -> String {
+    name.rsplit('.')
+        .next()
+        .unwrap_or(name)
+        .trim_start_matches("_perspt_")
+        .replace('_', " ")
+}
 
 /// A chat-scoped MCP lifecycle: discovery happened, specs are ready, and
 /// every call goes through the shared runtime.
@@ -368,30 +381,45 @@ impl ChatToolSession {
             .respond(id, action, content)
     }
 
-    /// One chat message with bounded tool rounds. Tool activity notices are
-    /// sent through `notices` as they happen; the final text is returned.
+    /// Run one chat message with bounded, model-selected tool rounds.
+    ///
+    /// Genuine model reasoning and final answer text are streamed through
+    /// `updates`. MCP activity uses a separate transient marker; protocol
+    /// notifications stay in logs and never enter the conversation.
     pub async fn run_turn(
         &self,
         provider: &GenAIProvider,
         model: &str,
         mut messages: Vec<CoreMessage>,
-        notices: &tokio::sync::mpsc::UnboundedSender<String>,
-    ) -> Result<String> {
+        updates: &tokio::sync::mpsc::UnboundedSender<String>,
+    ) -> Result<()> {
         for _round in 0..MAX_TOOL_ROUNDS {
-            self.sync_notifications(notices).await?;
+            self.sync_notifications().await?;
             let specs = self.specs.read().expect("MCP tool specs poisoned").clone();
             let output = provider
-                .chat_turn_with_tools(model, &messages, &specs, CoreToolChoice::Auto)
+                .stream_tool_turn(model, &messages, &specs, CoreToolChoice::Auto, |event| {
+                    match event {
+                        CoreTurnStreamEvent::Text(text) => {
+                            let _ = updates.send(text);
+                        }
+                        CoreTurnStreamEvent::Reasoning(text) => {
+                            let _ = updates.send(format!("__PERSPT_REASONING__:{text}"));
+                        }
+                    }
+                })
                 .await?;
             let calls = match output {
-                perspt_core::tools_driver::CoreTurnOutput::Text(text) => return Ok(text),
+                perspt_core::tools_driver::CoreTurnOutput::Text(_) => return Ok(()),
                 perspt_core::tools_driver::CoreTurnOutput::ToolCalls(calls) => calls,
             };
             messages.push(CoreMessage::AssistantToolCalls {
                 calls: calls.clone(),
             });
             for call in calls {
-                let _ = notices.send(format!("__PERSPT_REASONING__:🔧 {}\n", call.name));
+                let _ = updates.send(format!(
+                    "{MCP_ACTIVITY_PREFIX}Using MCP: {}…",
+                    tool_label(&call.name)
+                ));
                 let content = self.execute(&call).await;
                 messages.push(CoreMessage::ToolResponse {
                     call_id: call.call_id,
@@ -399,17 +427,15 @@ impl ChatToolSession {
                 });
             }
         }
-        Ok("(tool round limit reached without a final answer)".into())
+        let _ = updates.send("The MCP tool round limit was reached without a final answer.".into());
+        Ok(())
     }
 
-    async fn sync_notifications(
-        &self,
-        notices: &tokio::sync::mpsc::UnboundedSender<String>,
-    ) -> Result<()> {
+    async fn sync_notifications(&self) -> Result<()> {
         let mut runtime = self.runtime.lock().await;
         let events = runtime.sync_server_events().await?;
         for (server, event) in events {
-            let _ = notices.send(format!("__PERSPT_REASONING__:MCP {server}: {event:?}\n"));
+            log::debug!("MCP {server}: {event:?}");
         }
         let specs = runtime
             .admitted_entries()
@@ -435,5 +461,19 @@ impl ChatToolSession {
             ),
             Err(error) => format!("tool failed: {error:#}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activity_labels_hide_protocol_namespaces() {
+        assert_eq!(tool_label("mcp.todos.list_tasks"), "list tasks");
+        assert_eq!(
+            tool_label("mcp.docs._perspt_resource_read"),
+            "resource read"
+        );
     }
 }
