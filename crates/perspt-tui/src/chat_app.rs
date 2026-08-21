@@ -24,6 +24,8 @@ use throbber_widgets_tui::ThrobberState;
 use tokio::sync::mpsc;
 use unicode_width::UnicodeWidthStr;
 
+const REASONING_PREFIX: &str = "__PERSPT_REASONING__:";
+
 /// Role of a chat message
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageRole {
@@ -252,6 +254,9 @@ pub struct ChatApp {
     pub(crate) streaming_buffer: String,
     /// Buffer for streaming reasoning response
     pub(crate) streaming_reasoning: String,
+    /// Concise, transient MCP activity; never persisted as conversation or
+    /// reasoning content.
+    pub(crate) streaming_activity: Option<String>,
     /// Toggle to show/hide reasoning tokens
     pub(crate) show_reasoning: bool,
     /// Whether currently streaming a response
@@ -321,6 +326,7 @@ impl ChatApp {
             scroll_offset: 0,
             streaming_buffer: String::new(),
             streaming_reasoning: String::new(),
+            streaming_activity: None,
             show_reasoning: true,
             is_streaming: false,
             provider: Arc::new(provider),
@@ -358,10 +364,8 @@ impl ChatApp {
             .as_ref()
             .map(|session| session.tool_names())
             .unwrap_or_default();
-        for notice in &notices {
-            let msg = ChatMessage::system(notice.clone());
-            self.push_message(msg);
-        }
+        // Discovery detail belongs behind the explicit `/mcp` diagnostic;
+        // startup should remain a clean conversation surface.
         self.mcp_notices = notices;
         self.chat_tools = tools.filter(|session| session.has_tools());
         self
@@ -384,11 +388,15 @@ impl ChatApp {
                                 self.finalize_streaming();
                                 just_finalized = true;
                                 break;
-                            } else if let Some(content) =
-                                chunk.strip_prefix("__PERSPT_REASONING__:")
-                            {
+                            } else if let Some(content) = chunk.strip_prefix(REASONING_PREFIX) {
+                                self.streaming_activity = None;
                                 self.streaming_reasoning.push_str(content);
+                            } else if let Some(content) = chunk.strip_prefix(
+                                perspt_agent::external_tools::chat::MCP_ACTIVITY_PREFIX,
+                            ) {
+                                self.streaming_activity = Some(content.to_string());
                             } else {
+                                self.streaming_activity = None;
                                 self.streaming_buffer.push_str(&chunk);
                             }
                         }
@@ -670,7 +678,17 @@ impl ChatApp {
         match event {
             AppEvent::Terminal(crossterm_event) => self.handle_terminal_event(crossterm_event),
             AppEvent::StreamChunk(chunk) => {
-                self.streaming_buffer.push_str(&chunk);
+                if let Some(content) = chunk.strip_prefix(REASONING_PREFIX) {
+                    self.streaming_activity = None;
+                    self.streaming_reasoning.push_str(content);
+                } else if let Some(content) =
+                    chunk.strip_prefix(perspt_agent::external_tools::chat::MCP_ACTIVITY_PREFIX)
+                {
+                    self.streaming_activity = Some(content.to_string());
+                } else {
+                    self.streaming_activity = None;
+                    self.streaming_buffer.push_str(&chunk);
+                }
                 true
             }
             AppEvent::StreamComplete => {
@@ -938,9 +956,15 @@ impl ChatApp {
                         if chunk == EOT_SIGNAL {
                             self.finalize_streaming();
                             break;
-                        } else if let Some(content) = chunk.strip_prefix("__PERSPT_REASONING__:") {
+                        } else if let Some(content) = chunk.strip_prefix(REASONING_PREFIX) {
+                            self.streaming_activity = None;
                             self.streaming_reasoning.push_str(content);
+                        } else if let Some(content) = chunk
+                            .strip_prefix(perspt_agent::external_tools::chat::MCP_ACTIVITY_PREFIX)
+                        {
+                            self.streaming_activity = Some(content.to_string());
                         } else {
+                            self.streaming_activity = None;
                             self.streaming_buffer.push_str(&chunk);
                         }
                     }
@@ -1043,6 +1067,7 @@ impl ChatApp {
         self.is_streaming = true;
         self.streaming_buffer.clear();
         self.streaming_reasoning.clear();
+        self.streaming_activity = None;
         self.scroll_to_bottom();
 
         let (tx, rx) = mpsc::unbounded_channel();
@@ -1056,13 +1081,8 @@ impl ChatApp {
             let messages = self.core_messages();
             tokio::spawn(async move {
                 let outcome = session.run_turn(&provider, &model, messages, &tx).await;
-                match outcome {
-                    Ok(text) => {
-                        let _ = tx.send(text);
-                    }
-                    Err(error) => {
-                        let _ = tx.send(format!("error: {error:#}"));
-                    }
+                if let Err(error) = outcome {
+                    let _ = tx.send(format!("error: {error:#}"));
                 }
                 let _ = tx.send(EOT_SIGNAL.to_string());
             });
@@ -1082,16 +1102,16 @@ impl ChatApp {
     fn core_messages(&self) -> Vec<perspt_core::CoreMessage> {
         self.messages
             .iter()
-            .map(|message| match message.role {
-                MessageRole::User => perspt_core::CoreMessage::User {
+            .filter_map(|message| match message.role {
+                MessageRole::User => Some(perspt_core::CoreMessage::User {
                     content: message.content.clone(),
-                },
-                MessageRole::Assistant => perspt_core::CoreMessage::Assistant {
+                }),
+                MessageRole::Assistant => Some(perspt_core::CoreMessage::Assistant {
                     content: message.content.clone(),
-                },
-                MessageRole::System => perspt_core::CoreMessage::System {
-                    content: message.content.clone(),
-                },
+                }),
+                // Welcome text, slash-command output, and MCP diagnostics are
+                // local UI state, not provider instructions.
+                MessageRole::System => None,
             })
             .collect()
     }
@@ -1107,6 +1127,7 @@ impl ChatApp {
         }
         self.streaming_buffer.clear();
         self.streaming_reasoning.clear();
+        self.streaming_activity = None;
         self.is_streaming = false;
     }
 
@@ -1216,12 +1237,15 @@ mod tests {
     use perspt_core::GenAIProvider;
     use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
 
+    fn test_provider() -> GenAIProvider {
+        GenAIProvider::new().unwrap_or_else(|_| {
+            GenAIProvider::new_with_config(Some("openai"), Some("dummy_key")).unwrap()
+        })
+    }
+
     #[tokio::test]
     async fn test_slash_commands_in_tui() {
-        let provider = GenAIProvider::new().unwrap_or_else(|_| {
-            GenAIProvider::new_with_config(Some("openai"), Some("dummy_key")).unwrap()
-        });
-        let mut app = ChatApp::new(provider, "gpt-4".to_string());
+        let mut app = ChatApp::new(test_provider(), "gpt-4".to_string());
 
         // Test /help command
         app.input.set_text("/help");
@@ -1308,5 +1332,56 @@ mod tests {
         let (thought, remaining) = ChatMessage::parse_inline_thought(unclosed_thought);
         assert_eq!(thought, Some("I am currently thinking...".to_string()));
         assert_eq!(remaining, "Thinking ");
+    }
+
+    #[test]
+    fn mcp_diagnostics_stay_out_of_startup_and_model_context() {
+        let notice = "MCP tool docs.write rejected: no read-only grant";
+        let mut app =
+            ChatApp::new(test_provider(), "qwen".into()).with_chat_tools(None, vec![notice.into()]);
+
+        assert_eq!(app.messages.len(), 1);
+        assert!(!app.messages.iter().any(|message| message.content == notice));
+        assert!(app.mcp_status_text().contains(notice));
+
+        app.push_message(ChatMessage::system(app.mcp_status_text()));
+        app.push_message(ChatMessage::user("Find the current task"));
+        let context = app.core_messages();
+        assert_eq!(context.len(), 1);
+        assert!(matches!(
+            &context[0],
+            perspt_core::CoreMessage::User { content } if content == "Find the current task"
+        ));
+    }
+
+    #[test]
+    fn mcp_activity_never_becomes_reasoning_or_conversation() {
+        let mut app = ChatApp::new(test_provider(), "qwen".into());
+        app.is_streaming = true;
+        app.handle_app_event(AppEvent::StreamChunk(format!(
+            "{}Using MCP: list tasks…",
+            perspt_agent::external_tools::chat::MCP_ACTIVITY_PREFIX
+        )));
+
+        assert_eq!(
+            app.streaming_activity.as_deref(),
+            Some("Using MCP: list tasks…")
+        );
+        assert!(app.streaming_buffer.is_empty());
+        assert!(app.streaming_reasoning.is_empty());
+        assert_eq!(app.messages.len(), 1);
+
+        app.handle_app_event(AppEvent::StreamChunk(format!(
+            "{REASONING_PREFIX}I should inspect the task list."
+        )));
+        assert!(app.streaming_activity.is_none());
+        assert_eq!(app.streaming_reasoning, "I should inspect the task list.");
+
+        app.handle_terminal_event(CrosstermEvent::Key(KeyEvent::new(
+            KeyCode::Char('r'),
+            KeyModifiers::CONTROL,
+        )));
+        assert!(!app.show_reasoning);
+        assert_eq!(app.streaming_reasoning, "I should inspect the task list.");
     }
 }
