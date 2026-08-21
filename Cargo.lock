@@ -3411,6 +3411,7 @@ dependencies = [
  "async-trait",
  "diffy",
  "duckdb",
+ "find-msvc-tools",
  "futures",
  "ignore",
  "log",

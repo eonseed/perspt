@@ -61,5 +61,8 @@ rmcp = { workspace = true }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }
 
+[target.'cfg(all(windows, target_env = "msvc"))'.dependencies]
+find-msvc-tools = "0.1.9"
+
 [dev-dependencies]
 perspt-research = { workspace = true }
