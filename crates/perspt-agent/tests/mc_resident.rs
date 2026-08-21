@@ -105,6 +105,7 @@ impl EffectExecutor for ApplyAll {
         Ok(EffectOutcome {
             output: "ok".into(),
             mutated: !entry.effect.is_read_only(),
+            completed: true,
         })
     }
 
@@ -347,6 +348,7 @@ impl EffectExecutor for PayloadReads {
                 "ok".into()
             },
             mutated: !entry.effect.is_read_only(),
+            completed: true,
         })
     }
     async fn restore(&self, checkpoint: &CandidateCheckpoint) -> anyhow::Result<()> {

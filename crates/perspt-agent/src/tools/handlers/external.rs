@@ -45,12 +45,14 @@ impl CandidateToolHandler for ExternalDispatcher {
                     result.content
                 ),
                 mutated: false,
+                completed: true,
             }),
             // Uncertain completion is evidence for the model, not a loop
             // abort: the bracket stays open in the ledger for reconciliation.
             Err(error) => Ok(EffectOutcome {
                 output: format!("tool failed: {error:#}"),
                 mutated: false,
+                completed: false,
             }),
         }
     }

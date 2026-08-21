@@ -1,7 +1,7 @@
 //! MCP edge-adapter wiring (PSP-9 system 13, Gates K, L, U).
 //!
 //! Servers come from `[[external_tools]]`; with none configured nothing
-//! changes. Discovery (initialize + tools/list) happens once per session at
+//! changes. Latest-only discovery (`server/discover` + `tools/list`) happens at
 //! node assembly, every listed tool passes `admit_external_tool` against
 //! the session's *derived grant surface* (a server can never exceed what
 //! the user could grant), and admitted entries enter the assembled catalog
@@ -14,6 +14,7 @@ use super::*;
 /// Build the agent-mode external runtime when servers are configured.
 pub(super) fn external_runtime_from(
     config: &perspt_core::Config,
+    sampling: Option<Arc<dyn crate::external_tools::McpSamplingProvider>>,
 ) -> Result<Option<Arc<tokio::sync::Mutex<crate::external_tools::ExternalToolRuntime>>>> {
     let has_agent_servers = config
         .external_tools
@@ -22,11 +23,17 @@ pub(super) fn external_runtime_from(
     if !has_agent_servers {
         return Ok(None);
     }
-    let runtime = crate::external_tools::ExternalToolRuntime::from_config(
+    let mut runtime = crate::external_tools::ExternalToolRuntime::from_config(
         config,
         perspt_core::ExternalToolMode::Agent,
         Vec::new(),
     )?;
+    runtime.set_client_services(crate::external_tools::McpClientServices {
+        sampling,
+        elicitation: Some(Arc::new(
+            crate::external_tools::DecliningMcpElicitationProvider,
+        )),
+    });
     Ok(Some(Arc::new(tokio::sync::Mutex::new(runtime))))
 }
 
@@ -91,13 +98,27 @@ impl Psp9AgentRuntime {
         let servers: Vec<String> = guard.server_ids().into_iter().map(str::to_string).collect();
         for server_id in servers {
             match guard.discover_server(&server_id).await {
-                Ok(admitted) => recorder.record_custom(
-                    "external_server_discovered",
-                    serde_json::json!({
-                        "server": server_id,
-                        "admitted": admitted.len(),
-                    }),
-                )?,
+                Ok(admitted) => {
+                    let rejected = guard.admission_rejections(&server_id);
+                    recorder.record_custom(
+                        "external_server_discovered",
+                        serde_json::json!({
+                            "server": server_id,
+                            "admitted": admitted.len(),
+                            "rejected": rejected.len(),
+                        }),
+                    )?;
+                    for rejection in rejected {
+                        recorder.record_custom(
+                            "external_tool_rejected",
+                            serde_json::json!({
+                                "server": rejection.server_id,
+                                "tool": rejection.remote_tool,
+                                "reason": rejection.reason,
+                            }),
+                        )?;
+                    }
+                }
                 Err(error) => recorder.record_custom(
                     "external_server_failed",
                     serde_json::json!({

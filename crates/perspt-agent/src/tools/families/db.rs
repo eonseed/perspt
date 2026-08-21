@@ -254,6 +254,7 @@ impl CandidateToolHandler for DbList {
                 files.join("\n")
             },
             mutated: false,
+            completed: true,
         })
     }
 }
@@ -283,6 +284,7 @@ impl CandidateToolHandler for DbSchema {
         Ok(EffectOutcome {
             output,
             mutated: false,
+            completed: true,
         })
     }
 }
@@ -310,6 +312,7 @@ impl CandidateToolHandler for DbQuery {
         Ok(EffectOutcome {
             output,
             mutated: false,
+            completed: true,
         })
     }
 }

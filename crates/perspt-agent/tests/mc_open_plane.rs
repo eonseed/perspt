@@ -76,6 +76,7 @@ impl CandidateToolHandler for FixtureProbe {
         Ok(perspt_agent::toolloop::EffectOutcome {
             output: format!("probe-ok: {target}"),
             mutated: false,
+            completed: true,
         })
     }
 }

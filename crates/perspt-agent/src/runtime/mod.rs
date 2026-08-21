@@ -121,7 +121,11 @@ impl Psp9AgentRuntime {
         let (explorer_model, adjudicator_model, handoff_model) =
             resolve_role_routes(&routes, config, &transport)?;
         let fallback_models = resolve_fallbacks(&routes.fallbacks, &model, config, &transport)?;
-        let external = external_runtime_from(config)?;
+        let sampling = Arc::new(crate::external_tools::ModelTransportSamplingProvider::new(
+            transport.clone(),
+            model.clone(),
+        ));
+        let external = external_runtime_from(config, Some(sampling))?;
         let handlers = registry_with_external(&external);
         let run_config = settings::apply_config_overrides(run_config, config);
         Ok(Self {

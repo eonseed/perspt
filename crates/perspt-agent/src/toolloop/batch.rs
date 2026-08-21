@@ -389,6 +389,13 @@ impl ToolLoop<'_> {
         admitted: &[(ProviderToolCall, ToolEntry)],
         log: &mut EventLog,
     ) -> Result<Vec<(String, String)>> {
+        // Every durable intent must be visible before any concurrent effect
+        // starts. Recording after `join_all` would erase the crash window the
+        // external-effect bracket exists to expose.
+        let brackets = admitted
+            .iter()
+            .map(|(call, entry)| self.open_effect_bracket(call, entry))
+            .collect::<Result<Vec<_>>>()?;
         let executor = self.executor;
         let outcomes = futures::future::join_all(
             admitted
@@ -397,18 +404,42 @@ impl ToolLoop<'_> {
         )
         .await;
         let mut results = Vec::with_capacity(admitted.len());
-        for ((call, _), outcome) in admitted.iter().zip(outcomes) {
-            let output = bounded_model_output(self.recorder, outcome?.output)?;
-            emit(
-                self.recorder,
-                log,
-                LoopEvent::EffectApplied {
-                    call_id: call.call_id.clone(),
-                    mutated: false,
-                    output: output.clone(),
-                },
-            )?;
-            results.push((call.call_id.clone(), output));
+        let mut first_error = None;
+        for (((call, _), bracket), outcome) in admitted.iter().zip(brackets).zip(outcomes) {
+            match outcome {
+                Ok(outcome) => {
+                    if outcome.completed {
+                        if let (Some(recorder), Some(key)) = (self.recorder, bracket.as_deref()) {
+                            recorder.external_result(
+                                key,
+                                &serde_json::json!({"mutated": outcome.mutated}),
+                            )?;
+                        }
+                    }
+                    let output = bounded_model_output(self.recorder, outcome.output)?;
+                    emit(
+                        self.recorder,
+                        log,
+                        LoopEvent::EffectApplied {
+                            call_id: call.call_id.clone(),
+                            mutated: false,
+                            output: output.clone(),
+                        },
+                    )?;
+                    results.push((call.call_id.clone(), output));
+                }
+                Err(error) => {
+                    // All futures have already completed. Continue folding
+                    // definitive siblings so their brackets are not left
+                    // falsely open, then return the first executor error.
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+        }
+        if let Some(error) = first_error {
+            return Err(error);
         }
         Ok(results)
     }

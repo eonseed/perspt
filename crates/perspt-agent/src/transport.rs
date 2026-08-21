@@ -170,6 +170,23 @@ impl ModelTransport for GenAiTransport {
         tools: &'a [ToolSpec],
         choice: ToolChoicePolicy,
     ) -> TransportFuture<'a, TurnOutput> {
+        self.chat_turn_with_options(
+            model,
+            conversation,
+            tools,
+            choice,
+            perspt_sdk::GenerationOptions::default(),
+        )
+    }
+
+    fn chat_turn_with_options<'a>(
+        &'a self,
+        model: &'a ModelId,
+        conversation: &'a Conversation,
+        tools: &'a [ToolSpec],
+        choice: ToolChoicePolicy,
+        options: perspt_sdk::GenerationOptions,
+    ) -> TransportFuture<'a, TurnOutput> {
         let core_choice = render_choice(choice);
         Box::pin(async move {
             let handle = self
@@ -182,7 +199,17 @@ impl ModelTransport for GenAiTransport {
             loop {
                 match handle
                     .provider
-                    .chat_turn_with_tools(&model.model, &messages, &specs, core_choice.clone())
+                    .chat_turn_configured(
+                        &model.model,
+                        &messages,
+                        &specs,
+                        core_choice.clone(),
+                        perspt_core::tools_driver::CoreGenerationConfig {
+                            max_tokens: options.max_tokens,
+                            temperature: options.temperature,
+                            stop_sequences: options.stop_sequences.clone(),
+                        },
+                    )
                     .await
                 {
                     Ok(output) => return Ok(lift_output(output)),

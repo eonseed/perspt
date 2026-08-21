@@ -80,6 +80,7 @@ impl EffectExecutor for BigRead {
         Ok(EffectOutcome {
             output: big_payload(),
             mutated: false,
+            completed: true,
         })
     }
 

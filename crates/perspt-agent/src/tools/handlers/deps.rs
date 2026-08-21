@@ -69,6 +69,7 @@ impl CandidateToolHandler for MutateDependencies {
                 return Ok(EffectOutcome {
                     output: format!("tool failed: {command}: {transcript}"),
                     mutated: false,
+                    completed: true,
                 });
             }
         }
@@ -91,6 +92,7 @@ impl CandidateToolHandler for MutateDependencies {
                 }
             ),
             mutated: !changed.is_empty(),
+            completed: true,
         })
     }
 }

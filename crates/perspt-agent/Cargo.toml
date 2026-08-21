@@ -29,7 +29,7 @@ sha2 = { workspace = true }
 
 # LSP Client
 lsp-types = { workspace = true }
-url = "2.5"
+url = { workspace = true }
 
 # UUID for session IDs
 uuid = { workspace = true }
@@ -56,6 +56,7 @@ rustix = { workspace = true }
 tempfile = { workspace = true }
 rand_core = { version = "0.6", features = ["getrandom"] }
 reqwest = { workspace = true }
+rmcp = { workspace = true }
 
 [dev-dependencies]
 perspt-research = { workspace = true }

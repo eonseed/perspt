@@ -41,6 +41,7 @@ impl CandidateToolHandler for VerifierCommand {
                 format!("tool failed: {output}")
             },
             mutated: false,
+            completed: true,
         })
     }
 }

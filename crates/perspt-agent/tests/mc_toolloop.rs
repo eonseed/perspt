@@ -15,8 +15,8 @@ use perspt_sdk::{
     ActorId, BarrierEvaluator, BarrierWitness, CandidateStateWitness, CandidateTransition,
     Capability, ContractEvaluator, ContractWitness, Conversation, EffectKind, ModelFamily, ModelId,
     ModelTransport, NodeTerminalOutcome, ProviderCapabilities, ProviderToolCall, RiskBudget,
-    SdkError, StaticCatalog, ToolChoicePolicy, ToolEntry, ToolSpec, TransportFuture, TurnOutput,
-    VerificationCadence,
+    SdkError, StaticCatalog, ToolChoicePolicy, ToolEntry, ToolOrigin, ToolSpec, TransportFuture,
+    TurnOutput, VerificationCadence,
 };
 
 /// A transport that replays a fixed script of turns.
@@ -27,11 +27,22 @@ struct Scripted {
 #[derive(Default)]
 struct Recording {
     events: Mutex<Vec<LoopEvent>>,
+    brackets: Mutex<Vec<String>>,
 }
 
 impl LoopRecorder for Recording {
     fn record(&self, event: &LoopEvent) -> anyhow::Result<()> {
         self.events.lock().unwrap().push(event.clone());
+        Ok(())
+    }
+
+    fn external_intent(&self, key: &str, _intent: &serde_json::Value) -> anyhow::Result<()> {
+        self.brackets.lock().unwrap().push(format!("intent:{key}"));
+        Ok(())
+    }
+
+    fn external_result(&self, key: &str, _result: &serde_json::Value) -> anyhow::Result<()> {
+        self.brackets.lock().unwrap().push(format!("result:{key}"));
         Ok(())
     }
 }
@@ -107,6 +118,7 @@ impl EffectExecutor for ApplyAll {
         Ok(EffectOutcome {
             output: "ok".into(),
             mutated: !entry.effect.is_read_only(),
+            completed: entry.name != "mcp.fixture.uncertain",
         })
     }
 
@@ -418,6 +430,82 @@ async fn durable_checkpoint_preserves_the_next_turn_projection() {
         Some(perspt_sdk::Message::User { content })
             if content.contains("descended to V = 9.000")
     ));
+}
+
+/// R5 applies to observations as well as mutations: an MCP search can leave
+/// external state (billing, audit logs, expiring cursors) even though it does
+/// not mutate the candidate workspace.
+#[tokio::test]
+async fn durable_read_only_effect_is_write_ahead_bracketed() {
+    let mut external = perspt_sdk::base_entries()
+        .into_iter()
+        .find(|entry| entry.name == "read_file")
+        .expect("base read_file entry");
+    external.name = "mcp.fixture.read".into();
+    external.origin = ToolOrigin::External("fixture".into());
+    external.durable = true;
+
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![call(
+            "external-read",
+            "mcp.fixture.read",
+            serde_json::json!({"path": "src/lib.rs"}),
+        )]),
+        TurnOutput::Text("done".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![external]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 1.0), (true, 0.0)]);
+    let recorder = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.recorder = Some(&recorder);
+
+    let outcome = tool_loop.run("read external context").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    let key = "tool:mcp.fixture.read:external-read";
+    assert_eq!(
+        *recorder.brackets.lock().unwrap(),
+        [format!("intent:{key}"), format!("result:{key}")]
+    );
+}
+
+#[tokio::test]
+async fn uncertain_durable_read_leaves_its_bracket_open() {
+    let mut external = perspt_sdk::base_entries()
+        .into_iter()
+        .find(|entry| entry.name == "read_file")
+        .expect("base read_file entry");
+    external.name = "mcp.fixture.uncertain".into();
+    external.origin = ToolOrigin::External("fixture".into());
+    external.durable = true;
+
+    let transport = Scripted::new(vec![
+        TurnOutput::ToolCalls(vec![call(
+            "uncertain-read",
+            "mcp.fixture.uncertain",
+            serde_json::json!({"path": "src/lib.rs"}),
+        )]),
+        TurnOutput::Text("continue after the tool diagnostic".into()),
+    ]);
+    let catalog = StaticCatalog::with_base(vec![external]).unwrap();
+    let executor = ApplyAll {
+        applied: AtomicU32::new(0),
+        state: AtomicU32::new(0),
+    };
+    let measurer = EnergyScript::new(vec![(false, 1.0), (true, 0.0)]);
+    let recorder = Recording::default();
+    let mut tool_loop = loop_with(&transport, &catalog, &executor, &measurer);
+    tool_loop.recorder = Some(&recorder);
+
+    let outcome = tool_loop.run("read external context").await.unwrap();
+    assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
+    assert_eq!(
+        *recorder.brackets.lock().unwrap(),
+        ["intent:tool:mcp.fixture.uncertain:uncertain-read"]
+    );
 }
 
 /// MC-J: every executed effect traces to a model-issued call, and every

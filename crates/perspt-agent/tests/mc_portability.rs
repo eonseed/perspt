@@ -84,6 +84,7 @@ impl EffectExecutor for ApplyAll {
         Ok(EffectOutcome {
             output: "ok".into(),
             mutated: !entry.effect.is_read_only(),
+            completed: true,
         })
     }
 
