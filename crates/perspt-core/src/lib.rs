@@ -15,8 +15,9 @@ pub mod tools_driver;
 pub mod types;
 
 pub use config::{
-    Config, ContextConfig, ExplorationConfig, ExternalToolConfig, ExternalToolMode,
-    ExternalToolPolicy, ExternalToolTransport, ModelsConfig, PromptsConfig, ProviderEntry,
+    Config, ContextConfig, ExplorationConfig, ExternalOracleConfig, ExternalToolConfig,
+    ExternalToolMode, ExternalToolPolicy, ExternalToolTransport, ModelsConfig, PromptsConfig,
+    ProviderEntry, TestPolicy,
 };
 pub use events::{ActionType, AgentAction, AgentEvent, NodeStatus};
 pub use llm_provider::{
