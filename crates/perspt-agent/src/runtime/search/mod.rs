@@ -204,7 +204,7 @@ impl Psp9AgentRuntime {
             // content root, never a synthetic marker.
             None => crate::realize::snapshot_workspace(&self.working_dir, &[])?.root_hash(),
         };
-        let (resumed_from, no_goods, budget) =
+        let (resumed_from, no_goods, budget, bypassed_forest) =
             self.opening_state(node_id, generation, &accepted_root);
         // Every holder of the shared handle (the branch tool loops) can now
         // ledger usage snapshots under this forest's identity — crash-time
@@ -232,6 +232,18 @@ impl Psp9AgentRuntime {
             limits: forest.budget.limits().clone(),
             resumed_from,
         })?;
+        if let Some(interrupted) = bypassed_forest {
+            // Gate AC observability: this forest opens fresh while the
+            // interrupted forest's folded consumption stays unclaimed.
+            forest.emit(LoopEvent::BranchObservation {
+                forest_id: forest_id.clone(),
+                branch_id: "forest".into(),
+                observation: format!(
+                    "interrupted forest {interrupted} usage unclaimed by \
+                     {node_id}/{generation}; fresh budget under the same limits"
+                ),
+            })?;
+        }
         let attempts = self
             .run_branches(
                 &mut forest,
@@ -249,10 +261,13 @@ impl Psp9AgentRuntime {
         Ok(chosen)
     }
 
-    /// The forest's opening state. A resume seed (the ledger fold's
-    /// no-goods and the interrupted forest's consumption) is consumed only
-    /// by the same node generation. Other parallel nodes get a fresh budget
-    /// and cannot steal the interrupted forest's reserved usage.
+    /// The forest's opening state. The ledger fold's no-goods seed every
+    /// forest in the session; the interrupted forest's consumption and
+    /// `resumed_from` link are claimed exactly once, and only by the same
+    /// node generation at the same accepted root. Other parallel nodes get
+    /// a fresh budget and cannot steal the interrupted forest's reserved
+    /// usage; when such a bypass happens the interrupted forest id is
+    /// returned so the caller can ledger the unclaimed consumption.
     fn opening_state(
         &self,
         node_id: &str,
@@ -262,42 +277,16 @@ impl Psp9AgentRuntime {
         Option<String>,
         NoGoodStore,
         perspt_sdk::search::SharedSearchBudget,
+        Option<String>,
     ) {
         let mut seed_slot = self.search_seed.lock().unwrap();
-        let matches_owner = seed_slot
-            .as_ref()
-            .is_some_and(|seed| seed.owns(node_id, generation, accepted_root));
-        if !matches_owner {
-            let no_goods = seed_slot
-                .as_ref()
-                .map(|seed| seed.no_goods.clone())
-                .unwrap_or_default();
-            return (
-                None,
-                no_goods,
-                perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
-            );
-        }
-        let seed_state = seed_slot.take();
-        drop(seed_slot);
-        let resumed_from = seed_state.as_ref().and_then(|s| s.resumed_from.clone());
-        match seed_state {
-            Some(seeded) => {
-                let budget = match seeded.prior_usage {
-                    Some(usage) => perspt_sdk::search::SharedSearchBudget::with_usage(
-                        self.search.limits.clone(),
-                        usage,
-                    ),
-                    None => perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
-                };
-                (resumed_from, seeded.no_goods, budget)
-            }
-            None => (
-                None,
-                NoGoodStore::default(),
-                perspt_sdk::search::SharedSearchBudget::new(self.search.limits.clone()),
-            ),
-        }
+        seed::claim(
+            &mut seed_slot,
+            &self.search.limits,
+            node_id,
+            generation,
+            accepted_root,
+        )
     }
 
     /// The live sensor-profile identity: detected plugin verifier commands
