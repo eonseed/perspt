@@ -57,10 +57,10 @@ pub(super) fn configured_topology(
     Ok(ModelTopology {
         actuator,
         actuator_family,
-        architect: qualify_optional(optional(
-            models.and_then(|models| models.architect.clone()),
-            &config.architect_model,
-        ))?,
+        // The runtime resolves the architect route only from the `[models]`
+        // table (`resolve_role_routes`), so the recorded topology must not
+        // claim a flat-key route the architect turn would never dial.
+        architect: qualify_optional(models.and_then(|models| models.architect.clone()))?,
         speculator: qualify_optional(optional(
             models.and_then(|models| models.speculator.clone()),
             &config.speculator_model,
