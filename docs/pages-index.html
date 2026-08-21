@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Perspt documentation, API reference, and specification proposals">
+  <title>Perspt Documentation</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --background: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #2dd4bf;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--background);
+      color: var(--text);
+      font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(960px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 5rem 0;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--accent);
+      font-size: clamp(2.4rem, 7vw, 4rem);
+      letter-spacing: -0.04em;
+    }
+
+    .lead {
+      max-width: 680px;
+      margin: 0.75rem 0 2.5rem;
+      color: var(--muted);
+      font-size: 1.15rem;
+    }
+
+    nav {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+
+    a {
+      display: block;
+      min-height: 160px;
+      padding: 1.4rem;
+      border: 1px solid var(--border);
+      border-radius: 0.8rem;
+      background: var(--surface);
+      color: inherit;
+      text-decoration: none;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+
+    a:hover, a:focus-visible {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      outline: none;
+    }
+
+    h2 {
+      margin: 0 0 0.5rem;
+      color: var(--accent);
+      font-size: 1.25rem;
+    }
+
+    p { margin: 0; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Perspt</h1>
+    <p class="lead">
+      Documentation for the terminal chat interface, governed agent runtime,
+      reusable SDK, and Perspt Specification Proposals.
+    </p>
+    <nav aria-label="Documentation collections">
+      <a href="book/index.html">
+        <h2>Perspt Book</h2>
+        <p>Installation, tutorials, configuration, architecture, and developer guides.</p>
+      </a>
+      <a href="perspt/index.html">
+        <h2>Rust API</h2>
+        <p>Generated workspace API documentation for the Perspt crates.</p>
+      </a>
+      <a href="psps/index.html">
+        <h2>PSPs</h2>
+        <p>Design specifications, implementation contracts, and project governance.</p>
+      </a>
+    </nav>
+  </main>
+</body>
+</html>

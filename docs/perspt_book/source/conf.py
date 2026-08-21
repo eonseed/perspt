@@ -15,6 +15,21 @@ author = 'Ronak Rathore, Vikrant Rathore'
 release = '0.6.6'
 version = '0.6.6'
 
+if os.environ.get('PERSPT_DOCS_CI_FONTS'):
+    latex_fonts = r'''
+\setmainfont{Liberation Serif}[Ligatures=TeX]
+\setsansfont{Liberation Sans}[Scale=0.9,Ligatures=TeX]
+\setmonofont{Liberation Mono}[Scale=0.85]
+\newfontfamily\cjkfont{Noto Serif CJK SC}
+'''
+else:
+    latex_fonts = r'''
+\setmainfont{Times New Roman}[Ligatures=TeX]
+\setsansfont{Helvetica Neue}[Scale=0.9,Ligatures=TeX]
+\setmonofont{Menlo}[Scale=0.85]
+\newfontfamily\cjkfont{Songti SC}
+'''
+
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
@@ -294,23 +309,14 @@ latex_elements = {
 \cleardoublepage
 ''',
     'preamble': r'''
-% XeLaTeX Unicode and font configuration
+% LuaLaTeX Unicode and font configuration
 \usepackage{fontspec}
 \usepackage{unicode-math}
 \usepackage{tikz}
 \usetikzlibrary{shapes,arrows,positioning,calc}
 
 % Font selection with Unicode support
-\setmainfont{Times New Roman}[
-    Ligatures=TeX,
-]
-\setsansfont{Helvetica Neue}[
-    Scale=0.9,
-    Ligatures=TeX,
-]
-\setmonofont{Menlo}[
-    Scale=0.85,
-]
+''' + latex_fonts + r'''
 
 % Color definitions
 \usepackage{xcolor}
@@ -412,6 +418,9 @@ latex_elements = {
 \newunicodechar{❌}{{\emojifont ❌}}
 \newunicodechar{✗}{{\emojifont ✗}}
 \newunicodechar{️}{{}}  % Variation selector - render as nothing
+\newunicodechar{沈}{{\cjkfont 沈}}
+\newunicodechar{黛}{{\cjkfont 黛}}
+\newunicodechar{君}{{\cjkfont 君}}
 
 % Emoji command for manual usage
 \newcommand{\emoji}[1]{{\emojifont #1}}
@@ -444,11 +453,14 @@ texinfo_documents = [
 
 # -- Options for intersphinx extension ---------------------------------------
 
-intersphinx_mapping = {
-    'python': ('https://docs.python.org/3', None),
-    # Rust docs don't provide stable inventory, so we'll disable it for now
-    # 'rust': ('https://doc.rust-lang.org/stable/', None),
-}
+intersphinx_mapping = (
+    {}
+    if os.environ.get('CI')
+    else {
+        'python': ('https://docs.python.org/3', None),
+        # Rust docs do not provide a stable inventory.
+    }
+)
 
 # -- Options for todo extension ----------------------------------------------
 

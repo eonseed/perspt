@@ -5,7 +5,9 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 

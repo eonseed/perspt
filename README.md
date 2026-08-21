@@ -28,7 +28,7 @@ Perspt uses the pinned Rust 1.97.1 toolchain (edition 2021).
 ```bash
 git clone https://github.com/eonseed/perspt.git
 cd perspt
-cargo build --release
+cargo build --release --features bundled
 
 export GEMINI_API_KEY="your-api-key"
 ./target/release/perspt
@@ -440,10 +440,18 @@ The implementation uses the published [`srbn`](https://crates.io/crates/srbn),
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace --all-targets -- --test-threads=1
+cargo check --locked -p perspt-cli --features benchmark
+./check-rules.sh check
 cargo deny check
 ```
+
+Pull requests run that credential-free gate once on Ubuntu. Windows and macOS
+run when the change enters GitHub's merge queue, after a protected-branch push,
+or through the CI workflow's manual **Run workflow** action. This keeps review
+feedback prompt while still testing the exact queued merge on every supported
+target OS. Live model benchmarks remain manual and are never mixed into CI.
 
 Build the documentation:
 
@@ -465,7 +473,7 @@ mechanism; source `.typ` files are intentionally not cited.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See the [contributing guide](docs/perspt_book/source/developer-guide/contributing.rst).
 
 ## License
 

@@ -47,9 +47,9 @@ perspt = { version = "0.6.6", path = "crates/perspt" }
 
 # Exact-pinned to avoid libduckdb-sys recompilation on `cargo update`.
 # Only changes when you explicitly bump the version here.
-# NOTE: `bundled` is NOT a default feature. Local dev links against system libduckdb
-# (fast). CI and release builds use `--all-features` or `--features bundled` to
-# compile DuckDB from source for a fully self-contained binary.
+# NOTE: `bundled` is NOT a default feature. Local development and CI link the
+# exact matching DuckDB shared library (fast). Release builds use
+# `--features bundled` for a fully self-contained binary.
 duckdb = { version = "=1.10505.0" }
 
 # Shared third-party dependencies. Keeping these here makes direct-version

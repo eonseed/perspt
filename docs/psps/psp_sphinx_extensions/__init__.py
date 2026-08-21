@@ -13,10 +13,7 @@ from psp_sphinx_extensions.psp_processor.html import (
     psp_html_builder,
     psp_html_translator,
 )
-from psp_sphinx_extensions.psp_processor.parsing import (
-    psp_parser,
-    psp_role,
-)
+from psp_sphinx_extensions.psp_processor.parsing import psp_parser
 
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
@@ -78,8 +75,6 @@ def setup(app: Sphinx) -> dict[str, bool]:
 
     # app.set_translator("html", psp_html_translator.PSPTranslator)  # Docutils Node Visitor overrides (html builder)
     # app.set_translator("dirhtml", psp_html_translator.PSPTranslator)  # Docutils Node Visitor overrides (dirhtml builder)
-
-    app.add_role("psp", psp_role.PSPRole(), override=True)  # Transform PSP references to links
 
     # Register event callbacks
     # app.connect("builder-inited", _update_config_for_builder)  # Update configuration values for builder used

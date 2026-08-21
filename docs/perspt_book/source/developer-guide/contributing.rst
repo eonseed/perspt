@@ -80,20 +80,49 @@ Commit Messages
 PR Workflow
 -----------
 
-1. Create a feature branch from ``main``
+1. Create a feature branch from ``master`` (or from the preceding feature
+   branch for an explicitly stacked pull request).
 2. Make changes with passing tests
-3. Run the full check suite:
+3. Run the pull-request gate:
 
    .. code-block:: bash
 
-      cargo build && cargo test && cargo clippy -- -D warnings && cargo fmt -- --check
+      cargo fmt --all -- --check
+      cargo clippy --locked --workspace --all-targets -- -D warnings
+      cargo test --locked --workspace --all-targets -- --test-threads=1
+      cargo check --locked -p perspt-cli --features benchmark
+      cargo doc --locked --workspace --no-deps
       ./check-rules.sh check
 
-   CI builds and tests with ``--all-features``, so keep the optional
-   features (``bundled``, ``benchmark``) compiling.
+   These commands use the exact DuckDB 1.5.5 shared library. CI downloads the
+   official checksummed library matching the pinned Rust crate; local systems
+   should install the same version. Release binaries alone use ``bundled``.
+   The final ``cargo check`` covers the optional benchmark command without
+   running any credentialed evaluation.
 
 4. Push and open a PR
 5. Address review feedback
+
+CI Tiers
+--------
+
+The workflows separate quick review feedback from target-platform evidence:
+
+* Every non-draft pull request runs one Ubuntu job containing format, Clippy,
+  credential-free tests, optional-feature compilation, Rustdoc, and the PSP
+  code rules. Stacked pull requests are supported because CI does not filter
+  on the PR's base branch.
+* A GitHub ``merge_group`` runs the same Ubuntu gate plus Windows and macOS
+  tests against the temporary merge-queue commit. Enable a branch ruleset that
+  requires the merge queue and the ``PR gate (Ubuntu)``, ``PSP code rules``,
+  and ``Target OS`` checks to make this evidence a pre-merge requirement.
+* Pushes to ``master`` or ``develop`` run the target-OS matrix as a safety net
+  for direct merges. Maintainers can also use **Actions -> CI -> Run workflow**
+  to request the complete matrix before merging when a queue is not enabled.
+
+Superseded PR runs are cancelled. Merge-queue and protected-branch runs are
+never cancelled because their result is evidence for a specific commit.
+PDF generation is release work rather than a pull-request gate.
 
 
 Documentation
@@ -106,11 +135,13 @@ Documentation uses Sphinx with reStructuredText:
    # Build HTML docs
    cd docs/perspt_book && uv run make html
 
-   # Build PDF docs
-   cd docs/perspt_book && uv run make latexpdf
+   # Build PSP docs
+   cd docs/psps && uv run make html
 
    # Live preview
    cd docs/perspt_book && uv run sphinx-autobuild source build/html
 
-See the ``Generate Documentation`` and ``Build Sphinx HTML Documentation`` VS Code
-tasks for convenience.
+CI treats Sphinx warnings as errors and disables remote intersphinx inventory
+fetches so documentation validation is deterministic. One documentation
+workflow publishes the Rust API, book, and PSPs as a single Pages artifact;
+the release workflow owns optional PDF generation.

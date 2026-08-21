@@ -136,14 +136,26 @@ All PRs must pass:
 
 .. code-block:: bash
 
-   cargo build                    # Compile
-   cargo test                     # All tests
-   cargo clippy -- -D warnings    # No warnings
-   cargo fmt -- --check           # Formatted
-   ./check-rules.sh check         # PSP code rules (file/function/line limits)
+   cargo fmt --all -- --check
+   cargo clippy --locked --workspace --all-targets -- -D warnings
+   cargo test --locked --workspace --all-targets -- --test-threads=1
+   cargo check --locked -p perspt-cli --features benchmark
+   cargo doc --locked --workspace --no-deps
+   ./check-rules.sh check
 
-CI builds and tests with ``--all-features``, so keep the optional features
-(``bundled``, ``benchmark``) compiling.
+The PR gate runs once on Ubuntu. It downloads the official DuckDB 1.5.5 shared
+library, verifies its published checksum, and compiles the optional
+``benchmark`` CLI without running live model evaluation. Release builds, not
+CI tests, use the expensive ``bundled`` feature. A merge-queue commit,
+protected-branch push, or manual full run adds Windows and macOS tests.
+Platform-neutral formatting, Clippy, Rustdoc, and PSP rules are not repeated
+on every operating system.
+
+GitHub merge queues are the pre-merge path: the ``merge_group`` event checks
+the proposed change combined with the latest target branch and any changes
+ahead of it in the queue. Without an enabled merge-queue ruleset, maintainers
+must use the CI workflow's manual full run when pre-merge cross-platform
+evidence is required; the protected-branch push remains a post-merge fallback.
 
 The project currently has over 800 tests across all crates.
 

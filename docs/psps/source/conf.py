@@ -57,10 +57,16 @@ exclude_patterns = [
 nitpicky = True
 
 # Intersphinx configuration
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3/", None),
-    "sphinx": ("https://www.sphinx-doc.org/", None),
-}
+# CI builds must not depend on remote inventory availability. Local
+# documentation builds retain the convenient external cross-references.
+intersphinx_mapping = (
+    {}
+    if os.environ.get("CI")
+    else {
+        "python": ("https://docs.python.org/3/", None),
+        "sphinx": ("https://www.sphinx-doc.org/", None),
+    }
+)
 intersphinx_disabled_reftypes = []
 
 # sphinx.ext.extlinks

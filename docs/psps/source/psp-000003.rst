@@ -28,32 +28,32 @@ Proposed Changes
 
 .. rubric:: Functional Specification
 
-A new command-line flag, `--simple-cli` (or a similar name), will be introduced to launch Perspt in this new mode.
+A new command-line flag, ``--simple-cli`` (or a similar name), will be introduced to launch Perspt in this new mode.
 
 **Behavioral Changes:**
 
-*   **No TUI:** When launched with `--simple-cli`, Perspt will not render its TUI.
-*   **Simple Prompt:** A simple, Unix-like prompt (e.g., `> `) will be displayed for user input.
+*   **No TUI:** When launched with ``--simple-cli``, Perspt will not render its TUI.
+*   **Simple Prompt:** A simple, Unix-like prompt (for example, ``>`` followed by a space) will be displayed for user input.
 *   **Direct Output:** The AI's response will be printed directly to standard output as raw text. The terminal will handle scrolling.
 *   **Continuous Interaction:** After the AI response is complete, the prompt will reappear for the next question.
-*   **Exit:** The application will exit cleanly when the user presses `Ctrl+C`.
-*   **File Logging:** An optional argument, such as `--log-file <filename>`, can be used with `--simple-cli` to save the entire interaction (both user questions and AI responses) to the specified file. The output will still be printed to the console.
+*   **Exit:** The application will exit cleanly when the user presses ``Ctrl+C``.
+*   **File Logging:** An optional argument, such as ``--log-file <filename>``, can be used with ``--simple-cli`` to save the entire interaction (both user questions and AI responses) to the specified file. The output will still be printed to the console.
 
 .. rubric:: UI/UX Design
 
 The UI/UX is intentionally minimal:
 
-*   **Prompt:** A simple, non-intrusive prompt (e.g., `> `).
+*   **Prompt:** A simple, non-intrusive prompt (for example, ``>`` followed by a space).
 *   **Output:** Raw text output from the AI, with no special rendering.
 *   **Interaction:** A standard, synchronous request-response loop.
 
 .. rubric:: Technical Specification
 
-This section outlines the proposed implementation details for the simple CLI mode. The changes will primarily be in `src/main.rs` and will introduce a new `cli` module (in a new file `src/cli.rs`) to encapsulate the new logic.
+This section outlines the proposed implementation details for the simple CLI mode. The changes will primarily be in ``src/main.rs`` and will introduce a new ``cli`` module (in a new file ``src/cli.rs``) to encapsulate the new logic.
 
-*   **Argument Parsing (`src/main.rs`):**
+*   **Argument Parsing (``src/main.rs``):**
 
-    The existing `clap` command builder will be updated to include the new mode and its related options.
+    The existing ``clap`` command builder will be updated to include the new mode and its related options.
 
     .. code-block:: rust
 
@@ -72,9 +72,9 @@ This section outlines the proposed implementation details for the simple CLI mod
                .requires("simple-cli"),
        )
 
-*   **Application Flow (`src/main.rs`):**
+*   **Application Flow (``src/main.rs``):**
 
-    The `async main` function will parse these arguments and, if `--simple-cli` is present, delegate to a new `async` function for the CLI mode, passing the already-initialized configuration and provider.
+    The ``async main`` function will parse these arguments and, if ``--simple-cli`` is present, delegate to a new ``async`` function for the CLI mode, passing the already-initialized configuration and provider.
 
     .. code-block:: rust
 
@@ -124,7 +124,7 @@ This section outlines the proposed implementation details for the simple CLI mod
            Ok(())
        }
 
-*   **Simple CLI Implementation (new file `src/cli.rs`):**
+*   **Simple CLI Implementation (new file ``src/cli.rs``):**
 
     A new module will contain the core logic for the simple, interactive, and asynchronous command-line loop. It will use streaming for a responsive feel.
 
@@ -221,11 +221,11 @@ This section outlines the proposed implementation details for the simple CLI mod
 
 *   **Dependencies:**
 
-    This feature can be built using the existing project crates. The `tokio` dependency with the `io-util` and `macros` features is already in use and will support the asynchronous CLI loop.
+    This feature can be built using the existing project crates. The ``tokio`` dependency with the ``io-util`` and ``macros`` features is already in use and will support the asynchronous CLI loop.
 
 *   **Configuration:**
 
-    The simple CLI mode will respect the existing configuration mechanisms (`config.json`, environment variables, CLI arguments) for all settings related to the LLM provider (e.g., API keys, model choice). The configuration will be loaded and processed at startup in `main.rs` before the provider is initialized.
+    The simple CLI mode will respect the existing configuration mechanisms (``config.json``, environment variables, CLI arguments) for all settings related to the LLM provider (e.g., API keys, model choice). The configuration will be loaded and processed at startup in ``main.rs`` before the provider is initialized.
 
 =========
 Rationale
@@ -242,7 +242,7 @@ This approach was chosen for its simplicity and broad utility. It aligns with th
 Backwards Compatibility
 =======================
 
-This change is fully backwards-compatible. The existing TUI remains the default mode of operation. The new mode is only activated when the `--simple-cli` flag is used.
+This change is fully backwards-compatible. The existing TUI remains the default mode of operation. The new mode is only activated when the ``--simple-cli`` flag is used.
 
 =========
 Copyright

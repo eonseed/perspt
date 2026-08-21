@@ -25,6 +25,7 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       tag_name: ${{ steps.tag_name.outputs.TAG_NAME }}
     steps:
@@ -67,6 +68,7 @@ jobs:
     name: Build Release Binary
     needs: create-release
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     env:
       CXXFLAGS: ${{ startsWith(matrix.target, 'x86_64-pc-windows-msvc') && '/std:c++17 /EHsc' || '' }}
       CMAKE_CXX_FLAGS: ${{ startsWith(matrix.target, 'x86_64-pc-windows-msvc') && '/std:c++17 /EHsc' || '' }}
@@ -95,8 +97,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.97.1
           targets: ${{ matrix.target }}
 
       - name: Setup Node.js
@@ -137,6 +140,11 @@ jobs:
     name: Build and Upload Documentation
     needs: create-release
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: 0
+      PERSPT_DOCS_CI_FONTS: 1
+      PERSPT_SKIP_DASHBOARD_ASSETS: 1
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -144,52 +152,51 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          version: "latest"
+          version: "8.1.0"
+          enable-cache: true
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: dtolnay/rust-toolchain@master
         with:
-          node-version: '22'
+          toolchain: 1.97.1
+
+      - name: Install pinned DuckDB
+        uses: ./.github/actions/setup-duckdb
+
+      - name: Install documentation system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            graphviz \
+            texlive-luatex \
+            texlive-latex-recommended \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            fonts-liberation \
+            fonts-dejavu \
+            fonts-noto-cjk \
+            fontconfig
 
       - name: Build Rust documentation
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --locked --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
 
       - name: Build Sphinx HTML documentation
-        run: |
-          cd docs/perspt_book
-          uv run make html
+        working-directory: docs/perspt_book
+        run: uv run --locked sphinx-build -W --keep-going -b html source build/html
+        env:
+          CI: 1
 
       - name: Build Sphinx PDF documentation
         run: |
           cd docs/perspt_book
-          # Install comprehensive LaTeX packages and fonts for PDF generation
-          sudo apt-get update
-          sudo apt-get install -y \
-            texlive-xetex \
-            texlive-latex-recommended \
-            texlive-latex-extra \
-            texlive-fonts-recommended \
-            texlive-fonts-extra \
-            texlive-luatex \
-            fonts-liberation \
-            fonts-dejavu \
-            fonts-noto \
-            fonts-noto-color-emoji \
-            fonts-noto-extra \
-            fontconfig
-
-          # Update font cache
-          sudo fc-cache -fv
-
-          # Use CI configuration and build PDF
+          # Generate and compile the release-only PDF. Routine pull requests
+          # build strict HTML and do not install the LaTeX toolchain.
           export CI=true
           export GITHUB_ACTIONS=true
-          cp source/conf_ci.py source/conf.py
-          uv run sphinx-build -b latex source build/latex
-          cd build/latex && make || echo "PDF build failed, continuing with release..."
+          uv run --locked sphinx-build -W --keep-going -b latex source build/latex
+          make -C build/latex
 
       - name: Package documentation
         run: |
@@ -210,14 +217,12 @@ jobs:
     name: Generate Checksums
     needs: [create-release, build-release]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Download release assets
         run: |
           # Get the tag name
           TAG_NAME="${{ needs.create-release.outputs.tag_name }}"
-
-          # Wait a bit for assets to be available
-          sleep 30
 
           # Download all binary assets with retries
           for asset in "perspt-linux-x86_64" "perspt-windows-x86_64.exe" "perspt-macos-x86_64" "perspt-macos-arm64"; do
