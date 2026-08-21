@@ -8,6 +8,9 @@ license.workspace = true
 description = "Optional, credentialed evaluation tooling for Perspt"
 repository.workspace = true
 homepage.workspace = true
+# The corpus (hidden oracles and reference solutions included) is release
+# tooling, never a published library.
+publish = false
 # Explicit inclusion keeps nested Rust fixture packages in the crate archive.
 include = ["src/**", "build.rs", "corpus/**"]
 

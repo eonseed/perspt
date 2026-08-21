@@ -45,6 +45,8 @@ mod corpus;
 use corpus::materialize_corpus;
 #[cfg(test)]
 use corpus::source_corpus_root;
+mod harness;
+use harness::{copy_tree, hidden_verdict, prepare_python_env, SKIP_DIRS};
 
 const MAX_TURNS: u32 = 12;
 const DEADLINE_SECS: u64 = 120;
@@ -181,11 +183,11 @@ const ARMS: [EvalArm; 7] = [
 
 /// One matched task loaded from `corpus/<id>/`.
 #[derive(serde::Deserialize, serde::Serialize)]
-struct TaskSpec {
+pub(crate) struct TaskSpec {
     goal: String,
     /// The hidden suite's argv, run identically for every arm. Python
     /// oracles always run through `uv run --no-sync` — never bare python.
-    hidden_check: Vec<String>,
+    pub(crate) hidden_check: Vec<String>,
     #[serde(default)]
     tags: Vec<String>,
     /// "pass" (a straightforward task) or "recovery" (deliberately
@@ -198,11 +200,11 @@ fn default_expect() -> String {
     "pass".into()
 }
 
-struct Task {
+pub(crate) struct Task {
     id: String,
-    spec: TaskSpec,
-    fixture_dir: PathBuf,
-    hidden_dir: PathBuf,
+    pub(crate) spec: TaskSpec,
+    pub(crate) fixture_dir: PathBuf,
+    pub(crate) hidden_dir: PathBuf,
     solution_dir: PathBuf,
 }
 
@@ -337,9 +339,17 @@ fn validate_task_shape(task: &Task, violations: &mut Vec<String>) {
     if has_tag(task, "rust") && command != Some("cargo") {
         violations.push(format!("{}: Rust oracle must run through cargo", task.id));
     }
-    if (has_tag(task, "python") || has_tag(task, "mixed")) && command != Some("uv") {
+    let offline = ["uv", "run", "--no-sync"];
+    let offline_uv = task
+        .spec
+        .hidden_check
+        .iter()
+        .take(offline.len())
+        .map(String::as_str)
+        .eq(offline);
+    if (has_tag(task, "python") || has_tag(task, "mixed")) && !offline_uv {
         violations.push(format!(
-            "{}: Python/mixed oracle must run through uv",
+            "{}: Python/mixed oracle must run through uv run --no-sync",
             task.id
         ));
     }
@@ -490,68 +500,6 @@ struct CellResult {
     failure: Option<String>,
 }
 
-/// Directories never copied into the hidden-verification tree.
-const SKIP_DIRS: &[&str] = &[
-    "target",
-    ".venv",
-    ".perspt",
-    ".perspt-target",
-    ".perspt-tmp",
-    ".perspt-home",
-    ".pytest_cache",
-    ".ruff_cache",
-    "__pycache__",
-    "node_modules",
-];
-
-fn copy_tree(source: &Path, destination: &Path) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if SKIP_DIRS.contains(&name.as_str()) || name == "eval-ledger.db" {
-            continue;
-        }
-        let target = destination.join(&name);
-        if entry.file_type()?.is_dir() {
-            std::fs::create_dir_all(&target)?;
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
-}
-
-/// The hidden suite: a fresh copy of the post-run fixture with the
-/// withheld `hidden/` tree overlaid on top (overwriting any weakened
-/// visible test), run identically for every arm. The fixture's synced
-/// `.venv` is reused read-only for Python oracles.
-fn hidden_pass(fixture: &Path, task: &Task) -> bool {
-    let Ok(verify) = tempfile::tempdir() else {
-        return false;
-    };
-    if copy_tree(fixture, verify.path()).is_err() {
-        return false;
-    }
-    if task.hidden_dir.is_dir() && copy_tree(&task.hidden_dir, verify.path()).is_err() {
-        return false;
-    }
-    let check = &task.spec.hidden_check;
-    let mut command = Command::new(&check[0]);
-    command
-        .args(&check[1..])
-        .current_dir(verify.path())
-        .env("CARGO_INCREMENTAL", "0");
-    let venv = fixture.join(".venv");
-    if venv.is_dir() {
-        command.env("UV_PROJECT_ENVIRONMENT", venv);
-    }
-    command
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
 /// Prove that the oracle distinguishes the unfinished fixture from a known
 /// good implementation. `solution/` is never copied into an evaluation
 /// workspace; it exists solely to make corpus authoring falsifiable.
@@ -559,7 +507,7 @@ fn validate_task_solution(task: &Task) -> anyhow::Result<()> {
     let unfinished = tempfile::tempdir()?;
     write_fixture(unfinished.path(), task)?;
     anyhow::ensure!(
-        !hidden_pass(unfinished.path(), task),
+        !hidden_verdict(unfinished.path(), task)?,
         "{}: unfinished fixture unexpectedly passes the hidden oracle",
         task.id
     );
@@ -568,7 +516,7 @@ fn validate_task_solution(task: &Task) -> anyhow::Result<()> {
     write_fixture(solved.path(), task)?;
     copy_tree(&task.solution_dir, solved.path())?;
     anyhow::ensure!(
-        hidden_pass(solved.path(), task),
+        hidden_verdict(solved.path(), task)?,
         "{}: reference solution does not pass the hidden oracle",
         task.id
     );
@@ -634,16 +582,7 @@ fn write_fixture(dir: &Path, task: &Task) -> anyhow::Result<()> {
             std::fs::write(full, module)?;
         }
     }
-    if dir.join("pyproject.toml").is_file() {
-        // The synced environment is part of the fixture, not the agent's
-        // job: verification is offline (`uv run --no-sync`), so pytest
-        // must already be importable from the project's `.venv`.
-        for args in [vec!["venv", "-q"], vec!["pip", "install", "-q", "pytest"]] {
-            let status = Command::new("uv").args(&args).current_dir(dir).status()?;
-            anyhow::ensure!(status.success(), "fixture env setup failed: uv {args:?}");
-        }
-    }
-    Ok(())
+    prepare_python_env(dir)
 }
 
 /// Arm 1: the ungoverned direct harness — the same model, task, turn
@@ -1168,6 +1107,23 @@ pub fn aggregate_reports(paths: &[PathBuf]) -> anyhow::Result<serde_json::Value>
     }))
 }
 
+/// A cell whose harness — not the model or the task — failed. Recorded
+/// and reported, never scored as a hidden-test failure, and never allowed
+/// to discard the rest of a long live run.
+fn infrastructure_cell(
+    task: &Task,
+    arm: &EvalArm,
+    stage: &str,
+    error: &anyhow::Error,
+) -> CellResult {
+    CellResult {
+        task: task.id.clone(),
+        arm: arm.name.into(),
+        failure: Some(format!("infrastructure: {stage}: {error:#}")),
+        ..Default::default()
+    }
+}
+
 async fn evaluate_cells(
     topology: &ModelTopology,
     tasks: &[Task],
@@ -1181,7 +1137,10 @@ async fn evaluate_cells(
     for task in tasks.iter().take(limit) {
         for arm in arms {
             let dir = tempfile::tempdir()?;
-            write_fixture(dir.path(), task)?;
+            if let Err(error) = write_fixture(dir.path(), task) {
+                results.push(infrastructure_cell(task, arm, "fixture setup", &error));
+                continue;
+            }
             let started = std::time::Instant::now();
             let run = async {
                 if arm.direct {
@@ -1194,7 +1153,8 @@ async fn evaluate_cells(
                 match tokio::time::timeout(std::time::Duration::from_secs(CELL_DEADLINE_SECS), run)
                     .await
                 {
-                    Ok(result) => result?,
+                    Ok(Ok(result)) => result,
+                    Ok(Err(error)) => infrastructure_cell(task, arm, "arm execution", &error),
                     Err(_) => CellResult {
                         task: task.id.clone(),
                         arm: arm.name.into(),
@@ -1203,7 +1163,13 @@ async fn evaluate_cells(
                     },
                 };
             cell.wall_secs = started.elapsed().as_secs_f64();
-            cell.hard_pass = hidden_pass(dir.path(), task);
+            match hidden_verdict(dir.path(), task) {
+                Ok(pass) => cell.hard_pass = pass,
+                Err(error) => {
+                    let note = format!("infrastructure: hidden verification: {error:#}");
+                    cell.failure.get_or_insert(note);
+                }
+            }
             eprintln!(
                 "{}/{}: hard_pass={} wall={:.1}s turns={} branches={}",
                 task.id,

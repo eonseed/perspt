@@ -9,14 +9,28 @@ fn packaged_corpus_restores_nested_rust_manifests() {
     let packaged = materialize_corpus().unwrap();
     let packaged_tasks = load_tasks(packaged.path()).unwrap();
     assert_eq!(packaged_tasks.len(), corpus().len());
-    assert!(packaged
-        .path()
-        .join("graph-rust-dependent/fixture/Cargo.toml")
-        .is_file());
-    assert!(!packaged
-        .path()
-        .join("graph-rust-dependent/fixture/Cargo.toml.fixture")
-        .exists());
+    for manifest in [
+        "graph-rust-dependent/fixture/Cargo.toml",
+        "medium-rust-workspace/fixture/wcore/Cargo.toml",
+        "medium-rust-workspace/fixture/wapi/Cargo.toml",
+    ] {
+        assert!(packaged.path().join(manifest).is_file(), "{manifest}");
+        let fixture_name = format!("{manifest}.fixture");
+        assert!(
+            !packaged.path().join(&fixture_name).exists(),
+            "{fixture_name}"
+        );
+    }
+}
+
+#[test]
+fn suites_select_the_declared_arms() {
+    let names =
+        |suite: BenchmarkSuite| -> Vec<&str> { suite.arms().iter().map(|arm| arm.name).collect() };
+    assert_eq!(names(BenchmarkSuite::Smoke), ["integration"]);
+    assert_eq!(names(BenchmarkSuite::Adaptive), ["paging", "adaptive"]);
+    assert_eq!(names(BenchmarkSuite::Full).len(), 7);
+    assert!(names(BenchmarkSuite::Full).ends_with(&["integration"]));
 }
 
 #[test]
