@@ -235,6 +235,7 @@ impl Psp9AgentRuntime {
     /// handle on the same database file (used when an in-process dashboard
     /// already holds one).
     pub fn with_session_store(mut self, store: Arc<SessionStore>) -> Self {
+        self.database_path = Some(store.database_path().to_path_buf());
         self.shared_store = Some(store);
         self
     }

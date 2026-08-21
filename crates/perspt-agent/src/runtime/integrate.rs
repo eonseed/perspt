@@ -377,8 +377,15 @@ impl Psp9AgentRuntime {
         if contributors.is_empty() {
             return Ok(None);
         }
-        let scratch =
-            CandidateWorkspace::create(&self.working_dir, "staging-seed", 0, &graph.revision_id)?;
+        let exclusions = self.candidate_exclusions();
+        let scratch = CandidateWorkspace::create_filtered(
+            &self.working_dir,
+            "staging-seed",
+            0,
+            &graph.revision_id,
+            self.config.allow_unisolated_verifiers,
+            &exclusions,
+        )?;
         let files = staging.merged_files_for(graph, &contributors);
         scratch.restore_seeded(&files)?;
         let checkpoint = scratch.checkpoint(&[]).await?;

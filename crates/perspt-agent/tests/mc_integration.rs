@@ -610,7 +610,7 @@ async fn a_multi_node_resume_promotes_only_through_the_integration_gate() {
 /// node's checkpoint binding, exactly like a sibling failure folded just
 /// before a crash. Returns the session and the appended revision id.
 fn record_post_checkpoint_stop(database: &std::path::Path, node: &str) -> (String, String) {
-    let store = perspt_store::SessionStore::open(&database.to_path_buf()).unwrap();
+    let store = perspt_store::SessionStore::open(database).unwrap();
     let session_id = store.list_recent_sessions(1).unwrap()[0].session_id.clone();
     let rows = store.get_psp9_events(&session_id).unwrap();
     let newest: perspt_sdk::WorkGraphRevision = rows
