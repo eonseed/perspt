@@ -100,9 +100,9 @@ jobs:
                 RUSTUP_HOME="$4" \
                 CARGO_TARGET_DIR="$2/.perspt-target" \
                 TMPDIR="$2/.perspt-tmp" \
-                strace -f -s 256 -e trace=process -o "$2/cargo.trace" \
+                strace -f -s 256 -e trace=process,file -o "$2/cargo.trace" \
                   cargo check --offline; then
-                cat "$2/cargo.trace"
+                tail -n 240 "$2/cargo.trace"
                 exit 1
               fi
             ' probe "$rustc_path" "$probe_root" "${CARGO_HOME:-$HOME/.cargo}" "$rustup_root"
