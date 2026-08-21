@@ -57,6 +57,14 @@ pub enum CoreToolChoice {
     Specific(String),
 }
 
+/// Optional provider generation controls for one core turn.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CoreGenerationConfig {
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub stop_sequences: Vec<String>,
+}
+
 /// Render one provider-neutral message into the vendor shape.
 fn render_message(message: &CoreMessage) -> ChatMessage {
     match message {
@@ -114,12 +122,40 @@ impl GenAIProvider {
         tools: &[CoreToolSpec],
         choice: CoreToolChoice,
     ) -> Result<CoreTurnOutput> {
+        self.chat_turn_configured(
+            model,
+            messages,
+            tools,
+            choice,
+            CoreGenerationConfig::default(),
+        )
+        .await
+    }
+
+    /// Execute a tool-calling turn with explicit sampling controls.
+    pub async fn chat_turn_configured(
+        &self,
+        model: &str,
+        messages: &[CoreMessage],
+        tools: &[CoreToolSpec],
+        choice: CoreToolChoice,
+        config: CoreGenerationConfig,
+    ) -> Result<CoreTurnOutput> {
         let rendered: Vec<ChatMessage> = messages.iter().map(render_message).collect();
         let mut request = ChatRequest::new(rendered);
         if !tools.is_empty() {
             request = request.with_tools(tools.iter().map(render_tool).collect::<Vec<_>>());
         }
-        let options = ChatOptions::default().with_tool_choice(render_choice(&choice));
+        let mut options = ChatOptions::default().with_tool_choice(render_choice(&choice));
+        if let Some(max_tokens) = config.max_tokens {
+            options = options.with_max_tokens(max_tokens);
+        }
+        if let Some(temperature) = config.temperature {
+            options = options.with_temperature(f64::from(temperature));
+        }
+        if !config.stop_sequences.is_empty() {
+            options = options.with_stop_sequences(config.stop_sequences);
+        }
 
         let response = self
             .client()
