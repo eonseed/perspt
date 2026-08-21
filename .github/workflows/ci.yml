@@ -73,7 +73,7 @@ jobs:
           cargo_bin_root="${CARGO_HOME:-$HOME/.cargo}/bin"
           rustup_root="${RUSTUP_HOME:-$HOME/.rustup}"
           rustc_path="$(rustup which rustc)"
-          cargo init --lib --quiet "$probe_root"
+          cargo init --lib --quiet --name verifier-probe "$probe_root"
           mkdir -p "$probe_root/.perspt-home" "$probe_root/.perspt-target" "$probe_root/.perspt-tmp"
           bwrap \
             --die-with-parent \
