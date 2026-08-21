@@ -31,6 +31,7 @@ mod batch;
 mod binding;
 mod context;
 mod contract;
+mod effects;
 pub mod envelope;
 mod proposal;
 mod resident;
@@ -1002,56 +1003,6 @@ impl ToolLoop<'_> {
         })
     }
 
-    /// Execute one certified non-mutating call: the host-side tool surface
-    /// (`tool_search`, `tool_program` validation, `context_recall`) or the
-    /// sandboxed executor.
-    async fn apply_non_mutating(
-        &self,
-        call: &ProviderToolCall,
-        entry: &ToolEntry,
-        recall: Option<&resident::RecallIndex>,
-    ) -> Result<String> {
-        if call.name == "context_recall" {
-            return Ok(match recall {
-                Some(index) => index.lookup(&call.arguments),
-                None => "miss: no context pages exist yet in this session".to_string(),
-            });
-        }
-        if call.name == "read_artifact" {
-            return artifact::read_artifact_window(self.recorder, &call.arguments);
-        }
-        if call.name == "tool_search" {
-            let query = call
-                .arguments
-                .get("query")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            let limit = call
-                .arguments
-                .get("limit")
-                .and_then(serde_json::Value::as_u64)
-                .and_then(|value| usize::try_from(value).ok())
-                .unwrap_or(8);
-            let matches = self
-                .catalog
-                .search_specs(&self.capabilities, query, limit, false);
-            return Ok(serde_json::to_string(&matches)?);
-        }
-        if call.name == "tool_program" {
-            let source = call
-                .arguments
-                .get("source")
-                .and_then(serde_json::Value::as_str)
-                .context("tool_program requires string source")?;
-            let calls = perspt_policy::evaluate_tool_program(
-                source,
-                perspt_policy::ToolProgramLimits::default(),
-            )?;
-            return Ok(serde_json::to_string(&calls)?);
-        }
-        Ok(self.executor.apply(call, entry).await?.output)
-    }
-
     /// Evaluate all five clauses for a transition and ledger the witness.
     fn certify(
         &self,
@@ -1148,50 +1099,11 @@ impl ToolLoop<'_> {
             // partial one.
             promote_matching_capability(&mut self.capabilities, &witness)
                 .map_err(|error| anyhow::anyhow!("promotion: {error}"))?;
-            let output = self.apply_non_mutating(call, &entry, recall).await?;
-            let output = bounded_model_output(self.recorder, output)?;
-            emit(
-                self.recorder,
-                log,
-                LoopEvent::EffectApplied {
-                    call_id: call.call_id.clone(),
-                    mutated: false,
-                    output: output.clone(),
-                },
-            )?;
-            return Ok(output);
+            return self.execute_non_mutating(call, &entry, recall, log).await;
         }
 
         self.apply_mutating(call, &entry, proposal, &before, log, projection, mutations)
             .await
-    }
-
-    /// R5 bracketing: a durable effect's intent is ledgered before it
-    /// runs, so an interruption leaves a visible open bracket.
-    fn open_effect_bracket(
-        &self,
-        call: &ProviderToolCall,
-        entry: &ToolEntry,
-    ) -> Result<Option<String>> {
-        let Some(key) = entry
-            .durable
-            .then(|| format!("tool:{}:{}", call.name, call.call_id))
-        else {
-            return Ok(None);
-        };
-        if let Some(recorder) = self.recorder {
-            recorder.external_intent(
-                &key,
-                &serde_json::json!({
-                    "tool": call.name,
-                    "call_id": call.call_id,
-                    "arguments": call.arguments,
-                    "node_id": self.node_id,
-                    "generation": self.generation,
-                }),
-            )?;
-        }
-        Ok(Some(key))
     }
 
     /// Apply a mutating call to the reversible overlay, certify the realized
@@ -1209,8 +1121,10 @@ impl ToolLoop<'_> {
     ) -> Result<String> {
         let bracket_key = self.open_effect_bracket(call, entry)?;
         let outcome = self.executor.apply(call, entry).await?;
-        if let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref()) {
-            recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
+        if outcome.completed {
+            if let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref()) {
+                recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
+            }
         }
         let after = self.executor.state_witness().await?;
         let transition = CandidateTransition::new(proposal, before.witness.clone(), after);

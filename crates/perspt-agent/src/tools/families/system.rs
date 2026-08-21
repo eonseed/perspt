@@ -115,6 +115,7 @@ impl CandidateToolHandler for SysInfo {
         Ok(EffectOutcome {
             output: capped(lines.join("\n")),
             mutated: false,
+            completed: true,
         })
     }
 }
@@ -138,6 +139,7 @@ impl CandidateToolHandler for SysProcesses {
         Ok(EffectOutcome {
             output: capped(String::from_utf8_lossy(&output.stdout).into_owned()),
             mutated: false,
+            completed: true,
         })
     }
 }
@@ -169,6 +171,7 @@ impl CandidateToolHandler for SysDisk {
                 target.display()
             ),
             mutated: false,
+            completed: true,
         })
     }
 }
@@ -190,6 +193,7 @@ impl CandidateToolHandler for SysEnv {
         Ok(EffectOutcome {
             output: capped(names.join("\n")),
             mutated: false,
+            completed: true,
         })
     }
 }

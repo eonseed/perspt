@@ -54,6 +54,7 @@ impl CandidateToolHandler for WorkspaceOp {
                 format!("tool failed: {}", result.error.unwrap_or_default())
             },
             mutated: result.success,
+            completed: true,
         })
     }
 }

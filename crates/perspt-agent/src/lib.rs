@@ -20,8 +20,10 @@ pub mod verifier;
 
 pub use candidate::CandidateWorkspace;
 pub use external_tools::{
-    ExternalConnectionState, ExternalToolEvent, ExternalToolObserver, ExternalToolResult,
-    ExternalToolRuntime, McpTransport, MCP_PROTOCOL_VERSION,
+    ExternalConnectionState, ExternalToolEvent, ExternalToolObserver, ExternalToolRejection,
+    ExternalToolResult, ExternalToolRuntime, McpClientServices, McpElicitationAction,
+    McpElicitationBroker, McpElicitationProvider, McpPendingElicitation, McpSamplingProvider,
+    McpServerEvent, ModelTransportSamplingProvider, MCP_PROTOCOL_VERSION,
 };
 pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use measure::CodingCandidateMeasurer;

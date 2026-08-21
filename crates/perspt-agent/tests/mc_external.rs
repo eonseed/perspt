@@ -6,10 +6,15 @@
 //! rejected, withheld rejected — and a replay lifecycle answers from
 //! recorded observations without reconnecting.
 
+#![allow(deprecated)]
+
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
-use perspt_agent::{ExternalToolResult, ExternalToolRuntime};
+use perspt_agent::{
+    ExternalToolResult, ExternalToolRuntime, McpClientServices, McpElicitationAction,
+    McpElicitationBroker, McpSamplingProvider,
+};
 use perspt_core::{
     Config, ExternalToolConfig, ExternalToolMode, ExternalToolPolicy, ExternalToolTransport,
 };
@@ -64,8 +69,63 @@ fn stdio_config() -> Config {
 fn session_capability() -> Capability {
     Capability::new(
         ActorId::new("session"),
-        vec![EffectKind::ReadFile, EffectKind::Search, EffectKind::List],
+        vec![
+            EffectKind::ReadFile,
+            EffectKind::DataRead,
+            EffectKind::Search,
+            EffectKind::List,
+        ],
     )
+}
+
+struct FixtureSampler;
+
+#[test]
+fn sampling_shape_is_current() {
+    let params = serde_json::json!({
+        "method": "sampling/createMessage",
+        "params": {
+            "messages": [
+                {"role": "user", "content": {"type": "text", "text": "sample"}}
+            ],
+            "maxTokens": 16,
+            "temperature": 0.0,
+            "stopSequences": ["stop"]
+        }
+    });
+    let request: rmcp::model::ServerRequest = serde_json::from_value(params.clone()).unwrap();
+    assert!(matches!(
+        request,
+        rmcp::model::ServerRequest::CreateMessageRequest(_)
+    ));
+    let message: rmcp::model::ServerJsonRpcMessage = serde_json::from_value(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": "sample-1",
+        "method": params["method"],
+        "params": params["params"],
+    }))
+    .unwrap();
+    assert!(matches!(
+        message,
+        rmcp::model::ServerJsonRpcMessage::Request(request)
+            if matches!(request.request, rmcp::model::ServerRequest::CreateMessageRequest(_))
+    ));
+}
+
+#[async_trait::async_trait]
+impl McpSamplingProvider for FixtureSampler {
+    async fn create_message(
+        &self,
+        _server_id: &str,
+        request: rmcp::model::CreateMessageRequestParams,
+    ) -> anyhow::Result<rmcp::model::CreateMessageResult> {
+        assert_eq!(request.max_tokens, 16);
+        assert_eq!(request.stop_sequences, Some(vec!["stop".to_string()]));
+        Ok(rmcp::model::CreateMessageResult::new(
+            rmcp::model::SamplingMessage::assistant_text("sampled"),
+            "fixture-model".to_string(),
+        ))
+    }
 }
 
 async fn assert_admission_triple(runtime: &mut ExternalToolRuntime) {
@@ -76,6 +136,14 @@ async fn assert_admission_triple(runtime: &mut ExternalToolRuntime) {
         ["mcp.fixture.echo"],
         "only the honest read-only tool is admitted: {names:?}"
     );
+    let rejected = runtime.admission_rejections("fixture");
+    assert_eq!(rejected.len(), 2);
+    assert!(rejected
+        .iter()
+        .any(|item| item.remote_tool == "shell" && item.reason.contains("RunShell")));
+    assert!(rejected
+        .iter()
+        .any(|item| item.remote_tool == "fetch" && item.reason.contains("NetworkFetch")));
     let entry = &admitted[0];
     assert!(
         entry.durable,
@@ -101,7 +169,7 @@ async fn assert_admission_triple(runtime: &mut ExternalToolRuntime) {
 }
 
 #[tokio::test]
-async fn stdio_admission_triple_and_replay_without_reinvocation() {
+async fn stdio_admission_and_replay() {
     let config = stdio_config();
     let mut runtime = ExternalToolRuntime::from_config(
         &config,
@@ -137,6 +205,180 @@ async fn stdio_admission_triple_and_replay_without_reinvocation() {
         .call("mcp.fixture.echo", serde_json::json!({"text": "governed"}))
         .await;
     assert!(dry.is_err(), "replay refuses to invent unrecorded results");
+}
+
+#[tokio::test]
+async fn legacy_server_is_rejected() {
+    let mut config = stdio_config();
+    config.external_tools[0].command.push("--legacy".into());
+    let mut runtime = ExternalToolRuntime::from_config(
+        &config,
+        ExternalToolMode::Agent,
+        vec![session_capability()],
+    )
+    .unwrap();
+    let error = runtime.discover_server("fixture").await.unwrap_err();
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("2026-07-28") || message.contains("compatible protocol"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn context_and_client_requests() {
+    let config = complete_config();
+    let broker = McpElicitationBroker::new();
+    let mut runtime = complete_runtime(&config, &broker).await;
+    let answer = answer_elicitation(broker);
+    let roundtrip = runtime
+        .call("mcp.fixture.client_roundtrip", serde_json::json!({}))
+        .await
+        .unwrap();
+    answer.await.unwrap();
+    assert!(!roundtrip.is_error, "{}", roundtrip.content);
+    assert_context_ops(&mut runtime).await;
+    runtime.shutdown().await.unwrap();
+}
+
+fn complete_config() -> Config {
+    let mut config = stdio_config();
+    let server = &mut config.external_tools[0];
+    server.command.push("--complete".into());
+    server.roots.push(perspt_core::McpRootConfig {
+        uri: "file:///workspace".into(),
+        name: Some("Workspace".into()),
+    });
+    server.sampling = true;
+    server.elicitation = true;
+    server.subscriptions = false;
+    server
+        .tools
+        .insert("client_roundtrip".into(), read_policy());
+    server.tools.insert("async_task".into(), read_policy());
+    config
+}
+
+fn read_policy() -> ExternalToolPolicy {
+    ExternalToolPolicy {
+        effect: Some(EffectKind::Search),
+        risk: Some(perspt_sdk::RiskClass::Low),
+        footprint: Some(FootprintSpec::default()),
+        proposal_bindings: Vec::new(),
+    }
+}
+
+async fn complete_runtime(config: &Config, broker: &McpElicitationBroker) -> ExternalToolRuntime {
+    let mut runtime = ExternalToolRuntime::from_config(
+        config,
+        ExternalToolMode::Agent,
+        vec![session_capability()],
+    )
+    .unwrap();
+    runtime.set_client_services(McpClientServices {
+        sampling: Some(std::sync::Arc::new(FixtureSampler)),
+        elicitation: Some(std::sync::Arc::new(broker.clone())),
+    });
+    let entries = runtime.discover_server("fixture").await.unwrap();
+    assert_complete_ops(&entries);
+    runtime
+}
+
+fn assert_complete_ops(entries: &[perspt_sdk::ToolEntry]) {
+    let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+    for expected in [
+        "mcp.fixture.client_roundtrip",
+        "mcp.fixture.async_task",
+        "mcp.fixture._perspt_resources_list",
+        "mcp.fixture._perspt_resource_templates_list",
+        "mcp.fixture._perspt_resource_read",
+        "mcp.fixture._perspt_prompts_list",
+        "mcp.fixture._perspt_prompt_get",
+        "mcp.fixture._perspt_complete",
+    ] {
+        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+    }
+}
+
+fn answer_elicitation(broker: McpElicitationBroker) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            if let Some(request) = broker.try_next() {
+                broker
+                    .respond(
+                        request.id,
+                        McpElicitationAction::Accept,
+                        Some(serde_json::json!({"confirmed": true})),
+                    )
+                    .unwrap();
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+}
+
+async fn assert_context_ops(runtime: &mut ExternalToolRuntime) {
+    let resource = runtime
+        .call(
+            "mcp.fixture._perspt_resource_read",
+            serde_json::json!({"uri": "file:///fixture.txt"}),
+        )
+        .await
+        .unwrap();
+    assert!(resource.content.to_string().contains("fixture resource"));
+    let prompt = runtime
+        .call(
+            "mcp.fixture._perspt_prompt_get",
+            serde_json::json!({
+                "name": "review",
+                "argument_names": ["topic"],
+                "argument_values": ["fixture"]
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(prompt.content.to_string().contains("review fixture"));
+    let completion = runtime
+        .call(
+            "mcp.fixture._perspt_complete",
+            serde_json::json!({
+                "kind": "prompt",
+                "reference": "review",
+                "argument": "topic",
+                "value": "fix"
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(completion.content.to_string().contains("fixture"));
+    let task = runtime
+        .call("mcp.fixture.async_task", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(task.content.to_string().contains("task complete"));
+}
+
+#[tokio::test]
+async fn chat_discovery_diagnostics() {
+    let mut config = stdio_config();
+    config.external_tools[0].modes = vec![ExternalToolMode::Chat];
+    let (session, notices) = perspt_agent::external_tools::chat::ChatToolSession::from_config(
+        &config,
+        std::sync::Arc::new(perspt_core::GenAIProvider::new().unwrap()),
+        "fixture-model",
+    )
+    .await
+    .unwrap()
+    .expect("chat-enabled server");
+
+    assert_eq!(session.tool_names(), ["mcp.fixture.echo"]);
+    assert!(notices
+        .iter()
+        .any(|notice| notice.contains("1 tool(s) admitted, 2 rejected")));
+    assert!(notices
+        .iter()
+        .any(|notice| notice.contains("fixture.shell rejected")));
 }
 
 /// A minimal loopback Streamable-HTTP wrapper over the same tool set:
@@ -204,19 +446,20 @@ fn http_fixture_response(request: &serde_json::Value) -> String {
     let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let id = request.get("id").cloned();
     let Some(id) = id else {
-        return concat!(
-            "HTTP/1.1 202 Accepted\r\nmcp-session-id: fixture-session\r\n",
-            "content-length: 0\r\n\r\n"
-        )
-        .into();
+        return "HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\n\r\n".into();
     };
     let result = match method {
-        "initialize" => serde_json::json!({
-            "protocolVersion": "2025-11-25",
+        "server/discover" => serde_json::json!({
+            "resultType": "complete",
+            "supportedVersions": ["2026-07-28"],
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "fixture-http", "version": "0"},
+            "ttlMs": 0,
+            "cacheScope": "private",
         }),
         "tools/list" => serde_json::json!({
+            "resultType": "complete",
+            "ttlMs": 0,
+            "cacheScope": "private",
             "tools": [
                 {"name": "echo", "description": "Echo the provided text back",
                  "inputSchema": {"type": "object",
@@ -239,13 +482,14 @@ fn http_fixture_response(request: &serde_json::Value) -> String {
                 .unwrap_or("");
             let payload = serde_json::json!({
                 "jsonrpc": "2.0", "id": id,
-                "result": {"content": [{"type": "text", "text": format!("echo: {text}")}],
+                "result": {"resultType": "complete",
+                            "content": [{"type": "text", "text": format!("echo: {text}")}],
                             "isError": false},
             });
             // SSE framing exercises the stream path end to end.
             let body = format!("event: message\ndata: {payload}\n\n");
             return format!(
-                "HTTP/1.1 200 OK\r\nmcp-session-id: fixture-session\r\ncontent-type: \
+                "HTTP/1.1 200 OK\r\ncontent-type: \
                  text/event-stream\r\ncontent-length: {}\r\n\r\n{}",
                 body.len(),
                 body
@@ -255,7 +499,7 @@ fn http_fixture_response(request: &serde_json::Value) -> String {
     };
     let payload = serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string();
     format!(
-        "HTTP/1.1 200 OK\r\nmcp-session-id: fixture-session\r\ncontent-type: \
+        "HTTP/1.1 200 OK\r\ncontent-type: \
          application/json\r\ncontent-length: {}\r\n\r\n{}",
         payload.len(),
         payload

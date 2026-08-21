@@ -59,6 +59,7 @@ impl CandidateToolHandler for InspectionExec {
                 format!("tool failed (exit {:?}): {output}", execution.exit_code)
             },
             mutated: false,
+            completed: true,
         })
     }
 }

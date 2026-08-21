@@ -71,6 +71,7 @@ impl EffectExecutor for Idle {
         Ok(EffectOutcome {
             output: "ok".into(),
             mutated: false,
+            completed: true,
         })
     }
 

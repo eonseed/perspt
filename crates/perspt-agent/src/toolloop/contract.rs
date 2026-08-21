@@ -29,6 +29,10 @@ pub struct EffectOutcome {
     pub output: String,
     /// Whether the overlay was mutated.
     pub mutated: bool,
+    /// Whether the executor observed a definitive completion. A durable
+    /// effect with an uncertain result deliberately leaves its write-ahead
+    /// bracket open for reconciliation.
+    pub completed: bool,
 }
 
 /// Opaque executor checkpoint plus its measured state witness.

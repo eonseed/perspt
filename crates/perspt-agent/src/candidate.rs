@@ -635,6 +635,7 @@ impl EffectExecutor for CandidateWorkspace {
             return Ok(EffectOutcome {
                 output: format!("tool failed: no executor registered for {}", call.name),
                 mutated: false,
+                completed: true,
             });
         };
         let outcome = handler.apply(self, call, entry).await?;
@@ -652,6 +653,7 @@ impl EffectExecutor for CandidateWorkspace {
         Ok(EffectOutcome {
             output: outcome.output,
             mutated: mutates_source,
+            completed: outcome.completed,
         })
     }
 

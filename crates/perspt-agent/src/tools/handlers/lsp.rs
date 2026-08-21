@@ -79,6 +79,7 @@ impl CandidateToolHandler for LspQuery {
         Ok(EffectOutcome {
             output,
             mutated: false,
+            completed: true,
         })
     }
 }
