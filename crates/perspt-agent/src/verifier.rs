@@ -122,6 +122,7 @@ pub(crate) async fn run_governed_verifier(
     if let Some(path) = rustup_home.filter(|path| path.is_dir()) {
         process.env("RUSTUP_HOME", path);
     }
+    configure_native_toolchain(&mut process);
     let output = tokio::time::timeout(timeout, process.output())
         .await
         .with_context(|| {
@@ -192,6 +193,44 @@ fn native_toolchain_environment() -> impl Iterator<Item = &'static str> {
 fn native_toolchain_environment() -> impl Iterator<Item = &'static str> {
     std::iter::empty()
 }
+
+#[cfg(all(windows, target_env = "msvc"))]
+fn configure_native_toolchain(process: &mut Command) {
+    let Some((target, linker_variable)) = native_msvc_target() else {
+        return;
+    };
+    let Some(linker) = find_msvc_tools::find_tool(target, "link.exe") else {
+        return;
+    };
+    for (key, value) in linker.env() {
+        process.env(key, value);
+    }
+    // An absolute linker avoids collisions with Git for Windows' unrelated
+    // Unix `link.exe`, even when both tools occur in the host PATH.
+    process.env(linker_variable, linker.path());
+}
+
+#[cfg(all(windows, target_env = "msvc"))]
+fn native_msvc_target() -> Option<(&'static str, &'static str)> {
+    match std::env::consts::ARCH {
+        "x86_64" => Some((
+            "x86_64-pc-windows-msvc",
+            "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER",
+        )),
+        "x86" => Some((
+            "i686-pc-windows-msvc",
+            "CARGO_TARGET_I686_PC_WINDOWS_MSVC_LINKER",
+        )),
+        "aarch64" => Some((
+            "aarch64-pc-windows-msvc",
+            "CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_LINKER",
+        )),
+        _ => None,
+    }
+}
+
+#[cfg(not(all(windows, target_env = "msvc")))]
+fn configure_native_toolchain(_process: &mut Command) {}
 
 #[cfg(windows)]
 fn host_shell(root: &Path, command: &str) -> Command {
