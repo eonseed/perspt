@@ -176,7 +176,7 @@ jobs:
             ${{ runner.os }}-rust-1.97.1-
 
       - name: Run target-OS tests
-        run: cargo test --locked --workspace --all-targets -- --test-threads=1
+        run: cargo test --locked --workspace --all-targets --no-fail-fast -- --test-threads=1
 
       - name: Check the optional benchmark CLI
         run: cargo check --locked --package perspt-cli --features benchmark
