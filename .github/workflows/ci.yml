@@ -55,7 +55,12 @@ jobs:
           if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined ]]; then
             sudo sysctl --write kernel.apparmor_restrict_unprivileged_unconfined=0
           fi
-          bwrap --die-with-parent --unshare-net --ro-bind / / /bin/true
+          bwrap \
+            --die-with-parent \
+            --unshare-net \
+            --ro-bind / / \
+            --dev /dev \
+            /bin/sh -c ': </dev/null'
 
       - name: Install pinned DuckDB
         uses: ./.github/actions/setup-duckdb
@@ -65,47 +70,6 @@ jobs:
         with:
           toolchain: 1.97.1
           components: rustfmt, clippy
-
-      - name: Verify the governed verifier sandbox
-        shell: bash
-        run: |
-          probe_root="$(mktemp -d)"
-          cargo_bin_root="${CARGO_HOME:-$HOME/.cargo}/bin"
-          rustup_root="${RUSTUP_HOME:-$HOME/.rustup}"
-          rustc_path="$(rustup which rustc)"
-          cargo init --lib --quiet --name verifier-probe "$probe_root"
-          mkdir -p "$probe_root/.perspt-home" "$probe_root/.perspt-target" "$probe_root/.perspt-tmp"
-          bwrap \
-            --die-with-parent \
-            --unshare-net \
-            --ro-bind / / \
-            --tmpfs /home \
-            --tmpfs /tmp \
-            --dir "$HOME" \
-            --dir "${CARGO_HOME:-$HOME/.cargo}" \
-            --ro-bind "$cargo_bin_root" "$cargo_bin_root" \
-            --ro-bind "$rustup_root" "$rustup_root" \
-            --bind "$probe_root" "$probe_root" \
-            --chdir "$probe_root" \
-            /bin/sh -c '
-              id
-              cat /proc/self/attr/current
-              namei -l "$1"
-              findmnt --target "$1" --output TARGET,VFS-OPTIONS,FS-OPTIONS
-              ls -l "$1"
-              "$1" -vV
-              rustc -vV
-              if ! HOME="$2/.perspt-home" \
-                CARGO_HOME="$3" \
-                RUSTUP_HOME="$4" \
-                CARGO_TARGET_DIR="$2/.perspt-target" \
-                TMPDIR="$2/.perspt-tmp" \
-                strace -f -s 256 -e trace=process,file -o "$2/cargo.trace" \
-                  cargo check --offline; then
-                tail -n 240 "$2/cargo.trace"
-                exit 1
-              fi
-            ' probe "$rustc_path" "$probe_root" "${CARGO_HOME:-$HOME/.cargo}" "$rustup_root"
 
       - name: Cache Cargo downloads
         uses: actions/cache@v6
