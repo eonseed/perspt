@@ -142,7 +142,7 @@ pub(crate) async fn run_governed_verifier(
 }
 
 fn verifier_environment() -> Vec<(String, String)> {
-    [
+    let portable = [
         "PATH",
         "LANG",
         "LC_ALL",
@@ -151,10 +151,46 @@ fn verifier_environment() -> Vec<(String, String)> {
         "WINDIR",
         "COMSPEC",
         "PATHEXT",
+    ];
+    portable
+        .into_iter()
+        .chain(native_toolchain_environment())
+        .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value)))
+        .collect()
+}
+
+#[cfg(windows)]
+fn native_toolchain_environment() -> impl Iterator<Item = &'static str> {
+    // Rust's MSVC linker discovery needs the installation roots when a process
+    // starts from a deliberately cleared environment. In particular,
+    // find-msvc-tools consults ProgramFiles(x86); without it rustc may resolve
+    // Git for Windows' unrelated Unix `link.exe` from PATH. Keep this an
+    // explicit compiler/SDK allowlist rather than inheriting the host
+    // environment wholesale.
+    [
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+        "VCINSTALLDIR",
+        "VSINSTALLDIR",
+        "VCToolsInstallDir",
+        "VCToolsVersion",
+        "VSCMD_ARG_HOST_ARCH",
+        "VSCMD_ARG_TGT_ARCH",
+        "WindowsSdkDir",
+        "WindowsSDKVersion",
+        "UniversalCRTSdkDir",
+        "UCRTVersion",
+        "INCLUDE",
+        "LIB",
+        "LIBPATH",
     ]
     .into_iter()
-    .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value)))
-    .collect()
+}
+
+#[cfg(not(windows))]
+fn native_toolchain_environment() -> impl Iterator<Item = &'static str> {
+    std::iter::empty()
 }
 
 #[cfg(windows)]
