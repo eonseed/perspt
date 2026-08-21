@@ -81,6 +81,26 @@ impl CandidateWorkspace {
         graph_revision: impl Into<String>,
         allow_unisolated_verifiers: bool,
     ) -> Result<Self> {
+        Self::create_filtered(
+            source_root,
+            node_id,
+            generation,
+            graph_revision,
+            allow_unisolated_verifiers,
+            &[],
+        )
+    }
+
+    /// Create a candidate while withholding runtime-owned control-plane files
+    /// such as an in-workspace session database.
+    pub(crate) fn create_filtered(
+        source_root: &Path,
+        node_id: impl Into<String>,
+        generation: u32,
+        graph_revision: impl Into<String>,
+        allow_unisolated_verifiers: bool,
+        excluded: &[PathBuf],
+    ) -> Result<Self> {
         let source_root = source_root
             .canonicalize()
             .with_context(|| format!("canonicalizing {}", source_root.display()))?;
@@ -90,7 +110,7 @@ impl CandidateWorkspace {
         let overlay_root = temp.path().join("workspace");
         std::fs::create_dir_all(&overlay_root)?;
         let overlay_root = overlay_root.canonicalize()?;
-        copy_workspace(&source_root, &overlay_root)?;
+        copy_workspace_filtered(&source_root, &overlay_root, excluded)?;
         Ok(Self {
             overlay_tools: AgentTools::new(overlay_root.clone()),
             source_tools: AgentTools::new(source_root.clone()),
@@ -801,6 +821,10 @@ pub(crate) fn reject_symlink_ancestor(root: &Path, relative: &str) -> Result<()>
 }
 
 fn copy_workspace(source: &Path, destination: &Path) -> Result<()> {
+    copy_workspace_filtered(source, destination, &[])
+}
+
+fn copy_workspace_filtered(source: &Path, destination: &Path, excluded: &[PathBuf]) -> Result<()> {
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -822,6 +846,9 @@ fn copy_workspace(source: &Path, destination: &Path) -> Result<()> {
             continue;
         }
         let from = entry.path();
+        if excluded.iter().any(|path| path == &from) {
+            continue;
+        }
         let to = destination.join(&name);
         let kind = entry.file_type()?;
         if kind.is_dir() {
@@ -829,7 +856,7 @@ fn copy_workspace(source: &Path, destination: &Path) -> Result<()> {
                 link_dependency_dir(&from, &to)?;
             } else {
                 std::fs::create_dir_all(&to)?;
-                copy_workspace(&from, &to)?;
+                copy_workspace_filtered(&from, &to, excluded)?;
             }
         } else if kind.is_file() {
             std::fs::copy(&from, &to)?;

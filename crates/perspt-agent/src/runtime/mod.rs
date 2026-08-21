@@ -405,16 +405,52 @@ impl Psp9AgentRuntime {
         generation: u32,
         revision_id: &str,
     ) -> Result<CandidateWorkspace> {
-        let mut candidate = CandidateWorkspace::create_with_policy(
+        let exclusions = self.candidate_exclusions();
+        let mut candidate = CandidateWorkspace::create_filtered(
             &self.working_dir,
             node_id,
             generation,
             revision_id,
             self.config.allow_unisolated_verifiers,
+            &exclusions,
         )?;
         candidate.set_tool_handlers(self.tool_handlers.clone());
         candidate.set_verifier_timeouts(self.config.verifier_timeouts);
         Ok(candidate)
+    }
+
+    /// The live ledger is runtime state, not a coding artifact. Keeping it out
+    /// of candidates also avoids copying an exclusively locked DuckDB file on
+    /// Windows when `--db-path` names a file inside the workspace.
+    fn candidate_exclusions(&self) -> Vec<PathBuf> {
+        let Some(configured) = &self.database_path else {
+            return Vec::new();
+        };
+        let absolute = if configured.is_absolute() {
+            configured.clone()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| self.working_dir.clone())
+                .join(configured)
+        };
+        let target = absolute.canonicalize().unwrap_or(absolute);
+        let Some((parent, name)) = target.parent().zip(target.file_name()) else {
+            return vec![target];
+        };
+        let prefix = format!("{}.", name.to_string_lossy());
+        let mut excluded = vec![target.clone()];
+        if let Ok(entries) = std::fs::read_dir(parent) {
+            excluded.extend(
+                entries
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| {
+                        path.file_name()
+                            .is_some_and(|file| file.to_string_lossy().starts_with(&prefix))
+                    }),
+            );
+        }
+        excluded
     }
 
     /// Recovery ladder (Theorem 6): the loop already consumed its retry and
