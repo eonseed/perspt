@@ -1,9 +1,19 @@
 # Perspt
 
-**v0.6.6**
+**v0.6.6** · **Hózhó** *(Navajo)* — *a state of perfect balance, harmony,
+and continuous self-improvement.*\
+**Your Terminal’s Window to the AI World**
 
-Perspt is a Rust terminal interface for large language models and an experimental,
-verification-driven agent platform. It provides:
+> “The keyboard hums, the screen aglow,\
+> AI’s wisdom, a steady flow.\
+> Will robots take over, it’s quite the fright,\
+> Or just provide insights, day and night?\
+> We ponder and chat, with code as our guide,\
+> Is AI our helper or our human pride?”
+
+Perspt (pronounced “perspect,” short for **Per**sonal **S**pectrum
+**P**ertaining **T**houghts) is a Rust terminal interface for large language
+models and an experimental, verification-driven agent platform. It provides:
 
 1. Interactive TUI chat and a simple script-friendly CLI.
 2. A governed coding agent built on the SRBN ideas developed in the three-paper
@@ -14,6 +24,8 @@ verification-driven agent platform. It provides:
    verifier evidence.
 
 [![Perspt in Action](docs/screencast/perspt_terminal_ui.jpg)](https://github.com/user-attachments/assets/f80f7109-1615-487b-b2a8-b76e16ebf6a7)
+
+---
 
 Perspt is pre-1.0. The coding path works end to end, but the full roadmap is
 not complete. See [PSP 9](docs/psps/source/psp-000009.rst) and
