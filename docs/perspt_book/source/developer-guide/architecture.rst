@@ -207,7 +207,9 @@ The governed PSP-9/PSP-10 agent runtime.
 5. Measurement - ``measure.rs`` re-measures the candidate through the plugin
    verifier suite inside the sandboxed verifier (``verifier.rs``); the gate
    is evaluated on the re-measured candidate, never on the model's account
-   of it
+   of it. The default evolving-test policy measures the resulting tests;
+   backward-compatible and protected external evidence are explicit additions,
+   never implicit assumptions about every task's contract
 6. Adjudication - a tool-free validator reviews only the realized diff and
    records an uncalibrated verdict (``runtime/adjudicate.rs``)
 7. Staging and integration - node winners stage into a graph workspace and

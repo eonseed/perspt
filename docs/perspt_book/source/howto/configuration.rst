@@ -100,12 +100,16 @@ context; every configured reserve must be positive:
    working_set_turns = 8
    output_reserve_tokens = 4096
 
-``[verification]`` sets acceptance-stage options: the optional ``format``
-sensor and per-stage timeouts:
+``[verification]`` sets the test-evidence policy, optional ``format`` sensor,
+and per-stage timeouts. ``evolving`` is the iterative-development default;
+``backward-compatible`` additionally runs recognized historical test files;
+``external-oracle`` additionally runs a protected overlay configured under
+``[verification.external_oracle]``:
 
 .. code-block:: toml
 
    [verification]
+   test_policy = "evolving"
    require_format = true
    stage_timeout_secs = 180
 

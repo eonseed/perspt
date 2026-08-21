@@ -576,6 +576,15 @@ mutate the overlay; every touched file's pre-image is journaled; verifiers
 measure the overlay, not the workspace. A rejected attempt is dropped
 wholesale.
 
+Test evidence follows an explicit policy. The ordinary ``evolving`` policy
+measures the resulting implementation and resulting tests together, which is
+necessary when a task intentionally changes a contract. A
+``backward-compatible`` run adds a regression view with recognized historical
+test files restored. An ``external-oracle`` run adds a separately supplied
+acceptance overlay that the actuator does not promote. These are additional
+test-stage views of the same realized candidate, not alternate paths around
+the syntax, build, or test requirements.
+
 Search Forest Branches
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -596,7 +605,10 @@ With ``--max-parallel-nodes`` above 1, node winners land in a
 content-addressed staging root instead of the user workspace. Disjoint
 footprints are enforced at dispatch; the merged state must pass one global
 integration gate before promotion, and a gate failure restores the prior
-staging root.
+staging root. The integration gate uses the same session-bound test policy as
+the node gates: resulting tests for ordinary evolving development, an
+additional historical regression view for explicitly backward-compatible
+work, or a separately protected external acceptance overlay.
 
 Crash Resume
 ~~~~~~~~~~~~

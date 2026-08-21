@@ -115,6 +115,16 @@ source workspace:
 7. Every observation and decision is appended to a hash-chained ledger before
    it is used.
 
+Tests are governed as evolving project artifacts by default: Perspt runs the
+resulting implementation, resulting tests, and resulting project configuration
+together, so an intentional API or behavior change is not forced to satisfy an
+obsolete test. Projects that promise compatibility can opt into a second
+regression view with `test_policy = "backward-compatible"`. CI or release work
+can instead select `"external-oracle"` and overlay separately protected
+acceptance tests only at the gate. In every mode, syntax, build, and the
+resulting project test suite remain required coding stages; the selected test
+policy is recorded when the session starts.
+
 The initial model-facing schema is intentionally small. `tool_search` activates
 deferred typed tools, while bounded pure Starlark `tool_program` calls can
 compose several proposals. Every nested proposal returns to the same kernel.

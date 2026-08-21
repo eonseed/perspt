@@ -30,7 +30,8 @@ Modules
        sensor architecture)
    * - ``measure``
      - ``CodingCandidateMeasurer`` - full verifier suite at gate boundaries,
-       cheap syntax-only pass at mutation boundaries
+       cheap syntax-only pass at mutation boundaries, and the explicit
+       evolving/backward-compatible/external-oracle test-evidence policies
    * - ``probe``
      - ``probe_route``/``ProbeReport`` - behavioral provider probes (Gate U)
    * - ``promote``
