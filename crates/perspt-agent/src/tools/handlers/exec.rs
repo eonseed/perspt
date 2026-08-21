@@ -113,7 +113,12 @@ fn validate_inspection_args(args: &[String]) -> Result<()> {
             continue;
         }
         let path = Path::new(argument);
-        if path.is_absolute() || path.components().any(|part| part == Component::ParentDir) {
+        if path.has_root()
+            || path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, Component::Prefix(_) | Component::ParentDir))
+        {
             anyhow::bail!("inspection argument escapes the workspace: {argument:?}");
         }
     }
@@ -135,6 +140,11 @@ mod tests {
         assert!(validate_inspection_args(&["src".into(), "--hidden".into()]).is_ok());
         assert!(validate_inspection_args(&["../secret".into()]).is_err());
         assert!(validate_inspection_args(&["/etc/passwd".into()]).is_err());
+        #[cfg(windows)]
+        {
+            assert!(validate_inspection_args(&[r"C:\Windows\win.ini".into()]).is_err());
+            assert!(validate_inspection_args(&[r"\Windows\win.ini".into()]).is_err());
+        }
         assert!(validate_inspection_args(&[".".into(), "-exec".into(), "sh".into()]).is_err());
         assert!(validate_inspection_args(&["--pre=sh".into()]).is_err());
     }
