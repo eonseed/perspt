@@ -983,7 +983,7 @@ async fn run_governed(
 
 /// Ledger-derived process and search metrics for a governed cell.
 fn fold_ledger_metrics(database: &Path, session_id: &str, cell: &mut CellResult) {
-    let Ok(store) = perspt_store::SessionStore::open(&database.to_path_buf()) else {
+    let Ok(store) = perspt_store::SessionStore::open(database) else {
         return;
     };
     let Ok(rows) = store.get_psp9_events(session_id) else {

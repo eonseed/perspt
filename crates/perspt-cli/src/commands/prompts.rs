@@ -5,7 +5,7 @@
 //! `manifest`, which regenerates a library's committed `manifest.toml`
 //! explicitly (a normal build never edits the tree).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use perspt_core::prompts::PlatformPromptLibrary;
@@ -249,7 +249,7 @@ pub fn manifest(prompts_dir: &Path, stages: &[(&str, &str)]) -> Result<()> {
 
 /// `perspt prompts explain-session <db> <session>`: the programs a session
 /// actually compiled, with digests, from the ledger.
-pub fn explain_session(db_path: &PathBuf, session_id: &str) -> Result<()> {
+pub fn explain_session(db_path: &Path, session_id: &str) -> Result<()> {
     let store = perspt_store::SessionStore::open(db_path)?;
     let rows = store.get_psp9_events(session_id)?;
     let mut programs = 0usize;
@@ -298,7 +298,7 @@ pub fn explain_session(db_path: &PathBuf, session_id: &str) -> Result<()> {
 /// `perspt context explain-turn <db> <session>`: the session's recorded
 /// context events — compactions (summary + source pages), infeasibility
 /// refusals, and working-set selections.
-pub fn explain_context(db_path: &PathBuf, session_id: &str) -> Result<()> {
+pub fn explain_context(db_path: &Path, session_id: &str) -> Result<()> {
     let store = perspt_store::SessionStore::open(db_path)?;
     let rows = store.get_psp9_events(session_id)?;
     let mut shown = 0usize;

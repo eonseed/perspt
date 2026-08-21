@@ -314,6 +314,7 @@ async fn reduced_isolation_runs_the_native_windows_verifiers() {
     rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
     let workspace =
         CandidateWorkspace::create_with_policy(dir.path(), "n1", 0, "rev-0", true).unwrap();
+    apply_lib(&workspace, "pub fn answer() -> u32 { 3 }\n").await;
     let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
         .measure()
         .await

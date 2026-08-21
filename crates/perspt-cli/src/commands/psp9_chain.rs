@@ -34,7 +34,7 @@ pub fn rebuild_and_verify(store: &SessionStore, session_id: &str) -> Result<(Led
 pub fn open_store(db_path: Option<&std::path::Path>, read_only: bool) -> Result<SessionStore> {
     match (db_path, read_only) {
         (Some(path), true) => SessionStore::open_read_only(path),
-        (Some(path), false) => SessionStore::open(&path.to_path_buf()),
+        (Some(path), false) => SessionStore::open(path),
         (None, true) => SessionStore::open_read_only(&SessionStore::default_db_path()?),
         (None, false) => SessionStore::new(),
     }
