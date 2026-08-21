@@ -24,94 +24,53 @@ Set any supported API key environment variable and run ``perspt`` with no argume
      - Environment Variable
      - Default Model
    * - 1
-     - OpenAI
-     - ``OPENAI_API_KEY``
-     - ``gpt-5-mini``
+     - Google Vertex AI
+     - ``VERTEX_PROJECT_ID``
+     - ``vertex::gemini-2.5-flash``
    * - 2
-     - Anthropic
-     - ``ANTHROPIC_API_KEY``
-     - ``claude-fable``
-   * - 3
      - Google Gemini
      - ``GEMINI_API_KEY``
-     - ``gemini-3.5-flash``
+     - ``gemini-3.1-flash-lite-preview``
+   * - 3
+     - OpenAI
+     - ``OPENAI_API_KEY``
+     - ``gpt-4o-mini``
    * - 4
+     - Anthropic
+     - ``ANTHROPIC_API_KEY``
+     - ``claude-3-5-sonnet-20241022``
+   * - 5
      - Groq
      - ``GROQ_API_KEY``
-     - ``llama-4-70b``
-   * - 5
+     - ``llama-3.1-8b-instant``
+   * - 6
      - Cohere
      - ``COHERE_API_KEY``
-     - ``command-r7``
-   * - 6
+     - ``command-r-plus``
+   * - 7
      - XAI
      - ``XAI_API_KEY``
-     - ``grok-4``
-   * - 7
+     - ``grok-beta``
+   * - 8
      - DeepSeek
      - ``DEEPSEEK_API_KEY``
-     - ``deepseek-v4``
-   * - 8
-     - AWS Bedrock
-     - ``AWS_ACCESS_KEY_ID`` (and region/creds)
-     - ``us.amazon.nova-pro-v2:0``
+     - ``deepseek-chat``
    * - 9
-     - Google Agent Platform
-     - ``VERTEX_API_KEY`` (and project/region)
-     - ``vertex::gemini-3.5-flash``
-   * - 10
      - Ollama
      - *(none - auto-detected)*
-     - ``llama4``
+     - ``llama3.2``
 
 .. code-block:: bash
 
    # Example: set a key and run
    export GEMINI_API_KEY="your-key"
-   perspt                # auto-detects Gemini, uses gemini-3.5-flash
+   perspt                # auto-detects Gemini, uses gemini-3.1-flash-lite-preview
    perspt chat --model gemini-3.1-pro   # override model
 
 Advanced Enterprise Provider Configurations
 -------------------------------------------
 
-Unlike standard API-key based providers, enterprise platforms like **AWS Bedrock** and **Google Agent Platform (formerly Vertex AI)** require multi-part configurations and secure credentials to function.
-
-AWS Bedrock (SigV4 Authentication)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Perspt integrates natively with AWS Bedrock via the AWS Signature Version 4 (SigV4) protocol. It automatically detects your AWS configuration from standard AWS environment variables or your local AWS config files.
-
-**Required Environment Variables:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Variable
-     - Description
-   * - ``AWS_ACCESS_KEY_ID``
-     - Your AWS Access Key ID.
-   * - ``AWS_SECRET_ACCESS_KEY``
-     - Your AWS Secret Access Key.
-   * - ``AWS_REGION``
-     - The AWS region hosting Bedrock (e.g., ``us-east-1`` or ``us-west-2``).
-   * - ``AWS_SESSION_TOKEN``
-     - *(Optional)* Required if using temporary AWS IAM credentials.
-
-**Local Profile Configuration:**
-
-If environment variables are not set, Perspt will automatically read credentials from your local profile (e.g., ``~/.aws/credentials`` and ``~/.aws/config``) using the standard AWS resolution chain:
-
-.. code-block:: ini
-
-   # ~/.aws/config
-   [default]
-   region = us-east-1
-
-   # ~/.aws/credentials
-   [default]
-   aws_access_key_id = AKIAIOSFODNN7EXAMPLE
-   aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+Unlike standard API-key based providers, enterprise platforms like **Google Agent Platform (formerly Vertex AI)** require multi-part configurations and secure credentials to function.
 
 Google Agent Platform (formerly Vertex AI)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -153,30 +112,16 @@ Since OAuth2 access tokens are short-lived (usually expiring in 1 hour), you can
 Supported Models & Naming Conventions
 -------------------------------------
 
-Perspt features an intelligent router that resolves your target provider from the model name prefix. In version 0.6.2, we support the latest generation of models across all providers:
+In version 0.6.6, a fully qualified model name resolves its own provider: a
+``provider::model`` prefix (``openai``, ``anthropic``, ``gemini``/``google``,
+``vertex``, ``groq``, ``cohere``, ``ollama``, ``xai``, or ``deepseek``) selects
+that provider directly, and the model part is passed through verbatim. A bare
+model name uses the configured or auto-detected provider instead.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 25 35 40
+.. code-block:: bash
 
-   * - Provider
-     - Model Prefix / Name
-     - Target Model ID
-   * - **OpenAI**
-     - ``gpt-5.5-*`` / ``gpt-5-*``
-     - ``gpt-5.5-preview``, ``gpt-5-mini``
-   * - **Anthropic**
-     - ``claude-fable`` / ``claude-4.8-*``
-     - ``claude-fable``, ``opus-4.8``
-   * - **Google Gemini**
-     - ``gemini-3.5-*`` / ``gemini-3.1-*``
-     - ``gemini-3.5-flash``, ``gemini-3.1-pro``
-   * - **AWS Bedrock**
-     - ``aws.*`` / ``bedrock.*``
-     - ``us.amazon.nova-pro-v2:0``, ``us.anthropic.claude-fable-v1:0``
-   * - **Google Agent Platform**
-     - ``vertex.*``
-     - ``vertex::gemini-3.5-flash``, ``vertex::gemini-3.1-pro``
+   perspt chat --model vertex::gemini-3.1-pro   # provider from the namespace
+   perspt chat --model gemini-3.1-pro           # provider from config/detection
 
 
 Configuration File
@@ -211,11 +156,15 @@ All fields are optional. ``provider`` accepts the aliases ``provider_type`` and
    # Override the endpoint for OpenAI-compatible / local / proxy servers
    base_url = "http://localhost:8000/v1"
 
-   # Optional per-tier overrides for `perspt agent`
-   architect_model = "gpt-5.5"
-   actuator_model = "gpt-5-mini"
-   verifier_model = "gpt-5-mini"
-   speculator_model = "gpt-5-mini"
+   # Optional per-role routes for `perspt agent`, as fully qualified
+   # `provider::model` values. When present, the [models] table takes
+   # precedence over the flat *_model fields.
+   [models]
+   architect = "openai::gpt-5.5"
+   actuator = "openai::gpt-5-mini"
+   verifier = "openai::gpt-5-mini"
+   speculator = "openai::gpt-5-mini"
+   adjudicator = "openai::gpt-5.5"
 
 .. note::
    ``base_url`` overrides the endpoint for the active provider. This is useful
@@ -227,6 +176,56 @@ All fields are optional. ``provider`` accepts the aliases ``provider_type`` and
    Custom model names that genai does not recognize (for example
    ``phi-4-npu-ov``) are routed to the configured ``provider``. You can also
    target an adapter inline with namespacing, e.g. ``openai::phi-4-npu-ov``.
+
+Agent Configuration Blocks
+--------------------------
+
+The agent runtime reads four optional TOML blocks. All fields are optional;
+invalid values fail at startup.
+
+**Bounded search** (``[exploration]``):
+
+.. code-block:: toml
+
+   [exploration]
+   initial_branches = 1        # Branches opened before any expansion trigger
+   max_branches = 3            # Branch identities per forest (hard cap 3)
+   distinct_family = true      # Prefer a distinct model family on expansion
+   max_workspace_files = 2048  # Cumulative eager-copy file reservation cap
+   max_workspace_bytes = 134217728  # Cumulative eager-copy byte reservation cap
+
+**Prompt bundles** (``[prompts]``):
+
+.. code-block:: toml
+
+   [prompts]
+   bundles = ["./prompt-bundles/tuned"]  # External bundles, pinned at session start
+   activation_min_tasks = 30    # Minimum paired activation tasks (floor 30; raise-only)
+   noninferiority_margin = 0.05 # Noninferiority margin epsilon in [0, 0.05]
+
+**Resident-context reserves** (``[context]``):
+
+.. code-block:: toml
+
+   [context]
+   working_set_turns = 8          # Verbatim turns kept in the working set
+   synopsis_frame_tokens = 2048   # Token reserve for the synopsis frame
+   output_reserve_tokens = 8192   # Token reserve for model output
+   guard_reserve_tokens = 1024    # Guard reserve against overflow
+
+**Verification acceptance stages** (``[verification]``):
+
+.. code-block:: toml
+
+   [verification]
+   require_format = false     # Declare the plugin format stage as an acceptance sensor
+   stage_timeout_secs = 180   # Wall-clock limit for every governed verifier stage
+   test_timeout_secs = 300    # Per-stage override (also syntax/build/lint/format)
+
+.. note::
+   The ``[ensemble]`` section was removed by PSP-10 and is now a hard startup
+   error: the proposal ensemble is replaced by the bounded search forest, and
+   the error message points to ``[exploration]``.
 
 Command-Line Flags
 ------------------
@@ -273,7 +272,15 @@ Agent-specific (see :doc:`howto/agent-options` for the full list):
    --max-calls-per-turn <N>     # Direct and nested call budget
    --rejection-budget <N>       # Shared recovery/rejection budget
    --max-parallel <N>           # Parallel verifier sensors
+   --max-parallel-nodes <N>     # Concurrent work-graph nodes (>1 needs --yes)
+   --exploration-only           # Read-only exploration; nothing mutated
+   --allow-experimental-prompts # Substitute validated [prompts] bundles live
+   --domain <ID>                # Domain package (coding, research); default: detect
+   --allow-dependency-mutation  # Grant governed dependency mutation
    --persistent-grants          # Sign durable grant intent
+   --db-path <PATH>             # PSP-9 ledger database path
+   --dashboard                  # Start the web dashboard alongside the agent
+   --dashboard-port <N>         # Embedded dashboard port (default 3000)
    --output-summary <FILE>      # Terminal session summary as JSON
 
 Manage configuration interactively:
@@ -306,13 +313,10 @@ The ``perspt dashboard`` subcommand accepts these options:
    * - ``--port``
      - ``3000``
      - HTTP port for the dashboard server
-   * - ``--bind``
-     - ``127.0.0.1``
-     - Bind address (use ``0.0.0.0`` for remote access)
    * - ``--db-path``
      - Platform default
      - Path to the DuckDB database file
 
 The dashboard opens the database in **read-only** mode and never writes to it.
-When bound to ``127.0.0.1``, cookies are set without the ``Secure`` flag so
-plain HTTP works on localhost.
+The server always binds to ``127.0.0.1``; cookies are set without the
+``Secure`` flag so plain HTTP works on localhost.

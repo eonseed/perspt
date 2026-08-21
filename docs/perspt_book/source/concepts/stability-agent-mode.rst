@@ -19,7 +19,7 @@ Paper I (*Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizo
 
 Let :math:`x` be a candidate state. The system computes a vector of residual errors :math:`r(x)`. We define the Lyapunov energy :math:`V(x)` as a measure of the distance from :math:`x` to the verified manifold :math:`V(x) = 0`. The single-agent contract asserts that the state converges if each step reduces :math:`V(x)`.
 
-In the Perspt runtime, the candidate state corresponds to a modification proposed by the actuator model. The orchestrator validates the proposal using domain-specific sensors to calculate the energy.
+In the Perspt runtime, the candidate state corresponds to a modification proposed by the actuator model. The governed tool loop validates the proposal through the admissibility kernel and uses domain-specific sensors to calculate the energy.
 
 Paper II: The Harness Contract
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -46,7 +46,7 @@ The protocol proceeds in rounds:
 
 1. **Proposal**: The commander (Actuator) issues a proposed workspace change.
 2. **Observation**: The loyal lieutenants (Sensors) independently inspect the proposal and report their findings as a vector of residual events.
-3. **Consensus**: The gatekeeper (Orchestrator) aggregates the lieutenants' reports using the quadratic energy function. If the loyal lieutenants consensus reveals no critical residual errors (i.e., :math:`V(x) \le \varepsilon`), the proposal is committed.
+3. **Consensus**: The gatekeeper (the governed tool loop and its admissibility kernel) aggregates the lieutenants' reports using the quadratic energy function. If the loyal lieutenants consensus reveals no critical residual errors (i.e., :math:`V(x) \le \varepsilon`), the proposal is committed.
 4. **Correction or Escalation**: If the energy exceeds the threshold, the lieutenants' specific error reports are compiled into a feedback message. The commander is instructed to repair the state. If the commander fails to reach stability within the allocated round budget, the lieutenants reject further proposals and execute an escalation protocol to alert the operator.
 
 The Energy Formulation
@@ -123,10 +123,15 @@ This forces the structural energy component :math:`V_{\text{str}}` to remain hig
 Operational Mechanisms
 ----------------------
 
-The platform achieves stabilization through five mechanisms:
+The platform achieves stabilization through ten mechanisms:
 
 1. **Closed-Loop Scheduler**: Re-evaluates the ready state of the graph dynamically. If a node fails to converge, the scheduler registers a repair action as a graph revision event (e.g., splitting a node or inserting an interface node).
 2. **Capability Filtering**: All proposals must pass through the admissibility kernel. A proposal requesting a file edit or command run must possess a valid capability token.
 3. **Structured Prompt Compilation**: When a proposal is rejected, the system compiles the residual diagnostics into a correction prompt.
 4. **Event-Sourced Ledger**: Every transaction (proposals, rejections, commits, rollbacks) is written to a Merkle ledger to enable complete session replay.
 5. **Domain Abstraction**: The core engine processes abstract residuals and energy models. Domain-specific behavior is relegated to domain packages.
+6. **Bounded Search Forests**: On a gate failure, up to three isolated branches attempt distinct strategies against the same accepted root. Exact no-goods learned from failed branches suppress equivalent later attempts.
+7. **Pre-Action Budget Reservations**: Every search-branch action reserves its cost against a shared limit vector before it runs; a refused reservation aborts the branch at no cost.
+8. **Resident-Context Paging**: The conversation is partitioned into immutable content-addressed pages. Evicted pages leave in-place tombstones and remain recallable through the ``context_recall`` tool.
+9. **Prompt-Program Provenance**: Every model call binds a compiled prompt program; the program and invocation digests are recorded in the ledger.
+10. **Staging and Integration Gate**: Multi-node winners land in a content-addressed staging root and reach the user workspace only through one global integration gate.

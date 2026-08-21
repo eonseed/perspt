@@ -11,7 +11,7 @@ Core Types
 .. code-block:: rust
 
    pub struct PolicyEngine {
-       policies: Vec<FrozenModule>,
+       policies: Vec<String>,
        policy_dir: PathBuf,
    }
 
@@ -45,5 +45,6 @@ Functions
      - Parse, validate, and filter a shell command
    * - ``validate_workspace_bound(cmd, dir)``
      - Ensure command stays within working directory
-   * - ``is_safe_for_auto_exec(cmd)``
-     - Whitelist check for auto-approval in balanced mode
+   * - ``validate_artifact_mutation(path, root, op)``
+     - Guard destructive artifact operations (delete/move) against
+       protected project files

@@ -9,7 +9,7 @@ System Requirements
 -------------------
 
 - **Operating System**: macOS, Linux, or Windows (via Windows Subsystem for Linux).
-- **Rust Toolchain**: Version 1.82.0 or later (required for compilation from source).
+- **Rust Toolchain**: Version 1.97.1 or later (required for compilation from source).
 - **Terminal Emulator**: Must support 256-color escape codes and UTF-8 encoding.
 
 Building from Source
@@ -49,7 +49,7 @@ To verify that the executable is operational, query the system version and help 
 .. code-block:: bash
 
    perspt --version
-   # Expected output: perspt 0.6.2
+   # Expected output: perspt 0.6.6
 
    perspt --help
 

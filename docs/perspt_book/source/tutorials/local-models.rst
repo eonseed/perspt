@@ -54,14 +54,15 @@ Agent Mode with Local Models
 
    Local models are slower and less capable than cloud models for complex agent
    tasks. For best results with agent mode, use a capable model (70B+ parameters)
-   or use cloud models for the Architect and Verifier tiers:
+   or use a cloud model for the actuator route and keep the cheap local model
+   on read-only exploration:
 
    .. code-block:: bash
 
       export GEMINI_API_KEY="your-key"
       perspt agent \
-        --architect-model gemini-3.1-pro \
-        --actuator-model qwen2.5-coder \
+        --actuator-model gemini-3.1-pro \
+        --explorer-model qwen2.5-coder \
         -w ./project "Create a utility"
 
 Available Models

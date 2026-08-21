@@ -19,7 +19,7 @@ Before installation, verify that the host environment conforms to the following 
    * - **Operating System**
      - Linux, macOS, or Windows (via Windows Subsystem for Linux)
    * - **Rust Compiler**
-     - Version 1.82.0 or later (required for building from source)
+     - Version 1.97.1 or later (required for building from source)
    * - **Terminal Emulator**
      - Modern console supporting UTF-8 encoding and 256-color escape sequences
    * - **Network Link**
@@ -32,7 +32,7 @@ Perspt requires access to an external model oracle. You must define and export t
 
 .. code-block:: text
 
-   OpenAI > Anthropic > Gemini > Groq > Cohere > XAI > DeepSeek > Ollama
+   Vertex AI > Gemini > OpenAI > Anthropic > Groq > Cohere > XAI > DeepSeek > Ollama
 
 Set the key for your selected provider:
 
@@ -127,13 +127,13 @@ Operational Execution Steps
 During execution, the SRBN engine performs the following operations:
 
 1. **System Detection**: The program identifies Python as the target workspace language, and registers the corresponding LSP verifier and pytest environments.
-2. **Task Sheafification**: The Architect model decomposes the instruction into a directed acyclic graph (DAG) of task nodes. Each node represents a single module and lists its expected output files. The system enforces the *ownership closure* rule (no file can be modified by more than one node).
-3. **Stabilization Loop**: The scheduler processes nodes in ready order. For each node, the Actuator proposes an artifact bundle containing file writes, diffs, and commands. The system applies the changes and computes the Lyapunov energy:
-   
+2. **Graph Planning**: Planning is a governed architect turn that revises the work graph through the ``update_graph`` tool. Each node lists its declared file footprint, and the dispatcher schedules ready nodes by footprint conflict (no two concurrent nodes may touch the same files).
+3. **Stabilization Loop**: For each dispatched node, the Actuator issues typed tool calls against a reversible candidate overlay; the deterministic kernel admits each call before it is applied. The system then computes the Lyapunov energy on the realized candidate:
+
    - Syntactic energy (:math:`V_{\text{syn}}`): Diagnostics from the LSP.
    - Logical energy (:math:`V_{\text{log}}`): Test failures from the test runner.
    - Build energy (:math:`V_{\text{boot}}`): Exit codes of environment setups.
-   
+
    If :math:`V(x) > \varepsilon`, the engine compiles the error diagnostics into a correction prompt and retries. This loops until the node converges (:math:`V(x) \leq \varepsilon`) or the retry cap is reached.
 4. **Interactive Review**: In interactive mode, the TUI displays the proposed file changes (unified diffs) and verifier states for approval before commit.
 5. **Merkle Commit**: Stable nodes are written to the Merkle ledger and committed to the active workspace.
@@ -164,40 +164,46 @@ For non-interactive environments, such as automated build pipelines, use the ``-
 
    perspt agent --yes -w ./rust-csv-converter "Build a Rust CLI tool that converts CSV to JSON"
 
-To speed up iteration, you can defer execution-tier tests until the final validation pass:
+Exploration-Only Mode
+~~~~~~~~~~~~~~~~~~~~~
+
+To survey a repository under a strictly read-only capability, run only the exploration phase. Every call passes the kernel, mutation attempts are recorded denials, and nothing is mutated or promoted:
 
 .. code-block:: bash
 
-   perspt agent --yes --defer-tests -w ./rust-csv-converter "Build a Rust CLI tool that converts CSV to JSON"
+   perspt agent --exploration-only -w ./rust-csv-converter "Summarize how CSV parsing is structured"
 
-Parameterizing Models per Tier
+Perspt also accepts ``--allow-experimental-prompts`` to substitute validated ``[prompts]`` bundle sections live; such overrides remain experimental until a change record passes paired evaluation.
+
+Parameterizing Models per Role
 ------------------------------
 
-The system divides the agent runtime into four operational tiers. You can allocate different models to these tiers depending on the complexity of the role:
+The agent runtime routes model calls by role. You can allocate different models to these roles depending on the complexity of the work:
 
-- **Architect**: Responsible for graph planning and structural revisions.
-- **Actuator**: Responsible for generating code edits and artifact bundles.
-- **Verifier**: Responsible for measuring remaining residuals.
-- **Speculator**: Responsible for fast validation and lookahead.
+- **Actuator** (``--model`` / ``--actuator-model``): Proposes the governed coding tool calls.
+- **Explorer** (``--explorer-model``): Optional cheaper read-only repository exploration.
+- **Adjudicator** (``--adjudicator-model``): Optional no-tool conjunctive diff veto.
 
 To run the agent with customized model selections:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-2.5-pro \
      --actuator-model gemini-2.5-flash \
-     --verifier-model gemini-2.5-pro \
-     --speculator-model gemini-2.5-flash \
+     --explorer-model gemini-2.5-flash \
+     --adjudicator-model gemini-2.5-pro \
      -w ./project "Task description"
 
-Each tier also supports a fallback model option in case the primary oracle returns a rate limit or API error:
+The ``[models]`` table in ``config.toml`` additionally routes architect, actuator, verifier, speculator, and adjudicator turns as fully qualified ``provider::model`` values; when present it takes precedence over the flat ``*_model`` configuration fields.
+
+The actuator route also supports ordered fallback models in case the primary oracle returns a rate limit or API error. The flag is repeatable, and failover is sticky:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-2.5-pro \
-     --architect-fallback-model gemini-2.5-flash \
+     --actuator-model gemini-2.5-pro \
+     --fallback-model gemini-2.5-flash \
+     --fallback-model gemini-2.5-flash-lite \
      -w ./project "Task description"
 
 Next Steps
@@ -228,4 +234,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the twelve-crate design.
+      Understand the fourteen-crate design.

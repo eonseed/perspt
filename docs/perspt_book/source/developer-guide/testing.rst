@@ -44,22 +44,42 @@ Test Organization
    * - ``crates/perspt-store/``
      - Store tests
      - DuckDB schema, CRUD, ledger
+   * - ``crates/perspt-agent/tests/``
+     - Mechanism checks
+     - 23 ``mc_*.rs`` suites plus ``psp9_runtime.rs`` covering the
+       PSP-9/PSP-10 runtime mechanisms (tool loop, dispatch, search,
+       recovery)
+   * - ``crates/perspt-sdk/tests/``
+     - Mechanism checks
+     - ``mechanism_checks.rs`` and ``mc_prompt_activation.rs`` for the
+       platform SDK
 
 
 Test Patterns
 -------------
 
-**In-Memory Store:**
+**Temporary Store:**
 
-Use ``SessionStore::in_memory()`` for tests that need persistence without disk I/O:
+Use ``SessionStore::open()`` against a temporary directory for tests that
+need persistence without touching the user database:
 
 .. code-block:: rust
 
-   #[tokio::test]
-   async fn test_ledger_commit() {
-       let store = SessionStore::in_memory().unwrap();
-       let ledger = MerkleLedger::from_store(store);
-       // ... test ledger operations
+   #[test]
+   fn test_session_roundtrip() {
+       let dir = tempdir().unwrap();
+       let store = SessionStore::open(&dir.path().join("test.db")).unwrap();
+       store
+           .create_session(&SessionRecord {
+               session_id: "s1".into(),
+               task: "demo".into(),
+               working_dir: "/tmp/demo".into(),
+               merkle_root: None,
+               detected_toolchain: None,
+               status: "active".into(),
+           })
+           .unwrap();
+       assert!(store.get_session("s1").unwrap().is_some());
    }
 
 **Plugin Testing:**
@@ -120,8 +140,22 @@ All PRs must pass:
    cargo test                     # All tests
    cargo clippy -- -D warnings    # No warnings
    cargo fmt -- --check           # Formatted
+   ./check-rules.sh check         # PSP code rules (file/function/line limits)
 
-The project currently has 239+ tests across all crates.
+CI builds and tests with ``--all-features``, so keep the optional features
+(``bundled``, ``benchmark``) compiling.
+
+The project currently has over 800 tests across all crates.
+
+
+Benchmarks Are Not Tests
+------------------------
+
+``perspt benchmark`` is not part of ``cargo test`` or CI. The
+``perspt-benchmark`` crate is gated behind the non-default ``benchmark``
+feature of ``perspt-cli``, requires configured model credentials, and is run
+manually to evaluate and compare Perspt against other coding agents. Its own
+unit tests are credential-free and run with the ordinary workspace suite.
 
 
 Panic Safety

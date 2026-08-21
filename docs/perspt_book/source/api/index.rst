@@ -22,11 +22,29 @@ Crate-level API documentation for Perspt's Rust workspace.
 
       Types, config, LLM provider, events, plugins.
 
+   .. grid-item-card:: perspt-sdk
+      :link: perspt-sdk
+      :link-type: doc
+
+      Domain-neutral SRBN control plane: energy, gates, ledger.
+
+   .. grid-item-card:: perspt-coding
+      :link: perspt-coding
+      :link-type: doc
+
+      Coding domain package: residuals, adapters, barriers.
+
+   .. grid-item-card:: perspt-research
+      :link: perspt-research
+      :link-type: doc
+
+      Research domain package (skeleton).
+
    .. grid-item-card:: perspt-agent
       :link: perspt-agent
       :link-type: doc
 
-      SRBN orchestrator, agents, ledger, tools.
+      Governed candidate runtime, tool loop, verifier, work-graph dispatch.
 
    .. grid-item-card:: perspt-tui
       :link: perspt-tui
@@ -64,11 +82,26 @@ Crate-level API documentation for Perspt's Rust workspace.
 
       Axum + Askama + HTMX web dashboard.
 
+   .. grid-item-card:: perspt-prompt-macros
+      :link: perspt-prompt-macros
+      :link-type: doc
+
+      Build-time compiler for typed prompt section libraries.
+
+   .. grid-item-card:: perspt-benchmark
+      :link: perspt-benchmark
+      :link-type: doc
+
+      Optional, feature-gated manual evaluation tooling.
+
 .. toctree::
    :maxdepth: 2
    :hidden:
 
    perspt-core
+   perspt-sdk
+   perspt-coding
+   perspt-research
    perspt-agent
    perspt-tui
    perspt-cli
@@ -76,3 +109,5 @@ Crate-level API documentation for Perspt's Rust workspace.
    perspt-policy
    perspt-sandbox
    perspt-dashboard
+   perspt-prompt-macros
+   perspt-benchmark

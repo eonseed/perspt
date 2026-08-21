@@ -8,7 +8,7 @@ Perspt supports multiple LLM providers through the ``genai`` Rust client crate, 
 Supported Providers and Adapters
 --------------------------------
 
-The underlying ``genai`` client supports 29 adapters representing different APIs and providers:
+Perspt accepts nine provider identifiers, each routed to the matching ``genai`` adapter (any other value is rejected as unsupported):
 
 .. list-table::
    :header-rows: 1
@@ -22,26 +22,18 @@ The underlying ``genai`` client supports 29 adapters representing different APIs
      - ``openai``
      - ``gpt-5.5``
      - SOTA GPT-5.5, GPT-5-mini
-   * - **OpenAI Compatible**
-     - ``openai_resp``
-     - ``custom-model``
-     - Targets custom endpoints (e.g., Azure OpenAI)
    * - **Anthropic**
      - ``anthropic``
      - ``claude-fable``
      - Claude Fable, Opus 4.8, Sonnet 4.6, Haiku 4.6
    * - **Google Gemini**
-     - ``gemini``
+     - ``gemini``, ``google``
      - ``gemini-3.5-flash``
      - Gemini 3.5 Flash, 3.1 Pro, 3.1 Flash-Lite
    * - **Google Vertex AI**
      - ``vertex``
      - ``vertex::gemini-3.5-flash``
      - Google Cloud Vertex platform
-   * - **AWS Bedrock**
-     - ``bedrock_api``, ``bedrock_sigv4``
-     - ``us.amazon.nova-pro-v2:0``
-     - AWS Bedrock cloud execution (Titan, Nova, Claude)
    * - **Groq**
      - ``groq``
      - ``llama-3.3-70b-specdec``
@@ -59,65 +51,9 @@ The underlying ``genai`` client supports 29 adapters representing different APIs
      - ``deepseek-v4``
      - DeepSeek v4 models (Chat, Coder)
    * - **Ollama**
-     - ``ollama``, ``ollama_cloud``
+     - ``ollama``
      - ``llama3.3``
      - Local offline models
-   * - **GitHub Copilot**
-     - ``github_copilot``
-     - ``copilot-model``
-     - Copilot developer services
-   * - **OpenRouter**
-     - ``open_router``
-     - ``router-model``
-     - Multi-model routing gateway
-   * - **Together AI**
-     - ``together``
-     - ``together-model``
-     - Low-latency open-source models
-   * - **Fireworks AI**
-     - ``fireworks``
-     - ``fireworks-model``
-     - Fast serverless models
-   * - **Nebius AI**
-     - ``nebius``
-     - ``nebius-model``
-     - Nebius cloud inference
-   * - **Mimo**
-     - ``mimo``
-     - ``mimo-model``
-     - Mimo execution platform
-   * - **Zhipu AI**
-     - ``zai``, ``zai_coding``
-     - ``glm-4``
-     - ChatGLM and coding assistants
-   * - **BigModel**
-     - ``bigmodel``
-     - ``bigmodel-model``
-     - BigModel cloud models
-   * - **Aliyun**
-     - ``aliyun``
-     - ``qwen-turbo``
-     - Alibaba DashScope API
-   * - **Baidu**
-     - ``baidu``
-     - ``qianfan-model``
-     - Baidu Qianfan models
-   * - **Moonshot**
-     - ``moonshot``
-     - ``kimi-model``
-     - Moonshot Kimi API
-   * - **AIHubMix**
-     - ``aihubmix``
-     - ``hubmix-model``
-     - AIHubMix model services
-   * - **OpenCode Go**
-     - ``opencode_go``
-     - ``opencode-model``
-     - Specialized code generation
-   * - **Custom**
-     - ``custom``
-     - ``custom-model``
-     - User-defined adapter routing
 
 Configuration Methods
 ---------------------
@@ -141,6 +77,11 @@ Configuration Methods
 
    provider = "anthropic"
    model = "claude-fable"
+
+Agent mode can additionally bind several credentials and routes at once
+through the ``[providers.<id>]`` and ``[models]`` tables, which hold
+fully qualified ``provider::model`` routes for multi-route portfolios.
+See :doc:`agent-mode` for details.
 
 Provider-Specific Notes
 -----------------------
@@ -178,25 +119,14 @@ Azure OpenAI requires configuring the base URL override and the API key:
 
 **Google Vertex AI**
 
-Vertex AI requires your Google Cloud project ID and region (optional, defaults to ``us-central1``). Authentication is typically handled via Google Application Default Credentials (ADC).
+Vertex AI requires your Google Cloud project ID and a location (optional, defaults to ``global``). Authentication is typically handled via Google Application Default Credentials (ADC); setting ``VERTEX_API_KEY`` to a bearer token overrides the ADC token.
 
 .. code-block:: bash
 
    export VERTEX_PROJECT_ID="my-gcp-project-123"
-   export VERTEX_REGION="us-central1"
+   export VERTEX_LOCATION="us-central1"
    # Run using Vertex model prefix
    perspt chat --model vertex::gemini-3.5-flash
-
-**AWS Bedrock**
-
-Bedrock uses your local AWS credentials (e.g. AWS profile or environment keys) and processes calls via Bedrock API adapters.
-
-.. code-block:: bash
-
-   export AWS_ACCESS_KEY_ID="AKIA..."
-   export AWS_SECRET_ACCESS_KEY="xxx"
-   export AWS_DEFAULT_REGION="us-east-1"
-   perspt chat --model us.amazon.nova-pro-v2:0
 
 **Ollama (Local)**
 

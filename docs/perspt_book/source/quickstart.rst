@@ -10,7 +10,7 @@ Prerequisites
 
 Verify that the target system satisfies the following conditions:
 
-- **Rust Toolchain**: Version 1.82+ is required for compiling from source.
+- **Rust Toolchain**: Version 1.97.1+ is required for compiling from source.
 - **LLM API Key**: Access to OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, or DeepSeek, OR a local Ollama service.
 
 Installation
@@ -110,57 +110,38 @@ To execute autonomous multi-file code generation under the SRBN orchestrator:
    # Auto-approve all modifications (headless mode)
    perspt agent -y -w ./my-api "Build a REST API in Rust with Axum"
 
-   # Run with specific models for Architect and Actuator roles
+   # Run with specific models for Actuator and Explorer roles
    perspt agent \
-     --architect-model gemini-3.1-pro \
      --actuator-model gemini-3.5-flash \
+     --explorer-model gemini-3.1-flash-lite \
      -w ./project "Create an ETL pipeline in Python"
 
-An execution run displays the active scheduling, verifier execution, and SDK gate telemetry. Below is a clinical trace of a typical autonomous run:
+A headless execution run narrates the governed tool loop: admitted effects, measured energies, and gate decisions. Below is a clinical trace of a typical autonomous run:
 
 .. code-block:: text
 
-   🚀 Starting SRBN agent session (ID: 01H2X...)
-   [Step 1/3] Planning Task...
-     Running Architect (model: gemini-3.1-pro)
-     Decomposing task: "Create Python calculator package..."
-     Generated 3 graph nodes (Interface -> Implementation -> Integration)
-     Ownership closure verified.
-   
-   [Step 2/3] Closed-Loop Scheduling...
-     Picking ready node: node_1_interface
-       Generating outputs: [src/calc/__init__.py]
-       Executing verification stage: SyntaxCheck... ✅ passed (V_syn = 0.0)
-       Executing verification stage: StructuralCheck...
-         goal-presence check: expected [add, sub, mul, div]
-         missing required symbols: [add, sub, mul, div]
-         goal-presence FAIL: SymbolMismatch residual raised.
-         SDK V=Σwₑrₑ²=8.0 [syn 0.00|str 8.00|log 0.00|boot 0.00|sheaf 0.00] gate=rejected (Δ=8.0) ρ=0.5 bound≤3 (1 residuals)
-       Generating correction prompt for node_1_interface (generation 1)...
-       Generating outputs: [src/calc/__init__.py] (generation 2)
-       Executing verification stage: StructuralCheck... ✅ passed (V_str = 0.0)
-       SDK V=Σwₑrₑ²=0.0 [syn 0.00|str 0.00|log 0.00|boot 0.00|sheaf 0.00] gate=hard-pass ρ=0.5 bound≤3 (0 residuals)
-       Committing node_1_interface to Merkle ledger.
-   
-     Picking ready node: node_2_implementation
-       Generating outputs: [src/calc/core.py]
-       Executing verification stage: TestCheck... pytest failed 1 test case.
-       SDK V=Σwₑrₑ²=2.0 [syn 0.00|str 0.00|log 2.00|boot 0.00|sheaf 0.00] gate=rejected (Δ=2.0) ρ=0.5 bound≤3 (1 residuals)
-       Generating correction prompt for node_2_implementation (generation 1)...
-       Generating outputs: [src/calc/core.py] (generation 2)
-       Executing verification stage: TestCheck... ✅ all tests passed.
-       SDK V=Σwₑrₑ²=0.0 [syn 0.00|str 0.00|log 0.00|boot 0.00|sheaf 0.00] gate=hard-pass ρ=0.5 bound≤3 (0 residuals)
-       Committing node_2_implementation to Merkle ledger.
-   
-     Picking ready node: node_3_integration
-       Executing verification stage: SheafCheck... ✅ passed (V_sheaf = 0.0)
-       SDK V=Σwₑrₑ²=0.0 [syn 0.00|str 0.00|log 0.00|boot 0.00|sheaf 0.00] gate=hard-pass ρ=0.5 bound≤3 (0 residuals)
-       Committing node_3_integration to Merkle ledger.
-   
-   [Step 3/3] Settle Session...
-     Session converged successfully. Output Merkle root: 9f8a7e...
-     Completed nodes: 3, Escalated nodes: 0.
-     Session outcome: Success. Exiting.
+   Domain: coding
+   PSP-9 agent starting
+   Task: Create a Python calculator package with add, subtract, multiply, divide. Include pytest tests.
+   Workspace: ./my-calculator
+     Exploration mapped 1 language groups and 1 package roots
+     PSP-9 session 01997a2f using gemini::gemini-3.5-flash
+     [implement-1] Coding
+     Effect call-1 applied to candidate (mutated=true)
+     Effect call-2 applied to candidate (mutated=true)
+     Measured implement-1 generation 1: V=2.000, hard_pass=false, residuals=1
+     Gate implement-1 generation 1: RejectedNonDescending { delta_v: 0.0 }
+     Effect call-3 applied to candidate (mutated=true)
+     Measured implement-1 generation 2: V=0.000, hard_pass=true, residuals=0
+     Gate implement-1 generation 2: HardPass
+
+   Outcome: HardPass
+   Session: 01997a2f-9c1e-4c30-b7ac-2f5d8f3e6a41
+   Turns: 5
+   Ledger head: 9f8a7e...
+   Promoted paths: pyproject.toml, src/calc/__init__.py, tests/test_calc.py
+
+Every effect the model proposes passes the deterministic admissibility kernel before it touches the candidate workspace, and the acceptance gate reads the re-measured candidate — never the model's account of it.
 
 Operational Modes
 -----------------
@@ -183,9 +164,27 @@ Choose the appropriate command mode depending on your task requirement:
    * - **Simple Chat**
      - ``perspt simple-chat``
      - CLI chat without terminal interface, ideal for shell piping.
+   * - **Exploration**
+     - ``perspt agent --exploration-only "<question>"``
+     - Read-only repository survey; nothing is mutated or promoted.
    * - **Status**
      - ``perspt status``
      - Query metrics of the active agent session.
+   * - **Providers**
+     - ``perspt providers --probe``
+     - Print the provider capability matrix with live behavioral probes.
+   * - **Replay**
+     - ``perspt replay <session-id>``
+     - Deterministic, credential-free audit replay of a session.
+   * - **Audit**
+     - ``perspt audit <sample> --safe``
+     - Ingest delayed audit labels for conformal calibration.
+   * - **Prompts**
+     - ``perspt prompts list``
+     - Inspect the compiled prompt section libraries.
+   * - **Context**
+     - ``perspt context explain-turn --db-path <DB> <session-id>``
+     - Explain a session's recorded resident-context events.
 
 Essential System Commands
 -------------------------
@@ -210,10 +209,8 @@ Essential System Commands
      - Resumes the most recently interrupted agent session.
    * - ``perspt ledger --recent``
      - Displays recent commits recorded in the Merkle ledger.
-   * - ``perspt ledger --rollback <hash>``
-     - Rolls back the workspace state to a specific Merkle commit hash.
-   * - ``perspt logs --tui``
-     - Launches the interactive LLM request log viewer.
+   * - ``perspt ledger --rollback <session>``
+     - Undoes the named session's newest completed promotion (session id prefix).
 
 Next Steps
 ----------
@@ -243,4 +240,4 @@ Next Steps
       :link: developer-guide/architecture
       :link-type: doc
 
-      Understand the twelve-crate design.
+      Understand the fourteen-crate design.

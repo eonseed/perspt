@@ -8,30 +8,32 @@ Perspt provides multiple layers of security for agent mode.
 Starlark Policies (perspt-policy)
 ---------------------------------
 
-The ``perspt-policy`` crate evaluates Starlark scripts to enforce rules on
-agent actions. Policies can:
+The ``perspt-policy`` crate evaluates Starlark scripts against every
+command line the agent proposes. Policies can:
 
-- **Allow/deny file operations** - Prevent writes to sensitive paths
-- **Restrict shell commands** - Block dangerous commands (``rm -rf``, etc.)
-- **Enforce naming conventions** - Require files match patterns
-- **Limit resource usage** - Cap file sizes, directory depth
+- **Deny shell commands** - Block dangerous commands (``rm -rf``, etc.)
+- **Require confirmation** - Gate risky commands behind a user prompt
+
+Each ``.star`` file in the rules directory (``rules/`` under the config
+directory) must define ``evaluate``, a function that receives the full
+command line and returns ``"allow"``, ``"prompt"``, or ``"deny"`` (a bool
+is also accepted). The builtins are ``matches_pattern(command, pattern)``
+(substring match) and ``log_policy(message)``:
 
 .. code-block:: python
 
    # Example Starlark policy
-   def check_file_write(path, content):
-       if path.startswith("/etc/") or path.startswith("/usr/"):
-           return deny("Cannot write to system directories")
-       if len(content) > 1_000_000:
-           return deny("File too large (>1MB)")
-       return allow()
+   def evaluate(command):
+       for pattern in ["rm -rf", "sudo", "chmod 777"]:
+           if matches_pattern(command, pattern):
+               log_policy("blocked: " + command)
+               return "deny"
+       if matches_pattern(command, "git push"):
+           return "prompt"
+       return "allow"
 
-   def check_command(cmd):
-       forbidden = ["rm -rf", "sudo", "chmod 777"]
-       for f in forbidden:
-           if f in cmd:
-               return deny("Forbidden command: " + f)
-       return allow()
+When several files are loaded, the strictest decision wins, and a policy
+that fails to evaluate denies the command.
 
 
 Sandbox Isolation (perspt-sandbox)
@@ -54,14 +56,31 @@ Configuration:
    # The sandbox restricts commands to the working directory
 
 
-Ownership Closure
------------------
+Authority Model
+---------------
 
-The PSP-5 ownership closure rule ensures:
+PSP-9 authority is capability-based:
 
-- Each file is owned by exactly one DAG node
-- No two nodes can write to the same file
-- Violations trigger a re-plan by the Architect
+- Live capabilities are minted from grants at session start and are bound
+  to the session's authority epoch
+- ``perspt abort`` revokes the epoch durably: in-flight promotions and
+  stale resume intents are refused, and the workspace is untouched
+- ``--allow-dependency-mutation`` is the explicit grant for governed
+  dependency mutation (``cargo add``, ``uv add``, ``npm install``)
+- ``--persistent-grants`` persists signed grant intent only, never live
+  capabilities: resume must mint fresh ones
+
+
+Footprint Scheduling
+--------------------
+
+The multi-node dispatcher schedules by write footprints:
+
+- Each node declares the files it writes (a node that declares none holds
+  an opaque whole-workspace footprint)
+- Nodes with conflicting footprints never run concurrently
+- Promotion is single-flight: it runs only in the dispatcher's completion
+  arm
 
 This prevents conflicting edits and provides a clear audit trail.
 
@@ -73,7 +92,8 @@ In interactive mode (without ``--yes``), every node's changes must be manually
 approved. The review modal shows:
 
 - Full diff of all changes
-- Verification results (V_syn, V_str, V_log, V_boot, V_sheaf)
+- Verification results (syntax, build, test, lint), the measured energy,
+  and a degraded flag with reasons when any sensor was skipped
 - Options to reject, correct, or edit
 
 For security-sensitive projects, always use interactive mode.
@@ -99,7 +119,12 @@ Best Practices
 --------------
 
 1. **Use interactive mode for production code** - Always review diffs
-2. **Set cost limits** - ``--max-cost`` prevents runaway spending
+2. **Replay sessions** - ``perspt replay <SESSION_ID>`` is a deterministic,
+   credential-free audit replay
 3. **Use workspace directories** - ``-w <dir>`` scopes agent writes
-4. **Enable LLM logging** - ``--log-llm`` for post-run auditing
-5. **Review ledger after headless runs** - ``perspt ledger --recent``
+4. **Label delayed audit samples** - ``perspt audit`` lists pending samples
+   and records safe/unsafe labels
+5. **Inspect prompt and context provenance** - ``perspt prompts
+   explain-session`` and ``perspt context explain-turn`` show what a session
+   compiled and compacted
+6. **Review ledger after headless runs** - ``perspt ledger --recent``

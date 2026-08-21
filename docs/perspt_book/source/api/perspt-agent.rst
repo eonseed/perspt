@@ -3,7 +3,8 @@
 ``perspt-agent``
 ================
 
-The SRBN orchestrator and all supporting subsystems.
+The governed PSP-9 agent runtime: candidate workspaces, the SRBN tool loop,
+sandboxed verification, and work-graph dispatch.
 
 Modules
 -------
@@ -14,70 +15,80 @@ Modules
 
    * - Module
      - Description
-   * - ``orchestrator``
-     - ``SRBNOrchestrator`` - petgraph-based DAG execution with PSP-5 lifecycle
-   * - ``agent``
-     - ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
-   * - ``tools``
-     - ``AgentTools`` - 10+ filesystem and shell tools (read_file, write_file, apply_diff, run_command, search_code, list_files, apply_patch, sed_replace, awk_filter, diff_files)
-   * - ``ledger``
-     - ``MerkleLedger`` - Content-addressed commit tracking over DuckDB
+   * - ``candidate``
+     - ``CandidateWorkspace`` - reversible coding candidate overlay with
+       compiler-backed measurement
+   * - ``exploration``
+     - Deterministic, read-only repository orientation for the runtime
+   * - ``external_tools``
+     - ``ExternalToolRuntime`` - shared governed MCP runtime for agent and
+       interactive chat lifecycles
+   * - ``grant``
+     - Persistent grant signing-key resolution
    * - ``lsp``
-     - ``LspClient`` - JSON-RPC stdio client for rust-analyzer, ty, pyright, etc.
-   * - ``test_runner``
-     - ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
-   * - ``context_retriever``
-     - ``ContextRetriever`` - Workspace search with byte budget limits
+     - ``LspClient`` - JSON-RPC stdio client for language servers (the
+       sensor architecture)
+   * - ``measure``
+     - ``CodingCandidateMeasurer`` - full verifier suite at gate boundaries,
+       cheap syntax-only pass at mutation boundaries
+   * - ``probe``
+     - ``probe_route``/``ProbeReport`` - behavioral provider probes (Gate U)
+   * - ``promote``
+     - Descriptor-relative workspace promotion
+   * - ``realize``
+     - ``SnapshotRealizer``/``ProjectionMismatch`` - the gate is evaluated on
+       the realized candidate workspace, never the model's account of it
+   * - ``runtime``
+     - ``Psp9AgentRuntime`` - the authoritative PSP-9 agent runtime
+   * - ``toolloop``
+     - ``ToolLoop`` - the SRBN tool loop; every model-issued tool call is a
+       governed proposal through the admissibility kernel
+   * - ``tools``
+     - ``AgentTools`` - filesystem and search operations plus the open
+       ``CandidateHandlerRegistry`` the governed candidate dispatches through
+   * - ``transport``
+     - ``GenAiTransport`` - the only adapter joining the SDK's
+       provider-neutral contract and ``perspt-core``'s ``genai`` driver
+   * - ``turn``
+     - Universal actor turn runner shared by every stochastic actor (PSP-10)
+   * - ``verifier``
+     - Governed verifier sandbox: compiler/test/lint processes run behind a
+       deny-network profile and a read allow-list
 
-Key Traits
-----------
+Key Types
+---------
 
-**Agent** - Per-tier LLM interaction:
+**Psp9ModelRoutes** - Explicit model-plane routes for one PSP-9 session:
 
 .. code-block:: rust
 
-   #[async_trait]
-   pub trait Agent: Send + Sync {
-       async fn process(&self, node: &SRBNNode, ctx: &AgentContext)
-           -> Result<AgentMessage>;
-       fn name(&self) -> &str;
-       fn can_handle(&self, node: &SRBNNode) -> bool;
-       fn model(&self) -> &str;
-       fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
+   pub struct Psp9ModelRoutes {
+       pub primary: Option<String>,
+       pub actuator: Option<String>,
+       pub explorer: Option<String>,
+       pub adjudicator: Option<String>,
+       pub fallbacks: Vec<String>,
    }
 
-**TestRunnerTrait** - Plugin-driven verification:
+**Psp9RunSummary** - Terminal outcome of one run:
 
 .. code-block:: rust
 
-   #[async_trait]
-   pub trait TestRunnerTrait: Send + Sync {
-       async fn run_syntax_check(&self) -> Result<TestResults>;
-       async fn run_tests(&self) -> Result<TestResults>;
-       async fn run_build_check(&self) -> Result<TestResults>;
-       async fn run_lint(&self) -> Result<TestResults>;
-       async fn run_stage(&self, stage: VerifierStage) -> Result<TestResults>;
-       fn name(&self) -> &str;
+   pub struct Psp9RunSummary {
+       pub session_id: String,
+       pub node_id: String,
+       pub outcome: NodeTerminalOutcome,
+       pub turns_used: u32,
+       pub ledger_head: String,
+       pub promoted_paths: Vec<String>,
    }
 
-Ledger Types
-------------
+Usage
+-----
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+.. code-block:: rust
 
-   * - Type
-     - Description
-   * - ``MerkleCommit``
-     - commit_id, session_id, node_id, merkle_root, parent_hash, energy, stable
-   * - ``NodeCommitPayload``
-     - Snapshot of node state for ledger commit
-   * - ``LedgerStats``
-     - total_sessions, total_commits, db_size_bytes
-   * - ``NodeReviewSummary``
-     - Energy history, escalations, seals, provenance for a single node
-   * - ``SessionReviewSummary``
-     - Aggregate stats: total/completed/failed/escalated, branches, review outcomes
-   * - ``SessionSnapshot``
-     - Full session state for resume: node_details, edges, branches, escalations
+   let runtime = Psp9AgentRuntime::from_config(workdir, &config, routes, run_config)?
+       .with_database_path(db_path);
+
+   let summary = runtime.run(task).await?;

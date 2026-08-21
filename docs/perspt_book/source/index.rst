@@ -72,7 +72,7 @@ development.
          :link: developer-guide/architecture
          :link-type: doc
 
-         Twelve-crate workspace design.
+         Fourteen-crate workspace design.
 
    Key Features
    ------------
@@ -82,15 +82,17 @@ development.
       :class: borderless
 
       * - **SRBN Agent**
-        - Experimental autonomous multi-file coding guided by Lyapunov energy, ownership closure, and sheaf validation from the SRBN paper series
+        - Experimental autonomous multi-file coding under the PSP-9 governed tool loop, with acceptance measured by Lyapunov energy from the SRBN paper series
+      * - **PSP-10 Mechanisms**
+        - Typed prompt programs with ledgered provenance, resident-context paging via ``context_recall``, bounded search forests, multi-node work-graph dispatch behind a single integration gate, and crash resume
       * - **Multi-Provider**
         - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, Ollama
       * - **LSP Sensors**
         - Real-time type checking via ``rust-analyzer``, ``ty``, ``pyright``, ``typescript-language-server``, ``gopls``
       * - **Test Runner**
         - pytest integration with weighted V_log energy
-      * - **Per-Tier Models**
-        - Assign different models to Architect, Actuator, Verifier, and Speculator tiers
+      * - **Per-Role Models**
+        - Route models with ``--model``/``--actuator-model``/``--explorer-model``/``--adjudicator-model``, or per role (architect, actuator, verifier, speculator, adjudicator) via the ``[models]`` table
       * - **Token Budget**
         - Cost control with usage monitoring and per-request limits
       * - **Beautiful TUI**

@@ -43,17 +43,15 @@ Keyboard Shortcuts
    * - **Ctrl+J**
      - Insert newline in input
    * - **Page Up / Down**
-     - Scroll chat history
+     - Scroll chat history by 10 lines
    * - **Shift+Up / Down**
      - Scroll chat history by 1 line
    * - **Ctrl+Up / Down**
      - Scroll chat history by 1 line
    * - **Home / End**
-     - Jump to top / bottom
-   * - **Esc** or **Ctrl+Q**
+     - Go to start / end of input line
+   * - **Ctrl+C** / **Ctrl+Q**
      - Quit
-   * - **Ctrl+C**
-     - Cancel current stream
    * - **Ctrl+R**
      - Toggle inner reasoning process display
    * - **Ctrl+A** / **Ctrl+E**
@@ -89,6 +87,11 @@ Both CLI and TUI modes support slash commands typed directly in the input box:
    * - ``/help``
      - Print the menu of available slash commands
 
+The chat TUI can also call external MCP tools: any ``[[external_tools]]``
+server entry in ``config.toml`` with ``mode = "chat"`` is admitted with
+read-only effects only. Tool activity is shown inline in the conversation,
+and tool results are labeled as untrusted content.
+
 Simple CLI Mode
 ---------------
 
@@ -97,6 +100,7 @@ For a minimal text interface suitable for piping and logging:
 .. code-block:: bash
 
    perspt simple-chat
+   perspt simple-chat --model gpt-4o-mini
    perspt simple-chat --log-file session.txt
 
 Type your message, press Enter. Responses stream to stdout. Type ``exit`` or
@@ -126,29 +130,32 @@ Perspt checks environment variables in this priority order:
    * - Env Variable
      - Provider
      - Default Model
-   * - ``ANTHROPIC_API_KEY``
-     - Anthropic
-     - ``claude-fable``
-   * - ``OPENAI_API_KEY``
-     - OpenAI
-     - ``gpt-5-mini``
+   * - ``VERTEX_PROJECT_ID``
+     - Vertex AI
+     - ``vertex::gemini-2.5-flash``
    * - ``GEMINI_API_KEY``
      - Gemini
-     - ``gemini-3.5-flash``
+     - ``gemini-3.1-flash-lite-preview``
+   * - ``OPENAI_API_KEY``
+     - OpenAI
+     - ``gpt-4o-mini``
+   * - ``ANTHROPIC_API_KEY``
+     - Anthropic
+     - ``claude-3-5-sonnet-20241022``
    * - ``GROQ_API_KEY``
      - Groq
-     - ``llama-3.3-70b-specdec``
+     - ``llama-3.1-8b-instant``
    * - ``COHERE_API_KEY``
      - Cohere
-     - ``command-a-plus``
+     - ``command-r-plus``
    * - ``XAI_API_KEY``
      - xAI
-     - ``grok-4``
+     - ``grok-beta``
    * - ``DEEPSEEK_API_KEY``
      - DeepSeek
-     - ``deepseek-v4``
+     - ``deepseek-chat``
    * - *(none)*
      - Ollama (local)
-     - ``llama3.3``
+     - ``llama3.2``
 
 See :doc:`providers` for full provider details.

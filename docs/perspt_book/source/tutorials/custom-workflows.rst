@@ -29,8 +29,8 @@ Run multiple agent tasks from a script:
    set -e
    export GEMINI_API_KEY="your-key"
 
-   perspt agent --yes --max-cost 2.0 -w /tmp/proj1 "Create a Python CSV parser"
-   perspt agent --yes --max-cost 2.0 -w /tmp/proj2 "Create a Rust CLI calculator"
+   perspt agent --yes --max-turns 8 -w /tmp/proj1 "Create a Python CSV parser"
+   perspt agent --yes --max-turns 8 -w /tmp/proj2 "Create a Rust CLI calculator"
 
 CI/CD Integration
 -----------------
@@ -59,7 +59,7 @@ Use headless mode in CI/CD pipelines:
            env:
              GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
            run: |
-             perspt agent --yes --max-cost 5.0 \
+             perspt agent --yes --max-turns 12 \
                -w ./generated "${{ inputs.task }}"
          - name: Commit Results
            run: |
@@ -77,9 +77,10 @@ After an agent run, use the management commands:
    # Session status
    perspt status
 
-   # LLM logs (requires --log-llm during the run)
-   perspt logs --tui
-   perspt logs --stats
+   # Audit a session from the ledger
+   perspt replay <SESSION_ID>
+   perspt prompts explain-session --db-path <PATH> <SESSION_ID>
+   perspt context explain-turn --db-path <PATH> <SESSION_ID>
 
    # Ledger history
    perspt ledger --recent

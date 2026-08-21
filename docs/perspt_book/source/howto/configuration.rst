@@ -31,11 +31,83 @@ The file is TOML. All fields are optional. ``provider`` accepts the aliases
    # Optional endpoint override for OpenAI-compatible / local / proxy servers
    # base_url = "http://localhost:8000/v1"
 
-   # Optional per-tier overrides for `perspt agent`
-   # architect_model = "gpt-5.5"
-   # actuator_model = "gpt-5-mini"
-   # verifier_model = "gpt-5-mini"
-   # speculator_model = "gpt-5-mini"
+   # Optional per-role routes for `perspt agent`; values stay fully
+   # qualified as provider::model
+   # [models]
+   # architect = "openai::gpt-5.5"
+   # actuator = "openai::gpt-5-mini"
+   # verifier = "openai::gpt-5-mini"
+   # speculator = "openai::gpt-5-mini"
+   # adjudicator = "openai::gpt-5.5"
+
+Agent Runtime Sections
+----------------------
+
+``perspt agent`` reads further optional TOML tables, each validated at
+startup.
+
+``[providers.<id>]`` lets several provider credentials coexist in one
+process. ``api_key_env`` names an environment variable; Vertex entries may
+omit a static key and use the per-request ADC token resolver:
+
+.. code-block:: toml
+
+   [providers.anthropic]
+   api_key_env = "ANTHROPIC_API_KEY"
+
+   [providers.local]
+   adapter = "ollama"
+   base_url = "http://localhost:11434"
+
+``[exploration]`` bounds the PSP-10 search forest: sequential eager
+branches with a hard branch cap of 3. The former ``[ensemble]`` section was
+removed by PSP-10 - a present block fails validation with a migration error
+pointing here:
+
+.. code-block:: toml
+
+   [exploration]
+   initial_branches = 1
+   max_branches = 3
+   distinct_family = true
+
+``[[external_tools]]`` declares shared MCP servers. Secret values are never
+stored here: environment maps contain destination names and source variable
+names:
+
+.. code-block:: toml
+
+   [[external_tools]]
+   id = "docs"
+   transport = "stdio"
+   command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
+
+``[prompts]`` pins external prompt replacement bundle directories and the
+paired activation bounds (Gate AE):
+
+.. code-block:: toml
+
+   [prompts]
+   bundles = ["./prompt-bundles/coding"]
+   activation_min_tasks = 30
+
+``[context]`` sets reserves and working-set bounds for the paged resident
+context; every configured reserve must be positive:
+
+.. code-block:: toml
+
+   [context]
+   working_set_turns = 8
+   output_reserve_tokens = 4096
+
+``[verification]`` sets acceptance-stage options: the optional ``format``
+sensor and per-stage timeouts:
+
+.. code-block:: toml
+
+   [verification]
+   require_format = true
+   stage_timeout_secs = 180
 
 Environment Variables
 ---------------------
@@ -47,27 +119,30 @@ Environment Variables
    * - Variable
      - Provider
      - Priority
-   * - ``ANTHROPIC_API_KEY``
-     - Anthropic
+   * - ``VERTEX_PROJECT_ID``
+     - Vertex AI
      - Highest
-   * - ``OPENAI_API_KEY``
-     - OpenAI
-     - 2
    * - ``GEMINI_API_KEY``
      - Gemini
+     - 2
+   * - ``OPENAI_API_KEY``
+     - OpenAI
      - 3
+   * - ``ANTHROPIC_API_KEY``
+     - Anthropic
+     - 4
    * - ``GROQ_API_KEY``
      - Groq
-     - 4
+     - 5
    * - ``COHERE_API_KEY``
      - Cohere
-     - 5
+     - 6
    * - ``XAI_API_KEY``
      - xAI
-     - 6
+     - 7
    * - ``DEEPSEEK_API_KEY``
      - DeepSeek
-     - 7
+     - 8
    * - *(none)*
      - Ollama
      - Fallback
@@ -113,5 +188,5 @@ Logging Configuration
    # Enable debug logging with RUST_LOG
    RUST_LOG=debug perspt simple-chat
 
-   # Agent LLM logging to DuckDB
-   perspt agent --log-llm -w . "Task"
+   # Audit a finished agent run (deterministic, credential-free replay)
+   perspt replay <SESSION_ID>

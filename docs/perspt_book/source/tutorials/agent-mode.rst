@@ -12,6 +12,10 @@ Agent mode lets Perspt plan, write, test, and commit multi-file projects
 autonomously. The SRBN runtime (extended by the dependency-aware mutable work graph)
 decomposes tasks into a graph of nodes — each revision acyclic — with each node
 owning specific output files, verified by real LSP diagnostics and test runners.
+Since v0.6.6 the engine underneath is the PSP-9 governed tool loop —
+capability-scoped typed tool calls, measured energy descent, and a
+Merkle-chained ledger — extended by the PSP-10 typed prompt and context
+mechanisms.
 
 .. admonition:: Experimental Feature
    :class: note
@@ -23,7 +27,7 @@ owning specific output files, verified by real LSP diagnostics and test runners.
 Prerequisites
 -------------
 
-- Perspt v0.5.6+
+- Perspt v0.6.6+
 - An API key for a capable model
 - For Python projects: ``uv`` and ``python3`` installed
 - For Rust projects: ``cargo`` and ``rustc`` installed
@@ -39,10 +43,10 @@ Basic Usage
    # Auto-approve all changes (headless)
    perspt agent -y -w ./my-project "Create a REST API in Rust"
 
-   # Use specific models per tier
+   # Use specific models per route
    perspt agent \
-     --architect-model gemini-3.1-pro \
-     --actuator-model gemini-3.5-flash \
+     --actuator-model gemini-3.1-pro \
+     --explorer-model gemini-3.5-flash \
      -w ./project "Build an ETL pipeline"
 
 
@@ -60,86 +64,64 @@ Step 1: Start the Agent
       divide operations. Include type hints, a pyproject.toml with
       build-system, and comprehensive pytest tests."
 
-Step 2: Watch the SRBN Loop
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Step 2: Watch the Governed Loop
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The agent proceeds through the PSP-5 phases:
+The agent proceeds through the governed loop phases:
 
-**Detection** - Perspt identifies Python from the task description and selects
-the ``python`` plugin:
+**Detection** - Perspt inspects the workspace and selects a domain package
+(here ``coding``); the selected domain is printed at startup. Pass
+``--domain`` to pick one explicitly.
 
-.. code-block:: text
+**Exploration** - Read-only repository mapping runs before any mutation is
+proposed. A cheaper model can serve this route via ``--explorer-model``.
 
-   [detect] Workspace: greenfield
-   [detect] Plugin: python (LSP: ty, tests: pytest, init: uv init --lib)
+**Planning** - By default the session runs a single work-graph node. With
+``--max-parallel-nodes`` above 1 (which requires ``--yes``), one governed
+architect turn is forced to call the privileged ``update_graph`` tool. The
+proposal declares nodes with output targets and edges and is validated
+(acyclic, complete) before acceptance; an invalid or empty proposal falls
+back to the single-node graph, and the fallback is recorded in the ledger.
 
-**Planning** - The Architect decomposes the task into a DAG:
+Each node's declared output targets form its write footprint, so the
+scheduler keeps concurrent nodes from touching the same files.
 
-.. code-block:: text
+**Execution** - A closed-loop scheduler (utilizing the mutable work graph)
+re-evaluates the graph each round and dispatches *ready* nodes whose
+footprints do not conflict — not a precomputed topological walk. Reworked
+nodes are re-picked and inserted nodes are executed on later rounds. For
+each node:
 
-   [plan] TaskPlan: 4 nodes, 1 plugin
-   [plan]   node-1: Initialize Python package (Command)
-   [plan]   node-2: Create calculator module (Code) -> [node-1]
-   [plan]   node-3: Create main entry point (Code) -> [node-2]
-   [plan]   node-4: Write pytest tests (UnitTest) -> [node-2]
+1. The actuator proposes typed tool calls (file edits, commands, reads)
+2. Effects are applied inside an isolated candidate workspace
+3. Compiler, test, and lint sensors measure the checkpoint's energy
+4. A checkpoint is accepted only when measured energy descends by at
+   least ``--rho-gate``; non-descending attempts draw down the shared
+   ``--rejection-budget``
 
-Each node owns specific output files (ownership closure):
-
-- node-1: ``pyproject.toml``
-- node-2: ``src/calculator/__init__.py``, ``src/calculator/core.py``
-- node-3: ``src/main.py``
-- node-4: ``tests/test_calculator.py``
-
-**Execution** - A closed-loop scheduler (utilizing the mutable work graph) re-evaluates
-the graph each round and runs the next *ready* node from a dependency-aware
-queue — not a precomputed topological walk. Reworked nodes are re-picked and
-inserted nodes are executed on later rounds. For each node:
-
-1. Actuator generates a multi-artifact bundle (writes, diffs, commands)
-2. Files are applied transactionally
-3. LSP diagnostics run (V_syn), contracts check (V_str), tests run (V_log)
-4. Bootstrap commands check (V_boot)
-
-Nodes run sequentially (one per round) in the current release; bounded
-parallelism is planned for a future version.
-
-.. code-block:: text
-
-   [node-2] Generating artifact bundle...
-   [node-2] Bundle: 2 files created (write), 0 modified (diff)
-   [node-2] Verification:
-             V_syn  = 0.00 (ty: 0 errors, 0 warnings)
-             V_str  = 0.00 (contracts satisfied)
-             V_log  = 0.00 (deferred or passed)
-             V_boot = 0.00 (all commands succeeded)
-             V_sheaf = 0.00 (pending final check)
-             V(x)  = 0.00 < epsilon=0.10 -> STABLE
+Nodes run one at a time by default; ``--max-parallel-nodes`` raises the
+concurrent dispatch bound (above 1 requires ``--yes``).
 
 Step 3: Review Changes
 ~~~~~~~~~~~~~~~~~~~~~~
 
-In interactive mode, the review modal presents grouped diffs:
+The agent runs inside a TUI with three tabs — **Dashboard**, **Tasks**,
+and **Diff** — cycled with ``Tab``/``Shift-Tab`` or selected directly with
+``1``, ``2``, ``3``. ``Up``/``k`` and ``Down``/``j`` navigate, ``p``
+pauses and resumes, ``a`` opens the approval modal, and ``q`` quits.
 
-.. code-block:: text
+In interactive mode, the review modal presents the pending change for
+approval. Keys inside the modal:
 
-   Review Node 2: Create calculator module
-   ----------------------------------------
-   Bundle: 2 created, 0 modified
-   + src/calculator/__init__.py  [create] (3 lines)
-   + src/calculator/core.py      [create] (45 lines)
-
-   Verification: V_syn OK | V_str OK | V_log OK | V_boot OK
-   Energy: V(x) = 0.00
-
-   [y] Approve  [n] Reject  [c] Correct  [e] Edit  [d] Diff
-
-Actions:
-
-- **y** - Approve and commit to ledger
-- **n** - Reject and re-generate from scratch
+- **y** - Approve
+- **n** - Reject
 - **c** - Send correction feedback to the agent
-- **e** - Open files in your editor, then return
-- **d** - Toggle full unified diff view
+- **e** - Edit
+- **d** - View diff
+- **s** - Skip
+- **Left**/**Right** - Move between actions; **Enter** confirms the
+  selected action
+- **Esc** - Close the modal
 
 Step 4: Inspect Results
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -158,88 +140,104 @@ After all nodes converge and pass sheaf validation:
    perspt ledger --recent
 
 
-Model Tier Configuration
-------------------------
+Model Route Configuration
+-------------------------
 
-Assign specialized models to each SRBN phase:
+Assign specialized models to each route:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-3.1-pro \
-     --actuator-model gemini-3.5-flash \
-     --verifier-model gemini-3.1-pro \
-     --speculator-model gemini-3.5-flash \
+     --actuator-model gemini-3.1-pro \
+     --explorer-model gemini-3.5-flash \
+     --adjudicator-model gemini-3.1-pro \
+     --fallback-model gemini-3.5-flash \
      -w ./project "Build a web server"
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 40 40
+   :widths: 25 45 30
 
-   * - Tier
+   * - Flag
      - Purpose
      - Recommendation
-   * - Architect
-     - Task decomposition, DAG planning
-     - Deep reasoning model (e.g., Gemini Pro, Claude Sonnet)
-   * - Actuator
-     - Code generation, artifact bundles
-     - Fast coding model (e.g., Gemini Flash)
-   * - Verifier
-     - Stability analysis, contract checking
+   * - ``--actuator-model``
+     - Proposes governed coding tool calls (alias: ``--model``)
+     - Strong coding model (e.g., Gemini Pro, Claude Sonnet)
+   * - ``--explorer-model``
+     - Cheaper read-only repository exploration
+     - Fast model (e.g., Gemini Flash)
+   * - ``--adjudicator-model``
+     - No-tool conjunctive diff adjudication
      - Analytical model (e.g., Gemini Pro)
-   * - Speculator
-     - Branch prediction, lookahead
-     - Ultra-fast model (e.g., Gemini Flash Lite)
+   * - ``--fallback-model``
+     - Ordered sticky actuator fallback; repeat the flag to add routes
+     - Reliable alternate provider
+
+The ``[models]`` table in the configuration file can pin the same routes
+per role (``actuator``, ``speculator`` for the explorer route,
+``adjudicator``); its ``architect`` role supplies the higher-capability
+handoff route used by the recovery ladder.
 
 
-Energy Tuning
--------------
+Descent Gating
+--------------
 
-Customize the Lyapunov energy weights:
-
-.. code-block:: bash
-
-   # Prioritize test passing (higher gamma)
-   perspt agent --energy-weights "1.0,0.5,3.0" -w . "Add tests"
-
-   # Prioritize type safety (higher alpha)
-   perspt agent --energy-weights "2.0,0.5,1.0" -w . "Add type hints"
-
-   # Custom convergence threshold
-   perspt agent --stability-threshold 0.5 -w . "Quick prototype"
-
-Execution Modes
----------------
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Mode
-     - Behavior
-   * - ``cautious``
-     - Prompt for approval on every node
-   * - ``balanced``
-     - Prompt when complexity > K (default)
-   * - ``yolo``
-     - Auto-approve everything (use with caution)
+Tune how much measured progress each accepted checkpoint must show:
 
 .. code-block:: bash
 
-   perspt agent --mode cautious -w . "Modify database schema"
+   # Require steeper measured descent per accepted checkpoint
+   perspt agent --rho-gate 1.0 -w . "Add tests"
 
+   # Accept shallower descent for exploratory work
+   perspt agent --rho-gate 0.1 -w . "Quick prototype"
 
-Cost and Step Limits
---------------------
+Each accepted checkpoint must lower the measured energy (compiler, test,
+and lint sensor readings) by at least ``--rho-gate`` (default 0.5).
+Checkpoints that fail the gate are refused and draw down the shared
+``--rejection-budget``.
+
+Approval
+--------
+
+Approval is interactive by default: the agent pauses at promotion and asks
+in the review modal. Pass ``-y``/``--yes`` to approve final promotion
+automatically. A run without a terminal (CI, piped output) requires
+``--yes``; otherwise it fails fast rather than silently escalating.
 
 .. code-block:: bash
 
-   # Maximum $5 cost
-   perspt agent --max-cost 5.0 -w . "Large refactor"
+   perspt agent --yes -w . "Modify database schema"
 
-   # Maximum 20 iterations across all nodes
-   perspt agent --max-steps 20 -w . "Iterative improvement"
+
+Loop Bounds
+-----------
+
+.. code-block:: bash
+
+   # Allow more model turns per node (default 12)
+   perspt agent --max-turns 20 -w . "Large refactor"
+
+   # Tighten the per-turn tool-call bound (default 8)
+   perspt agent --max-calls-per-turn 4 -w . "Small fix"
+
+   # Shrink the shared non-descending and recovery budget (default 4)
+   perspt agent --rejection-budget 2 -w . "Iterative improvement"
+
+
+Exploration and Experimental Prompts
+------------------------------------
+
+.. code-block:: bash
+
+   # Read-only exploration: deterministic map plus an explorer tool
+   # loop; nothing is mutated or promoted
+   perspt agent --exploration-only -w . "Map the module structure"
+
+   # Substitute validated [prompts] bundle sections live (Gate AE:
+   # experimental until a change record passes paired evaluation)
+   perspt agent --allow-experimental-prompts -w . "Refactor the parser"
 
 
 Managing Sessions
@@ -264,22 +262,25 @@ The ``resume`` command displays trust context before resuming: escalation count,
 last energy state, and total retries across all nodes.
 
 
-LLM Logging
------------
+Auditing Sessions
+-----------------
+
+Every model turn and tool effect is recorded in the Merkle-chained ledger;
+no logging flag is needed:
 
 .. code-block:: bash
 
-   # Log all LLM calls to the DuckDB store
-   perspt agent --log-llm -w . "Debug task"
+   # Deterministic, credential-free replay of a session
+   perspt replay <SESSION_ID>
 
-   # View logs interactively
-   perspt logs --tui
+   # The prompt programs a session actually compiled, with digests
+   perspt prompts explain-session --db-path <PATH> <SESSION_ID>
 
-   # View most recent session
-   perspt logs --last
+   # A session's recorded context events (compactions, refusals)
+   perspt context explain-turn --db-path <PATH> <SESSION_ID>
 
-   # Usage statistics
-   perspt logs --stats
+   # Ledger statistics
+   perspt ledger --stats
 
 
 Best Practices
@@ -288,9 +289,11 @@ Best Practices
 1. **Start with a clear task description** - Include language, package structure,
    and testing requirements in the prompt
 2. **Use workspace directories** - Always specify ``-w <dir>`` for clarity
-3. **Set cost limits** - Use ``--max-cost`` to prevent runaway spending
+3. **Set loop bounds** - Use ``--max-turns`` and ``--rejection-budget`` to
+   bound runaway sessions
 4. **Review before committing** - In interactive mode, inspect diffs carefully
-5. **Use per-tier models** - Match model capabilities to task complexity
+5. **Use per-route models** - Match model capabilities to each route with
+   ``--actuator-model``, ``--explorer-model``, and ``--adjudicator-model``
 6. **Track changes** - Use ``perspt ledger`` to review and rollback
 
 
@@ -300,14 +303,15 @@ Troubleshooting
 **Agent stuck in retry loop:**
 
 - Check LSP is working: ``ty check file.py`` or ``cargo check``
-- Lower stability threshold: ``--stability-threshold 0.5``
-- Use ``--defer-tests`` to skip V_log during coding
+- Relax the descent gate: ``--rho-gate 0.1``
+- Raise the shared recovery budget: ``--rejection-budget 8``
 
 **High energy despite clean code:**
 
 - Check test failures: ``uv run pytest -v``
 - Review LSP diagnostics
-- Adjust weights: ``--energy-weights "0.5,0.5,1.0"``
+- Replay the session to see what the sensors measured:
+  ``perspt replay <SESSION_ID>``
 
 **Plugin not detected:**
 

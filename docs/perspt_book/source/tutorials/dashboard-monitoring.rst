@@ -43,59 +43,64 @@ Step 3: Open the Overview
 Navigate to ``http://localhost:3000`` in your browser. The Overview
 page shows your active session with:
 
-- **Status badge** - "running" (blue) while the agent works
-- **Node count** - completed/total with failed count if any
-- **Budget** - steps used and cost consumed
+- **Status badge** - "running" while the agent works
+- **Node count** - stable/total nodes projected from the session's
+  latest graph revision
+- **Events** - how many ledger events the session has recorded
 
-Step 4: Explore the DAG
-------------------------
+Step 4: Open the Session Detail
+-------------------------------
 
-Click **DAG** next to your session. Node cards show the task
-decomposition:
+Click your session to open ``/sessions/{id}``. The detail page shows
+the task, working directory, status, and detected toolchain, plus node
+totals, event and measurement counts, the last and average energy, and
+a per-node summary table.
 
-- Green border - committed/verified nodes
-- Blue border - currently running
-- Red border - failed (will be retried)
+Step 5: Explore the Topology
+----------------------------
 
-The edge table below shows parent -> child relationships.
+Click **Topology** (``/sessions/{id}/topology``). The page shows the
+work graph as the ledger recorded it:
 
-Step 5: Watch Energy Convergence
+- **Revision lineage** - every graph revision, newest marked "latest"
+- **Nodes of the latest revision** - each node with its state badge
+  (stable, running, stopped, blocked, retired)
+- **Edge table** - parent -> child relationships
+
+Step 6: Watch Energy Convergence
 --------------------------------
 
-Click **Energy** to see per-node energy components. The agent aims
-to minimize V_total across all nodes. Watch values decrease as the
-verifier-guided correction loop runs.
+Click **Energy** to see the trajectory of measured candidates, in
+ledger order: one row per measurement with its node, generation,
+energy, and whether it was a hard pass. The summary bar shows the
+count, average, minimum, and maximum energy and how many measurements
+passed hard. Watch values decrease as accepted checkpoints descend.
 
-Step 6: Review LLM Telemetry
------------------------------
+Step 7: Check the Backlog
+-------------------------
 
-The **LLM** page shows:
-
-- Total requests, tokens in/out, and cumulative latency in the stats bar
-- Individual request details with model, prompt preview, and response preview
-
-This is useful for auditing LLM usage and identifying expensive calls.
-
-Step 7: Check Sandbox Branches
-------------------------------
-
-The **Sandbox** page lists provisional branches the agent is exploring.
-Active branches have sandbox directories; merged/flushed branches show
-their final state.
+Click **Backlog** for the conditional-capacity diagnostics: node state
+counts, how many nodes sit in the backlog (and how many of those are
+still unmeasured), the backlog potential Φ(W), its drift, and a
+per-node energy table.
 
 Step 8: Understand Decisions
 ----------------------------
 
-The **Decisions** page reveals the agent's internal reasoning:
+The **Decisions** page is the raw PSP-9 event trace: a flat,
+Merkle-chained table with one row per ledger record — its sequence
+number, event kind, a truncated payload summary, and the short hash
+that chains it to its predecessor. This is the same record that
+``perspt replay`` reconstructs.
 
-- **Escalation Reports** - when nodes were escalated for re-planning
-- **Sheaf Validations** - multi-source consistency checks
-- **Rewrites** - DAG modifications (requeued/inserted nodes)
-- **Plan Revisions** - architect plan amendments with reasons
-- **Repair Footprints** - correction attempts and diagnoses
-- **Verification Results** - syntax, build, test, and lint results
+Step 9: Review Governance
+-------------------------
 
-Step 9: Monitor Live Updates
+The **Governance** page shows the session's authority epoch and grant
+status, recent calibration epochs, adjudication verdicts, and delayed
+audit samples still pending a label.
+
+Step 10: Monitor Live Updates
 -----------------------------
 
 The dashboard receives Server-Sent Events (SSE) from the server every

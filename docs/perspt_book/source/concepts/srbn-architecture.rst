@@ -29,11 +29,12 @@ Overview
 --------
 
 The SRBN paper models coding tasks as a directed acyclic graph (DAG) of nodes with
-a sheaf structure that enforces consistency across shared boundaries. The system 
+a sheaf structure that enforces consistency across shared boundaries. The system
 establishes the following concrete mechanics: each node owns a set
-of output files (ownership closure), generates a multi-artifact bundle, and must
-pass multi-stage verification before its energy falls below the convergence
-threshold. Only then is the node committed to the Merkle ledger.
+of output files (ownership closure), runs a governed tool loop of typed tool
+calls against an isolated candidate, and must pass the measured acceptance
+gate on deterministic verifier evidence. Only then is the node's winner
+promoted and committed to the Merkle ledger.
 
 The runtime environment structures execution in two primary ways:
 
@@ -41,13 +42,14 @@ The runtime environment structures execution in two primary ways:
   :math:`V(x) = \sum_{e} w_e \lVert r_e \rVert^2` (see `Lyapunov Energy`_ below).
 - **Mutable work graph.** Rather than walking a precomputed topological order, a
   closed-loop scheduler re-evaluates a dependency-aware ready queue each round and
-  may requeue, split, insert, or replan nodes as verifier evidence arrives. 
+  may requeue, split, insert, or replan nodes as verifier evidence arrives.
   Each individual graph *revision* stays acyclic.
-  Node execution is currently sequential. Bounded parallelism (a worker
-  pool with file/interface/toolchain leases) is planned for a future release.
+  Bounded parallelism shipped in v0.6.6: the multi-node dispatcher behind
+  ``--max-parallel-nodes`` runs ready nodes concurrently, and two nodes with
+  conflicting file footprints never run at the same time.
 
 The core concepts of the control system — ownership closure, typed
-artifact bundles, the verifier profiles, node classes, and the Merkle ledger —
+tool calls, the verifier profiles, node classes, and the Merkle ledger —
 are described below.
 
 .. graphviz::
@@ -59,17 +61,20 @@ are described below.
        compound=true;
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
 
-       subgraph cluster_tiers {
-           label="Model Tiers";
+       subgraph cluster_models {
+           label="Model Roles";
            style=dashed;
-           arch [label="Architect\n(Deep Reasoning)", fillcolor="#E8F5E9"];
-           act [label="Actuator\n(Code Generation)", fillcolor="#E3F2FD"];
-           ver [label="Verifier\n(Stability Check)", fillcolor="#F3E5F5"];
-           spec [label="Speculator\n(Fast Lookahead)", fillcolor="#FFF3E0"];
+           arch [label="Architect\n(Graph Planning)", fillcolor="#E8F5E9"];
+           act [label="Actuator\n(Governed Tool Calls)", fillcolor="#E3F2FD"];
+           exp [label="Explorer\n(Read-Only Exploration)", fillcolor="#FFF3E0"];
+           adj [label="Adjudicator\n(No-Tool Diff Review)", fillcolor="#F3E5F5"];
        }
 
+       kernel [label="Admissibility Kernel\n(Deterministic)", fillcolor="#D1C4E9"];
+       cand [label="Candidate Overlay", fillcolor="#E0E0E0"];
+
        subgraph cluster_barriers {
-           label="Verification Barriers";
+           label="Deterministic Verifier Sensors";
            style=dashed;
            lsp [label="V_syn\n(LSP)", fillcolor="#FFECB3"];
            tests [label="V_log\n(Tests)", fillcolor="#FFECB3"];
@@ -78,36 +83,43 @@ are described below.
            sheaf [label="V_sheaf\n(Cross-Node)", fillcolor="#FFECB3"];
        }
 
+       gate [label="Accept Gate\n(hard pass or descent)", fillcolor="#B3E5FC"];
+
        subgraph cluster_output {
            label="Output";
            style=dashed;
            ledger [label="Merkle Ledger\n(DuckDB)", fillcolor="#C8E6C9"];
        }
 
-       arch -> act;
-       act -> lsp;
-       act -> tests;
-       act -> boot;
-       act -> struct;
-       lsp -> ver;
-       tests -> ver;
-       boot -> ver;
-       struct -> ver;
-       ver -> act [label="retry", style=dashed];
-       ver -> sheaf [label="stable"];
-       sheaf -> ledger [label="commit"];
+       arch -> act [label="work graph"];
+       exp -> act [label="evidence", style=dashed];
+       act -> kernel [label="typed proposals"];
+       kernel -> cand [label="admitted effects"];
+       cand -> lsp;
+       cand -> tests;
+       cand -> boot;
+       cand -> struct;
+       cand -> sheaf;
+       lsp -> gate;
+       tests -> gate;
+       boot -> gate;
+       struct -> gate;
+       sheaf -> gate;
+       adj -> gate [label="conjunctive review", style=dashed];
+       gate -> act [label="correction", style=dashed];
+       gate -> ledger [label="promote"];
    }
 
 
 The Control Loop
 ----------------
 
-Detection and planning run once at the start; the remaining phases run **per node
-inside the closed loop**. The scheduler re-evaluates the mutable work graph
-each round, picks the next ready node, and runs Generation → Verification →
-Convergence for it. A node that fails to converge can trigger a graph repair
-(requeue, split, insert interface, or replan a subgraph) and be re-picked on a
-later round, so these phases are *not* a single topological pass:
+Bootstrap and the architect turn run once at the start; the remaining phases
+run **per node inside the closed loop**. The dispatcher re-evaluates the
+mutable work graph, fills free slots with ready nodes, and runs the governed
+tool loop for each. A node that fails its gate can open a bounded search
+forest and be re-attempted, so these phases are *not* a single topological
+pass:
 
 .. list-table::
    :header-rows: 1
@@ -117,50 +129,54 @@ later round, so these phases are *not* a single topological pass:
      - Phase
      - Description
    * - 1
-     - **Detection**
-     - Inspect the repository. Select language plugins (Rust, Python, JS, Go) based on
-       existing files or the task description. Each plugin provides an LSP server, test
-       runner, and init command.
+     - **Session Bootstrap**
+     - Create the durable session, detect the domain package and language
+       plugins, mint epoch-bound capabilities from the grant policy, and
+       compile the prompt programs for the resolved routes and dialects.
    * - 2
-     - **Planning**
-     - Architect model decomposes the task into a ``TaskPlan`` DAG. Each node has an ID,
-       goal, context files, output files, dependencies, task type, and node class
-       (Interface, Implementation, or Integration). The **ownership closure** rule
-       ensures each output file appears in exactly one node. Planning is gated by
-       ``PlanningPolicy``: ``LocalEdit`` skips the Architect and creates a single-node
-       graph; all other policies run the full Architect decomposition.
-       A **FeatureCharter** is auto-created with policy-derived limits
-       (``max_modules``, ``max_files``, ``max_revisions``) before planning begins.
+     - **Architect Turn**
+     - A governed, forced-tool-choice model turn restricted to the privileged
+       ``update_graph`` tool proposes the work-graph revision. Acyclicity and
+       completeness are validated deterministically before the revision is
+       accepted; a single-node run keeps one node without an architect call.
    * - 3
-     - **Generation**
-     - Actuator model generates a multi-artifact bundle per node. The bundle is a JSON
-       structure with ``write``, ``diff``, and ``command`` operations. All files are
-       written transactionally.
+     - **Work-Graph Dispatch**
+     - Behind ``--max-parallel-nodes``, the dispatcher fills free slots with
+       ready nodes. Conflicting file footprints never run concurrently, and
+       each node attempt is bound to a generation seeded from the current
+       staging root, never from unstaged sibling state.
    * - 4
-     - **Verification**
-     - Compute five energy components: :math:`V_{syn}` (LSP diagnostics),
-       :math:`V_{str}` (contract violations), :math:`V_{log}` (test failures),
-       :math:`V_{boot}` (init/build exit codes), and :math:`V_{sheaf}`
-       (cross-node consistency). Total energy is :math:`V(x)`.
+     - **Governed Tool Loop**
+     - Per node, model turns issue typed tool calls. Each call becomes a
+       proposal; the deterministic admissibility kernel decides whether it
+       may affect the candidate; admitted effects mutate an isolated
+       candidate overlay; sandboxed deterministic verifiers re-measure the
+       candidate.
    * - 5
-     - **Convergence**
-     - If :math:`V(x) > \varepsilon`, generate a grounded correction prompt
-       containing the specific error messages and retry. Bounded by
-       ``RetryPolicy`` per error type.
+     - **Accept Gate**
+     - A candidate is accepted on a hard verifier pass, or on a measured
+       energy descent of at least :math:`\rho_{\text{gate}}` below the best
+       accepted state. Non-descending candidates consume the shared
+       rejection budget; the gate is evaluated on the re-measured candidate,
+       never on the model's account of it.
    * - 6
-     - **Sheaf Validation**
-     - Cross-node consistency checks. A per-node sheaf pre-check runs as each node
-       commits, and a full validation runs when the ready queue settles. Validates
-       import paths, shared type signatures, and interface-seal digests.
+     - **Bounded Search** (optional)
+     - On gate failure with budget remaining, a bounded search forest runs
+       up to three isolated branches with distinct strategies against the
+       accepted root. Every branch action reserves its cost before it runs,
+       exact no-goods suppress repeats, and exactly one selected candidate
+       is committed through the same gate.
    * - 7
-     - **Commit & Outcome**
-     - Record each node's terminal state in the Merkle ledger. Nodes that converge
-       (:math:`V(x) \leq \varepsilon`) are committed as ``Completed``; nodes whose retries are exhausted
-       are recorded as ``Escalated``. When the work graph settles (no node is
-       ready), a goal-completion gate may amend the plan or stop; the orchestrator
-       then derives a ``SessionOutcome`` from completed/escalated counts:
-       ``Success`` (all completed), ``PartialSuccess`` (some escalated), or
-       ``Failed`` (none completed), and emits a ``Complete`` event.
+     - **Staging & Integration**
+     - Each node's winner lands in a content-addressed staging root instead
+       of the user workspace. When dispatch settles, the merged state passes
+       one global integration gate; failure restores the prior staging root.
+   * - 8
+     - **Promotion**
+     - The integrated winner is written to the user workspace through
+       journaled, descriptor-relative promotion and committed to the
+       hash-chained ledger, from which ``perspt replay`` and
+       ``perspt resume`` reconstruct the session.
 
 
 Lyapunov Energy
@@ -197,12 +213,9 @@ residual contributions:
 
    V_{\text{comp}} = \sum_{e \in \text{comp}} w_e \, \lVert r_e(x) \rVert^2
 
-There is no secondary :math:`\alpha/\beta/\gamma` aggregation pass. The legacy
-``--energy-weights "alpha,beta,gamma"`` flag is parsed and folded proportionally into the
-individual residual weights :math:`w_e` relative to reference defaults (where
-:math:`\text{Syn}_{\text{default}} = 1.0`, :math:`\text{Str}_{\text{default}} = 0.5`,
-and :math:`\text{Log}_{\text{default}} = 2.0`), leaving the core mathematical engine as a
-pure sum of pre-weighted squares.
+There is no secondary :math:`\alpha/\beta/\gamma` aggregation pass. The
+per-class weights :math:`w_e` are fixed by the domain package's energy model,
+leaving the core mathematical engine as a pure sum of pre-weighted squares.
 
 Components
 ~~~~~~~~~~
@@ -259,25 +272,24 @@ to them from the `perspt-coding` domain package:
 Convergence Criterion
 ~~~~~~~~~~~~~~~~~~~~~
 
-The system is considered stable if and only if the candidate state satisfies:
+The system is considered stable if and only if the candidate achieves a
+**hard pass**: every required verifier and every hard policy constraint
+passes. A domain may additionally declare an analytic energy floor; a
+candidate at or below the floor is checkpointed as a classified terminal
+state but is never reported as verified success. If the state is not stable,
+the accept-gate evaluates descent. The single runtime acceptance knob is
+``--rho-gate``. A state :math:`x` can be provisionally accepted during
+convergence if:
 
 .. math::
 
-   V(x) \leq \varepsilon
-
-where :math:`\varepsilon` is the stability threshold (default :math:`\varepsilon = 0.10`), configurable
-via the ``--stability-threshold`` CLI argument. If the state is not stable, the accept-gate
-evaluates descent. A state :math:`x` can be provisionally accepted during convergence if:
-
-.. math::
-
-   V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
+   V(x) \leq V(x_{\text{best}}) - \rho_{\text{gate}}
 
 where :math:`x_{\text{best}}` is the best previously accepted state, and :math:`\rho_{\text{gate}}`
 is the minimum descent gate (default :math:`0.50`), ensuring non-trivial progress.
 
-Spectral Diagnostic (planned)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Spectral and Independence Diagnostics
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The system supports an energy-slope constant :math:`\mu = 2\,\lambda_{\min}^{+}(A)`
 — twice the algebraic connectivity (Fiedler value) of the verification graph
@@ -292,13 +304,14 @@ miss correlations.
 
    ``mu`` and :math:`\rho_{\text{eff}}` are **diagnostics, not acceptance-gate
    inputs** — by design they are computed off the critical path and never block a
-   node. The eigensolver and independence math are **implemented in
-   ``perspt-sdk``** (``spectral::VerificationGraph``, ``independence::compute``)
-   but are **not yet wired into the live agent** — the orchestrator tags each
-   residual with its verifier route but does not yet assemble the verification
-   graph or emit ``mu`` / :math:`\rho_{\text{eff}}`. This represents a planned
-   enhancement (see the references section under PSP-8 for further architectural
-   specifications).
+   node. The independence statistics are **live**: ``independence::compute``
+   folds the ``psp9_verdicts`` ledger into per-validator miss rates and
+   matched-stratum pair statistics, and :math:`\rho_{\text{eff}}` is reported
+   only when every pair meets the matched-sample floor (a Hoeffding upper
+   confidence bound backs the certified value). ``perspt status`` and the
+   dashboard's Governance page surface these figures. The spectral
+   eigensolver (``spectral::VerificationGraph``) remains an offline
+   ``perspt-sdk`` diagnostic.
 
 
 Node Classes
@@ -330,255 +343,141 @@ The **ownership closure** rule is a fundamental invariant of PSP-5:
 
    *Each output file appears in exactly one node's* ``output_files`` *list.*
 
-This prevents conflicting writes. When the Architect generates a task plan, the
-orchestrator validates ownership closure before execution begins. If two nodes
-claim the same file, the plan is rejected and re-generated.
+This prevents conflicting writes. In the current runtime the guarantee is
+enforced at dispatch through footprints: two nodes whose declared file
+footprints conflict never run concurrently, and each node attempt is seeded
+from the staging root rather than from unstaged sibling state.
 
 
-Model Tiers
+Model Roles
 -----------
 
-SRBN uses four specialized model tiers. Each tier can be configured independently:
+The runtime uses one required and two optional model roles. Verification is
+**not** a model role: the verifiers are deterministic sandboxed sensors
+(compilers, test runners, linters), never a model call.
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 30 50
+   :widths: 20 45 35
 
-   * - Tier
+   * - Role
      - Purpose
-     - Default Model
-   * - **Architect**
-     - Deep reasoning, task decomposition, DAG planning
-     - ``gemini-3.1-pro``
+     - CLI Flag
    * - **Actuator**
-     - Code generation, artifact bundle emission
-     - ``gemini-3.5-flash``
-   * - **Verifier**
-     - LSP diagnostics, contract checking, energy computation
-     - ``gemini-3.1-pro``
-   * - **Speculator**
-     - Fast lookahead, provisional branch prediction
-     - ``gemini-3.5-flash``
+     - Proposes governed coding tool calls; the only role that can mutate
+       the candidate. Also serves the architect's ``update_graph`` turn.
+     - ``--model`` / ``--actuator-model``
+   * - **Explorer**
+     - Optional cheaper read-only repository exploration.
+     - ``--explorer-model``
+   * - **Adjudicator**
+     - Optional no-tool conjunctive diff adjudication before promotion.
+     - ``--adjudicator-model``
 
-Configure per-tier models via CLI:
+Configure per-role routes via CLI:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-3.1-pro \
-     --actuator-model gemini-3.5-flash \
-     --verifier-model gemini-3.1-pro \
-     --speculator-model gemini-3.5-flash \
+     --actuator-model <provider::model> \
+     --explorer-model <provider::model> \
+     --adjudicator-model <provider::model> \
+     --fallback-model <provider::model> \
      "Build a REST API"
 
-Each tier also supports a fallback model (``--architect-fallback-model``, etc.).
+``--fallback-model`` is repeatable and defines the ordered sticky actuator
+failover route. Persistent per-role routes live in the ``[models]`` table of
+``config.toml`` as fully qualified ``provider::model`` values, so identity,
+calibration, and replay never depend on an ambient default provider. No
+model name is hard-coded in the runtime.
 
 
-Planning Policy
----------------
-
-The ``PlanningPolicy`` enum adapts the agent phase stack based on task scale:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 15 15 45
-
-   * - Policy
-     - Architect
-     - Speculator
-     - Description
-   * - **LocalEdit**
-     - No
-     - No
-     - Small, localized changes. Skips task decomposition; uses a single-node graph.
-   * - **FeatureIncrement** (default)
-     - Yes
-     - No
-     - Mid-size features. Architect decomposes, Actuator implements, Verifier checks.
-   * - **LargeFeature**
-     - Yes
-     - Yes
-     - Full SRBN loop including speculator lookahead for downstream risk hints.
-   * - **GreenfieldBuild**
-     - Yes
-     - Yes
-     - New project. Full stack with workspace bootstrap node first.
-   * - **ArchitecturalRevision**
-     - Yes
-     - Yes
-     - Cross-cutting redesign. Plan-first with speculator risk analysis.
-
-
-PSP-7: Robust Correction Loop Contracts
+PSP-10: Model-Conditioned Prompt Programs
 -----------------------------------------
 
-PSP-7 extends the SRBN runtime with three hardening layers: a typed parse pipeline,
-a prompt compiler with provenance tracking, and structured correction telemetry.
+PSP-10 replaces free-form prompt templates with compiled prompt programs:
+typed sections, deterministic composition per model route, and ledgered
+digests for every model call.
 
-Typed Parse Pipeline (Fail-Closed Parsing)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Typed Prompt Sections
+~~~~~~~~~~~~~~~~~~~~~
 
-LLM responses are processed through a five-layer typed pipeline that replaces the
-legacy ``extract_all_code_blocks_from_response()`` fallback. Each layer returns a
-``ParseResultState`` that classifies the outcome:
+Prompt text lives in versioned section files under
+``crates/perspt-core/prompts/<stage>/NN_name.md``, one directory per stage
+(``session_bootstrap``, ``graph_plan``, ``repository_explore``,
+``adjudicate``, ``evidence_summarize``), beside a committed
+``manifest.toml``. The ``perspt-prompt-macros`` crate compiles every section
+at build time from the owning crate's ``build.rs``: it parses the front
+matter into a typed ``SectionSchema`` (id, version, role, priority, size
+bound, declared variables), runs the codegen validation list, and emits typed section
+structs into ``OUT_DIR``. A malformed section fails ``cargo build`` with an
+error naming the offending file — never a session.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 15 85
+Stage Composition and Digests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   * - Layer
-     - Description
-   * - **A (Raw Capture)**
-     - Hash, length, and first-line fingerprint of the raw response.
-   * - **B (Path Normalization)**
-     - Strip backticks, quotes, and markdown formatting from file paths.
-   * - **C (Strict JSON)**
-     - Attempt to parse the response as a structured JSON artifact bundle.
-   * - **D (Tolerant Recovery)**
-     - Recognize ``### File:``, ``File:``, and ``Diff:`` headings to extract
-       structured content. Never invents filenames - unnamed blocks produce ``None``.
-   * - **E (Semantic Validation)**
-     - Plugin-driven ownership closure, ``legal_support_files()`` checks,
-       ``dependency_command_policy()`` enforcement.
+At runtime a ``StageComposition`` composes one stage's rendered sections for
+the resolved model route and dialect into a ``CompiledPromptProgram``: the
+ordered messages with per-message rendered hashes, any sections dropped by
+deterministic budget fitting, the tool-spec hash, and a ``program_digest``
+computed over canonical bytes of the identity-bearing fields. One model call
+binds a platform program (the universal envelope) and a domain program; the
+pair forms a ``CompiledPromptInvocation`` with its own invocation digest.
 
-``ParseResultState`` has six variants: ``StructuredOk``, ``TolerantRecoveryOk``,
-``NoStructuredPayload``, ``SchemaInvalid``, ``SemanticallyRejected``, ``EmptyResponse``.
-Each variant carries a ``RetryClassification`` that guides the correction loop:
-``Retarget``, ``SupportFiles``, ``Replan``, or ``FatalBudget``.
+Provenance
+~~~~~~~~~~
 
-Active V_boot
-~~~~~~~~~~~~~
+Every model call is ledgered: a ``prompt_program_compiled`` event records
+each program's sections and digest, and a ``prompt_program_invoked`` event
+records the actor, turn, platform digest, domain digest, invocation digest,
+and tool-spec hash. A session's prompts are therefore reconstructible and
+diffable after the fact. Validated replacement bundles may substitute
+section bodies live only behind ``--allow-experimental-prompts``; external
+bodies obey exactly the validation rules the build does.
 
-PSP-7 separates bootstrap failures from code errors. After auto-repair re-verification,
-if the verifier profile is fully degraded or missing-crate/module failures persist,
-``V_boot`` is set independently rather than being folded into ``V_syn``. This gives
-the correction loop a dedicated signal for infrastructure problems.
+The ``perspt prompts`` CLI
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Sheaf Pre-Check
-~~~~~~~~~~~~~~~
+.. code-block:: bash
 
-After a node converges (:math:`V(x) \leq \varepsilon`) but before the full sheaf validation pass, a fast
-structural pre-check verifies that output artifacts declare consistent imports and
-exports with the ownership manifest. If the pre-check fails, the node re-enters
-``step_converge()`` with sheaf-specific evidence. A retry guard (max 1 sheaf pre-check
-retry) prevents infinite loops.
+   perspt prompts list                   # every compiled section: id, version, stage, role, hash
+   perspt prompts render <stage>         # compose one stage with fixture variables
+   perspt prompts lint --bundle <dir>    # validate an external bundle directory
+   perspt prompts manifest <dir>         # regenerate a library's manifest.toml
+   perspt prompts explain-session --db-path <db> <session-id>
+                                         # the programs a session actually compiled, with digests
 
-Prompt Compiler
-~~~~~~~~~~~~~~~
-
-PSP-7 replaces the template-constant approach with a typed prompt compiler:
-
-.. code-block:: text
-
-   compile(intent: PromptIntent, evidence: &PromptEvidence) -> CompiledPrompt
-
-The compiler accepts 13 ``PromptIntent`` variants (architect, actuator, verifier,
-correction, speculator, solo, bundle retarget, project naming) and emits a
-``CompiledPrompt`` with the assembled prompt text plus ``PromptProvenance`` metadata
-(template ID, evidence hashes, compiler version). Plugin ``correction_prompt_fragment()``
-and ``legal_support_files()`` are injected into correction prompts automatically.
-
-Correction Telemetry
-~~~~~~~~~~~~~~~~~~~~
-
-Every correction attempt is recorded as a ``CorrectionAttemptRow`` in the DuckDB store:
-
-- ``parse_state`` - which ``ParseResultState`` was returned
-- ``retry_classification`` - how the failure was classified
-- ``response_fingerprint`` - hash of the raw LLM response
-- ``response_length`` - byte length for detecting degenerate responses
-- ``energy_json`` - energy components snapshot after verification
-- ``accepted`` / ``rejection_reason`` - whether the attempt was committed
-
-Additionally, ``srbn_step_records`` track per-node execution steps (speculate, verify,
-converge, sheaf_validate, commit) with timing, energy snapshots, and attempt counts.
-These records are surfaced by ``perspt status``, the dashboard decisions page, and the
-headless agent summary.
-
-The policy is auto-selected based on workspace state (greenfield vs existing project).
-``needs_architect()`` gates whether the Architect tier runs; ``needs_speculator()``
-gates the speculator lookahead call.
+``perspt context explain-turn`` is the companion command for a session's
+recorded resident-context events (compactions and refusals).
 
 
-Feature Charter
-~~~~~~~~~~~~~~~
+Rejection Budget
+----------------
 
-Before architect planning begins, the orchestrator creates a ``FeatureCharter``
-with policy-derived defaults:
-
-- **LocalEdit**: max 1 module, 5 files, 3 revisions
-- **FeatureIncrement**: max 10 modules, 30 files, 5 revisions
-- **LargeFeature / GreenfieldBuild / ArchitecturalRevision**: max 25 modules, 80 files, 10 revisions
-
-The charter gates the plan: if the Architect produces a plan exceeding the charter's
-module or file budget, a warning is emitted. Language constraints are derived from
-active plugins.
-
-
-Retry Policy
-------------
-
-SRBN implements bounded retries per error type:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 20 50
-
-   * - Error Type
-     - Max Retries
-     - Escalation
-   * - Compilation errors (LSP)
-     - 3
-     - Escalate to user with diagnostic context
-   * - Tool failures (file ops)
-     - 5
-     - Escalate with error logs
-   * - Review rejections (user)
-     - 3
-     - Escalate with diff summary
-
-When retries are exhausted, the node transitions to **Escalated** state.
-Escalated nodes do not block subsequent nodes. The orchestrator tracks
-completed and escalated counts and derives the final ``SessionOutcome``:
-``Success`` if all nodes completed, ``PartialSuccess`` if some escalated,
-or ``Failed`` if none completed. In headless mode (``--yes``), escalations
-are logged and the session exits with a non-zero code when the outcome
-is not ``Success``.
+There is no per-error-type retry table. The loop runs against a single
+shared, non-replenishing **rejection budget** :math:`B` (default 4,
+``--rejection-budget``): non-descending candidates and recovery attempts
+consume it, while accepted descents do not. Together with the descent gate
+this yields the finite-decision bound
+:math:`\lfloor V_0 / \rho_{\text{gate}} \rfloor + B + 1` on gate decisions
+per node. When the budget is exhausted, the gate issues a **residual
+certificate** enumerating the remaining errors and the node terminates as a
+classified failure rather than looping. In headless mode (``--yes``) the
+session exits with a non-zero code when the outcome is not verified success.
 
 
-Artifact Bundle Protocol
-------------------------
+Typed Tool Proposals
+--------------------
 
-The Actuator emits a JSON artifact bundle for each node:
-
-.. code-block:: json
-
-   {
-     "artifacts": [
-       {
-         "path": "src/lib.rs",
-         "operation": "write",
-         "content": "pub fn add(a: i32, b: i32) -> i32 { a + b }"
-       },
-       {
-         "path": "src/main.rs",
-         "operation": "diff",
-         "patch": "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1,3 @@..."
-       }
-     ],
-     "commands": [
-       "cargo build"
-     ]
-   }
-
-Operations:
-
-- **write** - Create or overwrite a file with the given content
-- **diff** - Apply a unified diff patch to an existing file
-- **command** - Execute a shell command (validated by policy engine)
-
-All artifacts are applied transactionally. If any operation fails, the entire
-bundle is rolled back.
+The Actuator does not emit artifact bundles. Every mutation is an individual
+typed tool call: the call becomes an effect proposal, the deterministic
+admissibility kernel checks it against the node's capability (path patterns,
+command patterns, effect kinds), and only an admitted effect executes —
+against the isolated candidate overlay, never the user workspace. Proposed
+commands additionally pass the deterministic ``sanitize_command`` and
+workspace-bound guards plus the Starlark policy engine, and run inside the
+process sandbox. The candidate journals a pre-image of every file it
+touches, so any attempt can be discarded without residue.
 
 
 Plugin-Driven Verification
@@ -642,9 +541,10 @@ Merkle Ledger
 All changes are recorded in a DuckDB-backed Merkle ledger:
 
 - **Integrity** - Each commit has a cryptographic hash chaining to its parent
-- **Rollback** - Revert to any previous state via ``perspt ledger --rollback``
-- **Resume** - ``perspt resume`` rehydrates session state including energy history,
-  retry counts, and escalation reports
+- **Rollback** - Roll back a session's newest completed promotion via
+  ``perspt ledger --rollback`` (the argument is a session id prefix)
+- **Resume** - ``perspt resume`` continues an interrupted session from its
+  newest durable checkpoint by folding the ledger (see `Crash Resume`_)
 - **Audit** - Complete trail of AI-generated changes with energy breakdowns
 
 .. code-block:: bash
@@ -654,56 +554,58 @@ All changes are recorded in a DuckDB-backed Merkle ledger:
    perspt ledger --stats      # Session statistics
 
 
-Provisional Branches
+Isolation and Resume
 --------------------
 
-When SRBN speculates on child nodes before the parent is fully committed, it uses
-**provisional branches** to isolate speculative work.
+Nothing speculative ever touches the user workspace. Three layers keep
+observed work separated from accepted work, and crash resume preserves the
+separation.
 
 .. admonition:: Key Invariant
    :class: important
 
-   Provisional work is **never** merged into the global ledger until the parent node
-   meets the stability threshold. If the parent fails, all dependent branches are
-   flushed.
+   Model-proposed work reaches the user workspace only through the accept
+   gate, the staging root, and the global integration gate — in that order.
+   Everything else is discarded without residue.
 
-Branch Lifecycle
-~~~~~~~~~~~~~~~~
+Candidate Overlays
+~~~~~~~~~~~~~~~~~~
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
+Each node attempt runs in a ``CandidateWorkspace`` overlay. Admitted effects
+mutate the overlay; every touched file's pre-image is journaled; verifiers
+measure the overlay, not the workspace. A rejected attempt is dropped
+wholesale.
 
-   * - State
-     - Description
-   * - **Active**
-     - Branch is open, speculative work in progress
-   * - **Sealed**
-     - Parent interface is sealed; children may proceed
-   * - **Merged**
-     - Parent committed; branch work merged into global ledger
-   * - **Flushed**
-     - Parent failed; branch work discarded (may be replayed later)
+Search Forest Branches
+~~~~~~~~~~~~~~~~~~~~~~
 
-Interface Seals
-~~~~~~~~~~~~~~~
+A bounded search forest opens at most three branch identities, one branch
+attempt at a time. Every branch runs the ordinary governed loop in an
+isolated eager-copy workspace against the same immutable accepted root, and
+its internal states stay private to the forest. Exactly one selected
+candidate is committed through a single gate submission, and the committed
+decision must equal the preview or the forest fails closed. Exact no-goods
+learned from failed branches suppress equivalent later attempts, and every
+branch action reserves its cost against the declared limit vector before it
+runs.
 
-Interface nodes produce a structural digest (SHA-256 hash) of their public API
-after reaching the Commit phase. This seal is injected into child node restriction
-maps, ensuring children code against stable signatures.
+Staging and the Integration Gate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Parent node reaches **Commit** phase
-2. If the node is an **Interface** class, its exported signatures are hashed
-3. ``InterfaceSealed`` event is emitted with sealed paths and hash
-4. Blocked dependents are released
-5. Seal digests are available to child verifiers for contract checking
+With ``--max-parallel-nodes`` above 1, node winners land in a
+content-addressed staging root instead of the user workspace. Disjoint
+footprints are enforced at dispatch; the merged state must pass one global
+integration gate before promotion, and a gate failure restores the prior
+staging root.
 
-Flush Cascade
-~~~~~~~~~~~~~
+Crash Resume
+~~~~~~~~~~~~
 
-When a parent node fails verification:
-
-1. The parent's provisional branch is flushed
-2. ``collect_descendants`` walks the DAG to find all transitive children
-3. Each descendant branch is flushed recursively
-4. ``BranchFlushed`` event is emitted with the reason and affected IDs
+``perspt resume`` folds the durable ledger rather than deserializing live
+state. A single-node session re-enters its loop from the newest durable
+candidate checkpoint with exactly the remaining budgets, its accepted
+candidate rebuilt from content-addressed artifacts and a fresh capability
+minted at the current authority epoch (a bumped epoch refuses the resume).
+A multi-node session resumes through graph dispatch: the staging root is
+rebuilt from the ledger and every winner still reaches the user workspace
+only through the global integration gate.
