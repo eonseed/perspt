@@ -31,9 +31,11 @@ Core Workflow
 The agent runs a closed loop in which every model proposal is governed and
 every acceptance is measured:
 
-1. **Planning** - One governed architect turn, restricted to the
-   ``update_graph`` tool, decomposes the task into a work graph of typed
-   nodes. Simple tasks stay a single node.
+1. **Planning** - The default single-node run starts directly from a
+   deterministic one-node graph. When ``--max-parallel-nodes`` is above one,
+   one governed architect turn, restricted to ``update_graph``, may decompose
+   the task into a typed work graph; an empty or invalid proposal safely falls
+   back to the single node.
 2. **Proposal** - The actuator proposes typed tool calls (file writes,
    edits, commands) against a disposable candidate overlay. The real
    workspace is never touched by a proposal.
@@ -43,7 +45,11 @@ every acceptance is measured:
    and costs the model a correction, never the workspace a mutation.
 4. **Measurement** - Admitted mutations are measured on the realized
    filesystem by the language plugins (compilers, tests, linters, LSP
-   diagnostics), which produce the scalar energy :math:`V(y)`.
+   diagnostics), which produce the scalar energy :math:`V(y)`. Tests evolve
+   with the implementation by default. The optional
+   ``backward-compatible`` policy adds a historical regression view, while
+   ``external-oracle`` adds separately protected acceptance evidence; see
+   :doc:`../configuration`.
 5. **Acceptance** - A candidate is accepted when it is a hard pass, or when
    it achieves the required measured descent
    :math:`V(y) \leq V(\text{best}) - \rho_{\text{gate}}` (``--rho-gate``,
@@ -57,6 +63,40 @@ number of eager branches with exact-keyed no-goods, pre-action reservations
 that settle against observed actuals, and exactly one candidate committed
 through the ordinary gate. See :doc:`advanced-features` for the
 ``[exploration]`` configuration.
+
+Test Evidence Policies
+----------------------
+
+Tests are part of the project being developed, not an automatically immutable
+artifact. The coding gate always runs the resulting project suite. The
+``[verification] test_policy`` setting controls whether another test-evidence
+view is also required:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Policy
+     - When to use it
+   * - ``evolving`` (default)
+     - Feature work, refactoring, API migrations, and corrected behavior where
+       implementation and tests legitimately evolve together. New tests run;
+       changed or obsolete historical expectations are not resurrected.
+   * - ``backward-compatible``
+     - Additive changes and bug fixes that promise recognized pre-existing
+       test files will continue to pass. The resulting suite and the restored
+       regression view must both pass.
+   * - ``external-oracle``
+     - Work with independently maintained acceptance evidence. Perspt copies
+       the configured overlay onto a private candidate view and runs its
+       command as an additional blocking test stage. Put withheld material
+       outside the workspace.
+
+The first policy says the project's configured suite passed for its resulting
+contract; it does not turn tests authored by the actuator into independent
+proof. The external policy supplies that independence when the user, CI, or a
+release process owns the acceptance suite. Configuration and complete examples
+are in :doc:`../configuration`.
 
 Multi-Node Dispatch
 -------------------

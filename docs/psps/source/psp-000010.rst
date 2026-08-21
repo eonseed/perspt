@@ -950,7 +950,7 @@ staging layer.
        b [label="Node winner B"];
        staging [label="Content-addressed\nstaging root", fillcolor="#EAF2FF"];
        overlay [label="Integration overlay"];
-       gate [label="Full suite and\nimmutable oracle", shape=diamond,
+       gate [label="Full suite and\nconfigured test evidence", shape=diamond,
              fillcolor="#FFF8E6"];
        promote [label="Atomic promotion\nunder GraphWrite lease",
                 fillcolor="#E9F7EF", color="#347A55"];
@@ -974,14 +974,27 @@ staging layer.
   downstream work builds on upstream winners without touching the user tree.
 * Disjoint concurrent winners merge deterministically into an integration
   overlay; typed interface/restriction checks run across graph edges.
-* One global verifier gate runs the full domain suite and the immutable test
-  oracle on the combined state.
+* One global verifier gate runs the full domain suite and the session's
+  configured test-evidence policy on the combined state.
 * Promotion requires a global hard pass. The runtime uses
   ``certify_promotion`` and ``commit_promotion`` under one ``GraphWrite``
   lease. Failure restores the prior staging root.
 
 The work graph is the task trajectory. Branches propose node states. The
 staging root composes them. One atomic promotion commits the final result.
+
+Test evidence is policy-bound rather than universally immutable. The default
+``evolving`` policy runs the resulting implementation, tests, and project
+configuration, allowing an intentional contract change to replace obsolete
+tests. ``backward-compatible`` adds a second view with recognized
+pre-existing test files restored and is selected only when historical
+behavior remains contractual. ``external-oracle`` overlays separately
+protected acceptance material onto a private candidate copy and runs its
+configured command as an additional required test stage. The same policy is
+used by node gates, search previews, and the global integration gate, and its
+identity is recorded in ``session_started``. Benchmark ``hidden/`` suites
+remain withheld external evidence and are unaffected by the production
+default.
 
 23. Typed Prompt Sections and Codegen
 =====================================
@@ -2316,7 +2329,7 @@ PSP code check green, without adding entries to the warning baseline.
    * - 10 - Graph staging and integration gate
      - AA
      - Staging root in ``fold_completion``; ``runtime/integrate.rs``;
-       global gate with the immutable oracle; atomic promotion reusing
+       global gate with the configured test-evidence policy; atomic promotion reusing
        the hardened path. Tests: ``mc_integration.rs``.
    * - 11 - CLI, bundles, conformance, and evaluation
      - Z, AE, AF
@@ -2577,8 +2590,9 @@ required; **Accepted** remains unclaimed.
        detection (siblings only; downstream refinements win by edge
        precedence), predecessor-scoped inherited seeding, enforced
        ``output_targets`` write scopes (erratum 9), one global
-       integration gate, atomic promotion; failure leaves the user
-       workspace byte-identical.
+       integration gate, atomic promotion, and one explicit test-evidence
+       policy across node, search-preview, and integration measurements
+       (erratum 37); failure leaves the user workspace byte-identical.
    * - 11 - CLI, bundles, and evaluation
      - Z, AE, AF
      - SDK + Wired
@@ -2932,6 +2946,20 @@ corpus and made the evaluator's own acceptance claim fail closed; items
     closed). The recovery ladder continues from the node's recorded graph
     generation, so a node dispatched at a later generation after resume
     refines to its successor instead of colliding with a stale one.
+37. **Project tests evolve unless compatibility is declared.** The former
+    unconditional restored-test view made valid contract-changing work
+    impossible: a candidate had to satisfy both a new expectation and the
+    superseded old expectation. Production gates now default to
+    ``[verification] test_policy = "evolving"`` and verify the resulting
+    implementation, tests, and configuration. ``backward-compatible``
+    explicitly adds the historical regression view.
+    ``external-oracle`` requires a non-empty protected overlay path and
+    command, copies that material only into a private verification tree, and
+    adds its result as a blocking test-stage verdict. Mispaired configuration
+    fails startup. Node attempts, search previews, and integration use the
+    same policy. The benchmark's withheld oracle remains fixed because it
+    measures a predeclared task contract rather than ordinary iterative
+    development.
 
 =========================
 Resolved Design Decisions

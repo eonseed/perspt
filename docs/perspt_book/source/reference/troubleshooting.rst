@@ -71,9 +71,10 @@ conflicting node to finish. If this persists, simplify the task description.
 **Global integration failure:**
 
 Two nodes may pass separately and fail together. Node winners enter a
-content-addressed staging root instead of the user workspace, and one
-global verifier gate runs the full domain suite and the immutable test
-oracle on the combined state. Only a hard-passing integration root is
+content-addressed staging root instead of the user workspace, and one global
+verifier gate runs the full domain suite and the test evidence selected by
+``[verification] test_policy`` on the combined state. Only a hard-passing
+integration root is
 promoted, atomically; on failure the prior staging root is restored and the
 user workspace is left byte-identical.
 

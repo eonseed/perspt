@@ -40,7 +40,7 @@ The Byzantine Generals Metaphor
 
 To illustrate the stabilization protocol, we map the closed-loop convergence system to the Byzantine Generals Problem formulation (Lamport, Shostak, and Pease, 1982).
 
-Let the Actuator agent be a commanding general whose loyalty is unknown; the commander's objective is to propose a series of operations (file modifications, deletions, or command executions) to reach a stable repository state. Let the verification sensors (the compiler, the type-checker, the linter, and the test oracle) be the loyal lieutenants. 
+Let the Actuator agent be a commanding general whose loyalty is unknown; the commander's objective is to propose a series of operations (file modifications, deletions, or command executions) to reach a stable repository state. Let the verification sensors (the compiler, the type-checker, the linter, and the configured test evidence) be the loyal lieutenants. Tests evolve with the implementation in the default development policy; historical or externally protected evidence participates only when the corresponding verification policy is selected.
 
 The protocol proceeds in rounds:
 

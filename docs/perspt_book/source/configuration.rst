@@ -213,14 +213,66 @@ invalid values fail at startup.
    output_reserve_tokens = 8192   # Token reserve for model output
    guard_reserve_tokens = 1024    # Guard reserve against overflow
 
-**Verification acceptance stages** (``[verification]``):
+**Verification acceptance and test evidence** (``[verification]``):
 
 .. code-block:: toml
 
    [verification]
-   require_format = false     # Declare the plugin format stage as an acceptance sensor
-   stage_timeout_secs = 180   # Wall-clock limit for every governed verifier stage
-   test_timeout_secs = 300    # Per-stage override (also syntax/build/lint/format)
+   test_policy = "evolving"  # Default: resulting code, tests, and configuration
+   require_format = false    # Declare the plugin format stage as an acceptance sensor
+   stage_timeout_secs = 180  # Wall-clock limit for every governed verifier stage
+   test_timeout_secs = 300   # Per-stage override (also syntax/build/lint/format)
+
+The test policy defines which test evidence must pass in addition to the
+coding domain's required syntax and build stages:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 75
+
+   * - Policy
+     - Acceptance behavior
+   * - ``evolving``
+     - The default for iterative development. Perspt runs the resulting
+       implementation, resulting project tests, and resulting configuration.
+       Existing tests may be corrected, replaced, or removed when the task
+       intentionally changes their contract; newly written tests participate
+       in the same gate.
+   * - ``backward-compatible``
+     - Runs the resulting suite and a second regression view in which
+       recognized pre-existing test files are restored. Select it only when
+       the task promises compatibility with those historical expectations.
+   * - ``external-oracle``
+     - Runs the resulting suite and then overlays separately protected
+       acceptance material onto a private candidate copy. Its configured
+       command is an additional required test-stage verdict. This is intended
+       for CI, security fixes, contractual acceptance, and other work with an
+       independently maintained suite.
+
+An external oracle is explicit and fail-closed:
+
+.. code-block:: toml
+
+   [verification]
+   test_policy = "external-oracle"
+   test_timeout_secs = 600
+
+   [verification.external_oracle]
+   path = "/srv/project-acceptance"       # or relative to the agent workspace
+   command = "cargo test --test acceptance"
+
+The directory is copied over a private copy of the candidate only at the
+measurement boundary. It can contain tests, manifests, runner configuration,
+or harness scripts, and none of those files are promoted. Keep the directory
+outside the workspace when its contents must be withheld from the actuator.
+Configuring the table without ``test_policy = "external-oracle"``, or selecting
+that policy without the table, is a startup error rather than silently ignored
+configuration.
+
+``evolving`` does not claim that model-authored tests are independent proof of
+semantic correctness. It means the configured project verification suite
+passed for the new contract. Use protected acceptance evidence when an
+independent semantic oracle is required.
 
 .. note::
    The ``[ensemble]`` section was removed by PSP-10 and is now a hard startup
