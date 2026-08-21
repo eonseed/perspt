@@ -41,16 +41,17 @@ jobs:
         uses: actions/checkout@v7
 
       # Linux governed verifiers fail closed when their process-isolation
-      # backend is unavailable. GitHub's Ubuntu 24.04 image does not include
-      # Bubblewrap or its opt-in AppArmor user-namespace profile.
+      # backend is unavailable. GitHub's Ubuntu 24.04 image omits Bubblewrap
+      # and prevents unconfined processes from creating user namespaces. The
+      # runner is ephemeral and already executes the workspace test binaries;
+      # Bubblewrap still supplies the verifier's filesystem and network policy.
       - name: Install the Linux verifier sandbox
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends apparmor-profiles bubblewrap
-          sudo install --mode=0644 \
-            /usr/share/apparmor/extra-profiles/bwrap-userns-restrict \
-            /etc/apparmor.d/bwrap-userns-restrict
-          sudo apparmor_parser --replace /etc/apparmor.d/bwrap-userns-restrict
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+          if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
+            sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
+          fi
           bwrap --die-with-parent --unshare-net --ro-bind / / /bin/true
 
       - name: Install pinned DuckDB
