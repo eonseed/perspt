@@ -72,8 +72,9 @@ pub struct Psp9AgentRuntime {
     external_entries: Mutex<Option<Vec<perspt_sdk::ToolEntry>>>,
     /// Bounded-search settings from `[exploration]` (PSP-10 system 20).
     search: search::SearchSettings,
-    /// Prior search state folded from the ledger at resume; consumed by
-    /// the first forest opened afterwards (deterministic re-run).
+    /// Prior search state folded from the ledger at resume. The folded
+    /// no-goods seed every forest in the session; the interrupted
+    /// forest's consumption is claimed once, by its exact owner.
     search_seed: Mutex<Option<search::SearchSeed>>,
     /// Experimental platform-section overrides from validated
     /// `[prompts].bundles`, loaded by the composition root only under
@@ -431,7 +432,10 @@ impl Psp9AgentRuntime {
             node_id,
             scheduler,
         } = session;
-        let mut generation = 0u32;
+        // The ladder continues the node's recorded generation (a node
+        // dispatched at generation >= 1 after a graph resume must refine to
+        // generation + 1, or `WorkGraphRevision::revise` rejects it stale).
+        let mut generation = graph.node(node_id).map_or(0, |node| node.generation);
         let mut model = self.model.clone();
         let mut remaining_budget = initial_budget.saturating_sub(spent_of(&attempt));
         for level in [
