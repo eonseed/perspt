@@ -523,7 +523,13 @@ impl AgentTools {
         rg_args.extend(["--max-count", "50", "--", query, target]);
         let mut rg = Command::new("rg");
         rg.args(&rg_args).current_dir(&self.working_dir);
-        bounded_command_output(rg).or_else(|_| {
+        // Fall back to plain grep only when ripgrep is absent. A timeout or
+        // cap kill must surface as-is: retrying the same pathological query
+        // through grep would only double the worst-case latency.
+        bounded_command_output(rg).or_else(|error| {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(error);
+            }
             let mut grep_args = vec!["-rn"];
             if context > 0 {
                 grep_args.push(&context_arg);
@@ -696,6 +702,9 @@ impl AgentTools {
             }
             Ok(out) => {
                 ToolResult::failure("git_read", String::from_utf8_lossy(&out.stderr).to_string())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                ToolResult::failure("git_read", format!("git timed out: {e}"))
             }
             Err(e) => ToolResult::failure("git_read", format!("git failed to start: {e}")),
         }
