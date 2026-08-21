@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use perspt_sdk::{EffectKind, FootprintSpec, ProposalBinding, RiskClass};
 
@@ -355,6 +355,15 @@ impl ContextConfig {
 /// The `[verification]` acceptance-stage options.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VerificationConfig {
+    /// How project tests contribute to acceptance. `evolving` is the normal
+    /// development policy: the resulting code, tests, and configuration are
+    /// verified together. Stronger policies are explicit because historical
+    /// tests are not universally valid after an intentional contract change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_policy: Option<TestPolicy>,
+    /// Protected acceptance material used only by `external-oracle`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_oracle: Option<ExternalOracleConfig>,
     /// Declare the plugin `format` verifier stage (e.g. `cargo fmt --check`)
     /// as an acceptance sensor. Off by default.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -389,6 +398,69 @@ impl VerificationConfig {
                 anyhow::bail!("[verification] {name} must be positive");
             }
         }
+        match (self.test_policy.unwrap_or_default(), &self.external_oracle) {
+            (TestPolicy::ExternalOracle, Some(oracle)) => oracle.validate()?,
+            (TestPolicy::ExternalOracle, None) => anyhow::bail!(
+                "[verification] test_policy = \"external-oracle\" requires \
+                 [verification.external_oracle]"
+            ),
+            (_, Some(_)) => anyhow::bail!(
+                "[verification.external_oracle] requires \
+                 test_policy = \"external-oracle\""
+            ),
+            (_, None) => {}
+        }
+        Ok(())
+    }
+}
+
+/// Test-evidence policy at a coding gate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TestPolicy {
+    /// Verify the resulting implementation, tests, and project configuration.
+    /// Tests are ordinary mutable project artifacts.
+    #[default]
+    Evolving,
+    /// In addition to the resulting suite, run recognized pre-existing test
+    /// files against the candidate implementation. Intended only for tasks
+    /// that promise backward compatibility.
+    BackwardCompatible,
+    /// In addition to the resulting suite, overlay separately supplied,
+    /// protected acceptance material and run its configured command.
+    ExternalOracle,
+}
+
+impl TestPolicy {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Evolving => "evolving",
+            Self::BackwardCompatible => "backward-compatible",
+            Self::ExternalOracle => "external-oracle",
+        }
+    }
+}
+
+/// Protected files and command for `TestPolicy::ExternalOracle`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalOracleConfig {
+    /// Directory overlaid onto a private copy of the candidate only at the
+    /// acceptance boundary. It may contain tests, manifests, or harness code.
+    pub path: PathBuf,
+    /// Command executed from the root of that private verification copy.
+    pub command: String,
+}
+
+impl ExternalOracleConfig {
+    fn validate(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.path.as_os_str().is_empty(),
+            "[verification.external_oracle] path must not be empty"
+        );
+        anyhow::ensure!(
+            !self.command.trim().is_empty(),
+            "[verification.external_oracle] command must not be empty"
+        );
         Ok(())
     }
 }
@@ -572,6 +644,53 @@ mod tests {
         assert!(cfg.provider.is_none());
         assert!(cfg.model.is_none());
         assert!(cfg.api_key.is_none());
+    }
+
+    #[test]
+    fn test_evidence_policies_parse_and_evolving_is_the_default() {
+        assert_eq!(TestPolicy::default(), TestPolicy::Evolving);
+        let cfg = Config::from_toml_str(
+            r#"
+            [verification]
+            test_policy = "external-oracle"
+
+            [verification.external_oracle]
+            path = "/trusted/acceptance"
+            command = "cargo test --test acceptance"
+            "#,
+        )
+        .unwrap();
+        let verification = cfg.verification.unwrap();
+        assert_eq!(verification.test_policy, Some(TestPolicy::ExternalOracle));
+        assert_eq!(
+            verification.external_oracle.unwrap().command,
+            "cargo test --test acceptance"
+        );
+    }
+
+    #[test]
+    fn external_oracle_configuration_is_never_silently_ignored() {
+        let missing = Config::from_toml_str(
+            r#"
+            [verification]
+            test_policy = "external-oracle"
+            "#,
+        )
+        .unwrap_err();
+        assert!(missing.to_string().contains("external_oracle"));
+
+        let inactive = Config::from_toml_str(
+            r#"
+            [verification]
+            test_policy = "evolving"
+
+            [verification.external_oracle]
+            path = "/trusted/acceptance"
+            command = "cargo test"
+            "#,
+        )
+        .unwrap_err();
+        assert!(inactive.to_string().contains("external-oracle"));
     }
 
     #[test]

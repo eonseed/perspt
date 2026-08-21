@@ -112,7 +112,19 @@ model = "gpt-4o-mini"
 # Acceptance-stage options
 #
 # [verification]
-# require_format = true   # declare `cargo fmt --check` (etc.) as a gate sensor
+# require_format = true       # declare `cargo fmt --check` (etc.) as a gate sensor
+# test_policy = "evolving"    # default: resulting code + resulting tests
+# stage_timeout_secs = 180
+# test_timeout_secs = 300
+#
+# Use "backward-compatible" only when the task promises that recognized
+# pre-existing tests must continue to pass. For separately protected
+# acceptance evidence, use "external-oracle" and supply an overlay. Relative
+# paths resolve from the agent workspace; keep withheld material outside it.
+# test_policy = "external-oracle"
+# [verification.external_oracle]
+# path = "/absolute/path/to/protected-acceptance-overlay"
+# command = "cargo test --test acceptance"
 
 # Prompt bundles and activation bounds (PSP-10 system 25)
 #
@@ -120,4 +132,3 @@ model = "gpt-4o-mini"
 # bundles = []
 # activation_min_tasks = 30       # floor 30; may only be raised
 # noninferiority_margin = 0.05    # epsilon in [0, 0.05]
-
