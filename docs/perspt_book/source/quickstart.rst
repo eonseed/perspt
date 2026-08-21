@@ -76,6 +76,11 @@ To launch the default terminal user interface:
    perspt chat --model gemini-3.1-pro
 
 Type your dialogue prompt and press **Enter** to submit. Press **Esc** to exit the application.
+If the selected configuration contains chat-enabled ``[[external_tools]]``,
+type ``/mcp`` to inspect MCP discovery and the admitted read-only tools. See
+:doc:`user-guide/mcp` for a working server and policy configuration.
+Normal terminal paste shortcuts insert multiline clipboard content into the
+chat input because bracketed paste is enabled for the TUI lifecycle.
 
 TUI Key Bindings
 ~~~~~~~~~~~~~~~~

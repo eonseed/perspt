@@ -21,8 +21,10 @@ Modules
    * - ``exploration``
      - Deterministic, read-only repository orientation for the runtime
    * - ``external_tools``
-     - ``ExternalToolRuntime`` - shared governed MCP runtime for agent and
-       interactive chat lifecycles
+     - ``ExternalToolRuntime``/``ChatToolSession`` - official-SDK MCP
+       2026-07-28 client for agent and chat: admitted tools plus read-only
+       resource/prompt/completion operations, roots, sampling, elicitation,
+       subscriptions, tasks, typed server events, and rejection diagnostics
    * - ``grant``
      - Persistent grant signing-key resolution
    * - ``lsp``

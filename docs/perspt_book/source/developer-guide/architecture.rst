@@ -185,7 +185,10 @@ The governed PSP-9/PSP-10 agent runtime.
 - ``promote`` - Descriptor-relative workspace promotion
 - ``realize`` - ``SnapshotRealizer``: content-addressed workspace states
 - ``exploration`` - Deterministic, read-only repository orientation
-- ``external_tools`` - Governed MCP runtime (lazy discovery, local policy)
+- ``external_tools`` - Official-SDK MCP 2026-07-28 client (stdio/stateless
+  HTTP; tools, resources, prompts, roots, sampling, elicitation,
+  subscriptions, MRTR/tasks), with local admission, replay, and separate
+  agent/read-only-chat lifecycles
 - ``lsp`` - ``LspClient`` (JSON-RPC over stdio)
 
 **Runtime Flow:**

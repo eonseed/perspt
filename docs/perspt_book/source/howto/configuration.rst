@@ -71,16 +71,40 @@ pointing here:
    max_branches = 3
    distinct_family = true
 
-``[[external_tools]]`` declares shared MCP servers. Secret values are never
-stored here: environment maps contain destination names and source variable
-names:
+``[[external_tools]]`` declares shared latest-only MCP 2026-07-28 servers.
+The official Rust SDK supplies tools, resources, prompts, completions, roots,
+sampling, elicitation, subscriptions, MRTR, and tasks. Secret values are
+never stored here: environment maps contain destination names and source
+variable names. Omitted ``modes`` means agent-only; chat must be explicit.
+Every allowed remote tool needs a local policy, including a schema-valid
+footprint:
 
 .. code-block:: toml
 
    [[external_tools]]
    id = "docs"
    transport = "stdio"
-   command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
+   command = ["company-docs-mcp", "--stdio"]
+   modes = ["agent", "chat"]
+   env_from_env = { DOCS_TOKEN = "COMPANY_DOCS_TOKEN" }
+   roots = [{ uri = "file:///absolute/path/to/project", name = "Project" }]
+   sampling = true
+   max_sampling_tokens = 4096
+   elicitation = true
+   subscriptions = true
+   tasks = true
+   max_task_wait_ms = 300000
+
+   [external_tools.tools.search]
+   effect = "search"
+   risk = "low"
+   footprint = { selectors = [{ kind = "scoped_argument", family = "company-docs", field = "query", access = "read" }] }
+
+The policy key must equal the remote tool name and its ``field`` must exist in
+the advertised input schema. In chat, ``/mcp`` explains failures and lists the
+admitted namespaced operations. Older protocol versions have no fallback. See
+:doc:`../user-guide/mcp` for both transports, every capability and bound,
+agent/chat behavior, clipboard paste, and security guidance.
 
 ``[prompts]`` pins external prompt replacement bundle directories and the
 paired activation bounds (Gate AE):

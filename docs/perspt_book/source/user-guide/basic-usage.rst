@@ -84,13 +84,22 @@ Both CLI and TUI modes support slash commands typed directly in the input box:
      - Switch the active LLM model on the fly
    * - ``/save <path>`` (TUI only)
      - Export full conversation history to a markdown file
+   * - ``/mcp`` (TUI only)
+     - Show MCP configuration state, discovery failures, policy rejections,
+       and admitted operation names without contacting the model
+   * - ``/mcp accept [JSON]``, ``decline``, or ``cancel`` (TUI only)
+     - Answer a pending MCP elicitation request
    * - ``/help``
      - Print the menu of available slash commands
 
-The chat TUI can also call external MCP tools: any ``[[external_tools]]``
-server entry in ``config.toml`` with ``mode = "chat"`` is admitted with
-read-only effects only. Tool activity is shown inline in the conversation,
-and tool results are labeled as untrusted content.
+The chat TUI can use latest MCP tools, resources, prompts, completions,
+sampling, elicitation, subscriptions, and tasks from any ``[[external_tools]]``
+server entry in ``config.toml`` with ``modes = ["chat"]`` or
+``modes = ["agent", "chat"]`` is considered for read-only admission. Every
+allowed remote tool also needs an exact local policy table. Tool activity is
+shown inline in the conversation, and tool results are labeled as untrusted
+content. Unicode and multiline terminal clipboard paste is inserted at the
+input cursor. See :doc:`mcp` for configuration and the security boundary.
 
 Simple CLI Mode
 ---------------
