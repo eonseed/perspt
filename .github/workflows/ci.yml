@@ -40,6 +40,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # Linux governed verifiers fail closed when their process-isolation
+      # backend is unavailable. GitHub's Ubuntu image does not include it.
+      - name: Install the Linux verifier sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+
       - name: Install pinned DuckDB
         uses: ./.github/actions/setup-duckdb
 
