@@ -277,6 +277,17 @@ pub struct ChatApp {
     /// Chat-scoped MCP tools (read-only admission); None keeps the plain
     /// streaming path.
     pub(crate) chat_tools: Option<perspt_agent::external_tools::chat::ChatToolSession>,
+    /// Whether at least one MCP server selected the chat mode, including a
+    /// server that connected but had no tools admitted.
+    pub(crate) mcp_configured: bool,
+    /// Namespaced MCP tools admitted into this chat lifecycle.
+    pub(crate) mcp_tool_names: Vec<String>,
+    /// Discovery/admission summary retained even when `/clear` removes the
+    /// startup messages, so `/mcp` remains a useful diagnostic.
+    pub(crate) mcp_notices: Vec<String>,
+    /// One server-initiated elicitation currently awaiting an explicit user
+    /// response. The model/tool task remains paused while the TUI stays live.
+    pub(crate) pending_mcp_elicitation: Option<perspt_agent::McpPendingElicitation>,
     /// Last viewport width used for wrapping (to detect resize)
     pub(crate) last_viewport_width: usize,
     /// Shared history loaded from data_dir/history.txt
@@ -322,6 +333,10 @@ impl ChatApp {
             visible_height: 20,
             pending_send: false,
             chat_tools: None,
+            mcp_configured: false,
+            mcp_tool_names: Vec::new(),
+            mcp_notices: Vec::new(),
+            pending_mcp_elicitation: None,
             last_viewport_width: 80,
             history,
             history_index: None,
@@ -336,10 +351,18 @@ impl ChatApp {
         tools: Option<perspt_agent::external_tools::chat::ChatToolSession>,
         notices: Vec<String>,
     ) -> Self {
-        for notice in notices {
-            let msg = ChatMessage::system(notice);
+        // A failed setup still means MCP was configured; retain that state so
+        // `/mcp` reports the failure instead of incorrectly saying disabled.
+        self.mcp_configured = tools.is_some() || !notices.is_empty();
+        self.mcp_tool_names = tools
+            .as_ref()
+            .map(|session| session.tool_names())
+            .unwrap_or_default();
+        for notice in &notices {
+            let msg = ChatMessage::system(notice.clone());
             self.push_message(msg);
         }
+        self.mcp_notices = notices;
         self.chat_tools = tools.filter(|session| session.has_tools());
         self
     }
@@ -347,6 +370,7 @@ impl ChatApp {
     /// Run the chat application main loop
     pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
         loop {
+            self.poll_mcp_elicitation();
             // Render
             terminal.draw(|frame| self.render(frame))?;
 
@@ -392,6 +416,11 @@ impl ChatApp {
 
             if event::poll(timeout)? {
                 match event::read()? {
+                    Event::Paste(text)
+                        if !self.is_streaming || self.pending_mcp_elicitation.is_some() =>
+                    {
+                        self.input.insert_text(&text);
+                    }
                     Event::Key(key) => {
                         if key.kind == KeyEventKind::Release {
                             continue;
@@ -435,9 +464,15 @@ impl ChatApp {
                             }
 
                             // Send message on Enter
-                            KeyCode::Enter if !self.is_streaming && !self.input.is_empty() => {
+                            KeyCode::Enter
+                                if (!self.is_streaming
+                                    || self.pending_mcp_elicitation.is_some())
+                                    && !self.input.is_empty() =>
+                            {
                                 let text = self.input.text().trim().to_string();
-                                if self.handle_local_command(&text) {
+                                if self.handle_local_command(&text)
+                                    || self.handle_elicitation(&text)
+                                {
                                     continue;
                                 } else if text.starts_with('/') {
                                     let cmd = text.to_lowercase();
@@ -496,16 +531,13 @@ impl ChatApp {
                                             ));
                                         }
                                         self.input.clear();
-                                    } else if cmd == "/help" {
+                                    } else if cmd == "/mcp" {
                                         self.push_message(ChatMessage::system(
-                                            "Available Slash Commands:\n\
-                                             \x20 /exit, /quit      - Exit the chat session\n\
-                                             \x20 /clear            - Reset the conversation history\n\
-                                             \x20 /model <name>     - Switch the active model on the fly\n\
-                                             \x20 /save <path>      - Export conversation history to a \
-                                             file\n\
-                                             \x20 /help             - Show this help menu",
+                                            self.mcp_status_text(),
                                         ));
+                                        self.input.clear();
+                                    } else if cmd == "/help" {
+                                        self.push_message(ChatMessage::system(self.help_text()));
                                         self.input.clear();
                                     } else {
                                         self.push_message(ChatMessage::system(format!(
@@ -601,7 +633,9 @@ impl ChatApp {
                             // Text editing
                             KeyCode::Backspace => self.input.backspace(),
                             KeyCode::Delete => self.input.delete(),
-                            KeyCode::Char(c) if !self.is_streaming => {
+                            KeyCode::Char(c)
+                                if !self.is_streaming || self.pending_mcp_elicitation.is_some() =>
+                            {
                                 self.input.insert_char(c);
                             }
                             _ => {}
@@ -663,6 +697,11 @@ impl ChatApp {
     /// Handle a terminal event (key press, mouse, resize)
     fn handle_terminal_event(&mut self, event: CrosstermEvent) -> bool {
         match event {
+            CrosstermEvent::Paste(text)
+                if !self.is_streaming || self.pending_mcp_elicitation.is_some() =>
+            {
+                self.input.insert_text(&text);
+            }
             CrosstermEvent::Key(key) => {
                 if key.kind == KeyEventKind::Release {
                     return true;
@@ -706,9 +745,12 @@ impl ChatApp {
                     }
 
                     // Send message on Enter
-                    KeyCode::Enter if !self.is_streaming && !self.input.is_empty() => {
+                    KeyCode::Enter
+                        if (!self.is_streaming || self.pending_mcp_elicitation.is_some())
+                            && !self.input.is_empty() =>
+                    {
                         let text = self.input.text().trim().to_string();
-                        if self.handle_local_command(&text) {
+                        if self.handle_local_command(&text) || self.handle_elicitation(&text) {
                             return true;
                         } else if text.starts_with('/') {
                             let cmd = text.to_lowercase();
@@ -758,15 +800,11 @@ impl ChatApp {
                                     ));
                                 }
                                 self.input.clear();
+                            } else if cmd == "/mcp" {
+                                self.push_message(ChatMessage::system(self.mcp_status_text()));
+                                self.input.clear();
                             } else if cmd == "/help" {
-                                self.push_message(ChatMessage::system(
-                                    "Available Slash Commands:\n\
-                                     \x20 /exit, /quit      - Exit the chat session\n\
-                                     \x20 /clear            - Reset the conversation history\n\
-                                     \x20 /model <name>     - Switch the active model on the fly\n\
-                                     \x20 /save <path>      - Export conversation history to a file\n\
-                                     \x20 /help             - Show this help menu",
-                                ));
+                                self.push_message(ChatMessage::system(self.help_text()));
                                 self.input.clear();
                             } else {
                                 self.push_message(ChatMessage::system(format!(
@@ -860,7 +898,9 @@ impl ChatApp {
                     // Text editing
                     KeyCode::Backspace => self.input.backspace(),
                     KeyCode::Delete => self.input.delete(),
-                    KeyCode::Char(c) if !self.is_streaming => {
+                    KeyCode::Char(c)
+                        if !self.is_streaming || self.pending_mcp_elicitation.is_some() =>
+                    {
                         self.input.insert_char(c);
                     }
                     _ => {}
@@ -1194,6 +1234,23 @@ mod tests {
             .messages
             .iter()
             .any(|m| m.content.contains("Available Slash Commands:")));
+        assert!(app
+            .messages
+            .iter()
+            .any(|m| m.content.contains("/mcp") && m.content.contains("MCP is disabled")));
+
+        // `/mcp` is a local diagnostic and explains the default agent-only
+        // mode when chat has no configured MCP lifecycle.
+        app.input.set_text("/mcp");
+        app.handle_terminal_event(CrosstermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::NONE,
+        )));
+        assert_eq!(app.input.text(), "");
+        assert!(app.messages.iter().any(|m| {
+            m.content.contains("MCP status: disabled for chat")
+                && m.content.contains("modes = [\"agent\", \"chat\"]")
+        }));
 
         // Test /model switching
         app.input.set_text("/model custom-gemma");

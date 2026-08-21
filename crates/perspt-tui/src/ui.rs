@@ -32,8 +32,8 @@ pub async fn run_chat_tui(
     tool_notices: Vec<String>,
 ) -> Result<()> {
     use crossterm::event::{
-        DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     };
     use ratatui::crossterm::execute;
     use std::io::stdout;
@@ -60,9 +60,13 @@ pub async fn run_chat_tui(
     let result = app.run(&mut terminal).await;
 
     // Restore terminal
-    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    let _ = execute!(
+        stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableBracketedPaste,
+        DisableMouseCapture
+    );
     ratatui::restore();
-    execute!(stdout(), DisableMouseCapture)?;
 
     result
 }
