@@ -23,4 +23,4 @@ pub use projection::{
     CONVERSATION_EVENT_SCHEMA_VERSION,
 };
 pub use tool::{ProviderToolCall, ToolChoicePolicy, ToolSpec, TurnOutput};
-pub use transport::{ModelTransport, TransportFuture};
+pub use transport::{GenerationOptions, ModelTransport, TransportFuture};

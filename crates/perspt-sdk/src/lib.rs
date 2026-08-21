@@ -116,9 +116,9 @@ pub use ledger::{
 };
 pub use model::{
     CapabilityDegradation, Conversation, ConversationDelta, ConversationDeltaRecord,
-    ConversationProjection, ConversationSeeded, Message, ModelFamily, ModelId, ModelTransport,
-    ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall, ToolChoicePolicy, ToolSpec,
-    TransportFuture, TurnOutput, CONVERSATION_EVENT_SCHEMA_VERSION,
+    ConversationProjection, ConversationSeeded, GenerationOptions, Message, ModelFamily, ModelId,
+    ModelTransport, ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall,
+    ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput, CONVERSATION_EVENT_SCHEMA_VERSION,
 };
 pub use observability::arriving_potential_per_step;
 pub use observability::{
