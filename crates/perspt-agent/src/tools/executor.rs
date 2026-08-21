@@ -530,7 +530,10 @@ impl AgentTools {
             if error.kind() != std::io::ErrorKind::NotFound {
                 return Err(error);
             }
-            let mut grep_args = vec!["-rn"];
+            // GNU grep omits the filename for a single file unless -H is
+            // explicit; ripgrep above always includes it. Keep both paths on
+            // the same stable, workspace-relative output contract.
+            let mut grep_args = vec!["-Hrn"];
             if context > 0 {
                 grep_args.push(&context_arg);
             }
