@@ -53,6 +53,27 @@ perspt agent --yes -w ./project "Add validation for empty input"
 perspt agent --dashboard --dashboard-port 3000 -w ./project "Add tests"
 ```
 
+Platform support is capability-specific:
+
+| Host | TUI chat / `simple-chat` | Governed coding agent |
+|---|---|---|
+| Linux | Supported | Supported with Bubblewrap installed |
+| macOS | Supported | Supported with the system `sandbox-exec` backend |
+| Native Windows | Supported | Supported in explicit reduced-isolation mode |
+| Windows Subsystem for Linux | Supported | Supported as Linux |
+
+Native Windows has no Perspt process-sandbox backend yet. Agent mode therefore
+fails closed by default. Enable `--allow-unisolated` (or set
+`[verification] allow_unisolated = true`) to run the native toolchain with the
+host user's authority; Perspt prints a startup warning and still retains typed
+tool admission, disposable candidates, verification gates, journaling, and
+approval, but it does **not** claim filesystem or network isolation. Use WSL
+when those OS isolation guarantees are required.
+
+```powershell
+perspt agent --allow-unisolated -w . "Fix the failing parser tests"
+```
+
 ## Providers
 
 Perspt supports OpenAI, Anthropic, Gemini, Groq, Cohere, xAI, DeepSeek,
@@ -451,7 +472,10 @@ Pull requests run that credential-free gate once on Ubuntu. Windows and macOS
 run when the change enters GitHub's merge queue, after a protected-branch push,
 or through the CI workflow's manual **Run workflow** action. This keeps review
 feedback prompt while still testing the exact queued merge on every supported
-target OS. Live model benchmarks remain manual and are never mixed into CI.
+target OS. The Windows suite covers chat/TUI and both coding security modes:
+strict mode refuses unsandboxed processes, while explicit reduced isolation
+runs a native Rust verifier fixture. Live model benchmarks remain manual and
+are never mixed into CI.
 
 Build the documentation:
 

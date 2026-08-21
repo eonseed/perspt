@@ -219,12 +219,21 @@ invalid values fail at startup.
 
    [verification]
    test_policy = "evolving"  # Default: resulting code, tests, and configuration
+   allow_unisolated = false # Explicit reduced-isolation process execution
    require_format = false    # Declare the plugin format stage as an acceptance sensor
    stage_timeout_secs = 180  # Wall-clock limit for every governed verifier stage
    test_timeout_secs = 300   # Per-stage override (also syntax/build/lint/format)
 
 The test policy defines which test evidence must pass in addition to the
 coding domain's required syntax and build stages:
+
+``allow_unisolated`` is ``false`` by default. Enable it only when the entire
+Perspt process is isolated externally or when native Windows coding is more
+important than OS process isolation. It permits verifiers, read-only inspection
+commands, and language servers to run with the host user's authority; it does
+not turn those processes into a sandbox. The CLI also offers the one-run
+``--allow-unisolated`` switch. A config value is preferable when an interrupted
+native Windows session may need ``perspt resume``.
 
 .. list-table::
    :header-rows: 1

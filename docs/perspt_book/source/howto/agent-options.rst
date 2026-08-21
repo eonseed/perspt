@@ -37,6 +37,12 @@ Core Options
    * - ``--allow-dependency-mutation``
      - Grant governed dependency mutation (``cargo add``, ``uv add``,
        ``npm install``).
+   * - ``--allow-unisolated``
+     - Explicitly permit verifier, inspection, and LSP child processes to run
+       without an OS sandbox. Intended for acknowledged native Windows use or
+       an embedder that isolates the complete Perspt process. Candidate,
+       capability, gate, ledger, and approval controls remain active, but the
+       child has the host user's filesystem and network authority.
    * - ``--allow-experimental-prompts``
      - Substitute validated ``[prompts]`` bundle sections live (Gate AE:
        experimental until a change record passes paired evaluation).
@@ -119,3 +125,6 @@ Examples
      -w ./project "Build a web server"
 
    perspt agent --dashboard --dashboard-port 8080 -w ./myapp "Add unit tests"
+
+   # Native Windows reduced-isolation mode
+   perspt agent --allow-unisolated -w . "Fix the parser"

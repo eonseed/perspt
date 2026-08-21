@@ -1,20 +1,37 @@
-//! Descriptor-relative workspace promotion.
+//! Workspace promotion with platform-specific hardening.
 //!
-//! Every check and every act in this module goes through a held directory
-//! descriptor obtained by walking the relative path one component at a time
-//! with `O_NOFOLLOW | O_DIRECTORY`. An ancestor directory swapped for a
-//! symlink after validation cannot redirect a write, because the write is
-//! issued against the descriptor, not the path name. This closes the
-//! check-then-act race the string-path promotion had (Gate L).
+//! Unix checks and acts through a held directory descriptor, walking relative
+//! paths with `O_NOFOLLOW | O_DIRECTORY`; an ancestor swap cannot redirect a
+//! write. Native Windows supports the explicitly reduced-isolation release
+//! path with reparse-point checks and write-through replacement, but does not
+//! claim the same descriptor-relative race guarantee (Gate L).
 
 use anyhow::{bail, Context, Result};
+#[cfg(not(windows))]
 use rustix::fs::{fsync, mkdirat, openat, renameat, unlinkat, AtFlags, Mode, OFlags};
+#[cfg(windows)]
+use std::ffi::OsString;
+#[cfg(not(windows))]
 use std::fs::File;
+#[cfg(windows)]
+use std::fs::OpenOptions;
+#[cfg(windows)]
+use std::io::{ErrorKind, Write};
+#[cfg(not(windows))]
 use std::io::{Read, Write};
+#[cfg(not(windows))]
 use std::os::fd::OwnedFd;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
+#[cfg(not(windows))]
 use std::path::{Component, Path};
+#[cfg(windows)]
+use std::path::{Component, Path, PathBuf};
 
 /// A workspace root held open as a directory descriptor.
+#[cfg(not(windows))]
 pub struct WorkspaceRoot {
     fd: OwnedFd,
 }
@@ -22,11 +39,13 @@ pub struct WorkspaceRoot {
 /// The parent directory of a promotion target, held open, plus the final
 /// file name. All reads and writes for the target go through this pair.
 #[derive(Debug)]
+#[cfg(not(windows))]
 pub struct TargetDir {
     fd: OwnedFd,
     name: String,
 }
 
+#[cfg(not(windows))]
 impl WorkspaceRoot {
     /// Open the workspace root. The root itself may be reached through a
     /// symlink (the user chose it); everything below it may not.
@@ -90,6 +109,7 @@ impl WorkspaceRoot {
     }
 }
 
+#[cfg(not(windows))]
 impl TargetDir {
     /// Read the target through the descriptor; `None` when absent.
     pub fn read_optional(&self) -> Result<Option<Vec<u8>>> {
@@ -149,7 +169,7 @@ impl TargetDir {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
 
@@ -195,5 +215,232 @@ mod tests {
         let root = WorkspaceRoot::open(dir.path()).unwrap();
         assert!(root.target_dir("../outside.txt", false).is_err());
         assert!(root.target_dir("/etc/passwd", false).is_err());
+    }
+}
+
+/// Native Windows promotion used by the explicit reduced-isolation mode.
+///
+/// Windows paths are checked for reparse points component by component and
+/// replacement uses the native write-through APIs. Unlike the descriptor-held
+/// Unix implementation, these checks cannot close every ancestor swap race;
+/// callers must not describe this mode as governed OS isolation.
+#[cfg(windows)]
+pub struct WorkspaceRoot {
+    root: PathBuf,
+}
+
+#[cfg(windows)]
+#[derive(Debug)]
+pub struct TargetDir {
+    parent: PathBuf,
+    name: OsString,
+}
+
+#[cfg(windows)]
+impl WorkspaceRoot {
+    pub fn open(root: &Path) -> Result<Self> {
+        let root = root
+            .canonicalize()
+            .with_context(|| format!("opening workspace root {}", root.display()))?;
+        anyhow::ensure!(root.is_dir(), "workspace root is not a directory");
+        Ok(Self { root })
+    }
+
+    pub fn target_dir(&self, relative: &str, create: bool) -> Result<TargetDir> {
+        let mut components = Vec::new();
+        for component in Path::new(relative).components() {
+            match component {
+                Component::Normal(part) => components.push(part.to_os_string()),
+                Component::CurDir => {}
+                _ => bail!("promotion path escapes the workspace: {relative}"),
+            }
+        }
+        let name = components
+            .pop()
+            .context("promotion path has no file name")?;
+        let mut parent = self.root.clone();
+        for part in components {
+            parent.push(part);
+            match std::fs::symlink_metadata(&parent) {
+                Ok(metadata) => {
+                    ensure_plain(&parent, &metadata)?;
+                    anyhow::ensure!(
+                        metadata.is_dir(),
+                        "promotion ancestor is not a directory: {}",
+                        parent.display()
+                    );
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound && create => {
+                    std::fs::create_dir(&parent)
+                        .with_context(|| format!("creating directory {}", parent.display()))?;
+                    let metadata = std::fs::symlink_metadata(&parent)?;
+                    ensure_plain(&parent, &metadata)?;
+                }
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("descending into {}", parent.display()))
+                }
+            }
+        }
+        Ok(TargetDir { parent, name })
+    }
+
+    pub fn read_if_present(&self, relative: &str) -> Result<Option<Vec<u8>>> {
+        match self.target_dir(relative, false) {
+            Ok(target) => target.read_optional(),
+            Err(error) if io_not_found(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+}
+
+#[cfg(windows)]
+impl TargetDir {
+    fn path(&self) -> PathBuf {
+        self.parent.join(&self.name)
+    }
+
+    pub fn read_optional(&self) -> Result<Option<Vec<u8>>> {
+        let path = self.path();
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => ensure_plain(&path, &metadata)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error).with_context(|| format!("opening {}", path.display())),
+        }
+        std::fs::read(&path)
+            .map(Some)
+            .with_context(|| format!("reading {}", path.display()))
+    }
+
+    pub fn write(&self, bytes: &[u8]) -> Result<()> {
+        let target = self.path();
+        let existed = match std::fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                ensure_plain(&target, &metadata)?;
+                true
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => false,
+            Err(error) => {
+                return Err(error).with_context(|| format!("opening {}", target.display()))
+            }
+        };
+        let staged = self
+            .parent
+            .join(format!(".perspt-promote-{}", uuid::Uuid::new_v4()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged)
+            .with_context(|| format!("staging {}", target.display()))?;
+        if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            let _ = std::fs::remove_file(&staged);
+            return Err(error).with_context(|| format!("writing staged {}", target.display()));
+        }
+        drop(file);
+        if let Err(error) = replace_file(&staged, &target, existed) {
+            let _ = std::fs::remove_file(&staged);
+            return Err(error).with_context(|| format!("promoting {}", target.display()));
+        }
+        Ok(())
+    }
+
+    pub fn remove(&self) -> Result<()> {
+        let target = self.path();
+        match std::fs::symlink_metadata(&target) {
+            Ok(metadata) => ensure_plain(&target, &metadata)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(error).with_context(|| format!("opening {}", target.display()))
+            }
+        }
+        std::fs::remove_file(&target).with_context(|| format!("removing {}", target.display()))
+    }
+
+    pub fn apply(&self, bytes: Option<&[u8]>) -> Result<()> {
+        match bytes {
+            Some(content) => self.write(content),
+            None => self.remove(),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn ensure_plain(path: &Path, metadata: &std::fs::Metadata) -> Result<()> {
+    const REPARSE_POINT: u32 = 0x400;
+    anyhow::ensure!(
+        metadata.file_attributes() & REPARSE_POINT == 0,
+        "promotion path contains a reparse point: {}",
+        path.display()
+    );
+    Ok(())
+}
+
+#[cfg(windows)]
+fn io_not_found(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .is_some_and(|cause| cause.kind() == ErrorKind::NotFound)
+}
+
+#[cfg(windows)]
+fn replace_file(staged: &Path, target: &Path, existed: bool) -> std::io::Result<()> {
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, ReplaceFileW, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH,
+    };
+
+    let staged = staged
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let success = unsafe {
+        if existed {
+            ReplaceFileW(
+                target.as_ptr(),
+                staged.as_ptr(),
+                std::ptr::null(),
+                REPLACEFILE_WRITE_THROUGH,
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        } else {
+            MoveFileExW(staged.as_ptr(), target.as_ptr(), MOVEFILE_WRITE_THROUGH)
+        }
+    };
+    if success == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn native_write_replace_read_and_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = WorkspaceRoot::open(dir.path()).unwrap();
+        let target = root.target_dir("nested/file.txt", true).unwrap();
+        target.write(b"first").unwrap();
+        target.write(b"second").unwrap();
+        assert_eq!(target.read_optional().unwrap().unwrap(), b"second");
+        target.remove().unwrap();
+        assert!(target.read_optional().unwrap().is_none());
+    }
+
+    #[test]
+    fn native_parent_escapes_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = WorkspaceRoot::open(dir.path()).unwrap();
+        assert!(root.target_dir("../outside.txt", false).is_err());
+        assert!(root.target_dir(r"C:\outside.txt", false).is_err());
     }
 }

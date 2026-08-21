@@ -384,7 +384,17 @@ fn join_reader(reader: std::thread::JoinHandle<std::io::Result<String>>) -> Resu
 
 fn minimal_environment() -> BTreeMap<String, String> {
     let mut environment = BTreeMap::new();
-    for key in ["PATH", "LANG", "LC_ALL", "USER"] {
+    for key in [
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "USER",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+    ] {
         if let Ok(value) = std::env::var(key) {
             environment.insert(key.to_string(), value);
         }
@@ -459,6 +469,8 @@ fn platform_command(
         "--ro-bind".into(),
         "/".into(),
         "/".into(),
+        "--dev".into(),
+        "/dev".into(),
     ];
     // Mask user-secret roots after binding the host read-only. The coding
     // candidate is normally under /tmp and is rebound below.
@@ -694,5 +706,22 @@ mod tests {
         )));
         assert!(!profile.contains("allow network*"));
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_policy_mounts_a_private_device_tree() {
+        let root = std::env::temp_dir();
+        let sandbox = ProcessSandbox::new(
+            "cargo",
+            vec!["check".into()],
+            ProcessPolicy::candidate_mutation(root),
+        )
+        .unwrap();
+        let prepared = sandbox.prepare_invocation().unwrap();
+        assert!(prepared
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--dev", "/dev"]));
     }
 }

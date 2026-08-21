@@ -39,11 +39,11 @@ that fails to evaluate denies the command.
 Sandbox Isolation (perspt-sandbox)
 ----------------------------------
 
-The ``perspt-sandbox`` crate provides filesystem and process isolation for
-agent-executed commands:
+The ``perspt-sandbox`` crate provides bounded command execution and OS-backed
+isolation where a backend is registered:
 
 - **Filesystem scoping** - Commands run in a restricted view of the filesystem
-- **Process limits** - Timeout, memory, and CPU constraints
+- **Process limits** - Wall-clock timeout and bounded captured output
 - **Network control** - Optional network access restriction
 
 Configuration:
@@ -54,6 +54,11 @@ Configuration:
    perspt agent -w ./project "Task"
 
    # The sandbox restricts commands to the working directory
+
+Linux uses Bubblewrap and macOS uses ``sandbox-exec``. Native Windows fails
+closed by default. ``--allow-unisolated`` is an explicit reduced-isolation
+override: the agent-level capability and verification machinery stays active,
+but child processes retain the host user's filesystem and network authority.
 
 
 Authority Model

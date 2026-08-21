@@ -80,3 +80,4 @@ tempfile = "3.27"
 rustix = { version = "1.1", features = ["fs"] }
 uuid = { version = "1.23", features = ["v4"] }
 url = "2.5"
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

@@ -10,8 +10,8 @@ pub struct Psp9RunConfig {
     pub rejection_budget: u32,
     pub rho_gate: f64,
     pub approval_policy: ApprovalPolicy,
-    /// Embedders that already isolate the entire process may opt out of the
-    /// nested verifier sandbox. The CLI never enables this.
+    /// Explicit reduced-isolation mode for hosts without a registered process
+    /// sandbox, or embedders that isolate the complete Perspt process.
     pub allow_unisolated_verifiers: bool,
     pub max_parallel_verifiers: usize,
     /// Persist signed grant intent across sessions. Disabled by default;
@@ -107,6 +107,7 @@ pub(super) fn apply_config_overrides(
         run_config.turn_deadline_secs = secs.max(1);
     }
     if let Some(verification) = &config.verification {
+        run_config.allow_unisolated_verifiers |= verification.allow_unisolated.unwrap_or(false);
         run_config.require_format = verification.require_format.unwrap_or(false);
         run_config.test_policy = verification.test_policy.unwrap_or_default();
         run_config.external_oracle = verification.external_oracle.clone();
@@ -198,5 +199,19 @@ mod tests {
             perspt_core::TestPolicy::BackwardCompatible
         );
         assert!(folded.external_oracle.is_none());
+    }
+
+    #[test]
+    fn reduced_isolation_requires_an_explicit_config_opt_in() {
+        let strict = apply_config_overrides(Psp9RunConfig::default(), &Default::default());
+        assert!(!strict.allow_unisolated_verifiers);
+
+        let mut config = perspt_core::Config::default();
+        config.verification = Some(perspt_core::config::VerificationConfig {
+            allow_unisolated: Some(true),
+            ..Default::default()
+        });
+        let folded = apply_config_overrides(Psp9RunConfig::default(), &config);
+        assert!(folded.allow_unisolated_verifiers);
     }
 }

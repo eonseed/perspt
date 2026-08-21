@@ -149,7 +149,9 @@ library, verifies its published checksum, and compiles the optional
 CI tests, use the expensive ``bundled`` feature. A merge-queue commit,
 protected-branch push, or manual full run adds Windows and macOS tests.
 Platform-neutral formatting, Clippy, Rustdoc, and PSP rules are not repeated
-on every operating system.
+on every operating system. macOS exercises the native governed verifier.
+Windows covers native chat/TUI and shared code, verifies strict coding mode
+fails closed, and separately exercises the explicit reduced-isolation verifier.
 
 GitHub merge queues are the pre-merge path: the ``merge_group`` event checks
 the proposed change combined with the latest target branch and any changes

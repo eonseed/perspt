@@ -38,8 +38,8 @@ pub fn entries() -> Vec<ToolEntry> {
         ),
         family_entry(
             "sys_processes",
-            "List running processes (pid, cpu%, mem%, command name only — \
-             never the arguments of other processes)",
+            "List running processes using host-native summary fields; command \
+             arguments are never returned",
             EffectKind::SystemProbe,
             object_schema(&[]),
             probe_footprint("processes"),
@@ -109,7 +109,7 @@ impl CandidateToolHandler for SysInfo {
             format!("os: {}", std::env::consts::OS),
             format!("arch: {}", std::env::consts::ARCH),
         ];
-        for program in ["rustc", "cargo", "python3", "uv", "node", "git"] {
+        for program in ["rustc", "cargo", python_program(), "uv", "node", "git"] {
             lines.push(format!("{program}: {}", tool_version(program)));
         }
         Ok(EffectOutcome {
@@ -130,14 +130,9 @@ impl CandidateToolHandler for SysProcesses {
         _call: &perspt_sdk::ProviderToolCall,
         _entry: &ToolEntry,
     ) -> Result<EffectOutcome> {
-        // `comm=` prints the executable name only: other processes'
-        // arguments (which may embed secrets) never enter the output.
-        let output = std::process::Command::new("ps")
-            .args(["-axo", "pid=,pcpu=,pmem=,comm="])
-            .output()?;
-        anyhow::ensure!(output.status.success(), "ps failed");
+        let output = process_summary()?;
         Ok(EffectOutcome {
-            output: capped(String::from_utf8_lossy(&output.stdout).into_owned()),
+            output: capped(output),
             mutated: false,
             completed: true,
         })
@@ -161,10 +156,7 @@ impl CandidateToolHandler for SysDisk {
             }
             None => workspace.overlay_root().to_path_buf(),
         };
-        let stat = rustix::fs::statvfs(&target)?;
-        let block = stat.f_frsize.max(1);
-        let total = stat.f_blocks * block;
-        let available = stat.f_bavail * block;
+        let (total, available) = disk_usage(&target)?;
         Ok(EffectOutcome {
             output: format!(
                 "path: {}\ntotal_bytes: {total}\navailable_bytes: {available}",
@@ -174,6 +166,72 @@ impl CandidateToolHandler for SysDisk {
             completed: true,
         })
     }
+}
+
+#[cfg(windows)]
+fn python_program() -> &'static str {
+    "python"
+}
+
+#[cfg(not(windows))]
+fn python_program() -> &'static str {
+    "python3"
+}
+
+#[cfg(windows)]
+fn process_summary() -> Result<String> {
+    // CSV fields are image name, PID, session name, session number, and
+    // memory usage. No command line or environment is exposed.
+    let output = std::process::Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH"])
+        .output()?;
+    anyhow::ensure!(output.status.success(), "tasklist failed");
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(not(windows))]
+fn process_summary() -> Result<String> {
+    // `comm=` prints the executable name only: other processes' arguments
+    // (which may embed secrets) never enter the output.
+    let output = std::process::Command::new("ps")
+        .args(["-axo", "pid=,pcpu=,pmem=,comm="])
+        .output()?;
+    anyhow::ensure!(output.status.success(), "ps failed");
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(not(windows))]
+fn disk_usage(target: &std::path::Path) -> Result<(u64, u64)> {
+    let stat = rustix::fs::statvfs(target)?;
+    let block = stat.f_frsize.max(1);
+    Ok((stat.f_blocks * block, stat.f_bavail * block))
+}
+
+#[cfg(windows)]
+fn disk_usage(target: &std::path::Path) -> Result<(u64, u64)> {
+    let target = target.canonicalize()?;
+    let script = "$d=[System.IO.DriveInfo]::new($args[0]); \
+                  Write-Output $d.TotalSize; Write-Output $d.AvailableFreeSpace";
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ])
+        .arg(target)
+        .output()?;
+    anyhow::ensure!(output.status.success(), "PowerShell disk probe failed");
+    let values = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        values.len() >= 2,
+        "PowerShell disk probe returned invalid output"
+    );
+    Ok((values[0], values[1]))
 }
 
 struct SysEnv;

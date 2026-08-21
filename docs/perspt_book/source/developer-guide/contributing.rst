@@ -118,7 +118,12 @@ The workflows separate quick review feedback from target-platform evidence:
   and ``Target OS`` checks to make this evidence a pre-merge requirement.
 * Pushes to ``master`` or ``develop`` run the target-OS matrix as a safety net
   for direct merges. Maintainers can also use **Actions -> CI -> Run workflow**
-  to request the complete matrix before merging when a queue is not enabled.
+  to request the Windows/macOS matrix before merging when a queue is not
+  enabled. That manual target-only run does not repeat the Ubuntu quality gate.
+
+The macOS job exercises its governed verifier backend. The native Windows job
+tests chat/TUI and shared functionality, proves strict coding mode fails closed,
+and runs a Rust verifier fixture only after explicit reduced-isolation opt-in.
 
 Superseded PR runs are cancelled. Merge-queue and protected-branch runs are
 never cancelled because their result is evidence for a specific commit.

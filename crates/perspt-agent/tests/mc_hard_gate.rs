@@ -10,6 +10,7 @@ use std::sync::Arc;
 use perspt_agent::toolloop::CandidateMeasurer;
 use perspt_agent::{CandidateWorkspace, CodingCandidateMeasurer};
 use perspt_core::plugin::VerifierStage;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use perspt_core::{ExternalOracleConfig, TestPolicy};
 use perspt_research::ResearchDomain;
 use perspt_sdk::{AgentDomainPackage, DomainScope, ResidualClass};
@@ -151,6 +152,7 @@ async fn apply_file(workspace: &CandidateWorkspace, path: &str, content: &str) {
     workspace.apply(&call, &entry).await.unwrap();
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
 async fn evolving_tests_allow_an_intentional_contract_change() {
     let dir = tempfile::tempdir().unwrap();
@@ -190,6 +192,7 @@ async fn evolving_tests_allow_an_intentional_contract_change() {
     );
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
 async fn external_oracle_is_additional_protected_acceptance_evidence() {
     let dir = tempfile::tempdir().unwrap();
@@ -251,6 +254,7 @@ async fn external_oracle_is_additional_protected_acceptance_evidence() {
 /// positive energy but no longer blocks hard pass, which gates only on the
 /// `HardGatePolicy` stages (syntax, build, test). Before this fix any
 /// pre-existing repository warning made hard pass permanently unreachable.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[tokio::test]
 async fn a_lint_only_warning_does_not_block_hard_pass() {
     let dir = tempfile::tempdir().unwrap();
@@ -281,6 +285,47 @@ async fn a_lint_only_warning_does_not_block_hard_pass() {
     assert!(
         measured.energy > 0.0,
         "advisory residuals still cost energy"
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[tokio::test]
+async fn governed_verifiers_fail_closed_without_a_windows_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    assert!(!measured.hard_pass);
+    assert!(measured.residuals.iter().any(|residual| {
+        residual
+            .evidence
+            .summary
+            .contains("no registered governed process sandbox")
+    }));
+}
+
+#[cfg(target_os = "windows")]
+#[tokio::test]
+async fn reduced_isolation_runs_the_native_windows_verifiers() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    let workspace =
+        CandidateWorkspace::create_with_policy(dir.path(), "n1", 0, "rev-0", true).unwrap();
+    let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    assert!(
+        measured.hard_pass,
+        "explicit reduced isolation should run the installed native toolchain: {:?}",
+        measured
+            .residuals
+            .iter()
+            .map(|residual| &residual.evidence.summary)
+            .collect::<Vec<_>>()
     );
 }
 

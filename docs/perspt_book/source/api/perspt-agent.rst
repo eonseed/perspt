@@ -56,7 +56,8 @@ Modules
      - Universal actor turn runner shared by every stochastic actor (PSP-10)
    * - ``verifier``
      - Governed verifier sandbox: compiler/test/lint processes run behind a
-       deny-network profile and a read allow-list
+       deny-network profile and a read allow-list; an explicit reduced-isolation
+       policy is available on hosts without a backend
 
 Key Types
 ---------

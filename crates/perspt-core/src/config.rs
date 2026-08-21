@@ -443,6 +443,11 @@ impl ContextConfig {
 /// The `[verification]` acceptance-stage options.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VerificationConfig {
+    /// Permit verifier, inspection, and LSP processes to run without an OS
+    /// sandbox when the current platform has no registered backend. This is
+    /// an explicit reduced-isolation mode; false by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_unisolated: Option<bool>,
     /// How project tests contribute to acceptance. `evolving` is the normal
     /// development policy: the resulting code, tests, and configuration are
     /// verified together. Stronger policies are explicit because historical

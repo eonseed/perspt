@@ -77,6 +77,8 @@ Run the SRBN autonomous coding agent.
 
 - ``--dashboard`` - Start the web monitoring dashboard alongside the agent
 - ``--dashboard-port <PORT>`` - Port for the embedded dashboard (default ``3000``)
+- ``--allow-unisolated`` - Explicit reduced-isolation process execution;
+  required for native Windows coding until a sandbox backend exists
 
 See :doc:`../howto/agent-options` for full agent options.
 
