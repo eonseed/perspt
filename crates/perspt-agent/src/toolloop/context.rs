@@ -131,10 +131,42 @@ impl LoopContext {
     /// the mandatory head); every remaining restored page is deliberately
     /// stale because its true birth root is unknowable. Relabelling those
     /// pages with the current root would launder stale evidence as fresh.
+    /// The one exception is an unresolved tool-call pair: it is pinned
+    /// mandatory unconditionally, and a mandatory page whose dependency no
+    /// longer holds refuses assembly outright (Gate AF) — so its messages
+    /// carry the live dependency instead of an unresumable marker.
     pub(crate) fn restamp_legacy(&mut self, dep: perspt_sdk::prompt::StateDependency) {
+        let open_pair = {
+            let unresolved: BTreeSet<String> = self
+                .projection
+                .conversation()
+                .unresolved_call_ids()
+                .into_iter()
+                .collect();
+            let messages = self.projection.conversation().messages();
+            let mut open_pair = vec![false; messages.len()];
+            let mut open_calls: BTreeSet<String> = BTreeSet::new();
+            for (index, message) in messages.iter().enumerate() {
+                match message {
+                    Message::AssistantToolCalls { calls }
+                        if calls.iter().any(|call| unresolved.contains(&call.call_id)) =>
+                    {
+                        open_pair[index] = true;
+                        open_calls.extend(calls.iter().map(|call| call.call_id.clone()));
+                    }
+                    Message::ToolResponse { call_id, .. } if open_calls.contains(call_id) => {
+                        open_pair[index] = true;
+                    }
+                    _ => {}
+                }
+            }
+            open_pair
+        };
         for (index, entry) in self.birth_deps.iter_mut().enumerate() {
             *entry = if index < 2 {
                 perspt_sdk::prompt::StateDependency::SessionInvariant
+            } else if open_pair.get(index).copied().unwrap_or(false) {
+                dep.clone()
             } else {
                 perspt_sdk::prompt::StateDependency::AcceptedRoot(
                     "legacy-unavailable-provenance".into(),
@@ -478,6 +510,45 @@ mod tests {
         assert_ne!(
             context.birth_deps()[2],
             perspt_sdk::prompt::StateDependency::AcceptedRoot("live-root".into())
+        );
+    }
+
+    /// A legacy checkpoint with an unresolved tool call must stay
+    /// resumable: the unresolved pair is pinned mandatory unconditionally,
+    /// and a mandatory page whose dependency never holds would refuse
+    /// every assembly (Gate AF) — so exactly those messages carry the live
+    /// dependency while other unknown-provenance pages stay demoted.
+    #[test]
+    fn legacy_resume_keeps_the_unresolved_pair_assemblable() {
+        let mut log = EventLog::new(true);
+        let mut context = LoopContext::seed("system", "goal", None, &mut log).unwrap();
+        context
+            .push_user("old observation", None, &mut log)
+            .unwrap();
+        context
+            .push_tool_calls(
+                vec![ProviderToolCall {
+                    call_id: "c1".into(),
+                    name: "read_file".into(),
+                    arguments: serde_json::json!({"path": "a.rs"}),
+                }],
+                None,
+                &mut log,
+            )
+            .unwrap();
+        context.stamp_after_open(true, None, "live-root", &[]);
+
+        let deps = context.birth_deps();
+        assert_eq!(
+            deps[2],
+            perspt_sdk::prompt::StateDependency::AcceptedRoot(
+                "legacy-unavailable-provenance".into()
+            )
+        );
+        assert_eq!(
+            deps[3],
+            perspt_sdk::prompt::StateDependency::AcceptedRoot("live-root".into()),
+            "the unresolved tool-call page must depend on a state that holds"
         );
     }
 

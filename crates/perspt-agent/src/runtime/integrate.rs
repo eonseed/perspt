@@ -147,6 +147,7 @@ pub(super) fn fold_staging(
 ) -> Result<StagingRoot> {
     use anyhow::Context;
     let mut staging = StagingRoot::default();
+    let mut pre_generation: BTreeSet<String> = BTreeSet::new();
     for row in recorder.store.get_psp9_events(session_id)? {
         let Ok(perspt_sdk::LedgerEvent::Custom { kind, payload }) =
             serde_json::from_str::<perspt_sdk::LedgerEvent>(&row.event_json)
@@ -163,15 +164,19 @@ pub(super) fn fold_staging(
         let Some(node) = graph.node(node_id) else {
             continue;
         };
-        let generation = payload
-            .get("generation")
-            .and_then(|value| value.as_u64())
-            .with_context(|| {
-                format!(
-                    "staged contribution for {node_id} predates generation-bound staging; \
-                     the staging root cannot be reconstructed safely"
-                )
-            })?;
+        let generation = match payload.get("generation").and_then(|value| value.as_u64()) {
+            Some(generation) => {
+                pre_generation.remove(node_id);
+                generation
+            }
+            None => {
+                // Fatal only if no later, generation-bound row for the same
+                // node supersedes this one (newest-wins, fail-closed).
+                pre_generation.insert(node_id.to_string());
+                staging.contributions.remove(node_id);
+                continue;
+            }
+        };
         if generation != u64::from(node.generation) {
             // A refined/replaced node must never inherit a winner produced
             // by its earlier generation. The current generation re-runs.
@@ -198,6 +203,11 @@ pub(super) fn fold_staging(
             },
         );
     }
+    anyhow::ensure!(
+        pre_generation.is_empty(),
+        "staged contributions for {pre_generation:?} predate generation-bound staging; \
+         the staging root cannot be reconstructed safely"
+    );
     Ok(staging)
 }
 
@@ -445,5 +455,56 @@ mod tests {
         staging.contributions.insert("z".into(), winner(b"X"));
         let conflict = staging.conflict(&graph).expect("b and z diverge");
         assert!(conflict.contains("b") && conflict.contains("z"));
+    }
+
+    fn staging_row(generation: Option<u32>) -> serde_json::Value {
+        let mut payload = serde_json::json!({
+            "node_id": "a",
+            "state_root": "root-a",
+            "files": [],
+        });
+        if let Some(generation) = generation {
+            payload["generation"] = generation.into();
+        }
+        payload
+    }
+
+    /// A pre-generation staging row superseded by a newer, generation-bound
+    /// row for the same node must not refuse the fold (newest wins); a
+    /// node whose newest row predates generation binding still fails
+    /// closed.
+    #[test]
+    fn a_superseded_pre_generation_staging_row_folds_by_the_newer_row() {
+        let database = tempfile::tempdir().unwrap();
+        let recorder = Psp9Recorder::create(
+            "fold-staging-test",
+            "task",
+            std::path::Path::new("."),
+            Some(&database.path().join("fold-staging.db")),
+            None,
+            None,
+        )
+        .unwrap();
+        let graph = graph_a_to_b_with_sibling_z();
+        recorder
+            .record_custom("staging_root_updated", staging_row(None))
+            .unwrap();
+        let refusal = match fold_staging(&recorder, "fold-staging-test", &graph) {
+            Err(error) => error.to_string(),
+            Ok(_) => panic!("an unsuperseded pre-generation row must refuse the fold"),
+        };
+        assert!(refusal.contains("generation-bound"), "{refusal}");
+        recorder
+            .record_custom("staging_root_updated", staging_row(Some(0)))
+            .unwrap();
+        let staging = fold_staging(&recorder, "fold-staging-test", &graph).unwrap();
+        assert_eq!(
+            staging
+                .contributions
+                .get("a")
+                .map(|w| w.state_root.as_str()),
+            Some("root-a"),
+            "the newer generation-bound row supersedes the legacy one"
+        );
     }
 }
