@@ -17,7 +17,7 @@ Perspt operates across three primary surfaces, each designed for a different typ
    A rich, full-screen Terminal User Interface (TUI) built on ``ratatui``. It provides an interactive conversational interface with the LLM right on your terminal. The TUI supports real-time streaming, markdown rendering with syntax highlighting, inline LaTeX math equations, keyboard-driven navigation, and prompt history. It allows you to explore ideas, ask code questions, and interactively write code without leaving your terminal workspace.
 
 3. **Agent Mode (``agent``)**:
-   A collaborative multi-agent system composed of specialized virtual actors (the Architect, Actuator, Verifier, and Speculator) that work together to solve complex software engineering and coding jobs. It models development tasks as state graphs and uses the **Stabilized Recursive Barrier Network (SRBN)** framework to ensure reliability and workflow stability. By integrating with local tests, compilers, and linters, Agent Mode automatically detects, corrects, and verifies code updates, ensuring the repository moves systematically toward a clean, working state.
+   A governed tool loop in which an actuator model proposes typed tool calls, optionally assisted by a cheaper read-only explorer and a no-tool diff adjudicator, to solve complex software engineering and coding jobs. It models development tasks as work graphs and uses the **Stabilized Recursive Barrier Network (SRBN)** framework to ensure reliability and workflow stability. By integrating with local tests, compilers, and linters, Agent Mode automatically detects, corrects, and verifies code updates, ensuring the repository moves systematically toward a clean, working state.
 
 The Problem of Guessing (Reliability via Verification)
 ------------------------------------------------------
@@ -47,13 +47,13 @@ We summarize the capabilities of the system in terms of their operational invari
    * - Invariant
      - Operational Specification
    * - **Multi-Provider Hub**
-     - Establishes unified client communication with OpenAI, Anthropic, Gemini, Groq, Cohere, XAI, DeepSeek, AWS Bedrock, Vertex AI, and local Ollama instances.
+     - Establishes unified client communication with OpenAI, Anthropic, Gemini, Groq, Cohere, XAI, DeepSeek, Vertex AI, and local Ollama instances.
    * - **LSP Verification**
      - Connects directly to language-server protocols (including ``rust-analyzer``, ``pyright``, and ``typescript-language-server``) to extract syntactic diagnostics.
    * - **Test Automation**
      - Integrates with local test runtimes (such as ``pytest`` and Cargo) to compute logic error metrics.
    * - **Role Specialization**
-     - Segregates agent processes into four distinct reasoning tiers: Architect (planning), Actuator (generation), Verifier (measurement), and Speculator (lookahead).
+     - Routes model calls by role: the Actuator proposes governed tool calls, an optional Explorer performs read-only repository lookahead, and an optional Adjudicator vetoes diffs without tools; the ``[models]`` table additionally routes architect, verifier, and speculator turns.
    * - **Policy Sandbox**
      - Restricts process execution via a Starlark-based policy engine, preventing command execution or file mutation outside the workspace boundaries.
    * - **Resource Budgeting**
@@ -124,17 +124,18 @@ The operational execution of this control loop is represented as follows:
 System Architecture
 -------------------
 
-The Perspt system is constructed as a workspace of twelve crates. The dependencies and responsibilities are partitioned as follows:
+The Perspt system is constructed as a workspace of fourteen crates. The dependencies and responsibilities are partitioned as follows:
 
 - **The User Interface**: Handled by ``perspt-cli`` (command parsing) and ``perspt-tui`` (terminal rendering).
 - **The Core Engine**: Handled by ``perspt-core`` (provider abstractions and types), ``perspt-agent`` (the orchestration loop), and ``perspt-store`` (session databases).
 - **The Security Envelope**: Handled by ``perspt-policy`` (Starlark checks) and ``perspt-sandbox`` (isolated execution environments).
 - **The Monitoring Plane**: Handled by ``perspt-dashboard`` (web interface).
-- **The Reusable SDK**: Handled by ``perspt-sdk``, ``perspt-coding``, and ``perspt-research``.
+- **The Reusable SDK**: Handled by ``perspt-sdk``, ``perspt-coding``, ``perspt-research``, and ``perspt-prompt-macros`` (compile-time typed prompt sections).
+- **The Evaluation Harness**: Handled by ``perspt-benchmark`` (optional, feature-gated, run manually only).
 
 The separation between ``perspt-sdk`` and domain packages (like ``perspt-coding``) ensures that the mathematical control loop remains independent of specific execution environments. The same SDK stabilizes both code repositories and academic research projects.
 
-The current implementation is in a transition state: the orchestrator executes the main loop using its legacy scheduler and node graph, while running the SDK's measured acceptance gate in parallel to collect telemetry and prepare for full SDK integration.
+The current implementation executes the PSP-9 governed tool loop end to end: every model-issued tool call is a proposal decided by the deterministic kernel, and the measured acceptance gate reads the re-measured candidate. No legacy orchestrator remains.
 
 System Command Index
 --------------------
@@ -175,9 +176,27 @@ The application interface is accessed via the following commands:
    * - ``resume``
      - Resumes the most recently interrupted session.
      - ``perspt resume --last``
-   * - ``logs``
-     - Inspects LLM communication logs.
-     - ``perspt logs --tui``
+   * - ``audit``
+     - Ingests delayed audit labels for conformal calibration.
+     - ``perspt audit <sample> --safe``
+   * - ``providers``
+     - Prints the provider capability matrix, optionally live-probed.
+     - ``perspt providers --probe``
+   * - ``replay``
+     - Replays a session's audit record deterministically, without credentials.
+     - ``perspt replay <session-id>``
+   * - ``db repair``
+     - Quarantines a poisoned DuckDB WAL after durable backups.
+     - ``perspt db repair --db-path perspt.db --discard-wal``
+   * - ``prompts``
+     - Inspects and maintains the compiled prompt section libraries.
+     - ``perspt prompts list``
+   * - ``context``
+     - Explains a session's recorded resident-context events.
+     - ``perspt context explain-turn --db-path perspt.db <session-id>``
+   * - ``benchmark``
+     - Runs the optional evaluation suites (feature-gated; manual only).
+     - ``perspt benchmark run --suite smoke``
    * - ``dashboard``
      - Launches the web monitoring server.
      - ``perspt dashboard``
@@ -185,7 +204,9 @@ The application interface is accessed via the following commands:
 Supported Oracles and Providers
 -------------------------------
 
-The client library supports direct integration with all **29 adapters** natively supported by the ``genai`` crate, ensuring complete flexibility for developers:
+The client library accepts nine provider identifiers through the ``genai``
+transport; OpenAI-compatible endpoints (including Azure and local servers)
+route through the ``openai`` adapter with a custom base URL:
 
 .. list-table::
    :header-rows: 1
@@ -194,71 +215,36 @@ The client library supports direct integration with all **29 adapters** natively
    * - Provider / Adapter ID
      - Target Env Variable
      - Reference Models
-   * - **OpenAI** (``openai``)
-     - ``OPENAI_API_KEY``
-     - gpt-5.5, gpt-5-mini
-   * - **Azure OpenAI / Custom** (``openai_resp``)
-     - ``OPENAI_API_KEY`` / ``OPENAI_BASE_URL``
-     - gpt-5.5, custom-model
+   * - **OpenAI / compatible** (``openai``)
+     - ``OPENAI_API_KEY`` (+ ``OPENAI_BASE_URL``)
+     - gpt-4o-mini, custom-model
    * - **Anthropic** (``anthropic``)
      - ``ANTHROPIC_API_KEY``
-     - claude-fable, opus-4.8, sonnet-4.6, haiku-4.6
-   * - **Google Gemini** (``gemini``)
+     - claude-3-5-sonnet-20241022
+   * - **Google Gemini** (``gemini``/``google``)
      - ``GEMINI_API_KEY``
-     - gemini-3.5-flash, gemini-3.1-pro, gemini-3.1-flash-lite
+     - gemini-3.1-flash-lite-preview, gemini-3.1-pro
    * - **Google Vertex AI** (``vertex``)
-     - GCP OAuth (or ``VERTEX_PROJECT_ID``)
-     - vertex::gemini-3.5-flash, vertex::gemini-3.1-pro
-   * - **AWS Bedrock** (``bedrock_api``/``bedrock_sigv4``)
-     - AWS credentials (e.g. ``AWS_ACCESS_KEY_ID``)
-     - us.amazon.nova-pro-v2:0, us.anthropic.claude-fable-v1:0
+     - GCP ADC (``VERTEX_PROJECT_ID``)
+     - vertex::gemini-2.5-flash, vertex::gemini-3.5-flash-lite
    * - **Groq** (``groq``)
      - ``GROQ_API_KEY``
-     - llama-3.3-70b-specdec, gemma2-9b-it
+     - llama-3.1-8b-instant
    * - **Cohere** (``cohere``)
      - ``COHERE_API_KEY``
-     - command-a-plus, north-mini-code
+     - command-r-plus
    * - **xAI** (``xai``)
      - ``XAI_API_KEY``
-     - grok-4
+     - grok-beta
    * - **DeepSeek** (``deepseek``)
      - ``DEEPSEEK_API_KEY``
-     - deepseek-v4, deepseek-coder-v4
-   * - **Ollama** (``ollama``/``ollama_cloud``)
-     - None (local port) / Cloud credentials
-     - llama3.3, qwen2.5-coder, phi4
-   * - **GitHub Copilot** (``github_copilot``)
-     - Copilot session token
-     - copilot-model
-   * - **OpenRouter** (``open_router``)
-     - ``OPENROUTER_API_KEY``
-     - router-model
-   * - **Together AI** (``together``)
-     - ``TOGETHER_API_KEY``
-     - together-model
-   * - **Fireworks AI** (``fireworks``)
-     - ``FIREWORKS_API_KEY``
-     - fireworks-model
-   * - **Nebius AI** (``nebius``)
-     - ``NEBIUS_API_KEY``
-     - nebius-model
-   * - **Zhipu AI** (``zai``/``zai_coding``)
-     - ``ZHIPU_API_KEY``
-     - glm-4
-   * - **Aliyun DashScope** (``aliyun``)
-     - ``DASHSCOPE_API_KEY``
-     - qwen-turbo
-   * - **Baidu Qianfan** (``baidu``)
-     - ``QIANFAN_ACCESS_KEY`` / ``QIANFAN_SECRET_KEY``
-     - qianfan-model
-   * - **Moonshot Kimi** (``moonshot``)
-     - ``MOONSHOT_API_KEY``
-     - kimi-model
-   * - **Other Adapters**
-     - Refer to :ref:`user-guide-providers`
-     - Mimo, BigModel, AIHubMix, OpenCode Go, Custom
+     - deepseek-chat
+   * - **Ollama** (``ollama``)
+     - None (local port)
+     - llama3.2, qwen2.5-coder
 
-For detailed setup guides and provider-specific details, please see :ref:`user-guide-providers`.
+Any other provider string is rejected as unsupported. For detailed setup
+guides and provider-specific details, please see :ref:`user-guide-providers`.
 
 System Philosophy
 -----------------

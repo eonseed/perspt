@@ -5,8 +5,8 @@ Dashboard
 
 The Perspt web dashboard provides real-time browser-based monitoring of
 agent execution. Launch it alongside a running agent session to observe
-DAG topology, energy convergence, LLM telemetry, sandbox branches, and
-decision traces.
+DAG topology, energy convergence, backlog diagnostics, governance state,
+and decision traces.
 
 Launching the Dashboard
 -----------------------
@@ -39,48 +39,31 @@ committed/verified, red for failed, blue for running). Displays the
 task graph edges below. Useful for understanding the agent's
 decomposition of work.
 
-**Energy Convergence** - Displays per-node energy components: V_syn
-(syntax), V_str (structure), V_log (tests), V_boot (bootstrap), and
-V_sheaf (sheaf validation). The V_total column shows the combined
-energy value.
+**Backlog** - Conditional-capacity diagnostics over the PSP-9 ledger:
+counts of latest-revision nodes per state and the last measured energy
+of each backlog node. Every number is a diagnostic projection, not a
+stability claim.
 
-**LLM Telemetry** - Summary stats bar showing total requests, tokens
-in/out, and cumulative latency. Below, a table of individual LLM
-requests with model, node, token counts, latency, and prompt/response
-previews.
+**Energy Convergence** - Displays the measured energy trajectory: one
+row per candidate measurement with its sequence, node, generation,
+energy value, and hard-pass flag. A summary shows the average, minimum,
+and maximum energy plus the hard-pass count.
 
-**Sandbox Monitoring** - Lists provisional branches with their state
-(active, merged, flushed) and sandbox directories. Useful for tracking
-which code changes are being explored.
+**Decision Trace** - The raw PSP-9 event trace: a flat table of
+Merkle-chained ledger records, one row per event with its sequence
+number, kind, summary, and short hash.
 
-**Decision Trace** - Collapsible sections for each decision category:
-escalation reports, sheaf validations, DAG rewrites, plan revisions,
-repair footprints, and verification results. Each section shows relevant
-details in tabular form.
+**Governance** - Calibration epochs with their state, target rho,
+threshold, sample count, and model route, plus validator verdicts and
+pending delayed audits.
 
 Authentication
 --------------
 
-By default, the dashboard runs without authentication on localhost.
-This is safe for local development.
-
-To require a password, add to your ``config.toml``:
-
-.. code-block:: toml
-
-   [dashboard]
-   password = "your-secret-password"
-
-When a password is configured, visiting any page redirects to ``/login``.
-After entering the correct password, a session cookie is set and
-subsequent requests pass through.
-
-Cookie attributes:
-
-- ``HttpOnly`` - not accessible via JavaScript
-- ``SameSite=Lax`` - CSRF protection
-- ``Secure`` - set when not on localhost
-- ``Path=/`` - applies to all dashboard routes
+The dashboard binds to ``127.0.0.1`` only and runs without
+authentication. This is safe for local development: the server is not
+reachable from other machines, and it opens the DuckDB session store in
+read-only mode.
 
 Using with a Running Agent
 --------------------------
@@ -107,6 +90,7 @@ The typical workflow:
 Viewing Historical Sessions
 ----------------------------
 
-The Overview page shows the 50 most recent sessions. Sessions from past
+The Overview page lists sessions 20 per page, with pagination controls
+to browse further back. Sessions from past
 agent runs remain in the DuckDB database and can be browsed even after
 the agent has stopped.

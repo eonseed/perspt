@@ -50,26 +50,33 @@ Router
      - ``/``
      - ``handlers::overview::overview_handler`` - session list
    * - GET
-     - ``/sessions/{session_id}/dag``
-     - ``handlers::dag::dag_handler`` - DAG topology
+     - ``/sessions/{session_id}``
+     - ``handlers::session_detail::session_detail_handler`` - session detail
+   * - GET
+     - ``/sessions/{session_id}/topology``
+     - ``handlers::dag::topology_handler`` - work-graph topology
+   * - GET
+     - ``/sessions/{session_id}/backlog``
+     - ``handlers::backlog::backlog_handler`` - backlog diagnostics
    * - GET
      - ``/sessions/{session_id}/energy``
      - ``handlers::energy::energy_handler`` - energy convergence
    * - GET
-     - ``/sessions/{session_id}/llm``
-     - ``handlers::llm::llm_handler`` - LLM telemetry
-   * - GET
-     - ``/sessions/{session_id}/sandbox``
-     - ``handlers::sandbox::sandbox_handler`` - provisional branches
-   * - GET
      - ``/sessions/{session_id}/decisions``
      - ``handlers::decisions::decisions_handler`` - decision trace
+   * - GET
+     - ``/sessions/{session_id}/governance``
+     - ``handlers::governance::governance_handler`` - governance view
    * - GET
      - ``/sse/{session_id}``
      - ``sse::sse_handler`` - SSE event stream
 
-All routes except ``/login`` are behind ``auth::auth_middleware``.
-If no password is configured, all requests pass through.
+Static assets are served from ``crates/perspt-dashboard/static/`` under
+``/static`` via ``tower_http::services::ServeDir``.
+
+All routes except ``/login`` and ``/static`` are behind
+``auth::auth_middleware``. If no password is configured, all requests pass
+through.
 
 Auth Middleware
 ---------------
@@ -88,7 +95,8 @@ SSE Stream
 
 The SSE endpoint pushes named events every 2 seconds:
 
-- ``node-stats`` - live summary of node states (total, done, running, failed)
+- ``psp9-stats`` - live session summary (ledger event count, measurement
+  count, last measured energy)
 
 Each event contains an HTML fragment suitable for HTMX ``sse-swap``.
 
@@ -99,14 +107,14 @@ Askama templates live in ``crates/perspt-dashboard/templates/``:
 
 - ``base.html`` - layout with navigation, HTMX, and DaisyUI theme
 - ``login.html`` - login form
+- ``session_base.html`` - shared per-session layout with tab navigation
 - ``pages/overview.html`` - session list table
-- ``pages/dag.html`` - node cards and edge table
+- ``pages/session_detail.html`` - single-session summary
+- ``pages/dag.html`` - work-graph topology view
+- ``pages/backlog.html`` - backlog diagnostics
 - ``pages/energy.html`` - energy component table
-- ``pages/llm.html`` - stats bar and request table
-- ``pages/sandbox.html`` - provisional branch table
-- ``pages/decisions.html`` - collapsible sections for escalations,
-  sheaf validations, rewrites, plan revisions, repair footprints,
-  and verification results
+- ``pages/governance.html`` - governance view
+- ``pages/decisions.html`` - flat Merkle-chained PSP-9 event trace
 
 View Models
 -----------
@@ -114,8 +122,12 @@ View Models
 Each page has a corresponding view model in ``src/views/``:
 
 - ``OverviewViewModel`` - sessions, node counts, budgets
-- ``DagViewModel`` - nodes with state/energy, edges
+- ``SessionDetailViewModel`` - single-session summary
+- ``TopologyViewModel`` - work-graph nodes and edges
+- ``BacklogViewModel`` - backlog diagnostics
 - ``EnergyViewModel`` - per-node energy components
-- ``LlmViewModel`` - requests with token counts, latency, previews
-- ``SandboxViewModel`` - provisional branches with sandbox directories
-- ``DecisionsViewModel`` - all six decision categories
+- ``GovernanceViewModel`` - governance evidence
+- ``DecisionsViewModel`` - the flat Merkle-chained PSP-9 event trace
+
+``views/psp9.rs`` provides the shared ``LedgerProjection`` these view models
+and the SSE stream are built from.

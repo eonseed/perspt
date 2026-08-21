@@ -10,8 +10,8 @@ Overview
 --------
 
 In headless mode (``--yes`` flag), the agent auto-approves all changes, skipping
-the interactive review modal. Combined with ``--workdir`` and ``--defer-tests``,
-it enables fully autonomous project generation.
+the interactive review modal. Combined with ``--workdir``, it enables fully
+autonomous project generation.
 
 .. code-block:: bash
 
@@ -47,7 +47,9 @@ Basic Headless Run
 The agent will:
 
 1. Detect language plugins
-2. Plan the task DAG
+2. Plan the work graph — a single node by default; with
+   ``--max-parallel-nodes`` above 1, one governed architect turn may
+   decompose the task
 3. Execute all nodes, auto-approving each
 4. Run verification (LSP + tests) on each node
 5. Commit stable nodes to the ledger
@@ -67,56 +69,44 @@ Key Flags
      - Auto-approve all changes (headless mode)
    * - ``-w, --workdir <DIR>``
      - Working directory for the project
-   * - ``--defer-tests``
-     - Skip V_log during node coding; only run tests at sheaf validation
-   * - ``--max-cost <USD>``
-     - Safety limit on total LLM spend
-   * - ``--max-steps <N>``
-     - Safety limit on total iterations
-   * - ``--log-llm``
-     - Log all LLM requests to DuckDB for post-analysis
-   * - ``--single-file``
-     - Force single-file mode (no DAG planning)
-   * - ``--output-plan <FILE>``
-     - Export the task plan as JSON before execution
+   * - ``--max-turns <N>``
+     - Maximum model turns per node (default 12)
+   * - ``--max-calls-per-turn <N>``
+     - Maximum model-issued and nested tool calls per turn (default 8)
+   * - ``--rejection-budget <N>``
+     - Shared non-descending and recovery budget (default 4)
+   * - ``--output-summary <FILE>``
+     - Write the terminal session summary as JSON
 
+.. admonition:: Headless requirements
+   :class: note
 
-Deferred Tests
---------------
-
-By default, the agent runs tests (V_log) during each node's verification. With
-``--defer-tests``, V_log is set to 0.0 during node coding and tests only run at
-the final sheaf validation stage. This speeds up iteration:
-
-.. code-block:: bash
-
-   perspt agent --yes --defer-tests -w /tmp/fast \
-     "Build a CLI tool in Rust that converts CSV to JSON"
-
-.. admonition:: Trade-off
-   :class: warning
-
-   Deferred tests mean individual nodes may converge with untested code. The sheaf
-   validation stage catches integration issues, but per-node test failures are
-   discovered later.
+   A run without a terminal (CI, piped output) requires ``--yes``:
+   promotion approval cannot be prompted without a terminal, so the run
+   fails fast instead of silently escalating. ``--max-parallel-nodes``
+   above 1 also requires ``--yes``. A run that ends in escalation or
+   incomplete work exits with a nonzero status, so CI never reads a
+   stopped node as success.
 
 
 Reading Structured Progress
 ---------------------------
 
-In headless mode, Perspt emits structured progress to stderr:
+In headless mode, Perspt prints its startup banner (task, workspace,
+detected domain), then streams ledger narration lines and per-node status
+changes as the run progresses. When the run finishes it prints the
+outcome, session id, turns used, ledger head hash, and any promoted
+paths.
 
-.. code-block:: text
+For a machine-readable record, pass ``--output-summary``:
 
-   [detect] Workspace: greenfield
-   [detect] Plugin: python (LSP: ty, tests: pytest, init: uv init --lib)
-   [plan] TaskPlan: 5 nodes, 1 plugin
-   [node-1] State: Generating -> Verifying -> Stable (V=0.00)
-   [node-2] State: Generating -> Verifying -> Stable (V=0.00)
-   [node-3] State: Generating -> Verifying -> Retry (V=2.50)
-   [node-3] State: Generating -> Verifying -> Stable (V=0.00)
-   [sheaf] 3 validators, 0 failures, V_sheaf=0.00
-   [done] 5/5 nodes completed, session abc123
+.. code-block:: bash
+
+   perspt agent --yes -w /tmp/out --output-summary summary.json \
+     "Build a CLI tool in Rust that converts CSV to JSON"
+
+The JSON summary contains the session id, node id, outcome, turns used,
+ledger head, and promoted paths.
 
 
 Checking Session Status
@@ -132,8 +122,11 @@ After a headless run, inspect the results:
    # Recent ledger entries
    perspt ledger --recent
 
-   # LLM usage statistics (if --log-llm was used)
-   perspt logs --stats
+   # Ledger statistics
+   perspt ledger --stats
+
+   # Deterministic, credential-free replay of a session
+   perspt replay <SESSION_ID>
 
    # Resume a failed session
    perspt resume --last
@@ -159,7 +152,7 @@ Run multiple agent tasks from a shell script:
    for i in "${!tasks[@]}"; do
      dir="/tmp/project-$i"
      mkdir -p "$dir"
-     perspt agent --yes --max-cost 2.0 -w "$dir" "${tasks[$i]}"
+     perspt agent --yes --max-turns 8 -w "$dir" "${tasks[$i]}"
      echo "=== Project $i complete ==="
    done
 
@@ -167,11 +160,14 @@ Run multiple agent tasks from a shell script:
 Safety Recommendations
 ----------------------
 
-1. **Always set cost limits** - ``--max-cost 5.0`` prevents runaway spending
+1. **Always set loop bounds** - ``--max-turns`` and ``--rejection-budget``
+   bound runaway sessions
 2. **Use disposable directories** - Point ``-w`` to a fresh directory
 3. **Review after generation** - Inspect the output before using it in production
-4. **Use --log-llm** - Enables post-run analysis of what the agent did
-5. **Set --max-steps** - Bounds the total number of retries across all nodes
+4. **Audit with the ledger** - ``perspt replay <SESSION_ID>`` reconstructs
+   what the agent did, no logging flag required
+5. **Check the exit status** - A nonzero exit means escalation or
+   incomplete work, not verified success
 
 
 See Also

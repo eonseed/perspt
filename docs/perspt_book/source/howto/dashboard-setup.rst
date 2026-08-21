@@ -17,18 +17,12 @@ The Perspt configuration file lives in your platform's config directory:
 If migrating from the legacy ``~/.perspt/`` layout, Perspt will warn and
 fall back to the old location automatically.
 
-Configure a Dashboard Password
--------------------------------
+Understand the Access Model
+---------------------------
 
-Add to ``config.toml``:
-
-.. code-block:: toml
-
-   [dashboard]
-   password = "your-secret"
-
-Without this section, the dashboard runs in open-access mode (suitable
-for localhost-only use).
+The dashboard binds to ``127.0.0.1`` only and runs unauthenticated. It is
+a read-only view of the local session database, suitable for
+localhost-only use; do not forward the port to other machines.
 
 Change the Default Port
 -----------------------
@@ -91,8 +85,8 @@ To use a custom port:
    perspt agent --dashboard --dashboard-port 8080 "Add tests"
 
 The embedded dashboard provides the same interface as the standalone
-``perspt dashboard`` command: DAG topology, energy convergence,
-LLM telemetry, and correction-attempt provenance. It stops
+``perspt dashboard`` command: overview, session detail, topology,
+backlog, energy, decisions, and governance pages. It stops
 automatically when the agent process exits.
 
 .. note::

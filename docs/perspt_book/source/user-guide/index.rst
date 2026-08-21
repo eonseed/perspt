@@ -18,13 +18,13 @@ In-depth coverage of every Perspt feature.
       :link: agent-mode
       :link-type: doc
 
-      Experimental SRBN lifecycle, DAG planning, node verification, and review.
+      Governed tool loop, work graph, measured verification, and review.
 
    .. grid-item-card:: Advanced Features
       :link: advanced-features
       :link-type: doc
 
-      Per-tier models, energy tuning, ledger, resume, and cost control.
+      Per-role model routing, acceptance gate, budgets, ledger, and resume.
 
    .. grid-item-card:: Providers
       :link: providers

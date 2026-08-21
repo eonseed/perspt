@@ -3,9 +3,9 @@
 Agent Mode
 ==========
 
-The agent command activates the experimental SRBN (Stabilized Recursive Barrier
-Network) engine for autonomous multi-file code generation. Agent mode is the
-current coding-domain implementation of the stability contracts described in
+The agent command runs the governed PSP-9 tool loop for autonomous
+multi-file code generation. Agent mode is the current coding-domain
+implementation of the stability contracts described in
 :doc:`../concepts/stability-agent-mode`.
 
 Launching Agent Mode
@@ -19,68 +19,63 @@ Launching Agent Mode
    perspt agent -w ./my-project "Create a Python REST API"
    perspt agent -y -w /tmp/demo "Build a Rust CLI tool"
 
+A run without a terminal (CI, pipes) requires ``--yes``: promotion approval
+cannot be prompted without one, so the CLI fails fast instead of silently
+escalating a fully verified run. Any outcome other than a hard pass exits
+with a nonzero process status, so scripts never read a stopped node as
+success.
+
 Core Workflow
 -------------
 
-The SRBN agent follows a structured closed-loop lifecycle utilizing a quadratic energy model and a mutable work graph:
+The agent runs a closed loop in which every model proposal is governed and
+every acceptance is measured:
 
-1. **Detection** - Identify workspace state (greenfield/brownfield) and select
-   language plugins
-2. **Planning** - Based on the auto-selected ``PlanningPolicy``, either:
+1. **Planning** - One governed architect turn, restricted to the
+   ``update_graph`` tool, decomposes the task into a work graph of typed
+   nodes. Simple tasks stay a single node.
+2. **Proposal** - The actuator proposes typed tool calls (file writes,
+   edits, commands) against a disposable candidate overlay. The real
+   workspace is never touched by a proposal.
+3. **Admission** - Every proposal passes the deterministic five-clause
+   kernel — authority, contract, effect scope, barrier increment, and risk
+   budget — before it takes effect. A denied call is recorded in the ledger
+   and costs the model a correction, never the workspace a mutation.
+4. **Measurement** - Admitted mutations are measured on the realized
+   filesystem by the language plugins (compilers, tests, linters, LSP
+   diagnostics), which produce the scalar energy :math:`V(y)`.
+5. **Acceptance** - A candidate is accepted when it is a hard pass, or when
+   it achieves the required measured descent
+   :math:`V(y) \leq V(\text{best}) - \rho_{\text{gate}}` (``--rho-gate``,
+   default ``0.5``). A rejected candidate restores the best accepted
+   checkpoint.
+6. **Ledger** - Every proposal, denial, measurement, gate decision, and
+   checkpoint is appended to a hash-chained ledger *before* it is used.
 
-   - **LocalEdit** - Skip Architect, create a single-node graph
-   - **FeatureIncrement / LargeFeature / GreenfieldBuild / ArchitecturalRevision** -
-     Architect decomposes the task into a DAG of nodes with assigned classes.
+On a gate failure the runtime can open a bounded search forest: a small
+number of eager branches with exact-keyed no-goods, pre-action reservations
+that settle against observed actuals, and exactly one candidate committed
+through the ordinary gate. See :doc:`advanced-features` for the
+``[exploration]`` configuration.
 
-   A ``FeatureCharter`` is created with policy-derived limits (max modules, files,
-   and revisions) to constrain plan scope.
-3. **Execution** - The scheduler does *not* walk a precomputed topological
-   order. Utilizing a mutable work graph, it runs a closed
-   ("fly-by-wire") loop: each round it re-evaluates the graph and selects the
-   next *ready* node — one whose dependencies are all complete and whose
-   interface seals are satisfied — from a dependency-aware ready queue. For the
-   selected node:
+Multi-Node Dispatch
+-------------------
 
-   a. Actuator generates a multi-artifact bundle (writes, diffs, commands)
-   b. Bundle is applied transactionally
-   c. Verification computes Lyapunov energy from syntax, structure, tests,
-      bootstrap, and sheaf checks
-   d. If :math:`V(x) \leq \varepsilon` (default 0.10), the node is stable;
-      otherwise the agent retries, repairs the graph (requeue, split, insert
-      interface, or replan a subgraph), or escalates with residual evidence
-
-   Because the graph is mutable, a reworked node is re-picked on a later round
-   and newly inserted nodes are executed. When the ready queue empties, a
-   goal-completion gate decides whether the task is met, the plan should be
-   amended, or the loop should stop. Each graph *revision* remains acyclic.
-
-   .. note::
-
-      The scheduler currently executes **one ready node per round
-      (sequential)**. Bounded parallelism — a worker pool with
-      file/interface/toolchain leases running non-conflicting nodes
-      concurrently (``max_parallel*`` controls) — is planned for a future
-      release.
-
-The verification formula is the quadratic residual energy (each sensor
-emits a residual of magnitude :math:`r_e \ge 0`):
-
-.. math::
-
-   V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0.
-
-The component readouts :math:`V_{syn}, V_{str}, V_{log}, V_{boot}, V_{sheaf}` are
-derived rollups of this single energy, so :math:`V(x) = \sum_{\text{comp}}
-V_{\text{comp}}` (no separate :math:`\alpha/\beta/\gamma` pass).
-
-4. **Sheaf Validation** - Cross-node contract verification
-5. **Review** - In interactive mode: grouped-diff modal with approve/reject/correct
-6. **Commit** - Stable nodes are committed to the Merkle ledger
+By default the work graph executes one node at a time. ``--max-parallel-nodes``
+raises the number of concurrent nodes; values above 1 require ``--yes``
+because promotion approval cannot be prompted per node while other nodes
+run. The dispatcher schedules by footprint conflict — two nodes whose
+declared file footprints overlap never run concurrently — and each node
+writes into content-addressed staging. Conflict detection is
+dependency-aware (downstream refinements win by edge precedence), and one
+global integration gate measures the merged result before anything is
+promoted.
 
 Node Classes
 ------------
 
-Each DAG node belongs to a class that governs scheduling and verification:
+Each work-graph node carries a class describing the kind of work it
+performs:
 
 .. list-table::
    :header-rows: 1
@@ -88,73 +83,97 @@ Each DAG node belongs to a class that governs scheduling and verification:
 
    * - Class
      - Description
+   * - **Explore**
+     - Read-only investigation of the workspace.
+   * - **Plan**
+     - Task decomposition and graph revision.
+   * - **Implement**
+     - Code changes toward the node goal.
+   * - **Verify**
+     - Measurement-only verification work.
+   * - **Test**
+     - Test authoring and execution.
+   * - **Integrate**
+     - Merging staged work across nodes.
+   * - **Repair**
+     - Recovery from a failed or rejected node.
    * - **Interface**
-     - Public API definitions, type signatures, traits. Scheduled first.
-   * - **Implementation**
-     - Internal logic. May depend on Interface nodes.
-   * - **Integration**
-     - Wiring, main entry, config assembly. Scheduled last.
+     - Public API definitions, type signatures, traits.
 
-Artifact Bundle Protocol
-------------------------
-
-Each node produces a bundle with three artifact types:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Type
-     - Description
-   * - ``write``
-     - Create a new file with full content
-   * - ``diff``
-     - Modify an existing file (unified diff format)
-   * - ``command``
-     - Execute a shell command (e.g., ``uv add pandas``)
-
-Ownership closure ensures no two nodes own the same file.
+The planner currently emits ``Implement`` nodes; the full taxonomy is the
+SDK contract that dispatch and the ledger record.
 
 Review Modal (Interactive)
 --------------------------
 
-When running without ``--yes``, the review modal presents:
+When running without ``--yes``, the review modal presents the affected
+files, the verification gate results (syntax, build, tests, lint, plus
+test pass/fail counts), the scalar energy ``V(x)``, and a degraded flag
+listing any sensors that could not run.
 
-.. code-block:: text
-
-   Review Node 3: Implement data transformer
-   ------------------------------------------
-   Bundle: 1 created, 1 modified
-   + src/transformer.py    [create] (45 lines)
-   ~ src/pipeline.py       [diff]   (+3, -1)
-
-   Verification: V_syn OK | V_str OK | V_log OK | V_boot OK
-   Energy: V(x) = 0.00
-
-   [y] Approve  [n] Reject  [c] Correct  [e] Edit  [d] Diff
-
-- **y** - Approve and commit to ledger
-- **n** - Reject and regenerate
+- **y** - Approve and promote
+- **n** - Reject and restore the best checkpoint
 - **c** - Send feedback for correction
 - **e** - Open files in your editor
 - **d** - Toggle full diff view
+- **s** - Skip this review
+
+``Left``/``Right`` move the button selection, ``Enter`` confirms the
+selected decision, and ``Esc`` dismisses the modal.
 
 Session Management
 ------------------
 
 .. code-block:: bash
 
-   # Check session state (per-node counts, energy, escalations, correction attempts)
+   # Check session state (ledger, measurements, energy, gate, denials)
    perspt status
 
-   # Abort the current session
+   # Abort the current session by revoking its authority epoch
    perspt abort
 
-   # Resume with trust context (shows escalation count, energy, retries)
+   # Resume the most recent session
    perspt resume --last
 
-When resuming, the ``BudgetEnvelope`` (step, cost, and revision caps) is restored
-from the database so limits continue from where the session left off.
+``perspt status`` prints the ledger event count and head, measurement and
+denial counts, the last energy and gate decision, search forest, branch,
+and no-good counts, adjudicator verdicts, the capacity :math:`\Phi(W)`, and
+validator independence statistics. ``perspt resume`` prints the session id,
+task, working directory, and status, then verifies the ledger chain before
+continuing; live authority is never serialized, so resume always mints
+fresh capabilities.
+
+Domains
+-------
+
+``--domain`` selects the domain package (``coding``, ``research``); by
+default the best-matching domain is detected from the workspace, with
+``coding`` as the fallback.
+
+Exploration-Only Runs
+---------------------
+
+``--exploration-only`` runs only the read-only exploration phase: a
+deterministic repository map plus an interactive explorer tool loop.
+Nothing is mutated or promoted, and the run never prompts, so it works
+without ``--yes`` even in non-interactive contexts.
+
+Headless Summary
+----------------
+
+In headless mode the agent prints the terminal summary lines — outcome,
+session id, turns used, ledger head, and promoted paths:
+
+.. code-block:: text
+
+   Outcome: HardPass
+   Session: 019820f3-...
+   Turns: 6
+   Ledger head: 4f2c9a1b8d7e6a50
+   Promoted paths: src/api.py, tests/test_api.py
+
+``--output-summary <FILE>`` writes the same summary as JSON for CI
+integration.
 
 Dashboard Monitoring
 --------------------
@@ -166,56 +185,35 @@ While an agent session runs, you can observe it in a browser:
    # In a separate terminal
    perspt dashboard
 
-Open ``http://localhost:3000`` to see the Overview, DAG, Energy, LLM, Sandbox,
-and Decisions pages. The dashboard reads the session store in read-only mode so
-it never interferes with the running agent.
+Open ``http://localhost:3000`` to see the Overview, Session detail,
+Topology, Backlog, Energy, Decisions, and Governance pages. The Decisions
+page is a flat Merkle-chained event trace. The dashboard reads the session
+store in read-only mode so it never interferes with the running agent.
 
 See :doc:`dashboard` for full details.
-
-Speculator Lookahead
---------------------
-
-For complex policies (``LargeFeature``, ``GreenfieldBuild``, ``ArchitecturalRevision``),
-the Speculator tier runs a fast lookahead before each node's Actuator generation.
-It examines pending child nodes and produces risk hints that are injected into the
-Actuator's prompt, helping avoid downstream breakage. Simpler policies
-(``LocalEdit``, ``FeatureIncrement``) skip the speculator to reduce latency and cost.
-
-See :doc:`advanced-features` for model tiers, energy tuning, and cost controls.
-
-Correction Observability (PSP-7)
----------------------------------
-
-PSP-7 adds structured telemetry to the correction loop. Every correction attempt is
-persisted with the parse result state, retry classification, and energy snapshot.
-
-The ``perspt status`` command now shows:
-
-- **Step Timeline** - per-step-type counts and total execution time
-- **Correction Attempts** - per-node accepted/rejected attempt counts
-
-The dashboard **Decisions** page includes a dedicated Correction Attempts table with
-node, attempt number, parse state, and rejection reason.
-
-In headless mode, the agent summary emits ``[STEPS]`` and ``[CORRECTIONS]`` lines
-for CI integration:
-
-.. code-block:: text
-
-   [STEPS] 15 records, 42.3s total
-   [CORRECTIONS] 2 node(s) needed correction, 5 total attempts
 
 Live Dashboard Monitoring
 --------------------------
 
-Use ``--dashboard`` to start the web monitoring dashboard alongside the agent:
+Use ``--dashboard`` to start the web monitoring dashboard alongside the
+agent:
 
 .. code-block:: bash
 
    perspt agent --dashboard "Build a REST server"
    # Open http://127.0.0.1:3000 in a browser
 
-The embedded dashboard opens a read-only DuckDB connection to the same
-database the agent writes to, providing real-time views of DAG topology,
-energy convergence, LLM telemetry, and correction-attempt history. Use
-``--dashboard-port`` to change the port. The server stops when the agent exits.
+The embedded dashboard reads through the same database connection the agent
+writes to, providing real-time views of work-graph topology, energy
+convergence, and the ledgered decision trace. Use ``--dashboard-port`` to
+change the port. The server stops when the agent exits.
+
+.. note::
+
+   The embedded dashboard runs unauthenticated on ``127.0.0.1``. It is
+   intended for local monitoring only; do not expose the port beyond the
+   local machine.
+
+See :doc:`advanced-features` for per-role model routing, the acceptance
+gate, budgets, and search configuration, and :doc:`../howto/agent-options`
+for the full flag reference.

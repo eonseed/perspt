@@ -19,27 +19,35 @@ Applications
    * - ``AgentApp``
      - Agent dashboard with DAG tree, energy display, and review modal
 
-Widgets
--------
+Widgets and Rendering Modules
+-----------------------------
 
 .. list-table::
    :header-rows: 1
    :widths: 25 75
 
-   * - Widget
+   * - Module
      - Description
-   * - ``Dashboard``
-     - Main agent dashboard layout with panels
-   * - ``TaskTree``
+   * - ``dashboard``
+     - ``Dashboard`` - main agent dashboard layout with panels
+   * - ``task_tree``
      - DAG visualization showing node states and energy
-   * - ``ReviewModal``
-     - Grouped diff viewer with approve/reject/correct controls
-   * - ``DiffViewer``
-     - Unified diff display with syntax highlighting
-   * - ``LogsViewer``
-     - LLM call log browser with filtering
-   * - ``Theme``
-     - Color scheme and styling
+   * - ``review_modal``
+     - ``ReviewModal`` - grouped diff viewer with approve/reject/correct controls
+   * - ``diff_viewer``
+     - ``DiffViewer`` - unified diff display with syntax highlighting
+   * - ``simple_input``
+     - Minimal input widget with full control over key handling
+   * - ``markdown``
+     - Markdown, table, and LaTeX-math rendering for the chat TUI
+   * - ``latex``
+     - LaTeX to Unicode transpilation for terminal math rendering
+   * - ``chat_view``
+     - Message-area and input-box rendering for the chat TUI
+   * - ``chat_commands``
+     - Chat-local slash commands and conversation export
+   * - ``theme``
+     - ``Theme`` - color scheme and styling
 
 Entry Points
 ------------
@@ -47,10 +55,14 @@ Entry Points
 .. code-block:: rust
 
    pub fn run_chat_tui(...) -> Result<()>;
-   pub fn run_agent_tui_with_orchestrator(...) -> Result<()>;
-   pub fn run_logs_viewer(...) -> Result<()>;
-   pub fn init_terminal() -> Result<TuiTerminal>;
-   pub fn restore_terminal(terminal: TuiTerminal) -> Result<()>;
+   pub fn run_agent_tui_with_runtime(...) -> Result<()>;
+
+Terminal setup and teardown live in ``tui_runner``:
+
+.. code-block:: rust
+
+   pub fn init_terminal(config: &TuiRunnerConfig) -> io::Result<TuiTerminal>;
+   pub fn restore_terminal(config: &TuiRunnerConfig) -> io::Result<()>;
 
 Channels
 --------

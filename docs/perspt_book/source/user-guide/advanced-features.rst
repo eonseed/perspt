@@ -3,152 +3,164 @@
 Advanced Features
 =================
 
-Per-Tier Model Selection
-------------------------
+Per-Role Model Routing
+----------------------
 
-Assign different models to each SRBN tier:
+The runtime routes each role through the ``[models]`` table of the config
+file. Values are fully qualified ``provider::model`` routes so identity,
+calibration, and replay never depend on an ambient default provider:
+
+.. code-block:: toml
+
+   [models]
+   architect = "vertex::gemini-3.1-pro"
+   actuator = "vertex::gemini-3.5-flash"
+   verifier = "vertex::gemini-3.1-pro"
+   speculator = "vertex::gemini-3.5-flash-lite"
+   adjudicator = "vertex::gemini-3.1-pro"
+
+The ``speculator`` entry is consumed only as the fallback route for the
+explorer role. On the command line, three roles can be overridden per run:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-3.1-pro \
-     --actuator-model gemini-3.5-flash \
-     --verifier-model gemini-3.1-pro \
-     --speculator-model gemini-3.5-flash \
+     --actuator-model vertex::gemini-3.5-flash \
+     --explorer-model vertex::gemini-3.5-flash-lite \
+     --adjudicator-model vertex::gemini-3.1-pro \
      -w ./project "Task description"
 
-Each tier also supports a ``--<tier>-fallback-model`` flag for automatic failover:
+``--model`` is an alias for ``--actuator-model``. ``--fallback-model``
+adds an ordered sticky failover route for the actuator; repeat the option
+to add more routes. Role-specific models are never silently reused as
+actuator fallbacks:
 
 .. code-block:: bash
 
    perspt agent \
-     --architect-model gemini-3.1-pro \
-     --architect-fallback-model gemini-3.5-flash \
+     --actuator-model vertex::gemini-3.5-flash-lite \
+     --fallback-model vertex::gemini-3.5-flash \
+     --fallback-model vertex::gemini-3.1-pro \
      -w ./project "Task"
 
+The adjudicator, when configured, is a no-tool validator of the realized
+diff. Its verdict is an uncalibrated conjunctive veto, never an energy
+measurement.
 
-Energy Weights
---------------
 
-The single energy that gates acceptance is the **quadratic residual
-energy**
+The Acceptance Gate
+-------------------
+
+A candidate is accepted when it is a hard pass — every sensor clean — or
+when it achieves the required measured energy descent
 
 .. math::
 
-   V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0,
+   V(y) \leq V(\text{best}) - \rho_{\text{gate}}.
 
-a weighted sum of *squared* edge residuals. Each sensor (compiler, type checker,
-test oracle, lint, runtime probe, goal-presence) emits a residual with a
-non-negative magnitude :math:`r_e`; the energy model squares and weights it. The
-familiar component readouts :math:`V_{\text{syn}}`, :math:`V_{\text{str}}`,
-:math:`V_{\text{log}}`, :math:`V_{\text{boot}}`, and :math:`V_{\text{sheaf}}` are
-**derived rollups** of this same energy, grouped by component, with
-:math:`V(x) = \sum_{\text{comp}} V_{\text{comp}}` — there is no second weighting
-pass.
-
-The ``--energy-weights "a,b,g"`` flag scales the per-component weights
-(``a`` → syntactic, ``b`` → structural, ``g`` → logic) *proportionally*: the
-default ``1.0,0.5,2.0`` is the identity reference that leaves the model's
-built-in per-class weights untouched, and overrides re-weight relative to it.
+The energy is measured on the realized filesystem by the language plugins
+(compilers, tests, linters, LSP diagnostics), never estimated by a model.
+``--rho-gate`` sets the required descent per accepted checkpoint:
 
 .. code-block:: bash
 
-   # Default (identity): use the model's built-in per-class weights
-   perspt agent --energy-weights "1.0,0.5,2.0" -w . "Task"
+   # Default: rho = 0.5
+   perspt agent --rho-gate 0.5 -w . "Precise task"
 
-   # Prioritize tests (raise the logic-component weight)
-   perspt agent --energy-weights "1.0,0.5,3.0" -w . "Add tests"
+   # Accept smaller measured improvements
+   perspt agent --rho-gate 0.25 -w . "Incremental refactor"
 
-   # Prioritize type safety (raise the syntactic-component weight)
-   perspt agent --energy-weights "2.0,0.5,2.0" -w . "Add types"
-
-.. note::
-
-   Because the energy is now quadratic, its scale differs from the old linear
-   form: a clean candidate still has :math:`V = 0`, but a defect with magnitude
-   :math:`r` contributes :math:`w_e r^2` rather than :math:`w_e r`. The stability
-   threshold :math:`\varepsilon` is interpreted against this quadratic scale.
+A rejected candidate restores the best accepted checkpoint, so the
+workspace never regresses past a measured state.
 
 
-Stability Threshold
--------------------
+Budgets
+-------
+
+The loop is finite by construction. Each budget is a hard bound, and
+exhausting one escalates with a residual certificate rather than looping:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 62
+
+   * - Flag
+     - Description
+   * - ``--max-turns <N>``
+     - Maximum model turns per node (default ``12``).
+   * - ``--max-calls-per-turn <N>``
+     - Maximum direct and nested tool calls per turn (default ``8``).
+   * - ``--rejection-budget <N>``
+     - Shared non-descending and recovery budget (default ``4``).
+   * - ``--max-parallel <N>``
+     - Maximum independent compiler, test, and lint sensors (default ``4``).
+   * - ``--max-parallel-nodes <N>``
+     - Concurrent work-graph nodes (default ``1``; above 1 requires
+       ``--yes``).
+
+
+Bounded Search
+--------------
+
+On a gate failure the runtime can open a bounded search forest instead of
+retrying blindly. Branches are sequential and eager, with a hard cap of
+three identities per forest; every dead end is recorded as an exact-keyed
+no-good so it is never re-proposed, every branch takes pre-action
+reservations that settle against observed actuals, and exactly one
+candidate is committed through the ordinary acceptance gate. The
+``[exploration]`` config block bounds the search:
+
+.. code-block:: toml
+
+   [exploration]
+   initial_branches = 1     # branches opened before any expansion trigger
+   max_branches = 3         # branch identities per forest (hard cap 3)
+   distinct_family = true   # prefer a distinct model family on expansion
+   max_workspace_files = 2000
+   max_workspace_bytes = 50000000
+
+``distinct_family`` is a prior, never a certificate. The workspace caps
+bound the cumulative eager-copy file and byte reservations. Search
+activity appears in ``perspt status`` as forest, branch, committed, and
+no-good counts.
+
+
+Prompt Programs
+---------------
+
+Every model call is compiled from typed prompt sections into a per-call
+prompt program. The program's route, dialect, section provenance, and
+tool-surface hash are ledgered, so a session's exact prompts can be
+audited after the fact:
 
 .. code-block:: bash
 
-   # Default: epsilon = 0.10
-   perspt agent --stability-threshold 0.10 -w . "Precise task"
+   # List every compiled section: id, version, stage, role, hash
+   perspt prompts list
 
-   # Relaxed for prototyping
-   perspt agent --stability-threshold 0.5 -w . "Quick prototype"
+   # Show the programs a session actually compiled, with digests
+   perspt prompts explain-session --db-path <FILE> <SESSION_ID>
 
-
-Cost and Step Limits
---------------------
-
-.. code-block:: bash
-
-   # Cap total LLM spend at $5
-   perspt agent --max-cost 5.0 -w . "Large refactor"
-
-   # Cap total iterations across all nodes
-   perspt agent --max-steps 20 -w . "Iterative task"
+``--allow-experimental-prompts`` substitutes validated ``[prompts]``
+bundle sections live. This is Gate AE and remains experimental until a
+change record passes paired evaluation.
 
 
-Complexity Control
-------------------
-
-.. code-block:: bash
-
-   # Set complexity threshold
-   perspt agent -k 3 -w . "Simple task"
-
-   # Explicit complexity estimation
-   perspt agent --complexity medium -w . "Medium task"
-
-
-Deferred Testing
+Resident Context
 ----------------
 
-Skip unit tests during per-node verification; only run them at sheaf validation:
+The conversation the model sees is paged: content is stored as
+content-addressed pages, and the transported conversation carries
+tombstones in place of folded content. The composed request is checked
+against the route's input allowance and dialect byte limit before any
+call, and the model recalls folded pages only through the governed
+``context_recall`` tool. Compactions and refusals are recorded in the
+ledger:
 
 .. code-block:: bash
 
-   perspt agent --defer-tests -w . "Speed-optimized generation"
-
-This sets V_log = 0.0 during node coding. Tests run only at the final sheaf stage.
-
-
-Verifier Strictness
--------------------
-
-.. code-block:: bash
-
-   # Default strictness
-   perspt agent --verifier-strictness default -w . "Task"
-
-   # Strict: fail on any warning
-   perspt agent --verifier-strictness strict -w . "Production code"
-
-   # Minimal: only fail on errors
-   perspt agent --verifier-strictness minimal -w . "Prototype"
-
-
-LLM Logging and Analytics
---------------------------
-
-.. code-block:: bash
-
-   # Enable LLM call logging to DuckDB
-   perspt agent --log-llm -w . "Task"
-
-   # Interactive log browser
-   perspt logs --tui
-
-   # Show most recent session
-   perspt logs --last
-
-   # Usage statistics (tokens, cost, timing)
-   perspt logs --stats
+   # Show a session's recorded context events (compactions, refusals)
+   perspt context explain-turn --db-path <FILE> <SESSION_ID>
 
 
 Merkle Ledger
@@ -167,85 +179,58 @@ DuckDB. This provides:
    perspt ledger --stats
 
 
-Single-File Mode
-----------------
+Run Summaries
+-------------
 
-Force the agent to produce a single file without DAG planning:
-
-.. code-block:: bash
-
-   perspt agent --single-file -w . "Create a Python utility script"
-
-
-Plan Export
------------
-
-Save the task plan as JSON before execution:
+``--output-summary <FILE>`` writes the terminal run summary as JSON
+(session id, node id, outcome, turns used, ledger head, promoted paths)
+for CI integration. Any outcome other than a hard pass exits with a
+nonzero process status:
 
 .. code-block:: bash
 
-   perspt agent --output-plan plan.json -w . "Create a web app"
-   cat plan.json
+   perspt agent -y --output-summary summary.json -w . "Task"
+   cat summary.json
 
 
-Execution Modes
----------------
+Resume and Replay
+-----------------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
+.. code-block:: bash
 
-   * - Mode
-     - Behavior
-   * - ``cautious``
-     - Prompt for approval on every node
-   * - ``balanced``
-     - Prompt when complexity exceeds threshold K (default)
-   * - ``yolo``
-     - Auto-approve everything without review
+   # Resume the most recent session
+   perspt resume --last
+
+   # Credential-free audit replay of a session
+   perspt replay <SESSION_ID>
+
+Resume verifies the ledger chain, rebuilds staging by folding the ledger,
+and re-enters dispatch. Live authority is intentionally never serialized:
+resume always rechecks the durable authority epoch and mints fresh
+capabilities. ``--persistent-grants`` on the original run stores signed
+grant intent so an unattended resume can complete bracketed promotion
+intents.
 
 
-Planning Policy
----------------
+Exploration-Only Runs
+---------------------
 
-The orchestrator automatically selects a ``PlanningPolicy`` based on workspace
-state. The policy controls which agent tiers are activated:
+``--exploration-only`` runs only the read-only exploration phase: a
+deterministic repository map plus an interactive explorer tool loop.
+Nothing is mutated or promoted:
 
-.. list-table::
-   :header-rows: 1
-   :widths: 25 15 15 45
+.. code-block:: bash
 
-   * - Policy
-     - Architect
-     - Speculator
-     - When Selected
-   * - **LocalEdit**
-     - Skipped
-     - Skipped
-     - Small, localized changes (single-node graph)
-   * - **FeatureIncrement**
-     - Active
-     - Skipped
-     - Existing projects (default)
-   * - **LargeFeature**
-     - Active
-     - Active
-     - Complex multi-module tasks
-   * - **GreenfieldBuild**
-     - Active
-     - Active
-     - New project (no existing files)
-   * - **ArchitecturalRevision**
-     - Active
-     - Active
-     - Cross-cutting redesign
+   perspt agent --exploration-only -w . "Map the request handling path"
 
-When the Speculator is active, it runs a fast lookahead before each node's code
-generation, producing risk hints about downstream impacts. This adds latency
-but improves first-pass correctness for complex DAGs.
 
-A **FeatureCharter** is auto-created with policy-derived limits before planning:
+Governed Dependency Mutation
+----------------------------
 
-- **LocalEdit**: max 1 module, 5 files, 3 revisions
-- **FeatureIncrement**: max 10 modules, 30 files, 5 revisions
-- **LargeFeature / GreenfieldBuild / ArchitecturalRevision**: max 25 modules, 80 files, 10 revisions
+Dependency changes (``cargo add``, ``uv add``, ``npm install``) are an
+external effect and are denied by default. ``--allow-dependency-mutation``
+grants them, still subject to the kernel and the ledger:
+
+.. code-block:: bash
+
+   perspt agent --allow-dependency-mutation -w . "Add pandas and use it"

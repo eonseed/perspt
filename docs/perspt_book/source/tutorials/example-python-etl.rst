@@ -24,8 +24,8 @@ Running the Agent
    export GEMINI_API_KEY="your-key"
 
    perspt agent --yes -w /tmp/etl-demo \
-     --architect-model gemini-3.1-pro \
-     --actuator-model gemini-3.5-flash \
+     --actuator-model gemini-3.1-pro \
+     --explorer-model gemini-3.5-flash \
      "Create a Python ETL pipeline package. It should:
       1. Read CSV files into Pydantic models for validation
       2. Transform records (clean nulls, normalize strings, compute derived fields)
@@ -59,17 +59,12 @@ The agent produces a project with ``src/`` layout:
 Verification
 ------------
 
-The SRBN engine verifies each node:
-
-.. code-block:: text
-
-   [node-1] Initialize Python package (V_boot=0.00)
-   [node-2] Create validator module (V_syn=0.00, V_log=0.00, V=0.00)
-   [node-3] Create transformer module (V_syn=0.00, V_log=0.00, V=0.00)
-   [node-4] Create core pipeline (V_syn=0.00, V_log=0.00, V=0.00)
-   [node-5] Create CLI entry point (V_syn=0.00, V=0.00)
-   [node-6] Write pytest tests (V_log=0.00, V=0.00)
-   [node-7] Integration wiring (V_sheaf=0.00)
+The engine verifies every checkpoint with real sensors: the ``ty`` LSP
+server and pytest measure the energy of each candidate, and a checkpoint
+is accepted only when that measured energy descends by at least the
+``--rho-gate`` margin. When the run finishes, the terminal summary
+reports the outcome, the session id, turns used, the ledger head hash,
+and the promoted paths.
 
 After completion, verify manually:
 
@@ -85,9 +80,10 @@ Key Observations
 - The agent uses ``uv init --lib`` to create proper ``src/`` layout with
   ``[build-system]`` in ``pyproject.toml``
 - Ownership closure ensures no two nodes write to the same file
-- The ``ty`` LSP server provides real-time type checking (V_syn)
-- pytest provides test verification (V_log)
-- All 7 SRBN nodes converge at V(x) = 0.00
+- The ``ty`` LSP server provides real-time type checking
+- pytest provides test verification
+- Work is promoted only after the run's final checkpoint passes every
+  hard predicate (a ``HardPass`` outcome)
 
 See Also
 --------

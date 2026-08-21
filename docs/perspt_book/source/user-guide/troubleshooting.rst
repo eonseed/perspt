@@ -36,22 +36,22 @@ Agent Mode Issues
 
 1. Check tool prerequisites: ``which uv``, ``which cargo``, ``which node``
 2. Check LSP is functioning: ``ty check .`` or ``cargo check``
-3. Lower stability threshold: ``--stability-threshold 0.5``
-4. Use ``--defer-tests`` to skip V_log during coding
-5. Check ``perspt status`` for escalation details
+3. Relax the descent gate: ``--rho-gate 0.3``
+4. Raise the retry allowance: ``--rejection-budget 8``
+5. Check ``perspt status`` for gate decisions and denials
 
 **High energy despite clean code:**
 
 1. Run tests manually: ``uv run pytest -v`` or ``cargo test``
 2. Check for LSP diagnostics: ``ty check .``
-3. Adjust energy weights: ``--energy-weights "0.5,0.5,1.0"``
+3. Bound runaway turns: ``--max-turns 8 --max-calls-per-turn 4``
 4. Verify contract compliance
 
 **Plugin not detected:**
 
 1. Ensure required binaries are installed in PATH
 2. Check workspace has expected marker files (``Cargo.toml``, ``pyproject.toml``)
-3. Run ``perspt status`` to see active plugins
+3. Run ``perspt status`` to see ledger counters, last energy, and gate state
 
 
 TUI Rendering Issues
@@ -70,14 +70,10 @@ TUI Rendering Issues
 Degraded Verification
 ---------------------
 
-When tool binaries (``ty``, ``cargo``, ``pytest``) are missing, the agent enters
-**degraded verification mode**:
-
-- V_syn is estimated via heuristic pattern matching (regex-based)
-- V_log uses ``exit 0`` stubs
-- V_boot skips missing commands
-
-This allows the agent to function, but with lower verification confidence.
+When tool binaries (``ty``, ``cargo``, ``pytest``) are missing, checkpoints
+may be flagged as **degraded** in the review modal, with the reasons listed
+alongside the flag. The agent keeps working, but with lower verification
+confidence.
 
 To restore full verification, install the required tools:
 
@@ -108,6 +104,13 @@ If a session is interrupted:
 
    # Or abort and start fresh
    perspt abort
+
+If the session store itself refuses to open because of a poisoned DuckDB
+write-ahead log, back it up and quarantine it (the WAL is never deleted):
+
+.. code-block:: bash
+
+   perspt db repair --db-path <path-to-db> --discard-wal
 
 
 Getting Help

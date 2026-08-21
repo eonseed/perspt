@@ -16,11 +16,11 @@ Modules
    * - Module
      - Description
    * - ``types``
-     - All PSP-5 types: SRBNNode, NodeState, NodeClass, ModelTier, EnergyComponents, BehavioralContract, StabilityMonitor, RetryPolicy, TaskPlan, AgentContext, TokenBudget, ArtifactBundle, OwnershipManifest, VerificationResult, EscalationReport, SheafValidationResult, ProvisionalBranch, InterfaceSealRecord, ContextPackage, ContextProvenance, StructuralDigest, SummaryDigest, RestrictionMap, BlockedDependency
+     - Core shared types: NodeClass, ModelTier, EnergyComponents, TaskPlan, PlannedTask, PlannedContract, PlannedTest, TaskType, CommandContract, SensorStatus, StageOutcome, VerifierStrictness, StructuralDigest, SummaryDigest, ArtifactKind, ContextBudget, RestrictionMap, ContextPackage, ContextProvenance
    * - ``config``
-     - ``Config { provider, model, api_key }``
+     - ``Config`` - provider/model/API-key basics plus the ``[providers]``, ``[models]``, ``[external_tools]``, ``[verification]``, ``[exploration]``, ``[prompts]``, and ``[context]`` tables
    * - ``events``
-     - ``AgentEvent`` (~30 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``, channel types
+     - ``AgentEvent`` (33 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``, channel types
    * - ``llm_provider``
      - ``GenAIProvider``, ``LlmResponse``, ``EOT_SIGNAL``, streaming support
    * - ``plugin``
@@ -29,29 +29,34 @@ Modules
      - ``ProjectMemory`` from ``.perspt/memory.toml``
    * - ``normalize``
      - Model and provider name normalization
+   * - ``prompts``
+     - ``PlatformPromptLibrary`` - the platform prompt section library, compiled at build time by ``perspt-prompt-macros``
+   * - ``portfolio``
+     - ``ModelPortfolio``, ``ProviderHandle`` - several concurrently live provider handles
+   * - ``tools_driver``
+     - ``CoreToolCall``, ``CoreToolSpec``, ``CoreTurnOutput`` - the ``genai`` tool-calling driver
+   * - ``local_command``
+     - ``LocalCommand`` - provider-independent commands handled entirely by frontends
+   * - ``path``
+     - Canonical path resolution for artifact paths
+   * - ``paths``
+     - Centralized platform-aware path helpers (config/data/project tiers)
 
 Key Types
 ---------
 
-**SRBNNode** - The core DAG node:
+**Config** - The main configuration struct (excerpt):
 
 .. code-block:: rust
 
-   pub struct SRBNNode {
-       pub node_id: String,
-       pub goal: String,
-       pub context_files: Vec<PathBuf>,
-       pub output_targets: Vec<PathBuf>,
-       pub contract: BehavioralContract,
-       pub tier: ModelTier,
-       pub monitor: StabilityMonitor,
-       pub state: NodeState,
-       pub parent_id: Option<String>,
-       pub children: Vec<String>,
-       pub node_class: NodeClass,
-       pub owner_plugin: Option<String>,
-       pub provisional_branch_id: Option<String>,
-       pub interface_seal_hash: Option<String>,
+   pub struct Config {
+       pub provider: Option<String>,
+       pub model: Option<String>,
+       pub api_key: Option<String>,
+       pub base_url: Option<String>,
+       // ... per-tier model overrides, plus the [providers], [models],
+       // [external_tools], [verification], [exploration], [prompts],
+       // and [context] tables
    }
 
 **EnergyComponents** - Lyapunov energy decomposition:
@@ -66,15 +71,18 @@ Key Types
        pub v_sheaf: f32,  // Cross-node validation
    }
 
-**AgentEvent** - 30+ lifecycle events:
+**AgentEvent** - 33 lifecycle events:
 
-``TaskStatusChanged``, ``PlanGenerated``, ``PlanReady``, ``NodeSelected``,
-``BundleApplied``, ``VerificationComplete``, ``SheafValidationComplete``,
-``BranchCreated``, ``InterfaceSealed``, ``BranchFlushed``, ``BranchMerged``,
-``EscalationClassified``, ``GraphRewriteApplied``, ``DegradedVerification``,
-``SensorFallback``, ``ContextDegraded``, ``ContextBlocked``, ``ProvenanceDrift``,
-``ModelFallback``, ``ToolReadiness``, ``ApprovalRequest``, ``EnergyUpdated``,
-``NodeCompleted``, ``Complete``, ``Error``, ``Log``, ``FallbackPlanner``,
-``DependentUnblocked``, ``StructuralDependencyMissing``
+``TaskStatusChanged``, ``PlanGenerated``, ``EnergyUpdated``, ``Log``,
+``NodeCompleted``, ``ApprovalRequest``, ``Complete``, ``Error``,
+``PlanReady``, ``NodeSelected``, ``FallbackPlanner``,
+``VerificationComplete``, ``BundleApplied``, ``SensorFallback``,
+``DegradedVerification``, ``EscalationClassified``,
+``SheafValidationComplete``, ``GraphRewriteApplied``, ``BranchCreated``,
+``InterfaceSealed``, ``BranchFlushed``, ``DependentUnblocked``,
+``BranchMerged``, ``ContextDegraded``, ``ContextBlocked``,
+``StructuralDependencyMissing``, ``ModelFallback``, ``ProvenanceDrift``,
+``ToolReadiness``, ``BudgetUpdated``, ``PlanRevised``, ``FileDeleted``,
+``FileMoved``
 
 See :doc:`../developer-guide/architecture` for the complete type inventory.

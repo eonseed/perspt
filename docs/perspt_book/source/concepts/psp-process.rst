@@ -56,23 +56,29 @@ We tabulate the specifications that govern the architecture of the system.
    * - PSP-4
      - SRBN Agent Mode
      - Superseded by PSP-5
-   * - **PSP-5**
-     - **Multi-File Coding UX and Repo-Native Verification**
-     - **Final**
+   * - PSP-5
+     - Multi-File Coding UX and Repo-Native Verification
+     - Final
    * - PSP-6
      - Web Dashboard and Real-Time Monitoring
      - Final
-   * - **PSP-7**
-     - **Robust Typed Correction Loops and Plugin-Aware Prompt Contracts**
+   * - PSP-7
+     - Robust Typed Correction Loops and Plugin-Aware Prompt Contracts
+     - Final
+   * - PSP-8
+     - SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph
+     - Final
+   * - **PSP-9**
+     - **Governed Agentic Platform: SRBN Tool Harness and Model Portfolio**
      - **Final**
-   * - **PSP-8**
-     - **SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph**
+   * - **PSP-10**
+     - **Bounded Search Trajectories and Model-Conditioned Prompt Programs**
      - **Draft**
 
 PSP-5: The Core Lifecycle
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-PSP-5 is the operative specification that governs the core multi-file agent execution. It supersedes PSP-4 and establishes:
+PSP-5 is the historical specification of the original multi-file agent execution; the operative platform is now defined by PSP-9 and PSP-10. It supersedes PSP-4 and established:
 
 - **Project-first execution** - The task is modeled as a directed acyclic graph (DAG) of nodes instead of a single-file task.
 - **Ownership closure** - Each file is owned by exactly one node.
@@ -109,6 +115,31 @@ PSP-8 defines the architecture for separating domain-neutral control mechanisms 
 - **Capability kernel** - Scoped admissibility check over proposed effects to guarantee sandbox bounds.
 
 See the full specification at ``docs/psps/source/psp-000008.rst``.
+
+PSP-9: The Governed Platform
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PSP-9 replaces bundle generation with a governed tool loop and defines the operative agent runtime. It introduces:
+
+- **Governed tool loop** - Every model-issued tool call becomes a typed proposal; a deterministic admissibility kernel decides whether it may affect the candidate.
+- **Measured acceptance gate** - A candidate is admitted on a hard verifier pass or a measured energy descent of at least :math:`\rho_{\text{gate}}` below the best accepted state.
+- **Model portfolio** - Per-role routes (actuator, explorer, adjudicator) with an ordered sticky fallback chain, configured via ``[models]`` or CLI flags.
+- **Durable event ledger** - A hash-chained event stream enabling deterministic, credential-free replay and crash resume.
+- **Open language registry** - A ``LanguageId``-keyed adapter registry replaces closed per-language enum dispatch.
+
+See the full specification at ``docs/psps/source/psp-000009.rst``.
+
+PSP-10: Search and Prompt Programs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+PSP-10 extends the governed platform with bounded search trajectories and model-conditioned prompt programs. It introduces:
+
+- **Typed prompt sections** - Prompt libraries compiled at build time from versioned section files, with program and invocation digests recorded in the ledger.
+- **Bounded search forests** - On gate failure, isolated branches run against the accepted root under pre-reserved budgets, with exact no-good learning.
+- **Resident-context paging** - The conversation becomes content-addressed pages; evicted pages leave tombstones and remain recallable via ``context_recall``.
+- **Multi-node dispatch** - Concurrent work-graph nodes behind ``--max-parallel-nodes``, staged into a content-addressed root and promoted through one global integration gate.
+
+See the full specification at ``docs/psps/source/psp-000010.rst``.
 
 Writing a PSP
 -------------

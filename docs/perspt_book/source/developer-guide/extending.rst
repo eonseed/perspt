@@ -30,8 +30,8 @@ Language plugins implement the ``LanguagePlugin`` trait from ``perspt-core``.
               }
           }
 
-          fn test_command(&self) -> Option<String> {
-              Some("go test ./...".into())
+          fn test_command(&self) -> String {
+              "go test ./...".into()
           }
 
           fn syntax_check_command(&self) -> Option<String> {
@@ -158,64 +158,120 @@ A domain package is a Rust struct that implements the ``AgentDomainPackage`` tra
 Registering the Domain Adapter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Once implemented, register your custom package inside the ``DomainRegistry`` during the workspace detection phase in ``perspt-cli/src/main.rs``:
+Once implemented, register your custom package inside the ``DomainRegistry`` at the composition root in ``crates/perspt-cli/src/commands/agent.rs``:
 
 .. code-block:: rust
 
-   let mut registry = DomainRegistry::new();
-   registry.register(Box::new(ResearchDomain));
+   let mut domains = perspt_sdk::DomainRegistry::new();
+   domains.register(std::sync::Arc::new(ResearchDomain));
 
-The SRBN control plane automatically detects, schedules, and gates the workspace based on the active domain configurations. Every domain must implement the same interface to maintain compatibility with the Merkle ledger and dashboard.
+An explicit ``--domain`` id wins; otherwise the registry selects the best detection, falling back to the coding domain. Every domain must implement the same interface to maintain compatibility with the ledger and dashboard.
 
 Adding an Agent Tool
 --------------------
 
-Tools are defined in ``crates/perspt-agent/src/tools.rs``:
+Tools live under ``crates/perspt-agent/src/tools/`` (catalog and executor in
+``mod.rs`` and ``executor.rs``, sandboxing in ``sandbox.rs``, builtin
+handlers in ``handlers/``, first-party families in ``families/``). The
+extension point is the open execution plane: a *tool family* contributes
+catalog entries (``perspt_sdk::ToolEntry``) and registers one
+``CandidateToolHandler`` per tool name in the ``CandidateHandlerRegistry``.
+The governance wrapper (catalog -> validate -> budget -> certify -> execute
+-> re-certify) is uniform and lives outside the handlers.
 
 .. code-block:: rust
 
-   impl AgentTools {
-       pub fn get_available_tools(&self) -> Vec<ToolDefinition> {
-           vec![
-               // ... existing tools ...
-               ToolDefinition {
-                   name: "my_tool".into(),
-                   description: "Description".into(),
-                   parameters: vec![
-                       ToolParameter {
-                           name: "arg1".into(),
-                           description: "First argument".into(),
-                           required: true,
-                       },
-                   ],
-               },
-           ]
-       }
+   use perspt_agent::{
+       CandidateHandlerRegistry, CandidateToolHandler, CandidateWorkspace,
+   };
+   use perspt_agent::toolloop::EffectOutcome;
 
-       async fn execute_my_tool(&self, args: &HashMap<String, String>)
-           -> ToolResult
-       {
-           // Implementation
+   struct MyProbe;
+
+   #[async_trait::async_trait]
+   impl CandidateToolHandler for MyProbe {
+       async fn apply(
+           &self,
+           workspace: &CandidateWorkspace,
+           call: &perspt_sdk::ProviderToolCall,
+           entry: &perspt_sdk::ToolEntry,
+       ) -> anyhow::Result<EffectOutcome> {
+           // Realize the effect against the reversible candidate.
        }
    }
 
-
-Adding a Sheaf Validator
--------------------------
-
-Sheaf validators check cross-node contracts. Add a new variant to
-``SheafValidatorClass`` in ``perspt-core/src/types.rs``:
+Register the family at the composition root
+(``crates/perspt-cli/src/commands/agent.rs``), through the same public path
+the shipped system and DB explorer families use:
 
 .. code-block:: rust
 
-   pub enum SheafValidatorClass {
-       ExportImportConsistency,
-       DependencyGraphConsistency,
-       // ... existing variants ...
-       MyNewValidator,     // Add new variant
-   }
+   let mut handlers = CandidateHandlerRegistry::with_builtins();
+   handlers.register("my_probe", Arc::new(MyProbe))?;
+   runtime = runtime
+       .with_tool_family(vec![my_probe_entry()])  // catalog entries
+       .with_tool_handlers(handlers);             // execution surface
 
-Then implement the validation logic in the orchestrator's sheaf validation phase.
+Duplicate registration fails closed, so a family can never silently shadow
+a builtin. Handlers never decide admission, budgets, or certification — the
+admissibility kernel already did; they only realize the effect against the
+reversible candidate.
+
+
+Adding a Prompt Section Library
+-------------------------------
+
+Actor prompts are typed section libraries under
+``crates/perspt-core/prompts/`` (``session_bootstrap``, ``graph_plan``,
+``repository_explore``, ``adjudicate``, ``evidence_summarize``). A library
+is a directory of ordered Markdown sections with YAML frontmatter:
+
+.. code-block:: markdown
+
+   ---
+   id: session_bootstrap/role
+   version: 1
+   role: system
+   required: true
+   max_bytes: 256
+   vars:
+     domain_id: { type: "BoundedText<64>" }
+   ---
+   You are a governed {{domain_id}} agent.
+
+``perspt-prompt-macros`` compiles the sections at build time
+(``frontmatter.rs`` parses, ``validate.rs`` runs the codegen validation
+list, ``emit.rs`` generates the section constructors). After any section
+change:
+
+1. ``perspt prompts lint`` - run the validation list (``--bundle`` points it
+   at an external bundle directory)
+2. ``perspt prompts manifest crates/perspt-core/prompts`` - regenerate the
+   committed ``manifest.toml`` with fresh content hashes
+
+
+Adding a Benchmark Corpus Task
+------------------------------
+
+The optional evaluation corpus lives in ``crates/perspt-benchmark/corpus/``
+(30 hidden-oracle tasks; see its ``README.md``). Each task directory holds:
+
+- ``task.json`` - user goal, shell-free hidden-check argv, expectation, one
+  language tag (``rust``, ``python``, ``mixed``), one scale tag, and
+  capability tags
+- ``fixture/`` - the only tree copied into the agent's workspace
+- ``hidden/`` - the oracle overlay copied only after the agent finishes
+- ``solution/`` - a withheld reference overlay used only by validation
+
+Validate with the credential-free authoring gate:
+
+.. code-block:: bash
+
+   cargo run -p perspt-cli --features benchmark -- benchmark validate
+
+The gate refuses fewer than 30 tasks, an imbalanced language/scale mix,
+insufficient capability coverage, a fixture that already passes its oracle,
+or a reference solution that does not pass.
 
 
 Adding an LLM Provider
@@ -226,7 +282,8 @@ To add a new provider:
 
 1. Add the adapter kind to ``str_to_adapter_kind()``
 2. Map the env var in ``new_with_config()``
-3. Add default model fallbacks in ``perspt-cli/src/main.rs``
+3. Add the provider's default model to ``detect_provider_from_env()`` in
+   ``perspt-core/src/llm_provider.rs``
 4. Update the auto-detection priority in config
 
 .. code-block:: rust

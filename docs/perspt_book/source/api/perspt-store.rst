@@ -42,41 +42,28 @@ Record Types
      - Description
    * - ``SessionRecord``
      - session_id, task, working_dir, merkle_root, detected_toolchain, status
-   * - ``NodeStateRecord``
-     - Per-node snapshot (id, state, energy, class, plugin, goal)
-   * - ``EnergyRecord``
-     - v_syn, v_str, v_log, v_boot, v_sheaf, v_total per node
-   * - ``LlmRequestRecord``
-     - model, prompt, response, tokens_in/out, latency_ms
-   * - ``StructuralDigestRecord``
-     - Content hash for interface seals
-   * - ``ContextProvenanceRecord``
-     - What context each node received
-   * - ``EscalationReportRecord``
-     - Classified escalation with energy and evidence
-   * - ``RewriteRecordRow``
-     - Graph rewrite audit trail
-   * - ``SheafValidationRow``
-     - Cross-node validation results
-   * - ``ProvisionalBranchRow``
-     - Branch lifecycle tracking
-   * - ``BranchLineageRow``
-     - Parent-child branch relationships
-   * - ``InterfaceSealRow``
-     - Sealed interface records
-   * - ``BranchFlushRow``
-     - Flush cascade records
-   * - ``TaskGraphEdgeRow``
-     - DAG edges between nodes
-   * - ``ReviewOutcomeRow``
-     - Human review decisions
-   * - ``VerificationResultRow``
-     - Full verification snapshots
-   * - ``ArtifactBundleRow``
-     - Stored artifact bundles per node
+   * - ``Psp9LedgerRow``
+     - session_id, sequence, event_json, prev_hash, hash - one durable
+       PSP-9 ledger record
+   * - ``Psp9VerdictRow``
+     - session_id, candidate_id, validator_id, stratum, missed,
+       unsafe_label, evidence_hash
+   * - ``Psp9CalibrationEpochRow``
+     - epoch_id, stratum, target_rho, threshold, state, sample_count
+   * - ``Psp9ExternalEffectRow``
+     - idempotency_key, intent_hash, intent_json, result_json, status
+
+The ledger accessors on ``SessionStore`` (append, read, and replay over the
+``psp9_*`` tables) live in ``store/psp9_ledger.rs``; ``repair.rs`` provides
+``repair_database``/``RepairReport``, the recoverable WAL quarantine behind
+``perspt db repair``.
 
 DuckDB Tables
 --------------
 
-The schema is initialized by ``init_schema()`` and includes 17+ tables matching
-the record types above.
+The schema is initialized by ``init_schema()`` through an idempotent
+transactional migration and comprises 11 tables: ``sessions``,
+``schema_migrations``, ``psp9_ledger_events``, ``psp9_artifacts``,
+``psp9_authority_epochs``, ``psp9_calibration_epochs``,
+``psp9_calibration_samples``, ``psp9_context_checkpoints``,
+``psp9_external_effects``, ``psp9_grant_policies``, ``psp9_verdicts``.

@@ -31,15 +31,23 @@ Project Structure
 .. code-block:: text
 
    crates/
-     perspt-core/     # Types, config, LLM, events, plugins
-     perspt-agent/    # Orchestrator, agents, ledger, tools
-     perspt-tui/      # Chat + Agent TUI
-     perspt-cli/      # CLI entry (clap)
-     perspt-store/    # DuckDB persistence
-     perspt-policy/   # Starlark policies
-     perspt-sandbox/  # Command sandboxing
-   tests/             # Integration tests
-   docs/              # Sphinx documentation
+     perspt-core/           # Types, config, LLM, events, plugins, prompts
+     perspt-agent/          # Candidate runtime, tool loop, verifier, dispatch
+     perspt-tui/            # Chat + Agent TUI
+     perspt-cli/            # CLI entry (clap)
+     perspt-store/          # DuckDB persistence
+     perspt-policy/         # Starlark policies
+     perspt-sandbox/        # Command sandboxing
+     perspt-dashboard/      # Axum web dashboard
+     perspt-sdk/            # Domain-neutral SRBN platform SDK
+     perspt-prompt-macros/  # Build-time prompt section codegen
+     perspt-coding/         # Coding domain package
+     perspt-research/       # Research domain package
+     perspt-benchmark/      # Optional credentialed evaluation harness
+     perspt/                # Root integration crate
+   xtask/                   # PSP code-rule checker (dev-only)
+   tests/                   # Integration tests
+   docs/                    # Sphinx documentation
 
 
 Coding Standards
@@ -49,7 +57,8 @@ Coding Standards
 2. **Formatted** - ``cargo fmt`` with default settings
 3. **Tests pass** - ``cargo test`` must pass all tests
 4. **No ``println!`` in UI paths** - Use the event system or ``env_logger``
-5. **Error types** - Use ``ErrorType`` enum for categorized errors
+5. **PSP code rules** - Files <= 1408 lines, functions <= 70 code lines,
+   lines <= 108 columns; enforced by ``./check-rules.sh check``
 6. **Streaming safety** - Never block the UI select loop; spawn on tokio tasks
 
 Commit Messages
@@ -78,6 +87,10 @@ PR Workflow
    .. code-block:: bash
 
       cargo build && cargo test && cargo clippy -- -D warnings && cargo fmt -- --check
+      ./check-rules.sh check
+
+   CI builds and tests with ``--all-features``, so keep the optional
+   features (``bundled``, ``benchmark``) compiling.
 
 4. Push and open a PR
 5. Address review feedback

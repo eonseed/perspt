@@ -3,10 +3,12 @@
 Architecture
 ============
 
-Perspt is a Rust workspace of twelve crates. Eight crates make up the running
-program, three crates form a reusable platform layer, and one root crate ties
-them together. Version 0.6.2 implements the correction-loop contracts and
-adds the platform SDK layer for the experimental SRBN agent.
+Perspt is a Rust workspace of fourteen crates plus a dev-only ``xtask``
+automation crate. Eight crates make up the running program, four crates form
+the reusable platform layer (SDK, prompt codegen, and two domain packages),
+one crate is the optional feature-gated benchmark harness, and one root crate
+ties them together. Version 0.6.6 implements the PSP-9 governed candidate
+runtime and the PSP-10 typed prompt, search, and integration layers.
 
 Workspace Layout
 ----------------
@@ -15,8 +17,8 @@ Workspace Layout
 
    perspt/                       # Root: integration crate (perspt)
    +-- crates/
-   |   +-- perspt-core/          # Types, config, LLM provider, events, plugins
-   |   +-- perspt-agent/         # SRBN orchestrator, agents, ledger, LSP, tools
+   |   +-- perspt-core/          # Types, config, LLM provider, events, plugins, prompts
+   |   +-- perspt-agent/         # Governed candidate runtime, tool loop, verifier, search
    |   +-- perspt-tui/           # Ratatui TUI (chat + agent + review modal)
    |   +-- perspt-cli/           # Clap CLI entry point, subcommands
    |   +-- perspt-store/         # DuckDB session store
@@ -24,8 +26,11 @@ Workspace Layout
    |   +-- perspt-sandbox/       # Command sandboxing
    |   +-- perspt-dashboard/     # Axum web dashboard
    |   +-- perspt-sdk/           # Domain-neutral SRBN platform SDK
+   |   +-- perspt-prompt-macros/ # Build-time prompt section codegen
    |   +-- perspt-coding/        # Coding domain package (first domain)
-   |   +-- perspt-research/      # Research domain skeleton (second domain)
+   |   +-- perspt-research/      # Research domain package (second domain)
+   |   +-- perspt-benchmark/     # Optional credentialed evaluation harness
+   +-- xtask/                    # PSP code-rule checker (dev-only)
    +-- tests/                    # Integration tests
    +-- docs/                     # Sphinx documentation
 
@@ -40,25 +45,56 @@ Dependency Graph
        rankdir=BT;
        node [shape=box, style=rounded];
        "perspt-cli" -> "perspt-core";
-       "perspt-cli" -> "perspt-agent";
+       "perspt-cli" -> "perspt-sdk";
        "perspt-cli" -> "perspt-tui";
+       "perspt-cli" -> "perspt-agent";
+       "perspt-cli" -> "perspt-coding";
+       "perspt-cli" -> "perspt-prompt-macros";
+       "perspt-cli" -> "perspt-research";
        "perspt-cli" -> "perspt-store";
+       "perspt-cli" -> "perspt-dashboard";
+       "perspt-cli" -> "perspt-benchmark" [style=dotted, label="feature: benchmark"];
+       "perspt-core" -> "perspt-sdk";
+       "perspt-core" -> "perspt-prompt-macros";
        "perspt-agent" -> "perspt-core";
-       "perspt-agent" -> "perspt-store";
+       "perspt-agent" -> "perspt-sdk";
+       "perspt-agent" -> "perspt-coding";
+       "perspt-agent" -> "perspt-research";
        "perspt-agent" -> "perspt-policy";
        "perspt-agent" -> "perspt-sandbox";
-       "perspt-agent" -> "perspt-sdk" [style=dotted, label="SDK Bridge"];
+       "perspt-agent" -> "perspt-store";
        "perspt-tui" -> "perspt-core";
        "perspt-tui" -> "perspt-agent";
+       "perspt-tui" -> "perspt-store";
        "perspt-store" -> "perspt-core";
-       "perspt-policy" [label="perspt-policy\n(Starlark)"];
+       "perspt-policy" -> "perspt-core";
        "perspt-sandbox" [label="perspt-sandbox"];
        "perspt-coding" -> "perspt-sdk";
+       "perspt-coding" -> "perspt-prompt-macros";
        "perspt-research" -> "perspt-sdk";
+       "perspt-prompt-macros" -> "perspt-sdk";
        "perspt-dashboard" -> "perspt-store";
-       "perspt-dashboard" -> "perspt-core";
-       "perspt-cli" -> "perspt-dashboard";
+       "perspt-dashboard" -> "perspt-sdk";
+       "perspt-benchmark" -> "perspt-agent";
+       "perspt-benchmark" -> "perspt-core";
+       "perspt-benchmark" -> "perspt-sdk";
+       "perspt-benchmark" -> "perspt-store";
    }
+
+
+PSP-9 / PSP-10 Overview
+-----------------------
+
+PSP-9 replaced the multi-agent orchestrator with a single governed candidate
+runtime: every model-issued tool call becomes a typed proposal, a
+deterministic admissibility kernel (in ``perspt-sdk``) decides whether it may
+affect the reversible candidate workspace, and every gate is evaluated on the
+re-measured candidate, never on the model's account of it. Every event lands
+in a hash-chained durable ledger (``perspt-store``), so sessions replay and
+resume deterministically. PSP-10 adds typed prompt section libraries with
+build-time codegen (``perspt-prompt-macros``), the bounded search forest with
+exact no-good learning, graph staging behind a global integration gate, and
+the optional benchmark harness (``perspt-benchmark``).
 
 
 Crate: ``perspt-core``
@@ -68,11 +104,20 @@ The foundation crate. Re-exports all canonical types.
 
 **Modules:**
 
-- ``types`` - All PSP-5 types (see :ref:`type-inventory` below)
-- ``config`` - ``Config { provider, model, api_key }``
-- ``events`` - ``AgentEvent`` (~30 variants), ``AgentAction``, ``NodeStatus``, ``ActionType``
-- ``llm_provider`` - ``GenAIProvider`` wrapping the ``genai`` crate; ``EOT_SIGNAL``
-- ``plugin`` - ``LanguagePlugin`` trait + ``PythonPlugin``, ``RustPlugin``, ``JsPlugin``
+- ``types`` - Core shared types, split into submodules
+  ``types/{context,model,plan,policy,verification,workspace}.rs``
+  (see :ref:`type-inventory` below)
+- ``config`` - ``Config { provider, model, api_key, ... }`` plus per-tier
+  model overrides
+- ``events`` - ``AgentEvent`` (33 variants), ``AgentAction``, ``NodeStatus``,
+  ``ActionType``
+- ``llm_provider`` - ``GenAIProvider`` wrapping the ``genai`` crate;
+  ``EOT_SIGNAL``
+- ``portfolio`` - ``ModelPortfolio`` with provider handles and declared caps
+- ``plugin`` - ``LanguagePlugin`` trait + ``PythonPlugin``, ``RustPlugin``,
+  ``JsPlugin``
+- ``prompts`` - Typed prompt section libraries (``prompts/*/``) compiled at
+  build time by ``perspt-prompt-macros``
 - ``memory`` - ``ProjectMemory`` loaded from ``.perspt/memory.toml``
 - ``normalize`` - Model and provider name normalization
 
@@ -84,11 +129,11 @@ The foundation crate. Re-exports all canonical types.
        fn name(&self) -> &str;
        fn detect(&self, path: &Path) -> bool;
        fn get_init_action(&self, opts: &InitOptions) -> ProjectAction;
-       fn test_command(&self) -> Option<String>;
+       fn test_command(&self) -> String;
        fn syntax_check_command(&self) -> Option<String>;
        fn verifier_profile(&self) -> VerifierProfile;
-       fn owns_file(&self, path: &Path) -> bool;
-       // ... ~15 methods total
+       fn owns_file(&self, path: &str) -> bool;
+       // ... ~25 methods total
    }
 
 Plugins provide verifier profiles with fallback chains:
@@ -102,7 +147,7 @@ Plugins provide verifier profiles with fallback chains:
    }
 
    pub struct VerifierCapability {
-       pub stage: VerifierStage,       // SyntaxCheck | Build | Test | Lint
+       pub stage: VerifierStage,       // SyntaxCheck | Build | Test | Lint | Format
        pub command: Option<String>,     // Primary command
        pub available: bool,
        pub fallback_command: Option<String>,
@@ -113,67 +158,70 @@ Plugins provide verifier profiles with fallback chains:
 Crate: ``perspt-agent``
 ------------------------
 
-The experimental SRBN orchestrator and its subsystems.
+The governed PSP-9/PSP-10 agent runtime.
 
 **Modules:**
 
-- ``orchestrator`` - ``SRBNOrchestrator`` with ``petgraph::DiGraph<SRBNNode, Dependency>``.  Split into phase-focused sub-modules: ``mod`` (struct, constructors, run, helpers, tests), ``init`` (workspace bootstrap), ``solo`` (single-file mode), ``planning`` (architect interaction), ``verification`` (energy computation), ``convergence`` (stability loop), ``commit`` (ledger promotion), ``repair`` (correction prompts), ``bundle`` (artifact application).
-- ``agent`` - ``Agent`` trait + ``ArchitectAgent``, ``ActuatorAgent``, ``VerifierAgent``, ``SpeculatorAgent``
-- ``tools`` - ``AgentTools`` (read_file, write_file, apply_diff, delete_file, move_file, run_command, search_code, etc.)
-- ``prompts`` - Externalized prompt templates for architect (existing/greenfield) and actuator roles
-- ``ledger`` - ``MerkleLedger`` atop ``SessionStore``
+- ``runtime`` - ``Psp9AgentRuntime``: work-graph planning, bounded dispatch,
+  node assembly, adjudication, staging and integration, resume, and the
+  bounded search forest (``runtime/search/``)
+- ``toolloop`` - The SRBN tool loop: each model-issued tool call becomes a
+  typed proposal; the deterministic admissibility kernel decides whether it
+  may affect the candidate
+- ``candidate`` - ``CandidateWorkspace``: reversible coding-candidate overlay
+- ``measure`` - ``CodingCandidateMeasurer``: full verifier suite at gate
+  boundaries, cheap syntax-only pass at mutation boundaries
+- ``verifier`` - Governed verifier sandbox: compiler/test/lint processes run
+  under a deny-network profile with a read allow-list
+- ``tools`` - ``AgentTools`` executor and sandboxing, the
+  ``CandidateHandlerRegistry`` execution plane (``tools/handlers/``), and
+  first-party tool families (``tools/families/{db,system}.rs``)
+- ``transport`` - ``GenAiTransport``: the only adapter between the SDK's
+  provider-neutral contract and ``perspt-core``'s ``genai`` driver
+- ``turn`` - Universal actor turn runner (worker, explorer, architect,
+  adjudicator, evidence summarizer, capability probe)
+- ``grant`` - Persistent grant signing-key resolution
+- ``probe`` - ``probe_route``/``ProbeReport``: behavioral provider probes
+- ``promote`` - Descriptor-relative workspace promotion
+- ``realize`` - ``SnapshotRealizer``: content-addressed workspace states
+- ``exploration`` - Deterministic, read-only repository orientation
+- ``external_tools`` - Governed MCP runtime (lazy discovery, local policy)
 - ``lsp`` - ``LspClient`` (JSON-RPC over stdio)
-- ``test_runner`` - ``TestRunnerTrait`` + ``PythonTestRunner``, ``RustTestRunner``, ``PluginVerifierRunner``
-- ``context_retriever`` - ``ContextRetriever`` for workspace search
 
-**Agent Trait:**
+**Runtime Flow:**
 
-.. code-block:: rust
+``Psp9AgentRuntime::run()`` drives one governed session:
 
-   #[async_trait]
-   pub trait Agent: Send + Sync {
-       async fn process(&self, node: &SRBNNode, ctx: &AgentContext)
-           -> Result<AgentMessage>;
-       fn name(&self) -> &str;
-       fn can_handle(&self, node: &SRBNNode) -> bool;
-       fn model(&self) -> &str;
-       fn build_prompt(&self, node: &SRBNNode, ctx: &AgentContext) -> String;
-   }
+1. Exploration - deterministic read-only repository map; ``--exploration-only``
+   adds an interactive explorer tool loop and stops before any mutation
+2. Planning - one forced-tool-choice architect turn, restricted to the
+   privileged ``update_graph`` tool, produces the work graph; the host never
+   fabricates multi-node graphs
+3. Dispatch - bounded multi-node scheduling (``runtime/dispatch.rs``);
+   ``--max-parallel-nodes`` sets the concurrency (default 1; above 1
+   requires ``--yes``)
+4. Tool loop - per node, the governed loop (``toolloop/``) turns each model
+   tool call into a typed proposal, admits it through the deterministic
+   kernel, and realizes it against the reversible candidate overlay
+   (``candidate.rs``)
+5. Measurement - ``measure.rs`` re-measures the candidate through the plugin
+   verifier suite inside the sandboxed verifier (``verifier.rs``); the gate
+   is evaluated on the re-measured candidate, never on the model's account
+   of it
+6. Adjudication - a tool-free validator reviews only the realized diff and
+   records an uncalibrated verdict (``runtime/adjudicate.rs``)
+7. Staging and integration - node winners stage into a graph workspace and
+   must pass the global integration gate before descriptor-relative
+   promotion (``runtime/integrate.rs``, ``promote.rs``)
+8. Recording - every event lands in the durable hash-chained ledger
+   (``runtime/recorder.rs``); interrupted sessions resume from the newest
+   durable checkpoint with exactly the remaining budgets
+   (``runtime/resume.rs``)
 
-**Orchestrator:**
-
-.. code-block:: rust
-
-   pub struct SRBNOrchestrator {
-       pub graph: DiGraph<SRBNNode, Dependency>,
-       pub context: AgentContext,
-       // + ledger, agents (4 tiers), tools, LSP clients, test runners,
-       //   event/action channels, per-tier model names + fallbacks
-   }
-
-The orchestrator drives the core workspace lifecycle:
-
-1. ``detect_workspace()`` - Identify plugins and workspace state
-2. ``plan_task()`` - Architect decomposes task into the initial work graph
-3. Closed-loop scheduler - A ``loop`` that calls ``next_ready_node()`` each round
-   to select the next dependency-satisfied node from the mutable work graph
-   (see the mutable work graph specifications), instead of a one-shot topological traversal. Repair actions
-   (requeue, split, insert interface, replan subgraph) mutate the graph between
-   rounds and reworked/inserted nodes are re-picked.
-4. ``verify_node()`` - Compute V(x) via plugin verifier profile
-5. ``sheaf_validate()`` - Cross-node contract checking
-6. ``review_node()`` - Interactive approval (unless ``--yes``)
-7. ``execute_node()`` - Returns ``NodeOutcome::Completed`` when V(x) <= epsilon,
-   ``NodeOutcome::Reworked`` when a repair mutated the graph, or
-   ``NodeOutcome::Escalated`` when retries are exhausted
-8. ``commit_node()`` - Record stable node in Merkle ledger
-
-When the ready queue empties, a goal-completion gate may amend the plan or
-settle; the orchestrator then derives ``SessionOutcome`` from
-completed/escalated counts and emits a ``Complete`` event. Each graph revision
-is acyclic. The scheduler runs one ready node per round today — bounded
-parallelism (worker pool with leases, ``max_parallel*`` controls) is planned for
-a future release.
+Failed attempts feed the bounded search forest (``runtime/search/``):
+sequential, at most three branch identities, one branch attempt (quantum) at
+a time, with exact no-good learning that suppresses only byte-identical
+repeated attempts.
 
 
 Crate: ``perspt-store``
@@ -190,68 +238,61 @@ DuckDB-backed persistence. **Not SQLite.**
 DuckDB Schema and Tables
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-The database model is implemented as a set of relational tables in a DuckDB store. Key tables and their columns are structured as follows:
+The schema (``crates/perspt-store/src/schema.rs``) is applied through an
+idempotent transactional migration; ``schema_migrations`` records the
+applied version. Eleven tables:
 
-.. list-table:: Database Core Tables
+.. list-table:: Database Tables
    :header-rows: 1
-   :widths: 20 40 40
+   :widths: 25 40 35
 
    * - Table Name
-     - Column Structure (DuckDB Data Types)
-     - Invariant Relationships and Purpose
+     - Key Columns
+     - Purpose
    * - ``sessions``
-     - * ``session_id`` (VARCHAR, PRIMARY KEY)
-       * ``task_description`` (TEXT)
-       * ``working_dir`` (VARCHAR)
-       * ``merkle_root`` (VARCHAR)
-       * ``status`` (VARCHAR)
-     - Tracks the life cycle of active agent sessions. The ``merkle_root`` maps to the final committed workspace hash.
-   * - ``node_states``
-     - * ``node_id`` (VARCHAR)
-       * ``session_id`` (VARCHAR, FK -> sessions)
-       * ``generation`` (INTEGER)
-       * ``status`` (VARCHAR)
-       * ``output_files`` (JSON array)
-     - Preserves snapshots of workspace nodes across successive generations. Combined with ``session_id``, forms the unique node key.
-   * - ``energy_records``
-     - * ``node_id`` (VARCHAR)
-       * ``session_id`` (VARCHAR)
-       * ``generation`` (INTEGER)
-       * ``v_syn`` (FLOAT)
-       * ``v_str`` (FLOAT)
-       * ``v_log`` (FLOAT)
-       * ``v_boot`` (FLOAT)
-       * ``v_sheaf`` (FLOAT)
-     - Records step-by-step energy changes. Captures the output of the SDK Measured Acceptance Gate.
-   * - ``llm_requests``
-     - * ``request_id`` (VARCHAR, PRIMARY KEY)
-       * ``session_id`` (VARCHAR)
-       * ``node_id`` (VARCHAR)
-       * ``prompt`` (TEXT)
-       * ``response`` (TEXT)
-       * ``tokens_sent`` (INTEGER)
-       * ``tokens_received`` (INTEGER)
-     - Captures full dialogue request payloads, response bodies, and token telemetry for usage audits.
+     - ``session_id`` (PK), ``task``, ``working_dir``, ``merkle_root``,
+       ``detected_toolchain``, ``status``
+     - Life cycle of agent sessions
+   * - ``schema_migrations``
+     - ``version`` (PK), ``applied_at``
+     - Applied schema versions
+   * - ``psp9_ledger_events``
+     - ``(session_id, sequence)`` (PK), ``event_json``, ``prev_hash``,
+       ``hash``
+     - The durable canonical event stream; hash-chained
+   * - ``psp9_artifacts``
+     - ``content_hash`` (PK), ``content``, ``byte_len``, ``media_type``
+     - Content-addressed artifact bytes
+   * - ``psp9_authority_epochs``
+     - ``session_id`` (PK), ``epoch``
+     - Single-writer authority fencing per session
+   * - ``psp9_context_checkpoints``
+     - ``(session_id, covered_event_root)`` (PK), ``checkpoint_json``
+     - Durable conversation checkpoints for resume
+   * - ``psp9_external_effects``
+     - ``(session_id, idempotency_key)`` (PK), ``intent_hash``, ``status``
+     - External (MCP) effect intents and results, idempotent
+   * - ``psp9_grant_policies``
+     - ``policy_id`` (PK), ``session_id``, ``policy_json``, ``revoked``
+     - Capability grant policies
+   * - ``psp9_verdicts``
+     - ``(session_id, candidate_id, validator_id)`` (PK), ``stratum``,
+       ``missed``, ``unsafe_label``
+     - Adjudication verdicts per candidate
+   * - ``psp9_calibration_epochs``
+     - ``epoch_id`` (PK), ``stratum``, ``target_rho``, ``threshold``,
+       ``state``, ``sample_count``
+     - Conformal calibration epochs
+   * - ``psp9_calibration_samples``
+     - ``(epoch_id, sample_id)`` (PK), ``score``, ``unsafe_label``,
+       ``audit_selected``
+     - Calibration samples; ``unsafe_label`` stays NULL until the delayed
+       audit label arrives
 
-Remaining Audit and Control Tables:
-
-* ``structural_digests``: Maps file paths to their content hashes to enforce interface-seal validations.
-* ``context_provenance``: Records the sources of context files retrieved for the Actuator.
-* ``escalation_reports``: Contains logs of failed convergence steps that triggered an escalation.
-* ``rewrite_records``: Logs scheduler graph mutation operations (node splits, requeues, etc.).
-* ``sheaf_validations``: Logs cross-node consistency checks.
-* ``provisional_branches``: Manages provisional workspaces for downstream nodes.
-* ``branch_lineage``: Tracks parent-child branch structures.
-* ``interface_seals``: Stores structural hashes of interfaces.
-* ``branch_flushes``: Logs discarded provisional work.
-* ``task_graph_edges``: Records DAG dependency edges between nodes.
-* ``review_outcomes``: Records human approval decisions.
-* ``verification_results``: Contains full tool outputs from validation runs.
-* ``artifact_bundles``: Stores transactional JSON artifact payloads.
-* ``plan_revisions``: Stores Architect-generated graph structures.
-* ``feature_charters``: Documents resource ceilings assigned at planning time.
-* ``repair_footprints``: Records repair prompts and correction steps.
-* ``budget_envelopes``: Tracks session financial caps.
+Row types live in ``store/rows.rs`` (``SessionRecord``) and
+``store/psp9_ledger.rs`` (``Psp9LedgerRow``, ``Psp9VerdictRow``,
+``Psp9CalibrationEpochRow``, ``Psp9ExternalEffectRow``). ``repair.rs`` backs
+``perspt db repair`` for recovering a database with a poisoned WAL.
 
 
 Crate: ``perspt-tui``
@@ -260,7 +301,11 @@ Crate: ``perspt-tui``
 Ratatui-based terminal UI with two modes:
 
 - **ChatApp** - Interactive chat with streaming, LaTeX math transpilation, ASCII table wrapping, and markdown saving
-- **AgentApp** - Agent dashboard with DAG tree, energy display, review modal
+- **AgentApp** - Agent dashboard with work-graph tree, energy display, review modal
+
+The agent TUI is entered through ``run_agent_tui_with_runtime``
+(``agent_app.rs``), which owns the ``Psp9AgentRuntime`` for the session and
+wires its event and action channels.
 
 Key components:
 
@@ -273,13 +318,13 @@ Key components:
    * - ``Dashboard``
      - Main agent dashboard layout
    * - ``TaskTree``
-     - DAG visualization with node states
+     - Work-graph visualization with node states
    * - ``ReviewModal``
      - Grouped diff viewer with approve/reject/correct
    * - ``DiffViewer``
      - Unified diff display
-   * - ``LogsViewer``
-     - LLM log browser
+   * - ``telemetry``
+     - TUI-side energy component display types
    * - ``FrameRateLimiter``
      - 60fps cap, adaptive rendering
 
@@ -332,12 +377,13 @@ Process isolation with active timeout enforcement:
 
 .. _type-inventory:
 
-PSP-5 Type Inventory
---------------------
+Core Type Inventory
+-------------------
 
-All canonical types live in ``perspt_core::types``:
+All canonical shared types live in ``perspt_core::types``, re-exported from
+``types/mod.rs``:
 
-**SRBN Core:**
+**Workspace (``types/workspace.rs``):**
 
 .. list-table::
    :header-rows: 1
@@ -345,26 +391,24 @@ All canonical types live in ``perspt_core::types``:
 
    * - Type
      - Description
-   * - ``SRBNNode``
-     - DAG node: goal, output_targets, contract, tier, monitor, state, node_class, owner_plugin, provisional_branch_id, interface_seal_hash
-   * - ``NodeState`` (12 variants)
-     - TaskQueued -> Planning -> Coding -> Verifying -> Retry -> SheafCheck -> Committing -> Completed / Failed / Escalated / Aborted / Superseded. Includes ``from_display_str()`` (case-insensitive canonical parser with legacy aliases), ``is_success()``, ``is_active()``, and ``Display`` impl.
    * - ``NodeClass``
      - Interface, Implementation (default), Integration
-   * - ``ModelTier``
-     - Architect, Actuator, Verifier, Speculator
-   * - ``BehavioralContract``
-     - interface_signature, invariants, forbidden_patterns, weighted_tests, energy_weights
-   * - ``StabilityMonitor``
-     - energy_history, attempt_count, stable, stability_epsilon, max_retries, retry_policy
-   * - ``RetryPolicy``
-     - Per-error-type counters: compilation, tool, review
-   * - ``SessionOutcome``
-     - Success (all nodes completed), PartialSuccess (some escalated), Failed (none completed)
-   * - ``NodeOutcome``
-     - Completed (V(x) <= epsilon) or Escalated (retries exhausted). Returned by ``execute_node()``
+   * - ``VerifierStrictness``
+     - Default (compile + tests), Strict (adds lint), Minimal (syntax only)
 
-**Energy:**
+**Model (``types/model.rs``):**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Type
+     - Description
+   * - ``ModelTier``
+     - Architect, Actuator, Verifier, Speculator; ``default_model()`` maps
+       each tier to its recommended default route
+
+**Energy (``types/context.rs``):**
 
 .. list-table::
    :header-rows: 1
@@ -373,13 +417,10 @@ All canonical types live in ``perspt_core::types``:
    * - Type
      - Fields
    * - ``EnergyComponents``
-     - v_syn (LSP), v_str (contracts), v_log (tests), v_boot (init), v_sheaf (cross-node)
-   * - ``Criticality``
-     - Critical (10.0), High (3.0), Low (1.0)
-   * - ``WeightedTest``
-     - test_name, criticality
+     - v_syn (LSP), v_str (contracts), v_log (tests), v_boot (commands),
+       v_sheaf (cross-node); ``total()`` is the plain sum of the rollups
 
-**Task Planning:**
+**Task Planning (``types/plan.rs``):**
 
 .. list-table::
    :header-rows: 1
@@ -388,30 +429,24 @@ All canonical types live in ``perspt_core::types``:
    * - Type
      - Description
    * - ``TaskPlan``
-     - Container for ``Vec<PlannedTask>``
+     - Container for ``Vec<PlannedTask>`` with ownership-closure,
+       acyclicity, and implicit-dependency validation
    * - ``PlannedTask``
-     - id, goal, output_files, dependencies, task_type, contract, command_contract, node_class
+     - id, goal, context_files, output_files, dependencies, task_type,
+       contract, command_contract, node_class, dependency_expectations
    * - ``TaskType``
      - Code, Command, UnitTest, IntegrationTest, Refactor, Documentation
+   * - ``PlannedContract``
+     - interface_signature, invariants, forbidden_patterns, tests
+   * - ``PlannedTest``
+     - name, criticality (informational string label)
+   * - ``DependencyExpectation``
+     - required_packages, setup_commands, min_toolchain_version
    * - ``CommandContract``
-     - command, expected_exit_code, expected_files, forbidden_stderr_patterns
+     - command, expected_exit_code, expected_files,
+       forbidden_stderr_patterns, working_dir
 
-**Artifact Bundle:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``ArtifactBundle``
-     - artifacts: Vec<ArtifactOperation>, commands: Vec<String>
-   * - ``ArtifactOperation``
-     - Write { path, content } | Diff { path, patch } | Delete { path } | Move { from, to }
-   * - ``OwnershipManifest``
-     - entries: HashMap<String, OwnershipEntry>, fanout_limit
-
-**Verification:**
+**Verification and Context (``types/verification.rs``):**
 
 .. list-table::
    :header-rows: 1
@@ -419,99 +454,29 @@ All canonical types live in ``perspt_core::types``:
 
    * - Type
      - Description
-   * - ``VerificationResult``
-     - syntax_ok, build_ok, tests_ok, lint_ok, diagnostics_count, tests_passed/failed, degraded, stage_outcomes
-   * - ``StageOutcome``
-     - stage, passed, sensor_status, output
    * - ``SensorStatus``
      - Available | Fallback { actual, reason } | Unavailable { reason }
-   * - ``VerifierStrictness``
-     - Default, Strict, Minimal
-
-**Context Management:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``AgentContext``
-     - working_dir, history, merkle_root, complexity_k, session_id, auto_approve, defer_tests, token_budget, execution_mode, active_plugins, ownership_manifest
-   * - ``TokenBudget``
-     - max_tokens, max_cost_usd, tokens_used (in/out), cost_usd, per-1k rates
-   * - ``ContextBudget``
-     - byte_limit (100KB), file_count_limit (20)
-   * - ``RestrictionMap``
-     - Per-node context scoping: owned_files, sealed_interfaces, structural_digests
-   * - ``ContextPackage``
-     - Assembled context with budget tracking
-   * - ``ContextProvenance``
-     - Audit trail of what context each node received
-
-**Escalation and Rewrite:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``EscalationCategory``
-     - ImplementationError, ContractMismatch, InsufficientModelCapability, DegradedSensors, TopologyMismatch
-   * - ``RewriteAction`` (9 variants)
-     - GroundedRetry, ContractRepair, CapabilityPromotion, SensorRecovery, DegradedValidationStop, NodeSplit, InterfaceInsertion, SubgraphReplan, UserEscalation
-   * - ``EscalationReport``
-     - node_id, category, action, energy_snapshot, stage_outcomes, evidence
-
-**Sheaf Validation:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``SheafValidatorClass`` (7 variants)
-     - ExportImportConsistency, DependencyGraphConsistency, SchemaContractCompatibility, BuildGraphConsistency, TestOwnershipConsistency, CrossLanguageBoundary, PolicyInvariantConsistency
-   * - ``SheafValidationResult``
-     - validator_class, plugin_source, passed, evidence_summary, v_sheaf_contribution, requeue_targets
-
-**Provisional Branches:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``ProvisionalBranch``
-     - branch_id, node_id, state, parent_seal_hash, sandbox_dir
-   * - ``ProvisionalBranchState``
-     - Active -> Sealed -> Merged / Flushed
-   * - ``InterfaceSealRecord``
-     - node_id, sealed_path, artifact_kind, seal_hash, version
-   * - ``BranchFlushRecord``
-     - parent_node_id, flushed_branch_ids, requeue_node_ids, reason
-   * - ``BlockedDependency``
-     - child_node_id, parent_node_id, required_seal_paths
-
-**Structural Digests:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Type
-     - Description
-   * - ``StructuralDigest``
-     - Content hash of Interface artifacts (signatures, schemas, seals)
-   * - ``SummaryDigest``
-     - Compressed summaries (IntentSummary, VerifierResults, DesignRationale)
+   * - ``StageOutcome``
+     - stage, passed, sensor_status, output
    * - ``ArtifactKind``
      - Signature, Schema, SymbolInventory, InterfaceSeal
+   * - ``StructuralDigest``
+     - Content hash of a compile-critical structural artifact (signatures,
+       schemas, seals)
+   * - ``SummaryDigest``
+     - Condensed summary with hash; ``SummaryKind`` is IntentSummary,
+       VerifierResults, or DesignRationale
+   * - ``ContextBudget``
+     - byte_limit (100KB default), file_count_limit (20)
+   * - ``RestrictionMap``
+     - Per-node context boundary: owned_files, sealed_interfaces,
+       structural/summary digests, dependency commits
+   * - ``ContextPackage``
+     - The bounded, reproducible context assembled for a node
+   * - ``ContextProvenance``
+     - Audit trail of the digests and files a node's context used
 
-**Planning and Budget:**
+**Policy (``types/policy.rs``):**
 
 .. list-table::
    :header-rows: 1
@@ -519,16 +484,10 @@ All canonical types live in ``perspt_core::types``:
 
    * - Type
      - Description
-   * - ``BudgetEnvelope``
-     - Session-level budget caps: max_steps, max_revisions, max_cost_usd, usage counters
-   * - ``FeatureCharter``
-     - Scope governance: max_modules, max_files, max_revisions, language_constraint
-   * - ``PlanRevision``
-     - Versioned plan: revision_id, sequence, plan, reason, supersedes, status (Active/Superseded/Cancelled)
-   * - ``RepairFootprint``
-     - Correction audit: affected_files, applied_bundle, diagnosis, resolved flag
-   * - ``PlanningPolicy`` (5 variants)
-     - Adaptive agent gating: LocalEdit (skip architect), FeatureIncrement (default), LargeFeature, GreenfieldBuild, ArchitecturalRevision. Methods: ``needs_architect()``, ``needs_speculator()``
+   * - ``CommandPolicyDecision``
+     - Allow, Deny, RequireApproval
+   * - ``ManifestMutationPolicy``
+     - Allow, Deny
 
 
 Events System
@@ -544,19 +503,22 @@ The event system uses unbounded tokio channels:
    pub type ActionSender = UnboundedSender<AgentAction>;
    pub type ActionReceiver = UnboundedReceiver<AgentAction>;
 
-``AgentEvent`` has ~35 variants covering the full PSP-5 lifecycle:
+``AgentEvent`` has 33 variants (``crates/perspt-core/src/events.rs``):
 
-- **Planning**: ``PlanReady``, ``PlanGenerated``, ``PlanRevised``
+- **Planning**: ``PlanReady``, ``PlanGenerated``, ``PlanRevised``, ``FallbackPlanner``
 - **Execution**: ``NodeSelected``, ``BundleApplied``, ``NodeCompleted``
 - **Verification**: ``VerificationComplete``, ``DegradedVerification``, ``SensorFallback``
 - **Sheaf**: ``SheafValidationComplete``
-- **Branches**: ``BranchCreated``, ``InterfaceSealed``, ``BranchFlushed``, ``BranchMerged``
+- **Branches**: ``BranchCreated``, ``InterfaceSealed``, ``BranchFlushed``, ``BranchMerged``, ``DependentUnblocked``
 - **Escalation**: ``EscalationClassified``, ``GraphRewriteApplied``
-- **Context**: ``ContextDegraded``, ``ContextBlocked``, ``ProvenanceDrift``
+- **Context**: ``ContextDegraded``, ``ContextBlocked``, ``StructuralDependencyMissing``, ``ProvenanceDrift``
 - **Budget**: ``BudgetUpdated``
 - **File Ops**: ``FileDeleted``, ``FileMoved``
 - **UI**: ``ApprovalRequest``, ``TaskStatusChanged``, ``EnergyUpdated``, ``Log``
 - **Lifecycle**: ``Complete``, ``Error``, ``ModelFallback``, ``ToolReadiness``
+
+The sheaf and branch variants are vestigial: the TUI still renders them for
+older ledger streams, but the PSP-9 runtime no longer emits them.
 
 
 Data Flow
@@ -576,25 +538,26 @@ Data Flow
    |       |
    [tui]   [perspt-agent]
    |       |
-   |       +-- SRBNOrchestrator
-   |       |     +-- detect_workspace()  -> [plugins]
-   |       |     +-- plan_task()         -> [Architect Agent]
-   |       |     +-- control loop        -> next_ready_node() + [Actuator Agent]
-   |       |     +-- verify_node()       -> [LSP, TestRunner, Verifier Agent]
-   |       |     +-- sheaf_validate()    -> [Sheaf Validators]
-   |       |     +-- commit_node()       -> [MerkleLedger]
-   |       |     +-- derive SessionOutcome from completed/escalated counts
-   |       |     +-- emit Complete event with outcome
+   |       +-- Psp9AgentRuntime
+   |       |     +-- exploration        -> read-only repository map
+   |       |     +-- plan               -> architect turn (update_graph)
+   |       |     +-- dispatch           -> bounded multi-node scheduler
+   |       |     +-- tool loop          -> proposals -> admissibility kernel
+   |       |     +-- candidate overlay  -> reversible workspace mutations
+   |       |     +-- verifier/measure   -> sandboxed deterministic verification
+   |       |     +-- adjudicate         -> diff-only validator verdict
+   |       |     +-- integrate/promote  -> staging, integration gate, promotion
+   |       |     +-- recorder           -> hash-chained ledger events
    |       |
-   |       +-- AgentTools  (filesystem, search, commands)
-   |       +-- LspClient   (JSON-RPC stdio)
-   |       +-- TestRunner   (plugin-driven)
-   |       +-- ContextRetriever (workspace search)
+   |       +-- GenAiTransport            (provider-neutral model plane)
+   |       +-- CandidateHandlerRegistry  (open execution plane + tool families)
+   |       +-- ExternalToolRuntime       (governed MCP)
+   |       +-- LspClient                 (JSON-RPC stdio)
    |       |
-   |       +-- EventSender --> [perspt-tui AgentApp]
+   |       +-- EventSender --> [perspt-tui AgentApp / perspt-dashboard]
    |       +-- ActionReceiver <-- [perspt-tui ReviewModal]
    |
-   [perspt-store]  DuckDB persistence
+   [perspt-store]  DuckDB persistence (ledger, checkpoints, verdicts)
    [perspt-policy]  Starlark rule evaluation
    [perspt-sandbox]  Process isolation
 

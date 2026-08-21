@@ -18,13 +18,14 @@ Understanding the foundations of Perspt.
       :link: stability-agent-mode
       :link-type: doc
 
-      How the three Stability papers shape PSP-8, agent mode, and future plugins.
+      How the three Stability papers shape PSP-8, PSP-9 (Final), PSP-10, and
+      agent mode.
 
    .. grid-item-card:: Workspace Crates
       :link: workspace-crates
       :link-type: doc
 
-      The twelve-crate modular architecture.
+      The fourteen-crate modular architecture.
 
    .. grid-item-card:: PSP Process
       :link: psp-process

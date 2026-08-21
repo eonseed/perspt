@@ -46,7 +46,7 @@ Launch the plain-text CLI chat.
 
 .. code-block:: bash
 
-   perspt simple-chat [--log-file FILE]
+   perspt simple-chat [--model MODEL] [--log-file FILE]
 
 
 ``dashboard``
@@ -56,11 +56,12 @@ Launch the real-time web monitoring dashboard.
 
 .. code-block:: bash
 
-   perspt dashboard [--port PORT] [--bind ADDR] [--db-path PATH]
+   perspt dashboard [--port PORT] [--db-path PATH]
 
 - ``--port`` - HTTP port (default ``3000``)
-- ``--bind`` - Bind address (default ``127.0.0.1``)
 - ``--db-path`` - Path to DuckDB database file (default: platform data directory)
+
+The server always binds to ``127.0.0.1``.
 
 See :doc:`../howto/dashboard-setup` for configuration details.
 
@@ -114,7 +115,12 @@ Query the Merkle ledger.
 
 .. code-block:: bash
 
-   perspt ledger [--recent] [--stats] [--node NODE_ID]
+   perspt ledger [--recent] [--stats] [--rollback SESSION_PREFIX]
+
+- ``--recent`` - Show recent commits
+- ``--stats`` - Show ledger statistics
+- ``--rollback SESSION_PREFIX`` - Undo the session's newest completed
+  promotion and label it unsafe
 
 
 ``status``
@@ -126,21 +132,25 @@ Show current session status.
 
    perspt status
 
-Displays: per-node lifecycle counts (queued, running, verifying, retrying,
-completed, failed, escalated), latest energy breakdown, total retry count,
-recent escalation reports, step timeline summary (per-step-type counts,
-total step time), and correction attempt summaries (accepted/rejected counts
-per node).
+Displays: ledger event count, ledger head, measurement count, last energy,
+last gate decision, denial count, search forest/branch/no-good counters,
+validator verdicts, the Φ(W) conditional-capacity diagnostic,
+validator-independence statistics, pending external effects, and a
+``perspt replay`` hint.
 
 
 ``abort``
 ~~~~~~~~~
 
-Abort the current agent session.
+Abort a PSP-9 session by revoking its authority epoch.
 
 .. code-block:: bash
 
-   perspt abort
+   perspt abort [--force] [SESSION_ID]
+
+- ``-f, --force`` - Force abort without confirmation
+- ``SESSION_ID`` - Session to abort (defaults to the newest running PSP-9
+  session)
 
 
 ``resume``
@@ -150,11 +160,106 @@ Resume an interrupted session.
 
 .. code-block:: bash
 
-   perspt resume [--last]
+   perspt resume [SESSION_ID] [--last] [--db-path PATH]
 
-Displays trust context before resuming: escalation count, last energy state,
-total retries. The ``BudgetEnvelope`` (step/cost/revision caps) is restored from
-the database so limits continue from the interrupted session.
+- ``SESSION_ID`` - Session ID to resume
+- ``--last`` - Resume the most recent session
+- ``--db-path`` - Database file to inspect (defaults to the standard store)
+
+Displays the session id, task, working directory, and status before
+resuming, and verifies the ledger chain is valid.
+
+
+``audit``
+~~~~~~~~~
+
+Delayed audit labels and conformal activation (PSP-9).
+
+.. code-block:: bash
+
+   perspt audit [SAMPLE] [--safe] [--unsafe]
+
+- ``SAMPLE`` - Sample id (or unique prefix) to label; omit to list pending
+  samples
+- ``--safe`` - Label the sample as safe
+- ``--unsafe`` - Label the sample as unsafe
+
+
+``providers``
+~~~~~~~~~~~~~
+
+Print the provider capability matrix (PSP-9).
+
+.. code-block:: bash
+
+   perspt providers [--probe]
+
+- ``--probe`` - Run live behavioral probes against every configured model
+  route
+
+
+``replay``
+~~~~~~~~~~
+
+Deterministic, credential-free audit replay of a session (PSP-9).
+
+.. code-block:: bash
+
+   perspt replay <SESSION_ID> [--db-path PATH]
+
+- ``SESSION_ID`` - The session id to replay
+- ``--db-path`` - Database file to inspect (defaults to the standard store)
+
+
+``db``
+~~~~~~
+
+Inspect and repair the local DuckDB store.
+
+.. code-block:: bash
+
+   perspt db repair --db-path PATH [--discard-wal]
+
+- ``repair`` - Quarantine a poisoned WAL after making durable backups
+- ``--db-path`` - Database file to repair
+- ``--discard-wal`` - Explicitly authorize WAL quarantine; the WAL is never
+  deleted
+
+
+``prompts``
+~~~~~~~~~~~
+
+Inspect and maintain the compiled prompt section libraries (PSP-10).
+
+.. code-block:: bash
+
+   perspt prompts list
+   perspt prompts render <STAGE>
+   perspt prompts lint [--bundle DIR]
+   perspt prompts manifest <DIR>
+   perspt prompts explain-session --db-path PATH <SESSION_ID>
+
+- ``list`` - List every compiled section: id, version, stage, role, hash
+- ``render <STAGE>`` - Compose one stage with fixture variables and print it
+- ``lint`` - Run the codegen validation list over an external bundle
+  directory
+- ``manifest <DIR>`` - Regenerate a prompt library's committed
+  ``manifest.toml`` (explicit)
+- ``explain-session`` - Show the programs a session actually compiled, with
+  digests
+
+
+``context``
+~~~~~~~~~~~
+
+Explain a session's recorded resident-context events (PSP-10).
+
+.. code-block:: bash
+
+   perspt context explain-turn --db-path PATH <SESSION_ID>
+
+- ``explain-turn`` - Show a session's recorded context events (compactions,
+  refusals)
 
 
 ``benchmark`` (optional)
@@ -172,18 +277,9 @@ separate evaluation runner. It is absent from the default CLI build.
 ``validate`` is credential-free. ``run`` is explicit and credentialed; its
 ``smoke``, ``adaptive``, and ``full`` suites use production role resolution
 from the selected Perspt configuration and record the configured topology.
-Coding verification stays deterministic, so a configured verifier route is
-provenance rather than a model call. Model names and family labels are not
-benchmark arguments.
-
-
-``logs``
-~~~~~~~~
-
-View LLM call logs and token metrics. Full prompt/response text is only
-available when ``--log-llm`` was active during the session; basic token
-usage, latency, and cost data are always recorded.
-
-.. code-block:: bash
-
-   perspt logs [--tui] [--last] [--stats]
+``run --tasks <N>`` overrides the suite's task count. Coding verification
+stays deterministic, so a configured verifier route is provenance rather
+than a model call. Model names and family labels are not benchmark
+arguments. The benchmark is manual-only and feature-gated — the
+``perspt-benchmark`` crate is a separate optional crate — and a benchmark
+run is never part of normal validation or CI.
