@@ -42,7 +42,7 @@ similar = { workspace = true }
 throbber-widgets-tui = "0.11"
 
 # Markdown Rendering (terminal)
-termimad = "0.34"
+termimad = "0.35"
 
 # Markdown to Ratatui Text
 tui-markdown = { version = "0.3.8", default-features = false }
