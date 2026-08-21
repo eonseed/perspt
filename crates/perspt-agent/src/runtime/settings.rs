@@ -30,6 +30,12 @@ pub struct Psp9RunConfig {
     /// Declare the plugin `format` verifier stage as an acceptance sensor
     /// (`[verification] require_format`). Off by default.
     pub require_format: bool,
+    /// How project tests contribute to acceptance. Ordinary development uses
+    /// `Evolving`; stronger regression or protected-oracle evidence is
+    /// deliberately opt-in.
+    pub test_policy: perspt_core::TestPolicy,
+    /// Protected acceptance material for `TestPolicy::ExternalOracle`.
+    pub external_oracle: Option<perspt_core::ExternalOracleConfig>,
     /// Per-stage governed verifier wall-clock limits
     /// (`[verification] stage_timeout_secs` + per-stage overrides).
     pub verifier_timeouts: crate::verifier::VerifierTimeouts,
@@ -59,6 +65,8 @@ impl Default for Psp9RunConfig {
             max_parallel_nodes: 1,
             turn_deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
             require_format: false,
+            test_policy: perspt_core::TestPolicy::Evolving,
+            external_oracle: None,
             verifier_timeouts: crate::verifier::VerifierTimeouts::default(),
             resident: crate::toolloop::ResidentReserves::default(),
             ablate_correction_packets: false,
@@ -100,6 +108,8 @@ pub(super) fn apply_config_overrides(
     }
     if let Some(verification) = &config.verification {
         run_config.require_format = verification.require_format.unwrap_or(false);
+        run_config.test_policy = verification.test_policy.unwrap_or_default();
+        run_config.external_oracle = verification.external_oracle.clone();
         let defaults = crate::verifier::VerifierTimeouts::default();
         run_config.verifier_timeouts = crate::verifier::VerifierTimeouts {
             default_secs: verification
@@ -173,5 +183,20 @@ mod tests {
                 .as_secs(),
             180
         );
+    }
+
+    #[test]
+    fn test_policy_folds_from_verification_config() {
+        let mut config = perspt_core::Config::default();
+        config.verification = Some(perspt_core::config::VerificationConfig {
+            test_policy: Some(perspt_core::TestPolicy::BackwardCompatible),
+            ..Default::default()
+        });
+        let folded = apply_config_overrides(Psp9RunConfig::default(), &config);
+        assert_eq!(
+            folded.test_policy,
+            perspt_core::TestPolicy::BackwardCompatible
+        );
+        assert!(folded.external_oracle.is_none());
     }
 }

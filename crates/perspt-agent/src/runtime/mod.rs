@@ -302,6 +302,7 @@ impl Psp9AgentRuntime {
                 "model": self.model,
                 "fallback_models": self.fallback_models,
                 "mode": "tool_loop",
+                "test_policy": self.config.test_policy.as_str(),
             }),
         )?;
         self.record_route_capabilities(&recorder)?;

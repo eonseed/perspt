@@ -683,6 +683,7 @@ impl Psp9AgentRuntime {
                 .with_domain(self.domain.clone())
                 .with_max_parallel(self.config.max_parallel_verifiers)
                 .with_require_format(self.config.require_format)
+                .with_test_policy(self.config.test_policy, self.config.external_oracle.clone())
                 .with_correction_packets(!self.config.ablate_correction_packets);
         let measured = crate::toolloop::CandidateMeasurer::measure(&measurer).await?;
         let candidate_id = format!("{}/{}/{branch_id}", forest.node_id, forest.generation);
