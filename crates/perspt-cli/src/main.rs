@@ -487,7 +487,7 @@ async fn main() -> Result<()> {
             session_id,
             last,
             db_path,
-        }) => commands::resume::run(session_id, last, db_path).await,
+        }) => commands::resume::run(session_id, last, db_path, config_override).await,
         Some(Commands::SimpleChat { model, log_file }) => {
             commands::simple_chat::run(commands::simple_chat::SimpleChatArgs {
                 model,
