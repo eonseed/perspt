@@ -117,6 +117,15 @@ discovery failures, policy rejections, and admitted operations. ``/help``
 includes MCP and elicitation commands. The model calls tools automatically;
 ``/mcp`` performs no remote call.
 
+Normal chat starts without discovery or policy messages in the conversation.
+When the model selects an admitted operation, the TUI shows one transient,
+human-readable activity label and then the final answer. Raw MCP lifecycle
+events, tool arguments, results, subscription notifications, and server logs
+stay out of both the conversation and the reasoning panel. Use ``/mcp`` when
+you explicitly want discovery and admission diagnostics. **Ctrl+R** remains
+the reasoning control and displays only reasoning emitted by the selected
+model; tool-aware Qwen turns use the same reasoning stream.
+
 Chat has a fixed read-only authority ceiling. Mutating, shell, network-fetch,
 dependency, graph, and policy effects are rejected even when the same tool is
 admissible in the governed agent. ``perspt simple-chat`` intentionally creates

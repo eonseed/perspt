@@ -97,9 +97,15 @@ sampling, elicitation, subscriptions, and tasks from any ``[[external_tools]]``
 server entry in ``config.toml`` with ``modes = ["chat"]`` or
 ``modes = ["agent", "chat"]`` is considered for read-only admission. Every
 allowed remote tool also needs an exact local policy table. Tool activity is
-shown inline in the conversation, and tool results are labeled as untrusted
-content. Unicode and multiline terminal clipboard paste is inserted at the
-input cursor. See :doc:`mcp` for configuration and the security boundary.
+shown as a concise transient status only while a call is active. MCP protocol
+events, arguments, results, discovery notices, and subscription traces do not
+become conversation or reasoning content. The selected model chooses an
+admitted tool automatically when needed; ``/mcp`` is the explicit diagnostic
+surface. Tool results are labeled as untrusted content before returning to the
+model. **Ctrl+R** continues to control genuine model reasoning, including
+tool-aware turns. Unicode and multiline terminal clipboard paste is inserted
+at the input cursor. See :doc:`mcp` for configuration and the security
+boundary.
 
 Simple CLI Mode
 ---------------
