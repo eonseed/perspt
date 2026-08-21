@@ -17,7 +17,9 @@ Before installation, verify that the host environment conforms to the following 
    * - Component
      - Specification Requirement
    * - **Operating System**
-     - Linux, macOS, or Windows (via Windows Subsystem for Linux)
+     - Linux, macOS, or Windows. Native Windows coding requires the explicit
+       reduced-isolation option; use Windows Subsystem for Linux when OS
+       sandbox isolation is required.
    * - **Rust Compiler**
      - Version 1.97.1 or later (required for building from source)
    * - **Terminal Emulator**

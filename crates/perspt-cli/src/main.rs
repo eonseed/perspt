@@ -98,6 +98,10 @@ enum Commands {
         #[arg(long)]
         allow_dependency_mutation: bool,
 
+        /// Run coding processes without an OS sandbox (reduced isolation)
+        #[arg(long)]
+        allow_unisolated: bool,
+
         /// Concurrent work-graph nodes (default 1; above 1 requires --yes)
         #[arg(long, default_value = "1")]
         max_parallel_nodes: usize,
@@ -421,6 +425,7 @@ async fn main() -> Result<()> {
             persistent_grants,
             domain,
             allow_dependency_mutation,
+            allow_unisolated,
             max_parallel_nodes,
             exploration_only,
             allow_experimental_prompts,
@@ -449,6 +454,7 @@ async fn main() -> Result<()> {
                 persistent_grants,
                 domain,
                 allow_dependency_mutation,
+                allow_unisolated,
                 max_parallel_nodes,
                 exploration_only,
                 allow_experimental_prompts,

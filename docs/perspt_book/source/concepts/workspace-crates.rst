@@ -220,7 +220,10 @@ Each Starlark policy is a single function that receives the command string and r
 perspt-sandbox
 ~~~~~~~~~~~~~~
 
-Command sandboxing library. It spawns verifiers and test runners inside isolated process boundaries to prevent local system resource contamination.
+Bounded command-execution and process-isolation library. It uses Bubblewrap on
+Linux and ``sandbox-exec`` on macOS, fails closed when required isolation is
+unavailable, and exposes an explicit best-effort mode for externally isolated
+embedders and acknowledged native Windows operation.
 
 * ``SandboxedCommand``: Wraps standard library commands, enforcing memory ceilings, processor timeouts, environment sanitization, and redirecting stdout/stderr to files for analysis.
 

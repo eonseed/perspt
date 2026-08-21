@@ -59,6 +59,11 @@ jobs:
             2. Make it executable (Linux/macOS): `chmod +x perspt-*`
             3. Move to your PATH: `sudo mv perspt-* /usr/local/bin/perspt`
 
+            Native Windows supports chat, MCP, and coding. Coding processes
+            fail closed by default because Perspt has no native Windows sandbox;
+            use `perspt agent --allow-unisolated ...` only after accepting that
+            reduced-isolation mode, or use WSL for OS isolation.
+
             ## Documentation
             See the [documentation](https://eonseed.github.io/perspt/) for detailed usage instructions.
           draft: false

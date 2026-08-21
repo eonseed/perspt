@@ -98,6 +98,18 @@ proof. The external policy supplies that independence when the user, CI, or a
 release process owns the acceptance suite. Configuration and complete examples
 are in :doc:`../configuration`.
 
+Windows Process Isolation
+-------------------------
+
+On native Windows, TUI chat and ``simple-chat`` require no special option.
+Coding remains strict by default and refuses to start verifier or inspection
+processes because Perspt does not yet implement a restricted-token/ACL sandbox.
+Use ``--allow-unisolated`` for a single acknowledged run, or configure
+``[verification] allow_unisolated = true`` when durable resume is required.
+The candidate overlay, deterministic admission kernel, measurement gates,
+ledger, and promotion approval remain active, but child processes can access
+anything the host user can access. WSL provides the Linux sandbox path.
+
 Multi-Node Dispatch
 -------------------
 

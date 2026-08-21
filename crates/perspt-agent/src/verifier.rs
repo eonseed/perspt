@@ -82,9 +82,7 @@ pub(crate) async fn run_governed_verifier(
     std::fs::create_dir_all(&target)?;
     let read_roots = verifier_read_roots(&root, &extra_env);
     let mut process = if allow_unisolated {
-        let mut process = Command::new("/bin/sh");
-        process.arg("-c").arg(&command).current_dir(&root);
-        process
+        host_shell(&root, &command)
     } else {
         isolated_command(&root, &command, &read_roots)?
     };
@@ -104,12 +102,16 @@ pub(crate) async fn run_governed_verifier(
         .map(PathBuf::from)
         .or_else(|| original_home.as_ref().map(|home| home.join(".rustup")));
     process
+        .env_clear()
+        .envs(verifier_environment())
         .env("HOME", &isolated_home)
         .env("CARGO_NET_OFFLINE", "true")
         .env("CARGO_TARGET_DIR", target)
         .env("UV_CACHE_DIR", uv_cache)
         .env("UV_OFFLINE", "1")
         .env("TMPDIR", tmp)
+        .env("TEMP", root.join(".perspt-tmp").join(&target_suffix))
+        .env("TMP", root.join(".perspt-tmp").join(&target_suffix))
         .envs(extra_env)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -137,6 +139,39 @@ pub(crate) async fn run_governed_verifier(
             String::from_utf8_lossy(&output.stderr)
         ),
     })
+}
+
+fn verifier_environment() -> Vec<(String, String)> {
+    [
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "SystemRoot",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok().map(|value| (key.into(), value)))
+    .collect()
+}
+
+#[cfg(windows)]
+fn host_shell(root: &Path, command: &str) -> Command {
+    let mut process = Command::new("cmd.exe");
+    process
+        .args(["/D", "/S", "/C"])
+        .arg(command)
+        .current_dir(root);
+    process
+}
+
+#[cfg(not(windows))]
+fn host_shell(root: &Path, command: &str) -> Command {
+    let mut process = Command::new("/bin/sh");
+    process.arg("-c").arg(command).current_dir(root);
+    process
 }
 
 #[cfg(target_os = "macos")]

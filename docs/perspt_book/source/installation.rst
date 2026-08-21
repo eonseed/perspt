@@ -8,7 +8,9 @@ To deploy and execute Perspt, the environment must satisfy the specified system 
 System Requirements
 -------------------
 
-- **Operating System**: macOS, Linux, or Windows (via Windows Subsystem for Linux).
+- **Operating System**: Linux, macOS, or Windows. Native Windows supports all
+  interface modes and explicit reduced-isolation coding; use Windows Subsystem
+  for Linux when the coding agent must have an OS sandbox.
 - **Rust Toolchain**: Version 1.97.1 or later (required for compilation from source).
 - **Terminal Emulator**: Must support 256-color escape codes and UTF-8 encoding.
 
@@ -80,6 +82,25 @@ Agent Mode Prerequisites
 ------------------------
 
 Autonomous agent execution requires the presence of domain-specific compilers, type checkers, and test runners on the system path.
+
+Native Windows has no Perspt process-sandbox backend. Strict agent mode fails
+closed before starting compiler, test, lint, inspection, or LSP processes. To
+accept native host-user execution explicitly, use:
+
+.. code-block:: powershell
+
+   perspt agent --allow-unisolated -w . "Implement the requested change"
+
+The same durable setting is useful for resume:
+
+.. code-block:: toml
+
+   [verification]
+   allow_unisolated = true
+
+This mode retains candidate overlays, capability checks, verification gates,
+journaling, and promotion approval, but it does not isolate filesystem or
+network access by child processes. Prefer WSL when that boundary matters.
 
 Python Domain
 ~~~~~~~~~~~~~

@@ -55,6 +55,8 @@ pub struct LspClient {
     process: Option<Child>,
     /// Whether the server is initialized
     initialized: bool,
+    /// Explicit reduced-isolation mode inherited from the agent run.
+    allow_unisolated: bool,
 }
 
 impl LspClient {
@@ -69,6 +71,7 @@ impl LspClient {
             language_id: String::new(),
             process: None,
             initialized: false,
+            allow_unisolated: false,
         }
     }
 
@@ -86,7 +89,13 @@ impl LspClient {
             language_id: config.language_id.clone(),
             process: None,
             initialized: false,
+            allow_unisolated: false,
         }
+    }
+
+    pub(crate) fn allow_unisolated(mut self, allow: bool) -> Self {
+        self.allow_unisolated = allow;
+        self
     }
 
     /// Get the command for a known language server
@@ -133,12 +142,12 @@ impl LspClient {
     ) -> Result<()> {
         log::info!("Starting LSP server: {} {:?}", cmd, args);
 
-        let prepared = ProcessSandbox::new(
-            cmd,
-            args.to_vec(),
-            ProcessPolicy::inspection(workspace_root),
-        )?
-        .prepare_invocation()?;
+        let policy = if self.allow_unisolated {
+            ProcessPolicy::inspection(workspace_root).best_effort()
+        } else {
+            ProcessPolicy::inspection(workspace_root)
+        };
+        let prepared = ProcessSandbox::new(cmd, args.to_vec(), policy)?.prepare_invocation()?;
         let mut child = Command::new(&prepared.program);
         child
             .args(&prepared.args)

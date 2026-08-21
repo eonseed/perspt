@@ -25,6 +25,7 @@ pub async fn run(
     persistent_grants: bool,
     domain: Option<String>,
     allow_dependency_mutation: bool,
+    allow_unisolated: bool,
     max_parallel_nodes: usize,
     exploration_only: bool,
     allow_experimental_prompts: bool,
@@ -77,6 +78,7 @@ pub async fn run(
         approval_policy,
         max_parallel_verifiers: max_parallel.max(1),
         persistent_grants,
+        allow_unisolated_verifiers: allow_unisolated,
         allow_dependency_mutation,
         max_parallel_nodes: max_parallel_nodes.max(1),
         ..perspt_agent::Psp9RunConfig::default()
@@ -96,6 +98,19 @@ pub async fn run(
         "non-interactive run requires --yes: promotion approval cannot be \
          prompted without a terminal"
     );
+
+    let reduced_isolation = allow_unisolated
+        || config
+            .verification
+            .as_ref()
+            .and_then(|verification| verification.allow_unisolated)
+            .unwrap_or(false);
+    if reduced_isolation && !exploration_only {
+        eprintln!(
+            "WARNING: reduced isolation is enabled. Agent-started programs can use your \
+             host-user authority."
+        );
+    }
 
     let mut runtime = perspt_agent::Psp9AgentRuntime::from_config(
         working_dir.clone(),

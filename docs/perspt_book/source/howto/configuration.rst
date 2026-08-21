@@ -125,7 +125,7 @@ context; every configured reserve must be positive:
    output_reserve_tokens = 4096
 
 ``[verification]`` sets the test-evidence policy, optional ``format`` sensor,
-and per-stage timeouts. ``evolving`` is the iterative-development default;
+process-isolation fallback, and per-stage timeouts. ``evolving`` is the iterative-development default;
 ``backward-compatible`` additionally runs recognized historical test files;
 ``external-oracle`` additionally runs a protected overlay configured under
 ``[verification.external_oracle]``:
@@ -134,8 +134,14 @@ and per-stage timeouts. ``evolving`` is the iterative-development default;
 
    [verification]
    test_policy = "evolving"
+   allow_unisolated = false
    require_format = true
    stage_timeout_secs = 180
+
+Keep ``allow_unisolated`` false for fail-closed execution. Native Windows users
+may set it true to run compilers, tests, inspection commands, and LSP servers
+without an OS sandbox; Perspt retains its agent-level gates but child processes
+have the host user's authority.
 
 Environment Variables
 ---------------------

@@ -50,7 +50,8 @@ impl CandidateToolHandler for LspQuery {
         let config = plugin.get_lsp_config();
         let mut sessions = workspace.lsp_sessions().lock().await;
         if !sessions.contains_key(plugin.name()) {
-            let mut client = crate::lsp::LspClient::from_config(&config);
+            let mut client = crate::lsp::LspClient::from_config(&config)
+                .allow_unisolated(workspace.unisolated_verifiers_allowed());
             client.start_with_config(&config, &overlay_root).await?;
             sessions.insert(
                 plugin.name().to_string(),

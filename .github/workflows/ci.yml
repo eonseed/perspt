@@ -33,7 +33,9 @@ env:
 jobs:
   quality:
     name: PR gate (Ubuntu)
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.cross_platform)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -103,7 +105,9 @@ jobs:
 
   code-rules:
     name: PSP code rules
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    if: >-
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      (github.event_name != 'workflow_dispatch' || !inputs.cross_platform)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

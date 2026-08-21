@@ -182,7 +182,8 @@ The governed PSP-9/PSP-10 agent runtime.
   adjudicator, evidence summarizer, capability probe)
 - ``grant`` - Persistent grant signing-key resolution
 - ``probe`` - ``probe_route``/``ProbeReport``: behavioral provider probes
-- ``promote`` - Descriptor-relative workspace promotion
+- ``promote`` - Descriptor-relative workspace promotion on Unix; native
+  write-through replacement plus best-effort reparse-point rejection on Windows
 - ``realize`` - ``SnapshotRealizer``: content-addressed workspace states
 - ``exploration`` - Deterministic, read-only repository orientation
 - ``external_tools`` - Official-SDK MCP 2026-07-28 client (stdio/stateless
@@ -208,7 +209,9 @@ The governed PSP-9/PSP-10 agent runtime.
    kernel, and realizes it against the reversible candidate overlay
    (``candidate.rs``)
 5. Measurement - ``measure.rs`` re-measures the candidate through the plugin
-   verifier suite inside the sandboxed verifier (``verifier.rs``); the gate
+   verifier suite inside the sandboxed verifier (``verifier.rs``), or through
+   explicitly acknowledged host-user execution in native Windows reduced-
+   isolation mode; the gate
    is evaluated on the re-measured candidate, never on the model's account
    of it. The default evolving-test policy measures the resulting tests;
    backward-compatible and protected external evidence are explicit additions,
@@ -217,7 +220,10 @@ The governed PSP-9/PSP-10 agent runtime.
    records an uncalibrated verdict (``runtime/adjudicate.rs``)
 7. Staging and integration - node winners stage into a graph workspace and
    must pass the global integration gate before descriptor-relative
-   promotion (``runtime/integrate.rs``, ``promote.rs``)
+   promotion (``runtime/integrate.rs``, ``promote.rs``). Unix promotion holds
+   ancestor directory descriptors; Windows uses write-through native replace
+   operations and rejects observed reparse points, without claiming the same
+   race-resistant boundary.
 8. Recording - every event lands in the durable hash-chained ledger
    (``runtime/recorder.rs``); interrupted sessions resume from the newest
    durable checkpoint with exactly the remaining budgets

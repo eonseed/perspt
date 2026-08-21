@@ -475,8 +475,10 @@ admissibility kernel checks it against the node's capability (path patterns,
 command patterns, effect kinds), and only an admitted effect executes —
 against the isolated candidate overlay, never the user workspace. Proposed
 commands additionally pass the deterministic ``sanitize_command`` and
-workspace-bound guards plus the Starlark policy engine, and run inside the
-process sandbox. The candidate journals a pre-image of every file it
+workspace-bound guards plus the Starlark policy engine, and normally run inside
+the process sandbox. Explicit native Windows reduced-isolation mode retains
+those agent checks but runs child processes with host-user authority. The
+candidate journals a pre-image of every file it
 touches, so any attempt can be discarded without residue.
 
 
