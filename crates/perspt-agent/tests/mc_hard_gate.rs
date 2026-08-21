@@ -10,6 +10,7 @@ use std::sync::Arc;
 use perspt_agent::toolloop::CandidateMeasurer;
 use perspt_agent::{CandidateWorkspace, CodingCandidateMeasurer};
 use perspt_core::plugin::VerifierStage;
+use perspt_core::{ExternalOracleConfig, TestPolicy};
 use perspt_research::ResearchDomain;
 use perspt_sdk::{AgentDomainPackage, DomainScope, ResidualClass};
 
@@ -133,6 +134,10 @@ fn rust_fixture(dir: &std::path::Path, lib_body: &str) {
 }
 
 async fn apply_lib(workspace: &CandidateWorkspace, content: &str) {
+    apply_file(workspace, "src/lib.rs", content).await;
+}
+
+async fn apply_file(workspace: &CandidateWorkspace, path: &str, content: &str) {
     let entry = perspt_sdk::base_entries()
         .into_iter()
         .find(|entry| entry.name == "write_file")
@@ -140,10 +145,106 @@ async fn apply_lib(workspace: &CandidateWorkspace, content: &str) {
     let call = perspt_sdk::ProviderToolCall {
         call_id: "w1".into(),
         name: "write_file".into(),
-        arguments: serde_json::json!({"path": "src/lib.rs", "content": content}),
+        arguments: serde_json::json!({"path": path, "content": content}),
     };
     use perspt_agent::toolloop::EffectExecutor;
     workspace.apply(&call, &entry).await.unwrap();
+}
+
+#[tokio::test]
+async fn evolving_tests_allow_an_intentional_contract_change() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+    std::fs::write(
+        dir.path().join("tests/contract.rs"),
+        "use lint_gate_fixture::answer; #[test] fn contract() { assert_eq!(answer(), 2); }\n",
+    )
+    .unwrap();
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    apply_lib(&workspace, "pub fn answer() -> u32 { 3 }\n").await;
+    apply_file(
+        &workspace,
+        "tests/contract.rs",
+        "use lint_gate_fixture::answer; #[test] fn contract() { assert_eq!(answer(), 3); }\n",
+    )
+    .await;
+
+    let evolving = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .measure()
+        .await
+        .unwrap();
+    assert!(
+        evolving.hard_pass,
+        "the resulting implementation and resulting tests are authoritative in evolving mode"
+    );
+
+    let compatible = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .with_test_policy(TestPolicy::BackwardCompatible, None)
+        .measure()
+        .await
+        .unwrap();
+    assert!(
+        !compatible.hard_pass,
+        "backward-compatible mode must additionally enforce the old contract"
+    );
+}
+
+#[tokio::test]
+async fn external_oracle_is_additional_protected_acceptance_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    rust_fixture(dir.path(), "pub fn answer() -> u32 { 2 }\n");
+    let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "rev-0").unwrap();
+    apply_lib(&workspace, "pub fn answer() -> u32 { 3 }\n").await;
+    let protected = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(protected.path().join("tests")).unwrap();
+    std::fs::write(
+        protected.path().join("tests/acceptance.rs"),
+        "use lint_gate_fixture::answer; #[test] fn acceptance() { assert_eq!(answer(), 4); }\n",
+    )
+    .unwrap();
+
+    let measured = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .with_test_policy(
+            TestPolicy::ExternalOracle,
+            Some(ExternalOracleConfig {
+                path: protected.path().to_path_buf(),
+                command: "cargo test --test acceptance".into(),
+            }),
+        )
+        .measure()
+        .await
+        .unwrap();
+    assert!(
+        !measured.hard_pass,
+        "the protected acceptance suite must gate the candidate"
+    );
+
+    std::fs::write(
+        protected.path().join("tests/acceptance.rs"),
+        "use lint_gate_fixture::answer; #[test] fn acceptance() { assert_eq!(answer(), 3); }\n",
+    )
+    .unwrap();
+    let accepted = CodingCandidateMeasurer::new(&workspace, "n1", 0)
+        .with_test_policy(
+            TestPolicy::ExternalOracle,
+            Some(ExternalOracleConfig {
+                path: protected.path().to_path_buf(),
+                command: "cargo test --test acceptance".into(),
+            }),
+        )
+        .measure()
+        .await
+        .unwrap();
+    assert!(
+        accepted.hard_pass,
+        "a passing protected suite must permit the otherwise valid candidate: {:?}",
+        accepted
+            .residuals
+            .iter()
+            .map(|residual| &residual.evidence.summary)
+            .collect::<Vec<_>>()
+    );
 }
 
 /// A clippy warning is advisory: it surfaces as a Lint residual with

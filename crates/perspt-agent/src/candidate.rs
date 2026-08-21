@@ -523,11 +523,12 @@ impl CandidateWorkspace {
         }
     }
 
-    /// Build a second candidate whose implementation matches the current
-    /// candidate but whose pre-existing test files are restored to their
-    /// source pre-images. This prevents a candidate from certifying itself by
-    /// weakening the test oracle it is measured against.
-    pub(crate) fn immutable_test_oracle(&self) -> Result<Option<ImmutableTestOracle>> {
+    /// Build the optional regression view for the explicit
+    /// `backward-compatible` test policy. The candidate suite still runs in
+    /// full; this second view restores recognized pre-existing test files and
+    /// removes newly added test files. It is deliberately not the default:
+    /// an intentional contract change may legitimately supersede old tests.
+    pub(crate) fn backward_compatibility_tests(&self) -> Result<Option<TestEvidenceWorkspace>> {
         let registry = perspt_core::PluginRegistry::new();
         let plugins = registry.detect_all(&self.overlay_root);
         let preimages = self.source_preimages.lock().unwrap();
@@ -552,10 +553,11 @@ impl CandidateWorkspace {
         }
 
         let temp = tempfile::Builder::new()
-            .prefix("perspt-test-oracle-")
+            .prefix("perspt-regression-tests-")
             .tempdir()?;
         let root = temp.path().join("workspace");
         std::fs::create_dir_all(&root)?;
+        let root = root.canonicalize()?;
         copy_workspace(&self.overlay_root, &root)?;
         for (relative, source_preimage) in touched_tests {
             let path = root.join(&relative);
@@ -570,7 +572,48 @@ impl CandidateWorkspace {
                 None => {}
             }
         }
-        Ok(Some(ImmutableTestOracle { _temp: temp, root }))
+        Ok(Some(TestEvidenceWorkspace { _temp: temp, root }))
+    }
+
+    /// Build a protected acceptance view for the explicit `external-oracle`
+    /// policy. The supplied directory is copied over a private copy of the
+    /// resulting candidate only at measurement time, so its tests and harness
+    /// can replace candidate-controlled files without entering promotion.
+    pub(crate) fn external_oracle_tests(
+        &self,
+        configured_path: &Path,
+    ) -> Result<TestEvidenceWorkspace> {
+        let oracle_path = if configured_path.is_absolute() {
+            configured_path.to_path_buf()
+        } else {
+            self.source_root.join(configured_path)
+        };
+        let oracle_path = oracle_path.canonicalize().with_context(|| {
+            format!(
+                "canonicalizing external test oracle {}",
+                oracle_path.display()
+            )
+        })?;
+        anyhow::ensure!(
+            oracle_path.is_dir(),
+            "external test oracle is not a directory: {}",
+            oracle_path.display()
+        );
+        anyhow::ensure!(
+            oracle_path != self.source_root && !self.source_root.starts_with(&oracle_path),
+            "external test oracle must be a dedicated directory, not the workspace or one of \
+             its ancestors: {}",
+            oracle_path.display()
+        );
+        let temp = tempfile::Builder::new()
+            .prefix("perspt-external-oracle-")
+            .tempdir()?;
+        let root = temp.path().join("workspace");
+        std::fs::create_dir_all(&root)?;
+        let root = root.canonicalize()?;
+        copy_workspace(&self.overlay_root, &root)?;
+        copy_workspace(&oracle_path, &root)?;
+        Ok(TestEvidenceWorkspace { _temp: temp, root })
     }
 }
 
@@ -658,7 +701,8 @@ struct JournalEntry {
     prior: Option<Vec<u8>>,
 }
 
-pub(crate) struct ImmutableTestOracle {
+#[derive(Debug)]
+pub(crate) struct TestEvidenceWorkspace {
     _temp: TempDir,
     pub(crate) root: PathBuf,
 }
@@ -993,7 +1037,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn immutable_oracle_restores_existing_tests_but_keeps_candidate_code() {
+    async fn backward_compatible_view_restores_old_tests_but_keeps_candidate_code() {
         let source = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(source.path().join("src")).unwrap();
         std::fs::create_dir_all(source.path().join("tests")).unwrap();
@@ -1024,7 +1068,7 @@ mod tests {
             .await
             .unwrap();
 
-        let oracle = candidate.immutable_test_oracle().unwrap().unwrap();
+        let oracle = candidate.backward_compatibility_tests().unwrap().unwrap();
         assert_eq!(
             std::fs::read_to_string(oracle.root.join("src/logic.py")).unwrap(),
             "VALUE = 'candidate'\n"
@@ -1033,6 +1077,48 @@ mod tests {
             std::fs::read_to_string(oracle.root.join("tests/test_logic.py")).unwrap(),
             "def test_value(): assert False\n"
         );
+    }
+
+    #[tokio::test]
+    async fn external_oracle_overlays_protected_evidence_onto_candidate_code() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(source.path().join("src")).unwrap();
+        std::fs::write(source.path().join("Cargo.toml"), "candidate manifest\n").unwrap();
+        std::fs::write(source.path().join("src/lib.rs"), "source code\n").unwrap();
+        let protected = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(protected.path().join("tests")).unwrap();
+        std::fs::write(
+            protected.path().join("tests/acceptance.rs"),
+            "protected test\n",
+        )
+        .unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        candidate
+            .apply(
+                &write_call("src/lib.rs", "candidate code\n"),
+                &write_entry(),
+            )
+            .await
+            .unwrap();
+
+        let oracle = candidate.external_oracle_tests(protected.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(oracle.root.join("src/lib.rs")).unwrap(),
+            "candidate code\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(oracle.root.join("tests/acceptance.rs")).unwrap(),
+            "protected test\n"
+        );
+    }
+
+    #[test]
+    fn external_oracle_refuses_the_workspace_as_its_overlay() {
+        let source = tempfile::tempdir().unwrap();
+        std::fs::write(source.path().join("Cargo.toml"), "candidate manifest\n").unwrap();
+        let candidate = CandidateWorkspace::create(source.path(), "n1", 0, "r1").unwrap();
+        let error = candidate.external_oracle_tests(source.path()).unwrap_err();
+        assert!(error.to_string().contains("dedicated directory"));
     }
 
     #[tokio::test]

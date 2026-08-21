@@ -4,7 +4,8 @@
 //! Two nodes may pass separately and fail together. Node winners enter a
 //! content-addressed staging root instead of the user workspace; disjoint
 //! winners merge deterministically; one global verifier gate runs the full
-//! domain suite and the immutable test oracle on the combined state; and
+//! domain suite and the configured test-evidence policy on the combined
+//! state; and
 //! only a hard-passing integration root is promoted, atomically, through
 //! the hardened path. Failure restores the prior staging root — the user
 //! workspace never contains one winner without the rest of its verified
@@ -231,9 +232,9 @@ pub(super) fn transitive_predecessors(
 impl Psp9AgentRuntime {
     /// Run the global integration gate over the staging root (Gate AA):
     /// realize the combined state in one eager-copy integration workspace,
-    /// run the full suite and the immutable oracle, and promote atomically
-    /// only on a global hard pass. `None` means integration failed and the
-    /// prior root is restored (nothing reached the user workspace).
+    /// run the full suite and configured test-evidence policy, and promote
+    /// atomically only on a global hard pass. `None` means integration failed
+    /// and the prior root is restored (nothing reached the user workspace).
     pub(super) async fn run_integration_gate(
         &self,
         recorder: &Psp9Recorder,
@@ -267,6 +268,7 @@ impl Psp9AgentRuntime {
             .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers)
             .with_require_format(self.config.require_format)
+            .with_test_policy(self.config.test_policy, self.config.external_oracle.clone())
             .measure()
             .await?;
         recorder.record_custom(

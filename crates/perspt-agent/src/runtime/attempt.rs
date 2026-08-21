@@ -146,6 +146,7 @@ impl Psp9AgentRuntime {
             .with_domain(self.domain.clone())
             .with_max_parallel(self.config.max_parallel_verifiers)
             .with_require_format(self.config.require_format)
+            .with_test_policy(self.config.test_policy, self.config.external_oracle.clone())
             .with_correction_packets(!self.config.ablate_correction_packets);
         let tool_loop = ToolLoop {
             transport: self.transport.as_ref(),

@@ -14,7 +14,7 @@ use perspt_sdk::{
     ResidualClass, ResidualEvent, ResidualSeverity, SensorRef,
 };
 
-use crate::candidate::CandidateWorkspace;
+use crate::candidate::{CandidateWorkspace, TestEvidenceWorkspace};
 use crate::toolloop::{CandidateMeasurer, Measured};
 use crate::verifier::{run_governed_verifier, VerifierExecution, VerifierJob};
 
@@ -22,6 +22,30 @@ use crate::verifier::{run_governed_verifier, VerifierExecution, VerifierJob};
 /// gate stages, interactive `run_*` tools, and the incremental syntax pass
 /// warm one another instead of each paying a cold build.
 pub(crate) const SHARED_TARGET_SUFFIX: &str = "shared";
+
+#[derive(Default)]
+struct AdditionalTestEvidence<'a> {
+    regression_root: Option<&'a Path>,
+    external_oracle: Option<(&'a Path, &'a str)>,
+}
+
+#[derive(Default)]
+struct PreparedTestEvidence {
+    regression: Option<TestEvidenceWorkspace>,
+    external: Option<(TestEvidenceWorkspace, String)>,
+}
+
+impl PreparedTestEvidence {
+    fn borrowed(&self) -> AdditionalTestEvidence<'_> {
+        AdditionalTestEvidence {
+            regression_root: self.regression.as_ref().map(|view| view.root.as_path()),
+            external_oracle: self
+                .external
+                .as_ref()
+                .map(|(view, command)| (view.root.as_path(), command.as_str())),
+        }
+    }
+}
 
 /// Execution order within one shared target dir: the cheap check warms the
 /// metadata, the build warms the full artifacts, tests/lints reuse them.
@@ -45,6 +69,8 @@ pub struct CodingCandidateMeasurer<'a> {
     adapters: CodingAdapterRegistry,
     max_parallel: usize,
     require_format: bool,
+    test_policy: perspt_core::TestPolicy,
+    external_oracle: Option<perspt_core::ExternalOracleConfig>,
     correction_packets: bool,
 }
 
@@ -58,6 +84,8 @@ impl<'a> CodingCandidateMeasurer<'a> {
             adapters: CodingAdapterRegistry::with_builtins(),
             max_parallel: 4,
             require_format: false,
+            test_policy: perspt_core::TestPolicy::Evolving,
+            external_oracle: None,
             correction_packets: true,
         }
     }
@@ -73,6 +101,19 @@ impl<'a> CodingCandidateMeasurer<'a> {
     /// (`[verification] require_format`).
     pub fn with_require_format(mut self, require_format: bool) -> Self {
         self.require_format = require_format;
+        self
+    }
+
+    /// Select how test evidence participates in the hard gate. The default is
+    /// `Evolving`: project tests and their configuration may change together
+    /// with the implementation. Stronger policies are explicit.
+    pub fn with_test_policy(
+        mut self,
+        policy: perspt_core::TestPolicy,
+        external_oracle: Option<perspt_core::ExternalOracleConfig>,
+    ) -> Self {
+        self.test_policy = policy;
+        self.external_oracle = external_oracle;
         self
     }
 
@@ -103,7 +144,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
     /// make hard pass unreachable and loop the model forever).
     fn collect_jobs(
         &self,
-        immutable_oracle_root: Option<&Path>,
+        test_evidence: AdditionalTestEvidence<'_>,
         residuals: &mut Vec<ResidualEvent>,
         advisory: &mut Vec<ResidualEvent>,
         satisfied_stages: &mut BTreeSet<&'static str>,
@@ -158,15 +199,24 @@ impl<'a> CodingCandidateMeasurer<'a> {
                     root: self.candidate.overlay_root().to_path_buf(),
                 });
             }
-            if let Some(root) = immutable_oracle_root {
+            if let Some(root) = test_evidence.regression_root {
                 jobs.push(VerifierJob {
-                    plugin: format!("{}:immutable-test-oracle", plugin.name()),
+                    plugin: format!("{}:backward-compatible-tests", plugin.name()),
                     adapter_id,
                     stage: perspt_core::plugin::VerifierStage::Test,
                     command: plugin.test_command(),
                     root: root.to_path_buf(),
                 });
             }
+        }
+        if let Some((root, command)) = test_evidence.external_oracle {
+            jobs.push(VerifierJob {
+                plugin: "external-oracle".into(),
+                adapter_id: LanguageId::new("external-oracle"),
+                stage: perspt_core::plugin::VerifierStage::Test,
+                command: command.to_string(),
+                root: root.to_path_buf(),
+            });
         }
         Ok(jobs)
     }
@@ -237,8 +287,9 @@ impl<'a> CodingCandidateMeasurer<'a> {
     /// `shared`, the same warm pool the interactive tools and incremental
     /// syntax pass use), so a gate pays one cold build plus incrementals
     /// instead of a cold tree per stage. Groups still run in parallel under
-    /// the `max_parallel` semaphore; the immutable-test-oracle root is its
-    /// own group and stays isolated from candidate build artifacts.
+    /// the `max_parallel` semaphore; any additional regression or protected
+    /// acceptance root is its own group and stays isolated from candidate
+    /// build artifacts.
     fn spawn_verifier_groups(
         &self,
         jobs: Vec<VerifierJob>,
@@ -298,6 +349,37 @@ impl<'a> CodingCandidateMeasurer<'a> {
             required.insert("format".into());
         }
         required
+    }
+
+    fn prepare_test_evidence(&self) -> Result<PreparedTestEvidence> {
+        anyhow::ensure!(
+            self.test_policy == perspt_core::TestPolicy::ExternalOracle
+                || self.external_oracle.is_none(),
+            "protected external test configuration requires the external-oracle test policy"
+        );
+        let regression = match self.test_policy {
+            perspt_core::TestPolicy::BackwardCompatible => {
+                self.candidate.backward_compatibility_tests()?
+            }
+            _ => None,
+        };
+        let external = match self.test_policy {
+            perspt_core::TestPolicy::ExternalOracle => {
+                let configured = self
+                    .external_oracle
+                    .as_ref()
+                    .context("external-oracle test policy has no protected oracle configuration")?;
+                Some((
+                    self.candidate.external_oracle_tests(&configured.path)?,
+                    configured.command.clone(),
+                ))
+            }
+            _ => None,
+        };
+        Ok(PreparedTestEvidence {
+            regression,
+            external,
+        })
     }
 
     /// Gate X / PSP-10 Phase 1: `HardGatePolicy::required_stages` is
@@ -378,11 +460,9 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         let required = self.required_stages();
         let mut all_passed = false;
         let mut ran_stages: BTreeSet<&'static str> = BTreeSet::new();
-        let immutable_oracle = self.candidate.immutable_test_oracle()?;
+        let test_evidence = self.prepare_test_evidence()?;
         let jobs = self.collect_jobs(
-            immutable_oracle
-                .as_ref()
-                .map(|oracle| oracle.root.as_path()),
+            test_evidence.borrowed(),
             &mut residuals,
             &mut advisory,
             &mut ran_stages,
