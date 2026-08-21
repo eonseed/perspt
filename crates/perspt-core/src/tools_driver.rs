@@ -8,8 +8,10 @@
 //! `perspt-agent::transport` performs the one translation.
 
 use anyhow::{Context, Result};
+use futures::StreamExt;
 use genai::chat::{
-    ChatMessage, ChatOptions, ChatRequest, Tool, ToolCall, ToolChoice, ToolResponse,
+    ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent, Tool, ToolCall, ToolChoice,
+    ToolResponse,
 };
 
 use crate::llm_provider::GenAIProvider;
@@ -36,6 +38,16 @@ pub struct CoreToolCall {
 pub enum CoreTurnOutput {
     ToolCalls(Vec<CoreToolCall>),
     Text(String),
+}
+
+/// User-facing stream events from a tool-aware model turn.
+///
+/// Tool protocol chunks and thought signatures stay inside the transport;
+/// callers receive only answer text and genuine model reasoning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CoreTurnStreamEvent {
+    Text(String),
+    Reasoning(String),
 }
 
 /// Mirror of the SDK's `Message`.
@@ -109,6 +121,29 @@ fn render_choice(choice: &CoreToolChoice) -> ToolChoice {
     }
 }
 
+fn render_request(messages: &[CoreMessage], tools: &[CoreToolSpec]) -> ChatRequest {
+    let rendered = messages.iter().map(render_message).collect();
+    let mut request = ChatRequest::new(rendered);
+    if !tools.is_empty() {
+        request = request.with_tools(tools.iter().map(render_tool).collect::<Vec<_>>());
+    }
+    request
+}
+
+fn render_options(choice: &CoreToolChoice, config: &CoreGenerationConfig) -> ChatOptions {
+    let mut options = ChatOptions::default().with_tool_choice(render_choice(choice));
+    if let Some(max_tokens) = config.max_tokens {
+        options = options.with_max_tokens(max_tokens);
+    }
+    if let Some(temperature) = config.temperature {
+        options = options.with_temperature(f64::from(temperature));
+    }
+    if !config.stop_sequences.is_empty() {
+        options = options.with_stop_sequences(config.stop_sequences.clone());
+    }
+    options
+}
+
 impl GenAIProvider {
     /// Execute one tool-calling chat turn against `model`.
     ///
@@ -141,21 +176,8 @@ impl GenAIProvider {
         choice: CoreToolChoice,
         config: CoreGenerationConfig,
     ) -> Result<CoreTurnOutput> {
-        let rendered: Vec<ChatMessage> = messages.iter().map(render_message).collect();
-        let mut request = ChatRequest::new(rendered);
-        if !tools.is_empty() {
-            request = request.with_tools(tools.iter().map(render_tool).collect::<Vec<_>>());
-        }
-        let mut options = ChatOptions::default().with_tool_choice(render_choice(&choice));
-        if let Some(max_tokens) = config.max_tokens {
-            options = options.with_max_tokens(max_tokens);
-        }
-        if let Some(temperature) = config.temperature {
-            options = options.with_temperature(f64::from(temperature));
-        }
-        if !config.stop_sequences.is_empty() {
-            options = options.with_stop_sequences(config.stop_sequences);
-        }
+        let request = render_request(messages, tools);
+        let options = render_options(&choice, &config);
 
         let response = self
             .client()
@@ -181,6 +203,80 @@ impl GenAIProvider {
         Ok(CoreTurnOutput::Text(
             response.first_text().unwrap_or_default().to_string(),
         ))
+    }
+
+    /// Stream one tool-aware turn while retaining the complete tool calls.
+    ///
+    /// Reasoning is forwarded as it arrives. Answer text is held until the
+    /// terminal event proves that the model did not select a tool, preventing
+    /// tool-call preambles and protocol fragments from leaking into the chat.
+    pub async fn stream_tool_turn(
+        &self,
+        model: &str,
+        messages: &[CoreMessage],
+        tools: &[CoreToolSpec],
+        choice: CoreToolChoice,
+        mut emit: impl FnMut(CoreTurnStreamEvent),
+    ) -> Result<CoreTurnOutput> {
+        let request = render_request(messages, tools);
+        let options = render_options(&choice, &CoreGenerationConfig::default())
+            .with_capture_content(true)
+            .with_capture_tool_calls(true)
+            .with_capture_usage(true);
+        let response = self
+            .client()
+            .exec_chat_stream(model, request, Some(&options))
+            .await
+            .with_context(|| format!("streaming tool-aware chat turn against {model:?}"))?;
+        let mut stream = response.stream;
+        let mut end = None;
+
+        while let Some(event) = stream.next().await {
+            match event? {
+                ChatStreamEvent::ReasoningChunk(chunk) if !chunk.content.is_empty() => {
+                    emit(CoreTurnStreamEvent::Reasoning(chunk.content));
+                }
+                ChatStreamEvent::End(value) => {
+                    end = Some(value);
+                    break;
+                }
+                ChatStreamEvent::Start
+                | ChatStreamEvent::Chunk(_)
+                | ChatStreamEvent::ReasoningChunk(_)
+                | ChatStreamEvent::ToolCallChunk(_)
+                | ChatStreamEvent::ThoughtSignatureChunk(_) => {}
+            }
+        }
+
+        let end = end.context("tool-aware model stream ended without a terminal event")?;
+        self.add_tokens(
+            end.captured_usage
+                .as_ref()
+                .and_then(|usage| usage.total_tokens)
+                .map(|tokens| tokens as usize)
+                .unwrap_or(0),
+        )
+        .await;
+
+        let calls = end
+            .captured_tool_calls()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|call| CoreToolCall {
+                call_id: call.call_id.clone(),
+                name: call.fn_name.clone(),
+                arguments: call.fn_arguments.clone(),
+            })
+            .collect::<Vec<_>>();
+        if !calls.is_empty() {
+            return Ok(CoreTurnOutput::ToolCalls(calls));
+        }
+
+        let text = end.captured_first_text().unwrap_or_default().to_string();
+        if !text.is_empty() {
+            emit(CoreTurnStreamEvent::Text(text.clone()));
+        }
+        Ok(CoreTurnOutput::Text(text))
     }
 }
 

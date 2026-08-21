@@ -28,7 +28,9 @@ pub use plugin::{
     InitOptions, JsPlugin, LanguagePlugin, LspConfig, PluginRegistry, PythonPlugin, RustPlugin,
 };
 pub use portfolio::{declared_caps, ModelPortfolio, ProviderCaps, ProviderHandle};
-pub use tools_driver::{CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec, CoreTurnOutput};
+pub use tools_driver::{
+    CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec, CoreTurnOutput, CoreTurnStreamEvent,
+};
 
 // Re-export commonly used types
 pub use types::{
