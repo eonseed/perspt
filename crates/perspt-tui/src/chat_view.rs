@@ -56,10 +56,11 @@ impl ChatApp {
         // Handle throbber when loading with empty buffers
         if self.is_streaming
             && self.streaming_buffer.is_empty()
-            && self.streaming_reasoning.is_empty()
+            && (!self.show_reasoning || self.streaming_reasoning.is_empty())
         {
+            let label = self.streaming_activity.as_deref().unwrap_or("Thinking…");
             let throbber = Throbber::default()
-                .label(" Thinking...")
+                .label(format!(" {label}"))
                 .style(Style::default().fg(Color::Rgb(255, 183, 77)));
             frame.render_stateful_widget(
                 throbber,
@@ -217,11 +218,15 @@ impl ChatApp {
     pub(crate) fn render_input(&self, frame: &mut Frame, area: Rect) {
         if self.is_streaming {
             // Show streaming indicator
+            let status = self
+                .streaming_activity
+                .as_deref()
+                .unwrap_or("Receiving response…");
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Rgb(96, 125, 139)))
                 .title(Span::styled(
-                    " Receiving response... ",
+                    format!(" {status} "),
                     Style::default().fg(Color::Rgb(255, 183, 77)),
                 ));
             let inner = block.inner(area);
