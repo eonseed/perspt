@@ -1,0 +1,778 @@
+PSP: 000011
+Title: Domain-Neutral Runtime Inversion, Multi-Actor Supervisor, and Replayable Human Interaction Platform
+Author: Vikrant Rathore (@vikrantrathore), Ronak Rathore (@ronakrathore)
+Status: Draft
+Type: Enhancement
+Created: 2026-08-23
+Discussion-To: https://github.com/eonseed/perspt/discussions/PSP-11
+Extends: 000008, 000009, 000010
+
+========
+Abstract
+========
+
+Perspt implements the foundational mathematical and systems nucleus established across the three volumes of *The Art of Reliable AI Systems: Stability Is All You Need (SRBN)*: realized-state residual measurement, Lyapunov energy descent, admissibility gating, capability attenuation, and revisioned work graphs. In version 0.6.6, however, as verified in the architectural audit, these mechanisms are tightly coupled to the coding domain. The generic runtime directly depends on ``perspt-coding``, owns file-oriented staging and language-verifier drivers, and hardcodes coding graph attributes. The research domain remains a non-executable conformance skeleton, multi-node execution with stochastic prompt roles is conflated with multi-agent delegation, and the terminal user interface (TUI) exhibits critical control-plane gaps where interaction actions drop silently and cause runtime deadlocks.
+
+This PSP specifies the complete architectural inversion of Perspt into a domain-neutral, multi-actor, human-in-the-loop platform. It defines five core subsystems:
+
+1. **A Minimal and Versioned SDK Nucleus:** Freezes the core Paper I–III contracts (state witnesses, residual energies, acceptance gates, capabilities, admissibility witnesses, replay folds, and interaction envelopes) into a minimal, stable, zero-dependency foundation, moving product-specific search, prompt compilation, and benchmarking behind clear extension crates.
+2. **Generic Runtime Inversion via Explicit Domain Ports:** Removes all domain-specific dependencies from the runtime, establishing explicit ports for state drivers, sensor suites, transition contracts, atomic tool registrations, correction policies, and presentation layers.
+3. **Behavior-Complete Domain Plugins:** Completes the research domain with executable citation, claim, provenance, and freshness sensors, and provides an in-memory fixture domain to verify full task lifecycles without filesystem or coding dependencies.
+4. **Durable Multi-Actor Supervisor:** Elevates stochastic roles to durable, supervised actor instances with distinct identities, parent-child lineages, mailboxes, lifecycle state machines, and mathematically attenuated capability delegation trees.
+5. **Replayable Platform Human Interaction Service:** Implements a durable interaction broker with typed requests and responses, exactly-once resolution, deterministic cancellation/timeout semantics, and full replay support for questions, corrections, plan modifications, and capability grants.
+
+The proposal includes twelve binary acceptance gates and a six-phase implementation sequence to transition Perspt from an experimental coding harness into a robust, domain-extensible agentic platform.
+
+==========
+Motivation
+==========
+
+Audit Findings (Perspt v0.6.6)
+==============================
+
+The Perspt v0.6.6 architecture audit verified that ``perspt-sdk`` contains genuine, well-tested implementations of Paper I–III primitives. However, it identified eight critical architectural findings that prevent Perspt from functioning as the general-purpose, domain-extensible platform described in its documentation:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 8 12 80
+
+   * - Finding
+     - Severity
+     - Detailed Audit Finding
+   * - **F1**
+     - High
+     - **Generic runtime directly depends on coding domain:** ``perspt-agent`` depends directly on ``perspt-coding``. The runtime constructors default to ``CodingDomain``, and node assembly embeds ``owner_domains = ["coding"]``, ``CodingContract``, ``CodingCandidateMeasurer``, and language plugin bindings.
+   * - **F2**
+     - High
+     - **Domain package trait is descriptive, not executable:** ``AgentDomainPackage`` declares stages and tool names but does not supply state drivers, executable sensors, tool executors, contract evaluators, or promotion behavior.
+   * - **F3**
+     - High
+     - **Research domain is a skeleton:** ``perspt-research`` provides no tool executors and declares a ``citation-check`` stage with no corresponding executable sensor, failing runtime hard gates.
+   * - **F4**
+     - High
+     - **Multi-node and multi-role conflated with multi-agent:** Concurrent work graph execution uses multiple stochastic prompt roles, but all worker actions execute under a single ``ActorId("toolloop")`` without actor supervision, child delegation, or distinct capability grants.
+   * - **F5**
+     - Critical
+     - **TUI is not a safe human-in-the-loop control plane:** The runtime action loop handles only approve, reject, and abort. ``RequestCorrection``, ``Edit``, ``Skip``, and ``Escape`` modal dismissals drop without resolving the pending request, deadlocking the runtime. ``ask_user`` has no registered executor.
+   * - **F6**
+     - Medium
+     - **Dashboard is an isolated observer:** The web dashboard lacks actor topology, mailboxes, and interaction endpoints, acting only as a read-only projection.
+   * - **F7**
+     - Medium
+     - **SDK lacks a minimal core:** The 16.5K line SDK mixes the foundational Paper I–III contracts with prompt programs, search trees, model routing, and calibration benchmarks.
+   * - **F8**
+     - High
+     - **Documentation narrative over product architecture:** Documentation leads with speculative narratives, poems, and PSP history rather than clean architectural specifications, theorem-to-code mappings, and capability matrices.
+
+Mathematical and Platform Imperatives from the SRBN Trilogy
+===========================================================
+
+The three volumes of *The Art of Reliable AI Systems* establish precise mathematical foundations that govern this architectural refactoring:
+
+1. **Volume I (Foundations of Stability):** Defines the realized state space :math:`\mathcal{Z} = \mathcal{X} \times \mathcal{Y}`, the safe manifold :math:`\mathcal{M} = \{z \in \mathcal{Z} \mid V(z) = 0\}`, and the Lyapunov energy functional :math:`V(z) \ge 0`. Under the Polyak-Łojasiewicz (PL) condition :math:`\|\nabla V\|^2 \ge 2\mu V` and persistent bounded disturbances :math:`\delta`, the Input-to-State Stability (ISS) theorem (Volume I, Chapter 12) proves that the closed-loop system contracts toward a disturbance ball of radius :math:`\frac{\delta^2}{2(\alpha-\beta)^2\mu}`. State tracking must be content-addressed and Merkle-backed (Chapter 15) to guarantee auditability across discrete execution steps.
+
+2. **Volume II (Harnesses and Sparse Feedback):** Formalizes the harness tuple :math:`H = (S, O, B, U, \Pi, L)` (Volume II, Chapters 1 & 3). Verifiers produce raw residuals :math:`r_{k,i}`, normalized into dimensionless values :math:`\hat{r}_{k,i} = r_{k,i}/s_i`, which compose into the canonical quadratic Lyapunov energy :math:`V_{\mathrm{sq}} = \sum_i w_i \hat{r}_i^2` with strictly positive exchange rates :math:`w_i > 0` (Chapter 6). The measured acceptance gate :math:`G(y; x_k) = \operatorname{hard}(y) \lor (V(y) \le V_{\mathrm{best}} - \rho)` with descent margin :math:`\rho \ge 3\sigma` (Chapter 11) guarantees that total descent acceptances cannot exceed :math:`\lfloor V_0 / \rho \rfloor`. Under a finite rejection budget :math:`B`, total gate evaluations are strictly bounded by :math:`\lfloor V_0 / \rho \rfloor + B`. Unchecked drift grows as :math:`\mathbb{E}[d_T] \ge (1+\gamma)^T d_0`, bounding the maximum safe sampling interval to :math:`T^* = \ln(h)/\ln(1+\gamma)` (Chapter 12). Termination must emit an honest residual certificate representing empirical evidence rather than unmeasured success claims (Chapter 13).
+
+3. **Volume III (The Platform Contract):** Establishes platform execution over stochastic actors :math:`A`, proposals :math:`p = (a, c, i, y, e, m)`, mediated effects :math:`e`, and the deterministic admissibility kernel :math:`K` (Volume III, Chapters 3 & 17). Authority is represented by unforgeable capabilities :math:`c = (\mathrm{op}, E, q, \tau, d)` governed by a partial attenuation ordering :math:`c' \preceq c` and monotonic effect interpretation :math:`\mathrm{eff}(c') \subseteq \mathrm{eff}(c)` (Chapters 4 & 5). Correlated validator analysis (Chapter 9, Lemma 5.1 & Corollary 5.2) proves that joint miss rates equal :math:`q_1 q_2 + \kappa \sigma_1 \sigma_2`, bounding ensemble risk by :math:`\rho_{\mathrm{eff}} = \min_{i<j} u_{ij}`. Risk budgets are evaluated as supermartingales governed by Ville's maximal inequality :math:`\Pr[\sup_t m_t \ge L] \le m_0/L` (Chapter 10). Replay is deterministic via the transition function :math:`x_{t+1} = \Phi(x_t, e_t)` (Chapter 13), and serializability requires ordering non-commuting turns whose semantic footprints :math:`\mathrm{reads}(e)` and :math:`\mathrm{writes}(e)` overlap (Chapter 14).
+
+Theoretical Compliance Scorecard
+================================
+
+.. list-table::
+   :header-rows: 1
+   :widths: 15 15 15 15 40
+
+   * - Paper / Volume
+     - Primitive Coverage
+     - Live Coding Path
+     - Domain-Neutral Live Path
+     - Target Architectural Directive
+   * - **Volume I** (Stability Foundations)
+     - Complete
+     - Strong
+     - Partial
+     - Preserve kernel; isolate state realization port behind domain packages.
+   * - **Volume II** (Harness & Measurement)
+     - Complete
+     - Strong
+     - Partial
+     - Preserve quadratic energy and gate; extract sensor suite port from coding measurers.
+   * - **Volume III** (Platform & Authority)
+     - Complete
+     - Strong
+     - Partial
+     - Extract generic runtime; promote roles to supervised capability-bearing actors.
+   * - **Domain Plugin Model**
+     - Incomplete
+     - Functional
+     - Broken
+     - Invert runtime dependencies; establish behavior-complete `DomainPackage` port.
+   * - **Multi-Actor Supervisor**
+     - Partial
+     - Simulated
+     - Missing
+     - Implement durable actor lifecycle, mailboxes, and capability attenuation trees.
+   * - **Human-in-the-Loop Platform**
+     - Incomplete
+     - Fragile
+     - Missing
+     - Implement durable, replayable platform interaction service with exactly-once resolution.
+
+==========================
+Target System Architecture
+==========================
+
+System Topology and Inversion of Control
+========================================
+
+The target architecture enforces strict, unidirectional dependencies. The generic runtime (`perspt-runtime`) depends exclusively on the minimal SDK contracts and defines abstract domain ports. Concrete domain packages (`perspt-coding`, `perspt-research`, and test fixtures) implement these ports independently. The application composition root (`perspt-cli`) registers the concrete domain packages, host adapters, and user interfaces without any cross-domain coupling in the runtime core:
+
+.. graphviz::
+
+   digraph PersptArchitecture {
+      rankdir=TB;
+      compound=true;
+      node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+      edge [fontname="Helvetica", fontsize=9];
+
+      subgraph cluster_srbn {
+         label = "Underlying Mathematical Kernel";
+         style = "dashed";
+         color = "#90caf9";
+         srbn [label="Published srbn Kernel\n(Volume I Stability & Merkle Primitives)", fillcolor="#e3f2fd"];
+      }
+
+      subgraph cluster_sdk {
+         label = "Core Protocol & Contracts";
+         style = "solid";
+         color = "#a5d6a7";
+         sdk [label="perspt-sdk (Minimal Nucleus)\nPaper I-III Types, Energy, Gate, Capabilities, Events", fillcolor="#e8f5e9"];
+      }
+
+      subgraph cluster_runtime {
+         label = "Generic Execution & Supervision";
+         style = "solid";
+         color = "#ffe082";
+         runtime [label="perspt-runtime\n(Generic Supervisor, Scheduler, Admissibility Kernel)", fillcolor="#fff8e1"];
+         ports [label="Runtime Ports\n(StateDriver, SensorSuite, ToolRegistration, InteractionPort)", fillcolor="#fffde7"];
+      }
+
+      subgraph cluster_domains {
+         label = "Behavior-Complete Domain Packages";
+         style = "solid";
+         color = "#f48fb1";
+         coding [label="perspt-coding\n(File Overlays, Language Verifiers, AST)", fillcolor="#fce4ec"];
+         research [label="perspt-research\n(Source Ingestion, Citations, Provenance)", fillcolor="#fce4ec"];
+         fixture [label="perspt-fixture\n(In-Memory Constraint Solver)", fillcolor="#fce4ec"];
+      }
+
+      subgraph cluster_composition {
+         label = "Application & Interfaces";
+         style = "solid";
+         color = "#80cbc4";
+         cli [label="CLI Composition Root\n(perspt-cli)", fillcolor="#e0f2f1"];
+         tui [label="perspt-tui\n(Multi-Actor TUI)", fillcolor="#e0f7fa"];
+         dash [label="perspt-dashboard\n(Web Projections)", fillcolor="#e0f7fa"];
+      }
+
+      srbn -> sdk;
+      sdk -> runtime;
+      runtime -> ports;
+      coding -> ports [label="implements", style="dashed", dir="back"];
+      research -> ports [label="implements", style="dashed", dir="back"];
+      fixture -> ports [label="implements", style="dashed", dir="back"];
+
+      cli -> runtime [label="configures"];
+      cli -> coding [label="registers"];
+      cli -> research [label="registers"];
+      cli -> fixture [label="registers"];
+      cli -> tui [label="mounts"];
+      cli -> dash [label="mounts"];
+   }
+
+The Six Durable Execution Obligations (Volume III, Chapter 15)
+==============================================================
+
+To guarantee mathematical compliance with the SRBN platform theorems, `perspt-runtime` must satisfy the six durable execution obligations (R1–R6):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 10 25 65
+
+   * - Obligation
+     - Formal Definition
+     - Runtime Implementation in Perspt
+   * - **R1**
+     - **Durable Single-Assignment Outcomes**
+     - Every proposal and commit-or-reject decision is written once to append-only storage with a unique hash-chained sequence index. Re-delivering a command returns the prior outcome; reusing a key for different data is rejected as invalid.
+   * - **R2**
+     - **Recorded Nondeterminism**
+     - All stochastic observations—model responses, sensor measurements, human interaction inputs, and timers—are committed to the event ledger *before* being consumed by state transitions.
+   * - **R3**
+     - **Deterministic State Transition**
+     - The state transition :math:`x_{t+1} = \Phi(x_t, e_t)` is a pure, deterministic function of the prior realized state :math:`x_t` and the committed event record :math:`e_t`.
+   * - **R4**
+     - **Unforgeable Capability Transport**
+     - Capabilities are unforgeable kernel-minted tokens. Every delegation enforces monotonic attenuation :math:`c' \preceq c` across all fields (operations, effect sets, budgets, expirations, scopes).
+   * - **R5**
+     - **Write-Ahead External Effects**
+     - Every irreversible external effect is bracketed by intent, execution result, and compensation records under an idempotency key, allowing recovery to distinguish unstarted, in-flight, and completed effects.
+   * - **R6**
+     - **Ordered Non-Commuting Durable Turns**
+     - State commits whose semantic footprints conflict (:math:`\mathrm{writes}(e_1) \cap (\mathrm{reads}(e_2) \cup \mathrm{writes}(e_2)) \ne \emptyset`) are strictly serialized; commuting commits execute concurrently.
+
+Mathematical Formalism and State Evolution
+===========================================
+
+1. **State Realization and Candidate Scopes (Volume I, Chapter 15 & Volume II, Chapter 3):**
+   
+   Let :math:`\mathcal{S}` be the domain state space. An immutable state reference :math:`x \in \mathcal{S}` is content-addressed by its Merkle root :math:`H(x)`. A candidate session opens an isolated working branch with declared semantic scope :math:`\Omega \subseteq \mathcal{S}`:
+   
+   .. math::
+   
+      \kappa = \operatorname{OpenCandidate}(x_{\text{base}}, \Omega)
+
+   Mutations are staged in private scratch space. The realization operator :math:`\mathcal{R}: \text{CandidateHandle} \to \text{RealizedState}` materializes candidate :math:`\kappa` into a deterministic realized snapshot :math:`y = \mathcal{R}(\kappa)`.
+
+2. **Residual Measurement and Lyapunov Energy (Volume II, Chapters 5 & 6):**
+   
+   The sensor suite evaluates :math:`y` against active verifiers, producing a normalized residual vector :math:`\hat{\mathbf{r}}(y) = (\hat{r}_1(y), \ldots, \hat{r}_m(y)) \in (\mathbb{R}_{\ge 0} \cup \{\bot\})^m`. The Lyapunov energy functional is defined as:
+   
+   .. math::
+   
+      V(y) = \sum_{i=1}^m w_i \cdot \hat{r}_i(y)^2, \quad w_i > 0
+
+   If any required sensor produces :math:`\bot` (unmeasured), energy evaluation is invalid and candidate :math:`y` cannot be admitted.
+
+3. **Acceptance Gating and Finite Decision Bounds (Volume II, Chapter 11):**
+   
+   Candidate :math:`y` is evaluated against the current best accepted energy :math:`V_{\text{best}} = \min_{j \le k} V(x_j)` via the gate predicate:
+   
+   .. math::
+   
+      G(y; x_k) = \operatorname{HardPass}(y) \lor \left( V(y) \le V_{\text{best}} - \rho \right), \quad \rho \ge 3\sigma
+
+   Descent-acceptances decrease energy by at least :math:`\rho`. Total gate evaluations before exhaustion are bounded by:
+   
+   .. math::
+   
+      N_{\text{decisions}} \le \left\lfloor \frac{V(x_0)}{\rho} \right\rfloor + B
+
+4. **Actor Capability Attenuation Trees (Volume III, Chapters 4 & 5):**
+   
+   Let :math:`\Gamma_t` represent the system authority relation at time :math:`t`. A capability :math:`c = (\mathrm{op}, E, q, \tau, d, \Omega)` defines operation type, permitted effect kinds :math:`E`, call quota :math:`q`, expiration timestamp :math:`\tau`, delegability flag :math:`d`, and resource scope :math:`\Omega`. Attenuation :math:`c' \preceq c` requires:
+   
+   .. math::
+   
+      c' \preceq c \Longleftrightarrow (\mathrm{op}' = \mathrm{op}) \land (E' \subseteq E) \land (q' \le q) \land (\tau' \le \tau) \land (d' \le d) \land (\Omega' \subseteq \Omega)
+
+   When parent actor :math:`a_p` spawns child actor :math:`a_c`, every granted capability :math:`c_c \in \Gamma(a_c)` must satisfy :math:`\exists c_p \in \Gamma(a_p): c_c \preceq c_p`.
+
+5. **Deterministic Replay Fold (Volume III, Chapter 13):**
+   
+   Given initial state :math:`x_0` and event ledger :math:`\mathcal{L} = (e_1, e_2, \ldots, e_T)`, the platform state at any step :math:`t` is reconstructed via deterministic fold:
+   
+   .. math::
+   
+      x_t = \operatorname{foldl}(\Phi, x_0, \mathcal{L}_{1..t}), \quad \text{where } x_{k} = \Phi(x_{k-1}, e_k)
+
+================
+Proposed Changes
+================
+
+1. Minimal `perspt-sdk` Contract
+================================
+
+The `perspt-sdk` crate is refactored into a minimal, zero-dependency mathematical and contract core. The public API surface is partitioned into stable foundational modules:
+
+* **`perspt_sdk::state`:** State references, content-addressed revision identifiers, Merkle witnesses, and snapshot boundaries.
+* **`perspt_sdk::residual`:** Raw residuals, normalized residuals, scale definitions, non-measured sentinels (:math:`\bot`), and the residual taxonomy.
+* **`perspt_sdk::energy`:** Canonical quadratic Lyapunov energy models, weight vectors, and composite energy scores.
+* **`perspt_sdk::gate`:** Hard-gate policies, descent margins (:math:`\rho`), acceptance decisions, trajectory tracking, and finite decision bounds.
+* **`perspt_sdk::capability`:** Capability tokens, attenuation lattice (:math:`\preceq`), scopes, and five-clause admissibility witnesses.
+* **`perspt_sdk::workgraph`:** Revisioned acyclic task graphs, semantic footprints (:math:`\mathrm{reads}` / :math:`\mathrm{writes}`), leases, and scheduling invariants.
+* **`perspt_sdk::ledger`:** Canonical versioned event envelopes, hash chaining, write-ahead records, and deterministic replay folds.
+* **`perspt_sdk::interaction`:** Platform interaction contracts (requests, responses, decisions, timeout dispositions).
+
+Secondary product components (model-conditioned prompt compilation, multi-provider transports, bounded search forests, synthetic benchmark harnesses, and UI visual formatters) are extracted into dedicated extension crates: ``perspt-prompts``, ``perspt-models``, and ``perspt-search``.
+
+2. Generic Runtime Inversion via Explicit Ports
+===============================================
+
+The runtime crate (`perspt-runtime`) is completely isolated from domain concepts. All domain interactions are governed by six strongly-typed traits:
+
+.. code-block:: rust
+
+   /// Root behavioral specification and capabilities manifest for a domain package.
+   pub trait DomainPackage: Send + Sync + 'static {
+       /// Metadata, version, identifier, and schema declarations.
+       fn manifest(&self) -> DomainManifest;
+
+       /// Evaluates whether this domain applies to a given state snapshot.
+       fn detect(&self, snapshot: &dyn StateSnapshot) -> DomainDetection;
+
+       /// Supplies the domain-owned state lifecycle driver.
+       fn state_driver(&self) -> Arc<dyn StateDriver>;
+
+       /// Returns atomic tool registrations (schema, effect kind, footprint, executor).
+       fn tools(&self) -> Vec<ToolRegistration>;
+
+       /// Provides the executable sensor suite for candidate state measurement.
+       fn sensors(&self) -> Arc<dyn SensorSuite>;
+
+       /// Evaluates domain-specific contract transitions and safety barriers.
+       fn transition_contract(&self) -> Arc<dyn ContractEvaluator>;
+
+       /// Declares operational safety barrier configuration and policies.
+       fn safety_barrier(&self) -> BarrierDisposition;
+
+       /// Provides domain-directed correction policies for failed candidates.
+       fn correction_policy(&self) -> Arc<dyn CorrectionPolicy>;
+
+       /// Supplies graph planning heuristics and footprint definitions.
+       fn graph_policy(&self) -> Arc<dyn GraphPolicy>;
+
+       /// Provides domain-specific visual rendering and artifact diff formatting.
+       fn presentation(&self) -> Arc<dyn DomainPresentation>;
+   }
+
+   /// Domain-owned state lifecycle manager.
+   #[async_trait::async_trait]
+   pub trait StateDriver: Send + Sync {
+       /// Opens a new candidate workspace branch over the declared scope.
+       async fn open_candidate(&self, base: StateRef, scope: Scope) -> Result<CandidateHandle, StateError>;
+
+       /// Captures an intermediate private checkpoint within the candidate branch.
+       async fn checkpoint(&self, candidate: &CandidateHandle) -> Result<CheckpointRef, StateError>;
+
+       /// Realizes candidate mutations into a verifiable state snapshot.
+       async fn realize(&self, candidate: &CandidateHandle) -> Result<RealizedState, StateError>;
+
+       /// Restores the candidate workspace to a previous checkpoint.
+       async fn restore(&self, candidate: &CandidateHandle, checkpoint: CheckpointRef) -> Result<(), StateError>;
+
+       /// Computes the semantic and structural diff between two accepted states.
+       async fn diff(&self, before: StateRef, after: StateRef) -> Result<DomainDiff, StateError>;
+
+       /// Atomically promotes an accepted candidate state into committed durable storage.
+       async fn promote(&self, accepted: StateRef, approval: ApprovalWitness) -> Result<PromotionReceipt, StateError>;
+   }
+
+   /// Executable measurement suite evaluating candidate states against domain verifiers.
+   #[async_trait::async_trait]
+   pub trait SensorSuite: Send + Sync {
+       async fn measure(
+           &self,
+           state: &RealizedState,
+           scope: &Scope,
+           boundary: EvidenceBoundary,
+       ) -> Result<CandidateMeasurement, SensorError>;
+   }
+
+   /// Atomic tool registration enforcing coupling between schema and executor.
+   #[derive(Clone)]
+   pub struct ToolRegistration {
+       pub schema: ToolSchema,
+       pub effect_kind: EffectKind,
+       pub footprint: SemanticFootprint,
+       pub risk_profile: RiskProfile,
+       pub executor: Arc<dyn ToolExecutor>,
+   }
+
+   /// Evaluates state transitions against formal domain contracts.
+   pub trait ContractEvaluator: Send + Sync {
+       fn evaluate_transition(
+           &self,
+           before: &RealizedState,
+           after: &RealizedState,
+           proposed_effect: &Effect,
+       ) -> ContractDisposition;
+   }
+
+3. Behavior-Complete Domain Plugins
+===================================
+
+* **`perspt-coding` (Coding Domain Package):**
+  Owns all filesystem staging overlays, snapshot realizers, language plugin bindings (Rust, Python, TypeScript, Go), AST extraction, test attribution, compiler error parsers, coding contracts, operational barriers, and unified diff/staging logic. Implements `DomainPackage` completely without modifying generic runtime code.
+
+* **`perspt-research` (Research Domain Package):**
+  Provides genuine source acquisition (arXiv, PubMed, web scrapers, local PDF/markdown corpora). Implements executable sensors:
+  
+  - ``citation-check``: Validates bibliography presence, DOI resolution, and schema completeness.
+  - ``claim-provenance``: Computes semantic attribution between derived claims and cited source spans.
+  - ``contradiction-sensor``: Evaluates claim consistency against ground-truth corpora.
+  - ``freshness-sensor``: Verifies temporal validity and publication currency.
+
+* **`perspt-fixture` (In-Memory Solver Domain):**
+  Provides an in-memory state driver representing a graph-coloring constraint satisfaction problem. The sensor suite measures constraint violations without filesystem, process, or network access. Used in CI to guarantee that `perspt-runtime` executes complete task lifecycles without importing `perspt-coding`.
+
+4. Durable Multi-Actor Supervisor and Process Runtime
+======================================================
+
+Stochastic prompt roles are transformed into first-class, durable supervised actor processes. Unlike ephemeral asynchronous tasks or stateless model loops, a durable actor process maintains an unforgeable identity, a crash-resilient state machine, a content-addressed mailbox, and an isolated capability grant tree recorded in the append-only event ledger.
+
+Durable Actor Process Architecture
+----------------------------------
+
+Every actor in Perspt runs as an isolated process entity governed by an `ActorSupervisor`. The supervisor enforces Erlang/OTP-style failure isolation, hierarchical lifecycle monitoring, monotonic capability attenuation, and deterministic crash recovery:
+
+.. graphviz::
+
+   digraph ActorLifecycle {
+      rankdir=LR;
+      node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+      edge [fontname="Helvetica", fontsize=9];
+
+      Proposed [label="Proposed\n(ActorSpec Minted)", fillcolor="#e1f5fe"];
+      Admitted [label="Admitted\n(Admissibility Witnessed)", fillcolor="#b3e5fc"];
+      Spawned [label="Spawned\n(Capabilities Attenuated)", fillcolor="#81d4fa"];
+      Runnable [label="Runnable\n(Scheduled in Work Graph)", fillcolor="#fff59d"];
+      Running [label="Running\n(Executing Turn / Tool)", fillcolor="#a5d6a7"];
+      Waiting [label="Waiting\n(On Lock / Interaction / Message)", fillcolor="#ffcc80"];
+      Completed [label="Completed\n(Node Accepted / Commited)", fillcolor="#c8e6c9"];
+      Failed [label="Failed\n(Budget / Sensor Exhaustion)", fillcolor="#ffcdd2"];
+      Contained [label="Contained\n(Policy / Barrier Breach)", fillcolor="#ef9a9a"];
+      Rehydrated [label="Rehydrated\n(Crash Recovery from Ledger)", fillcolor="#d1c4e9"];
+
+      Proposed -> Admitted [label="Kernel Validate"];
+      Admitted -> Spawned [label="Spawn Effect"];
+      Spawned -> Runnable [label="Initialize Process"];
+      Runnable -> Running [label="Turn Quantum Start"];
+      Running -> Waiting [label="IO / HITL / Leased Lock"];
+      Waiting -> Runnable [label="Resume Event Received"];
+      Running -> Completed [label="Descent / Hard Pass"];
+      Running -> Failed [label="Resource Exhaustion"];
+      Running -> Contained [label="Attenuation Breach"];
+      Rehydrated -> Runnable [label="Rehydrate Runnable"];
+      Rehydrated -> Waiting [label="Rehydrate Waiting"];
+   }
+
+Durable Process Data Structures and Traits
+------------------------------------------
+
+.. code-block:: rust
+
+   /// Durable identity and specification for a supervised actor process.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub struct ActorSpec {
+       pub actor_id: ActorId,
+       pub role: ActorRole,
+       pub parent_actor: Option<ActorId>,
+       pub domain_id: DomainId,
+       pub model_route: ModelRoute,
+       pub held_capabilities: HashSet<CapabilityGrantRef>,
+       pub budget: ResourceBudget,
+       pub context_head: ContextHeadRef,
+       pub supervision_policy: SupervisionPolicy,
+   }
+
+   /// Supervision restart, containment, and escalation policies.
+   #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+   pub enum SupervisionPolicy {
+       /// Restart the failed actor with its original initial capabilities and a fresh scratch branch.
+       RestartIsolated,
+       /// Fail the entire local subgraph and escalate to the parent actor.
+       EscalateToParent,
+       /// Halt and request human intervention via the Platform Interaction Service.
+       EscalateToOperator,
+       /// Terminate the actor immediately, revoke all delegated child capabilities, and roll back uncommitted changes.
+       ContainAndRollback,
+   }
+
+   /// Snapshot of a durable actor process state machine recorded in the event ledger.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub struct ActorStateRecord {
+       pub actor_id: ActorId,
+       pub lifecycle_state: ActorLifecycleState,
+       pub turn_index: u32,
+       pub consumed_budget: ResourceConsumption,
+       pub active_node_id: Option<NodeId>,
+       pub last_checkpoint: Option<CheckpointRef>,
+       pub unconsumed_messages: Vec<ActorMessageId>,
+       pub recorded_at: DateTime<Utc>,
+   }
+
+   /// Content-addressed message payload delivered between supervised actor mailboxes.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub struct ActorMessage {
+       pub message_id: ActorMessageId,
+       pub sender: ActorId,
+       pub recipient: ActorId,
+       pub sequence: u64,
+       pub payload: ActorMessagePayload,
+       pub timestamp: DateTime<Utc>,
+   }
+
+   /// Trait implemented by the durable actor process supervisor.
+   #[async_trait::async_trait]
+   pub trait ActorSupervisor: Send + Sync {
+       /// Spawns a new supervised child actor process under verified capability attenuation.
+       async fn spawn_actor(&self, spec: ActorSpec, attenuation_witness: AttenuationWitness) -> Result<ActorProcessHandle, ActorError>;
+
+       /// Delivers an authenticated, hash-chained message into an actor process mailbox.
+       async fn send_message(&self, message: ActorMessage) -> Result<(), ActorError>;
+
+       /// Suspends a running actor process, checkpointing its state to durable event storage.
+       async fn suspend_actor(&self, actor_id: &ActorId) -> Result<(), ActorError>;
+
+       /// Rehydrates all active actor processes from the event ledger following a host crash or restart.
+       async fn rehydrate_from_ledger(&self, session_id: &SessionId, ledger: &dyn EventLedger) -> Result<Vec<ActorProcessHandle>, ActorError>;
+
+       /// Terminates an actor process, reclaiming its resource allocations and revoking child authority.
+       async fn terminate_actor(&self, actor_id: &ActorId, reason: TerminationReason) -> Result<(), ActorError>;
+   }
+
+Durable Execution and Crash Recovery Invariants
+-----------------------------------------------
+
+1. **Unique Actor Assignment per Work-Graph Node:** Every concurrent node in the work graph executes under a distinct, dedicated `ActorId` (e.g., `ActorId("worker:node-4")`), replacing the monolithic legacy `"toolloop"` actor.
+2. **Strict Capability Attenuation:** Child actors are instantiated exclusively via admitted `EffectKind::SpawnActor` proposals. Capabilities are monotonically attenuated: :math:`C_{\text{child}} \preceq C_{\text{parent}}`. A child cannot escalate privileges, widen filesystem paths, or exceed parent resource budgets.
+3. **Write-Ahead Mailbox Delivery (Obligation R2):** All inter-actor messages and tool proposals are written to the event ledger *before* being processed by the actor's execution quantum.
+4. **Deterministic Crash Recovery & Rehydration:** When Perspt resumes after an unexpected termination or host restart, `ActorSupervisor::rehydrate_from_ledger` reconstructs the active supervision tree, actor lifecycle states, held capabilities, token budgets, and unconsumed mailboxes directly from recorded events. Execution continues without re-invoking models for previously completed turns.
+5. **Universal Actor Turn Lifecycle:** All actor types (architect, explorer, worker, adjudicator, researcher) execute through the unified `ActorTurnRunner`, guaranteeing consistent token accounting, failover, and observability across all stochastic roles.
+
+5. Platform Human-in-the-Loop Interaction Service
+=================================================
+
+Human interaction is elevated into a durable, asynchronous, replayable platform service:
+
+.. code-block:: rust
+
+   /// Unique content-addressed interaction request identifier.
+   #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+   pub struct InteractionRequestId(pub Uuid);
+
+   /// Durable interaction request issued by the runtime or an actor.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub struct InteractionRequest {
+       pub request_id: InteractionRequestId,
+       pub session_id: SessionId,
+       pub actor_id: ActorId,
+       pub node_id: Option<NodeId>,
+       pub kind: InteractionKind,
+       pub prompt: String,
+       pub schema: Option<JsonSchema>,
+       pub options: Vec<InteractionOption>,
+       pub requested_effect: Option<Effect>,
+       pub state_witness: StateWitness,
+       pub evidence_refs: Vec<EvidenceRef>,
+       pub deadline: Option<DateTime<Utc>>,
+       pub default_disposition: TimeoutDisposition,
+   }
+
+   /// Interaction request categories.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub enum InteractionKind {
+       PromotionApproval,
+       CapabilityElevation,
+       ClarificationQuestion,
+       CorrectionFeedback,
+       PlanReview,
+       SessionControl,
+   }
+
+   /// Resolved interaction response from the operator.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub struct InteractionResponse {
+       pub request_id: InteractionRequestId,
+       pub operator_id: OperatorId,
+       pub decision: InteractionDecision,
+       pub payload: Option<serde_json::Value>,
+       pub state_witness: StateWitness,
+       pub resolved_at: DateTime<Utc>,
+       pub signature: Option<OperatorSignature>,
+   }
+
+   /// Interaction decision outcomes.
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   pub enum InteractionDecision {
+       Approved,
+       Rejected { reason: String },
+       Answered { answer: String },
+       ModifiedPlan { updated_graph: Box<WorkGraph> },
+       Custom { payload: serde_json::Value },
+       Cancelled,
+       TimedOut,
+   }
+
+   /// Platform interaction port implemented by UI/TUI/Headless frontends.
+   #[async_trait::async_trait]
+   pub trait InteractionPort: Send + Sync {
+       async fn post_request(&self, request: InteractionRequest) -> Result<(), InteractionError>;
+       async fn cancel_request(&self, request_id: InteractionRequestId) -> Result<(), InteractionError>;
+       async fn poll_response(&self, request_id: InteractionRequestId) -> Result<Option<InteractionResponse>, InteractionError>;
+   }
+
+* **Interaction Invariants:**
+  
+  1. **Exactly-Once Resolution:** Every request resolves exactly once.
+  2. **Deterministic Timeouts:** Frontend disconnections or cancellations resolve via the request's declared `TimeoutDisposition`.
+  3. **Atomic `ask_user` Executor:** Dispatches `InteractionKind::ClarificationQuestion` to the broker and blocks safely on the response.
+  4. **Deterministic Replay:** Recorded responses are served directly from the ledger during replay without prompting.
+
+6. Multi-Actor TUI and Observability Architecture
+=================================================
+
+The terminal user interface (`perspt-tui`) is re-architected as a reactive client projected over the platform's actor, graph, evidence, and interaction streams:
+
+.. code-block:: text
+
+   +-------------------------------------------------------------------------+
+   | Perspt v0.7.0 -- Governed Multi-Actor Platform             Session: s-8f42|
+   +-----------------------+---------------------------+---------------------+
+   | Work Graph & Actors   | Active Actor Stream       | Evidence & Gate     |
+   |                       |                           |                     |
+   | [*] architect (idle)  | Actor: worker:node-2      | Residuals:          |
+   | [>] worker:node-2     | Route: claude-3-5-sonnet  |   syntax: 0.00      |
+   |     running tool...   | Model Turn: 4/12          |   typecheck: 0.00   |
+   | [#] worker:node-3     | Tool: edit_file           |   unit-tests: 1.20  |
+   |     waiting on lock   | Footprint: src/parser.rs  | Energy: V(x) = 1.44 |
+   | [+] worker:node-1     | Output: Applied hunk 1-4  | Gate: DESCENT_OK    |
+   |     node accepted     | Status: Verifying candidate| Barrier: PASS      |
+   +-----------------------+---------------------------+---------------------+
+   | Pending Interactions (1 Active)                                         |
+   | [!] worker:node-2 requests clarification:                               |
+   |     "Should unknown tokens be discarded or treated as errors?"          |
+   |     [1] Discard and log  [2] Raise ParseError  [3] Enter custom text    |
+   +-------------------------------------------------------------------------+
+   | Controls: [Tab] Switch Pane  [a] Approve  [r] Reject  [p] Pause  [q] Quit |
+   +-------------------------------------------------------------------------+
+
+* **Responsive Key Dispatch:** Asynchronous input loop with immediate visual acknowledgement.
+* **Unified Interaction Pane:** Dedicated interactive region for reviewing promotion requests, answering questions, and editing plans.
+* **Domain Presentation Integration:** Renders domain-specific diffs and visualizations via `DomainPackage::presentation()`.
+
+=========
+Rationale
+=========
+
+Design Decision Rationale
+=========================
+
+* **Static Rust Traits for Domain Plugins in v0.x:**
+  Static dispatch via `DomainPackage` traits compiled at the CLI composition root delivers complete type safety, zero serialization overhead for large ASTs and tensors, and immediate compiler verification of contract adherence. Dynamic WASM loading is deferred to future PSPs once the port interfaces have stabilized.
+
+* **Explicit Supervised Actors vs Ambient Async Tasks:**
+  True multi-agent governance requires mathematical containment. If an agent could inherit ambient authority or run unmonitored async tasks, Paper III capability guarantees and deterministic replay would be violated. Each actor must possess its own ledgered mailbox, resource budget, and attenuation witness.
+
+* **Atomic Tool Registration:**
+  In v0.6.6, tool schemas and executors were registered in disconnected modules, allowing tools like `ask_user` and `spawn_agent` to be advertised without executors. The `ToolRegistration` struct enforces that a tool cannot be declared in a catalog without its schema, effect kind, footprint, and executable handler being defined simultaneously.
+
+* **Durable Interaction Broker vs Ephemeral Callbacks:**
+  Ad-hoc UI callbacks cannot survive terminal resizes, disconnections, or headless CI execution, and they make deterministic replay impossible. Treating interactions as ledgered, content-addressed request-response pairs ensures total determinism and robust crash-recovery.
+
+=======================
+Backwards Compatibility
+=======================
+
+* **CLI Compatibility:** Standard commands (`perspt run`, `perspt chat`, `perspt review`) remain fully functional. A new ``--domain <name>`` flag is introduced (defaulting to auto-detection).
+* **SDK & Runtime API Breaking Changes:**
+  - `perspt-agent` is renamed to `perspt-runtime` and no longer re-exports coding primitives.
+  - `AgentDomainPackage` is replaced by the executable `DomainPackage` trait hierarchy.
+  - Direct instantiation of `CandidateWorkspace` without a domain state driver is deprecated and removed.
+* **Configuration:** Existing `perspt.toml` configuration files remain valid. Domain selection is inferred from workspace contents or explicitly declared via `domain = "coding"`.
+
+======================
+Implementation Roadmap
+======================
+
+The implementation is structured across seven disciplined phases:
+
+.. rubric:: Phase 0: Correctness and Claims Patch (Target: v0.6.7)
+
+* Resolve TUI deadlocks: Ensure `RequestCorrection`, `Edit`, `Skip`, and `Escape` in the promotion modal resolve pending requests safely.
+* Wire or remove non-functional TUI controls (`Pause`, `Resume`, `Manual Approval`).
+* Implement an in-memory fallback executor for `ask_user` to prevent "no executor registered" runtime errors.
+* Align README and Book documentation to accurately reflect current capabilities (clarify that v0.6.6 is a multi-node, multi-role coding runtime with an SDK mechanism library).
+
+.. rubric:: Phase 1: Minimal SDK Contract Freeze
+
+* Extract and version the minimal Paper I–III contracts in `perspt-sdk`.
+* Separate prompt compilation, search forests, and model routing into extension modules.
+* Add golden serialization tests and API compatibility fixtures for all ledger events, capability grants, and interaction envelopes.
+
+.. rubric:: Phase 2: Generic Runtime Inversion
+
+* Remove `perspt-coding` from `perspt-runtime` dependencies.
+* Move `CodingCandidateMeasurer`, coding contracts, safety barriers, and language plugin bindings into `perspt-coding`.
+* Introduce the in-memory `perspt-fixture` domain and verify that a full session runs end-to-end without importing any coding crate.
+* Enforce atomic `ToolRegistration` across all tool catalogs.
+
+.. rubric:: Phase 3: Research Domain Completion
+
+* Implement source acquisition tools for `perspt-research` (arXiv, PubMed, web, local files).
+* Implement executable sensors for `citation-check`, `claim-provenance`, `contradiction-sensor`, and `freshness-sensor`.
+* Implement the research state driver, claim-evidence diff, and publication promotion pipeline.
+* Validate research candidate hard-gate execution without language plugins.
+
+.. rubric:: Phase 4: Durable Actor Supervisor and Capability Delegation
+
+* Implement `ActorSpec`, `ActorStateRecord`, `ActorLifecycle`, and the durable `ActorSupervisor` process runtime.
+* Assign distinct, durable actor process instances with dedicated mailboxes to all concurrent work graph nodes.
+* Implement `EffectKind::SpawnActor` with verified mathematical capability attenuation ($C_{\text{child}} \preceq C_{\text{parent}}$).
+* Implement crash-recovery rehydration (`ActorSupervisor::rehydrate_from_ledger`) to restore running actor processes, mailboxes, and contexts from recorded events.
+* Unify all stochastic prompt roles under the universal `ActorTurnRunner`.
+
+.. rubric:: Phase 5: Replayable Interaction Service and Multi-Actor TUI
+
+* Implement the platform `InteractionPort` and durable interaction broker.
+* Connect `PromotionApproval`, `CapabilityElevation`, `ClarificationQuestion` (`ask_user`), `CorrectionFeedback`, and `PlanReview` to the broker.
+* Rebuild `perspt-tui` as a reactive projection over actor, graph, evidence, and interaction streams.
+* Verify replay of sessions with interactive user responses without invoking models or interactive prompts.
+
+.. rubric:: Phase 6: Documentation Reset and Acceptance Verification
+
+* Restructure the README and Perspt Book around the product architecture.
+* Add comprehensive domain plugin authoring tutorials and conformance test guides.
+* Publish complete theorem-to-code mapping tables and release capability matrices.
+
+================
+Acceptance Gates
+================
+
+The implementation must satisfy twelve strict binary acceptance gates before v0.7.0 final release:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 6 94
+
+   * - Gate
+     - Requirement
+   * - **G1**
+     - ``cargo tree -p perspt-runtime`` contains no domain crate (zero references to ``perspt-coding``, ``perspt-research``, or language plugins).
+   * - **G2**
+     - Static analysis verifies zero occurrences of ``coding``, ``Cargo``, ``pytest``, or file-staging literals within `perspt-runtime`.
+   * - **G3**
+     - An independent test domain (`perspt-fixture`) executes from detection through promotion via composition-root registration only, without edits to runtime, TUI, or store crates.
+   * - **G4**
+     - `perspt-research` autonomously discovers sources, validates citations, clears residuals, and passes its hard gate without invoking any language plugin.
+   * - **G5**
+     - Every advertised tool in any domain or runtime catalog is atomically bound to an executable handler.
+   * - **G6**
+     - Every active actor runs as a durable supervised process with a unique ID, lifecycle state machine, resource budget, context head, and ledgered mailbox with crash-rehydration support.
+   * - **G7**
+     - Formal attenuation verification confirms that no spawned child actor can widen its parent's effects, scopes, filesystem paths, or approval policies.
+   * - **G8**
+     - Concurrently scheduled disjoint work graph nodes execute under separate durable actor processes, conflicting nodes serialize, and deterministic replay reproduces exact spawn/join ordering.
+   * - **G9**
+     - Every interactive event (promotion approval, `ask_user`, correction feedback, plan edit, pause, resume, abort, Skip, Escape, timeout) resolves deterministically without leaving any stranded async receiver.
+   * - **G10**
+     - Deterministic replay accurately reconstructs durable actor processes, mailboxes, and human interactions directly from the event ledger without model calls or user input.
+   * - **G11**
+     - TUI snapshot tests verify correct rendering across single-actor, multi-actor, degraded-sensor, and pending-interaction states.
+   * - **G12**
+     - Documentation claims in the README and Perspt Book are validated by automated conformance checks against the build capability matrix.
+
+============
+Open Issues
+============
+
+* **Dynamic Plugin ABI (Post-v0.7.0):** Evaluating WebAssembly (WASM via Wasmtime / WASIX) or C-ABI dynamic libraries for out-of-tree third-party domain packages.
+* **Distributed Actor Execution:** Extending the actor supervisor to manage actors executing across distributed physical compute nodes.
+* **Collaborative Multi-Operator Gateways:** Protocol specifications for multiple human reviewers interacting concurrently with a running session via terminal and web interfaces.
+
+=========
+Copyright
+=========
+
+This document is placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.

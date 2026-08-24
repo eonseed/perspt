@@ -135,6 +135,11 @@ The numerical index contains a table of all PSPs, ordered by number.
      - :doc:`Bounded Search Trajectories and Model-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
      - Draft
+   * - :psp:`000011`
+     - Enhancement
+     - :doc:`Domain-Neutral Runtime Inversion, Multi-Actor Supervisor, and Replayable Human Interaction Platform <psp-000011>`
+     - Vikrant Rathore, Ronak Rathore
+     - Draft
 
 ====================
 Index by Category
@@ -234,6 +239,11 @@ Enhancement PSPs improve existing Perspt functionality.
      - :doc:`Bounded Search Trajectories and Model-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
      - Draft
+   * - :psp:`000011`
+     - Enhancement
+     - :doc:`Domain-Neutral Runtime Inversion, Multi-Actor Supervisor, and Replayable Human Interaction Platform <psp-000011>`
+     - Vikrant Rathore, Ronak Rathore
+     - Draft
 
 UI/UX PSPs
 ===========
@@ -288,6 +298,11 @@ Draft PSPs (under development)
      - Enhancement
      - :doc:`Bounded Search Trajectories and Model-Conditioned Prompt Programs <psp-000010>`
      - Vikrant Rathore
+     - Draft
+   * - :psp:`000011`
+     - Enhancement
+     - :doc:`Domain-Neutral Runtime Inversion, Multi-Actor Supervisor, and Replayable Human Interaction Platform <psp-000011>`
+     - Vikrant Rathore, Ronak Rathore
      - Draft
 
 Discussion PSPs (under review)
