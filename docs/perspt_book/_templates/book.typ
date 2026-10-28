@@ -77,13 +77,13 @@
       )
       #v(9mm)
       #text(font: sans, size: 21pt, weight: "bold", tracking: -.02em, hyphenate: false, fill: rgb("#f8fafc"))[
-        Build with AI in your terminal. \
-        #text(fill: emerald-mint)[Ship code verified by your compiler.]
+        AI tools for developers. \
+        #text(fill: emerald-mint)[Chat. Explore. Make checked changes.]
       ]
       #v(5mm)
       #text(font: sans, size: 10.5pt, fill: rgb("#cbd5e1"))[
-        The complete guide to Perspt's command-line pipes, interactive TUI, \
-        compiler-verified SRBN coding agent, and embeddable Rust SDK.
+        A practical guide to Perspt's plain terminal chat, full-screen UI, \
+        checked coding tasks, and reusable Rust SDK.
       ]
     ]
     // Spectrum Divider Bar (Emerald -> Cyan -> Gold)
@@ -95,20 +95,20 @@
     )
     // Lower Cover Body
     #block(width: 100%, inset: (x: 18mm, top: 8mm, bottom: 14mm))[
-      #align(center, cover-art())
+      #align(center, scale(x: 78%, y: 78%, reflow: true, cover-art()))
       #v(7mm)
       #grid(
         columns: (1fr, 1fr),
         gutter: 3mm,
         rect(width: 100%, fill: rgb("#f0fdf4"), stroke: 0.5pt + rgb("#a7f3d0"), radius: 4pt, inset: 6pt)[
-          #text(font: mono, size: 6.8pt, weight: "bold", fill: emerald)[01 · SIMPLE CLI & TUI]\
+          #text(font: mono, size: 6.8pt, weight: "bold", fill: emerald)[01 / TERMINAL CHAT]\
           #v(1.5mm)
-          #text(font: sans, size: 8pt, fill: quiet)[Pipe-ready `simple-chat` and full-screen `perspt chat` across 9+ providers.]
+          #text(font: sans, size: 8pt, fill: quiet)[Line-oriented `simple-chat` and full-screen `perspt chat` with cloud or local models.]
         ],
         rect(width: 100%, fill: rgb("#fffbeb"), stroke: 0.5pt + rgb("#fde68a"), radius: 4pt, inset: 6pt)[
-          #text(font: mono, size: 6.8pt, weight: "bold", fill: amber)[02 · SRBN AGENT & RUST SDK]\
+          #text(font: mono, size: 6.8pt, weight: "bold", fill: amber)[02 / CODING AGENT & RUST SDK]\
           #v(1.5mm)
-          #text(font: sans, size: 8pt, fill: quiet)[Compiler-verified `perspt agent` and reusable `perspt-sdk` crates.]
+          #text(font: sans, size: 8pt, fill: quiet)[Candidate edits and project checks with `perspt agent`; reusable SDK contracts.]
         ],
       )
       #v(7mm)

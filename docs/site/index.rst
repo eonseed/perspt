@@ -1,5 +1,5 @@
 .. meta::
-   :description: Perspt is the AI workspace for your terminal in one fast Rust binary—featuring a pipe-ready Simple CLI, an interactive Terminal UI, a compiler-verified SRBN Coding Agent, and an embeddable Rust SDK.
+   :description: Chat with AI, explore a codebase, and make checked code changes from the terminal. Perspt combines interactive chat, a coding agent, and reusable Rust libraries.
 
 Perspt
 ======
@@ -10,107 +10,120 @@ Perspt
 
       .. rst-class:: eyebrow
 
-      $_ PERSPT // THE AI WORKSPACE FOR YOUR TERMINAL
+      PERSPT / AI TOOLS FOR DEVELOPERS
 
       .. raw:: html
 
-         <h1>Build with AI in your terminal.<br><em>Ship code verified by your compiler.</em></h1>
+         <h1>From a question<br>to a checked change.</h1>
 
       .. rst-class:: lead
 
-      Perspt brings 9+ cloud and local LLMs straight into your command line in one fast Rust binary. Pipe quick prompts through Unix shell scripts, chat interactively in a full-screen terminal UI, or delegate multi-file tasks to an autonomous coding agent that compiles and tests every change before touching your repo.
+      Chat with a model. Find our way through a codebase. Ask an agent to change it and run the checks. Perspt brings these workflows into the terminal, with cloud or local models and a reusable Rust SDK.
 
       .. container:: actions
 
-         `Read the Book <mount://book/index.html>`_
-         `5-Min Quick Start <mount://book/quickstart.html>`_
-         `Rust SDK Guide <mount://book/api/index.html>`_
-         `Download PDF <mount://pdf/perspt-book-en.pdf>`_
+         `Get started <mount://book/quickstart.html>`_
+         `See the agent workflow <mount://book/tutorials/agent-mode.html>`_
 
       .. rst-class:: hero-note
 
-      100% Rust · Zero Python dependencies · OpenAI, Anthropic, Gemini, Vertex AI, Ollama, Groq, DeepSeek, xAI & Cohere.
+      One Rust binary. Nine provider adapters. Linux, macOS, and Windows.
 
-      Linux, macOS, and Windows · `GitHub <https://github.com/eonseed/perspt>`_ · `Rustdoc API <perspt/index.html>`_ · `PSP Catalog <mount://psps/index.html>`_.
+      `GitHub <https://github.com/eonseed/perspt>`_ | `Read the book <mount://book/index.html>`_ | `Download PDF <mount://pdf/perspt-book-en.pdf>`_
 
    .. container:: hero-art
 
       .. image:: ../shared/_static/cover-art.svg
-         :alt: Terminal Spectrum and SRBN Verification Prism showing Simple CLI, Terminal UI, and SRBN Agent converging to V(x) = 0.
+         :alt: Perspt commands for full-screen chat, plain terminal chat, checked coding tasks, and the Rust SDK.
 
       .. rst-class:: art-caption
 
-      YOUR TERMINAL'S WINDOW TO THE AI WORLD // CLI · TUI · SRBN · SDK
-
-.. container:: pillars
-
-   .. container:: pillar
-
-      .. rubric:: SIMPLE CLI · ``perspt simple-chat``
-
-      **Plain terminal output for Unix pipes and scripts.**
-      Ask a quick question from your shell, pipe compiler logs or ``git diff`` into ``stdin``, and get clean text on ``stdout`` with zero UI chrome.
-
-      .. code-block:: sh
-
-         git diff | perspt simple-chat "Write a commit message"
-
-   .. container:: pillar
-
-      .. rubric:: TERMINAL UI · ``perspt chat``
-
-      **Interactive full-screen chat right in your terminal.**
-      Stream Markdown, syntax-highlighted code, tables, and LaTeX math; switch models live across 9+ cloud or local Ollama providers; and inspect MCP tools with ``/mcp``.
-
-      .. code-block:: sh
-
-         perspt chat --model gemini-3.5-flash
-
-   .. container:: pillar
-
-      .. rubric:: SRBN CODING AGENT · ``perspt agent``
-
-      **Autonomous coding verified by your compiler and tests.**
-      Give Perspt a task and a project directory. It plans the changes, edits an isolated sandbox copy, runs your compiler, LSP, and test suite, and fixes its own errors before committing.
-
-      .. code-block:: sh
-
-         perspt agent -w ./app "Add CSV export with unit tests"
-
-   .. container:: pillar
-
-      .. rubric:: EMBEDDABLE RUST SDK · ``perspt-sdk``
-
-      **Integrate verified AI workflows into your own Rust apps.**
-      Embed ``perspt-sdk``, ``perspt-coding``, and ``perspt-agent`` as library crates to reuse Perspt's verification gate, capability sandbox, and DuckDB audit ledger in custom software.
-
-      .. code-block:: sh
-
-         cargo add perspt-sdk perspt-coding
+      CHOOSE A COMMAND. START WITH A SMALL TASK.
 
 .. container:: section-heading
 
    .. rst-class:: eyebrow
 
-   HOW THE CODING AGENT WORKS
+   START WITH THE JOB
 
-   .. rubric:: Edits happen in a sandbox. Only working code reaches your repo.
+   .. rubric:: Four ways to put Perspt to work.
 
-Most AI coding tools generate code in an open loop: if the model makes a small mistake in one file, later edits build on top of that mistake until your project no longer compiles. Internally, ``perspt agent`` is powered by **SRBN (Stabilized Recursive Barrier Networks)**, an engineering architecture based on the *Stability is All You Need* research paper series.
+.. container:: pillars
+
+   .. container:: pillar
+
+      .. rubric:: Talk through a problem
+
+      **Full-screen chat with streamed answers.** Read Markdown and code, paste multiline input, and inspect configured read-only MCP tools with ``/mcp``.
+
+      .. code-block:: sh
+
+         perspt chat
+
+      `Start a conversation <mount://book/tutorials/first-chat.html>`_
+
+   .. container:: pillar
+
+      .. rubric:: Keep the terminal simple
+
+      **Chat without a full-screen interface.** Use a line editor and save the conversation with ``--log-file``. Piped input sends one message per non-empty line; output includes session messages.
+
+      .. code-block:: sh
+
+         perspt simple-chat --log-file chat.txt
+
+      `Learn the controls <mount://book/user-guide/basic-usage.html>`_
+
+   .. container:: pillar
+
+      .. rubric:: Make a checked code change
+
+      **Give the agent a task and a project directory.** It edits a candidate copy, runs the available project checks, and requests review before promotion. Agent mode is experimental.
+
+      .. code-block:: sh
+
+         perspt agent -w ./app "Fix the parser tests"
+
+      `Try a coding task <mount://book/tutorials/agent-mode.html>`_
+
+   .. container:: pillar
+
+      .. rubric:: Build on the Rust SDK
+
+      **Reuse the scoring, gates, and domain contracts.** Embed the pieces needed for a custom workflow. The coding package provides adapters for Rust, Python, and TypeScript; the research package is a skeleton.
+
+      .. code-block:: sh
+
+         cargo add perspt-sdk perspt-coding \
+           --git https://github.com/eonseed/perspt
+
+      `Open the SDK guide <mount://book/api/index.html>`_
+
+.. container:: section-heading
+
+   .. rst-class:: eyebrow
+
+   A CODING TASK, STEP BY STEP
+
+   .. rubric:: Propose. Check. Repair. Review.
+
+**The model proposes changes; the tools measure them.** Perspt keeps speculative edits in a candidate workspace. It checks the result with the detected language toolchain and uses the diagnostics to guide another attempt when needed.
 
 .. figure:: ../shared/_static/agent-workflow-overview.svg
-   :alt: Four-step safe sandbox workflow showing how perspt agent turns a task prompt into compiler-verified code.
+   :target: _static/agent-workflow-overview.svg
+   :alt: Describe a task, edit a candidate copy, run project checks, then review and promote. Failed attempts return to correction or stop at a budget limit.
    :width: 100%
 
-   The four-stage ``perspt agent`` workflow: your working tree stays untouched while Perspt edits a sandboxed copy and checks every step with your compiler, LSP, and test suite.
+   Promotion copies an approved result into the project. It does not create a Git commit. ``--yes`` approves promotion automatically; verification still runs.
 
-Instead of trusting the LLM's first guess, SRBN runs every candidate edit through your actual language toolchain (``cargo check``, ``rust-analyzer``, ``pytest``, ``pyright``, ``tsc``) and scores remaining compiler, contract, and test issues as a single error energy :math:`V(x) = \sum_{e \in E} w_e \|r_e(x)\|^2`. Changes are accepted only when all checks pass or measured errors strictly decrease (:math:`V(y) \le V_{\mathrm{best}} - \rho_{\mathrm{gate}}`). Bad edits are discarded automatically, keeping the agent locked on working code that matches your task.
+**A lower error score means progress, not completion.** Perspt can keep an improving checkpoint inside the candidate workspace. Delivery requires a hard pass of the required checks and approval. A run can also stop with unresolved errors when its limits are reached.
 
 .. figure:: ../shared/_static/front-page-abm.svg
-   :alt: Agent-based simulation comparing unguided LLM drift against SRBN Lyapunov-guided trajectory convergence.
+   :target: _static/front-page-abm.svg
+   :alt: Illustrative candidate scores with smooth connecting curves, accepted checkpoint dots, and rejected attempts. Energy remains non-negative and acceptance is decided at checkpoints.
    :width: 100%
 
-   Why closed-loop verification matters over multi-step tasks: unverified LLM loops drift as errors compound across steps, while Perspt's SRBN verification loop tests and corrects each step until the code compiles and passes tests (:math:`V(x) = 0`).
+   An illustration of measured progress, not benchmark data. Dots represent discrete verification results. Curves help us follow the attempts; they do not imply continuous execution or guaranteed convergence.
 
 .. container:: split-section
 
@@ -118,112 +131,53 @@ Instead of trusting the LLM's first guess, SRBN runs every candidate edit throug
 
       .. rst-class:: eyebrow
 
-      SAFE SANDBOX & FULL REPLAY
+      KEEP THE EVIDENCE CLOSE
 
-      .. rubric:: Isolated workspace edits, real compiler feedback, and instant rollback.
+      .. rubric:: Inspect the change. Understand the outcome.
 
-      When you run ``perspt agent``, the LLM never writes directly to your working tree. It proposes changes inside an isolated candidate workspace while Perspt's Starlark policy engine and OS sandbox (Bubblewrap on Linux, ``sandbox-exec`` on macOS) block unsafe commands.
+      **Watch a live run** with ``perspt agent --dashboard``. The local browser view shows measurements, decisions, and session progress.
 
-      Every verified step is recorded in a local DuckDB ledger, so you can watch progress in the live web dashboard (``--dashboard``), replay any session offline (``perspt replay``), or roll back promoted changes with a single command (``perspt ledger --rollback``).
+      **Inspect the record** with ``perspt replay <session-id>``. Replay audits recorded events without calling a model or rerunning the tests.
 
-      `Explore How Agent Mode Works <mount://book/concepts/srbn-architecture.html>`_
+      **Undo a promotion** with ``perspt ledger --rollback <session-prefix>``. Rollback targets that session's newest completed promotion and refuses to overwrite files changed since then.
 
-   .. image:: ../shared/_static/srbn-control-sequence.svg
-      :alt: Sequence diagram of the SRBN governed control loop across User, Orchestrator, Architect, Actuator, Admissibility Kernel, Verifier Suite, and Merkle Ledger.
+      `Read the agent guide <mount://book/user-guide/agent-mode.html>`_
 
-.. container:: section-heading
-
-   .. rst-class:: eyebrow
-
-   MODULAR 14-CRATE WORKSPACE & SDK
-
-   .. rubric:: Use Perspt as a CLI tool or embed the Rust SDK in your own stack.
-
-Perspt is engineered as a modular 14-crate Rust workspace around **``perspt-sdk``**. You can embed the verification loop, capability sandbox, provider portfolio, and DuckDB audit ledger directly into your own Rust applications, or build custom domain agents alongside ``perspt-coding`` and ``perspt-research``.
-
-.. code-block:: rust
-
-   use perspt_coding::CodingDomain;
-   use perspt_sdk::{
-       domain::AgentDomainPackage,
-       energy::{score_candidate, EnergyModel},
-       gate::evaluate_gate,
-   };
-
-   // Score compiler/LSP/test diagnostics and check the acceptance gate:
-   let domain = CodingDomain;
-   let model: EnergyModel = domain.energy_model(&scope);
-   let score = score_candidate(&residuals, &model)?;
-   let decision = evaluate_gate(score.hard_violations.is_empty(), score.total, best_v, model.rho_gate)?;
-
-.. figure:: ../shared/_static/workspace-architecture.svg
-   :alt: Layered architecture of the fourteen crates in the Perspt Rust workspace.
-   :width: 100%
-
-   The 14-crate Perspt workspace: presentation surfaces (Simple CLI, TUI, Web Dashboard) drive the SRBN agent runtime over ``perspt-sdk``, security & DuckDB persistence engines, and 9+ LLM providers.
-
-.. container:: book-section
-
-   .. image:: ../shared/_static/book-cover.png
-      :alt: Cover of The Perspt Book: Build with AI in your terminal. Ship code verified by your compiler.
-
-   .. container:: book-copy
+   .. container:: split-copy
 
       .. rst-class:: eyebrow
 
-      DEVELOPER HANDBOOK & PSP ARCHIVE
+      KNOW WHAT A PASS MEANS
 
-      .. rubric:: Clear developer guides, SDK references, and engineering specs.
+      .. rubric:: Checks provide evidence within their scope.
 
-      .. epigraph::
+      A hard pass means the required configured checks passed. Tests can evolve with the implementation by default. Stronger regression and external acceptance policies are available.
 
-         | *The keyboard hums, the screen aglow,*
-         | *AI's wisdom, a steady flow.*
-         |
-         | *Will robots take over, it's quite the fright,*
-         | *Or just provide insights, day and night?*
-         |
-         | *We ponder and chat, with code as our guide,*
-         | *Is AI our helper or our human pride?*
+      Candidate copies, command policies, and OS process isolation protect different boundaries. Linux uses Bubblewrap; macOS uses ``sandbox-exec``. Native Windows agent runs require explicit reduced isolation or WSL.
 
-      *The Perspt Book* walks you through installing Perspt, configuring cloud or local Ollama models, piping commands with ``simple-chat``, chatting in the TUI, running ``perspt agent`` on real projects, and embedding ``perspt-sdk`` in Rust.
+      `Choose a test policy <mount://book/configuration.html>`_ | `Check prerequisites <mount://book/installation.html>`_
 
-      Alongside the book, the **Perspt Specification Proposals (PSPs)** archive documents the complete engineering design and mathematical foundations behind the SRBN runtime.
+Get started
+-----------
 
-      .. container:: actions
-
-         `Start Reading the Book <mount://book/index.html>`_
-         `Open the PDF Book <mount://pdf/perspt-book-en.pdf>`_
-         `Browse PSP Catalog <mount://psps/index.html>`_
-
-.. container:: text-links
-
-   `Quick Start <mount://book/quickstart.html>`_
-   `Simple CLI & TUI Guide <mount://book/getting-started.html>`_
-   `Coding Agent Guide <mount://book/user-guide/agent-mode.html>`_
-   `Rust SDK Reference <mount://book/api/index.html>`_
-   `Real-Time Dashboard <mount://book/user-guide/dashboard.html>`_
-   `MCP Integration <mount://book/user-guide/mcp.html>`_
-   `Rustdoc API <perspt/index.html>`_
-
-Get Started in 60 Seconds
--------------------------
-
-Build Perspt from source with Cargo and try all three modes right away:
+From the repository root, build a self-contained CLI and install it on the Cargo binary path:
 
 .. code-block:: sh
 
    git clone https://github.com/eonseed/perspt.git
    cd perspt
-   cargo build --release
+   cargo install --locked --path crates/perspt-cli --features bundled
+   export GEMINI_API_KEY="<api-key>"
+   perspt chat
 
-   export GEMINI_API_KEY="your-api-key"   # Or OPENAI_API_KEY, ANTHROPIC_API_KEY, or local Ollama
+**Prefer local models?** Configure Ollama and select an installed model with an explicit route such as ``ollama::llama3.2``. **Ready for code changes?** Start with a small task in an existing project whose checks already run locally.
 
-   # 1. Simple CLI: plain terminal output for quick questions and Unix pipes
-   cat Cargo.toml | ./target/release/perspt simple-chat "Summarize the workspace crates"
+.. container:: text-links
 
-   # 2. Interactive Terminal UI: full-screen chat with Markdown, code, and model switching
-   ./target/release/perspt chat
-
-   # 3. SRBN Coding Agent: plan, write, compile, and test code in a project directory
-   ./target/release/perspt agent -w ./my-app "Build a CLI calculator in Rust with unit tests"
+   `Quick start <mount://book/quickstart.html>`_
+   `Local models <mount://book/tutorials/local-models.html>`_
+   `Agent tutorial <mount://book/tutorials/agent-mode.html>`_
+   `Rust SDK <mount://book/api/index.html>`_
+   `Architecture <mount://book/concepts/srbn-architecture.html>`_
+   `Specification proposals <mount://psps/index.html>`_
+   `Rustdoc <perspt/index.html>`_

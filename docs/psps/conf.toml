@@ -6,6 +6,7 @@ copyright = "2026, Vikrant Rathore"
 version = "0.6.6"
 release = "0.6.6"
 
+# Guidedog compatibility identifiers; no Python extensions are loaded.
 extensions = ["sphinx.ext.graphviz", "sphinx.ext.mathjax"]
 exclude_patterns = ["_build", "drafts/**", "template/**", "_templates/**", "README*", "MAINTAINER_GUIDE*", "Thumbs.db", ".DS_Store"]
 language = "en"
@@ -21,13 +22,6 @@ pdf_paper_size = "a4"
 include_roots = ["../shared"]
 html_static_path = ["../shared/_static"]
 html_css_files = ["perspt-docs.css"]
-html_js_files = [
-  "data/typography/linked-list.js",
-  "data/typography/linebreak.js",
-  "data/typography/hypher.js",
-  "data/typography/english.js",
-  "typography.js",
-]
 mathjax_path = "_static/mathjax/tex-svg-full.js"
 html_favicon = "../shared/_static/perspt-logo.svg"
 html_logo = "../shared/_static/perspt-logo.svg"

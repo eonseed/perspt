@@ -6,19 +6,13 @@ release = "0.6.6"
 root_doc = "index"
 source_suffix = [".rst"]
 exclude_patterns = ["_build", "_templates/**", "README*"]
+# Guidedog compatibility identifiers; no Python extensions are loaded.
 extensions = ["sphinx.ext.mathjax"]
 templates_path = ["_templates"]
 html_theme = "guidedog"
-html_title = "Perspt — Build with AI in Your Terminal"
+html_title = "Perspt: AI tools for developers"
 html_static_path = ["_static", "../shared/_static"]
 include_roots = ["../shared"]
-html_js_files = [
-  "data/typography/linked-list.js",
-  "data/typography/linebreak.js",
-  "data/typography/hypher.js",
-  "data/typography/english.js",
-  "typography.js",
-]
 html_copy_source = false
 html_use_index = false
 html_favicon = "../shared/_static/perspt-logo.svg"
