@@ -62,60 +62,80 @@ Perspt
              <div class="term-progress-bar"></div>
            </div>
            <div class="term-viewport">
-             <!-- Mode 1: Simple CLI -->
+             <!-- Mode 1: Simple CLI (plain stdout streaming) -->
              <div class="term-stage stage-0 is-active" role="tabpanel" data-mode-panel="0">
-               <div class="term-line step-1"><span class="t-prompt">$</span> <span class="t-cmd">perspt simple-chat</span> <span class="t-flag">--log-file session.md</span></div>
-               <div class="term-line step-2"><span class="t-muted">Connected to</span> <span class="t-cyan">gemini::gemini-3.5-flash</span> <span class="t-muted">· type /help for commands</span></div>
-               <div class="term-line step-3"><span class="t-user">You &gt;</span> Why does <code>split(',')</code> panic on a trailing comma?</div>
-               <div class="term-line step-4 t-card">
-                 <div class="t-card-head"><span class="t-mint">AI &gt;</span> Streaming plain text to stdout</div>
-                 <div><code>"a,b,".split(',')</code> yields a trailing <code>""</code> slice, so <code>parse::&lt;f64&gt;()</code> fails.</div>
-                 <div>Filter empty fields first: <code>line.split(',').filter(|s| !s.is_empty())</code></div>
-               </div>
-               <div class="term-line step-5 t-status-ok"><span class="t-check">✓</span> Streamed in 280 ms · logged to <code>session.md</code> <span class="t-cursor" aria-hidden="true">▋</span></div>
-             </div>
-
-             <!-- Mode 2: Full-Screen TUI -->
-             <div class="term-stage stage-1" role="tabpanel" data-mode-panel="1">
-               <div class="term-line step-1"><span class="t-prompt">$</span> <span class="t-cmd">perspt chat</span> <span class="t-flag">--model anthropic::claude-sonnet-4-5</span></div>
-               <div class="term-line step-2 t-tui-chrome">
-                 <span>PERSPT TUI v0.6.6</span>
-                 <span class="t-mint">claude-sonnet-4-5</span>
-                 <span class="t-cyan">/mcp: 2 tools</span>
-               </div>
-               <div class="term-line step-3 t-card">
-                 <div class="t-card-head"><span class="t-mint">Assistant</span> · Live Markdown, wrapped tables &amp; Unicode math</div>
-                 <div class="t-mini-table">
-                   <div><span>Surface</span><span>Command</span><span>Best For</span></div>
-                   <div><span>Simple CLI</span><span><code>perspt simple-chat</code></span><span>Quick shell Q&amp;A</span></div>
-                   <div><span>Chat TUI</span><span><code>perspt chat</code></span><span>Multi-line &amp; MCP</span></div>
+               <div class="term-line step-1"><span class="t-muted">~/app</span> <span class="t-prompt">$</span> <span class="t-cmd t-typewriter">perspt simple-chat --model gemini-3.5-flash</span></div>
+               <div class="term-line step-2 t-dim-line">Connected to <span class="t-cyan">gemini::gemini-3.5-flash</span> · plain stdout stream · Ctrl+C to exit</div>
+               <div class="term-line step-3"><span class="t-user">You &gt;</span> Why does <code>"a,b,".split(',')</code> fail when parsing floats in Rust?</div>
+               <div class="term-line step-4 t-stream-block">
+                 <div><span class="t-mint">AI  &gt;</span> A trailing comma yields a final <code>""</code> slice, causing <code>parse::&lt;f64&gt;()</code> to fail.</div>
+                 <div class="t-code-block">
+                   <div><span class="t-kw">pub fn</span> <span class="t-fn">parse_row</span>(line: &amp;<span class="t-ty">str</span>) -&gt; Result&lt;Vec&lt;<span class="t-ty">f64</span>&gt;&gt; {</div>
+                   <div>&nbsp;&nbsp;line.<span class="t-fn">split_terminator</span>(<span class="t-str">','</span>).<span class="t-fn">map</span>(str::parse).<span class="t-fn">collect</span>()</div>
+                   <div>}</div>
                  </div>
-                 <div class="t-math">Gate descent: <code>V(x) ≤ V(x_best) − ρ_gate</code></div>
                </div>
-               <div class="term-line step-4 t-tui-input"><span class="t-mint">&gt;</span> /save architecture-notes.md <span class="t-cursor" aria-hidden="true">▋</span></div>
-               <div class="term-line step-5 t-keys"><span>Enter Send</span><span>Ctrl+J Newline</span><span>Ctrl+R Reasoning</span><span>Ctrl+Q Quit</span></div>
+               <div class="term-line step-5"><span class="t-user">You &gt;</span> <span class="t-cmd">/save session.md</span> &nbsp;<span class="t-check">✓</span> <span class="t-muted">Saved 2 turns (240 ms)</span> <span class="t-cursor" aria-hidden="true">▋</span></div>
              </div>
 
-             <!-- Mode 3: Coding Agent -->
-             <div class="term-stage stage-2" role="tabpanel" data-mode-panel="2">
-               <div class="term-line step-1"><span class="t-prompt">$</span> <span class="t-cmd">perspt agent</span> <span class="t-flag">-w ./app</span> <span class="t-str">"Fix trailing-comma panic in CSV parser"</span></div>
-               <div class="term-line step-2"><span class="t-gold">[candidate]</span> Sandbox copy staged · <code>edit_file src/parser.rs (+8 -2)</code></div>
-               <div class="term-line step-3 t-card">
-                 <div class="t-card-head"><span class="t-gold">Verifier Suite</span> · Sandboxed compiler &amp; test execution</div>
-                 <div class="t-verify-row"><span class="t-check">✓</span> <span>syntax</span> <code>cargo check --message-format=json</code> <span class="t-mint">0 errors</span></div>
-                 <div class="t-verify-row"><span class="t-check">✓</span> <span>build</span> <code>cargo build --message-format=json</code> <span class="t-mint">ok (0.7s)</span></div>
-                 <div class="t-verify-row"><span class="t-check">✓</span> <span>test</span> <code>cargo test</code> <span class="t-mint">18 passed</span></div>
+             <!-- Mode 2: Full-Screen Ratatui TUI -->
+             <div class="term-stage stage-1" role="tabpanel" data-mode-panel="1">
+               <div class="term-line step-1 t-tui-topbar">
+                 <span><strong class="t-mint">PERSPT CHAT</strong> · Full-Screen TUI</span>
+                 <span class="t-cyan">anthropic::claude-sonnet-4-5</span>
+                 <span class="t-gold">MCP: 2 servers</span>
                </div>
-               <div class="term-line step-4"><span class="t-mint">V(x): 7.0 ──► 2.0 ──► 0.0</span> · <span class="t-badge-pass">HardPass</span></div>
-               <div class="term-line step-5 t-review-bar">Review changes: <span class="t-key">[y] Approve</span> <span class="t-key">[d] Diff</span> <span class="t-key">[c] Correct</span> <span class="t-cursor" aria-hidden="true">▋</span></div>
+               <div class="term-line step-2 t-tui-pane">
+                 <div class="t-pane-title">─ Conversation History ─────────────────────────────────────────</div>
+                 <div class="t-chat-msg"><span class="t-badge-you">You</span> Summarize the 3 surfaces and show the gate inequality.</div>
+                 <div class="t-chat-msg">
+                   <span class="t-badge-ai">Assistant</span>
+                   <div class="t-tui-table">
+                     <div class="t-tbl-head"><span>Mode</span><span>Command</span><span>Workflow</span></div>
+                     <div><span>Simple CLI</span><span><code>perspt simple-chat</code></span><span>Plain stdout &amp; shell logs</span></div>
+                     <div><span>Terminal UI</span><span><code>perspt chat</code></span><span>Split-pane Markdown, math &amp; MCP</span></div>
+                     <div><span>Coding Agent</span><span><code>perspt agent</code></span><span>Sandboxed edits + build/test gate</span></div>
+                   </div>
+                   <div class="t-math-box">Lyapunov descent gate: &nbsp;<span class="t-mint">V(x) ≤ V(x_best) − ρ_gate</span> &nbsp;<span class="t-muted">(hard pass: V(x) = 0)</span></div>
+                 </div>
+               </div>
+               <div class="term-line step-3 t-tui-inputbox">
+                 <div class="t-pane-title">─ Input (Enter: send · Ctrl+J: newline · Ctrl+R: reasoning) ────</div>
+                 <div><span class="t-mint">&gt;</span> /mcp status <span class="t-cursor" aria-hidden="true">▋</span></div>
+               </div>
+             </div>
+
+             <!-- Mode 3: Governed Coding Agent -->
+             <div class="term-stage stage-2" role="tabpanel" data-mode-panel="2">
+               <div class="term-line step-1"><span class="t-muted">~/app</span> <span class="t-prompt">$</span> <span class="t-cmd">perspt agent</span> <span class="t-flag">-w .</span> <span class="t-str">"Fix trailing-comma panic in CSV parser"</span></div>
+               <div class="term-line step-2 t-agent-grid">
+                 <div class="t-agent-box">
+                   <div class="t-box-label">WORK GRAPH &amp; ENERGY V(x)</div>
+                   <div class="t-energy-row"><span>V_syn</span><span class="t-bar-track"><span class="t-bar-fill fill-zero"></span></span><span class="t-mint">4.0 → 0.0</span></div>
+                   <div class="t-energy-row"><span>V_log</span><span class="t-bar-track"><span class="t-bar-fill fill-zero"></span></span><span class="t-mint">3.0 → 0.0</span></div>
+                   <div class="t-energy-row"><span>Total</span><span class="t-badge-pass">HardPass (V = 0.0)</span></div>
+                 </div>
+                 <div class="t-agent-box">
+                   <div class="t-box-label">SANDBOXED VERIFIER SUITE</div>
+                   <div class="t-vrow"><span class="t-check">✓</span> <span>syntax</span> <code>cargo check</code> <span class="t-mint">0 err</span></div>
+                   <div class="t-vrow"><span class="t-check">✓</span> <span>build</span> <code>cargo build</code> <span class="t-mint">0.6s</span></div>
+                   <div class="t-vrow"><span class="t-check">✓</span> <span>test</span> <code>cargo test</code> <span class="t-mint">18 ok</span></div>
+                 </div>
+               </div>
+               <div class="term-line step-3 t-diff-box">
+                 <div class="t-diff-head"><span>Review staged diff · <code>src/parser.rs</code></span><span class="t-muted">+1 −1</span></div>
+                 <div class="t-diff-del">- &nbsp;line.split(',').map(str::parse).collect()</div>
+                 <div class="t-diff-add">+ &nbsp;line.split_terminator(',').map(str::parse).collect()</div>
+               </div>
+               <div class="term-line step-4 t-review-bar">Apply to workspace? <span class="t-key">[y] Approve</span> <span class="t-key">[d] Diff</span> <span class="t-key">[c] Correct</span> <span class="t-key">[n] Reject</span> <span class="t-cursor" aria-hidden="true">▋</span></div>
              </div>
            </div>
            <div class="term-footer">
              <span class="term-footer-status">
                <span class="pulse-dot" aria-hidden="true"></span>
-               <span class="term-mode-caption" data-caption-0="MODE 01/03 · STREAMING CLI IN STDOUT" data-caption-1="MODE 02/03 · FULL-SCREEN RATATUI WORKSPACE" data-caption-2="MODE 03/03 · SANDBOXED CODING AGENT">MODE 01/03 · STREAMING CLI IN STDOUT</span>
+               <span class="term-mode-caption" data-caption-0="MODE 01/03 · PLAIN STREAMING CLI" data-caption-1="MODE 02/03 · FULL-SCREEN RATATUI TUI" data-caption-2="MODE 03/03 · VERIFIED CODING AGENT">MODE 01/03 · PLAIN STREAMING CLI</span>
              </span>
-             <span class="term-footer-hint">AUTO-CYCLING · CLICK TAB TO INSPECT</span>
+             <span class="term-footer-hint">AUTO-RUNNING · CLICK TAB TO SWITCH</span>
            </div>
          </div>
 
