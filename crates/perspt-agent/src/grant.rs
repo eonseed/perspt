@@ -5,7 +5,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use rand_core::{OsRng, RngCore};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrantKeySource {
@@ -51,7 +50,7 @@ impl GrantSigningKey {
         let parent = path.parent().context("grant key path has no parent")?;
         std::fs::create_dir_all(parent)?;
         let mut bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut bytes);
+        rand::fill(&mut bytes);
         write_private_key(&path, &encode_key(&bytes))?;
         log::warn!(
             "OS credential store unavailable; persistent grant key stored in mode-0600 file {}",

@@ -16,7 +16,7 @@ categories = ["command-line-utilities", "development-tools"]
 # Core types and path normalization
 perspt-core = { workspace = true }
 # Starlark policy engine
-starlark = "0.14"
+starlark = "0.14.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 
@@ -31,4 +31,4 @@ anyhow = { workspace = true }
 log = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.14"
+tempfile = { workspace = true }

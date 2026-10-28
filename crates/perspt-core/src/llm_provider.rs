@@ -97,7 +97,7 @@ impl GenAIProvider {
 
     /// Creates a new GenAI provider with automatic configuration.
     pub fn new() -> Result<Self> {
-        let client = Client::default();
+        let client = Client::new()?;
         Ok(Self::from_client(client))
     }
 
@@ -130,11 +130,11 @@ impl GenAIProvider {
         let client = if is_vertex {
             // Vertex AI authenticates with an OAuth2 Bearer token from ADC; no
             // static API key is required when ADC is configured.
-            build_vertex_client()
+            build_vertex_client()?
         } else {
             match adapter_kind {
-                Some(adapter_kind) => build_bound_client(adapter_kind, provider_type),
-                None => Client::default(),
+                Some(adapter_kind) => build_bound_client(adapter_kind, provider_type)?,
+                None => Client::new()?,
             }
         };
 
@@ -432,6 +432,9 @@ impl GenAIProvider {
                 Ok(ChatStreamEvent::ThoughtSignatureChunk(_)) => {
                     log::debug!("Thought signature chunk received (ignored)");
                 }
+                Ok(ChatStreamEvent::Heartbeat) => {
+                    log::debug!("Heartbeat received");
+                }
                 Err(e) => {
                     log::error!(
                         "!!! STREAM ERROR after {chunk_count} chunks at {elapsed:?}: {e} !!!"
@@ -534,7 +537,7 @@ impl GenAIProvider {
 /// resolver fetches that token from ADC (gcloud login, a service account, or the
 /// metadata server) on each request, so no static API key is needed. If a
 /// `VERTEX_API_KEY` bearer token is explicitly set, it is used as an override.
-fn build_vertex_client() -> Client {
+fn build_vertex_client() -> Result<Client> {
     let resolver = AuthResolver::from_resolver_async_fn(
         |_model: ModelIden| -> Pin<
             Box<dyn Future<Output = genai::resolver::Result<Option<AuthData>>> + Send>,
@@ -572,10 +575,10 @@ fn build_vertex_client() -> Client {
         });
     }
 
-    builder.build()
+    Ok(builder.build()?)
 }
 
-fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) -> Client {
+fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) -> Result<Client> {
     let mut builder = Client::builder().with_adapter_kind(adapter_kind);
 
     if let Some(base_url) = provider_type.and_then(provider_base_url_from_env) {
@@ -591,7 +594,7 @@ fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) ->
         builder = builder.with_service_target_resolver(target_resolver);
     }
 
-    builder.build()
+    Ok(builder.build()?)
 }
 
 fn provider_from_model_namespace(model: &str) -> Option<&'static str> {

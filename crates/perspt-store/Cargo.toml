@@ -39,7 +39,7 @@ log = { workspace = true }
 anyhow = { workspace = true }
 
 # Hex encoding for Merkle hashes
-hex = "0.4"
+hex = "0.4.3"
 sha2 = { workspace = true }
 
 # Platform-specific directories

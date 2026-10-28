@@ -21,10 +21,40 @@ use perspt_core::{
 use perspt_sdk::{AccessMode, ActorId, Capability, EffectKind, FootprintSpec, ResourceSelector};
 
 fn fixture_server_path() -> String {
-    format!(
-        "{}/tests/fixtures/mcp_server.py",
-        env!("CARGO_MANIFEST_DIR")
-    )
+    static SERVER_BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SERVER_BIN
+        .get_or_init(|| {
+            let exe_name = if cfg!(windows) {
+                "mcp_fixture_server.exe"
+            } else {
+                "mcp_fixture_server"
+            };
+            let current = std::env::current_exe().expect("current test executable path");
+            let examples_dir = current
+                .parent()
+                .and_then(|deps| deps.parent())
+                .expect("target profile directory")
+                .join("examples");
+            let candidate = examples_dir.join(exe_name);
+            if !candidate.is_file() {
+                let status = std::process::Command::new(
+                    std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()),
+                )
+                .args([
+                    "build",
+                    "--quiet",
+                    "-p",
+                    "perspt-agent",
+                    "--example",
+                    "mcp_fixture_server",
+                ])
+                .status()
+                .expect("build mcp_fixture_server example");
+                assert!(status.success(), "building mcp_fixture_server failed");
+            }
+            candidate.to_string_lossy().into_owned()
+        })
+        .clone()
 }
 
 fn echo_policy() -> ExternalToolPolicy {
@@ -58,7 +88,7 @@ fn stdio_config() -> Config {
         external_tools: vec![ExternalToolConfig {
             id: "fixture".into(),
             transport: ExternalToolTransport::Stdio,
-            command: vec!["python3".into(), fixture_server_path()],
+            command: vec![fixture_server_path()],
             tools,
             ..ExternalToolConfig::default()
         }],

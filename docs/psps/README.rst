@@ -2,261 +2,41 @@
 Perspt Specification Proposals (PSPs)
 =====================================
 
-This directory contains the Perspt Specification Proposals (PSPs) documentation system, designed to manage and document significant changes to the Perspt terminal user interface application. The system follows the structure and approach of Python's PEPs repository, with a custom Sphinx extension and theme.
-
-Features
-========
-
-* **Custom PSP Parser**: Parses PSP metadata (PSP number, title, author, status, etc.) into proper document headers
-* **Professional Theme**: Clean, accessible design with light/dark theme toggle 
-* **6-Digit PSP Numbering**: Supports PSP numbers from 000000 to 999999
-* **Collapsible Table of Contents**: Each PSP document includes an expandable/collapsible ToC at the top
-* **Field List Preambles**: PSP metadata is displayed as a professional field list similar to Python PEPs
-* **Modern Build System**: Uses Sphinx with uv for fast dependency management
-
-Overview
-========
-
-PSPs are design documents that provide information to the Perspt community and describe new features, processes, or design decisions for Perspt. This system is inspired by Python's PEP process but tailored for a terminal UI application focused on development workflow enhancement.
+This directory contains the Perspt Specification Proposals (PSPs) catalog, managed in pure Rust using ``guidedog dsc`` and rendered to HTML and Typst PDF.
 
 Quick Start
 ===========
 
-Building the Documentation
----------------------------
+.. code-block:: bash
 
-1. Install dependencies:
+   # Validate all PSP records and index alignment
+   guidedog dsc check --dir=docs/psps
 
-   .. code-block:: bash
+   # Regenerate registry.rst and bundle.rst
+   guidedog dsc index --dir=docs/psps
 
-      cd docs/psps
-      uv install
-      # or
-      pip install sphinx
+   # Build HTML catalog and per-record Typst PDFs
+   guidedog dsc build --dir=docs/psps
 
-2. Build the HTML documentation:
-
-   .. code-block:: bash
-
-      make html
-      # or
-      uv run make html
-
-3. Open ``build/html/contents.html`` in your browser
-
-Creating a New PSP
-------------------
-
-1. **Start with Discussion (Optional)**: Create a GitHub Issue to gauge community interest
-
-2. **Create PSP Document**:
-
-   .. code-block:: bash
-
-      cp source/psp-template.rst source/psp-0000-your-title.rst
-
-3. **Fill out the template**: Use the 6-digit format and set ``Status: Draft``
-
-4. **Submit Pull Request**: 
-   
-   - **Check the PSP checkbox** in the pull request template
-   - Fill out the **PSP Information** section
-   - Use ``psp-0000-title.rst`` filename format
-   - Set ``Status: Draft`` in your PSP document
-
-5. **Automatic Processing**: Our automation will:
-   
-   - **Detect PSP PRs** based on checkbox selection and PSP file presence
-   - **Validate PSP requirements** ensuring both criteria are met
-   - **Provide guidance** through automated PR comments for proper submission
-   - **Track PSP status** and integrate with project boards
-   - Future enhancements will include automatic numbering and discussion issue creation
-
-6. **Community Discussion**: Participate in the auto-created discussion issue
-
-7. **Decision & Implementation**: Maintainers will accept/reject and track implementation
+   # Create a new draft PSP
+   guidedog dsc new "Proposal Title" --labels=architecture --dir=docs/psps
 
 Directory Structure
 ===================
 
-.. code-block::
+.. code-block:: text
 
    docs/psps/
-   ├── Makefile                     # Build configuration  
-   ├── build.py                     # Custom build script
-   ├── pyproject.toml              # Python dependencies
-   ├── README.rst                  # This file
-   ├── psp_sphinx_extensions/      # Custom Sphinx extension
-   │   ├── __init__.py            # Extension entry point
-   │   ├── psp_theme/             # Custom PSP theme
-   │   │   ├── theme.conf         # Theme configuration
-   │   │   ├── templates/         # HTML templates
-   │   │   │   └── page.html      # Main page template
-   │   │   └── static/           # CSS, JS, and assets
-   │   │       ├── style.css     # Main stylesheet
-   │   │       ├── mq.css        # Media queries
-   │   │       ├── colour_scheme.js # Theme switching
-   │   │       └── wrap_tables.js # Table enhancements
-   │   └── psp_processor/         # PSP processing logic
-   │       ├── html/             # HTML builders and translators
-   │       └── parsing/          # PSP parsers and roles
-   ├── source/
-   │   ├── conf.py               # Sphinx configuration
-   │   ├── contents.rst          # Main contents page (index)
-   │   ├── psp-000000.rst       # PSP index (6-digit format)
-   │   ├── psp-000001.rst       # PSP process definition
-   │   ├── psp-000002.rst       # Example PSP
-   │   ├── psp-template.rst     # Template for new PSPs
-   │   └── psp-XXXXXX.rst       # Additional PSPs (6-digit format)
-   └── build/                    # Generated documentation
-
-Available Commands
-==================
-
-.. code-block:: bash
-
-   # Build HTML documentation
-   make html
-   uv run make html
-
-   # Build PDF documentation (requires LaTeX)
-   make latexpdf
-   uv run make latexpdf
-
-   # Clean build directory
-   make clean
-   uv run make clean
-
-   # Watch for changes and auto-rebuild (if sphinx-autobuild is installed)
-   make livehtml
-   uv run sphinx-autobuild source build/html
-
-Architecture
-============
-
-The PSP system uses a custom Sphinx extension that closely follows the Python PEPs approach:
-
-**Custom Theme**: A specialized theme optimized for PSP documents with proper styling, responsive design, and accessibility features.
-
-**PSP Parser**: Custom parsing logic that understands PSP-specific metadata and cross-references.
-
-**HTML Builders**: Specialized HTML generation for PSP documents with enhanced navigation and indexing.
-
-**Role Support**: Custom roles like ``:psp:`NUM``` for cross-referencing PSPs within documents.
-
-The extension is modular and can be easily extended with additional PSP-specific features.
-
-PSP Types
-=========
-
-**Standards Track PSPs** describe new features or implementations for Perspt:
-
-* New UI components or interaction patterns
-* Changes to core functionality  
-* New command-line options or configuration
-* Performance improvements with user-visible changes
-
-**Informational PSPs** provide information without proposing changes:
-
-* Design philosophy documents
-* User experience guidelines
-* Best practices for Perspt usage
-* Compatibility guides
-
-**Process PSPs** describe process changes:
-
-* Changes to the PSP process itself
-* Development workflow modifications
-* Release processes
-* Community governance
-
-PSP Workflow
-============
-
-1. **Idea Phase**: Discuss in GitHub Issues
-2. **Draft Phase**: Create PSP document using template
-3. **Discussion Phase**: Community review and feedback
-4. **Decision Phase**: Maintainers accept/reject
-5. **Implementation Phase**: Code the approved changes
-6. **Final Phase**: Mark as complete
-
-GitHub Integration
-==================
-
-The PSP process is designed to integrate with GitHub:
-
-* **Issues** for discussions and proposals
-* **Pull Requests** for PSP document changes  
-* **Labels** for categorization and status tracking
-* **Projects** for workflow management
-
-Future enhancements may include GitHub Actions for automation.
-
-Extending the System
-====================
-
-The PSP extension system is designed to be extensible:
-
-**Adding New Features**: Modify the extension in ``psp_sphinx_extensions/`` to add new PSP-specific functionality.
-
-**Theme Customization**: Update the theme files in ``psp_theme/`` to change the appearance and behavior.
-
-**Custom Roles**: Add new reStructuredText roles in ``psp_processor/parsing/`` for enhanced markup.
-
-**Build Customization**: Modify ``build.py`` or the Makefile to add custom build steps or validation.
-
-Getting Help
-============
-
-* Read PSP 0001 for detailed process guidelines
-* Check existing PSPs for examples
-* Ask questions in GitHub Discussions
-* Contact maintainers for guidance
-
-Contributing
-============
-
-The PSP system itself can be improved through PSPs! If you have ideas for:
-
-* Process improvements
-* New extension features  
-* Theme enhancements
-* Better automation
-* Documentation improvements
-
-Please propose them through the standard PSP process.
-
-Development Setup
-=================
-
-For developers working on the PSP system itself:
-
-1. Install development dependencies:
-
-   .. code-block:: bash
-
-      cd docs/psps
-      uv install --dev
-
-2. Make changes to the extension in ``psp_sphinx_extensions/``
-
-3. Test your changes:
-
-   .. code-block:: bash
-
-      make clean && make html
-
-4. The extension is automatically loaded during the build process
-
-Resources
-=========
-
-* `Python PEPs <https://peps.python.org/>`_ - Inspiration for this system
-* `Sphinx Documentation <https://www.sphinx-doc.org/>`_ - Documentation framework
-* `reStructuredText Guide <https://docutils.sourceforge.io/rst.html>`_ - Markup format
-* `GitHub Actions <https://docs.github.com/en/actions>`_ - Automation platform
-
-License
-=======
-
-This PSP system and all PSPs are placed in the public domain or under the CC0-1.0-Universal license, whichever is more permissive.
+   ├── conf.toml                 # Guidedog HTML & PDF configuration
+   ├── discussion.toml           # Catalog prefix, numbering, and state machine
+   ├── index.rst                 # PSP catalog landing page
+   ├── workflow.rst              # PSP process and CLI workflow
+   ├── registry.rst              # Auto-generated PSP registry table
+   ├── bundle.rst                # Auto-generated reading order toctree
+   ├── template/
+   │   └── rfc-template.rst      # Template for new PSP drafts
+   ├── _templates/
+   │   ├── discussion.typ        # Typst layout for individual PSP PDFs
+   │   └── theme.typ             # Shared Typst palette and typography
+   └── records/
+       └── 000001-...rst         # Numbered PSP specification records

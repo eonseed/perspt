@@ -1,0 +1,40 @@
+project = "Perspt: Generative Velocity, Deterministic Stability"
+author = "Vikrant Rathore"
+copyright = "2026, Vikrant Rathore"
+version = "0.6.6"
+release = "0.6.6"
+root_doc = "index"
+source_suffix = [".rst"]
+exclude_patterns = ["_build", "_templates/**", "README*", "Thumbs.db", ".DS_Store"]
+extensions = ["sphinx.ext.graphviz", "sphinx.ext.mathjax"]
+templates_path = ["_templates"]
+include_roots = ["../shared"]
+html_theme = "guidedog"
+html_title = "The Perspt Book"
+html_static_path = ["../shared/_static"]
+html_css_files = ["perspt-docs.css"]
+html_js_files = [
+  "data/typography/linked-list.js",
+  "data/typography/linebreak.js",
+  "data/typography/hypher.js",
+  "data/typography/english.js",
+  "typography.js",
+]
+html_logo = "../shared/_static/perspt-logo.svg"
+html_favicon = "../shared/_static/perspt-logo.svg"
+html_copy_source = false
+mathjax_path = "_static/mathjax/tex-svg-full.js"
+numfig = true
+pdf_logo = "../shared/_static/perspt-logo.svg"
+
+[[pdf_documents]]
+root = "index"
+file = "perspt-book.pdf"
+title = "Perspt: Generative Velocity, Deterministic Stability"
+author = "Vikrant Rathore"
+
+[html_theme_options]
+accent = "#0f766e"
+
+[html_context]
+site_home = "../"

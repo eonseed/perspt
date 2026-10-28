@@ -1,0 +1,26 @@
+project = "Perspt Website"
+version = "0.6.6"
+release = "0.6.6"
+exclude_patterns = ["**"]
+
+[[site.mounts]]
+name = "home"
+source = "site"
+output = ""
+exclude = ["search.html", "_static/searchindex.js"]
+
+[[site.mounts]]
+name = "book"
+source = "perspt_book"
+output = "book"
+
+[[site.mounts]]
+name = "pdf"
+source = "perspt_book"
+output = "books"
+builder = "pdf"
+
+[[site.mounts]]
+name = "psps"
+source = "psps"
+output = "psps"

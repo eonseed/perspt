@@ -78,5 +78,5 @@ body:
         
         ## 📚 Related Documentation
         
-        - [PSP Process Guidelines](docs/psps/source/psp-000001.rst)
-        - [PSP Index](docs/psps/source/psp-000000.rst)
+        - [PSP Process Guidelines](docs/psps/records/000001-psp-purpose-and-guidelines.rst)
+        - [PSP Registry](docs/psps/registry.rst)

@@ -1,0 +1,49 @@
+# Perspt Specification Proposals (PSP) catalog configuration for `guidedog dsc`.
+
+prefix = "psp"
+name = "Perspt Specification Proposals"
+author = "Vikrant Rathore"
+
+types = [
+  "standards-track",
+  "informational",
+  "process",
+  "feature",
+  "enhancement",
+  "ui-ux",
+  "api-change",
+]
+
+[numbering]
+width = 6
+start = 1
+
+[workflow]
+draft = "draft"
+open = "discussion"
+
+[workflow.states.draft]
+next = ["withdrawn"]
+status = "Authoring in progress; open for technical shaping and feedback."
+
+[workflow.states.discussion]
+next = ["accepted", "active", "rejected", "withdrawn"]
+status = "Under formal community and maintainer review."
+
+[workflow.states.accepted]
+next = ["final", "active", "withdrawn"]
+status = "Approved for implementation on the Perspt roadmap."
+
+[workflow.states.active]
+next = ["final", "withdrawn"]
+status = "Living process or foundational specification in continuous effect."
+
+[workflow.states.final]
+evidence = true
+status = "Reference implementation complete, verified, and merged."
+
+[workflow.states.rejected]
+status = "Reviewed and declined with recorded technical rationale."
+
+[workflow.states.withdrawn]
+status = "Retired or superseded by a subsequent PSP."

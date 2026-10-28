@@ -6,7 +6,7 @@ use anyhow::Result;
 use duckdb::Connection;
 
 const CURRENT_SCHEMA_VERSION: i64 = 1;
-const EXPECTED_DUCKDB_VERSION: &str = "v1.5.5";
+const EXPECTED_DUCKDB_VERSION: &str = "v2.0.0";
 
 /// Initialize the store through an idempotent transactional migration.
 pub fn init_schema(conn: &Connection) -> Result<()> {
@@ -50,7 +50,7 @@ fn check_dynamic_abi(conn: &Connection) -> Result<()> {
     anyhow::ensure!(
         actual.starts_with(EXPECTED_DUCKDB_VERSION),
         "incompatible dynamically linked DuckDB ABI: expected {}, found {}; \
-         install DuckDB 1.5.5 or build with the `bundled` feature",
+         install DuckDB 2.0.0 or build with the `bundled` feature",
         EXPECTED_DUCKDB_VERSION,
         actual
     );

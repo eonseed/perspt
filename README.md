@@ -28,10 +28,11 @@ models and an experimental, verification-driven agent platform. It provides:
 ---
 
 Perspt is pre-1.0. The coding path works end to end, but the full roadmap is
-not complete. See [PSP 9](docs/psps/source/psp-000009.rst) and
-[PSP 10](docs/psps/source/psp-000010.rst), especially their Implementation
-Status tables, for the authoritative boundary between live code, tested SDK
-mechanisms, and future work.
+not complete. See [PSP 9](docs/psps/records/000009-governed-agentic-platform.rst),
+[PSP 10](docs/psps/records/000010-bounded-search-trajectories.rst), and
+[PSP 11](docs/psps/records/000011-domain-neutral-runtime-inversion.rst), especially
+their Implementation Status tables, for the authoritative boundary between live
+code, tested SDK mechanisms, and future work.
 
 ## Quick Start
 
@@ -392,7 +393,7 @@ sizes are bounded. Configure only server processes/operators you trust: call
 admission does not sandbox an arbitrary server implementation. Resources and
 prompts are exposed as namespaced read-only operations; roots are explicit;
 sampling and elicitation are opt-in; subscriptions and tasks are bounded. See
-the [MCP guide](docs/perspt_book/source/user-guide/mcp.rst).
+the [MCP guide](docs/perspt_book/user-guide/mcp.rst).
 
 Entering `l-o-v-e` in chat, agent mode, the TUI, or simple CLI mode is handled
 locally and never sent to an LLM. It prints Perspt's family dedication.
@@ -489,19 +490,21 @@ strict mode refuses unsandboxed processes, while explicit reduced isolation
 runs a native Rust verifier fixture. Live model benchmarks remain manual and
 are never mixed into CI.
 
-Build the documentation:
+Build the documentation (powered by [Guidedog](https://github.com/insanai/guidedog) and [Typst](https://typst.app/)):
 
 ```bash
-make -C docs/perspt_book html
-make -C docs/psps html
+cargo run -p xtask -- docs
 ```
 
 ## Documentation
 
+- [Perspt Unified Site & Book](https://eonseed.github.io/perspt/)
 - [Perspt Book](https://eonseed.github.io/perspt/book/index.html)
-- [PSP 8: SRBN SDK and domain packages](docs/psps/source/psp-000008.rst)
-- [PSP 9: governed tool-loop platform](docs/psps/source/psp-000009.rst)
-- [PSP 10: bounded search trajectories and model-conditioned prompt programs](docs/psps/source/psp-000010.rst)
+- [PSP Catalog](https://eonseed.github.io/perspt/psps/index.html)
+- [PSP 8: SRBN SDK and domain packages](docs/psps/records/000008-srbn-agent-sdk-work-graph.rst)
+- [PSP 9: governed tool-loop platform](docs/psps/records/000009-governed-agentic-platform.rst)
+- [PSP 10: bounded search trajectories and model-conditioned prompt programs](docs/psps/records/000010-bounded-search-trajectories.rst)
+- [PSP 11: domain-neutral runtime inversion and multi-actor supervisor](docs/psps/records/000011-domain-neutral-runtime-inversion.rst)
 
 The *Stability is All You Need* papers I, II, and III are forthcoming. PSP 9's
 bibliography names the paper-level definitions and theorems used by each
@@ -509,7 +512,7 @@ mechanism; source `.typ` files are intentionally not cited.
 
 ## Contributing
 
-See the [contributing guide](docs/perspt_book/source/developer-guide/contributing.rst).
+See the [contributing guide](docs/perspt_book/developer-guide/contributing.rst).
 
 ## License
 

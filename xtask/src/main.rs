@@ -24,9 +24,12 @@
 //! is out of scope.
 
 mod baseline;
+mod docs;
 mod report;
 mod rules;
 mod scan;
+mod serve;
+mod toolchain;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -67,6 +70,29 @@ enum Command {
         #[arg(long)]
         shrink: bool,
     },
+    /// Compile Typst diagrams and book cover artwork into `docs/shared/_static/`.
+    Assets,
+    /// Build Typst assets, PSP catalog, Perspt Book, and the unified Guidedog site.
+    Docs {
+        /// Skip Typst PDF compilation for faster HTML-only validation.
+        #[arg(long)]
+        no_pdf: bool,
+        /// Path or binary name for the `guidedog` executable.
+        #[arg(long, default_value = "guidedog")]
+        guidedog: String,
+    },
+    /// Build and serve the unified Guidedog documentation site locally with live reload.
+    Serve {
+        /// Local TCP port to bind.
+        #[arg(long, default_value_t = 8000)]
+        port: u16,
+        /// Skip Typst PDF compilation during live preview.
+        #[arg(long)]
+        no_pdf: bool,
+        /// Path or binary name for the `guidedog` executable.
+        #[arg(long, default_value = "guidedog")]
+        guidedog: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -85,6 +111,22 @@ fn run() -> Result<ExitCode> {
         Command::Check { rule } => cmd_check(&root, parse_rule(rule.as_deref())?),
         Command::Report { format, rule } => cmd_report(&root, format, parse_rule(rule.as_deref())?),
         Command::Baseline { shrink } => cmd_baseline(&root, shrink),
+        Command::Assets => {
+            docs::build_assets(&root)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Docs { no_pdf, guidedog } => {
+            docs::build_docs(&root, no_pdf, &guidedog)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Serve {
+            port,
+            no_pdf,
+            guidedog,
+        } => {
+            serve::run(&root, port, no_pdf, &guidedog)?;
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

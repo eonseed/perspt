@@ -1,0 +1,39 @@
+# Configuration file for Guidedog PSP catalog.
+
+project = "Perspt Specification Proposals"
+author = "Vikrant Rathore"
+copyright = "2026, Vikrant Rathore"
+version = "0.6.6"
+release = "0.6.6"
+
+extensions = ["sphinx.ext.graphviz"]
+exclude_patterns = ["_build", "drafts/**", "template/**", "_templates/**", "README*", "MAINTAINER_GUIDE*", "Thumbs.db", ".DS_Store"]
+language = "en"
+source_suffix = [".rst"]
+root_doc = "index"
+
+html_theme = "guidedog"
+html_title = "Perspt Specification Proposals (PSPs)"
+numfig = true
+
+pdf_paper_size = "a4"
+
+include_roots = ["../shared"]
+html_static_path = ["../shared/_static"]
+html_css_files = ["perspt-docs.css"]
+html_js_files = [
+  "data/typography/linked-list.js",
+  "data/typography/linebreak.js",
+  "data/typography/hypher.js",
+  "data/typography/english.js",
+  "typography.js",
+]
+mathjax_path = "mathjax/tex-svg-full.js"
+html_favicon = "../shared/_static/perspt-logo.svg"
+html_logo = "../shared/_static/perspt-logo.svg"
+
+[html_theme_options]
+accent = "#0f766e"
+
+[html_context]
+site_home = "../"

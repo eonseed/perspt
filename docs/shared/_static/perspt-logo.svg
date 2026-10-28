@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="perspt-logo-title perspt-logo-desc">
+<title id="perspt-logo-title">Perspt SRBN mark</title>
+<desc id="perspt-logo-desc">An isometric hexagonal barrier shell enclosing a descending Lyapunov funnel and a bright stabilized core at the equilibrium origin.</desc>
+<g stroke="#ffffff" stroke-width="0.9" stroke-linejoin="round" stroke-opacity="0.55">
+  <!-- Outer barrier shell B(x) >= 0 -->
+  <polygon points="60.000,4.000 108.497,32.000 92.332,41.333 60.000,22.667 27.668,41.333 11.503,32.000" fill="#67e8f9"/>
+  <polygon points="11.503,88.000 60.000,116.000 60.000,97.333 27.668,78.667 27.668,41.333 11.503,32.000" fill="#0891b2"/>
+  <polygon points="108.497,88.000 60.000,116.000 60.000,97.333 92.332,78.667 92.332,41.333 108.497,32.000" fill="#164e63"/>
+  <!-- Inner Lyapunov descent basin V(x) -->
+  <polygon points="76.166,69.333 92.332,78.667 60.000,97.333 27.668,78.667 43.834,69.333 60.000,78.667" fill="#67e8f9"/>
+  <polygon points="76.166,69.333 92.332,78.667 92.332,41.333 60.000,22.667 60.000,41.333 76.166,50.667" fill="#0e7490"/>
+  <polygon points="43.834,69.333 27.668,78.667 27.668,41.333 60.000,22.667 60.000,41.333 43.834,50.667" fill="#155e75"/>
+  <!-- Equilibrium attractor core V(x*) = 0 -->
+  <polygon points="60.000,41.333 76.166,50.667 60.000,60.000 43.834,50.667" fill="#fef08a"/>
+  <polygon points="43.834,69.333 60.000,78.667 60.000,60.000 43.834,50.667" fill="#f59e0b"/>
+  <polygon points="76.166,69.333 60.000,78.667 60.000,60.000 76.166,50.667" fill="#b45309"/>
+</g>
+</svg>

@@ -1,5 +1,5 @@
 name: Set up DuckDB
-description: Install the pinned DuckDB 1.5.5 shared library for CI
+description: Install the pinned DuckDB 2.0.0 shared library for CI
 
 runs:
   using: composite
@@ -9,12 +9,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        archive="$RUNNER_TEMP/libduckdb-linux-amd64.zip"
-        install_dir="$RUNNER_TEMP/duckdb-1.5.5"
-        curl --fail --location --retry 3 --output "$archive" https://github.com/duckdb/duckdb/releases/download/v1.5.5/libduckdb-linux-amd64.zip
-        echo "1fb8ce388157d84a25abe685a8a2520bf00c00321821968e4bb398fd766e7abb  $archive" | sha256sum --check -
+        archive="$RUNNER_TEMP/duckdb-shared-libs-linux-amd64.tar.gz"
+        install_dir="$RUNNER_TEMP/duckdb-2.0.0"
+        curl --fail --location --retry 3 --output "$archive" https://install.duckdb.org/v2.0.0/duckdb-shared-libs-linux-amd64.tar.gz
+        echo "993ad89e7dfca66cd6da994c2cad090c2fc160ddf9f550498a098ab4bb13cfb1  $archive" | sha256sum --check -
         mkdir -p "$install_dir"
-        unzip -q -o "$archive" -d "$install_dir"
+        tar -xzf "$archive" -C "$install_dir"
         echo "DUCKDB_LIB_DIR=$install_dir" >> "$GITHUB_ENV"
         echo "DUCKDB_INCLUDE_DIR=$install_dir" >> "$GITHUB_ENV"
         echo "LD_LIBRARY_PATH=$install_dir" >> "$GITHUB_ENV"
@@ -24,12 +24,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        archive="$RUNNER_TEMP/libduckdb-osx-universal.zip"
-        install_dir="$RUNNER_TEMP/duckdb-1.5.5"
-        curl --fail --location --retry 3 --output "$archive" https://github.com/duckdb/duckdb/releases/download/v1.5.5/libduckdb-osx-universal.zip
-        echo "7b5b8915cc382d0708636fe6385c0cdad5a61c9ff8ba2638b3e2141640783155  $archive" | shasum -a 256 -c -
+        archive="$RUNNER_TEMP/duckdb-shared-libs-osx-universal.tar.gz"
+        install_dir="$RUNNER_TEMP/duckdb-2.0.0"
+        curl --fail --location --retry 3 --output "$archive" https://install.duckdb.org/v2.0.0/duckdb-shared-libs-osx-universal.tar.gz
+        echo "14cd63180614cfd961f7959146ecd9087527ff20b67311efdc3fa1c29c18204d  $archive" | shasum -a 256 -c -
         mkdir -p "$install_dir"
-        unzip -q -o "$archive" -d "$install_dir"
+        tar -xzf "$archive" -C "$install_dir"
         echo "DUCKDB_LIB_DIR=$install_dir" >> "$GITHUB_ENV"
         echo "DUCKDB_INCLUDE_DIR=$install_dir" >> "$GITHUB_ENV"
         echo "DYLD_FALLBACK_LIBRARY_PATH=$install_dir" >> "$GITHUB_ENV"
@@ -38,16 +38,16 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        $archive = Join-Path $env:RUNNER_TEMP "libduckdb-windows-amd64.zip"
-        $installDir = Join-Path $env:RUNNER_TEMP "duckdb-1.5.5"
-        $url = "https://github.com/duckdb/duckdb/releases/download/v1.5.5/libduckdb-windows-amd64.zip"
+        $archive = Join-Path $env:RUNNER_TEMP "duckdb-shared-libs-windows-amd64.tar.gz"
+        $installDir = Join-Path $env:RUNNER_TEMP "duckdb-2.0.0"
+        $url = "https://install.duckdb.org/v2.0.0/duckdb-shared-libs-windows-amd64.tar.gz"
         Invoke-WebRequest -Uri $url -OutFile $archive
         $digest = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
-        if ($digest -ne "8375eb1fcf2212e8a0817950354815d4dde9dd383c2d9fa7b8975b71e278c1bd") {
+        if ($digest -ne "2b83169128239de5f45fe21de80f99bf436e53aa4bb24020dd951a1ba8d4b95f") {
           throw "DuckDB archive checksum mismatch: $digest"
         }
         New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-        Expand-Archive -Path $archive -DestinationPath $installDir -Force
+        tar -xzf $archive -C $installDir
         "DUCKDB_LIB_DIR=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Append
         "DUCKDB_INCLUDE_DIR=$installDir" | Out-File -FilePath $env:GITHUB_ENV -Append
         $installDir | Out-File -FilePath $env:GITHUB_PATH -Append

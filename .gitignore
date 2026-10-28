@@ -89,16 +89,20 @@ instance/
 
 # Documentation generated files
 docs/generated/
+docs/_build/
+docs/perspt_book/_build/
 docs/perspt_book/build*
+docs/psps/_build/
+docs/psps/.psp.lock
 docs/psps/build/*
+docs/site/_build/
 docs/book/book/
 target/doc/
 *.html
 *.css.bak
 *.js.bak
 !docs/header.html
-!docs/pages-index.html
-!docs/psps/psp_sphinx_extensions/psp_theme/** 
+!docs/site/_templates/**
 !crates/perspt-dashboard/templates/**
 
 # Dashboard asset pipeline

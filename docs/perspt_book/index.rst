@@ -1,0 +1,171 @@
+.. Perspt documentation master file
+
+.. title:: Perspt: Your Terminal's Window to the AI World
+
+.. only:: html
+
+   .. raw:: html
+
+      <div style="text-align: center; margin: 2em 0;">
+      <pre style="font-family: monospace; font-size: 0.8em; line-height: 1.2; margin: 0 auto; display: inline-block; text-align: left;">
+      ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
+      ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
+      ██████╔╝█████╗  ██████╔╝███████╗██████╔╝   ██║
+      ██╔═══╝ ██╔══╝  ██╔══██╗╚════██║██╔═══╝    ██║
+      ██║     ███████╗██║  ██║███████║██║        ██║
+      ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
+      </pre>
+      <p><em>Your Terminal's Window to the AI World</em></p>
+      </div>
+
+.. only:: latex
+
+   Perspt: Your Terminal's Window to the AI World
+   ==============================================
+
+.. figure:: ../shared/_static/front-page-abm.svg
+   :alt: Agent-based model trajectory toward consensus under SRBN verification
+   :width: 100%
+
+   Agent trajectories converging to the verified consensus corridor (:math:`V(x) \le \varepsilon`) under the SRBN barrier control loop.
+
+.. epigraph::
+
+   The keyboard hums, the screen aglow,
+   AI's wisdom, a steady flow.
+   Will robots take over, it's quite the fright,
+   Or just provide insights, day and night?
+   We ponder and chat, with code as our guide,
+   Is AI our helper or our human pride?
+
+**Your Terminal's Window to the AI World**
+
+Perspt is a high-performance terminal-based LLM interface that serves two purposes:
+a **simple CLI for testing and comparing LLM services** across supported providers,
+and an **experimental implementation** of the **SRBN (Stabilized Recursive Barrier
+Network)** engine inspired by the three-paper *Stability is All You Need* series.
+The SRBN agent plans multi-file projects as directed acyclic graphs, verifies each
+node with real LSP diagnostics and tests, and commits only when Lyapunov energy
+converges. The theoretical framework is mature; the implementation is under active
+development.
+
+.. only:: html
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 28 72
+
+      * - Guide
+        - Overview
+      * - :doc:`quickstart`
+        - Install and start conversing or running governed coding sessions in 5 minutes.
+      * - :doc:`tutorials/agent-mode`
+        - Autonomous multi-file coding with the experimental SRBN engine.
+      * - :doc:`user-guide/dashboard`
+        - Monitor agent execution, Lyapunov energy, and work graphs in real time via browser.
+      * - :doc:`developer-guide/architecture`
+        - Explore the fourteen-crate workspace design and domain-neutral SDK.
+
+   Key Features
+   ------------
+
+   .. list-table::
+      :widths: 5 95
+      :class: borderless
+
+      * - **SRBN Agent**
+        - Experimental autonomous multi-file coding under the PSP-9 governed tool loop, with acceptance measured by Lyapunov energy from the SRBN paper series
+      * - **PSP-10 Mechanisms**
+        - Typed prompt programs with ledgered provenance, resident-context paging via ``context_recall``, bounded search forests, multi-node work-graph dispatch behind a single integration gate, and crash resume
+      * - **Multi-Provider**
+        - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, Ollama
+      * - **LSP Sensors**
+        - Real-time type checking via ``rust-analyzer``, ``ty``, ``pyright``, ``typescript-language-server``, ``gopls``
+      * - **Test Runner**
+        - pytest integration with weighted V_log energy
+      * - **Per-Role Models**
+        - Route models with ``--model``/``--actuator-model``/``--explorer-model``/``--adjudicator-model``, or per role (architect, actuator, verifier, speculator, adjudicator) via the ``[models]`` table
+      * - **Token Budget**
+        - Cost control with usage monitoring and per-request limits
+      * - **Beautiful TUI**
+        - Ratatui-based with diff viewer, task tree, dashboard, and review modal
+      * - **Security**
+        - Starlark policy engine with command sanitization and workspace-bound enforcement
+      * - **MCP 2026-07-28 Client**
+        - Official-SDK stdio/Streamable HTTP support for tools, context primitives, client requests, subscriptions and tasks, with local admission and ``/mcp`` diagnostics
+      * - **Merkle Ledger**
+        - Cryptographic change tracking with session resume and rollback
+      * - **Headless Mode**
+        - Fully autonomous operation with ``--yes`` for CI/CD and batch workflows
+
+   ----
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Getting Started
+
+   introduction
+   quickstart
+   installation
+   getting-started
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Tutorials
+
+   tutorials/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: User Guide
+
+   user-guide/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Concepts
+
+   concepts/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: How-To Guides
+
+   howto/index
+   configuration
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Reference
+
+   reference/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference
+
+   api/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Developer Guide
+
+   developer-guide/index
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Appendices
+
+   changelog
+   license
+   acknowledgments
+
+.. only:: html
+
+   Quick Links
+   -----------
+
+   - `GitHub Repository <https://github.com/eonseed/perspt>`_
+   - `Crates.io <https://crates.io/crates/perspt>`_
+   - `PSP Catalog <../psps/index.html>`_
+   - `Issue Tracker <https://github.com/eonseed/perspt/issues>`_

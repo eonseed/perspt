@@ -21,23 +21,23 @@ srbn-serde = "0.3.0"
 srbn-ledger = "0.3.0"
 
 # Spectral energy-slope constant mu = 2*lambda_min+(A): symmetric eigensolver.
-nalgebra = "0.35"
+nalgebra = "0.35.0"
 
 # Serialization for ledgerable records.
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # Stable identifiers for residuals, certificates, and claims.
-uuid = { version = "1.11", features = ["v4"] }
+uuid = { workspace = true }
 
 # Cryptographic hashing for the Merkle replay ledger.
 sha2 = { workspace = true }
 
 # Error handling.
-thiserror = "2.0"
+thiserror = "2.0.21"
 
 # Parse direct program invocations without granting shell composition.
 shell-words = { workspace = true }
 
 # Persistent grant intent signatures; live capabilities are never serialized.
-ed25519-dalek = "2.1"
+ed25519-dalek = "3.0.0"

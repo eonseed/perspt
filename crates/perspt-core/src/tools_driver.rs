@@ -244,7 +244,8 @@ impl GenAIProvider {
                 | ChatStreamEvent::Chunk(_)
                 | ChatStreamEvent::ReasoningChunk(_)
                 | ChatStreamEvent::ToolCallChunk(_)
-                | ChatStreamEvent::ThoughtSignatureChunk(_) => {}
+                | ChatStreamEvent::ThoughtSignatureChunk(_)
+                | ChatStreamEvent::Heartbeat => {}
             }
         }
 

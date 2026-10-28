@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Perspt is a high-performance Rust AI agent and terminal environment powered by Stabilized Recursive Barrier Networks (SRBN), governed tool loops, and Merkle-backed DuckDB provenance.">
+<title>Perspt / Generative velocity. Deterministic stability.</title>
+<link rel="icon" href="{{ pathto_root }}_static/perspt-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="{{ pathto_root }}_static/site.css">
+<script>try{var m=localStorage.getItem("guidedog-theme");
+if(m==="light"||m==="dark")document.documentElement.dataset.theme=m}catch(e){}</script>
+</head><body>
+<a class="skip" href="#content">Skip to content</a>
+<header class="site-header">
+<a class="brand" href="{{ pathto_root }}index.html" aria-label="Perspt home">
+<img src="{{ pathto_root }}_static/perspt-logo.svg" alt="" width="36" height="36">
+<span>Perspt</span></a>
+<nav aria-label="Main navigation">
+<a href="{{ pathto_root }}book/index.html">The Book</a>
+<a href="{{ pathto_root }}book/concepts/srbn-architecture.html">SRBN Architecture</a>
+<a href="{{ pathto_root }}psps/index.html">PSPs</a>
+<a href="{{ pathto_root }}perspt/index.html">Rust API</a>
+{% if not ssg_no_pdf %}
+<a class="nav-pdf" href="{{ pathto_root }}books/perspt-book-en.pdf">Read the PDF</a>
+{% endif %}
+<button class="theme-toggle" type="button" aria-label="Switch between light and dark theme"
+ title="Theme">&#9680;</button>
+</nav></header>
+<main id="content"><article class="landing">{{ body }}</article></main>
+<footer class="site-footer">
+<div><strong>Perspt</strong><p>Generative velocity. Deterministic stability.</p></div>
+<div><a href="{{ pathto_root }}book/index.html">Read the Book</a>
+<a href="{{ pathto_root }}psps/index.html">Specification Proposals (PSPs)</a>
+<a href="{{ pathto_root }}perspt/index.html">Rust API Reference (rustdoc)</a>
+{% if not ssg_no_pdf %}<a href="{{ pathto_root }}books/perspt-book-en.pdf">PDF Book</a>{% endif %}</div>
+<div><a href="https://github.com/eonseed/perspt/releases">Get Perspt</a>
+<a href="https://github.com/eonseed/perspt">Source on GitHub</a>
+<a href="https://crates.io/crates/perspt">Crates.io</a>
+<a href="https://github.com/eonseed/perspt/blob/main/LICENSE">LGPL-3.0 License</a></div>
+<p>2026 Vikrant Rathore and Ronak Rathore. Perspt {{ release }}, LGPL-3.0-only.<br>Published with Guidedog &amp; Typst.</p>
+</footer>
+<script src="{{ pathto_root }}_static/data/typography/linked-list.js"></script>
+<script src="{{ pathto_root }}_static/data/typography/linebreak.js"></script>
+<script src="{{ pathto_root }}_static/data/typography/hypher.js"></script>
+<script src="{{ pathto_root }}_static/data/typography/english.js"></script>
+<script src="{{ pathto_root }}_static/typography.js"></script>
+<script>
+document.querySelector(".theme-toggle").addEventListener("click", function () {
+  var root = document.documentElement;
+  var dark = root.dataset.theme ? root.dataset.theme === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("guidedog-theme", root.dataset.theme); } catch (e) {}
+});
+</script></body></html>

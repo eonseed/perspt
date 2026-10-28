@@ -27,6 +27,7 @@ concurrency:
 env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   CARGO_TERM_COLOR: always
   PERSPT_SKIP_DASHBOARD_ASSETS: 1
 
@@ -36,20 +37,27 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || !inputs.cross_platform)
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
       # Linux governed verifiers fail closed when their process-isolation
       # backend is unavailable. GitHub's Ubuntu 24.04 image omits Bubblewrap
-      # and prevents unconfined processes from creating user namespaces. The
-      # runner is ephemeral and already executes the workspace test binaries;
-      # Bubblewrap still supplies the verifier's filesystem and network policy.
+      # and prevents unconfined processes from creating user namespaces.
       - name: Install the Linux verifier sandbox
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install --yes --no-install-recommends bubblewrap
           if [[ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]]; then
             sudo sysctl --write kernel.apparmor_restrict_unprivileged_userns=0
@@ -67,25 +75,18 @@ jobs:
       - name: Install pinned DuckDB
         uses: ./.github/actions/setup-duckdb
 
-      - name: Install the pinned Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.97.1
-          components: rustfmt, clippy
-
-      - name: Cache Cargo downloads
+      - name: Cache Cargo registry and compiled dependencies
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            target/debug/deps
+            target/debug/build
           key: ${{ runner.os }}-rust-1.97.1-pr-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-rust-1.97.1-pr-
             ${{ runner.os }}-rust-1.97.1-
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
 
       # The official pinned shared library keeps native compilation out of
       # routine CI. Clippy compiles the workspace, so cargo build is redundant.
@@ -108,7 +109,7 @@ jobs:
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
       (github.event_name != 'workflow_dispatch' || !inputs.cross_platform)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -119,12 +120,15 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      - name: Cache Cargo downloads
+      - name: Cache xtask build
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            target/debug/deps
+            target/debug/build
+            target/debug/xtask
           key: ${{ runner.os }}-rust-1.97.1-rules-${{ hashFiles('Cargo.lock', 'xtask/**') }}
           restore-keys: |
             ${{ runner.os }}-rust-1.97.1-rules-
@@ -143,7 +147,7 @@ jobs:
       github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' && inputs.cross_platform)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -164,12 +168,14 @@ jobs:
         with:
           toolchain: 1.97.1
 
-      - name: Cache Cargo downloads
+      - name: Cache Cargo registry and compiled dependencies
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            target/debug/deps
+            target/debug/build
           key: ${{ runner.os }}-rust-1.97.1-target-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-rust-1.97.1-target-

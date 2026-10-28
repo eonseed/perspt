@@ -45,16 +45,16 @@ serde_json = { workspace = true }
 # Utilities
 anyhow = { workspace = true }
 log = { workspace = true }
-ignore = "0.4"
-regex = "1.12.2"
-diffy = "0.5"
+ignore = "0.4.34"
+regex = "1.13.1"
+diffy = "0.5.2"
 duckdb = { workspace = true }
 shell-words = { workspace = true }
 futures = { workspace = true }
-tokio-util = "0.7"
+tokio-util = "0.7.20"
 rustix = { workspace = true }
 tempfile = { workspace = true }
-rand_core = { version = "0.6", features = ["getrandom"] }
+rand = "0.10.3"
 reqwest = { workspace = true }
 rmcp = { workspace = true }
 
@@ -62,7 +62,7 @@ rmcp = { workspace = true }
 windows-sys = { workspace = true }
 
 [target.'cfg(all(windows, target_env = "msvc"))'.dependencies]
-find-msvc-tools = "0.1.9"
+find-msvc-tools = "0.1.15"
 
 [dev-dependencies]
 perspt-research = { workspace = true }

@@ -1,49 +1,42 @@
 #!/bin/bash
 
 # 👁️ Perspt Documentation Generation Script
-# Generates beautiful Rust API documentation with custom styling
+# Generates the Guidedog + Typst unified site, Perspt Book, PSP Catalog, and Rust API documentation
+
+set -e
 
 echo "👁️ Generating Perspt Documentation"
 echo "=================================="
 
-# Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Check if we're in the right directory
 if [ ! -f "Cargo.toml" ]; then
     echo -e "${RED}Error: Not in a Rust project directory. Please run from the project root.${NC}"
     exit 1
 fi
 
-# Check if required files exist
-if [ ! -f "docs/header.html" ] || [ ! -f "docs/custom.css" ]; then
-    echo -e "${YELLOW}Warning: Custom styling files not found. Generating basic docs...${NC}"
-    cargo doc --no-deps --all-features
-    exit 0
-fi
+echo "📐 Building Typst diagrams, PSP catalog, Perspt Book, and unified Guidedog site..."
+cargo run -p xtask -- docs
 
-echo "🎨 Generating documentation with custom styling..."
-
-# Set RUSTDOCFLAGS for custom styling
-export RUSTDOCFLAGS="--html-in-header docs/header.html --extend-css docs/custom.css --default-theme dark"
-
-# Generate the documentation
-cargo doc --no-deps --all-features
-
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Documentation generated successfully!${NC}"
-    
-    # Show the documentation URL
-    DOC_PATH="target/doc/perspt/index.html"
-    if [ -f "$DOC_PATH" ]; then
-        echo -e "${GREEN}📚 Documentation available at: file://$(pwd)/$DOC_PATH${NC}"
-    fi
-    
-    echo -e "${GREEN}🎉 Beautiful Rust API docs ready!${NC}"
+if [ -f "docs/header.html" ] && [ -f "docs/custom.css" ]; then
+    echo "🎨 Generating Rust API documentation with custom styling..."
+    export RUSTDOCFLAGS="--html-in-header $(pwd)/docs/header.html --extend-css $(pwd)/docs/custom.css --default-theme dark"
 else
-    echo -e "${RED}❌ Documentation generation failed!${NC}"
-    exit 1
+    echo -e "${YELLOW}Generating Rust API documentation...${NC}"
 fi
+
+cargo doc --workspace --no-deps
+
+if [ -d "target/doc" ] && [ -d "docs/_build/site" ]; then
+    cp -rn target/doc/* docs/_build/site/ 2>/dev/null || true
+fi
+
+echo -e "${GREEN}✅ Documentation generated successfully!${NC}"
+echo -e "${GREEN}📚 Unified Site:  file://$(pwd)/docs/_build/site/index.html${NC}"
+echo -e "${GREEN}📖 Perspt Book:   file://$(pwd)/docs/_build/site/book/index.html${NC}"
+echo -e "${GREEN}📕 Book PDF:      file://$(pwd)/docs/perspt.pdf${NC}"
+echo -e "${GREEN}📜 PSP Catalog:   file://$(pwd)/docs/_build/site/psps/index.html${NC}"
+echo -e "${GREEN}🦀 Rust API Docs: file://$(pwd)/target/doc/perspt/index.html${NC}"

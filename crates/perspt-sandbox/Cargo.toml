@@ -16,5 +16,5 @@ categories = ["command-line-utilities", "development-tools"]
 # Shell parsing for command string
 
 # Utilities
-anyhow = "1.0"
-log = "0.4"
+anyhow = { workspace = true }
+log = { workspace = true }

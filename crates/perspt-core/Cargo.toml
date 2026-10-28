@@ -15,14 +15,14 @@ categories = ["command-line-utilities", "development-tools"]
 [dependencies]
 perspt-sdk = { workspace = true }
 # LLM unified interface
-genai = "0.6.5"
+genai = "0.7.2"
 futures = { workspace = true }
 
 # Google Cloud Application Default Credentials (ADC) for Vertex AI auth.
 # genai's Vertex adapter needs an OAuth2 Bearer token supplied via an
 # AuthResolver; gcp_auth auto-detects ADC (gcloud login / service account /
 # metadata server) so no static API key is required.
-gcp_auth = "0.12"
+gcp_auth = "0.12.7"
 
 # TOML configuration parsing/serialization
 toml = { workspace = true }

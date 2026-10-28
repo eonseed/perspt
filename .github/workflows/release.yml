@@ -9,12 +9,13 @@ on:
       tag:
         description: "Tag to release"
         required: true
-        default: "v0.5.0"
+        default: "v0.6.6"
 
 permissions:
   contents: write
 
 env:
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   CARGO_TERM_COLOR: always
 
 defaults:
@@ -24,7 +25,7 @@ defaults:
 jobs:
   create-release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       tag_name: ${{ steps.tag_name.outputs.TAG_NAME }}
@@ -55,6 +56,7 @@ jobs:
             - **Windows (x86_64)**: `perspt-windows-x86_64.exe`
             - **macOS (x86_64)**: `perspt-macos-x86_64`
             - **macOS (ARM64)**: `perspt-macos-arm64`
+            - **The Perspt Book (PDF)**: `perspt-book-en.pdf`
 
             ## Installation
             1. Download the appropriate binary for your platform
@@ -67,7 +69,7 @@ jobs:
             reduced-isolation mode, or use WSL for OS isolation.
 
             ## Documentation
-            See the [documentation](https://eonseed.github.io/perspt/) for detailed usage instructions.
+            See the [documentation](https://eonseed.github.io/perspt/) for the complete Perspt Book, PSP Catalog, and Rust API reference.
           draft: false
           prerelease: true
 
@@ -82,7 +84,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             artifact_name: perspt
             asset_name: perspt-linux-x86_64
@@ -148,11 +150,10 @@ jobs:
   build-documentation:
     name: Build and Upload Documentation
     needs: create-release
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     env:
       CARGO_INCREMENTAL: 0
-      PERSPT_DOCS_CI_FONTS: 1
       PERSPT_SKIP_DASHBOARD_ASSETS: 1
     steps:
       - name: Checkout code
@@ -160,11 +161,8 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          version: "0.11.6"
-          enable-cache: true
+      - name: Install Guidedog
+        uses: ./.github/actions/guidedog
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -174,70 +172,58 @@ jobs:
       - name: Install pinned DuckDB
         uses: ./.github/actions/setup-duckdb
 
-      - name: Install documentation system packages
+      - name: Cache Cargo registry and Rustdoc dependencies
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/debug/deps
+            target/debug/build
+          key: ${{ runner.os }}-rust-1.97.1-reldocs-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-rust-1.97.1-reldocs-
+            ${{ runner.os }}-rust-1.97.1-
+
+      - name: Build Guidedog site, Perspt Book PDF, and PSP PDFs
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            graphviz \
-            fonts-freefont-otf \
-            latexmk \
-            texlive-luatex \
-            texlive-latex-recommended \
-            texlive-latex-extra \
-            texlive-fonts-recommended \
-            fonts-liberation \
-            fonts-dejavu \
-            fonts-noto-cjk \
-            fontconfig
+          guidedog dsc index --dir=docs/psps
+          guidedog dsc check --dir=docs/psps
+          guidedog dsc build --dir=docs/psps
+          guidedog ssg build docs --out docs/_build/site
+          mkdir -p docs/_build/site/psps/pdf
+          cp docs/psps/_build/pdf/*.pdf docs/_build/site/psps/pdf/
+          cp docs/_build/site/books/perspt-book-en.pdf perspt-book-en.pdf
 
       - name: Build Rust documentation
-        run: cargo doc --locked --workspace --no-deps
+        run: |
+          cargo doc --locked --workspace --no-deps
+          cp -rn target/doc/* docs/_build/site/ || true
         env:
           RUSTDOCFLAGS: -D warnings
 
-      - name: Build Sphinx HTML documentation
-        working-directory: docs/perspt_book
-        run: uv run --locked sphinx-build -W --keep-going -b html source build/html
-        env:
-          CI: 1
-
-      - name: Build Sphinx PDF documentation
+      - name: Package documentation archive
         run: |
-          cd docs/perspt_book
-          # Generate and compile the release-only PDF. Routine pull requests
-          # build strict HTML and do not install the LaTeX toolchain.
-          export CI=true
-          export GITHUB_ACTIONS=true
-          uv run --locked sphinx-build -W --keep-going -b latex source build/latex
-          make -C build/latex
+          cd docs/_build/site
+          zip -qr ../../../documentation.zip .
 
-      - name: Package documentation
-        run: |
-          mkdir -p documentation-package
-          cp -r target/doc documentation-package/rust-docs
-          cp -r docs/perspt_book/build/html documentation-package/sphinx-html
-          cp docs/perspt_book/build/latex/*.pdf documentation-package/ 2>/dev/null || true
-          cd documentation-package
-          zip -r ../documentation.zip .
-
-      - name: Upload Documentation Asset
+      - name: Upload Documentation Assets
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.create-release.outputs.tag_name }}
-          files: documentation.zip
+          files: |
+            documentation.zip
+            perspt-book-en.pdf
 
   checksums:
     name: Generate Checksums
     needs: [create-release, build-release]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Download release assets
         run: |
-          # Get the tag name
           TAG_NAME="${{ needs.create-release.outputs.tag_name }}"
-
-          # Download all binary assets with retries
           for asset in "perspt-linux-x86_64" "perspt-windows-x86_64.exe" "perspt-macos-x86_64" "perspt-macos-arm64"; do
             for i in {1..5}; do
               if curl -L -f -o "$asset" \

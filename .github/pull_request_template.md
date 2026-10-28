@@ -55,7 +55,7 @@ Fixes #(issue)
 - [ ] Unit tests pass
 - [ ] Integration tests pass
 - [ ] Manual testing completed
-- [ ] PSP builds successfully with Sphinx (PSP PRs only)
+- [ ] PSP builds and validates with `guidedog dsc check --dir=docs/psps` (PSP PRs only)
 - [ ] No formatting errors or warnings (PSP PRs only)
 
 ### Test Configuration
