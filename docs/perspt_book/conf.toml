@@ -34,7 +34,7 @@ title = "Perspt: Generative Velocity, Deterministic Stability"
 author = "Vikrant Rathore"
 
 [html_theme_options]
-accent = "#0f766e"
+accent = "#059669"
 
 [html_context]
 site_home = "../"

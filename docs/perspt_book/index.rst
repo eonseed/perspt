@@ -1,6 +1,6 @@
 .. Perspt documentation master file
 
-.. title:: Perspt: Your Terminal's Window to the AI World
+.. title:: Perspt: Simple CLI, Terminal UI, and Verified Coding Agent
 
 .. only:: html
 
@@ -15,19 +15,19 @@
       ██║     ███████╗██║  ██║███████║██║        ██║
       ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
       </pre>
-      <p><em>Your Terminal's Window to the AI World</em></p>
+      <p><em>Simple CLI · Interactive Terminal UI · Reliable Coding Agent · Rust SDK</em></p>
       </div>
 
 .. only:: latex
 
-   Perspt: Your Terminal's Window to the AI World
-   ==============================================
+   Perspt: Simple CLI, Terminal UI, and Verified Coding Agent
+   ==========================================================
 
 .. figure:: ../shared/_static/front-page-abm.svg
    :alt: Agent-based model trajectory toward consensus under SRBN verification
    :width: 100%
 
-   Agent trajectories converging to the verified consensus corridor (:math:`V(x) \le \varepsilon`) under the SRBN barrier control loop.
+   How Perspt's coding agent stays reliable: unguided LLM loops drift as errors compound across steps, while Perspt's internal SRBN verification loop checks every change against your compiler and test suite until errors reach zero (:math:`V(x) = 0`).
 
 .. epigraph::
 
@@ -38,16 +38,18 @@
    We ponder and chat, with code as our guide,
    Is AI our helper or our human pride?
 
-**Your Terminal's Window to the AI World**
+**AI in Your Terminal — Built for Everyday Developer Workflows**
 
-Perspt is a high-performance terminal-based LLM interface that serves two purposes:
-a **simple CLI for testing and comparing LLM services** across supported providers,
-and an **experimental implementation** of the **SRBN (Stabilized Recursive Barrier
-Network)** engine inspired by the three-paper *Stability is All You Need* series.
-The SRBN agent plans multi-file projects as directed acyclic graphs, verifies each
-node with real LSP diagnostics and tests, and commits only when Lyapunov energy
-converges. The theoretical framework is mature; the implementation is under active
-development.
+Perspt is a fast, single-binary Rust tool (and embeddable **Rust SDK**) designed to make working with Large Language Models effortless and reliable from your terminal. It gives developers **three practical ways to work with AI**, plus an SDK for custom integrations:
+
+1. **Simple CLI (``perspt simple-chat``)** — Plain terminal output with zero UI chrome. Pipe files, compiler logs, or ``git diff`` into ``stdin`` and get clean text back on ``stdout`` for shell scripts and one-liners.
+2. **Interactive Terminal UI (``perspt`` / ``perspt chat``)** — A full-screen terminal chat app with streaming Markdown, syntax highlighting, tables, LaTeX math, conversation saving, read-only MCP tool support, and instant switching across 9+ LLM providers.
+3. **SRBN Coding Agent (``perspt agent``)** — An autonomous coding agent that plans tasks, edits files in an isolated sandbox, and runs your real compiler, LSP, and test suite to fix its own mistakes before committing changes to your project.
+4. **Embeddable Rust SDK (``perspt-sdk``, ``perspt-coding``, ``perspt-research``)** — Library crates that let you integrate Perspt's verified agent loop, policy engine, and multi-provider runtime directly into your own Rust applications.
+
+.. note:: What is SRBN?
+
+   **SRBN (Stabilized Recursive Barrier Networks)** is the internal reliability engine inside ``perspt agent``, based on the *Stability is All You Need* research paper series. As a developer, you don't need to configure or know the math to use ``perspt agent``—SRBN works automatically behind the scenes by running your compiler, language server, and tests after each edit, scoring remaining errors as :math:`V(x)`, and rolling back bad guesses so the code Perspt generates actually runs and stays close to the task you gave it.
 
 .. only:: html
 
@@ -55,48 +57,38 @@ development.
       :header-rows: 1
       :widths: 28 72
 
-      * - Guide
-        - Overview
+      * - Start Here
+        - What You Will Learn
       * - :doc:`quickstart`
-        - Install and start conversing or running governed coding sessions in 5 minutes.
+        - Install Perspt and run the Simple CLI, Terminal UI, and Coding Agent in 5 minutes.
+      * - :doc:`introduction`
+        - Understand the three developer modes, the Rust SDK, and how SRBN keeps code reliable.
       * - :doc:`tutorials/agent-mode`
-        - Autonomous multi-file coding with the experimental SRBN engine.
+        - Step-by-step walkthrough of autonomous multi-file coding with ``perspt agent``.
+      * - :doc:`api/index`
+        - Embed ``perspt-sdk`` and ``perspt-coding`` into your own Rust applications.
       * - :doc:`user-guide/dashboard`
-        - Monitor agent execution, Lyapunov energy, and work graphs in real time via browser.
-      * - :doc:`developer-guide/architecture`
-        - Explore the fourteen-crate workspace design and domain-neutral SDK.
+        - Monitor live agent runs, compiler/test checks, and diffs in your browser.
 
-   Key Features
-   ------------
+   What's Included
+   ---------------
 
    .. list-table::
-      :widths: 5 95
+      :widths: 24 76
       :class: borderless
 
-      * - **SRBN Agent**
-        - Experimental autonomous multi-file coding under the PSP-9 governed tool loop, with acceptance measured by Lyapunov energy from the SRBN paper series
-      * - **PSP-10 Mechanisms**
-        - Typed prompt programs with ledgered provenance, resident-context paging via ``context_recall``, bounded search forests, multi-node work-graph dispatch behind a single integration gate, and crash resume
-      * - **Multi-Provider**
-        - OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, DeepSeek, Ollama
-      * - **LSP Sensors**
-        - Real-time type checking via ``rust-analyzer``, ``ty``, ``pyright``, ``typescript-language-server``, ``gopls``
-      * - **Test Runner**
-        - pytest integration with weighted V_log energy
-      * - **Per-Role Models**
-        - Route models with ``--model``/``--actuator-model``/``--explorer-model``/``--adjudicator-model``, or per role (architect, actuator, verifier, speculator, adjudicator) via the ``[models]`` table
-      * - **Token Budget**
-        - Cost control with usage monitoring and per-request limits
-      * - **Beautiful TUI**
-        - Ratatui-based with diff viewer, task tree, dashboard, and review modal
-      * - **Security**
-        - Starlark policy engine with command sanitization and workspace-bound enforcement
-      * - **MCP 2026-07-28 Client**
-        - Official-SDK stdio/Streamable HTTP support for tools, context primitives, client requests, subscriptions and tasks, with local admission and ``/mcp`` diagnostics
-      * - **Merkle Ledger**
-        - Cryptographic change tracking with session resume and rollback
-      * - **Headless Mode**
-        - Fully autonomous operation with ``--yes`` for CI/CD and batch workflows
+      * - **1. Simple CLI**
+        - ``perspt simple-chat`` streams raw text to your terminal with no UI chrome—ideal for Unix pipes, shell scripts, and quick questions.
+      * - **2. Terminal UI**
+        - ``perspt chat`` launches a rich ``ratatui`` interface with Markdown, code highlighting, math rendering, clipboard paste, and ``/mcp`` tool inspection.
+      * - **3. SRBN Coding Agent**
+        - ``perspt agent`` edits code in a safe candidate overlay, verifies every step with compilers, LSPs (``rust-analyzer``, ``pyright``, ``tsc``, ``gopls``), and test runners (``cargo test``, ``pytest``), and promotes only working code.
+      * - **4. Rust SDK**
+        - ``perspt-sdk``, ``perspt-coding``, and ``perspt-research`` expose the verification loop, capability kernel, and domain traits for your own Rust programs.
+      * - **9+ LLM Providers**
+        - Works out of the box with OpenAI, Anthropic, Google Gemini, Vertex AI, Groq, Cohere, xAI, DeepSeek, local Ollama, and any OpenAI-compatible server.
+      * - **Safe Sandbox & Undo**
+        - Starlark security policies, OS process sandboxing (Bubblewrap / ``sandbox-exec``), and a local DuckDB ledger with one-command rollback (``perspt ledger --rollback``).
 
    ----
 
@@ -142,7 +134,7 @@ development.
 
 .. toctree::
    :maxdepth: 2
-   :caption: API Reference
+   :caption: API & SDK Reference
 
    api/index
 

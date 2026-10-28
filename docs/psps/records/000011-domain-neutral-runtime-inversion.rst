@@ -714,7 +714,7 @@ The implementation is structured across seven disciplined phases:
 
 * Implement `ActorSpec`, `ActorStateRecord`, `ActorLifecycle`, and the durable `ActorSupervisor` process runtime.
 * Assign distinct, durable actor process instances with dedicated mailboxes to all concurrent work graph nodes.
-* Implement `EffectKind::SpawnActor` with verified mathematical capability attenuation ($C_{\text{child}} \preceq C_{\text{parent}}$).
+* Implement ``EffectKind::SpawnActor`` with verified mathematical capability attenuation (:math:`C_{\text{child}} \preceq C_{\text{parent}}`).
 * Implement crash-recovery rehydration (`ActorSupervisor::rehydrate_from_ledger`) to restore running actor processes, mailboxes, and contexts from recorded events.
 * Unify all stochastic prompt roles under the universal `ActorTurnRunner`.
 

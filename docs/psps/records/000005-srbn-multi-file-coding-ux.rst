@@ -533,7 +533,7 @@ Required validator classes are:
 * Sheaf validation SHALL run after child nodes converge and before the parent node is considered stable.
 * Validators SHALL operate on committed summaries and current repository state, not only on prompt text.
 * A sheaf validation failure SHALL identify the violated boundary, the affected node or node set, and the evidence used by the validator.
-* Failures SHALL increase ``V_sheaf`` and requeue only the affected node set where possible instead of restarting the whole project graph.
+* Failures SHALL increase :math:`V_{\text{sheaf}}` and requeue only the affected node set where possible instead of restarting the whole project graph.
 * When a validator cannot produce trustworthy evidence because sensors are degraded, the runtime SHALL surface a degraded-validation state and escalate rather than claim stability.
 
 **Sheaf Validation Outputs**
@@ -544,7 +544,7 @@ Each sheaf validation pass SHALL emit:
 * validator class and plugin source
 * pass or fail status
 * evidence summary and affected files or interfaces
-* resulting ``V_sheaf`` contribution
+* resulting :math:`V_{\text{sheaf}}` contribution
 * recommended requeue targets when validation fails
 
 **5. Discrete Adaptive Speculation Pipeline**

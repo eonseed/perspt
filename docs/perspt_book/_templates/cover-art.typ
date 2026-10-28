@@ -1,119 +1,177 @@
-// Cover illustration for the Perspt Book:
-// 3D Lyapunov Attractor Funnel V(x), Level-Set Contours, Safety Barrier B(x) = 0,
-// and Sheaf-Coupled Autonomous Agent Trajectories converging to V(x*) = 0.
+// Creative cover & hero illustration for Perspt:
+// "The Terminal Spectrum & SRBN Verification Prism" — showing Simple CLI, Terminal UI,
+// and the SRBN Coding Agent converging through compiler/LSP/test rings to V(x) = 0.
 
-#let teal-deep = rgb("#083344")
-#let teal-dark = rgb("#164e63")
-#let teal = rgb("#0e7490")
-#let cyan = rgb("#06b6d4")
-#let cyan-light = rgb("#67e8f9")
-#let cyan-ice = rgb("#cffafe")
+#let obsidian = rgb("#090d16")
+#let slate-card = rgb("#111827")
+#let slate-line = rgb("#1e293b")
+#let emerald-deep = rgb("#064e3b")
+#let emerald = rgb("#059669")
+#let emerald-glow = rgb("#10b981")
+#let emerald-mint = rgb("#6ee7b7")
+#let cyan = rgb("#0ea5e9")
+#let cyan-soft = rgb("#7dd3fc")
 #let amber = rgb("#d97706")
 #let gold = rgb("#f59e0b")
-#let gold-light = rgb("#fde68a")
-#let crimson = rgb("#dc2626")
+#let coral = rgb("#f43f5e")
+#let paper = rgb("#f8fafc")
+#let muted = rgb("#94a3b8")
 
-#let cover-illustration() = box(width: 240pt, height: 220pt)[
-  // Outer Barrier Halo B(x) = 0 (dashed crimson/amber boundary ellipse at top of funnel)
-  #place(
-    dx: 10pt,
-    dy: 10pt,
-    ellipse(
-      width: 220pt,
-      height: 68pt,
-      fill: cyan-ice.transparentize(65%),
-      stroke: (paint: crimson.transparentize(20%), thickness: 1.5pt, dash: "dashed"),
-    ),
-  )
-
-  // Funnel body polygon (shaded gradient-like layers from wide top to equilibrium apex)
+#let cover-illustration() = box(
+  width: 268pt,
+  height: 224pt,
+  fill: obsidian,
+  radius: 10pt,
+  stroke: 1.2pt + emerald,
+  clip: true,
+)[
+  // Subtle terminal titlebar at top of the illustration card
   #place(
     top + left,
-    polygon(
-      fill: teal.transparentize(78%),
-      stroke: (paint: teal-dark.transparentize(35%), thickness: 1pt),
-      (12pt, 44pt),
-      (68pt, 148pt),
-      (120pt, 196pt),
-      (172pt, 148pt),
-      (228pt, 44pt),
-    ),
+    rect(
+      width: 268pt,
+      height: 20pt,
+      fill: slate-card,
+      stroke: (bottom: 0.8pt + slate-line),
+    )[
+      #place(dx: 9pt, dy: 6.5pt, circle(radius: 3.2pt, fill: coral))
+      #place(dx: 19pt, dy: 6.5pt, circle(radius: 3.2pt, fill: gold))
+      #place(dx: 29pt, dy: 6.5pt, circle(radius: 3.2pt, fill: emerald-glow))
+      #place(
+        dx: 44pt,
+        dy: 5.5pt,
+        text(font: ("DejaVu Sans Mono", "Liberation Mono"), size: 6.6pt, weight: "bold", fill: emerald-mint)[
+          \$\_ perspt :: CLI · TUI · SRBN-AGENT · SDK
+        ],
+      )
+    ],
   )
 
-  // Descending Lyapunov level-set ellipses V(x) = c_k
-  #for (dy, w, h, col, sw) in (
-    (22pt, 196pt, 58pt, teal, 1.1pt),
-    (52pt, 158pt, 46pt, teal, 1.1pt),
-    (82pt, 120pt, 34pt, cyan, 1.2pt),
-    (112pt, 84pt, 24pt, cyan, 1.3pt),
-    (142pt, 50pt, 14pt, gold, 1.5pt),
+  // Subtle coordinate grid lines inside the dark canvas
+  #for x in (44pt, 88pt, 134pt, 180pt, 224pt) {
+    place(
+      top + left,
+      line(start: (x, 20pt), end: (x, 224pt), stroke: 0.4pt + slate-line),
+    )
+  }
+  #for y in (56pt, 94pt, 132pt, 170pt, 204pt) {
+    place(
+      top + left,
+      line(start: (0pt, y), end: (268pt, y), stroke: 0.4pt + slate-line),
+    )
+  }
+
+  // Three input mode badges at the top row (Simple CLI, Terminal UI, SRBN Agent)
+  #for (dx, label, sub, col) in (
+    (12pt, "01 SIMPLE CLI", "stdin | stdout", cyan-soft),
+    (96pt, "02 TERMINAL UI", "ratatui + /mcp", emerald-mint),
+    (180pt, "03 SRBN AGENT", "compile + test", gold),
   ) {
     place(
-      dx: 120pt - w / 2,
-      dy: dy,
+      dx: dx,
+      dy: 28pt,
+      rect(
+        width: 76pt,
+        height: 26pt,
+        radius: 4pt,
+        fill: slate-card,
+        stroke: 0.9pt + col,
+        inset: (x: 5pt, y: 3.5pt),
+      )[
+        #text(font: ("DejaVu Sans Mono", "Liberation Mono"), size: 5.8pt, weight: "bold", fill: col)[#label]\
+        #text(font: ("DejaVu Sans Mono", "Liberation Mono"), size: 5.3pt, fill: paper)[#sub]
+      ],
+    )
+  }
+
+  // Concentric verification barrier rings around the central attractor (134pt, 136pt)
+  #for (w, h, col, dash) in (
+    (216pt, 102pt, slate-line, none),
+    (176pt, 82pt, cyan.transparentize(30%), "dashed"),
+    (132pt, 62pt, emerald-glow.transparentize(15%), none),
+    (84pt, 38pt, gold, none),
+  ) {
+    place(
+      dx: 134pt - w / 2,
+      dy: 138pt - h / 2,
       ellipse(
         width: w,
         height: h,
-        fill: col.transparentize(88%),
-        stroke: (paint: col, thickness: sw),
+        fill: col.transparentize(90%),
+        stroke: if dash != none {
+          (paint: col, thickness: 1.1pt, dash: dash)
+        } else {
+          (paint: col, thickness: 1.2pt)
+        },
       ),
     )
   }
 
-  // Sheaf cohomology stalk coupling chords across the funnel
-  #for (p1, p2) in (
-    ((42pt, 54pt), (198pt, 54pt)),
-    ((58pt, 82pt), (182pt, 82pt)),
-    ((76pt, 110pt), (164pt, 110pt)),
-    ((94pt, 138pt), (146pt, 138pt)),
+  // Converging trajectories from the 3 modes into the verified core V(x) = 0
+  #for (pts, col) in (
+    (((50pt, 54pt), (68pt, 88pt), (96pt, 118pt), (134pt, 138pt)), cyan-soft),
+    (((134pt, 54pt), (134pt, 84pt), (134pt, 112pt), (134pt, 138pt)), emerald-mint),
+    (((218pt, 54pt), (200pt, 88pt), (172pt, 118pt), (134pt, 138pt)), gold),
   ) {
     place(
       top + left,
-      line(
-        start: p1,
-        end: p2,
-        stroke: (paint: teal-dark.transparentize(45%), thickness: 0.8pt, dash: "dotted"),
-      ),
-    )
-  }
-
-  // Stabilized agent trajectories spiraling down into the equilibrium origin V(x*) = 0
-  #let trajectories = (
-    ((28pt, 38pt), (48pt, 72pt), (72pt, 108pt), (96pt, 146pt), (120pt, 192pt)),
-    ((212pt, 38pt), (192pt, 72pt), (168pt, 108pt), (144pt, 146pt), (120pt, 192pt)),
-    ((64pt, 24pt), (78pt, 64pt), (92pt, 104pt), (106pt, 148pt), (120pt, 192pt)),
-    ((176pt, 24pt), (162pt, 64pt), (148pt, 104pt), (134pt, 148pt), (120pt, 192pt)),
-    ((120pt, 16pt), (120pt, 62pt), (120pt, 108pt), (120pt, 152pt), (120pt, 192pt)),
-  )
-  #for tr in trajectories {
-    place(
-      top + left,
       curve(
-        stroke: (paint: teal-deep, thickness: 1.7pt),
-        curve.move(tr.at(0)),
-        ..tr.slice(1).map(pt => curve.line(pt)),
+        stroke: (paint: col, thickness: 1.6pt),
+        curve.move(pts.at(0)),
+        ..pts.slice(1).map(p => curve.line(p)),
       ),
     )
-    // Agent node markers along trajectory
-    for pt in tr.slice(0, 4) {
+    for p in pts.slice(1, 3) {
       place(
-        dx: pt.at(0) - 3pt,
-        dy: pt.at(1) - 3pt,
-        circle(radius: 3pt, fill: cyan-light, stroke: 0.9pt + teal-deep),
+        dx: p.at(0) - 3pt,
+        dy: p.at(1) - 3pt,
+        circle(radius: 3pt, fill: obsidian, stroke: 1.1pt + col),
       )
     }
   }
 
-  // Equilibrium attractor core V(x*) = 0 at apex (120pt, 192pt)
+  // Central Verified Core V(x) = 0 badge
   #place(
-    dx: 120pt - 12pt,
-    dy: 192pt - 12pt,
-    circle(radius: 12pt, fill: gold-light.transparentize(35%), stroke: 1.2pt + amber),
+    dx: 134pt - 30pt,
+    dy: 138pt - 11pt,
+    rect(
+      width: 60pt,
+      height: 22pt,
+      radius: 11pt,
+      fill: emerald-deep,
+      stroke: 1.4pt + emerald-mint,
+    )[
+      #align(center + horizon)[
+        #text(font: ("DejaVu Sans Mono", "Liberation Mono"), size: 7.2pt, weight: "bold", fill: paper)[
+          V(x) = 0 ✓
+        ]
+      ]
+    ],
   )
+
+  // Bottom SDK & Toolchain status strip
   #place(
-    dx: 120pt - 6.5pt,
-    dy: 192pt - 6.5pt,
-    circle(radius: 6.5pt, fill: gold, stroke: 1.2pt + teal-deep),
+    dx: 12pt,
+    dy: 196pt,
+    rect(
+      width: 244pt,
+      height: 19pt,
+      radius: 4pt,
+      fill: slate-card,
+      stroke: 0.7pt + slate-line,
+      inset: (x: 8pt, y: 4pt),
+    )[
+      #grid(
+        columns: (1fr, auto),
+        align: horizon,
+        text(font: ("DejaVu Sans Mono", "Liberation Mono"), size: 5.8pt, fill: emerald-mint)[
+          RUST SDK: perspt-sdk · perspt-coding · perspt-agent
+        ],
+        text(font: ("DejaVu Sans Mono", "Liberation Mono"), size: 5.8pt, weight: "bold", fill: gold)[
+          PASS
+        ],
+      )
+    ],
   )
 ]
 

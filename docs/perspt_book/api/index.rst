@@ -1,13 +1,48 @@
 .. _api-index:
 
-API Reference
-=============
+API & SDK Reference
+===================
 
-Crate-level API documentation for Perspt's Rust workspace.
+Perspt is built as a modular 14-crate Rust workspace. In addition to the ``perspt`` CLI binary, you can embed **``perspt-sdk``**, **``perspt-coding``**, and **``perspt-agent``** directly into your own Rust applications to build verified AI workflows and custom domain agents.
+
+Integrating the Perspt SDK
+--------------------------
+
+Add ``perspt-sdk`` (and optionally ``perspt-coding`` for software engineering verifiers) to your project's ``Cargo.toml``:
+
+.. code-block:: toml
+
+   [dependencies]
+   perspt-sdk = { git = "https://github.com/eonseed/perspt" }
+   perspt-coding = { git = "https://github.com/eonseed/perspt" }
+
+You can then score verifier diagnostics with the canonical quadratic Lyapunov energy :math:`V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2` and evaluate the acceptance gate in your own Rust code:
+
+.. code-block:: rust
+
+   use perspt_coding::CodingDomain;
+   use perspt_sdk::{
+       domain::{AgentDomainPackage, DomainScope},
+       energy::score_candidate,
+       gate::evaluate_gate,
+   };
+
+   fn check_candidate(scope: &DomainScope, residuals: &[perspt_sdk::residual::ResidualEvent], best_v: f64) -> perspt_sdk::error::Result<bool> {
+       let domain = CodingDomain;
+       let model = domain.energy_model(scope);
+       let score = score_candidate(residuals, &model)?;
+       let decision = evaluate_gate(
+           score.hard_violations.is_empty(),
+           score.total,
+           best_v,
+           model.rho_gate,
+       )?;
+       Ok(decision.is_accepted())
+   }
 
 .. tip::
 
-   For full Rustdoc-generated documentation, run:
+   For full Rustdoc-generated API documentation across all workspace crates, open the `Rustdoc API Reference <../../perspt/index.html>`_ or run locally:
 
    .. code-block:: bash
 

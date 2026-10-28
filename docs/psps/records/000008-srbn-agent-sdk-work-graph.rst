@@ -323,9 +323,9 @@ theory is conditional: Perspt claims SRBN stability only for a declared domain,
 state proxy, residual schema, verifier route, correction channel, disturbance
 estimate, and accepted trajectory.
 
-For a WorkGraph revision with nodes ``N`` and typed edges ``E``, each executable
-node or sealed interface contributes a local state component ``x_i``. Each edge
-``e = (i, j)`` has a restriction or comparison map ``rho_e`` supplied by the
+For a WorkGraph revision with nodes :math:`N` and typed edges :math:`E`, each executable
+node or sealed interface contributes a local state component :math:`x_i`. Each edge
+:math:`e = (i, j)` has a restriction or comparison map :math:`\rho_e` supplied by the
 domain package. The domain package maps verifier evidence into residuals:
 
 .. math::
@@ -339,9 +339,9 @@ and the SDK computes the canonical non-negative weighted energy:
    V(x) = \sum_{e \in E} w_e \|r_e(x)\|^2,\qquad w_e > 0.
 
 This weighted sum of squared edge residuals is the single energy that gates acceptance, feeds the finite-decision bound, and is recorded for replay.
-Each ``ResidualEvent`` stores the raw residual magnitude ``r_e >= 0``; the
-SDK squares and weights it when computing ``V``. The component aggregates
-``V_syn``, ``V_str``, ``V_log``, ``V_boot``, and ``V_sheaf`` are derived
+Each ``ResidualEvent`` stores the raw residual magnitude :math:`r_e \ge 0`; the
+SDK squares and weights it when computing :math:`V`. The component aggregates
+:math:`V_{\mathrm{syn}}`, :math:`V_{\mathrm{str}}`, :math:`V_{\mathrm{log}}`, :math:`V_{\mathrm{boot}}`, and :math:`V_{\mathrm{sheaf}}` are derived
 rollups of this same quadratic energy, grouped by ``EnergyComponent``:
 
 .. math::
@@ -351,7 +351,7 @@ rollups of this same quadratic energy, grouped by ``EnergyComponent``:
    V(x) = \sum_{\mathrm{comp}} V_{\mathrm{comp}}.
 
 The component rollups are user-visible projections only. They do not carry independent weights and are not summed through a second weighting pass.
-Every edge residual carries an explicit weight ``w_e``; no component defaults to an implicit weight of ``1`` while others are weighted.
+Every edge residual carries an explicit weight :math:`w_e`; no component defaults to an implicit weight of :math:`1` while others are weighted.
 
 The safe set for the declared proxy is the zero-energy set:
 
@@ -368,13 +368,13 @@ visual-layout, and deployment residuals. The SDK owns the energy equation and
 trace; domain packages own the residual construction and weights.
 
 Perspt's primary contract is the measured discrete energy and gate. The
-continuous embedding-space constants ``alpha`` (correction strength), ``beta``
-(drift strength), ``delta`` (persistent disturbance), ``L`` (smoothness), and
-``eta`` (step size) require a gradient field ``v(x) = -alpha grad V(x)`` and a
-drift field ``f(x)`` on an exposed or estimated continuous coordinate. The
+continuous embedding-space constants :math:`\alpha` (correction strength), :math:`\beta`
+(drift strength), :math:`\delta` (persistent disturbance), :math:`L` (smoothness), and
+:math:`\eta` (step size) require a gradient field :math:`v(x) = -\alpha \nabla V(x)` and a
+drift field :math:`f(x)` on an exposed or estimated continuous coordinate. The
 coding domain operates on discrete verifier residuals and exposes no such
 coordinate, so these constants are expected to remain ``NotClaimed`` for it. The
-SDK treats ``alpha``, ``beta``, ``delta``, ``L``, and ``eta`` as optional records that a domain package may register only when it can instrument them; it does not require them, build acceptance on them, or display analytic floors derived from them unless they are registered with evidence.
+SDK treats :math:`\alpha`, :math:`\beta`, :math:`\delta`, :math:`L`, and :math:`\eta` as optional records that a domain package may register only when it can instrument them; it does not require them, build acceptance on them, or display analytic floors derived from them unless they are registered with evidence.
 
 When a domain can expose or estimate a continuous correction coordinate, the
 paper model uses transverse error dynamics:
@@ -405,12 +405,12 @@ report the input-to-state-stability energy floor:
       = \frac{\delta^2}{2(\alpha-\beta)^2\mu},
    \qquad \alpha > \beta,\quad \mu > 0.
 
-The implementation treats ``V_infty`` as a declared or estimated floor, not
+The implementation treats :math:`V_{\infty}` as a declared or estimated floor, not
 as a magical success condition. A candidate above the floor still requires hard
 checks, measured descent, or a residual certificate.
 
-The energy-slope constant ``mu`` is the exception: for the quadratic residual
-energy ``V(x) = x^T A x`` with ``A = B^T W B``, it is combinatorial rather than
+The energy-slope constant :math:`\mu` is the exception: for the quadratic residual
+energy :math:`V(x) = x^{\top} A x` with :math:`A = B^{\top} W B`, it is combinatorial rather than
 embedding-dependent and is computable from the WorkGraph verification
 structure:
 
@@ -418,22 +418,22 @@ structure:
 
    \mu = 2\,\lambda_{\min}^{+}(A),
 
-the smallest non-zero eigenvalue of ``A``. In the identity-restriction case
-``A`` reduces to the weighted Laplacian of the verification graph and ``mu`` is
-its algebraic connectivity (Fiedler value). The SDK exposes ``mu`` as a
+the smallest non-zero eigenvalue of :math:`A`. In the identity-restriction case
+:math:`A` reduces to the weighted Laplacian of the verification graph and :math:`\mu` is
+its algebraic connectivity (Fiedler value). The SDK exposes :math:`\mu` as a
 spectral diagnostic of the active verification graph and is able to report
-the change in ``mu`` produced by adding a candidate verifier edge, so that an
+the change in :math:`\mu` produced by adding a candidate verifier edge, so that an
 independent verifier that raises the spectral gap is distinguishable from a
 redundant verifier that does not.
 
-``mu`` is a diagnostic, not an input to the acceptance gate. It is computed off the critical path -- on graph-revision commit, when the graph
+:math:`\mu` is a diagnostic, not an input to the acceptance gate. It is computed off the critical path -- on graph-revision commit, when the graph
 structure stabilizes, or asynchronously -- and does not block worker dispatch,
 candidate verification, or the acceptance-gate decision. During high graph
-churn the SDK may report the last computed ``mu`` with its source revision.
+churn the SDK may report the last computed :math:`\mu` with its source revision.
 
-For discrete corrections, the SDK stores the proposed step size ``eta`` and
+For discrete corrections, the SDK stores the proposed step size :math:`\eta` and
 may validate it against the paper's sufficient bound when the domain provides
-the smoothness constant ``L``:
+the smoothness constant :math:`L`:
 
 .. math::
 
@@ -465,11 +465,11 @@ available:
       V(y_{k+1}) \le V(x_k^{\mathrm{best}})
          - \rho_{\mathrm{gate}}.
 
-Descent is measured against the best accepted energy ``V(x_k^best)``, not
+Descent is measured against the best accepted energy :math:`V(x_k^{\mathrm{best}})`, not
 the most recent accepted energy. There is a single descent tolerance
-``rho_gate > 0``. ``min_descent`` is not a second gate threshold; where a domain
+:math:`\rho_{\mathrm{gate}} > 0`. ``min_descent`` is not a second gate threshold; where a domain
 records a predicted analytic decrease, it is advisory only and does not relax
-or replace ``rho_gate`` in the gate decision.
+or replace :math:`\rho_{\mathrm{gate}}` in the gate decision.
 
 Otherwise the candidate is rejected for the accepted trajectory:
 
@@ -477,8 +477,8 @@ Otherwise the candidate is rejected for the accepted trajectory:
 
    x_{k+1}^{\mathrm{accepted}} \leftarrow x_k^{\mathrm{best}}.
 
-With ``V >= 0``, descent threshold ``rho_gate > 0``, baseline energy ``V_0``,
-and finite rejection budget ``B``, a run has the finite-decision bound:
+With :math:`V \ge 0`, descent threshold :math:`\rho_{\mathrm{gate}} > 0`, baseline energy :math:`V_0`,
+and finite rejection budget :math:`B`, a run has the finite-decision bound:
 
 .. math::
 
@@ -488,7 +488,7 @@ and finite rejection budget ``B``, a run has the finite-decision bound:
       + B + 1.
 
 The SDK exposes this bound in telemetry whenever the run has a fixed
-``rho_gate`` and correction budget.
+:math:`\rho_{\mathrm{gate}}` and correction budget.
 
 At platform level, every effect proposal must satisfy the capability
 admissibility predicate before any durable effect occurs. For proposal
@@ -550,10 +550,10 @@ condition
    \epsilon = 1 - \alpha_{\mathrm{load}} > 0
 
 requires a stochastic workflow arrival process with a measurable sub-critical
-load ``alpha_load < 1``. A single-session run has no arrival process, so its
+load :math:`\alpha_{\mathrm{load}} < 1`. A single-session run has no arrival process, so its
 potential is monotone non-increasing and the drift condition is trivially
 satisfied. Perspt does not present the drift condition as a conformance result
-in single-session execution. A deployment may record ``alpha_load`` and check
+in single-session execution. A deployment may record :math:`\alpha_{\mathrm{load}}` and check
 the drift condition only in a multi-session or server mode where the arrival
 process exists.
 
@@ -561,7 +561,7 @@ The implementation distinguishes between *measured SRBN conformance* and
 *analytic stability claims*. Measured conformance is mandatory: Perspt must
 compute residuals, energy, gate decisions, correction directions, residual
 certificates, and replay records for every run. Analytic claims are stricter:
-Perspt may display ``V_infty``, step-size certificates, or platform drift claims
+Perspt may display :math:`V_{\infty}`, step-size certificates, or platform drift claims
 only when the domain package provides the corresponding constants, evidence, and
 ledger measurements. A missing constant is not a soft pass; it is an explicit
 ``NotClaimed`` analytic status.
@@ -609,7 +609,7 @@ PSP-8-complete unless all applicable gates below pass.
   sources.
 
 **Gate G: Spectral and analytic-claim conformance**
-  The SDK computes the spectral energy-slope constant ``mu = 2 lambda_min+(A)``
+  The SDK computes the spectral energy-slope constant :math:`\mu = 2\,\lambda_{\min}^{+}(A)`
   from the quadratic residual energy and exposes it as a verification-graph
   diagnostic. This spectral computation is required, computed off the critical
   path so that it never blocks dispatch or the acceptance gate. The continuous
@@ -617,14 +617,14 @@ PSP-8-complete unless all applicable gates below pass.
   stochastic analytic claims are optional and not required for PSP-8
   completion: a run that claims them must register a ``StabilityClaim`` with the
   relevant constants, the analysis domain, and evidence references, after which
-  the SDK computes ``V_infty`` and step-size checks; a run without those
+  the SDK computes :math:`V_{\infty}` and step-size checks; a run without those
   constants remains measured-conformant and analytically ``NotClaimed``. The
   coding domain is expected to remain ``NotClaimed`` for the continuous
   constants.
 
 **Gate H: Backlog-potential conformance**
-  Active work exposes per-item potential ``phi_i`` and aggregate potential
-  ``Phi(W)`` as a backlog gauge. This gauge is required. Platform-level
+  Active work exposes per-item potential :math:`\phi_i` and aggregate potential
+  :math:`\Phi(W)` as a backlog gauge. This gauge is required. Platform-level
   Foster-Lyapunov drift claims are optional and apply only to a multi-session or
   server deployment with a measurable sub-critical load; they are not required
   for single-session PSP-8 completion.
@@ -645,17 +645,17 @@ PSP-8-complete unless all applicable gates below pass.
    :widths: 20, 34, 46
    :class: longtable
 
-   "Proxy state ``x``", "``WorkspaceSnapshot``, ``WorkGraphRevision``, ledger head, capability set, active candidate", "State witnesses and input digests recorded before proposal, verifier, and commit"
-   "Sheaf residual ``r_e``", "``ResidualEvent`` with class, sensor, affected paths/symbols, score, and evidence payload", "Raw tool/LSP/test/AST/policy evidence normalized into finite non-negative residual score"
-   "Energy ``V``", "``EnergyModel`` and ``EnergyComponents``", "Weights, residual vector, component totals, and total energy recorded for every candidate"
-   "Safe set ``M_safe``", "Hard gates plus zero/tolerance energy condition", "Hard-check results, degraded sensors, and declared tolerance recorded with gate decision"
-   "Correction field ``v`` or discrete correction route", "``CorrectionDirection`` and prompt-compiler input package", "Dominant residual cluster, selected correction route, model/tool route, and follow-up verifier result"
+   "Proxy state :math:`x`", "``WorkspaceSnapshot``, ``WorkGraphRevision``, ledger head, capability set, active candidate", "State witnesses and input digests recorded before proposal, verifier, and commit"
+   "Sheaf residual :math:`r_e`", "``ResidualEvent`` with class, sensor, affected paths/symbols, score, and evidence payload", "Raw tool/LSP/test/AST/policy evidence normalized into finite non-negative residual score"
+   "Energy :math:`V`", "``EnergyModel`` and ``EnergyComponents``", "Weights, residual vector, component totals, and total energy recorded for every candidate"
+   "Safe set :math:`\mathcal{M}_{\mathrm{safe}}`", "Hard gates plus zero/tolerance energy condition", "Hard-check results, degraded sensors, and declared tolerance recorded with gate decision"
+   "Correction field :math:`v` or discrete correction route", "``CorrectionDirection`` and prompt-compiler input package", "Dominant residual cluster, selected correction route, model/tool route, and follow-up verifier result"
    "Accepted trajectory", "``AcceptedTrajectoryRecord`` and ``GateDecision``", "Observed candidates retained; accepted states only hard-pass or satisfy measured descent"
    "Residual certificate", "``ResidualCertificate``", "Final residuals, final energy, exhausted budgets, verifier routes, rejected attempts, and ledger head"
    "Merkle history", "Event-sourced ledger with cryptographic hashes", "Append-only proposal, decision, effect, verifier, graph, and rollback events"
-   "Capability ``c`` and authority ``Gamma``", "``Capability`` and ``AdmissibilityWitness``", "Authority, scope, contract, barrier, and risk clauses evaluated outside generated code"
-   "Attenuation ``c' <= c``", "Capability delegation rule", "Delegated effect scope, call budget, expiry, and delegability are no greater than source capability"
-   "Platform potential ``Phi(W)``", "``WorkflowPotential`` dashboard projection", "Accepted energy, remaining budget, per-workflow potential, aggregate potential, and load estimate"
+   "Capability :math:`c` and authority :math:`\Gamma`", "``Capability`` and ``AdmissibilityWitness``", "Authority, scope, contract, barrier, and risk clauses evaluated outside generated code"
+   "Attenuation :math:`c' \preceq c`", "Capability delegation rule", "Delegated effect scope, call budget, expiry, and delegability are no greater than source capability"
+   "Platform potential :math:`\Phi(W)`", "``WorkflowPotential`` dashboard projection", "Accepted energy, remaining budget, per-workflow potential, aggregate potential, and load estimate"
    "Durable execution obligations", "Replay ledger, command IR, idempotency keys, noncommuting leases", "Recorded nondeterminism, deterministic replay, write-ahead external effects, and serialized durable conflicts"
 
 ``perspt-sdk`` uses the published ``srbn`` crate as the canonical SRBN
@@ -1009,12 +1009,12 @@ The ``ResidualSchema`` and ``EnergyModel`` declare:
 
 * residual classes and their allowed sensors;
 * normalization from raw tool output to finite non-negative scores;
-* residual weights ``w_e`` and hard-check thresholds;
-* the mapping from residuals into ``V_syn``, ``V_str``, ``V_log``, ``V_boot``,
-  and ``V_sheaf``;
-* the default ``rho_gate``, energy tolerance, and correction budgets;
-* optional local stability constants ``alpha``, ``beta``, ``delta``, ``mu``,
-  ``L``, and ``eta`` when the domain claims a mathematical energy tube rather
+* residual weights :math:`w_e` and hard-check thresholds;
+* the mapping from residuals into :math:`V_{\mathrm{syn}}`, :math:`V_{\mathrm{str}}`, :math:`V_{\mathrm{log}}`, :math:`V_{\mathrm{boot}}`,
+  and :math:`V_{\mathrm{sheaf}}`;
+* the default :math:`\rho_{\mathrm{gate}}`, energy tolerance, and correction budgets;
+* optional local stability constants :math:`\alpha`, :math:`\beta`, :math:`\delta`, :math:`\mu`,
+  :math:`L`, and :math:`\eta` when the domain claims a mathematical energy tube rather
   than only measured descent.
 
 ``perspt-coding`` implements this trait. Inside ``perspt-coding``,
@@ -1152,27 +1152,27 @@ line; it is the measured reason the current state is unsafe or incomplete.
 Each verifier residual maps into one SRBN energy component, which is the
 rollup that groups its squared weighted residual:
 
-* V_syn: syntax, parser, typechecker, and compiler diagnostics caused by the
+* :math:`V_{\mathrm{syn}}`: syntax, parser, typechecker, and compiler diagnostics caused by the
   candidate;
-* V_str: structural contract, ownership, import graph, symbol, interface,
+* :math:`V_{\mathrm{str}}`: structural contract, ownership, import graph, symbol, interface,
   formatting, lint, and invariant residuals;
-* V_log: failing tests, snapshots, property checks, and behavioral validators;
-* V_boot: toolchain, dependency, package sync, sandbox, missing binary, and
+* :math:`V_{\mathrm{log}}`: failing tests, snapshots, property checks, and behavioral validators;
+* :math:`V_{\mathrm{boot}}`: toolchain, dependency, package sync, sandbox, missing binary, and
   degraded-sensor residuals;
-* V_sheaf: cross-node, cross-domain, and cross-adapter consistency residuals.
+* :math:`V_{\mathrm{sheaf}}`: cross-node, cross-domain, and cross-adapter consistency residuals.
 
 The energy components are the derived rollups defined in System 2; they are
 telemetry projections of the single quadratic residual energy.
 
 ``CapabilityDenied`` and ``BudgetExhausted`` are admissibility outcomes, not
 verifier consistency residuals. They are recorded on a separate blocked
-channel and are not summed into the Lyapunov energy ``V`` or treated as a
+channel and are not summed into the Lyapunov energy :math:`V` or treated as a
 residual to be corrected by regeneration.
 
 A degraded sensor means the energy for its component is unknown, not low. When a
 required sensor is unavailable, the node takes a degraded-validation stop
 and emit a residual certificate rather than accepting descent on an energy that
-is missing a required component. A ``V_boot`` residual for a degraded sensor is
+is missing a required component. A :math:`V_{\mathrm{boot}}` residual for a degraded sensor is
 permitted only for sensors that are not required for the node scope.
 
 Correction prompts are generated from dominant residuals:
@@ -1205,8 +1205,8 @@ deterministic or independent routes. Same-model critique does not contribute a
 full-weight descent acceptance.
 
 Verifier independence is measured, not assumed. The ledger retains
-each validator's verdict per candidate so that pairwise miss rates ``q_i`` and
-miss correlation ``kappa_ij`` are computable from history. For a conjunctive
+each validator's verdict per candidate so that pairwise miss rates :math:`q_i` and
+miss correlation :math:`\kappa_{ij}` are computable from history. For a conjunctive
 verifier gate the effective ensemble miss bound is
 
 .. math::
@@ -1215,11 +1215,11 @@ verifier gate the effective ensemble miss bound is
       = \min_{i<j} \left( q_i q_j + \kappa_{ij}\,\sigma_i \sigma_j \right),
    \qquad \sigma_i = \sqrt{q_i (1 - q_i)}.
 
-Residual weights ``w_e`` are reduced for verifiers whose measured
+Residual weights :math:`w_e` are reduced for verifiers whose measured
 correlation with an already-counted verifier is high, so that a redundant
 validator does not contribute the weight of an independent one. Duplicate
 validators are not counted as independent merely because they appear twice,
-and status views surface ``rho_eff`` rather than a raw count of validators.
+and status views surface :math:`\rho_{\mathrm{eff}}` rather than a raw count of validators.
 
 7. Capability-Constrained Admissibility
 =======================================
@@ -1630,27 +1630,27 @@ Mechanism checks:
   stabilize/run loop, records terminal status, and serializes the attempt trace
   through ``srbn-serde`` into the Perspt ledger;
 * finite energy: every residual vector maps to a finite non-negative energy and
-  sensor failure creates V_boot or degraded stop, never zero energy;
+  sensor failure creates :math:`V_{\mathrm{boot}}` or degraded stop, never zero energy;
 * energy equation: a synthetic graph with known residuals verifies
-  ``V = sum_e w_e r_e^2`` and rejects negative, NaN, or infinite weights/scores;
+  :math:`V = \sum_e w_e r_e^2` and rejects negative, NaN, or infinite weights/scores;
 * acceptance gate: a hard-pass candidate commits, a candidate with
-  ``V_next <= V_accepted - rho_gate`` commits by descent, and a non-descending
+  :math:`V_{\mathrm{next}} \le V_{\mathrm{accepted}} - \rho_{\mathrm{gate}}` commits by descent, and a non-descending
   candidate remains observed-only;
-* finite-decision bound: with ``V_0``, ``rho_gate``, and budget ``B``, the run
-  cannot exceed ``floor(V_0 / rho_gate) + B + 1`` gate decisions before terminal
+* finite-decision bound: with :math:`V_0`, :math:`\rho_{\mathrm{gate}}`, and budget :math:`B`, the run
+  cannot exceed :math:`\lfloor V_0 / \rho_{\mathrm{gate}} \rfloor + B + 1` gate decisions before terminal
   classification;
 * residual certificate: budget exhaustion emits a certificate with final
   residuals, final energy, verifier routes, rejected attempts, correction
   directions, and ledger head;
-* stability-claim validation: when a domain declares ``alpha``, ``beta``,
-  ``delta``, ``mu``, ``L``, and ``eta``, the SDK computes ``V_infty`` and checks
+* stability-claim validation: when a domain declares :math:`\alpha`, :math:`\beta`,
+  :math:`\delta`, :math:`\mu`, :math:`L`, and :math:`\eta`, the SDK computes :math:`V_{\infty}` and checks
   the discrete step-size precondition before displaying a mathematical stability
   claim;
 * admissibility witness: every committed effect records authority, contract,
   effect, barrier-increment, and risk-budget decisions;
 * attenuation preorder: delegated capabilities can only shrink effect scope,
   call budget, expiry, or delegability;
-* platform potential: active workflows expose ``phi_i`` and ``Phi(W)`` so the
+* platform potential: active workflows expose :math:`\phi_i` and :math:`\Phi(W)` so the
   dashboard can show backlog potential and sub-critical load estimates;
 * static graph snapshot bug: a local graph rewrite inserts a node and the
   scheduler executes it in the same session;
@@ -1703,9 +1703,9 @@ Metrics:
 * regression count after commit;
 * replay success rate;
 * SRBN trace serialization round-trip rate;
-* accepted energy floor estimate and ``V_infty`` when declared;
+* accepted energy floor estimate and :math:`V_{\infty}` when declared;
 * gate-decision bound utilization;
-* platform potential ``Phi(W)`` and load estimate ``alpha_load``;
+* platform potential :math:`\Phi(W)` and load estimate :math:`\alpha_{\mathrm{load}}`;
 * same-model critique ablation versus independent verifier route.
 
 No benchmark report omits failed runs. Residual certificates are first-class
@@ -2026,10 +2026,10 @@ conformance gate.
   activates Gate F.
 
 **Phase 5: Spectral Diagnostic and Verifier Independence**
-  Compute the spectral energy-slope constant ``mu`` from the verification graph
+  Compute the spectral energy-slope constant :math:`\mu` from the verification graph
   off the critical path and expose its sensitivity to candidate verifier edges.
   Measure pairwise validator miss correlation from the ledger and weight
-  residuals by measured independence, surfacing ``rho_eff``. This phase
+  residuals by measured independence, surfacing :math:`\rho_{\mathrm{eff}}`. This phase
   activates the required portion of Gate G.
 
 **Phase 6: Coding Verifier Suites**
@@ -2126,12 +2126,12 @@ Implementation Status
    * - 5 — Spectral diagnostic + verifier independence
      - G
      - **Not wired**
-     - ``spectral::VerificationGraph`` (``mu = 2 lambda_min+(A)``, Fiedler value,
-       ``edge_mu_sensitivity``) and ``independence::compute`` (``rho_eff``) are
+     - ``spectral::VerificationGraph`` (:math:`\mu = 2\,\lambda_{\min}^{+}(A)`, Fiedler value,
+       ``edge_mu_sensitivity``) and ``independence::compute`` (:math:`\rho_{\mathrm{eff}}`) are
        implemented and unit-tested in ``perspt-sdk`` but are **never invoked in
        the orchestrator**. The orchestrator tags each residual with its
        ``IndependenceRoute`` but does not assemble the verification graph or
-       compute ``mu`` / ``rho_eff``. See *Resolving Gate G* below.
+       compute :math:`\mu` / :math:`\rho_{\mathrm{eff}}`. See *Resolving Gate G* below.
    * - 6 — Coding verifier suites
      - D
      - **Done**
@@ -2185,9 +2185,9 @@ acceptance gate, only the addition of an off-path diagnostic emitter:
    weights, and build a ``VerificationGraph`` on each graph-revision commit.
 2. **Compute and record** ``graph.mu(tol)`` (and ``edge_mu_sensitivity`` for
    candidate verifier edges, to distinguish an independent verifier that raises
-   the spectral gap from a redundant one). Persist ``mu`` with its source
+   the spectral gap from a redundant one). Persist :math:`\mu` with its source
    revision to the ledger (``StabilityClaim.mu``).
-3. **Compute** ``rho_eff`` via ``independence::compute`` from the ledger's
+3. **Compute** :math:`\rho_{\mathrm{eff}}` via ``independence::compute`` from the ledger's
    per-validator verdict history and surface it in ``perspt status`` and the
    dashboard in place of any raw validator count.
 
@@ -2394,7 +2394,7 @@ lands:
 8. Add event rows for proposal, admissibility, residual, graph revision,
    exploration report, parallel task lifecycle, lease lifecycle, and accepted
    candidate, with the kernel-refusal rule for unrecorded observations.
-9. Compute the spectral constant ``mu`` for a synthetic verification graph and
+9. Compute the spectral constant :math:`\mu` for a synthetic verification graph and
    measure validator miss correlation from the ledger.
 10. Implement Rust unresolved-import and missing-module correction directions.
 11. Add an exploration model-routing test showing ``--explorer-model`` wins over
@@ -2413,15 +2413,15 @@ lands:
 Testing strategy:
 
 * unit tests for residual scoring and non-negative finite validation;
-* unit tests for ``V = sum_e w_e r_e^2`` with deterministic synthetic
+* unit tests for :math:`V = \sum_e w_e r_e^2` with deterministic synthetic
   residuals;
 * unit tests for hard-pass, descent-pass, non-descending rejection, declared
   floor, and exhausted-certificate gate decisions;
 * unit tests for the finite-decision bound
-  ``floor(V_0 / rho_gate) + B + 1``;
+  :math:`\lfloor V_0 / \rho_{\mathrm{gate}} \rfloor + B + 1`;
 * unit tests for ``srbn`` adapter terminal statuses and ``srbn-serde`` trace
   serialization round trips;
-* unit tests for stability-claim calculations: ``V_infty`` and discrete
+* unit tests for stability-claim calculations: :math:`V_{\infty}` and discrete
   step-size precondition checks;
 * SDK contract tests for domain package registration, context packages,
   verifier suites, residual mapping, and dashboard projections;

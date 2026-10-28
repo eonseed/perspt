@@ -335,7 +335,7 @@ The documentation update SHALL also make the user-visible behavior changes expli
 
 * correction now fails closed instead of guessing filenames,
 * malformed responses re-enter the bounded correction loop with schema feedback,
-* ``V_{boot}`` is an active project-mode verification signal rather than a dead component,
+* :math:`V_{\text{boot}}` is an active project-mode verification signal rather than a dead component,
 * sheaf validation remains a commit-time check but obvious cross-reference failures are surfaced earlier via a pre-check,
 * and status/log views expose correction provenance rather than only raw request logs.
 
@@ -370,7 +370,7 @@ This release prioritizes correctness over compatibility. There is no backward-co
 * The current fragmented DuckDB persistence layout is not a migration target. This release introduces a new storage engine with the schema required by PSP 7.
 * Existing session databases are not expected to be forward-compatible. Users start fresh sessions on the new engine.
 * Documentation for prompt contracts, correction failure classes, storage records, and plugin policy SHALL be added as part of the implementation.
-* Documentation that still describes PSP-5-era retry behavior, passive ``V_{boot}``, or sheaf-only post-convergence detection SHALL be treated as incorrect until updated in the same release.
+* Documentation that still describes PSP-5-era retry behavior, passive :math:`V_{\text{boot}}`, or sheaf-only post-convergence detection SHALL be treated as incorrect until updated in the same release.
 
 ========================
 Reference Implementation

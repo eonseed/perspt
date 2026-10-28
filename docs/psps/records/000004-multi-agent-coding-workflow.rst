@@ -116,15 +116,15 @@ Stability Control Algorithms
 
 To achieve a deterministic "Chain of Control" at scale, Perspt implements a hierarchical control framework that translates tool-driven engineering feedback into stability metrics.
 
-**1. Hierarchical Contract-Based Lyapunov Energy ($V(x)$):**
-The stability of each task node is governed by a local energy function $V(x)$, representing the distance to a **Behavioral Contract** (defined by the Architect during the planning phase). This approach ensures $O(1)$ verification overhead per leaf node, making it scalable for large codebases.
+**1. Hierarchical Contract-Based Lyapunov Energy** (:math:`V(x)`):
+The stability of each task node is governed by a local energy function :math:`V(x)`, representing the distance to a **Behavioral Contract** (defined by the Architect during the planning phase). This approach ensures :math:`O(1)` verification overhead per leaf node, making it scalable for large codebases.
 
-*   **Syntactic Component ($V_{syn}$):** Mapping for discrete tool feedback (LSP Diagnostics, Compiler errors). Each issue is weighted by its severity (Error > Warning > Hint).
-*   **Structural Component ($V_{str}$):** Measures the violation of the node's **Architectural Contract** (e.g., specific function signatures, required exports, or type invariants). This utilizes **LSP Symbol Analysis** and structural fingerprinting.
-*   **Logic Component ($V_{log}$):** Aggregate score of **Weighted Test Results**. Critical path tests (identified by the Planner) trigger higher energy penalties than edge cases.
-*   **Composite Formula:** $V(x) = \alpha V_{syn} + \beta V_{str} + \gamma V_{log}$.
-*   **Default Weights:** $\alpha = 1.0$, $\beta = 0.5$, $\gamma = 2.0$. Logic failures are most critical. These are CLI-overridable via ``--energy-weights``.
-*   **Stability Threshold ($\epsilon$):** Default: ``0.1``. A node is stable when $V(x) < \epsilon$. Override via ``--stability-threshold``.
+*   **Syntactic Component** (:math:`V_{\text{syn}}`): Mapping for discrete tool feedback (LSP Diagnostics, Compiler errors). Each issue is weighted by its severity (Error > Warning > Hint).
+*   **Structural Component** (:math:`V_{\text{str}}`): Measures the violation of the node's **Architectural Contract** (e.g., specific function signatures, required exports, or type invariants). This utilizes **LSP Symbol Analysis** and structural fingerprinting.
+*   **Logic Component** (:math:`V_{\text{log}}`): Aggregate score of **Weighted Test Results**. Critical path tests (identified by the Planner) trigger higher energy penalties than edge cases.
+*   **Composite Formula:** :math:`V(x) = \alpha V_{\text{syn}} + \beta V_{\text{str}} + \gamma V_{\text{log}}`.
+*   **Default Weights:** :math:`\alpha = 1.0`, :math:`\beta = 0.5`, :math:`\gamma = 2.0`. Logic failures are most critical. These are CLI-overridable via ``--energy-weights``.
+*   **Stability Threshold** (:math:`\epsilon`): Default: ``0.1``. A node is stable when :math:`V(x) < \epsilon`. Override via ``--stability-threshold``.
 
 .. note:: Superseded by PSP-8 — the energy is now quadratic.
 
@@ -145,11 +145,11 @@ Perspt acts as a native **Language Server Client**. This provides the "Sensor Ar
 *   The system uses LSP features (Definition, Type Definition, References) to verify structural and logic consistency across the workspace.
 *   **Stability Hazard:** If a required Language Server is offline, the CLI issues a "Sensor Failure" warning and blocks the control loop until the sensor is restored.
 
-**3. The Restorative Force ($-\nabla V(x)$):**
-When $V(x) > \epsilon$ (stability threshold), the **Verifier** generates a composite correction instruction. This instruction combines the specific LSP error message and the failed Architectural Contract property, providing the LLM Actuator with the exact vector field required for convergence.
+**3. The Restorative Force** (:math:`-\nabla V(x)`):
+When :math:`V(x) > \epsilon` (stability threshold), the **Verifier** generates a composite correction instruction. This instruction combines the specific LSP error message and the failed Architectural Contract property, providing the LLM Actuator with the exact vector field required for convergence.
 
 .. note::
-   **Terminology:** The **Verifier** role in this PSP is the implementation of the "Frozen Barrier Network" concept from the "Stability is All You Need" paper. It acts as an independent, high-speed sensor that computes $V(x)$ and provides restorative feedback to the Actuator.
+   **Terminology:** The **Verifier** role in this PSP is the implementation of the "Frozen Barrier Network" concept from the "Stability is All You Need" paper. It acts as an independent, high-speed sensor that computes :math:`V(x)` and provides restorative feedback to the Actuator.
 
 Workflow Design: The SRBN Loop
 ==============================
@@ -173,27 +173,27 @@ The agent follows a rigorous, control-theoretic loop to ensure stability during 
 
 2.  **Recursive Sub-graph Execution:**
     Components are decomposed and executed based on their topological order in the `petgraph` DAG.
-    *   **Complexity Gating:** If a component's sub-graph exceeds a complexity threshold $K$ (e.g. depth $>3$ or width $>5$), the CLI pauses for sub-plan approval (unless `--auto-approve` is enabled).
+    *   **Complexity Gating:** If a component's sub-graph exceeds a complexity threshold :math:`K` (e.g. depth :math:`> 3` or width :math:`> 5`), the CLI pauses for sub-plan approval (unless ``--auto-approve`` is enabled).
 
 3.  **Speculative Generation (Drift):**
     The **Actuator (Coding Model)** generates implementations to satisfy the local contract. The **Fast Speculator** runs lookahead branches.
 
 4.  **Stability Verification (The Sensor):**
-    The **Verifier** computes the node's local **Lyapunov Energy** $V(x)$ from three source streams:
+    The **Verifier** computes the node's local **Lyapunov Energy** :math:`V(x)` from three source streams:
     - **LSP Sink:** Ingests diagnostics from the Language Server.
     - **Structural Sink:** Checks signature and type compliance against the contract.
     - **Logic Sink:** Executes **Weighted Test Suites**. Failures in "Critical" tests (as labeled by the Architect) increase energy significantly.
 
 5.  **Convergence & Self-Correction:**
-    If $V(x) > \epsilon$, the node re-generates until $V(x)$ dissipates.
-    *   **Auto-Decision:** In `--auto-approve` mode, the system automatically accepts the first solution where $V(x) < \epsilon$.
-    *   **Strategic Escalation:** Even in auto-mode, if $V(x)$ does not decrease after 3 attempts (Stability Divergence), the system **blocks** and alerts the user.
+    If :math:`V(x) > \epsilon`, the node re-generates until :math:`V(x)` dissipates.
+    *   **Auto-Decision:** In ``--auto-approve`` mode, the system automatically accepts the first solution where :math:`V(x) < \epsilon`.
+    *   **Strategic Escalation:** Even in auto-mode, if :math:`V(x)` does not decrease after 3 attempts (Stability Divergence), the system **blocks** and alerts the user.
 
 6.  **Sheaf Validation (Post-Subgraph Consistency):**
     After all children of a parent node converge, a **Sheaf Validation** step ensures global coherence:
     *   **Type Consistency:** The Verifier checks that exported interfaces match imported expectations across module boundaries (using LSP ``textDocument/definition``).
     *   **Dependency Analysis:** Uses ``petgraph::algo::is_cyclic_directed`` to detect circular dependencies.
-    *   **Failure Handling:** If sheaf validation fails, the parent node's energy $V(parent)$ is spiked, and failing children are re-queued with an updated contract specifying the required interface correction.
+    *   **Failure Handling:** If sheaf validation fails, the parent node's energy :math:`V(\text{parent})` is spiked, and failing children are re-queued with an updated contract specifying the required interface correction.
 
 7.  **Merkle Ledger & Session Persistence:**
     Stable states are committed to the **Merkle Ledger** in **DuckDB**. In lookahead branches, if energy spikes, the system **Ratchets** back to the last stable hash.
@@ -372,8 +372,8 @@ The multi-agent workflow follows a deterministic state machine aligned with the 
 *   ``TASK_QUEUED``: Initial state. Task is received but not yet processed.
 *   ``PLANNING``: Architect produces Task DAG and Behavioral Contracts. Blocks for approval (unless ``--auto-approve``).
 *   ``CODING``: Actuator generates code for current node.
-*   ``VERIFYING``: Verifier computes Lyapunov Energy $V(x)$.
-*   ``RETRY``: Re-generation attempt after $V(x) > \epsilon$. Max 3 attempts.
+*   ``VERIFYING``: Verifier computes Lyapunov Energy :math:`V(x)`.
+*   ``RETRY``: Re-generation attempt after :math:`V(x) > \epsilon`. Max 3 attempts.
 *   ``SHEAF_CHK``: Sheaf Validation after sub-graph converges. Checks cross-node consistency.
 *   ``COMMITTING``: Stable state. Code is committed to Merkle Ledger.
 *   ``ESCALATED``: Stability diverged. User intervention required.
@@ -386,7 +386,7 @@ The multi-agent workflow follows a deterministic state machine aligned with the 
 *   ``TASK_QUEUED`` -> ``PLANNING`` (on session start)
 *   ``PLANNING`` -> ``CODING`` (on plan approval) | ``FAILED`` (on rejection)
 *   ``CODING`` -> ``VERIFYING`` (draft complete)
-*   ``VERIFYING`` -> ``SHEAF_CHK`` (if $V(x) < \epsilon$) | ``RETRY`` (if $V(x) > \epsilon$)
+*   ``VERIFYING`` -> ``SHEAF_CHK`` (if :math:`V(x) < \epsilon`) | ``RETRY`` (if :math:`V(x) > \epsilon`)
 *   ``RETRY`` -> ``CODING`` (retry attempt) | ``ESCALATED`` (retry limit)
 *   ``SHEAF_CHK`` -> ``COMMITTING`` (sheaf OK) | ``RETRY`` (sheaf fail, re-queue children)
 *   ``COMMITTING`` -> ``CODING`` (next node) | ``COMPLETED`` (all nodes done)
@@ -574,7 +574,7 @@ For advanced use cases, Perspt supports three levels of automation:
 
 *   **Interactive (Default):** The agent blocks for user approval before architectural sheafification and recursive sub-graph execution.
 *   **Semi-Auto (`--auto-approve-safe`):** The system automatically executes read-only tools and small file edits but persists sub-graph approval gates.
-*   **Fully Autonomous (`--auto-approve`):** The system autonomously gates decisions based on stability metrics ($V(x) < \epsilon$). It only escalates to the user if stability **diverges** across three corrective attempts.
+*   **Fully Autonomous (``--auto-approve``):** The system autonomously gates decisions based on stability metrics (:math:`V(x) < \epsilon`). It only escalates to the user if stability **diverges** across three corrective attempts.
 
 Code Intelligence & Verification
 ================================

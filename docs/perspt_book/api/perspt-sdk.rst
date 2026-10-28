@@ -22,7 +22,7 @@ Modules
      - ``ResidualEvent`` - the measured reason a state is unsafe or incomplete
    * - ``energy``
      - ``score_candidate``/``EnergyModel`` - the canonical quadratic residual
-       energy ``V(x) = sum_e w_e ||r_e||^2``
+       energy :math:`V(x) = \sum_e w_e \lVert r_e \rVert^2`
    * - ``gate``
      - Measured acceptance gate and finite-decision bound
    * - ``kernel``
@@ -63,7 +63,7 @@ Modules
    * - ``independence``
      - Measured validator dependence, never assumed independence
    * - ``spectral``
-     - Spectral energy-slope constant ``mu`` from the verification graph
+     - Spectral energy-slope constant :math:`\mu` from the verification graph
    * - ``stability``
      - Analytic stability claims (``NotClaimed`` for the coding domain)
    * - ``certificate``

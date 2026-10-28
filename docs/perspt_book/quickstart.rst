@@ -3,15 +3,13 @@
 Quick Start
 ===========
 
-This document outlines the minimal commands required to install, configure, and execute the Perspt terminal application and the autonomous agent mode.
+Get Perspt installed and try all three developer modes (**Simple CLI**, **Terminal UI**, and **SRBN Coding Agent**) in under five minutes.
 
 Prerequisites
 -------------
 
-Verify that the target system satisfies the following conditions:
-
-- **Rust Toolchain**: Version 1.97.1+ is required for compiling from source.
-- **LLM API Key**: Access to OpenAI, Anthropic, Google Gemini, Groq, Cohere, XAI, or DeepSeek, OR a local Ollama service.
+- **Rust Toolchain**: Rust 1.97.1+ (if building from source).
+- **An LLM Provider**: An API key for Gemini, OpenAI, Anthropic, Groq, DeepSeek, xAI, or Cohere—or a local **Ollama** instance (no API key needed).
 
 Installation
 ------------
@@ -60,17 +58,33 @@ Export the key for your selected provider. The system automatically detects thes
    export ANTHROPIC_API_KEY="sk-ant-..." # For Anthropic
    export GEMINI_API_KEY="..."           # For Google Gemini
 
-Executing the Interactive Chat TUI
-----------------------------------
+1. Simple CLI Mode (``perspt simple-chat``)
+-------------------------------------------
 
-To launch the default terminal user interface:
+Use ``perspt simple-chat`` when you want plain text output in your terminal with no UI borders—ideal for Unix pipes, shell scripts, and quick one-liners:
 
 .. code-block:: bash
 
-   # Auto-detects provider from env
+   # Ask a direct question in the terminal
+   perspt simple-chat
+
+   # Pipe a file or command output into Perspt
+   cat Cargo.toml | perspt simple-chat "List the crates in this workspace"
+
+   # Use a specific model
+   perspt simple-chat --model gemini-3.5-flash
+
+2. Interactive Terminal UI (``perspt`` / ``perspt chat``)
+---------------------------------------------------------
+
+Run ``perspt`` (or ``perspt chat``) to open the full-screen Terminal UI with streaming Markdown, syntax highlighting, tables, and LaTeX math:
+
+.. code-block:: bash
+
+   # Auto-detects your configured provider from environment variables
    perspt
 
-   # Or specify a model explicitly
+   # Or choose a model explicitly
    perspt chat --model gemini-3.1-pro
 
 Type your dialogue prompt and press **Enter** to submit. Press **Esc** to exit the application.
@@ -100,10 +114,10 @@ TUI Key Bindings
    * - **/save**
      - Save dialogue log to a local file.
 
-Executing Agent Mode
---------------------
+3. SRBN Coding Agent (``perspt agent``)
+---------------------------------------
 
-To execute autonomous multi-file code generation under the SRBN orchestrator:
+Give ``perspt agent`` a coding task and a project folder (``-w``). Behind the scenes, Perspt's **SRBN** engine edits files in a safe sandbox, runs your compiler, LSP, and test suite, and automatically fixes errors before committing the result:
 
 .. code-block:: bash
 

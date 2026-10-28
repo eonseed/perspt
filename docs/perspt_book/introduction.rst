@@ -1,255 +1,237 @@
 Introduction to Perspt
 ======================
 
-Perspt is an interface designed to bring the capabilities of Large Language Models (LLMs) directly and reliably into your terminal. Rather than treating artificial intelligence as a disconnected web service, Perspt integrates LLMs into your daily development workflow, offering three distinct interaction surfaces: Simple Chat, TUI, and Agent.
+Perspt brings Large Language Models (LLMs) directly into your terminal and your Rust codebase. Built for developers who value speed, simplicity, and code that actually compiles, Perspt provides **three terminal tools in one binary** plus a **reusable Rust SDK**.
 
-Whether you need to quickly ask a question using command-line pipelines, converse interactively in a rich terminal interface, or delegate complex multi-file engineering tasks to a team of specialized agents, Perspt provides a unified, structured, and stable environment for developer-AI collaboration.
-
-The Three Surfaces of Perspt
+The Three Ways to Use Perspt
 ----------------------------
 
-Perspt operates across three primary surfaces, each designed for a different type of developer workflow:
+Whether you want a quick one-liner in a bash pipeline, an interactive chat window in your terminal, or an autonomous coding agent that writes and tests code across multiple files, Perspt gives you a dedicated mode for the job:
 
-1. **Simple Chat Mode (``simple-chat``)**:
-   A lightweight, streamable command-line interface. It is designed to converse with an LLM and integrate seamlessly with Unix bash pipelines. You can quickly pipe files, logs, or command outputs directly into the model to request a response, and redirect the LLM's output to other command-line utilities. This makes it an ideal tool for shell scripting, fast code analysis, and automated diagnostics.
+1. **Simple CLI (``perspt simple-chat``) — Plain Terminal Output**
+   A fast, zero-chrome command-line interface that prints responses directly to ``stdout``. Because it adds no TUI borders or control sequences, you can pipe logs, diffs, or source files straight into ``perspt simple-chat`` and redirect its output to files or other Unix tools:
 
-2. **Interactive TUI Mode (``chat``)**:
-   A rich, full-screen Terminal User Interface (TUI) built on ``ratatui``. It provides an interactive conversational interface with the LLM right on your terminal. The TUI supports real-time streaming, markdown rendering with syntax highlighting, inline LaTeX math equations, keyboard-driven navigation, and prompt history. It allows you to explore ideas, ask code questions, and interactively write code without leaving your terminal workspace.
+   .. code-block:: bash
 
-3. **Agent Mode (``agent``)**:
-   A governed tool loop in which an actuator model proposes typed tool calls, optionally assisted by a cheaper read-only explorer and a no-tool diff adjudicator, to solve complex software engineering and coding jobs. It models development tasks as work graphs and uses the **Stabilized Recursive Barrier Network (SRBN)** framework to ensure reliability and workflow stability. By integrating with local tests, compilers, and linters, Agent Mode automatically detects, corrects, and verifies code updates, ensuring the repository moves systematically toward a clean, working state.
+      git diff | perspt simple-chat "Write a concise commit message for these changes"
 
-The Problem of Guessing (Reliability via Verification)
-------------------------------------------------------
+2. **Terminal UI (``perspt`` or ``perspt chat``) — Interactive Full-Screen Chat**
+   A rich Terminal User Interface built on ``ratatui``. It gives you real-time token streaming, syntax-highlighted code blocks, Markdown tables, inline LaTeX math rendering, multi-line paste, conversation history, read-only MCP tool integration (``/mcp``), and instant model switching (``/model``) across 9+ cloud and local providers.
 
-To understand why Perspt is designed this way, consider the challenge of writing complex code.
-Every time a language model suggests code, it is making a guess. Because language models are non-deterministic and lack internal verification loops, even a tiny error in a single guess can propagate across files. Left to run on its own without external guidance, an agentic system will quickly drift away from a working codebase, culminating in compilation failures and broken tests.
+3. **SRBN Coding Agent (``perspt agent``) — Verified Autonomous Coding**
+   Give Perspt a coding task and a target directory:
 
-In the spirit of Leslie Lamport’s work on distributed systems, where consensus must be reached among potentially faulty or unpredictable nodes, Perspt does not trust the model to self-verify. Instead, it wraps the model in a deterministic control loop. The system:
+   .. code-block:: bash
 
-- Validates every proposed change using local type-checkers, compilers, and test suites.
-- Measures errors as a scalar value (the Lyapunov energy).
-- Feeds specific compiler and test diagnostics back to the LLM to guide corrections.
-- Commits changes to the code repository only when the workspace is stable and error-free.
+      perspt agent -w ./my-project "Add CSV export support with unit tests"
 
-Perspt implements this discipline through the SRBN orchestrator.
+   Instead of blindly writing unverified code to your files, ``perspt agent`` edits an isolated sandbox copy of your project, runs your real compiler, language server (LSP), and test suite after each change, and automatically fixes compiler or test errors before promoting the finished changes.
 
+4. **Rust SDK (``perspt-sdk``, ``perspt-coding``, ``perspt-research``) — Embed in Your Own Apps**
+   Need to integrate verified AI workflows into your own Rust application or build a custom domain agent? Perspt's engine is published as modular Rust crates so you can reuse its verification gate, capability sandbox, provider portfolio, and DuckDB audit ledger as a library.
 
-Core System Features
---------------------
+Why SRBN? How Perspt Keeps Generated Code Reliable
+--------------------------------------------------
 
-We summarize the capabilities of the system in terms of their operational invariants:
+Every developer who has used an AI coding assistant knows the biggest frustration: **LLMs guess**.
+On a single function, a guess often works. Across a 10-step, multi-file task, small mistakes compound rapidly—an incorrect import in step 2 causes a type mismatch in step 4 and a broken test in step 7. Even if a model succeeds 95% of the time on a single step, an unverified 50-step chain succeeds less than 8% of the time (:math:`0.95^{50} \approx 7.7\%`).
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
+Internally, ``perspt agent`` solves this using **SRBN (Stabilized Recursive Barrier Networks)**, an engineering architecture based on the *Stability is All You Need* research paper series.
 
-   * - Invariant
-     - Operational Specification
-   * - **Multi-Provider Hub**
-     - Establishes unified client communication with OpenAI, Anthropic, Gemini, Groq, Cohere, XAI, DeepSeek, Vertex AI, and local Ollama instances.
-   * - **LSP Verification**
-     - Connects directly to language-server protocols (including ``rust-analyzer``, ``pyright``, and ``typescript-language-server``) to extract syntactic diagnostics.
-   * - **Test Automation**
-     - Integrates with local test runtimes (such as ``pytest`` and Cargo) to compute logic error metrics.
-   * - **Role Specialization**
-     - Routes model calls by role: the Actuator proposes governed tool calls, an optional Explorer performs read-only repository lookahead, and an optional Adjudicator vetoes diffs without tools; the ``[models]`` table additionally routes architect, verifier, and speculator turns.
-   * - **Policy Sandbox**
-     - Restricts process execution via a Starlark-based policy engine, preventing command execution or file mutation outside the workspace boundaries.
-   * - **Resource Budgeting**
-     - Halts execution when the token count, USD cost, or round count exceeds strict safety bounds.
-   * - **Terminal Interface (TUI)**
-     - Renders unified diff views, hierarchical task trees, and live telemetry dashboards within a terminal-based interface.
-   * - **Web Telemetry**
-     - Streams real-time heatmaps, state-graph topologies, and LLM diagnostics to a browser-based visualization dashboard.
+.. tip:: You don't need to know the math to use ``perspt agent``
 
-Theoretical Foundation of SRBN
-------------------------------
+   SRBN is an internal implementation detail. When you run ``perspt agent``, it automatically detects your project's language toolchain and runs the verification loop for you.
 
-The Stabilized Recursive Barrier Network (SRBN) is derived from the *Stability is All You Need* paper series. The framework treats LLM-based software modification as a trajectory stabilization problem. By wrapping the generative model inside a deterministic verification barrier, we convert an unconstrained random walk into a guided descent toward a stable state.
+Here is what SRBN does behind the scenes on every coding task:
 
-Key theoretical results from the papers include:
+- **Sandboxed Proposals**: The LLM never edits your working tree directly. Every file edit or tool call is applied to a disposable candidate workspace first.
+- **Real Toolchain Sensors**: After the model proposes a change, Perspt runs your actual language tools—such as ``cargo check``, ``rust-analyzer``, ``pyright``, ``pytest``, or ``tsc``—and checks that all required symbols and contracts exist.
+- **Single Error Score (:math:`V(x)`)**: Perspt turns compiler errors, type mismatches, and failing tests into a single non-negative error score called **Lyapunov energy**:
 
-- **Input-to-State Stability (ISS)**: Mathematical proofs demonstrating that bounded reasoning errors from the model result in bounded deviations in the system state.
-- **Flow Matching Barriers**: Projection operators that take a diverging, erroneous state trajectory and map it back onto the safe manifold.
-- **Logarithmic Reliability Scaling**: A prediction that the expected number of correction attempts scales logarithmically (:math:`O(\log N)`) with the size of the target codebase :math:`N`, rather than decaying exponentially as in unbarriered systems.
+  .. math::
 
-The chart below illustrates this conceptual scaling difference:
+     V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2
+
+  When :math:`V(x) = 0` and all required build/test stages pass, your code compiles cleanly and passes its tests.
+- **Accept Only Real Progress**: A candidate change is accepted only if it passes all checks (`HardPass`) or measurably reduces the error score by at least :math:`\rho_{\text{gate}}`:
+
+  .. math::
+
+     V(y) \le V(x_{\text{best}}) - \rho_{\text{gate}}
+
+  If an edit introduces new compiler errors or makes things worse, Perspt automatically discards that attempt, feeds the exact compiler/test diagnostics back to the model, and tries a targeted fix.
+
+The result is simple: **code generated by Perspt's agent is tested against your real toolchain before you ever see it, so it runs and stays faithful to the task you gave it.**
 
 .. figure:: ../shared/_static/reliability-scaling.svg
    :alt: Conceptual error accumulation: unbarriered random walk vs. SRBN logarithmic bound
    :width: 100%
 
-   Conceptual error accumulation: unbarriered random walk :math:`O(N)` vs. SRBN logarithmic bound :math:`O(\log N)`.
+   Why closed-loop verification matters: unguided multi-step LLM chains decay exponentially as errors accumulate, while Perspt's SRBN verification loop catches and repairs errors at each step.
 
-The operational execution of this control loop is represented as follows:
+The diagram below shows how a task flows through ``perspt agent`` from start to finish:
 
 .. graphviz::
    :align: center
-   :caption: SRBN Control Flow
+   :caption: How ``perspt agent`` plans, verifies, and commits code
 
    digraph srbn {
        rankdir=LR;
        node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
 
-       detect [label="Detect\n(Tooling)", fillcolor="#E0F7FA"];
-       plan [label="Plan\n(Architect)", fillcolor="#E8F5E9"];
-       gen [label="Generate\n(Actuator)", fillcolor="#FFF3E0"];
-       verify [label="Verify\n(LSP+Tests)", fillcolor="#F3E5F5"];
-       check [label="V(x) <= e?", shape=diamond, fillcolor="#FFECB3"];
-       sheaf [label="Sheaf\n(Consistency)", fillcolor="#E8EAF6"];
-       commit [label="Commit\n(Ledger)", fillcolor="#C8E6C9"];
+       detect [label="1. Detect\n(Language & Tools)", fillcolor="#E0F7FA"];
+       plan [label="2. Plan\n(Work Graph)", fillcolor="#E8F5E9"];
+       gen [label="3. Edit\n(Candidate Sandbox)", fillcolor="#FFF3E0"];
+       verify [label="4. Verify\n(Compiler + LSP + Tests)", fillcolor="#F3E5F5"];
+       check [label="Errors V(x)\ndecreased?", shape=diamond, fillcolor="#FFECB3"];
+       sheaf [label="5. Integrate\n(Cross-File Check)", fillcolor="#E8EAF6"];
+       commit [label="6. Promote\n(Ledger + Workspace)", fillcolor="#C8E6C9"];
 
        detect -> plan;
        plan -> gen;
        gen -> verify;
        verify -> check;
-       check -> gen [label="retry", style=dashed, color="#E53935"];
-       check -> sheaf [label="stable"];
+       check -> gen [label="fix diagnostics", style=dashed, color="#E53935"];
+       check -> sheaf [label="pass / lower V(x)"];
        sheaf -> commit;
    }
 
-System Architecture
--------------------
+Integrating Perspt via the Rust SDK
+-----------------------------------
 
-The Perspt system is constructed as a workspace of fourteen crates. The dependencies and responsibilities are partitioned as follows:
+Perspt is structured as a fourteen-crate Cargo workspace so you can use its building blocks in your own Rust projects:
 
-- **The User Interface**: Handled by ``perspt-cli`` (command parsing) and ``perspt-tui`` (terminal rendering).
-- **The Core Engine**: Handled by ``perspt-core`` (provider abstractions and types), ``perspt-agent`` (the orchestration loop), and ``perspt-store`` (session databases).
-- **The Security Envelope**: Handled by ``perspt-policy`` (Starlark checks) and ``perspt-sandbox`` (isolated execution environments).
-- **The Monitoring Plane**: Handled by ``perspt-dashboard`` (web interface).
-- **The Reusable SDK**: Handled by ``perspt-sdk``, ``perspt-coding``, ``perspt-research``, and ``perspt-prompt-macros`` (compile-time typed prompt sections).
-- **The Evaluation Harness**: Handled by ``perspt-benchmark`` (optional, feature-gated, run manually only).
+- **Embed the Verification Core (``perspt-sdk``)**: Use ``ResidualEvent``, ``EnergyModel``, ``score_candidate``, ``evaluate_gate``, the vijf-clause admissibility kernel, and the Merkle-chained replay ledger in any domain—not just software engineering.
+- **Reuse Domain Packages (``perspt-coding``, ``perspt-research``)**: Plug in ready-made language adapters (Rust, Python, TypeScript) or build your own domain package by implementing the ``AgentDomainPackage`` trait.
+- **Embed the Full Agent Runtime (``perspt-agent``, ``perspt-core``, ``perspt-store``)**: Run governed agent sessions programmatically from Rust with custom tool families, Starlark security policies (``perspt-policy``), and OS sandboxing (``perspt-sandbox``).
 
-The separation between ``perspt-sdk`` and domain packages (like ``perspt-coding``) ensures that the mathematical control loop remains independent of specific execution environments. The same SDK stabilizes both code repositories and academic research projects.
+See :ref:`api-index` for crate-by-crate documentation and code examples.
 
-The current implementation executes the PSP-9 governed tool loop end to end: every model-issued tool call is a proposal decided by the deterministic kernel, and the measured acceptance gate reads the re-measured candidate. No legacy orchestrator remains.
+Core Features at a Glance
+-------------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Feature
+     - What It Does for You
+   * - **3 Terminal Modes**
+     - ``perspt simple-chat`` for Unix pipes/scripts, ``perspt chat`` for interactive TUI chat, and ``perspt agent`` for autonomous verified coding.
+   * - **9+ LLM Providers**
+     - Connect to OpenAI, Anthropic, Google Gemini, Vertex AI, Groq, Cohere, xAI, DeepSeek, local Ollama, or any OpenAI-compatible endpoint.
+   * - **Compiler & LSP Checks**
+     - Automatically verifies candidate code with ``cargo check``, ``rust-analyzer``, ``pyright``, ``pytest``, ``typescript-language-server``, and ``gopls``.
+   * - **Per-Role Model Routing**
+     - Mix and match models: use a fast model for read-only repo exploration (``--explorer-model``), a strong coding model for edits (``--actuator-model``), and a reviewer model for diff checks (``--adjudicator-model``).
+   * - **OS Sandbox & Policy**
+     - Protects your machine with Starlark command policies, workspace path confinement, and OS process isolation (Bubblewrap on Linux, ``sandbox-exec`` on macOS).
+   * - **Hard Cost & Turn Limits**
+     - Strict per-session turn, tool-call, and rejection budgets ensure an agent never loops forever or burns unbounded API credits.
+   * - **Live Web Dashboard**
+     - Pass ``--dashboard`` to watch the task graph, error energy :math:`V(x)`, live file diffs, and LLM calls in your browser at ``http://127.0.0.1:3000``.
+   * - **Full Audit & Rollback**
+     - Every session is stored in a local DuckDB ledger. Replay sessions offline with ``perspt replay`` or undo any promotion with ``perspt ledger --rollback``.
 
 System Command Index
 --------------------
 
-The application interface is accessed via the following commands:
+Run ``perspt <COMMAND> --help`` at any time to see all flags for a command:
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 45 40
+   :widths: 16 44 40
 
    * - Command
-     - Function
-     - Invocation Example
+     - Purpose
+     - Example
    * - ``chat``
-     - Launches the interactive terminal UI (default).
+     - Interactive full-screen Terminal UI chat (default when running ``perspt``).
      - ``perspt chat --model gemini-3.1-pro``
    * - ``simple-chat``
-     - Launches a streamable CLI interface without terminal styling.
-     - ``perspt simple-chat``
+     - Plain CLI output with no TUI chrome; built for Unix pipes and scripts.
+     - ``perspt simple-chat "Explain this error"``
    * - ``agent``
-     - Launches autonomous agent mode.
-     - ``perspt agent "Create a parser in Rust"``
-   * - ``init``
-     - Instantiates memory files and policy rule structures.
-     - ``perspt init --memory --rules``
-   * - ``config``
-     - Displays or writes configuration values.
-     - ``perspt config --show``
-   * - ``ledger``
-     - Queries the Merkle state history.
-     - ``perspt ledger --recent``
+     - Autonomous SRBN coding agent with compiler and test verification.
+     - ``perspt agent -w ./app "Add unit tests"``
+   * - ``dashboard``
+     - Launch the real-time web dashboard in your browser.
+     - ``perspt dashboard``
    * - ``status``
-     - Returns session metrics and active energy values.
+     - Show current session status, node progress, and error energy :math:`V(x)`.
      - ``perspt status``
-   * - ``abort``
-     - Signals an active agent session to terminate.
-     - ``perspt abort``
+   * - ``ledger``
+     - Inspect session history or roll back the most recent promotion.
+     - ``perspt ledger --recent``
    * - ``resume``
-     - Resumes the most recently interrupted session.
-     - ``perspt resume --last``
-   * - ``audit``
-     - Ingests delayed audit labels for conformal calibration.
-     - ``perspt audit <sample> --safe``
-   * - ``providers``
-     - Prints the provider capability matrix, optionally live-probed.
-     - ``perspt providers --probe``
+     - Resume an interrupted or paused agent session from the DuckDB ledger.
+     - ``perspt resume <session-id>``
    * - ``replay``
-     - Replays a session's audit record deterministically, without credentials.
+     - Deterministically replay and verify a session offline without API keys.
      - ``perspt replay <session-id>``
-   * - ``db repair``
-     - Quarantines a poisoned DuckDB WAL after durable backups.
-     - ``perspt db repair --db-path perspt.db --discard-wal``
+   * - ``providers``
+     - List configured LLM providers and optionally probe live connectivity.
+     - ``perspt providers --probe``
+   * - ``config``
+     - View or edit your ``config.toml`` settings.
+     - ``perspt config --show``
+   * - ``init``
+     - Initialize project memory files and Starlark security policy rules.
+     - ``perspt init --memory --rules``
+   * - ``abort``
+     - Safely stop a running agent session by revoking its authority epoch.
+     - ``perspt abort``
    * - ``prompts``
-     - Inspects and maintains the compiled prompt section libraries.
+     - Inspect and lint compiled prompt section libraries.
      - ``perspt prompts list``
    * - ``context``
-     - Explains a session's recorded resident-context events.
-     - ``perspt context explain-turn --db-path perspt.db <session-id>``
-   * - ``benchmark``
-     - Runs the optional evaluation suites (feature-gated; manual only).
-     - ``perspt benchmark run --suite smoke``
-   * - ``dashboard``
-     - Launches the web monitoring server.
-     - ``perspt dashboard``
+     - Explain recorded context paging and recall events for a session.
+     - ``perspt context explain-turn --db-path perspt.db <id>``
+   * - ``audit``
+     - Record delayed safety audit labels for conformal risk calibration.
+     - ``perspt audit <sample> --safe``
+   * - ``db repair``
+     - Back up and repair a local DuckDB database after an unclean shutdown.
+     - ``perspt db repair --db-path perspt.db --discard-wal``
 
-Supported Oracles and Providers
--------------------------------
+Supported LLM Providers
+-----------------------
 
-The client library accepts nine provider identifiers through the ``genai``
-transport; OpenAI-compatible endpoints (including Azure and local servers)
-route through the ``openai`` adapter with a custom base URL:
+Perspt connects to nine provider families out of the box (plus any OpenAI-compatible local or cloud server):
 
 .. list-table::
    :header-rows: 1
-   :widths: 25 25 50
+   :widths: 26 28 46
 
-   * - Provider / Adapter ID
-     - Target Env Variable
-     - Reference Models
-   * - **OpenAI / compatible** (``openai``)
+   * - Provider
+     - Environment Variable
+     - Example Models
+   * - **Google Gemini** (``gemini``)
+     - ``GEMINI_API_KEY``
+     - ``gemini-3.5-flash``, ``gemini-3.1-pro``
+   * - **OpenAI / Compatible** (``openai``)
      - ``OPENAI_API_KEY`` (+ ``OPENAI_BASE_URL``)
-     - gpt-4o-mini, custom-model
+     - ``gpt-4o``, ``gpt-4o-mini``, local vLLM / llama.cpp
    * - **Anthropic** (``anthropic``)
      - ``ANTHROPIC_API_KEY``
-     - claude-3-5-sonnet-20241022
-   * - **Google Gemini** (``gemini``/``google``)
-     - ``GEMINI_API_KEY``
-     - gemini-3.1-flash-lite-preview, gemini-3.1-pro
+     - ``claude-3-5-sonnet-20241022``
    * - **Google Vertex AI** (``vertex``)
-     - GCP ADC (``VERTEX_PROJECT_ID``)
-     - vertex::gemini-2.5-flash, vertex::gemini-3.5-flash-lite
+     - Google Cloud ADC (``gcloud auth``)
+     - ``vertex::gemini-3.5-flash``, ``vertex::gemini-2.5-pro``
+   * - **Ollama (Local)** (``ollama``)
+     - None (runs locally on port 11434)
+     - ``llama3.2``, ``qwen2.5-coder``
    * - **Groq** (``groq``)
      - ``GROQ_API_KEY``
-     - llama-3.1-8b-instant
-   * - **Cohere** (``cohere``)
-     - ``COHERE_API_KEY``
-     - command-r-plus
-   * - **xAI** (``xai``)
-     - ``XAI_API_KEY``
-     - grok-beta
+     - ``llama-3.1-8b-instant``
    * - **DeepSeek** (``deepseek``)
      - ``DEEPSEEK_API_KEY``
-     - deepseek-chat
-   * - **Ollama** (``ollama``)
-     - None (local port)
-     - llama3.2, qwen2.5-coder
+     - ``deepseek-chat``, ``deepseek-reasoner``
+   * - **xAI** (``xai``)
+     - ``XAI_API_KEY``
+     - ``grok-beta``
+   * - **Cohere** (``cohere``)
+     - ``COHERE_API_KEY``
+     - ``command-r-plus``
 
-Any other provider string is rejected as unsupported. For detailed setup
-guides and provider-specific details, please see :ref:`user-guide-providers`.
-
-System Philosophy
------------------
-
-.. epigraph::
-
-   | *The keyboard hums, the screen aglow,*
-   | *AI's wisdom, a steady flow.*
-   | *Through SRBN's loop, stability we find,*
-   | *Code that works, refined and aligned.*
-
-  -- The Perspt Manifesto
-
-Perspt is built upon five design principles:
-
-- **Accessibility**: A single command must establish communication with any supported model.
-- **Verification**: Code is not committed until it passes deterministic verification checks.
-- **Determinism**: Transitions and rollback events must be event-sourced to ensure reproducibility.
-- **Safety**: Execution limits must be enforced via sandboxes and policy modules.
-- **Modularity**: The engine components must remain separated into reusable crates.
+See :ref:`user-guide-providers` for multi-provider portfolio configuration in ``config.toml``.

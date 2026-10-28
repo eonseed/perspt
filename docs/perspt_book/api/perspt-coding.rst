@@ -4,7 +4,7 @@
 =================
 
 The coding domain package built on ``perspt-sdk``: it declares the coding
-residual schema, supplies the coding energy model (weights, ``rho_gate``,
+residual schema, supplies the coding energy model (weights, :math:`\rho_{\text{gate}}`,
 correction budget), and maps dominant residuals into coding correction
 directions.
 
@@ -67,4 +67,4 @@ Key Types
 
 The coding domain operates on discrete verifier residuals (compiler, LSP,
 AST, tests), so its analytic constants remain ``NotClaimed``; only the
-measured discrete gate and the spectral ``mu`` apply.
+measured discrete gate and the spectral :math:`\mu` apply.
