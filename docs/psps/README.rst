@@ -21,6 +21,15 @@ Quick Start
    # Create a new draft PSP
    guidedog dsc new "Proposal Title" --labels=architecture --dir=docs/psps
 
+Maintainer decisions
+====================
+
+New proposals use ``XXXXX`` and the ``unassigned`` authoring state.
+Maintainers assign a number with ``guidedog dsc promote``; the numbered proposal remains ``draft``.
+Opening discussion is a separate ``guidedog dsc state`` decision.
+Merging a pull request never changes a proposal's number or state automatically.
+The complete lifecycle is configured in ``discussion.toml`` and explained in ``workflow.rst``.
+
 Directory Structure
 ===================
 

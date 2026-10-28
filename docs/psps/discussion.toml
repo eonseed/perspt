@@ -18,12 +18,18 @@ types = [
 width = 6
 start = 1
 
+# Maintainers assign numbers first; opening discussion is a separate decision.
+# Guidedog calls the unnumbered authoring state "draft" in its command interface.
 [workflow]
-draft = "draft"
-open = "discussion"
+draft = "unassigned"
+open = "draft"
+
+[workflow.states.unassigned]
+next = ["withdrawn"]
+status = "Unnumbered draft awaiting maintainer review and a PSP number."
 
 [workflow.states.draft]
-next = ["withdrawn"]
+next = ["discussion", "withdrawn"]
 status = "Authoring in progress; open for technical shaping and feedback."
 
 [workflow.states.discussion]

@@ -1,6 +1,6 @@
 :psp-number: XXXXX
 :psp-title: Title goes here
-:psp-state: draft
+:psp-state: unassigned
 :psp-type: standards-track
 :psp-authors: ["Author Name"]
 :psp-created: YYYY-MM-DD

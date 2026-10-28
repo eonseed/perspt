@@ -2,21 +2,21 @@ name: PSP Automation
 
 on:
   pull_request:
-    types: [opened, synchronize, closed]
+    types: [opened, synchronize, reopened]
     paths:
       - "docs/psps/**"
   issues:
     types: [opened]
 
 permissions:
-  contents: write
+  contents: read
   issues: write
   pull-requests: write
 
 jobs:
   validate-psp-pr:
     name: Validate PSP Catalog (guidedog dsc)
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -37,7 +37,7 @@ jobs:
       - name: Detect modified PSP records
         id: detect
         run: |
-          records=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/records/[0-9]{6}-.*\.rst$' || true)
+          records=$(git diff --name-only origin/${{ github.base_ref }}..HEAD | grep -E '^docs/psps/records/([0-9]{6}|XXXXX)-.*\.rst$' || true)
           if [ -z "$records" ]; then
             echo "has_psp_records=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -91,47 +91,6 @@ jobs:
               body
             });
 
-  promote-psp-on-merge:
-    name: Promote Draft PSP on Merge
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout master
-        uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: master
-          fetch-depth: 2
-
-      - name: Install Guidedog
-        uses: ./.github/actions/guidedog
-
-      - name: Promote merged draft PSPs and refresh index
-        run: |
-          records=$(git diff --name-only HEAD~1 HEAD | grep -E '^docs/psps/records/[0-9]{6}-.*\.rst$' || true)
-          if [ -z "$records" ]; then
-            exit 0
-          fi
-          changed=0
-          for record in $records; do
-            if [ -f "$record" ] && grep -q "^:psp-state: draft" "$record"; then
-              psp_id=$(grep "^:psp-number:" "$record" | sed 's/:psp-number: *//' | tr -d '\r\n')
-              guidedog dsc promote "$psp_id" --dir=docs/psps
-              changed=1
-            fi
-          done
-          if [ "$changed" -eq 1 ]; then
-            guidedog dsc index --dir=docs/psps
-            guidedog dsc check --dir=docs/psps
-            git config user.name "PSP Bot"
-            git config user.email "action@github.com"
-            git add docs/psps/
-            git commit -m "Promote merged draft PSP record(s) to discussion"
-            git pull --rebase origin master
-            git push origin master
-          fi
-
   comment-on-psp-proposal-issue:
     name: Welcome PSP Proposal Issue
     if: github.event_name == 'issues' && github.event.action == 'opened' && contains(github.event.issue.labels.*.name, 'psp-proposal')
@@ -147,10 +106,12 @@ jobs:
             When ready to author the formal specification record using **Guidedog**:
 
             \`\`\`bash
-            guidedog dsc new "Your PSP Title" --type=standards-track --dir=docs/psps
+            guidedog dsc new "Your PSP Title" --dir=docs/psps
             guidedog dsc index --dir=docs/psps
             guidedog dsc check --dir=docs/psps
             \`\`\`
+
+            Maintainers assign proposal numbers and change lifecycle states in reviewed pull requests. Merging a draft does not promote it.
 
             See [docs/psps/README.rst](docs/psps/README.rst) and [PSP-000001](docs/psps/records/000001-psp-purpose-and-guidelines.rst) for full guidelines.`;
 

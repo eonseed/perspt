@@ -154,7 +154,9 @@ PSP Lifecycle and Statuses
 
 PSPs follow a straightforward lifecycle with clear status transitions:
 
-**Draft:** The initial version under development by the author. PSP content may change significantly.
+**Unassigned:** An unnumbered authoring draft awaiting maintainer review. A maintainer assigns its PSP number with ``guidedog dsc promote``.
+
+**Draft:** A numbered proposal under development by the author. Assigning a number does not open community discussion.
 
 **Discussion:** Ready for community review and feedback. All discussion happens in a dedicated GitHub Issue.
 
@@ -206,8 +208,8 @@ Simplified PSP Workflow
    1. **Author actions:**
    
       * Fork the repository
-      * Copy `docs/psps/source/psp-template.rst` to `docs/psps/source/psp-0000-descriptive-name.rst`
-      * Fill out the template with `status: Draft`
+      * Run ``guidedog dsc new "Proposal title" --dir=docs/psps``
+      * Edit ``docs/psps/records/XXXXX-proposal-title.rst`` in state ``unassigned``
       * Create a GitHub Issue for PSP discussion
       * Submit a Pull Request using the unified PR template:
         - Check the "PSP" checkbox
@@ -222,12 +224,12 @@ Simplified PSP Workflow
    3. **Maintainer review:**
    
       * Review PR for basic structure and completeness
-      * Assign official PSP number (e.g., `0003`)
-      * Author updates filename and PSP number in the document
-      * Maintainer merges the PR (PSP officially becomes `Draft`)
+      * When ready, run ``guidedog dsc promote <slug> --dir=docs/psps`` to assign a six-digit number and keep the proposal in ``draft``
+      * Review the record, registry, and reading-order changes together
+      * Merge the reviewed pull request; merging alone never assigns a number or changes state
 
 **Phase 3: Discussion**
-   1. Author updates PSP status from `Draft` to `Discussion` via new PR
+   1. A maintainer runs ``guidedog dsc state <number> --to=discussion --reason="Ready for review" --dir=docs/psps`` and submits the changes through a reviewed pull request
    2. All discussion occurs in the dedicated GitHub Issue
    3. Author may submit additional PRs to update the PSP based on feedback
 
@@ -267,9 +269,11 @@ Simplified PSP Workflow
        final [label="Final", fillcolor="#68D391", fontcolor="#22543D", color="#276749"];
 
        start -> idea [label="optional"];
-       start -> draft [label="guidedog dsc new"];
-       idea -> draft;
-       draft -> discussion [label="promote"];
+       unassigned [label="Unassigned draft"];
+       start -> unassigned [label="guidedog dsc new"];
+       unassigned -> draft [label="maintainer assigns number"];
+       idea -> unassigned;
+       draft -> discussion [label="maintainer opens discussion"];
        discussion -> decision;
        decision -> accepted [label="accept"];
        decision -> rejected [label="reject"];
@@ -294,7 +298,7 @@ This simplified PSP process is designed to be:
 
 **GitHub-Native:** Using familiar GitHub tools (Issues, PRs, Actions) makes the process accessible to developers and community members already contributing to Perspt, reducing barriers to participation while enabling powerful automation.
 
-**Automation-Friendly:** The workflow supports GitHub Actions automation for PSP numbering, status tracking, project board updates, discussion management, and format validation, reducing manual administrative overhead.
+**Maintainer-Controlled:** Maintainers assign numbers and change lifecycle states through reviewed pull requests. GitHub Actions validates and publishes proposals and reports stale discussions; it never promotes a proposal or changes its state.
 
 **Community-Inclusive:** Process accommodates technical contributions, community governance, informational documentation, and process improvements, ensuring all types of valuable contributions have a structured pathway.
 

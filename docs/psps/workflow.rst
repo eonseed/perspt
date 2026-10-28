@@ -3,7 +3,7 @@ PSP Process and Workflow
 
 Perspt Specification Proposals (PSPs) provide a structured, reproducible mechanism for proposing significant changes, collecting architectural review, and maintaining a permanent historical record of Perspt's evolution. Routine bug fixes and minor internal refactors go through normal GitHub pull requests without a PSP.
 
-Catalog Management with GuideDog
+Catalog Management with Guidedog
 --------------------------------
 
 The PSP catalog is managed natively in Rust using ``guidedog dsc`` and configured by ``docs/psps/discussion.toml`` (prefix ``psp``, 6-digit zero-padded numbering starting at ``000001``).
@@ -25,14 +25,26 @@ The PSP catalog is managed natively in Rust using ``guidedog dsc`` and configure
    # Regenerate registry.rst and bundle.rst indices
    guidedog dsc index --dir=docs/psps
 
-   # Promote a draft to discussion and assign the next 6-digit PSP number
+   # Maintainer decision: assign a number and keep the proposal in draft
    guidedog dsc promote capability-delegation-lease-protocol --dir=docs/psps
 
+   # Separate maintainer decision: open community discussion
+   guidedog dsc state <number> --to=discussion --reason="Ready for review" --dir=docs/psps
+
    # Transition a PSP state with an explicit audit reason
-   guidedog dsc state 000010 --to=final --reason="All conformance gates W-AF passed" --evidence="cargo test --workspace" --dir=docs/psps
+   guidedog dsc state <number> --to=final --reason="All conformance gates W-AF passed" --evidence="cargo test --workspace" --dir=docs/psps
 
    # Build the HTML catalog and per-record Typst PDFs
    guidedog dsc build --dir=docs/psps
+
+Maintainers control the lifecycle
+---------------------------------
+
+New proposals are unnumbered authoring drafts in state ``unassigned``.
+After review, a maintainer uses ``promote`` to assign a number; the proposal becomes a numbered ``draft``.
+Opening discussion, accepting a design, and marking an implementation final are separate decisions made with ``state``.
+We submit the resulting metadata and registry changes through reviewed pull requests.
+Merging a draft does not promote it, and GitHub Actions never changes lifecycle metadata.
 
 When to Write a PSP
 -------------------
@@ -56,8 +68,11 @@ Each record in ``docs/psps/records/`` carries a ``:psp-state:`` field governed b
    * - State
      - Meaning
      - Allowed Next States
+   * - ``unassigned``
+     - Unnumbered authoring draft awaiting a maintainer-assigned number.
+     - ``draft`` through maintainer ``promote``, or ``withdrawn``
    * - ``draft``
-     - Initial specification under active authoring and mechanism design.
+     - Numbered proposal under authoring and review.
      - ``discussion``, ``withdrawn``
    * - ``discussion``
      - Numbered and open for community and maintainer architectural review.

@@ -15,8 +15,10 @@ It is the source for current proposal numbers, titles, and states.
 We avoid duplicating that registry in the book.
 The `catalog workflow <../../psps/workflow.html>`_ documents the allowed transitions.
 
-The configured states are ``draft``, ``discussion``, ``accepted``, ``active``, ``final``, ``rejected``, and ``withdrawn``.
-Promotion assigns a draft its next number and opens discussion.
+The configured states are ``unassigned``, ``draft``, ``discussion``, ``accepted``, ``active``, ``final``, ``rejected``, and ``withdrawn``.
+Maintainers assign a number with ``guidedog dsc promote``; the proposal remains ``draft``.
+They open discussion separately with ``guidedog dsc state`` and an explicit reason.
+Merging a pull request does not number a proposal or change its state.
 ``active`` denotes a living specification; ``withdrawn`` includes superseded proposals.
 
 .. code-block:: bash
@@ -109,7 +111,7 @@ Writing a PSP
 A developer wishing to propose an architectural modification must adhere to the following protocol:
 
 1. Create a branch from the repository root.
-2. Run ``guidedog dsc new "Your PSP Title" --type=standards-track --dir=docs/psps`` to instantiate a numbered record in ``docs/psps/records/``.
+2. Run ``guidedog dsc new "Proposal title" --dir=docs/psps`` to create an unnumbered record in ``docs/psps/records/``.
 3. Define the Abstract, Motivation, Specification, Rationale, and Reference Implementation.
 4. Run ``guidedog dsc index --dir=docs/psps && guidedog dsc check --dir=docs/psps`` and submit the proposal for review.
-5. Promote and transition the record via ``guidedog dsc promote`` / ``guidedog dsc state`` when consensus is reached.
+5. Maintainers assign a number and change the record's state through reviewed pull requests, using ``guidedog dsc promote`` and ``guidedog dsc state``.
