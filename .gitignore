@@ -91,6 +91,7 @@ target/doc/
 *.js.bak
 !docs/header.html
 !docs/site/_templates/**
+!docs/shared/_templates/**
 !crates/perspt-dashboard/templates/**
 
 # Dashboard asset pipeline

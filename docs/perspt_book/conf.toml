@@ -8,7 +8,7 @@ source_suffix = [".rst"]
 exclude_patterns = ["_build", "_templates/**", "README*", "Thumbs.db", ".DS_Store"]
 # Guidedog compatibility identifiers; no Python extensions are loaded.
 extensions = ["sphinx.ext.graphviz", "sphinx.ext.mathjax"]
-templates_path = ["_templates"]
+templates_path = ["_templates", "../shared/_templates"]
 include_roots = ["../shared"]
 html_theme = "guidedog"
 html_title = "The Perspt Book"
@@ -24,11 +24,11 @@ pdf_logo = "../shared/_static/perspt-logo.svg"
 [[pdf_documents]]
 root = "index"
 file = "perspt-book.pdf"
-title = "The Perspt Book: AI tools for developers"
+title = "The Perspt Book: AI chat and coding in the terminal"
 author = "Vikrant Rathore"
 
 [html_theme_options]
 accent = "#059669"
 
 [html_context]
-site_home = "../"
+site_section = "book"

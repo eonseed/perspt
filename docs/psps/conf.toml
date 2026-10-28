@@ -13,6 +13,7 @@ language = "en"
 source_suffix = [".rst"]
 root_doc = "index"
 
+templates_path = ["_templates", "../shared/_templates"]
 html_theme = "guidedog"
 html_title = "Perspt Specification Proposals (PSPs)"
 numfig = true
@@ -30,4 +31,4 @@ html_logo = "../shared/_static/perspt-logo.svg"
 accent = "#059669"
 
 [html_context]
-site_home = "../"
+site_section = "psps"

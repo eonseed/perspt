@@ -1,0 +1,6 @@
+{% extends "!layout.html" %}
+{% block rootrellink %}
+<li><a href="{{ pathto_root }}../index.html">Home</a></li>
+<li><a href="{{ pathto_root }}../book/index.html"{% if site_section == "book" %} aria-current="location"{% endif %}>Book</a></li>
+<li><a href="{{ pathto_root }}../psps/index.html"{% if site_section == "psps" %} aria-current="location"{% endif %}>PSPs</a></li>
+{% endblock %}
