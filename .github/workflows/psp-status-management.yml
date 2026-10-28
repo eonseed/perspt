@@ -22,9 +22,13 @@ on:
           - final
           - rejected
           - withdrawn
-          - deferred
       reason:
         description: "Reason for state transition"
+        required: true
+        type: string
+
+      evidence:
+        description: "Verification evidence (required for final)"
         required: false
         type: string
 
@@ -53,11 +57,16 @@ jobs:
           PSP_NUMBER: ${{ github.event.inputs.psp_number }}
           NEW_STATE: ${{ github.event.inputs.new_state }}
           REASON: ${{ github.event.inputs.reason }}
+          EVIDENCE: ${{ github.event.inputs.evidence }}
         run: |
           if [ "$NEW_STATE" = "discussion" ]; then
             guidedog dsc promote "$PSP_NUMBER" --dir=docs/psps
           else
-            guidedog dsc state "$PSP_NUMBER" "$NEW_STATE" --dir=docs/psps
+            args=(dsc state "$PSP_NUMBER" --to="$NEW_STATE" --reason="$REASON" --dir=docs/psps)
+            if [ -n "$EVIDENCE" ]; then
+              args+=(--evidence="$EVIDENCE")
+            fi
+            guidedog "${args[@]}"
           fi
           guidedog dsc index --dir=docs/psps
           guidedog dsc check --dir=docs/psps

@@ -20,7 +20,7 @@
 //! `.cargo/config.toml` is gitignored, so `check-rules.sh` rather than a
 //! `cargo xtask` alias is the entry point that survives a fresh clone.
 //!
-//! The rules cover Rust sources only. `docs/` — the PSPs and the Sphinx book —
+//! The rules cover Rust sources only. `docs/` — the PSPs and the Guidedog book —
 //! is out of scope.
 
 mod baseline;

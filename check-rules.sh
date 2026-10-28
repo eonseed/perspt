@@ -7,7 +7,7 @@
 #   PSP-2  function length <= 70 code lines   (Power of Ten Rule 4, relaxed)
 #   PSP-3  line width      <= 108 columns
 #
-# Rust sources only. docs/ — the PSPs and the Sphinx book — is out of scope.
+# Rust sources only. docs/ — the PSPs and the Guidedog book — is out of scope.
 #
 # Usage:
 #   ./check-rules.sh check                 # gate: fails on any new violation

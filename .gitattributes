@@ -1,0 +1,3 @@
+# Keep generated publication artifacts out of text diffs and whitespace checks.
+*.pdf binary
+*.png binary

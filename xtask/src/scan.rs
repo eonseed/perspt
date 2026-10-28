@@ -1,7 +1,7 @@
 //! Source discovery.
 //!
 //! The PSP code check rules govern **Rust sources only**. Documentation is deliberately
-//! out of scope: `docs/` holds PSPs and the Sphinx book, where a 3,500-line
+//! out of scope: `docs/` holds PSPs and the Guidedog book, where a 3,500-line
 //! specification is correct rather than a violation.
 
 use std::fs;

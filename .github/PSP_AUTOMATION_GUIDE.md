@@ -29,7 +29,7 @@ This document explains how Perspt Specification Proposals (PSPs) are authored, v
 - Builds the PSP catalog (HTML + individual Typst PDFs), the Perspt Book (HTML + Typst PDF), the unified landing site (`guidedog ssg build docs --out docs/_build/site`), and Rustdoc (`cargo doc`), and deploys the unified site to GitHub Pages.
 
 ### 3. PSP Status Management (`.github/workflows/psp-status-management.yml`)
-- Allows maintainers to transition PSP states (`discussion`, `accepted`, `active`, `final`, `rejected`, `withdrawn`, `deferred`) via `guidedog dsc state` and `guidedog dsc index`.
+- Allows maintainers to transition PSP states (`discussion`, `accepted`, `active`, `final`, `rejected`, `withdrawn`) via `guidedog dsc state` and `guidedog dsc index`.
 
 ## Related Documentation
 

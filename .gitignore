@@ -66,24 +66,12 @@ tags.*
 TAGS
 TAGS.*
 
-# python generated files
+# Local Python project and fixture artifacts
 __pycache__/
 *.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-docs/perspt_book/.python-version
-docs/psps/.python-version
+*.egg-info/
+.venv/
 
-# venv
-.venv
-docs/perspt_book/.venv
-docs/psps/.venv
-
-
-#Flask
-instance/
 .env
 .aider*
 
@@ -109,10 +97,6 @@ target/doc/
 crates/perspt-dashboard/node_modules/
 crates/perspt-dashboard/static/dashboard.css
 
-# mdBook generated files
-book/
-book.toml.bak
-
 # Rustdoc custom assets (generated)
 docs/header.html.bak
 docs/custom.css.bak
@@ -134,3 +118,10 @@ docs/temp/
 
 # Local AI provider config (never commit credentials)
 config.local.toml
+
+# Local agent guidance
+CLAUDE.md
+CLAUDE.local.md
+AGENT.md
+AGENTS.md
+.claude/
