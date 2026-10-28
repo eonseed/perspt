@@ -373,7 +373,8 @@ Utility functions:
 Crate: ``perspt-sandbox``
 ---------------------------
 
-Process isolation with active timeout enforcement:
+Process isolation with OS containment (``bwrap`` on Linux, ``sandbox-exec`` on
+macOS) and active timeout enforcement:
 
 .. code-block:: rust
 
@@ -383,11 +384,18 @@ Process isolation with active timeout enforcement:
        fn is_read_only(&self) -> bool;
    }
 
+   pub struct ProcessSandbox {
+       program: String,
+       args: Vec<String>,
+       policy: ProcessPolicy, // ReadOnly/WorkspaceWrite, allow_network, Required/BestEffort
+   }
+
    pub struct BasicSandbox {
        program: String,
        args: Vec<String>,
-       working_dir: Option<PathBuf>,
-       timeout: Duration,  // Active: spawn + poll + kill on deadline
+       working_dir: Option<String>,
+       timeout: Option<Duration>,  // Active: spawn + poll + kill on deadline
+       // ...
    }
 
 
@@ -433,8 +441,9 @@ All canonical shared types live in ``perspt_core::types``, re-exported from
    * - Type
      - Fields
    * - ``EnergyComponents``
-     - v_syn (LSP), v_str (contracts), v_log (tests), v_boot (commands),
-       v_sheaf (cross-node); ``total()`` is the plain sum of the rollups
+     - v_syn (syntax/type/build/lint), v_str (contracts), v_log (tests),
+       v_boot (sensor availability & tool execution), v_sheaf (cross-node);
+       ``total()`` is the plain sum of the rollups
 
 **Task Planning (``types/plan.rs``):**
 

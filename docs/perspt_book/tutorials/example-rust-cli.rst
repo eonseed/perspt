@@ -13,13 +13,17 @@ We will ask the agent to create a CLI tool that converts CSV files to JSON.
 Running the Agent
 -----------------
 
+Initialize a Cargo project first so the ``rust`` plugin and offline verifier
+sensors have a manifest to inspect:
+
 .. code-block:: bash
 
    export GEMINI_API_KEY="your-key"
+   cargo init /tmp/csv2json
 
    perspt agent --yes --allow-dependency-mutation -w /tmp/csv2json \
-     --actuator-model gemini-3.1-pro \
-     --explorer-model gemini-3.5-flash \
+     --actuator-model gemini::gemini-3.1-pro \
+     --explorer-model gemini::gemini-3.5-flash \
      "Create a Rust CLI tool called csv2json that:
       1. Reads a CSV file from a path argument
       2. Converts each row to a JSON object
@@ -45,11 +49,16 @@ Example output layout
 Verification
 ------------
 
-The agent uses the ``rust`` plugin:
+The agent uses the ``rust`` plugin's verifier profile inside the sandboxed
+verifier:
 
-- **LSP**: ``rust-analyzer`` for V_syn
-- **Tests**: ``cargo test`` for V_log
-- **Init**: ``cargo init`` for V_boot
+- **Syntax & Build (V_syn)**: ``cargo check --message-format=json`` and
+  ``cargo build --message-format=json``
+- **Tests (V_log)**: ``cargo test``
+- **Lint (advisory)**: ``cargo clippy -- -D warnings`` (steers repairs without
+  blocking a hard pass)
+- **Sensor readiness (V_boot)**: tracks whether required toolchain sensors were
+  available and runnable
 
 .. code-block:: bash
 
@@ -60,9 +69,11 @@ The agent uses the ``rust`` plugin:
 Key Observations
 ----------------
 
-- The ``rust`` plugin selects ``rust-analyzer`` as the LSP server
-- ``cargo init`` bootstraps the project structure (V_boot)
-- ``cargo test`` runs both unit and integration tests (V_log)
+- The ``rust`` plugin runs ``cargo check``, ``cargo build``, and ``cargo test``
+  as required hard-gate stages against the candidate overlay
+- ``--allow-dependency-mutation`` permits governed ``cargo add`` calls when the
+  task needs crates such as ``clap`` or ``anyhow``
+- ``cargo test`` runs both unit and integration tests (``V_log``)
 - The dispatcher prevents nodes with conflicting write footprints from running concurrently
 
 See Also

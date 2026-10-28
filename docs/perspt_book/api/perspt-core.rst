@@ -64,11 +64,11 @@ Key Types
 .. code-block:: rust
 
    pub struct EnergyComponents {
-       pub v_syn: f32,    // LSP diagnostics
-       pub v_str: f32,    // Contract compliance
+       pub v_syn: f32,    // Syntax, type, build, and lint rollups
+       pub v_str: f32,    // Contract and structural compliance
        pub v_log: f32,    // Test results
-       pub v_boot: f32,   // Bootstrap commands
-       pub v_sheaf: f32,  // Cross-node validation
+       pub v_boot: f32,   // Sensor availability and tool-execution rollups
+       pub v_sheaf: f32,  // Cross-node boundary validation
    }
 
 **AgentEvent** - 33 lifecycle events:

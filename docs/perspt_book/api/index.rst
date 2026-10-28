@@ -87,6 +87,8 @@ This example scores evidence and evaluates a gate; it does not run tools, author
      - Build-time compiler for typed prompt section libraries.
    * - :doc:`perspt-benchmark`
      - Optional, feature-gated manual evaluation tooling.
+   * - ``perspt``
+     - Root workspace facade crate re-exporting the core libraries.
 
 .. toctree::
    :maxdepth: 2

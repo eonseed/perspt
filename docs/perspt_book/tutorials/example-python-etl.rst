@@ -19,13 +19,17 @@ We will ask the agent to create a data pipeline that:
 Running the Agent
 -----------------
 
+Initialize a ``uv`` project first so ``pyproject.toml`` exists before the
+session starts:
+
 .. code-block:: bash
 
    export GEMINI_API_KEY="your-key"
+   uv init --lib /tmp/etl-demo
 
    perspt agent --yes --allow-dependency-mutation -w /tmp/etl-demo \
-     --actuator-model gemini-3.1-pro \
-     --explorer-model gemini-3.5-flash \
+     --actuator-model gemini::gemini-3.1-pro \
+     --explorer-model gemini::gemini-3.5-flash \
      "Create a Python ETL pipeline package. It should:
       1. Read CSV files into Pydantic models for validation
       2. Transform records (clean nulls, normalize strings, compute derived fields)
@@ -60,8 +64,9 @@ The exact files and test count depend on the generated implementation:
 Verification
 ------------
 
-The engine verifies every checkpoint with real sensors: the ``ty`` LSP
-server and pytest measure the energy of each candidate, and a checkpoint
+The engine verifies every checkpoint with real sensors: ``ty check`` (or
+``python -m compileall`` / ``pyright`` fallback) and offline ``pytest`` measure
+the energy of each candidate, and a checkpoint
 is accepted on a hard pass or sufficient measured descent.
 Only a hard-passing result can be delivered. When the run finishes, the terminal summary
 reports the outcome, the session id, turns used, the ledger head hash,
@@ -77,11 +82,13 @@ After completion, verify manually:
 Key Observations
 ----------------
 
-- The agent uses ``uv init --lib`` to create proper ``src/`` layout with
-  ``[build-system]`` in ``pyproject.toml``
+- Initializing with ``uv init --lib`` creates a ``src/`` layout with
+  ``[build-system]`` in ``pyproject.toml``, and ``--allow-dependency-mutation``
+  lets the agent run governed ``uv add`` commands for ``pandas``, ``pydantic``,
+  and ``pytest``
 - The dispatcher prevents nodes with conflicting write footprints from running concurrently
-- The ``ty`` LSP server provides real-time type checking
-- pytest provides test verification
+- ``ty check`` (with ``compileall`` / ``pyright`` fallback) checks syntax and types (``V_syn``)
+- ``uv run --no-sync pytest`` runs the test suite offline inside the sandbox (``V_log``)
 - Work is promoted only after the run's final checkpoint passes every
   hard predicate (a ``HardPass`` outcome)
 

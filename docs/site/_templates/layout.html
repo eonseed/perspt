@@ -65,4 +65,57 @@ document.querySelector(".theme-toggle").addEventListener("click", function () {
   root.dataset.theme = dark ? "light" : "dark";
   try { localStorage.setItem("guidedog-theme", root.dataset.theme); } catch (e) {}
 });
+(function () {
+  var term = document.querySelector(".hero-terminal");
+  if (!term) return;
+  var tabs = term.querySelectorAll(".term-tab");
+  var panels = term.querySelectorAll(".term-stage");
+  var caption = term.querySelector(".term-mode-caption");
+  var bar = term.querySelector(".term-progress-bar");
+  var count = panels.length;
+  var current = 0;
+  var paused = false;
+  var intervalMs = 5200;
+  function setMode(idx) {
+    current = ((idx % count) + count) % count;
+    term.setAttribute("data-mode", String(current));
+    tabs.forEach(function (tab, i) {
+      var active = i === current;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    panels.forEach(function (panel, i) {
+      panel.classList.toggle("is-active", i === current);
+    });
+    if (caption) {
+      var text = caption.getAttribute("data-caption-" + current);
+      if (text) caption.textContent = text;
+    }
+    if (bar) {
+      bar.style.animation = "none";
+      void bar.offsetWidth;
+      bar.style.animation = "";
+    }
+  }
+  tabs.forEach(function (tab, idx) {
+    tab.addEventListener("click", function () {
+      setMode(idx);
+    });
+  });
+  var initialMatch = /[?&]mode=([012])/.exec(location.search);
+  if (initialMatch) setMode(Number(initialMatch[1]));
+  term.addEventListener("mouseenter", function () {
+    paused = true;
+    term.classList.add("is-paused");
+  });
+  term.addEventListener("mouseleave", function () {
+    paused = false;
+    term.classList.remove("is-paused");
+  });
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    setInterval(function () {
+      if (!paused) setMode(current + 1);
+    }, intervalMs);
+  }
+})();
 </script></body></html>

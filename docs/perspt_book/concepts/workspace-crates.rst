@@ -98,7 +98,7 @@ The foundation crate. It defines the central types, data models, and configurati
 
 Key components:
 
-* **Core Types**: Structures representing the execution parameters, such as:
+* **Core Types**: Shared configuration, plugin, and workspace structures. (Note: the active PSP-9 work-graph node taxonomy ``NodeClass`` — ``Explore``, ``Plan``, ``Implement``, ``Verify``, ``Test``, ``Integrate``, ``Repair``, ``Interface`` — lives in ``perspt_sdk::workgraph::NodeClass``, while ``perspt_core::types::NodeClass`` retains the legacy three-way ``Interface`` / ``Implementation`` / ``Integration`` grouping):
 
   .. code-block:: rust
 
@@ -111,7 +111,7 @@ Key components:
          Integration,
      }
 
-* **Event Plane**: Defines the event system carrying over 40 lifecycle events. The ``AgentEvent`` enum is transmitted across channels to update the TUI and log database records.
+* **Event Plane**: Defines the event system carrying 33 ``AgentEvent`` lifecycle variants transmitted across channels to update the TUI and log database records.
 * **Provider Gate**: Integrates with the ``genai`` crate to handle provider-agnostic LLM requests, supporting token streaming, prompt assemblies, and backoff limits.
 * **Prompt Libraries**: Hosts the versioned prompt section files under ``crates/perspt-core/prompts/`` (``session_bootstrap``, ``graph_plan``, ``repository_explore``, ``adjudicate``, ``evidence_summarize``), compiled at build time by ``perspt-prompt-macros`` against the ``perspt-sdk`` prompt module.
 
@@ -182,7 +182,7 @@ Linux and ``sandbox-exec`` on macOS, fails closed when required isolation is
 unavailable, and exposes an explicit best-effort mode for externally isolated
 embedders and acknowledged native Windows operation.
 
-* ``SandboxedCommand``: Wraps standard library commands, enforcing memory ceilings, processor timeouts, environment sanitization, and redirecting stdout/stderr to files for analysis.
+* ``ProcessSandbox`` & ``BasicSandbox``: Implement ``SandboxedCommand`` to wrap child processes with OS filesystem/network containment (``bwrap`` on Linux, ``sandbox-exec`` on macOS), active wall-clock timeouts, environment sanitization, and bounded stdout/stderr capture (8 MiB default limit).
 
 perspt-dashboard
 ~~~~~~~~~~~~~~~~
@@ -226,9 +226,9 @@ The coding-domain package, implementing the ``AgentDomainPackage`` trait.
 perspt-research
 ~~~~~~~~~~~~~~~
 
-An experimental verification domain package.
+A second-domain contract-conformance skeleton proving that ``perspt-sdk`` is domain-neutral.
 
-* **Academic Manuscript Domain**: Implements the SDK traits to manage research document production. It treats LaTeX syntax errors, missing citations, and bibliography inconsistencies as residual events, driving convergence towards a fully validated scientific manuscript. It serves as a proof of concept for the SDK's domain-agnostic separation of concerns.
+* **Research Domain Skeleton**: Implements ``AgentDomainPackage`` for workspaces containing ``references.bib`` or ``sources.md``. It declares a ``citation-check`` required stage, a residual schema (``CitationMissing``, ``LogicGap``, ``SensorUnavailable``, ``ToolFailure``), energy weights, and correction directions without coupling ``perspt-sdk`` to coding-specific types. It is a contract skeleton rather than a complete LaTeX or manuscript-production workflow.
 
 perspt-prompt-macros
 ~~~~~~~~~~~~~~~~~~~~

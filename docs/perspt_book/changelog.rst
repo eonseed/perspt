@@ -74,7 +74,7 @@ This release implements PSP-9's governed agentic platform: every stochastic acti
 **Engineering Discipline:**
 
 - **Reproducible Toolchain** - Added ``rust-toolchain.toml`` pinned to Rust 1.97.1 while retaining edition 2021; workspace packages inherit the same MSRV.
-- **DuckDB 1.5.5 Boundary** - Exact-pinned ``duckdb`` and ``libduckdb-sys`` at ``1.10505.0``, added dynamic ABI rejection, transactional versioned migrations, catalog-checked nullability changes, and post-DDL checkpoints.
+- **DuckDB 2.0.0 Boundary** - Exact-pinned ``duckdb`` at ``=1.20000.0``, added dynamic ABI rejection, transactional versioned migrations, catalog-checked nullability changes, and post-DDL checkpoints.
 - **Recoverable WAL Repair** - ``perspt db repair --db-path PATH --discard-wal`` records WAL size and SHA-256, makes durable timestamped database/WAL backups, quarantines the WAL, verifies recovery read-only, and restores the original WAL on failure.
 - **Shared MCP Runtime Foundation** - Introduced the governed external-runtime boundary, mode filtering, local effect/footprint admission, namespacing, bounded observations, environment-referenced secrets, replay-only observations, and explicit reconciliation. The current release supersedes its initial tool-only transport with the official latest SDK client described above.
 - **PSP-5 API Retirement** - Removed the legacy orchestrator and Merkle-ledger facade from the public agent crate and refused resume of PSP-5 sessions; their existing rows remain inert forensic data.

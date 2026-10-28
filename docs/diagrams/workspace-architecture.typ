@@ -102,7 +102,7 @@
         ),
         crate-pill(
           "perspt-research",
-          "Second-domain proof package: citation verification, claim-graph residuals, domain generality check",
+          "Second-domain skeleton package proving SDK contract generality (citation-check stage & residual schema)",
           emerald-dark,
           emerald-soft,
         ),
@@ -126,7 +126,7 @@
         crate-pill("perspt-core", "GenAI multi-provider router, model portfolio, config, language plugins", amber-dark, amber-soft),
         crate-pill("perspt-store", "DuckDB 2.0 Merkle ledger, artifacts, checkpoints, WAL repair", amber-dark, amber-soft),
         crate-pill("perspt-policy", "Starlark `.star` execution policy engine (`allow`/`prompt`/`forbidden`)", amber-dark, amber-soft),
-        crate-pill("perspt-sandbox", "OS containment (`bwrap`, Seatbelt `sandbox-exec`, Windows JobObject)", amber-dark, amber-soft),
+        crate-pill("perspt-sandbox", "OS containment (Linux `bwrap`, macOS `sandbox-exec`) & active timeouts", amber-dark, amber-soft),
         crate-pill("perspt-prompt-macros", "Build-time compiler & validator for typed prompt section libraries", amber-dark, amber-soft),
       )
     ],
