@@ -10,7 +10,7 @@ API Key Issues
 
 **Solutions:**
 
-1. Check env var is exported: ``echo $GEMINI_API_KEY``
+1. Check whether the variable is set without printing it: ``test -n "$GEMINI_API_KEY" && echo set``
 2. Verify spelling: ``ANTHROPIC_API_KEY`` (not ``ANTHROPIC_KEY``)
 3. Store it in the config: ``perspt config --set api_key="your-key"``
 4. Check config file: ``~/.config/perspt/config.toml``
@@ -70,10 +70,8 @@ TUI Rendering Issues
 Degraded Verification
 ---------------------
 
-When tool binaries (``ty``, ``cargo``, ``pytest``) are missing, checkpoints
-may be flagged as **degraded** in the review modal, with the reasons listed
-alongside the flag. The agent keeps working, but with lower verification
-confidence.
+**Missing required tools block a hard pass.** The runtime records the missing evidence rather than treating it as a clean measurement.
+Non-required stages may produce advisory findings.
 
 To restore full verification, install the required tools:
 

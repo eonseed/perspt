@@ -112,7 +112,7 @@ DuckDB. This provides:
 
 - **Tamper detection** - Hash chain integrity
 - **Full auditability** - Every node's input/output is recorded
-- **Rollback capability** - Restore to any point in the session
+- **Rollback capability** - Undo a session's newest completed promotion, unless its files changed afterward
 
 .. code-block:: bash
 

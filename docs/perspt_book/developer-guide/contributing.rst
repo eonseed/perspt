@@ -155,3 +155,5 @@ CI treats ``guidedog`` warnings as errors (``-W -n``) so documentation
 validation is deterministic. One documentation workflow publishes the unified
 Guidedog site, Typst PDFs, PSP catalog, and Rustdoc API as a single GitHub Pages
 artifact.
+
+See :doc:`documentation` for the publication toolchain, source map, and review checks.

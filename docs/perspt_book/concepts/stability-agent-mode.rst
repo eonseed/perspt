@@ -1,137 +1,111 @@
 .. _stability-agent-mode:
 
-Stability Papers in Agent Mode
-==============================
+Stability and Measured Progress
+===============================
 
-The execution of autonomous agents in Perspt is governed by control-theoretic stability contracts derived from the *Stability is All You Need* paper series. We do not assume that a language model's proposal is correct. Instead, the agent system measures the proposed state, determines its residual errors, and admits changes only when they satisfy a formal convergence constraint.
+**Perspt separates a model's proposal from evidence that the proposal works.** The runtime measures candidate states with project tools, then decides whether to keep progress or ask for a correction.
+This page describes the implemented coding contract and how it relates to the stability terminology used in the specifications.
 
-We formulate this stabilization process using three distinct contracts.
+The energy score
+----------------
 
-The Three Contracts
--------------------
-
-Let a session consist of a sequence of proposed states :math:`x_1, x_2, \dots` and a corresponding sequence of accepted states :math:`s_1, s_2, \dots`.
-
-Paper I: The Single-Agent Stability Contract
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Paper I (*Stability is All You Need: Lyapunov-Guided Hierarchies for Long-Horizon LLM Reliability*) establishes the concept of a state-space manifold and the Lyapunov energy function. 
-
-Let :math:`x` be a candidate state. The system computes a vector of residual errors :math:`r(x)`. We define the Lyapunov energy :math:`V(x)` as a measure of the distance from :math:`x` to the verified manifold :math:`V(x) = 0`. The single-agent contract asserts that the state converges if each step reduces :math:`V(x)`.
-
-In the Perspt runtime, the candidate state corresponds to a modification proposed by the actuator model. The governed tool loop validates the proposal through the admissibility kernel and uses domain-specific sensors to calculate the energy.
-
-Paper II: The Harness Contract
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Paper II (*Stability is All You Need II: SRBN-Control Beyond Harness Engineering*) describes the measurement harness. The harness must observe every candidate, partition them into observed and accepted trajectories, and guarantee that the system terminates with a formal certificate of remaining errors if convergence is not achieved.
-
-In the Perspt runtime, this contract is implemented by the tracking engine. Every verification run, retry attempt, and error message is persisted in the ledger, culminating in either a committed state or an explicit escalation report.
-
-Paper III: The Platform Contract
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Paper III (*Stability is All You Need III: The SRBN Platform Contract*) lifts the single-agent harness to a multi-domain platform. The platform must isolate stochastic proposals from deterministic side-effects. It mandates that models propose actions, while a deterministic capability kernel enforces security bounds and records budgets.
-
-In the Perspt runtime, this is implemented via the SDK-first separation. The core SRBN engine (in ``perspt-sdk``) manages scheduling and gating, while domain packages (such as ``perspt-coding``) define domain-specific sensors and capabilities.
-
-The Byzantine Generals Metaphor
--------------------------------
-
-To illustrate the stabilization protocol, we map the closed-loop convergence system to the Byzantine Generals Problem formulation (Lamport, Shostak, and Pease, 1982).
-
-Let the Actuator agent be a commanding general whose loyalty is unknown; the commander's objective is to propose a series of operations (file modifications, deletions, or command executions) to reach a stable repository state. Let the verification sensors (the compiler, the type-checker, the linter, and the configured test evidence) be the loyal lieutenants. Tests evolve with the implementation in the default development policy; historical or externally protected evidence participates only when the corresponding verification policy is selected.
-
-The protocol proceeds in rounds:
-
-1. **Proposal**: The commander (Actuator) issues a proposed workspace change.
-2. **Observation**: The loyal lieutenants (Sensors) independently inspect the proposal and report their findings as a vector of residual events.
-3. **Consensus**: The gatekeeper (the governed tool loop and its admissibility kernel) aggregates the lieutenants' reports using the quadratic energy function. If the loyal lieutenants consensus reveals no critical residual errors (i.e., :math:`V(x) \le \varepsilon`), the proposal is committed.
-4. **Correction or Escalation**: If the energy exceeds the threshold, the lieutenants' specific error reports are compiled into a feedback message. The commander is instructed to repair the state. If the commander fails to reach stability within the allocated round budget, the lieutenants reject further proposals and execute an escalation protocol to alert the operator.
-
-The Energy Formulation
-----------------------
-
-Let :math:`E` be the set of active sensors. Each sensor :math:`e \in E` evaluates the candidate state :math:`x` and emits a residual magnitude :math:`r_e(x) \geq 0`. 
-
-The Lyapunov energy :math:`V(x)` is the weighted sum of the squared residuals:
+A verifier reports a residual: a measured issue such as a compiler diagnostic, failing test, or missing declared symbol.
+For residual magnitudes :math:`r_e \geq 0` and positive weights :math:`w_e`, the SDK computes:
 
 .. math::
 
-   V(x) = \sum_{e \in E} w_e \, \lVert r_e(x) \rVert^2, \qquad w_e > 0
+   V(r) = \sum_e w_e r_e^2
 
-We group the individual residuals into five component rollups:
+**The quadratic formula is continuous in the residual magnitudes.** The coding runtime, however, measures discrete candidate workspaces.
+Counts of diagnostics and failing tests can jump between measurements.
+There is no implemented continuous coordinate system over source-code states and no guarantee that every path through code space is smooth.
+The coding domain declares its continuous analytic stability constants ``NotClaimed``.
 
-- **Syntactic energy** (:math:`V_{\text{syn}}`): Derived from compiler syntax errors and language server diagnostics.
-- **Structural energy** (:math:`V_{\text{str}}`): Derived from interface contract violations.
-- **Logical energy** (:math:`V_{\text{log}}`): Derived from test suite failures.
-- **Bootstrap energy** (:math:`V_{\text{boot}}`): Derived from initialization and build environment failures.
-- **Sheaf energy** (:math:`V_{\text{sheaf}}`): Derived from cross-node import and dependency contradictions.
+.. figure:: ../../shared/_static/front-page-abm.svg
+   :target: ../_static/front-page-abm.svg
+   :alt: Smooth illustrative curves connect discrete measured scores. Filled dots are kept checkpoints and open dots are rejected attempts.
+   :width: 100%
 
-The total energy is the sum of these component rollups:
+   The dots are the decisions that matter. Curves guide the eye between illustrative measurements; they are not a simulation, benchmark, or continuous coding trajectory.
 
-.. math::
+The five reported components group the same weighted contributions:
 
-   V(x) = V_{\text{syn}} + V_{\text{str}} + V_{\text{log}} + V_{\text{boot}} + V_{\text{sheaf}}
+- **Syntax**: Syntax, type, and build residuals.
+- **Structure**: Import, symbol, interface, and other structural residuals.
+- **Logic**: Test failures, runtime failures, and regression residuals.
+- **Bootstrap**: Missing required sensors and tool failures.
+- **Sheaf**: Cross-node consistency residuals.
 
-A candidate state :math:`x` is admitted to the accepted trajectory if and only if it satisfies the gating condition:
+The components sum to the total without a second weighting step.
+Capability denials and budget exhaustion are recorded in a separate blocked channel rather than added to this score.
+See ``crates/perspt-sdk/src/energy.rs`` and ``crates/perspt-coding/src/lib.rs`` for the scoring implementation and coding weights.
 
-.. math::
+Keep progress without claiming completion
+-----------------------------------------
 
-   \operatorname{accept}(x) \iff V(x) \leq \varepsilon \quad \lor \quad V(x) < V(x_{\text{best}}) - \rho_{\text{gate}}
-
-where :math:`\varepsilon` is the convergence threshold (default :math:`0.10`), :math:`x_{\text{best}}` is the best previously accepted state in the current node generation, and :math:`\rho_{\text{gate}}` is the minimum required descent step.
-
-Observed vs. Accepted Trajectories
-----------------------------------
-
-We maintain a strict boundary between the actions the model proposes and the actions the system commits.
-
-Let :math:`T_{\text{obs}}` be the set of all observed candidate states:
-
-.. math::
-
-   T_{\text{obs}} = \{ x_t \mid t \ge 1 \}
-
-Let :math:`T_{\text{acc}}` be the set of accepted states:
+For the ordinary measured gate:
 
 .. math::
 
-   T_{\text{acc}} = \{ x \in T_{\text{obs}} \mid \operatorname{accept}(x) = \text{true} \}
+   \operatorname{accept}(y) \iff \operatorname{hard\_pass}(y)
+   \quad \lor \quad V(y) \leq V(x_{\mathrm{best}}) - \rho_{\mathrm{gate}}
 
-The Merkle ledger commits only elements of :math:`T_{\text{acc}}`. Unaccepted proposals in :math:`T_{\text{obs}} \setminus T_{\text{acc}}` are recorded as telemetry for correction feedback, but they never modify the workspace files.
+A hard pass means all required verifiers and hard constraints passed.
+Otherwise, the candidate must reduce the best accepted energy by at least :math:`\rho_{\mathrm{gate}}` (default ``0.5``).
+The comparison uses ``<=``, so a decrease exactly equal to the margin is sufficient.
 
-The GoalPresence Verification Sensor
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Acceptance by descent is an intermediate checkpoint.** It does not authorize delivery of incomplete code.
+Final promotion requires the required checks and approval; multi-node runs also check the merged integration result.
+Zero measured energy alone is not sufficient evidence that every required stage ran and passed.
+Likewise, an empty ``EnergyScore.hard_violations`` list only says no configured residual threshold was exceeded.
 
-A primary check performed by the structural sensor (lieutenant) is the validation of required symbol presence. Let :math:`\mathcal{S}_{\text{req}}` be the set of symbols (functions, structures, classes, or modules) that the node is required to implement, as declared by its behavioral contract interface signature and goal text. Let :math:`\mathcal{S}_{\text{obs}}` be the set of symbols actually defined in the generated source code.
+The general SDK gate can classify a stop at a declared analytic floor.
+That terminal outcome is not verified success.
+The coding domain does not claim an analytic floor.
+The implemented ordering and outcomes are in ``crates/perspt-sdk/src/gate.rs``.
 
-The goal-presence sensor computes the missing required symbols set :math:`\mathcal{M}`:
+Bound the attempts
+------------------
+
+With baseline energy :math:`V_0`, positive descent margin :math:`\rho_{\mathrm{gate}}`, and rejection budget :math:`B`, the measured node gate has the bound:
 
 .. math::
 
-   \mathcal{M} = \mathcal{S}_{\text{req}} \setminus \mathcal{S}_{\text{obs}}
+   N_{\mathrm{gate}} \leq \left\lfloor V_0 / \rho_{\mathrm{gate}} \right\rfloor + B + 1
 
-If :math:`\mathcal{M} \neq \emptyset`, the sensor emits a blocking residual of class ``SymbolMismatch``:
+This bounds gate decisions under the declared contract.
+It does not promise that a model will find a passing candidate or establish a model success probability.
+Turn, call, and recovery limits also apply.
+When a run cannot complete within its limits, it stops with a classified outcome and recorded remaining errors.
 
-.. math::
+Observe, accept, and promote
+----------------------------
 
-   r_{\text{symbol}}(x) = \lvert \mathcal{M} \rvert
+We distinguish three events:
 
-This forces the structural energy component :math:`V_{\text{str}}` to remain high, preventing the state from satisfying the acceptance gate until all required symbols are present in the workspace.
+1. **Observe**: The runtime measures a proposed candidate and records its evidence.
+2. **Accept**: A hard pass or sufficient descent advances the node's accepted trajectory.
+3. **Promote**: The runtime copies a deliverable, approved result into the project.
 
-Operational Mechanisms
-----------------------
+The ledger records rejected observations as well as accepted checkpoints.
+Rejected proposals do not become accepted progress and do not modify the project files through promotion.
+Ledger checkpoints and promotion are not Git commits.
 
-The platform achieves stabilization through ten mechanisms:
+The scope of verification
+-------------------------
 
-1. **Closed-Loop Scheduler**: Re-evaluates the ready state of the graph dynamically. If a node fails to converge, the scheduler registers a repair action as a graph revision event (e.g., splitting a node or inserting an interface node).
-2. **Capability Filtering**: All proposals must pass through the admissibility kernel. A proposal requesting a file edit or command run must possess a valid capability token.
-3. **Structured Prompt Compilation**: When a proposal is rejected, the system compiles the residual diagnostics into a correction prompt.
-4. **Event-Sourced Ledger**: Every transaction (proposals, rejections, commits, rollbacks) is written to a Merkle ledger to enable complete session replay.
-5. **Domain Abstraction**: The core engine processes abstract residuals and energy models. Domain-specific behavior is relegated to domain packages.
-6. **Bounded Search Forests**: On a gate failure, up to three isolated branches attempt distinct strategies against the same accepted root. Exact no-goods learned from failed branches suppress equivalent later attempts.
-7. **Pre-Action Budget Reservations**: Every search-branch action reserves its cost against a shared limit vector before it runs; a refused reservation aborts the branch at no cost.
-8. **Resident-Context Paging**: The conversation is partitioned into immutable content-addressed pages. Evicted pages leave in-place tombstones and remain recallable through the ``context_recall`` tool.
-9. **Prompt-Program Provenance**: Every model call binds a compiled prompt program; the program and invocation digests are recorded in the ledger.
-10. **Staging and Integration Gate**: Multi-node winners land in a content-addressed staging root and reach the user workspace only through one global integration gate.
+A required check that cannot run blocks a hard pass.
+Non-required stages can report advisory failures without changing the hard gate.
+The default test policy measures the resulting implementation and tests together.
+Historical regression and externally maintained acceptance evidence are explicit policies described in :doc:`../configuration`.
+
+**A hard pass is evidence within the configured checks' coverage.** It cannot establish behavior that the checks do not cover.
+Optional spectral and validator-dependence statistics are diagnostics, not acceptance inputs.
+
+Relation to the stability papers
+--------------------------------
+
+Perspt's specifications use the *Stability is All You Need* paper series as a design framework for measured progress, bounded correction, and governed effects.
+The implemented coding runtime uses the discrete measured gate above.
+Continuous geometric claims require additional assumptions that the coding package does not declare.
+The specifications preserve the design rationale; :doc:`srbn-architecture` describes the runtime mechanisms and their limits.

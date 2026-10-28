@@ -113,4 +113,5 @@ Key Types
        pub components: EnergyComponents,      // Derived rollups
        pub dominant: Vec<ResidualEventRef>,   // Dominant residuals first
        pub hard_violations: Vec<ResidualClass>,
+       pub blocked: Vec<ResidualEventRef>,    // Separate admissibility outcomes
    }

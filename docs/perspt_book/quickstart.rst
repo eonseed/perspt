@@ -3,246 +3,108 @@
 Quick Start
 ===========
 
-Get Perspt installed and try all three developer modes (**Simple CLI**, **Terminal UI**, and **SRBN Coding Agent**) in under five minutes.
+**Start with a conversation, then try a small code change.** We need a model provider for chat and the project's own verification tools for agent mode.
 
-Prerequisites
--------------
+1. Install the CLI
+------------------
 
-- **Rust Toolchain**: Rust 1.97.1+ (if building from source).
-- **An LLM Provider**: An API key for Gemini, OpenAI, Anthropic, Groq, DeepSeek, xAI, or Cohere—or a local **Ollama** instance (no API key needed).
-
-Installation
-------------
-
-.. rubric:: From Source (Recommended)
-
-To compile the release binary directly from the source repository:
+From the repository root, Rust 1.97.1 or later can build and install the CLI:
 
 .. code-block:: bash
 
    git clone https://github.com/eonseed/perspt.git
    cd perspt
-   cargo build --release
+   cargo install --locked --path crates/perspt-cli --features bundled
+   perspt --version
 
-The compiled binary is placed at ``target/release/perspt``.
+The ``bundled`` feature builds DuckDB into the executable, so we do not need a separate DuckDB library.
+Compilation can take several minutes.
+See :doc:`installation` for platform and agent prerequisites.
 
-.. rubric:: Cargo Install
+2. Connect a model
+------------------
 
-To compile and install the package from the local directory:
-
-.. code-block:: bash
-
-   cargo install --path .
-
-.. rubric:: With Ollama (No API Key)
-
-To run local models using Ollama:
+Set one provider key in the terminal where Perspt will run:
 
 .. code-block:: bash
 
-   # Start the local Ollama service
-   ollama serve
+   export GEMINI_API_KEY="<api-key>"
+   perspt chat
 
-   # Pull the target model
+OpenAI and Anthropic use ``OPENAI_API_KEY`` and ``ANTHROPIC_API_KEY`` respectively.
+With several credentials set, an explicit ``provider::model`` route selects the intended provider.
+Model availability depends on the provider account.
+
+For a local conversation, start Ollama in another terminal, then pull and select a model:
+
+.. code-block:: bash
+
    ollama pull llama3.2
+   perspt chat --model ollama::llama3.2
 
-Set Environment API Keys
-------------------------
+See :doc:`tutorials/local-models` for local setup and :doc:`user-guide/providers` for other providers.
 
-Export the key for your selected provider. The system automatically detects these variables at startup:
-
-.. code-block:: bash
-
-   # Choose one
-   export OPENAI_API_KEY="sk-..."        # For OpenAI
-   export ANTHROPIC_API_KEY="sk-ant-..." # For Anthropic
-   export GEMINI_API_KEY="..."           # For Google Gemini
-
-1. Simple CLI Mode (``perspt simple-chat``)
--------------------------------------------
-
-Use ``perspt simple-chat`` when you want plain text output in your terminal with no UI borders—ideal for Unix pipes, shell scripts, and quick one-liners:
-
-.. code-block:: bash
-
-   # Ask a direct question in the terminal
-   perspt simple-chat
-
-   # Pipe a file or command output into Perspt
-   cat Cargo.toml | perspt simple-chat "List the crates in this workspace"
-
-   # Use a specific model
-   perspt simple-chat --model gemini-3.5-flash
-
-2. Interactive Terminal UI (``perspt`` / ``perspt chat``)
----------------------------------------------------------
-
-Run ``perspt`` (or ``perspt chat``) to open the full-screen Terminal UI with streaming Markdown, syntax highlighting, tables, and LaTeX math:
-
-.. code-block:: bash
-
-   # Auto-detects your configured provider from environment variables
-   perspt
-
-   # Or choose a model explicitly
-   perspt chat --model gemini-3.1-pro
-
-Type your dialogue prompt and press **Enter** to submit. Press **Esc** to exit the application.
-If the selected configuration contains chat-enabled ``[[external_tools]]``,
-type ``/mcp`` to inspect MCP discovery and the admitted read-only tools. See
-:doc:`user-guide/mcp` for a working server and policy configuration.
-Normal terminal paste shortcuts insert multiline clipboard content into the
-chat input because bracketed paste is enabled for the TUI lifecycle.
-
-TUI Key Bindings
-~~~~~~~~~~~~~~~~
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Key
-     - Action
-   * - **Enter**
-     - Transmit dialogue input buffer.
-   * - **Esc**
-     - Terminate the TUI process.
-   * - **Up / Down**
-     - Navigate through dialogue command history.
-   * - **Page Up / Down**
-     - Scroll up/down in the chat conversation panel.
-   * - **/save**
-     - Save dialogue log to a local file.
-
-3. SRBN Coding Agent (``perspt agent``)
----------------------------------------
-
-Give ``perspt agent`` a coding task and a project folder (``-w``). Behind the scenes, Perspt's **SRBN** engine edits files in a safe sandbox, runs your compiler, LSP, and test suite, and automatically fixes errors before committing the result:
-
-.. code-block:: bash
-
-   # Create a Python package inside a new directory
-   perspt agent -w ./my-calculator "Create a Python calculator package with add, subtract, multiply, divide. Include pytest tests."
-
-   # Auto-approve all modifications (headless mode)
-   perspt agent -y -w ./my-api "Build a REST API in Rust with Axum"
-
-   # Run with specific models for Actuator and Explorer roles
-   perspt agent \
-     --actuator-model gemini-3.5-flash \
-     --explorer-model gemini-3.1-flash-lite \
-     -w ./project "Create an ETL pipeline in Python"
-
-A headless execution run narrates the governed tool loop: admitted effects, measured energies, and gate decisions. Below is a clinical trace of a typical autonomous run:
-
-.. code-block:: text
-
-   Domain: coding
-   PSP-9 agent starting
-   Task: Create a Python calculator package with add, subtract, multiply, divide. Include pytest tests.
-   Workspace: ./my-calculator
-     Exploration mapped 1 language groups and 1 package roots
-     PSP-9 session 01997a2f using gemini::gemini-3.5-flash
-     [implement-1] Coding
-     Effect call-1 applied to candidate (mutated=true)
-     Effect call-2 applied to candidate (mutated=true)
-     Measured implement-1 generation 1: V=2.000, hard_pass=false, residuals=1
-     Gate implement-1 generation 1: RejectedNonDescending { delta_v: 0.0 }
-     Effect call-3 applied to candidate (mutated=true)
-     Measured implement-1 generation 2: V=0.000, hard_pass=true, residuals=0
-     Gate implement-1 generation 2: HardPass
-
-   Outcome: HardPass
-   Session: 01997a2f-9c1e-4c30-b7ac-2f5d8f3e6a41
-   Turns: 5
-   Ledger head: 9f8a7e...
-   Promoted paths: pyproject.toml, src/calc/__init__.py, tests/test_calc.py
-
-Every effect the model proposes passes the deterministic admissibility kernel before it touches the candidate workspace, and the acceptance gate reads the re-measured candidate — never the model's account of it.
-
-Operational Modes
+3. Ask a question
 -----------------
 
-Choose the appropriate command mode depending on your task requirement:
+In the full-screen chat, type a question such as ``Explain the difference between a Rust String and &str`` and press **Enter**.
+Use **Ctrl+J** for a newline, **Page Up / Page Down** to scroll, and **Esc** to exit.
+Configured read-only MCP operations are available through ``/mcp``.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 15 35 50
+For a line-oriented interface:
 
-   * - Mode
-     - Command
-     - Target Use Case
-   * - **Chat TUI**
-     - ``perspt`` or ``perspt chat``
-     - Interactive conversation with formatted terminal rendering.
-   * - **Agent**
-     - ``perspt agent "<task>"``
-     - Autonomous multi-file code generation (experimental).
-   * - **Simple Chat**
-     - ``perspt simple-chat``
-     - CLI chat without terminal interface, ideal for shell piping.
-   * - **Exploration**
-     - ``perspt agent --exploration-only "<question>"``
-     - Read-only repository survey; nothing is mutated or promoted.
-   * - **Status**
-     - ``perspt status``
-     - Query metrics of the active agent session.
-   * - **Providers**
-     - ``perspt providers --probe``
-     - Print the provider capability matrix with live behavioral probes.
-   * - **Replay**
-     - ``perspt replay <session-id>``
-     - Deterministic, credential-free audit replay of a session.
-   * - **Audit**
-     - ``perspt audit <sample> --safe``
-     - Ingest delayed audit labels for conformal calibration.
-   * - **Prompts**
-     - ``perspt prompts list``
-     - Inspect the compiled prompt section libraries.
-   * - **Context**
-     - ``perspt context explain-turn --db-path <DB> <session-id>``
-     - Explain a session's recorded resident-context events.
+.. code-block:: bash
 
-Essential System Commands
--------------------------
+   perspt simple-chat --log-file chat.txt
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
+Type a message and press **Enter**; **Ctrl+D** exits.
+This command takes no positional prompt argument.
+It reads piped input one non-empty line at a time, and its output includes the banner, input echo, and session messages as well as model responses.
+For a single piped question:
 
-   * - Command
-     - Description
-   * - ``perspt config --show``
-     - Prints active configuration parameters.
-   * - ``perspt config --edit``
-     - Opens the TOML configuration file in your editor.
-   * - ``perspt init --memory --rules``
-     - Instantiates memory files and policy rules in the project workspace.
-   * - ``perspt status``
-     - Displays per-node states, energy components, and retries.
-   * - ``perspt abort``
-     - Signals the active agent process to terminate.
-   * - ``perspt resume --last``
-     - Resumes the most recently interrupted agent session.
-   * - ``perspt ledger --recent``
-     - Displays recent commits recorded in the Merkle ledger.
-   * - ``perspt ledger --rollback <session>``
-     - Undoes the named session's newest completed promotion (session id prefix).
+.. code-block:: bash
 
-Next Steps
+   printf '%s\n' 'Explain Rust ownership in three sentences.' | perspt simple-chat
+
+4. Try a code change
+--------------------
+
+**Start in an existing project with working local checks.** For a Rust project, run ``cargo test`` first, then give Perspt a specific task:
+
+.. code-block:: bash
+
+   perspt agent -w ./my-project \
+     "Add tests for empty input in the parser. Preserve the public API."
+
+The agent edits a candidate copy and runs the detected checks.
+It uses measured errors to guide repairs and asks for review before copying the final result into the project.
+Promotion does not create a Git commit.
+Agent mode is experimental; required tools and platform isolation are described in :doc:`installation`.
+
+**A hard pass means the required checks passed.** An improving intermediate checkpoint is not a completed task.
+If the run reaches a limit with errors remaining, it stops with a failure outcome instead of reporting success.
+We still review the diff and the adequacy of the tests.
+
+5. Watch or automate a run
+--------------------------
+
+.. code-block:: bash
+
+   # Live local browser view at http://127.0.0.1:3000
+   perspt agent --dashboard -w ./my-project "Fix the failing parser test"
+
+   # Non-interactive run; verification still applies
+   perspt agent --yes --output-summary summary.json \
+     -w ./my-project "Add tests for empty parser input"
+
+``--yes`` approves promotion automatically and is required without a terminal.
+A non-hard-pass outcome exits with a nonzero status.
+The embedded dashboard stops when the agent exits.
+
+Next steps
 ----------
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Guide
-     - Summary
-   * - :doc:`tutorials/index`
-     - Step-by-step learning guides.
-   * - :doc:`configuration`
-     - Customize providers and models.
-   * - :doc:`tutorials/agent-mode`
-     - Master autonomous coding.
-   * - :doc:`developer-guide/architecture`
-     - Understand the fourteen-crate design.
+- :doc:`tutorials/agent-mode`: Follow a complete coding task and inspect the result.
+- :doc:`configuration`: Choose providers, test policies, and verification settings.
+- :doc:`user-guide/agent-mode`: Understand review, limits, resume, and replay.
+- :doc:`api/index`: Reuse the Rust SDK.

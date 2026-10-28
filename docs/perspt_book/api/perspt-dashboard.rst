@@ -12,7 +12,7 @@ Core Types
 .. code-block:: rust
 
    pub struct AppState {
-       pub store: Arc<SessionStore>,        // read-only DuckDB
+       pub store: Arc<SessionStore>,        // shared store; read-only dashboard operations
        pub password: Option<String>,         // optional auth password
        pub session_token: Arc<Mutex<Option<String>>>,
        pub working_dir: PathBuf,

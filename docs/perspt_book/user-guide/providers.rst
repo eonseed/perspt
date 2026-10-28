@@ -3,137 +3,108 @@
 Providers
 =========
 
-Perspt supports multiple LLM providers through the ``genai`` Rust client crate, which provides unified access to all major commercial, open-source, and cloud-provider model APIs.
+**Use an explicit model route when several providers are configured.** A route has the form ``provider::model``.
+The provider prefix selects an adapter and the model part is passed through to it.
+A bare model name uses the configured or detected provider.
 
-Supported Providers and Adapters
---------------------------------
-
-Perspt accepts nine provider identifiers, each routed to the matching ``genai`` adapter (any other value is rejected as unsupported):
+Supported adapters
+------------------
 
 .. list-table::
    :header-rows: 1
-   :widths: 20 20 25 35
+   :widths: 25 25 50
 
-   * - Provider / Adapter
-     - Adapter Kind ID
-     - Reference Model
-     - Notes
-   * - **OpenAI**
+   * - Provider
+     - Prefix
+     - Credential or connection
+   * - OpenAI and compatible servers
      - ``openai``
-     - ``gpt-5.5``
-     - SOTA GPT-5.5, GPT-5-mini
-   * - **Anthropic**
+     - ``OPENAI_API_KEY``; optional ``OPENAI_BASE_URL``.
+   * - Anthropic
      - ``anthropic``
-     - ``claude-fable``
-     - Claude Fable, Opus 4.8, Sonnet 4.6, Haiku 4.6
-   * - **Google Gemini**
-     - ``gemini``, ``google``
-     - ``gemini-3.5-flash``
-     - Gemini 3.5 Flash, 3.1 Pro, 3.1 Flash-Lite
-   * - **Google Vertex AI**
+     - ``ANTHROPIC_API_KEY``.
+   * - Google Gemini
+     - ``gemini`` or ``google``
+     - ``GEMINI_API_KEY``.
+   * - Google Vertex AI
      - ``vertex``
-     - ``vertex::gemini-3.5-flash``
-     - Google Cloud Vertex platform
-   * - **Groq**
+     - ``VERTEX_PROJECT_ID`` and Application Default Credentials; optional ``VERTEX_LOCATION``.
+   * - Groq
      - ``groq``
-     - ``llama-3.3-70b-specdec``
-     - Ultra-low latency Llama/Gemma on LPU
-   * - **Cohere**
+     - ``GROQ_API_KEY``.
+   * - Cohere
      - ``cohere``
-     - ``command-a-plus``
-     - Command A+, North Mini Code
-   * - **xAI**
+     - ``COHERE_API_KEY``.
+   * - xAI
      - ``xai``
-     - ``grok-4``
-     - Grok 4 family
-   * - **DeepSeek**
+     - ``XAI_API_KEY``.
+   * - DeepSeek
      - ``deepseek``
-     - ``deepseek-v4``
-     - DeepSeek v4 models (Chat, Coder)
-   * - **Ollama**
+     - ``DEEPSEEK_API_KEY``.
+   * - Ollama
      - ``ollama``
-     - ``llama3.3``
-     - Local offline models
+     - Local server; no API key. Optional ``OLLAMA_BASE_URL``.
 
-Configuration Methods
----------------------
+Model access and tool-calling support depend on the account, server, and model.
+Perspt's adapter list is not a catalog of available models.
+``perspt providers`` shows configured routes; ``perspt providers --probe`` makes live requests to test their behavior.
 
-**1. Environment Variables** (recommended):
+Choose a route
+--------------
 
-.. code-block:: bash
-
-   export GEMINI_API_KEY="your-key"
-   perspt
-
-**2. CLI Flags**:
+Replace ``<model-id>`` with an identifier available through the selected provider:
 
 .. code-block:: bash
 
-   perspt chat --model gpt-5.5
+   export OPENAI_API_KEY="<api-key>"
+   perspt chat --model 'openai::<model-id>'
 
-**3. Config File** (``config.toml``):
+For local chat, select an installed model:
+
+.. code-block:: bash
+
+   ollama list
+   perspt chat --model ollama::llama3.2
+
+The local ID here is an example, not a requirement.
+See :doc:`../tutorials/local-models` for setup.
+
+Persist the default
+-------------------
+
+The configuration file can set a provider and model:
 
 .. code-block:: toml
 
-   provider = "anthropic"
-   model = "claude-fable"
+   provider = "openai"
+   model = "<model-id>"
 
-Agent mode can additionally bind several credentials and routes at once
-through the ``[providers.<id>]`` and ``[models]`` tables, which hold
-fully qualified ``provider::model`` routes for multi-route portfolios.
-See :doc:`agent-mode` for details.
+A CLI ``--model`` override takes precedence for that run.
+Agent roles can use different fully qualified routes through ``[providers.<id>]`` and ``[models]``.
+See :doc:`../howto/providers` for setup and :doc:`advanced-features` for role routing.
 
-Provider-Specific Notes
------------------------
+Vertex AI
+---------
 
-**OpenAI**
-
-.. code-block:: bash
-
-   export OPENAI_API_KEY="sk-xxx"
-   perspt chat --model gpt-5.5
-
-**Azure OpenAI (via OpenAI Compatible)**
-
-Azure OpenAI requires configuring the base URL override and the API key:
+The Vertex adapter resolves ADC tokens per request unless ``VERTEX_API_KEY`` supplies an explicit bearer-token override.
+``VERTEX_LOCATION`` defaults to ``global``.
 
 .. code-block:: bash
 
-   export OPENAI_API_KEY="your-azure-key"
-   export OPENAI_BASE_URL="https://your-resource.openai.azure.com/openai/deployments/your-deployment"
-   perspt chat --model gpt-5.5
+   gcloud auth application-default login
+   export VERTEX_PROJECT_ID="<project-id>"
+   export VERTEX_LOCATION="global"
+   perspt chat --model 'vertex::<model-id>'
 
-**Anthropic**
+OpenAI-compatible endpoints
+---------------------------
 
-.. code-block:: bash
-
-   export ANTHROPIC_API_KEY="sk-ant-xxx"
-   perspt chat --model claude-fable
-
-**Google Gemini**
+A server must support the OpenAI request format expected by the adapter:
 
 .. code-block:: bash
 
-   export GEMINI_API_KEY="AIza..."
-   perspt chat --model gemini-3.5-flash
+   export OPENAI_API_KEY="<server-key>"
+   export OPENAI_BASE_URL="http://localhost:8000/v1"
+   perspt chat --model 'openai::<served-model-id>'
 
-**Google Vertex AI**
-
-Vertex AI requires your Google Cloud project ID and a location (optional, defaults to ``global``). Authentication is typically handled via Google Application Default Credentials (ADC); setting ``VERTEX_API_KEY`` to a bearer token overrides the ADC token.
-
-.. code-block:: bash
-
-   export VERTEX_PROJECT_ID="my-gcp-project-123"
-   export VERTEX_LOCATION="us-central1"
-   # Run using Vertex model prefix
-   perspt chat --model vertex::gemini-3.5-flash
-
-**Ollama (Local)**
-
-.. code-block:: bash
-
-   ollama serve
-   ollama pull llama3.3
-   perspt chat --model llama3.3
-
-No API key required. Perspt auto-detects Ollama as the fallback provider.
+A base URL override alone does not establish compatibility with a provider-specific authentication or deployment protocol.

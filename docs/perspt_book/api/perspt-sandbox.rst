@@ -36,8 +36,8 @@ Usage
 
 .. code-block:: rust
 
-   let sandbox = BasicSandbox::new("cargo", vec!["test"])
-       .with_working_dir("/path/to/project")
+   let sandbox = BasicSandbox::new("cargo".into(), vec!["test".into()])
+       .with_working_dir("/path/to/project".into())
        .with_timeout(Duration::from_secs(60));
 
    let result = sandbox.execute()?;

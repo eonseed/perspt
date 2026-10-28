@@ -3,8 +3,7 @@
 Basic Usage
 ===========
 
-Perspt offers three primary modes of interaction: the **TUI** (rich interactive terminal UI),
-**simple-chat** (plain-text streaming for pipeline integration), and **Agent** (self-stabilizing autonomous multi-agent coding workflows).
+**Choose full-screen chat, plain terminal chat, or a coding task.** Chat modes support conversation; agent mode edits a candidate copy and runs project checks.
 
 Launching the TUI
 ------------------
@@ -110,7 +109,7 @@ boundary.
 Simple CLI Mode
 ---------------
 
-For a minimal text interface suitable for piping and logging:
+For line-oriented chat with optional session logging:
 
 .. code-block:: bash
 
@@ -121,6 +120,10 @@ For a minimal text interface suitable for piping and logging:
 Type your message, press Enter. Responses stream to stdout. Type ``exit`` or
 press ``Ctrl+D`` to quit.
 
+**Piped input is line-oriented.** Each non-empty line becomes a separate message.
+The command takes no positional prompt, and stdout includes a banner, input echoes, and session messages as well as responses.
+It does not combine a multiline file into a single prompt or provide a response-only output mode.
+
 Autonomous Agent Mode
 ---------------------
 
@@ -130,7 +133,9 @@ For complex software engineering and coding jobs that require self-stabilizing, 
 
    perspt agent "Implement a parsing logic for custom CSV formats in src/csv.rs"
 
-This starts the multi-agent orchestration loop. The system automatically plans, executes, and verifies the changes using local verification commands. You can specify custom models and configure validation parameters to match your codebase. Refer to :doc:`agent-mode` for details.
+The default run uses one work node.
+The agent edits a candidate copy, measures project checks, and requests promotion approval for a deliverable result.
+See :doc:`agent-mode` for review, verification policies, and optional parallel dispatch.
 
 
 Provider Auto-Detection

@@ -15,18 +15,10 @@ The SRBN engine at the heart of Perspt's experimental agent mode is based on the
 
   **Paper III:** *The SRBN Platform Contract*
 
-The series introduces a topological and control-theoretic framework that
-reformulates LLM agency as measured proposal, correction, and acceptance. Key
-theoretical contributions adopted in Perspt include:
-
-- **Input-to-State Stability (ISS)** - bounded reasoning errors yield bounded system deviation (paper proof)
-- **Flow Matching Barriers** - project diverging trajectories back onto the safe manifold (paper result)
-- **Adaptive Flow Speculation** - latency reduction via predictive branch execution
-- **Logarithmic Reliability Scaling** - the papers predict :math:`O(\log N)` retry cost instead of exponential decay
-
-Perspt serves as an experimental testbed for exploring these theoretical ideas in
-real-world multi-file coding workloads. The mathematical framework is mature;
-empirical benchmarks on Perspt's implementation have not yet been published.
+The specifications draw on the series for measured residual energy, bounded correction, and a separation between model proposals and governed effects.
+Perspt serves as an experimental coding implementation of these ideas.
+The coding domain uses measured discrete gates and declares its continuous analytic constants ``NotClaimed``.
+Paper assumptions and illustrative figures do not establish a measured success rate for Perspt.
 
 Core Dependencies
 -----------------
@@ -35,7 +27,7 @@ AI and LLM Integration
 ~~~~~~~~~~~~~~~~~~~~~~
 
 **genai**
-  The foundation of Perspt's multi-provider support. This exceptional crate provides unified interfaces to multiple AI providers and automatically stays up-to-date with new models and capabilities.
+  The foundation of Perspt's multi-provider support. This exceptional crate provides unified interfaces to multiple AI providers and supplies the adapters used by Perspt's configured model routes.
   
   * **Project**: `genai <https://crates.io/crates/genai>`_
   * **License**: MIT/Apache 2.0

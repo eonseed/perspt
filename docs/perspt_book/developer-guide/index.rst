@@ -17,6 +17,8 @@ Internals, architecture, and contribution guide for Perspt developers.
      - Dev setup, coding standards, and PR workflow.
    * - :doc:`extending`
      - Add providers, tools, language plugins, and custom domain adapters.
+   * - :doc:`documentation`
+     - Build and review the Guidedog website, figures, and PDFs.
    * - :doc:`testing`
      - Test infrastructure, patterns, and conventions.
 
@@ -28,3 +30,4 @@ Internals, architecture, and contribution guide for Perspt developers.
    contributing
    extending
    testing
+   documentation

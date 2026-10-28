@@ -91,7 +91,7 @@ Model Portfolio
    * - ``--actuator-model <M>``
      - Primary implementation route.
    * - ``--explorer-model <M>``
-     - Cheap, no-tool repository-map summarizer.
+     - Optional read-only repository exploration model.
    * - ``--adjudicator-model <M>``
      - Optional no-tool validator of the realized diff. Its verdict is an
        uncalibrated conjunctive veto, never an energy measurement.

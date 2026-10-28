@@ -9,33 +9,25 @@ an agent session in real time.
 Prerequisites
 -------------
 
-- Perspt installed (``cargo install --path crates/perspt-cli``)
+- Perspt installed (see :doc:`../installation`)
 - A project directory to work in
 
-Step 1: Start an Agent Session
-------------------------------
+Step 1: Start an agent with its dashboard
+-----------------------------------------
 
 .. code-block:: bash
 
-   perspt agent -w ./myproject "Create a REST API in Rust"
+   perspt agent --dashboard -w ./myproject "Fix the failing parser test"
 
-The agent will begin planning and executing tasks. Leave this terminal
-running.
+Leave this terminal running.
+The embedded dashboard shares the agent's store connection; it stops when the agent exits.
 
-Step 2: Launch the Dashboard
-----------------------------
+Step 2: Open the local dashboard
+--------------------------------
 
-Open a **new terminal** and run:
-
-.. code-block:: bash
-
-   perspt dashboard
-
-You should see:
-
-.. code-block:: text
-
-   Perspt dashboard listening on http://127.0.0.1:3000
+Open ``http://127.0.0.1:3000`` in a browser.
+After the agent exits, ``perspt dashboard`` can reopen historical sessions.
+A standalone dashboard process can conflict with an active writer's database lock, so we use the embedded option during a run.
 
 Step 3: Open the Overview
 -------------------------

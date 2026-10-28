@@ -24,21 +24,28 @@ You can then score verifier diagnostics with the canonical quadratic Lyapunov en
    use perspt_sdk::{
        domain::{AgentDomainPackage, DomainScope},
        energy::score_candidate,
-       gate::evaluate_gate,
+       gate::{evaluate_gate, GateDecision},
+       residual::ResidualEvent,
    };
 
-   fn check_candidate(scope: &DomainScope, residuals: &[perspt_sdk::residual::ResidualEvent], best_v: f64) -> perspt_sdk::error::Result<bool> {
-       let domain = CodingDomain;
-       let model = domain.energy_model(scope);
-       let score = score_candidate(residuals, &model)?;
-       let decision = evaluate_gate(
-           score.hard_violations.is_empty(),
-           score.total,
-           best_v,
-           model.rho_gate,
-       )?;
-       Ok(decision.is_accepted())
+   fn check_candidate(
+       scope: &DomainScope,
+       residuals: &[ResidualEvent],
+       all_required_checks_passed: bool,
+       best_v: f64,
+   ) -> perspt_sdk::error::Result<GateDecision> {
+       let model = CodingDomain.energy_model(scope);
+       let score = score_candidate(&model, residuals)?;
+       let hard_pass = all_required_checks_passed
+           && score.hard_violations.is_empty()
+           && score.blocked.is_empty();
+       evaluate_gate(hard_pass, score.total, best_v, model.rho_gate)
    }
+
+The caller must run the required verifiers to determine ``all_required_checks_passed``.
+An empty ``hard_violations`` list only means no declared residual threshold was exceeded.
+``AcceptedByDescent`` permits intermediate progress; it is not delivery success.
+This example scores evidence and evaluates a gate; it does not run tools, authorize effects, or promote files.
 
 .. tip::
 

@@ -9,7 +9,7 @@ Prerequisites
 -------------
 
 - `Ollama <https://ollama.ai>`_ installed
-- Sufficient RAM for your chosen model (7B models: 8GB+, 70B models: 64GB+)
+- Enough memory for the installed model and its context. Check the model's own requirements.
 
 Setup
 -----
@@ -24,7 +24,6 @@ Setup
 
    # Pull a model
    ollama pull llama3.2
-   ollama pull codellama  # For coding tasks
 
 Using Ollama with Perspt
 -------------------------
@@ -40,55 +39,23 @@ Perspt auto-detects Ollama if no cloud API keys are set:
    perspt
 
    # Or specify a model explicitly
-   perspt chat --model llama3.2
+   perspt chat --model ollama::llama3.2
 
 Agent Mode with Local Models
 -----------------------------
 
 .. code-block:: bash
 
-   perspt agent --model qwen2.5-coder -w ./my-project "Create a Python utility"
+   perspt agent --model ollama::qwen2.5-coder -w ./my-project "Create a Python utility"
 
-.. admonition:: Performance Note
-   :class: note
+**Agent mode needs tool-calling support.** A model that works in chat may not support the agent's structured tool calls.
+Pull the selected model first, check that its route supports the required operations, and start with a small task.
+An explicit ``ollama::`` prefix keeps the local route selected even when cloud credentials are present.
 
-   Local models are slower and less capable than cloud models for complex agent
-   tasks. For best results with agent mode, use a capable model (70B+ parameters)
-   or use a cloud model for the actuator route and keep the cheap local model
-   on read-only exploration:
+.. code-block:: bash
 
-   .. code-block:: bash
+   ollama pull qwen2.5-coder
+   perspt providers --probe
 
-      export GEMINI_API_KEY="your-key"
-      perspt agent \
-        --actuator-model gemini-3.1-pro \
-        --explorer-model qwen2.5-coder \
-        -w ./project "Create a utility"
-
-Available Models
-----------------
-
-Popular Ollama models for use with Perspt:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 15 60
-
-   * - Model
-     - Size
-     - Best For
-   * - ``llama3.3``
-     - 8B/70B
-     - General chat
-   * - ``qwen2.5-coder``
-     - 7B/32B
-     - Code generation
-   * - ``deepseek-coder-v2``
-     - 16B/236B
-     - Code generation
-   * - ``mistral``
-     - 7B
-     - General purpose
-   * - ``phi4``
-     - 14B
-     - Reasoning and lightweight tasks
+Provider probes make live requests to configured routes.
+The example model IDs illustrate route syntax; installed models are listed by ``ollama list``.

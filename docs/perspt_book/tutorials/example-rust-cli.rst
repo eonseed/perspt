@@ -17,7 +17,7 @@ Running the Agent
 
    export GEMINI_API_KEY="your-key"
 
-   perspt agent --yes -w /tmp/csv2json \
+   perspt agent --yes --allow-dependency-mutation -w /tmp/csv2json \
      --actuator-model gemini-3.1-pro \
      --explorer-model gemini-3.5-flash \
      "Create a Rust CLI tool called csv2json that:
@@ -28,8 +28,8 @@ Running the Agent
       5. Uses clap for argument parsing
       6. Includes unit tests and integration tests"
 
-Expected Output
----------------
+Example output layout
+---------------------
 
 .. code-block:: text
 
@@ -63,7 +63,7 @@ Key Observations
 - The ``rust`` plugin selects ``rust-analyzer`` as the LSP server
 - ``cargo init`` bootstraps the project structure (V_boot)
 - ``cargo test`` runs both unit and integration tests (V_log)
-- Ownership closure assigns each source file to exactly one node
+- The dispatcher prevents nodes with conflicting write footprints from running concurrently
 
 See Also
 --------

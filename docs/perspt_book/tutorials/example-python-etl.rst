@@ -23,7 +23,7 @@ Running the Agent
 
    export GEMINI_API_KEY="your-key"
 
-   perspt agent --yes -w /tmp/etl-demo \
+   perspt agent --yes --allow-dependency-mutation -w /tmp/etl-demo \
      --actuator-model gemini-3.1-pro \
      --explorer-model gemini-3.5-flash \
      "Create a Python ETL pipeline package. It should:
@@ -34,10 +34,11 @@ Running the Agent
       5. Use uv for dependency management with pandas and pydantic
       6. Include comprehensive pytest tests for each module"
 
-Expected Output
----------------
+Example output layout
+---------------------
 
-The agent produces a project with ``src/`` layout:
+A successful run may produce a layout like this.
+The exact files and test count depend on the generated implementation:
 
 .. code-block:: text
 
@@ -61,8 +62,8 @@ Verification
 
 The engine verifies every checkpoint with real sensors: the ``ty`` LSP
 server and pytest measure the energy of each candidate, and a checkpoint
-is accepted only when that measured energy descends by at least the
-``--rho-gate`` margin. When the run finishes, the terminal summary
+is accepted on a hard pass or sufficient measured descent.
+Only a hard-passing result can be delivered. When the run finishes, the terminal summary
 reports the outcome, the session id, turns used, the ledger head hash,
 and the promoted paths.
 
@@ -72,14 +73,13 @@ After completion, verify manually:
 
    cd /tmp/etl-demo
    uv run pytest -v
-   # Expected: 15-20 tests passing
 
 Key Observations
 ----------------
 
 - The agent uses ``uv init --lib`` to create proper ``src/`` layout with
   ``[build-system]`` in ``pyproject.toml``
-- Ownership closure ensures no two nodes write to the same file
+- The dispatcher prevents nodes with conflicting write footprints from running concurrently
 - The ``ty`` LSP server provides real-time type checking
 - pytest provides test verification
 - Work is promoted only after the run's final checkpoint passes every

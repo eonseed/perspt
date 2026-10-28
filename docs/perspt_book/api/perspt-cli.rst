@@ -19,7 +19,7 @@ Subcommands
    * - ``simple-chat``
      - Plain-text streaming chat
    * - ``agent``
-     - PSP-9 autonomous coding agent (22 options)
+     - Governed coding agent; see ``perspt agent --help`` for current options
    * - ``init``
      - Initialize project memory and policy rules
    * - ``config``

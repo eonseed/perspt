@@ -38,10 +38,10 @@ Build from Source
 
 .. code-block:: bash
 
-   cargo build -p perspt-dashboard --release
+   cargo build --locked -p perspt-cli --release --features bundled
 
-The dashboard binary is built as part of the ``perspt`` CLI. Running
-``cargo build --release`` from the workspace root includes it.
+The dashboard is a library embedded in the ``perspt`` CLI, not a separate binary.
+Use ``perspt agent --dashboard`` for live monitoring and ``perspt dashboard`` after the writer exits.
 
 Launch Locally
 --------------
@@ -75,8 +75,8 @@ alongside the agent using the ``--dashboard`` flag:
    perspt agent --dashboard "Create a REST API"
 
 This spawns the dashboard as a background task within the agent process.
-It opens a separate read-only DuckDB connection to the same database file
-the agent writes to - DuckDB supports one writer plus concurrent readers.
+The embedded server shares the agent's store connection.
+A separate dashboard process can conflict with an active writer's DuckDB lock.
 
 To use a custom port:
 

@@ -7,13 +7,9 @@ The **Stabilized Recursive Barrier Network (SRBN)** is the idea behind Perspt's
 experimental autonomous coding agent. It comes from the *Stability is All You
 Need* paper series.
 
-The idea is plain to state. A language model is good at proposing changes, but a
-proposal is only a guess. Left unchecked, a long run of guesses drifts: small
-mistakes pile up until the work is broken. SRBN refuses to trust a guess on its
-word. It measures every proposed change, keeps the change only when the
-measurement shows progress, and writes the kept result to a permanent record.
-Perspt's coding agent implements this work via a reusable software-development-kit
-(SDK) platform (originally specified in the references section under PSP-8).
+**Models propose; tools measure; the gate decides what progress to keep.** A proposal can contain errors that later edits build on.
+Perspt checks candidate states and records both observations and decisions.
+The runtime uses the shared contracts in ``perspt-sdk``.
 
 .. admonition:: Theory vs. Implementation
    :class: note
@@ -22,8 +18,8 @@ Perspt's coding agent implements this work via a reusable software-development-k
     runtime implements it. Where a claim comes from the papers' formal proofs,
     it is noted as a **paper result**. Where the developer team makes engineering choices that
     approximate or extend the theory, those are noted as **implementation details**.
-    The theoretical framework is mature; empirical benchmarks on Perspt's implementation
-    have not yet been published.
+    The coding domain uses measured discrete gates and declares its continuous analytic constants ``NotClaimed``.
+    Formal assumptions and illustrative figures do not establish an empirical success rate.
 
 Overview
 --------
@@ -33,8 +29,8 @@ a sheaf structure that enforces consistency across shared boundaries. The system
 establishes the following concrete mechanics: each node owns a set
 of output files (ownership closure), runs a governed tool loop of typed tool
 calls against an isolated candidate, and must pass the measured acceptance
-gate on deterministic verifier evidence. Only then is the node's winner
-promoted and committed to the Merkle ledger.
+gate on deterministic verifier evidence. Accepted checkpoints are recorded in the ledger.
+Delivery additionally requires the required checks and promotion approval; multi-node runs verify the merged result.
 
 The runtime environment structures execution in two primary ways:
 
@@ -144,7 +140,11 @@ state :math:`x`, the total Lyapunov energy :math:`V(x)` is defined by the quadra
    V(x) = \sum_{e \in \mathcal{E}} w_e \, \lVert r_e(x) \rVert^2
 
 where :math:`w_e > 0` represents the positive weight assigned to the residual class of
-sensor :math:`e`. 
+sensor :math:`e`.
+
+The quadratic expression is continuous in residual magnitudes.
+The runtime measures discrete workspaces, where residual counts can jump.
+A smooth illustration does not assert a continuous code-space trajectory.
 
 The five component readouts :math:`V_{syn}`, :math:`V_{str}`, :math:`V_{log}`,
 :math:`V_{boot}`, and :math:`V_{sheaf}` are **derived rollups** of this same energy,
@@ -194,6 +194,7 @@ to them from the `perspt-coding` domain package:
        * ``Policy`` (weight: 1.0)
        * ``Dependency`` (weight: 1.5)
        * ``Manifest`` (weight: 1.5)
+       * ``Lint`` (weight: 0.5)
        * ``Format`` (weight: 0.25)
      - Measures structural contract adherence. If a required symbol defined by a node's public
        interface signature is absent from the generated output files, the ``GoalPresence`` sensor
@@ -265,7 +266,9 @@ miss correlations.
 Node Classes
 ------------
 
-The system utilizes three node classes that govern execution order and verification:
+The following three classes describe the historical PSP-5 design.
+The current SDK has a broader taxonomy, and the planner currently emits ``Implement`` nodes.
+See :doc:`../user-guide/agent-mode` for the current node classes.
 
 .. list-table::
    :header-rows: 1
@@ -459,30 +462,20 @@ Language plugins determine the verification toolchain:
      - ``npm test``
      - ``npm init -y``
      - ``node``, ``npm``
-   * - **Go**
-     - ``gopls``
-     - ``go test``
-     - ``go mod init``
-     - ``go``
 
-The plugin is selected automatically during the Detection phase based on existing
-project files or the task description. Multi-language projects activate multiple
+Built-in plugins detect Rust, Python, and JavaScript/TypeScript from workspace markers and supported source files.
+There is no built-in Go plugin. Multi-language projects activate multiple
 plugins simultaneously.
 
 
 Degraded Verification
 ---------------------
 
-When a verification tool is unavailable (e.g., ``ty`` not installed), the SRBN
-engine falls back to degraded mode:
-
-- **Sensor fallback**: If the primary LSP server is not found, try a secondary
-  (e.g., ``pyright`` instead of ``ty``). Emit a ``SensorFallback`` event.
-- **Degraded stages**: If no LSP server is available at all, V_syn is set to 0.0
-  and the stage is marked degraded. Energy convergence proceeds without that
-  component.
-- **Stability blocked**: If too many stages degrade, the node cannot converge and
-  is escalated.
+**Missing required evidence blocks a hard pass.** A detected fallback can provide a separately identified sensor.
+If no required syntax, build, or test command can run, the runtime records a blocking ``SensorUnavailable`` residual.
+Non-required stages can report advisory findings without blocking the hard gate.
+A plugin can also declare a stage as a no-op, such as the Python build stage.
+The runtime does not silently treat a missing required verifier as a zero-error measurement.
 
 
 Merkle Ledger

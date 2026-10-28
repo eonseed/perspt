@@ -3,10 +3,10 @@
 Agent Mode
 ==========
 
-The agent command runs the governed PSP-9 tool loop for autonomous
-multi-file code generation. Agent mode is the current coding-domain
-implementation of the stability contracts described in
-:doc:`../concepts/stability-agent-mode`.
+**Give Perspt a coding task and a project directory.** The agent edits a candidate copy, runs detected project checks, and requests approval before promotion.
+Agent mode is experimental.
+A hard pass means the required checks passed; a run can also stop with unresolved errors.
+The runtime contracts are described in :doc:`../concepts/stability-agent-mode`.
 
 Launching Agent Mode
 --------------------
@@ -158,7 +158,7 @@ SDK contract that dispatch and the ledger record.
 Review Modal (Interactive)
 --------------------------
 
-When running without ``--yes``, the review modal presents the affected
+For a single-node run without ``--yes``, the review modal presents the affected
 files, the verification gate results (syntax, build, tests, lint, plus
 test pass/fail counts), the scalar energy ``V(x)``, and a degraded flag
 listing any sensors that could not run.
@@ -230,19 +230,10 @@ integration.
 Dashboard Monitoring
 --------------------
 
-While an agent session runs, you can observe it in a browser:
-
-.. code-block:: bash
-
-   # In a separate terminal
-   perspt dashboard
-
-Open ``http://localhost:3000`` to see the Overview, Session detail,
-Topology, Backlog, Energy, Decisions, and Governance pages. The Decisions
-page is a flat Merkle-chained event trace. The dashboard reads the session
-store in read-only mode so it never interferes with the running agent.
-
-See :doc:`dashboard` for full details.
+After a session finishes, ``perspt dashboard`` opens its database read-only for inspection.
+A separate dashboard process can conflict with an active writer's DuckDB lock.
+For live monitoring, use the embedded option below.
+See :doc:`dashboard` for the page map and interpretation.
 
 Live Dashboard Monitoring
 --------------------------

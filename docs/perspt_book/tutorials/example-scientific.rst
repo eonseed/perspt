@@ -23,7 +23,7 @@ Create a computational fluid dynamics simulation scaffolding:
 
    export GEMINI_API_KEY="your-key"
 
-   perspt agent --yes -w /tmp/cfd-sim \
+   perspt agent --yes --allow-dependency-mutation -w /tmp/cfd-sim \
      --actuator-model gemini-3.1-pro \
      --explorer-model gemini-3.5-flash \
      "Create a Python CFD simulation package that:
@@ -63,7 +63,7 @@ Analyze experimental wind tunnel data:
 
 .. code-block:: bash
 
-   perspt agent --yes -w /tmp/wind-tunnel \
+   perspt agent --yes --allow-dependency-mutation -w /tmp/wind-tunnel \
      --actuator-model gemini-3.1-pro \
      --explorer-model gemini-3.5-flash \
      "Create a Python wind tunnel data analysis package that:
@@ -84,7 +84,7 @@ Build a simple FEM solver in Rust:
 
 .. code-block:: bash
 
-   perspt agent --yes -w /tmp/fem-solver \
+   perspt agent --yes --allow-dependency-mutation -w /tmp/fem-solver \
      --actuator-model gemini-3.1-pro \
      --explorer-model gemini-3.5-flash \
      "Create a Rust finite element package that:
@@ -103,8 +103,7 @@ Tips for Scientific Tasks
    scheme, and solver type in the prompt
 2. **Include validation criteria** - Reference known analytical solutions or
    benchmark data for tests
-3. **Relax the descent gate** - Scientific tests often depend on numerical
-   tolerances that need tuning after initial generation: ``--rho-gate 0.1``
+3. **Set numerical tolerances in the tests** - The descent margin controls checkpoint progress, not the accuracy required by a scientific assertion.
 4. **Raise the loop bounds** - Scientific code often requires more iterations
    for convergence: ``--max-turns 20 --rejection-budget 8``
 5. **Review carefully** - Numerical correctness requires domain expertise beyond

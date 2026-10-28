@@ -143,7 +143,7 @@ All PRs must pass:
    cargo doc --locked --workspace --no-deps
    ./check-rules.sh check
 
-The PR gate runs once on Ubuntu. It downloads the official DuckDB 1.5.5 shared
+The PR gate runs once on Ubuntu. It downloads the official DuckDB 2.0.0 shared
 library, verifies its published checksum, and compiles the optional
 ``benchmark`` CLI without running live model evaluation. Release builds, not
 CI tests, use the expensive ``bundled`` feature. A merge-queue commit,
@@ -159,7 +159,6 @@ ahead of it in the queue. Without an enabled merge-queue ruleset, maintainers
 must use the CI workflow's manual full run when pre-merge cross-platform
 evidence is required; the protected-branch push remains a post-merge fallback.
 
-The project currently has over 800 tests across all crates.
 
 
 Benchmarks Are Not Tests
@@ -175,10 +174,6 @@ unit tests are credential-free and run with the ordinary workspace suite.
 Panic Safety
 ------------
 
-``main`` installs a panic hook that:
-
-1. Restores terminal (raw mode off, leave alternate screen)
-2. Prints the panic message with guidance
-3. Exits cleanly
-
-Test this with ``tests/panic_handling_test.rs``.
+The TUI runner restores the terminal on its normal exit path.
+If a crash leaves the terminal in raw mode, use ``reset`` or ``stty sane``.
+The integration fixture ``tests/panic_handling_test.rs`` covers panic and error scenarios.

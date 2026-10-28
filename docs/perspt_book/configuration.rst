@@ -67,47 +67,23 @@ Set any supported API key environment variable and run ``perspt`` with no argume
    perspt                # auto-detects Gemini, uses gemini-3.1-flash-lite-preview
    perspt chat --model gemini-3.1-pro   # override model
 
-Advanced Enterprise Provider Configurations
--------------------------------------------
+Vertex AI authentication
+------------------------
 
-Unlike standard API-key based providers, enterprise platforms like **Google Agent Platform (formerly Vertex AI)** require multi-part configurations and secure credentials to function.
-
-Google Agent Platform (formerly Vertex AI)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Google Agent Platform/Vertex AI uses secure OAuth2 Bearer Tokens rather than standard static API keys. You must supply your Google Cloud Project ID and regional location alongside the access token.
-
-**Required Environment Variables:**
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Variable
-     - Description
-   * - ``VERTEX_API_KEY``
-     - Your OAuth2 Bearer access token (generate dynamically via gcloud CLI).
-   * - ``VERTEX_PROJECT_ID``
-     - Your Google Cloud Platform (GCP) Project ID.
-   * - ``VERTEX_LOCATION``
-     - The GCP region hosting Vertex AI resources (e.g., ``us-central1`` or ``europe-west3``).
-
-**Token Generation Quickstart:**
-
-Since OAuth2 access tokens are short-lived (usually expiring in 1 hour), you can export the token dynamically in your shell before running Perspt:
+The Vertex adapter reads ``VERTEX_PROJECT_ID`` and an optional ``VERTEX_LOCATION`` (default ``global``).
+Without an explicit bearer-token override, Perspt obtains tokens through Application Default Credentials and resolves them per request.
+The ``gcloud`` CLI can configure local ADC:
 
 .. code-block:: bash
 
-   # 1. Authenticate with Google Cloud CLI
-   gcloud auth login
+   gcloud auth application-default login
+   export VERTEX_PROJECT_ID="<project-id>"
+   export VERTEX_LOCATION="global"
+   perspt chat --model 'vertex::<model-id>'
 
-   # 2. Configure variables and inject your access token
-   export VERTEX_PROJECT_ID="your-gcp-project-123"
-   export VERTEX_LOCATION="us-central1"
-   export VERTEX_API_KEY=$(gcloud auth print-access-token)
-
-   # 3. Launch Perspt using a Vertex AI model
-   perspt chat --model gemini-3.5-flash
+Replace ``<model-id>`` with a model enabled in the project.
+``VERTEX_API_KEY`` is an optional bearer-token override, not a required static API key.
+An explicitly supplied token must be refreshed by its owner when it expires.
 
 Supported Models & Naming Conventions
 -------------------------------------

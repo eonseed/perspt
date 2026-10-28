@@ -3,7 +3,7 @@
 Agent Mode Tutorial
 ===================
 
-Master autonomous multi-file code generation with the experimental SRBN engine.
+**Run a small coding task, inspect the checks, and review the result.** Agent mode is experimental.
 
 Overview
 --------
@@ -21,8 +21,8 @@ mechanisms.
    :class: note
 
    Agent mode implements the SRBN theoretical framework. The engine is functional
-   and usable, but has not yet been benchmarked. Results may vary depending on model
-   capability and task complexity.
+   and usable. Outcomes depend on the model, task, configured checks, and run limits.
+   Illustrative diagrams are not benchmark evidence.
 
 Prerequisites
 -------------
@@ -95,9 +95,9 @@ each node:
 1. The actuator proposes typed tool calls (file edits, commands, reads)
 2. Effects are applied inside an isolated candidate workspace
 3. Compiler, test, and lint sensors measure the checkpoint's energy
-4. A checkpoint is accepted only when measured energy descends by at
-   least ``--rho-gate``; non-descending attempts draw down the shared
-   ``--rejection-budget``
+4. A hard pass or descent of at least ``--rho-gate`` accepts a checkpoint.
+   Other attempts consume the shared rejection budget.
+   Descent alone does not authorize final promotion.
 
 Nodes run one at a time by default; ``--max-parallel-nodes`` raises the
 concurrent dispatch bound (above 1 requires ``--yes``).
@@ -126,15 +126,15 @@ approval. Keys inside the modal:
 Step 4: Inspect Results
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-After all nodes converge and pass sheaf validation:
+After a hard-passing result is approved and promoted:
 
 .. code-block:: bash
 
    ls -la
    # pyproject.toml  src/  tests/  uv.lock
 
-   # Run the tests
-   cd calc-demo && uv run pytest -v
+   # We are already inside calc-demo from Step 1
+   uv run --no-sync pytest -v
 
    # Check the ledger
    perspt ledger --recent
@@ -193,8 +193,7 @@ Tune how much measured progress each accepted checkpoint must show:
    # Accept shallower descent for exploratory work
    perspt agent --rho-gate 0.1 -w . "Quick prototype"
 
-Each accepted checkpoint must lower the measured energy (compiler, test,
-and lint sensor readings) by at least ``--rho-gate`` (default 0.5).
+A checkpoint passes on a hard pass or a measured decrease of at least ``--rho-gate`` (default 0.5) below the best accepted energy.
 Checkpoints that fail the gate are refused and draw down the shared
 ``--rejection-budget``.
 
@@ -254,12 +253,8 @@ Managing Sessions
    # Resume the last interrupted session with trust context
    perspt resume --last
 
-The ``status`` command shows per-node lifecycle counts (queued, running, verifying,
-retrying, completed, failed, escalated), the latest energy breakdown, total retry
-count, and recent escalation reports.
-
-The ``resume`` command displays trust context before resuming: escalation count,
-last energy state, and total retries across all nodes.
+The ``status`` command shows ledger and measurement counts, the latest energy and gate, denials, and search statistics.
+The ``resume`` command prints the session identity, task, working directory, and status before checking the ledger and continuing.
 
 
 Auditing Sessions

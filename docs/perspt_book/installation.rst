@@ -3,166 +3,133 @@
 Installation
 ============
 
-To deploy and execute Perspt, the environment must satisfy the specified system requirements. This document outlines the procedures for building the application, configuring provider keys, and setting up domain-specific tools.
+**Chat needs the Perspt binary and a model provider.** Coding tasks also need the project's own build and test tools.
+The documentation publisher has no Python runtime dependency.
 
-System Requirements
--------------------
+Build and install from source
+-----------------------------
 
-- **Operating System**: Linux, macOS, or Windows. Native Windows supports all
-  interface modes and explicit reduced-isolation coding; use Windows Subsystem
-  for Linux when the coding agent must have an OS sandbox.
-- **Rust Toolchain**: Version 1.97.1 or later (required for compilation from source).
-- **Terminal Emulator**: Must support 256-color escape codes and UTF-8 encoding.
-
-Building from Source
---------------------
-
-To compile the executable from the source repository:
+We need Rust 1.97.1 or later and a native C/C++ build toolchain for the bundled DuckDB build.
+From the repository root:
 
 .. code-block:: bash
 
-   # Clone the source repository
    git clone https://github.com/eonseed/perspt.git
    cd perspt
-
-   # Compile the project in release mode
-   cargo build --release
-
-The compiled binary will be placed at ``target/release/perspt``. To make the command globally accessible, copy the binary to a directory in your system ``PATH``, for example:
-
-.. code-block:: bash
-
-   cp target/release/perspt ~/.local/bin/
-
-Installing via Cargo
---------------------
-
-If you possess the Rust toolchain and wish to install directly from the local directory:
-
-.. code-block:: bash
-
-   cargo install --path .
-
-Verifying the Installation
---------------------------
-
-To verify that the executable is operational, query the system version and help manual:
-
-.. code-block:: bash
-
+   cargo install --locked --path crates/perspt-cli --features bundled
    perspt --version
-   # Expected output: perspt 0.6.6
-
    perspt --help
 
-Configuring API Keys
---------------------
+Cargo installs the executable on its binary path, usually ``~/.cargo/bin``.
+The ``bundled`` feature compiles DuckDB into the executable.
+Compilation can take several minutes.
 
-The application requires access to an LLM provider. Set the appropriate API key as an environment variable. The program will automatically detect the provider from the environment:
-
-.. code-block:: bash
-
-   # For Google Gemini
-   export GEMINI_API_KEY="your-api-key"
-
-   # For OpenAI
-   export OPENAI_API_KEY="sk-..."
-
-   # For Anthropic
-   export ANTHROPIC_API_KEY="sk-ant-..."
-
-If you are using Ollama for local execution, start the local service. No API key is required:
+To build without installing:
 
 .. code-block:: bash
 
-   ollama serve
+   cargo build --locked -p perspt-cli --release --features bundled
+   ./target/release/perspt --version
+
+The workspace root is a virtual manifest, so local installation targets ``crates/perspt-cli``.
+The ``perspt`` crate is a library facade; the executable belongs to ``perspt-cli``.
+
+For development builds without ``bundled``, we need the exact DuckDB shared library matching ``Cargo.toml``.
+The CI setup in ``.github/actions/setup-duckdb/action.yml`` pins the library and its checksums.
+See :doc:`developer-guide/contributing` for development checks.
+
+Connect a model
+---------------
+
+Set one credential and start chat:
+
+.. code-block:: bash
+
+   export GEMINI_API_KEY="<api-key>"
+   perspt chat
+
+Other supported providers and explicit ``provider::model`` routes are described in :doc:`user-guide/providers`.
+A modern terminal with UTF-8 and color support gives the best full-screen experience.
+``perspt simple-chat`` provides line-oriented terminal chat.
+
+For local execution, start ``ollama serve`` in another terminal, pull a model, and select it explicitly:
+
+.. code-block:: bash
+
    ollama pull llama3.2
+   perspt chat --model ollama::llama3.2
 
-Agent Mode Prerequisites
+Prepare a coding project
 ------------------------
 
-Autonomous agent execution requires the presence of domain-specific compilers, type checkers, and test runners on the system path.
+**Run the project's checks locally before starting an agent task.** Verification processes run without network access under the normal sandbox policy.
+We install or sync dependencies first, so checks can run offline.
+``--allow-dependency-mutation`` grants agent dependency operations when needed; it does not bypass other policies.
 
-Native Windows has no Perspt process-sandbox backend. Strict agent mode fails
-closed before starting compiler, test, lint, inspection, or LSP processes. To
-accept native host-user execution explicitly, use:
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - Project
+     - Tools and preparation
+   * - **Rust**
+     - Install Cargo and rustc. Add ``rust-analyzer`` with ``rustup component add rust-analyzer``. Fetch dependencies and confirm ``cargo check`` and ``cargo test`` work.
+   * - **Python**
+     - Install Python and uv. Sync the project's environment, including pytest. The syntax stage uses host ``ty`` when available, otherwise offline ``compileall`` through uv; Pyright is a separately detected fallback. The LSP prefers ``ty`` with ``pyright-langserver`` as fallback.
+   * - **JavaScript / TypeScript**
+     - Install Node.js, npm, TypeScript, and ``typescript-language-server``. Install project dependencies and configure the build and test scripts. The plugin runs ``npx tsc --noEmit``, ``npm run build``, and ``npm test``.
+
+The built-in plugins cover Rust, Python, and JavaScript/TypeScript.
+There is no built-in Go plugin.
+Python project tools are optional for working on Python projects and benchmark fixtures; they are not needed to publish these docs.
+
+Process isolation
+-----------------
+
+Linux agent runs use Bubblewrap, which must be installed and usable on the host.
+macOS uses ``sandbox-exec``.
+A missing required isolation backend blocks process execution by default.
+
+Chat and plain terminal chat work natively on Windows.
+Native Windows has no Perspt OS process-sandbox backend.
+WSL provides the Linux isolation path.
+To explicitly permit host-user execution on native Windows:
 
 .. code-block:: powershell
 
-   perspt agent --allow-unisolated -w . "Implement the requested change"
+   perspt agent --allow-unisolated -w . "Fix the parser tests"
 
-The same durable setting is useful for resume:
+For resumed runs, the durable setting is:
 
 .. code-block:: toml
 
    [verification]
    allow_unisolated = true
 
-This mode retains candidate overlays, capability checks, verification gates,
-journaling, and promotion approval, but it does not isolate filesystem or
-network access by child processes. Prefer WSL when that boundary matters.
+Candidate copies, capability checks, verification gates, journaling, and promotion approval still apply.
+Child processes in reduced isolation have the host user's filesystem and network access.
 
-Python Domain
-~~~~~~~~~~~~~
+Build the documentation
+-----------------------
 
-The Python adapter requires:
-
-1. **uv**: For dependency management and environment isolation.
-2. **ty**: For static type verification.
-3. **pytest**: For logical assertion testing.
-
-Install these dependencies as follows:
+Install Guidedog and confirm ``guidedog --version`` succeeds.
+Guidedog includes its PDF and Graphviz engines.
+The standalone Typst CLI is needed when changing the diagram and cover sources; builds can otherwise use the checked-in assets.
 
 .. code-block:: bash
 
-   # Install the uv package manager
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-
-   # Install verification tools
-   pip install ty pytest
-
-Rust Domain
-~~~~~~~~~~~
-
-The Rust adapter requires:
-
-1. **rustup**: For compiler toolchain management.
-2. **rust-analyzer**: For language server diagnostics.
-
-Install these components as follows:
-
-.. code-block:: bash
-
-   # Install the Rust compiler and manager
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-   # Install the LSP component
-   rustup component add rust-analyzer
-
-JavaScript/TypeScript Domain
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The TypeScript adapter requires Node.js and the TypeScript compiler:
-
-.. code-block:: bash
-
-   # Install Node.js via your system package manager, then install the compiler
-   npm install -g typescript
-
-Building the Documentation
---------------------------
-
-To compile the Guidedog and Typst documentation books locally:
-
-.. code-block:: bash
-
-   # Build all Typst diagrams, PSP catalog, book HTML/PDF, and unified site
+   # Complete website, book PDF, and proposal PDFs
    cargo run -p xtask -- docs
 
-   # Or build individual targets directly with guidedog
-   guidedog dsc build --dir=docs/psps
-   guidedog build html docs/psps -W -n
-   guidedog build html docs/perspt_book -W -n
-   guidedog ssg build docs --out docs/_build/site
+   # HTML only
+   cargo run -p xtask -- docs --no-pdf
 
-The generated unified site is located at ``docs/_build/site/index.html``, the book PDF is placed at ``docs/_build/site/books/perspt-book-en.pdf`` (and ``docs/perspt.pdf``), and individual PSP PDFs are placed in ``docs/psps/_build/pdf/``.
+   # Regenerate figures and cover artwork after source edits
+   cargo run -p xtask -- assets
+
+   # Live preview
+   cargo run -p xtask -- serve
+
+The site is written to ``docs/_build/site/index.html``.
+The book PDF is written to ``docs/_build/site/books/perspt-book-en.pdf`` and copied to ``docs/perspt.pdf``.
+See :doc:`developer-guide/documentation` for the publication checks.

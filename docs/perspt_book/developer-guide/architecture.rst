@@ -204,9 +204,8 @@ The governed PSP-9/PSP-10 agent runtime.
 
 1. Exploration - deterministic read-only repository map; ``--exploration-only``
    adds an interactive explorer tool loop and stops before any mutation
-2. Planning - one forced-tool-choice architect turn, restricted to the
-   privileged ``update_graph`` tool, produces the work graph; the host never
-   fabricates multi-node graphs
+2. Planning - the default run uses a deterministic single-node graph.
+   With parallel node dispatch, one governed architect turn can propose a validated graph; an invalid proposal falls back to one node
 3. Dispatch - bounded multi-node scheduling (``runtime/dispatch.rs``);
    ``--max-parallel-nodes`` sets the concurrency (default 1; above 1
    requires ``--yes``)
@@ -354,7 +353,7 @@ Starlark policy evaluation:
 .. code-block:: rust
 
    pub struct PolicyEngine {
-       policies: Vec<FrozenModule>,
+       policies: Vec<String>,
        policy_dir: PathBuf,
    }
 

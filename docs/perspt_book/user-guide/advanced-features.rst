@@ -170,7 +170,7 @@ Every stable node is committed to a content-addressed Merkle ledger stored in
 DuckDB. This provides:
 
 - **Auditability** - Full trace of what each node produced
-- **Rollback** - Restore to any point in the session
+- **Rollback** - Undo a session's newest completed promotion, unless its files changed afterward
 - **Resume** - Continue interrupted sessions with verified context
 
 .. code-block:: bash

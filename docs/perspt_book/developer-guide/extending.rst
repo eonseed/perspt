@@ -8,44 +8,13 @@ Adding a Language Plugin
 
 Language plugins implement the ``LanguagePlugin`` trait from ``perspt-core``.
 
-1. Create a new module in ``crates/perspt-core/src/plugin/``:
+**The built-in registry contains Rust, Python, and JavaScript/TypeScript.** Go is an example of an extension we could add, not a shipped plugin.
 
-   .. code-block:: rust
-
-      pub struct GoPlugin;
-
-      impl LanguagePlugin for GoPlugin {
-          fn name(&self) -> &str { "go" }
-          fn extensions(&self) -> &[&str] { &["go"] }
-          fn key_files(&self) -> &[&str] { &["go.mod", "go.sum"] }
-
-          fn detect(&self, path: &Path) -> bool {
-              path.join("go.mod").exists()
-          }
-
-          fn get_init_action(&self, opts: &InitOptions) -> ProjectAction {
-              ProjectAction::ExecCommand {
-                  command: format!("go mod init {}", opts.name),
-                  description: "Initialize Go module".into(),
-              }
-          }
-
-          fn test_command(&self) -> String {
-              "go test ./...".into()
-          }
-
-          fn syntax_check_command(&self) -> Option<String> {
-              Some("go vet ./...".into())
-          }
-
-          fn verifier_profile(&self) -> VerifierProfile {
-              // Define capabilities for each verifier stage
-              // with primary and fallback commands
-          }
-      }
-
-2. Register in the ``PluginRegistry``
-3. Add LSP config for ``gopls``
+1. Start from the trait in ``crates/perspt-core/src/plugin/contract.rs`` and an existing implementation such as ``plugin/js.rs``.
+2. Implement detection, LSP configuration, initialization and tooling actions, test and run commands, and the verifier profile.
+3. Declare real availability checks and explicit no-op stages. A missing required stage must block a hard pass.
+4. Register the plugin in ``PluginRegistry`` at the composition root and add the corresponding structured adapter to ``CodingAdapterRegistry``.
+5. Test detection, diagnostics, missing tools, and fail-before/pass-after verification with a local fixture.
 
 Designing Domain Adapters
 --------------------------
@@ -57,103 +26,30 @@ To write a custom domain extension (for example, to support research manuscript 
 Implementing the AgentDomainPackage Trait
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-A domain package is a Rust struct that implements the ``AgentDomainPackage`` trait. Below is a complete implementation example of a custom research domain package:
+A package implements ``AgentDomainPackage`` from ``crates/perspt-sdk/src/domain.rs``.
+We can inspect a complete, small implementation in ``crates/perspt-research/src/lib.rs``:
 
 .. code-block:: rust
 
-   use perspt_sdk::{
-       AgentDomainPackage, DomainDetection, DomainId, DomainScope, EnergyModel,
-       ResidualClass, ResidualEvent, ResidualSchema, ResidualWeight, WorkspaceSnapshot,
-       CorrectionDirection, EnergyComponent, StabilityClaim
-   };
+   use perspt_research::ResearchDomain;
+   use perspt_sdk::{AgentDomainPackage, DomainScope, WorkspaceSnapshot};
 
-   pub struct ResearchDomain;
+   let domain = ResearchDomain::new();
+   let workspace = WorkspaceSnapshot::new(
+       "/work/paper",
+       vec!["references.bib".into()],
+   );
+   assert!(domain.detect(&workspace).activated);
+   let model = domain.energy_model(&DomainScope::default());
+   model.validate()?;
 
-   impl AgentDomainPackage for ResearchDomain {
-       /// Returns the unique identifier of the domain.
-       fn domain_id(&self) -> DomainId {
-           DomainId::new("research")
-       }
+The required methods declare the domain identity, detection evidence, residual schema, energy model, correction directions, tool entries, hard-gate policy, verifier suite, and safety-barrier position.
+Every emitted consistency residual needs an explicit positive weight.
+Use ``CorrectionDirection::new(class, instruction)`` to construct a correction from structured residual evidence.
 
-       /// Detects if the current project workspace contains files corresponding to this domain.
-       fn detect(&self, workspace: &WorkspaceSnapshot) -> DomainDetection {
-           let mut evidence = Vec::new();
-           for marker in ["paper.tex", "thesis.tex", "bibliography.bib"] {
-               if workspace.has_file_named(marker) {
-                   evidence.push(format!("found academic manuscript file: {}", marker));
-               }
-           }
-           let activated = !evidence.is_empty();
-           DomainDetection {
-               domain: self.domain_id(),
-               activated,
-               confidence: if activated { 0.90 } else { 0.0 },
-               evidence,
-           }
-       }
-
-       /// Declares the list of residual classes this domain can emit.
-       fn residual_schema(&self, _scope: &DomainScope) -> ResidualSchema {
-           ResidualSchema::new(vec![
-               ResidualClass::Syntax,             // LaTeX syntax check
-               ResidualClass::SymbolMismatch,      // Missing citations
-               ResidualClass::InterfaceMismatch,   // Broken cross-references
-               ResidualClass::Build,              // pdflatex build failures
-           ])
-       }
-
-       /// Configures the energy model, including tolerances, bounds, and weights.
-       fn energy_model(&self, scope: &DomainScope) -> EnergyModel {
-           use EnergyComponent::*;
-           use ResidualClass::*;
-
-           let weights = vec![
-               ResidualWeight::new(Syntax, Syn, 2.0),
-               ResidualWeight::new(Build, Syn, 4.0).with_hard_threshold(0.0),
-               ResidualWeight::new(SymbolMismatch, Str, 1.5),
-               ResidualWeight::new(InterfaceMismatch, Str, 1.0),
-           ];
-
-           let mut model = EnergyModel::new("research", 0.10)
-               .with_correction_budget(5);
-           model.residual_weights = weights;
-           model.energy_tolerance = 0.0;
-           model.stability_claim = Some(StabilityClaim::not_claimed(format!(
-               "research scope: {}",
-               scope.label
-           )));
-           model
-       }
-
-       /// Maps residual events to directed correction prompts for the actuator.
-       fn correction_directions(&self, residuals: &[ResidualEvent]) -> Vec<CorrectionDirection> {
-           let mut directions = Vec::new();
-           for r in residuals {
-               match r.class {
-                   ResidualClass::Syntax => {
-                       directions.push(CorrectionDirection {
-                           instruction: format!(
-                               "Repair LaTeX syntax error: {}. Check brackets and escape characters.",
-                               r.message
-                           ),
-                           ..Default::default()
-                       });
-                   }
-                   ResidualClass::SymbolMismatch => {
-                       directions.push(CorrectionDirection {
-                           instruction: format!(
-                               "Insert missing citation entry in bibliography.bib for reference: {}.",
-                               r.message
-                           ),
-                           ..Default::default()
-                       });
-                   }
-                   _ => {}
-               }
-           }
-           directions
-       }
-   }
+**A contract declaration does not implement a verifier.** The research package is a skeleton that declares a ``citation-check`` stage; source discovery and citation verification are not complete research workflows.
+A new domain also needs executable measurement and effect handlers wired into the runtime.
+We leave analytic stability and safety claims undeclared unless we can supply their required evidence.
 
 Registering the Domain Adapter
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -277,7 +173,7 @@ or a reference solution that does not pass.
 Adding an LLM Provider
 -----------------------
 
-The ``genai`` adapter in ``perspt-core/src/llm_provider.rs`` handles providers.
+The ``genai`` adapter in ``crates/perspt-core/src/llm_provider.rs`` handles providers.
 To add a new provider:
 
 1. Add the adapter kind to ``str_to_adapter_kind()``
@@ -286,38 +182,23 @@ To add a new provider:
    ``perspt-core/src/llm_provider.rs``
 4. Update the auto-detection priority in config
 
-.. code-block:: rust
-
-   fn str_to_adapter_kind(provider: &str) -> AdapterKind {
-       match provider {
-           "openai" => AdapterKind::OpenAI,
-           "anthropic" => AdapterKind::Anthropic,
-           // ... existing providers ...
-           "newprovider" => AdapterKind::NewProvider,
-           _ => AdapterKind::OpenAI,
-       }
-   }
-
+Unknown provider identifiers must remain errors; a new adapter must not introduce an implicit fallback to another provider.
+Update explicit route resolution, environment detection, and the portfolio tests together.
 
 Adding a Starlark Policy
 --------------------------
 
-Create a ``.star`` file in the policy directory (``~/.config/perspt/policies/``):
+Create a ``.star`` file under ``rules/`` in the platform configuration directory.
+Each file defines ``evaluate(command)`` and returns ``"allow"``, ``"prompt"``, or ``"deny"``:
 
 .. code-block:: python
 
-   # custom_policy.star
+   # Starlark, not a Python runtime hook.
+   def evaluate(command):
+       if matches_pattern(command, "sudo"):
+           return "deny"
+       return "allow"
 
-   def check_file_write(path, content):
-       # Called before any file write.
-       if path.endswith(".env"):
-           return deny("Cannot write .env files")
-       return allow()
-
-   def check_command(cmd):
-       # Called before any command execution.
-       if "curl" in cmd and "http://" in cmd:
-           return prompt("Insecure HTTP request: " + cmd)
-       return allow()
-
-The ``PolicyEngine`` loads all ``.star`` files from the policy directory automatically.
+The engine evaluates command policies; it does not call invented file-write hooks.
+Capability and workspace checks govern file effects separately.
+See :doc:`../howto/security-rules` for policy loading and precedence.

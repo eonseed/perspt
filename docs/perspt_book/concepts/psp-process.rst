@@ -3,80 +3,32 @@
 PSP Process
 ===========
 
-A complex software system cannot be modified by arbitrary whim. We must frame every major modification as a formal proposal, detailing the design, the motivation, and the proof of correctness. We call such a proposal a **Perspt Specification Proposal (PSP)**.
+**A Perspt Specification Proposal (PSP) records a significant design change and its review.** Routine fixes use normal pull requests.
+The catalog preserves both implemented designs and proposals under discussion.
+A proposal's lifecycle state and its implementation coverage are separate facts.
 
-PSPs serve as the primary mechanism for:
+Find the current state
+----------------------
 
-- Proposing major features before implementation.
-- Documenting design decisions and trade-offs.
-- Providing a historical record of architectural evolution.
-- Enabling community review of significant changes.
+The `PSP registry <../../psps/registry.html>`_ is generated from record metadata.
+It is the source for current proposal numbers, titles, and states.
+We avoid duplicating that registry in the book.
+The `catalog workflow <../../psps/workflow.html>`_ documents the allowed transitions.
 
-PSP Lifecycle
--------------
+The configured states are ``draft``, ``discussion``, ``accepted``, ``active``, ``final``, ``rejected``, and ``withdrawn``.
+Promotion assigns a draft its next number and opens discussion.
+``active`` denotes a living specification; ``withdrawn`` includes superseded proposals.
 
-A proposal passes through four distinct states. First, it is written as a **Draft**. Once accepted for implementation, it becomes **Active**. When the implementation is complete and verified, the proposal becomes **Final**. If a subsequent proposal modifies the same system, the earlier proposal may become **Superseded**.
+.. code-block:: bash
 
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
+   guidedog dsc list --dir=docs/psps
+   guidedog dsc check --dir=docs/psps
 
-   * - Status
-     - Meaning
-   * - **Draft**
-     - Proposal is under active design and review.
-   * - **Active**
-     - Proposal is accepted and under active implementation.
-   * - **Final**
-     - Implementation is complete and fully verified.
-   * - **Superseded**
-     - Replaced or invalidated by a newer specification proposal.
+Read the design history
+-----------------------
 
-Key PSPs
---------
-
-We tabulate the specifications that govern the architecture of the system.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 15 45 40
-
-   * - PSP
-     - Title
-     - Status
-   * - PSP-1
-     - Core Chat Interface
-     - Final
-   * - PSP-2
-     - Multi-Provider Support
-     - Final
-   * - PSP-3
-     - Simple CLI Mode
-     - Final
-   * - PSP-4
-     - SRBN Agent Mode
-     - Superseded by PSP-5
-   * - PSP-5
-     - Multi-File Coding UX and Repo-Native Verification
-     - Final
-   * - PSP-6
-     - Web Dashboard and Real-Time Monitoring
-     - Final
-   * - PSP-7
-     - Robust Typed Correction Loops and Plugin-Aware Prompt Contracts
-     - Final
-   * - PSP-8
-     - SRBN Agent SDK, Coding Domain Package, and Mutable Work Graph
-     - Final
-   * - **PSP-9**
-     - **Governed Agentic Platform: SRBN Tool Harness and Model Portfolio**
-     - **Final**
-   * - **PSP-10**
-     - **Bounded Search Trajectories and Model-Conditioned Prompt Programs**
-     - **Final**
-   * - **PSP-11**
-     - **Domain-Neutral Runtime Inversion, Multi-Actor Supervisor, and Replayable Human Interaction Platform**
-     - **Discussion**
+The summaries below describe the ideas introduced by each proposal.
+For current behavior, use :doc:`../user-guide/agent-mode` and :doc:`srbn-architecture`.
 
 PSP-5: The Core Lifecycle
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -115,7 +67,7 @@ PSP-8 defines the architecture for separating domain-neutral control mechanisms 
 - **SDK-First design** - Movement of scheduling, energy gating, capability checks, and replay ledgers to a reusable SDK.
 - **Quadratic energy** - Adoption of the quadratic residual energy formula :math:`V(x) = \sum_{e} w_e \lVert r_e \rVert^2`.
 - **Mutable work graph** - A scheduler that modifies, splits, or inserts nodes in the queue as verification evidence arrives.
-- **Capability kernel** - Scoped admissibility check over proposed effects to guarantee sandbox bounds.
+- **Capability kernel** - Scoped admissibility checks over proposed effects.
 
 See the full specification at ``docs/psps/records/000008-srbn-agent-sdk-work-graph.rst``.
 

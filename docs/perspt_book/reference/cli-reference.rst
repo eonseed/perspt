@@ -48,6 +48,9 @@ Launch the plain-text CLI chat.
 
    perspt simple-chat [--model MODEL] [--log-file FILE]
 
+This command takes no positional prompt.
+Piped input sends one message per non-empty line; stdout includes session messages as well as responses.
+
 
 ``dashboard``
 ~~~~~~~~~~~~~
@@ -203,7 +206,7 @@ Print the provider capability matrix (PSP-9).
 ``replay``
 ~~~~~~~~~~
 
-Deterministic, credential-free audit replay of a session (PSP-9).
+Audit recorded session events without credentials, model calls, or rerunning project checks.
 
 .. code-block:: bash
 

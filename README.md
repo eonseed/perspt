@@ -4,16 +4,7 @@
 
 # Perspt
 
-**Your Terminal's Window to the AI World — Simple CLI · Terminal UI · Verified Coding Agent · Rust SDK**
-
-<p>
-<em>The keyboard hums, the screen aglow,</em><br>
-<em>AI's wisdom, a steady flow.</em><br><br>
-<em>Will robots take over, it's quite the fright,</em><br>
-<em>Or just provide insights, day and night?</em><br><br>
-<em>We ponder and chat, with code as our guide,</em><br>
-<em>Is AI our helper or our human pride?</em>
-</p>
+**Chat, explore, and make checked code changes from the terminal.**
 
 [![Build Status](https://github.com/eonseed/perspt/actions/workflows/ci.yml/badge.svg)](https://github.com/eonseed/perspt/actions/workflows/ci.yml)
 [![Documentation](https://github.com/eonseed/perspt/actions/workflows/docs.yml/badge.svg)](https://eonseed.github.io/perspt/)
@@ -28,26 +19,18 @@
 
 ---
 
-**Perspt** is a fast, single-binary Rust tool and embeddable SDK for working with Large Language Models in your terminal. Built for everyday developer productivity, Perspt gives you **three ways to use AI in the terminal** plus a **Rust SDK** for custom integration:
+**Perspt** is a Rust CLI and reusable SDK for model conversations and coding tasks. It connects to nine provider adapters, including local Ollama and OpenAI-compatible servers.
 
-1. **Simple CLI (`perspt simple-chat`)** — Plain terminal output with zero UI chrome. Pipe logs, files, or `git diff` straight from `stdin` and redirect clean text output into shell scripts.
-2. **Terminal UI (`perspt` / `perspt chat`)** — A full-screen interactive terminal chat interface with streaming Markdown, syntax highlighting, tables, LaTeX math, read-only MCP tools, and instant switching across 9+ LLM providers.
-3. **SRBN Coding Agent (`perspt agent`)** — An autonomous coding agent that plans tasks, edits files in an isolated sandbox, and runs your real compiler, LSP, and test suite to fix errors automatically before committing changes.
-4. **Rust SDK (`perspt-sdk`, `perspt-coding`, `perspt-research`)** — Modular Rust crates that let you embed Perspt's verification loop, capability sandbox, and DuckDB audit ledger into your own applications.
+| Goal | Command or library | What it provides |
+|---|---|---|
+| **Talk through a problem** | `perspt chat` | Full-screen streaming chat with Markdown, code, multiline paste, and configured read-only MCP tools |
+| **Use plain terminal chat** | `perspt simple-chat` | Line-oriented chat and optional session logging |
+| **Change a project** | `perspt agent` | Experimental candidate edits, project checks, bounded repairs, and promotion review |
+| **Build a custom workflow** | `perspt-sdk`, `perspt-coding` | Residual scoring, acceptance gates, and domain contracts |
 
-> **Why is the coding agent called SRBN?**
-> Internally, `perspt agent` is powered by **SRBN (Stabilized Recursive Barrier Networks)**, based on the *Stability is All You Need* research paper series. Standard LLM agents guess in an open loop and drift when errors accumulate across files. SRBN wraps the model in a deterministic compiler, LSP, and test feedback loop—scoring remaining errors and rolling back bad edits—so the code it generates actually compiles, runs, and stays close to the task you gave it.
+**The model proposes; the tools measure.** The coding agent edits a candidate copy and uses compiler, test, and other diagnostics to guide corrections. It can keep improving checkpoints, but delivery requires a hard pass of the required checks and promotion approval. A run can stop with errors remaining. The internal runtime is called SRBN (Stabilized Recursive Barrier Networks).
 
-## Features
-
-- **NO-CHROME SIMPLE CLI**: Stream plain text to `stdout` for Unix pipes, shell scripts, and quick terminal Q&A (`perspt simple-chat`).
-- **RICH TERMINAL UI**: Full-screen `ratatui` interface with Markdown, code blocks, math rendering, multiline paste, and `/mcp` inspection (`perspt chat`).
-- **VERIFIED CODING AGENT**: Edits code in a safe candidate overlay and verifies every step with real compilers, LSPs (`rust-analyzer`, `pyright`, `tsc`, `gopls`), and test suites (`cargo test`, `pytest`).
-- **9+ LLM PROVIDERS**: Works with OpenAI, Anthropic, Google Gemini, Vertex AI, Groq, Cohere, xAI, DeepSeek, local Ollama, and any OpenAI-compatible server.
-- **PER-ROLE MODEL ROUTING**: Assign different models for read-only repo exploration (`--explorer-model`), coding (`--actuator-model`), and diff review (`--adjudicator-model`).
-- **SAFE BY DEFAULT**: Starlark security policies, workspace path confinement, and OS process sandboxing (Bubblewrap on Linux, `sandbox-exec` on macOS).
-- **FULL AUDIT & ROLLBACK**: Local DuckDB ledger records every session for live browser monitoring (`--dashboard`), offline replay (`perspt replay`), crash resume (`perspt resume`), and one-command undo (`perspt ledger --rollback`).
-- **EMBEDDABLE RUST SDK**: 14 modular workspace crates with zero Python runtime dependencies.
+**A hard pass is evidence within the configured checks' coverage.** Tests can evolve with implementation by default; historical regression and external acceptance policies are available. Promotion copies files into the project and does not create a Git commit.
 
 ## Quick Start
 
@@ -56,26 +39,28 @@ Build Perspt from source (requires Rust 1.97.1+):
 ```bash
 git clone https://github.com/eonseed/perspt.git
 cd perspt
-cargo build --release --features bundled
+cargo install --locked --path crates/perspt-cli --features bundled
 
 export GEMINI_API_KEY="your-api-key"   # Or OPENAI_API_KEY, ANTHROPIC_API_KEY, or local Ollama
 ```
 
-Try all three modes:
+The CLI is now on the Cargo binary path. Try the three modes:
 
 ```bash
-# 1. Simple CLI — plain output for Unix pipes and scripts
-git diff | ./target/release/perspt simple-chat "Write a concise commit message"
+# 1. Plain terminal chat with session logging
+perspt simple-chat --log-file chat.txt
 
-# 2. Terminal UI — interactive full-screen chat
-./target/release/perspt chat
+# 2. Full-screen chat
+perspt chat
 
-# 3. SRBN Coding Agent — autonomous multi-file coding with compiler & test verification
-./target/release/perspt agent -w ./my-project "Fix the failing parser tests"
+# 3. A small coding task in an existing project
+perspt agent -w ./my-project "Fix the failing parser tests"
 
 # Headless agent run + live browser dashboard on http://127.0.0.1:3000
-./target/release/perspt agent --yes --dashboard -w ./my-project "Add input validation and unit tests"
+perspt agent --yes --dashboard -w ./my-project "Add input validation and unit tests"
 ```
+
+`simple-chat` takes no positional prompt. Piped input sends one message per non-empty line. Its stdout includes session messages as well as responses.
 
 > **Note on Windows**: `chat` and `simple-chat` work natively on Linux, macOS, and Windows. `perspt agent` uses Bubblewrap on Linux and `sandbox-exec` on macOS for OS process isolation; on native Windows, pass `--allow-unisolated` or run inside WSL2.
 
@@ -94,22 +79,31 @@ use perspt_coding::CodingDomain;
 use perspt_sdk::{
     domain::{AgentDomainPackage, DomainScope},
     energy::score_candidate,
-    gate::evaluate_gate,
+    gate::{evaluate_gate, GateDecision},
     residual::ResidualEvent,
 };
 
-fn verify_candidate(scope: &DomainScope, residuals: &[ResidualEvent], best_v: f64) -> perspt_sdk::error::Result<bool> {
-    let domain = CodingDomain;
-    let model = domain.energy_model(scope);
-    let score = score_candidate(residuals, &model)?;
-    let decision = evaluate_gate(score.hard_violations.is_empty(), score.total, best_v, model.rho_gate)?;
-    Ok(decision.is_accepted())
+fn check_candidate(
+    scope: &DomainScope,
+    residuals: &[ResidualEvent],
+    all_required_checks_passed: bool,
+    best_v: f64,
+) -> perspt_sdk::error::Result<GateDecision> {
+    let model = CodingDomain.energy_model(scope);
+    let score = score_candidate(&model, residuals)?;
+    let hard_pass = all_required_checks_passed
+        && score.hard_violations.is_empty()
+        && score.blocked.is_empty();
+    evaluate_gate(hard_pass, score.total, best_v, model.rho_gate)
 }
+
 ```
+
+The caller supplies the measured required-check result. An empty threshold-violation list alone does not establish a hard pass. A descent decision is intermediate progress, not delivery.
 
 ## Supported LLM Providers
 
-Set any one provider credential to start chatting, or configure a multi-model portfolio in `config.toml`:
+Set a provider credential or configure a portfolio in `config.toml`. Model IDs below are examples, not a catalog of currently available models. Availability depends on the provider account:
 
 | Provider | Environment Variable / Auth | Example Model ID |
 |---|---|---|
@@ -128,13 +122,13 @@ Set any one provider credential to start chatting, or configure a multi-model po
 | Command | Description |
 |---|---|
 | `perspt chat` | Interactive full-screen Terminal UI chat (default when running `perspt`) |
-| `perspt simple-chat` | Plain terminal output with no UI chrome; ideal for pipes and scripts |
+| `perspt simple-chat` | Line-oriented terminal chat with optional session logging |
 | `perspt agent <TASK>` | Autonomous SRBN coding agent with compiler, LSP, and test verification |
 | `perspt dashboard` | Real-time web dashboard for monitoring sessions, diffs, and energy |
 | `perspt status` | Show active session progress and verification status |
 | `perspt ledger` | Inspect session history or undo the newest promotion (`--rollback <ID>`) |
 | `perspt resume <ID>` | Resume an interrupted agent session from the DuckDB ledger |
-| `perspt replay <ID>` | Deterministically replay and audit a session offline without API keys |
+| `perspt replay <ID>` | Audit recorded session events offline without model calls or rerunning tests |
 | `perspt providers` | Show configured providers (`--probe` tests live connectivity) |
 | `perspt config` | View (`--show`) or edit (`--edit`) configuration |
 | `perspt init` | Initialize project memory and Starlark security policy rules |

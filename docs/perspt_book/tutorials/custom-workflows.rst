@@ -8,7 +8,8 @@ Integrate Perspt into scripts, CI/CD pipelines, and automation.
 Simple CLI for Scripting
 ------------------------
 
-The ``simple-chat`` command provides a Unix-friendly interface:
+The ``simple-chat`` command provides line-oriented chat and optional logging.
+Its stdout includes session messages; use the agent JSON summary for machine-readable coding outcomes.
 
 .. code-block:: bash
 
@@ -54,17 +55,18 @@ Use headless mode in CI/CD pipelines:
        steps:
          - uses: actions/checkout@v4
          - name: Install Perspt
-           run: cargo install perspt
+           run: cargo install --locked --path crates/perspt-cli --features bundled
          - name: Run Agent
            env:
              GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+             PERSPT_TASK: ${{ inputs.task }}
            run: |
              perspt agent --yes --max-turns 12 \
-               -w ./generated "${{ inputs.task }}"
+               -w ./generated "$PERSPT_TASK"
          - name: Commit Results
            run: |
              git add generated/
-             git commit -m "Generated: ${{ inputs.task }}"
+             git commit -m "Add generated project"
 
 
 Post-Run Analysis
