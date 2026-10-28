@@ -1,18 +1,78 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="perspt-logo-title perspt-logo-desc">
-<title id="perspt-logo-title">Perspt SRBN mark</title>
-<desc id="perspt-logo-desc">An isometric hexagonal barrier shell enclosing a descending Lyapunov funnel and a bright stabilized core at the equilibrium origin.</desc>
-<g stroke="#ffffff" stroke-width="0.9" stroke-linejoin="round" stroke-opacity="0.55">
-  <!-- Outer barrier shell B(x) >= 0 -->
-  <polygon points="60.000,4.000 108.497,32.000 92.332,41.333 60.000,22.667 27.668,41.333 11.503,32.000" fill="#67e8f9"/>
-  <polygon points="11.503,88.000 60.000,116.000 60.000,97.333 27.668,78.667 27.668,41.333 11.503,32.000" fill="#0891b2"/>
-  <polygon points="108.497,88.000 60.000,116.000 60.000,97.333 92.332,78.667 92.332,41.333 108.497,32.000" fill="#164e63"/>
-  <!-- Inner Lyapunov descent basin V(x) -->
-  <polygon points="76.166,69.333 92.332,78.667 60.000,97.333 27.668,78.667 43.834,69.333 60.000,78.667" fill="#67e8f9"/>
-  <polygon points="76.166,69.333 92.332,78.667 92.332,41.333 60.000,22.667 60.000,41.333 76.166,50.667" fill="#0e7490"/>
-  <polygon points="43.834,69.333 27.668,78.667 27.668,41.333 60.000,22.667 60.000,41.333 43.834,50.667" fill="#155e75"/>
-  <!-- Equilibrium attractor core V(x*) = 0 -->
-  <polygon points="60.000,41.333 76.166,50.667 60.000,60.000 43.834,50.667" fill="#fef08a"/>
-  <polygon points="43.834,69.333 60.000,78.667 60.000,60.000 43.834,50.667" fill="#f59e0b"/>
-  <polygon points="76.166,69.333 60.000,78.667 60.000,60.000 76.166,50.667" fill="#b45309"/>
-</g>
+  <title id="perspt-logo-title">Perspt — Your Terminal's Window to the AI World</title>
+  <desc id="perspt-logo-desc">A glowing terminal window opening into a deep 3D perspective horizon where a faceted code prompt chevron (&gt;_) projects a four-band spectrum of AI thought.</desc>
+  <defs>
+    <linearGradient id="bezel-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="50%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="screen-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#070b14"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <radialGradient id="screen-glow" cx="56%" cy="56%" r="50%">
+      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.32"/>
+      <stop offset="55%" stop-color="#10b981" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#070b14" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Outer Glowing Terminal Window Bezel ("The screen aglow") -->
+  <rect x="4" y="4" width="112" height="112" rx="22" fill="url(#bezel-grad)"/>
+  <rect x="7.5" y="7.5" width="105" height="105" rx="19" fill="url(#screen-bg)"/>
+
+  <!-- Inner Screen Ambient Glow -->
+  <rect x="10" y="24" width="100" height="86" rx="14" fill="url(#screen-glow)"/>
+
+  <!-- Terminal Window Titlebar -->
+  <path d="M 10 25 Q 10 10 25 10 L 95 10 Q 110 10 110 25 L 110 26 L 10 26 Z" fill="#111c30"/>
+  <line x1="10" y1="26" x2="110" y2="26" stroke="#1e293b" stroke-width="1.5"/>
+  <!-- Window Indicator Lights -->
+  <circle cx="22" cy="18" r="3.2" fill="#f43f5e"/>
+  <circle cx="33" cy="18" r="3.2" fill="#f59e0b"/>
+  <circle cx="44" cy="18" r="3.2" fill="#10b981"/>
+  <!-- Subtle Hózhó Balance Diamond in Titlebar -->
+  <polygon points="96,14.5 100,18 96,21.5 92,18" fill="#38bdf8" fill-opacity="0.85"/>
+
+  <!-- 3D Perspective Window Grid ("Your Terminal's Window to the AI World") -->
+  <g stroke="#38bdf8" stroke-opacity="0.28" stroke-width="1.1" fill="none">
+    <!-- Outer to Vanishing Portal Perspective Rays -->
+    <line x1="12" y1="28" x2="62" y2="62"/>
+    <line x1="108" y1="28" x2="62" y2="62"/>
+    <line x1="12" y1="108" x2="62" y2="62"/>
+    <line x1="108" y1="108" x2="62" y2="62"/>
+    <line x1="60" y1="26" x2="62" y2="62"/>
+    <line x1="60" y1="110" x2="62" y2="62"/>
+    <!-- Concentric Perspective Depth Frames -->
+    <rect x="24" y="37" width="74" height="58" rx="8" stroke="#10b981" stroke-opacity="0.32"/>
+    <rect x="40" y="48" width="44" height="34" rx="5" stroke="#38bdf8" stroke-opacity="0.45"/>
+  </g>
+
+  <!-- Dispersing Spectrum Beams ("Personal Spectrum Pertaining Thoughts / AI's wisdom, a steady flow") -->
+  <g opacity="0.95">
+    <!-- Band 1: Solar Gold / Amber -->
+    <polygon points="58,62 108,32 108,47" fill="#fbbf24"/>
+    <!-- Band 2: Phosphor Emerald -->
+    <polygon points="58,62 108,47 108,63" fill="#10b981"/>
+    <!-- Band 3: Electric Cyan -->
+    <polygon points="58,62 108,63 108,79" fill="#0ea5e9"/>
+    <!-- Band 4: Radiant Coral-Rose -->
+    <polygon points="58,62 108,79 108,94" fill="#f43f5e"/>
+  </g>
+
+  <!-- Central Horizon Vanishing Star / Equilibrium Node -->
+  <circle cx="58" cy="62" r="7.5" fill="#fef08a" fill-opacity="0.35"/>
+  <polygon points="58,53 61,59 67,62 61,65 58,71 55,65 49,62 55,59" fill="#ffffff"/>
+
+  <!-- Foreground Faceted Terminal Code Prompt Chevron `>` ("with code as our guide") -->
+  <!-- Upper Lit Facet of `>` -->
+  <polygon points="20,40 31,40 56,62 42,62" fill="#ecfdf5"/>
+  <!-- Lower Emerald Facet of `>` -->
+  <polygon points="42,62 56,62 31,84 20,84" fill="#34d399"/>
+  <!-- Crisp Outline on Prompt Chevron -->
+  <polygon points="20,40 31,40 56,62 31,84 20,84 42,62" fill="none" stroke="#064e3b" stroke-width="1.2" stroke-linejoin="round"/>
+
+  <!-- Glowing Terminal Underscore Cursor `_` -->
+  <rect x="52" y="84" width="24" height="7.5" rx="3" fill="#fbbf24" stroke="#090d16" stroke-width="1"/>
 </svg>

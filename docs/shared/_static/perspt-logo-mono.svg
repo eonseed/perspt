@@ -1,14 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="perspt-logo-mono-title">
-<title id="perspt-logo-mono-title">Perspt monochrome mark</title>
-<g stroke="#ffffff" stroke-width="0.9" stroke-linejoin="round" stroke-opacity="0.65">
-  <polygon points="60.000,4.000 108.497,32.000 92.332,41.333 60.000,22.667 27.668,41.333 11.503,32.000" fill="#cbd5e1"/>
-  <polygon points="11.503,88.000 60.000,116.000 60.000,97.333 27.668,78.667 27.668,41.333 11.503,32.000" fill="#64748b"/>
-  <polygon points="108.497,88.000 60.000,116.000 60.000,97.333 92.332,78.667 92.332,41.333 108.497,32.000" fill="#1e293b"/>
-  <polygon points="76.166,69.333 92.332,78.667 60.000,97.333 27.668,78.667 43.834,69.333 60.000,78.667" fill="#cbd5e1"/>
-  <polygon points="76.166,69.333 92.332,78.667 92.332,41.333 60.000,22.667 60.000,41.333 76.166,50.667" fill="#64748b"/>
-  <polygon points="43.834,69.333 27.668,78.667 27.668,41.333 60.000,22.667 60.000,41.333 43.834,50.667" fill="#334155"/>
-  <polygon points="60.000,41.333 76.166,50.667 60.000,60.000 43.834,50.667" fill="#f8fafc"/>
-  <polygon points="43.834,69.333 60.000,78.667 60.000,60.000 43.834,50.667" fill="#94a3b8"/>
-  <polygon points="76.166,69.333 60.000,78.667 60.000,60.000 76.166,50.667" fill="#475569"/>
-</g>
+  <title id="perspt-logo-mono-title">Perspt monochrome mark — Terminal Window &amp; Perspective Spectrum</title>
+  <!-- Outer Terminal Window Frame -->
+  <rect x="4" y="4" width="112" height="112" rx="22" fill="#334155"/>
+  <rect x="7.5" y="7.5" width="105" height="105" rx="19" fill="#0f172a"/>
+
+  <!-- Terminal Titlebar -->
+  <path d="M 10 25 Q 10 10 25 10 L 95 10 Q 110 10 110 25 L 110 26 L 10 26 Z" fill="#1e293b"/>
+  <circle cx="22" cy="18" r="3.2" fill="#94a3b8"/>
+  <circle cx="33" cy="18" r="3.2" fill="#cbd5e1"/>
+  <circle cx="44" cy="18" r="3.2" fill="#f8fafc"/>
+
+  <!-- Perspective Window Grid -->
+  <g stroke="#94a3b8" stroke-opacity="0.35" stroke-width="1.1" fill="none">
+    <line x1="12" y1="28" x2="62" y2="62"/>
+    <line x1="108" y1="28" x2="62" y2="62"/>
+    <line x1="12" y1="108" x2="62" y2="62"/>
+    <line x1="108" y1="108" x2="62" y2="62"/>
+    <rect x="24" y="37" width="74" height="58" rx="8"/>
+    <rect x="40" y="48" width="44" height="34" rx="5"/>
+  </g>
+
+  <!-- Monochrome Spectrum Rays -->
+  <polygon points="58,62 108,32 108,47" fill="#f1f5f9"/>
+  <polygon points="58,62 108,47 108,63" fill="#cbd5e1"/>
+  <polygon points="58,62 108,63 108,79" fill="#94a3b8"/>
+  <polygon points="58,62 108,79 108,94" fill="#64748b"/>
+
+  <!-- Vanishing Star -->
+  <polygon points="58,53 61,59 67,62 61,65 58,71 55,65 49,62 55,59" fill="#ffffff"/>
+
+  <!-- Prompt Chevron `>_` -->
+  <polygon points="20,40 31,40 56,62 42,62" fill="#ffffff"/>
+  <polygon points="42,62 56,62 31,84 20,84" fill="#cbd5e1"/>
+  <rect x="52" y="84" width="24" height="7.5" rx="3" fill="#f8fafc"/>
 </svg>
