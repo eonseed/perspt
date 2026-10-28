@@ -1,50 +1,50 @@
-.. title:: Perspt: AI tools for developers
+.. title:: The Perspt Book
 
 The Perspt Book
 ===============
 
 .. rst-class:: lead
 
-**Chat, explore, and make checked code changes from the terminal.** This book starts with everyday workflows and introduces the runtime and SDK as we need them.
+**Learn to use Perspt for AI chat and coding in the terminal.** We start with installation and a conversation, then use the coding agent to work on a project and review the result.
 
-Choose a starting point
------------------------
+Where to start
+--------------
 
 .. list-table::
    :header-rows: 1
    :widths: 34 66
 
-   * - Goal
-     - Start here
+   * - Task
+     - Guide
    * - **Try Perspt**
-     - :doc:`quickstart`: Install the CLI, connect a model, and ask a question.
-   * - **Work locally**
-     - :doc:`tutorials/local-models`: Connect an installed Ollama model.
-   * - **Change a project**
-     - :doc:`tutorials/agent-mode`: Run a small coding task, inspect checks, and review the diff.
-   * - **Automate a task**
-     - :doc:`tutorials/headless-mode`: Use explicit approval, limits, and a JSON summary.
-   * - **Embed the SDK**
-     - :doc:`api/index`: Score diagnostics and evaluate a gate in Rust.
+     - :doc:`quickstart`: Install Perspt, connect a provider, and ask a question.
+   * - **Use a local model**
+     - :doc:`tutorials/local-models`: Connect Ollama and select an installed model.
+   * - **Run a coding task**
+     - :doc:`tutorials/agent-mode`: Ask the agent to edit code, run tests, and show the result for review.
+   * - **Run without prompts**
+     - :doc:`tutorials/headless-mode`: Automate a task and save its result as JSON.
+   * - **Use Perspt from Rust**
+     - :doc:`api/index`: Choose the libraries needed for a Rust application.
 
-What Perspt provides
---------------------
+What Perspt does
+----------------
 
-- **Full-screen chat** with ``perspt chat``: streamed Markdown, code, multiline input, and configured read-only MCP tools.
-- **Plain terminal chat** with ``perspt simple-chat``: a line-oriented conversation with optional logging. Output includes session messages.
-- **Checked coding tasks** with ``perspt agent``: experimental candidate edits, detected project checks, bounded repairs, and promotion review.
-- **Reusable Rust libraries** for scoring, gates, capabilities, domain adapters, and ledger records.
+- **AI chat** with ``perspt chat``: a full-screen conversation with formatted answers, code, and multiline input.
+- **Simple terminal chat** with ``perspt simple-chat``: type a message, read the answer, and optionally save the conversation.
+- **Coding tasks** with ``perspt agent``: ask the agent to fix a bug, add a feature, or write tests. It edits a separate copy and runs the project's tools before asking for review.
+- **Rust libraries** for adding AI workflows, build and test checks, and session history to another application.
 
-.. figure:: ../shared/_static/front-page-abm.svg
-   :target: _static/front-page-abm.svg
-   :alt: Illustrative measured candidate energy and accepted checkpoints, with smooth curves for visual guidance and discrete gate decisions.
+.. figure:: ../shared/_static/agent-workflow-overview.svg
+   :target: _static/agent-workflow-overview.svg
+   :alt: Describe a task, edit a project copy, run builds and tests, then review and apply the changes.
    :width: 100%
 
-   A candidate can improve without being ready to deliver. Dots show verification checkpoints; smooth curves are illustrative. A run can reach a hard pass or stop with errors remaining.
+   The coding agent asks for approval before copying a successful result into the project. If it cannot finish within the run's limits, it reports the remaining problems.
 
-**A hard pass means the required checks passed.** It does not establish every requirement beyond the coverage of those checks.
-Promotion copies an approved result into the project; it does not create a Git commit.
-:doc:`introduction` explains the workflow and :doc:`concepts/srbn-architecture` explains the underlying SRBN runtime.
+Agent mode is experimental.
+We review the code and tests before committing, because passing checks can miss bugs.
+:doc:`introduction` explains the main commands and :doc:`concepts/srbn-architecture` covers the implementation in detail.
 
 .. toctree::
    :maxdepth: 2

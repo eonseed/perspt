@@ -3,9 +3,9 @@
 #show: diagram-page.with(width: 720pt, margin: 18pt)
 
 #section-banner(
-  "How the agent measures progress",
-  "Keep improvements. Reject regressions. Check before delivery.",
-  subtitle: [Illustrative scores for one node. These are not benchmark results or a promise that every run succeeds.],
+  "How build and test results guide the agent",
+  "Keep improvements. Reject regressions.",
+  subtitle: [An example of successive attempts at one coding task. The scores are illustrative, not benchmark results.],
 )
 #v(12pt)
 
@@ -45,7 +45,7 @@
         place(dx: px(k) - 24pt, dy: py(v) - 20pt, text(size: 8pt, weight: "bold", fill: amber-dark)[Rejected])
       }
       #place(dx: px(3) - 30pt, dy: py(4) + 14pt, text(size: 8pt, weight: "bold", fill: teal-dark)[Kept checkpoint])
-      #place(dx: px(6) - 24pt, dy: py(0) - 23pt, text(size: 8pt, weight: "bold", fill: teal-dark)[Hard pass])
+      #place(dx: px(6) - 24pt, dy: py(0) - 23pt, text(size: 8pt, weight: "bold", fill: teal-dark)[Checks passed])
       #for k in range(7) {
         place(dx: px(k) - 2pt, dy: 185pt, text(size: 8pt, fill: muted)[#k])
       }
@@ -57,9 +57,9 @@
   ],
   stack(
     spacing: 10pt,
-    card("1. Measure the candidate", [Compiler, test, and contract checks produce residuals. Their weighted squares form the non-negative score $V$.], accent-color: amber),
-    card("2. Keep measured progress", [A hard pass or sufficient descent can pass the node gate. An improving checkpoint stays internal until delivery checks pass.], accent-color: teal),
-    card("3. Deliver or stop", [Required checks and promotion approval govern delivery. Limits can stop a run with errors remaining.], accent-color: violet),
+    card("1. Run the checks", [Build errors, failing tests, and other reported problems contribute to the error score $V$. Lower is better.], accent-color: amber),
+    card("2. Keep improvements", [Perspt can keep an intermediate version that reduces the error score enough. This does not yet update the original project.], accent-color: teal),
+    card("3. Review the result", [The required checks must pass before edits can be applied. If the agent runs out of attempts, it reports the remaining errors.], accent-color: violet),
   ),
 )
 #v(12pt)

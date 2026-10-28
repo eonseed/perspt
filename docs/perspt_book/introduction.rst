@@ -1,97 +1,83 @@
 Introduction to Perspt
 ======================
 
-**Perspt brings model conversations and checked coding tasks into the terminal.** We can use a cloud provider or a local model and choose an interface that fits the task.
+**Perspt is an AI chat and coding assistant that runs in the terminal.** We can ask questions in chat, get help understanding code, or give the coding agent a task to carry out in a project.
+It connects to cloud providers and local models through Ollama.
 
-Choose a mode
--------------
+Choose a way to work
+--------------------
 
 .. list-table::
    :header-rows: 1
    :widths: 25 30 45
 
-   * - Goal
+   * - Task
      - Command or library
-     - What happens
-   * - **Talk through a problem**
+     - What it does
+   * - **Chat with AI**
      - ``perspt chat`` or ``perspt``
-     - Full-screen chat with streaming Markdown, code, multiline input, and configured read-only MCP operations.
-   * - **Use plain terminal chat**
+     - Opens a full-screen conversation with formatted answers, code, and multiline input.
+   * - **Use simple terminal chat**
      - ``perspt simple-chat``
-     - A line-oriented conversation with optional session logging. Piped input is one message per non-empty line; stdout includes session messages.
-   * - **Change a codebase**
+     - Reads a message one line at a time and prints the answer. It can also save a conversation to a file.
+   * - **Work on a codebase**
      - ``perspt agent -w ./app "Fix the parser tests"``
-     - Experimental coding agent with candidate copies, project checks, repair attempts, and promotion review.
-   * - **Build a custom workflow**
-     - ``perspt-sdk`` and domain crates
-     - Rust libraries for residual scoring, acceptance gates, capabilities, and recorded decisions.
+     - Reads the project, edits a separate copy, runs the build and tests, and asks for review before applying changes.
+   * - **Add Perspt to a Rust application**
+     - ``perspt-sdk`` and related crates
+     - Provides libraries for building AI workflows, running checks, and recording what happened.
 
-For a first run, follow :doc:`quickstart`.
-For plain chat controls, see :doc:`user-guide/basic-usage`.
-For configured providers and explicit model routes, see :doc:`user-guide/providers`.
+Follow :doc:`quickstart` to install Perspt and start a conversation.
+:doc:`user-guide/basic-usage` covers chat controls and :doc:`user-guide/providers` explains provider setup.
 
-What the coding agent does
---------------------------
+Give the coding agent a task
+----------------------------
 
-We describe the change and the project directory:
+A useful task describes the feature or bug, the project folder, and the expected behavior:
 
 .. code-block:: bash
 
    perspt agent -w ./app "Add CSV export with tests for empty input"
 
-Perspt explores the repository and applies proposed edits to a candidate copy.
-The default run uses one work node; optional parallel dispatch can decompose a larger task.
-Detected language plugins provide checks for Rust, Python, and JavaScript/TypeScript projects.
+The agent reads the repository and edits a separate copy of it.
+Perspt runs the tools provided by the detected language plugin, such as ``cargo check`` and ``cargo test`` for Rust.
+The built-in plugins support Rust, Python, and JavaScript/TypeScript projects.
+If a build or test fails, the agent uses the reported errors to try a correction.
+Limits on attempts and tool calls prevent a run from continuing indefinitely.
 
 .. figure:: ../shared/_static/agent-workflow-overview.svg
    :target: _static/agent-workflow-overview.svg
-   :alt: A task becomes candidate edits, project checks, and an approved promotion, with a bounded correction loop.
+   :alt: Describe a coding task, edit a project copy, run builds and tests, then review and apply the changes.
    :width: 100%
 
-   Proposed edits stay in the candidate workspace. A delivered result must pass the required checks and receive promotion approval.
+   The project files are updated after the required checks pass and the changes are approved. Perspt does not create a Git commit.
 
-**Verification guides the next attempt.** Compiler diagnostics, failing tests, and other residuals become a non-negative error score called energy, written :math:`V`.
-The agent can keep a checkpoint that reduces the best accepted score by the configured margin.
-A hard pass means the required checks passed; it is the success condition for delivery.
-Attempts that fail the gate do not advance accepted progress.
-Turn and rejection limits can end a run with errors remaining.
+**Review the code and the tests.** A passing suite can miss bugs or leave requirements untested.
+Tests can change with the implementation by default.
+For tasks that must preserve existing behavior, the ``backward-compatible`` policy also runs the historical tests.
+An ``external-oracle`` policy adds acceptance tests maintained separately from the agent's work.
+See :doc:`configuration` for these settings.
 
-.. figure:: ../shared/_static/reliability-scaling.svg
-   :target: _static/reliability-scaling.svg
-   :alt: Checks establish syntax and build, tested behavior, and declared contracts within their configured coverage. Passing checks does not prove every requirement.
-   :width: 100%
+Watch, review, and continue the work
+------------------------------------
 
-   Verification supplies evidence within the coverage of the configured checks. This diagram makes no benchmark or success-rate claim.
+- **Review edits in the terminal.** The agent shows the diff and the check results before applying changes. ``--yes`` approves this step automatically for unattended runs.
+- **Watch in the browser.** Add ``--dashboard`` and open ``http://127.0.0.1:3000`` while the agent runs.
+- **Read the session history.** ``perspt replay <session-id>`` reads recorded actions without calling a model or rerunning the tools.
+- **Continue an interrupted run.** ``perspt resume --last`` restores the saved progress and checks that the run is still authorized.
+- **Undo applied edits.** ``perspt ledger --rollback <session-prefix>`` undoes that session's latest set of applied changes. It refuses to overwrite files changed afterward.
 
-**A pass is evidence, not proof of every requirement.** By default the tests can change with the implementation.
-We can select historical regression checks or separately maintained acceptance tests when the task needs stronger evidence.
-See :doc:`configuration` for these policies.
+Linux uses Bubblewrap and macOS uses ``sandbox-exec`` to isolate the agent's child processes.
+Native Windows requires an explicit option to run without this isolation, or WSL.
+See :doc:`installation` for setup and :doc:`user-guide/agent-mode` for the full agent guide.
 
-The runtime calls this propose, measure, and correct process **SRBN (Stabilized Recursive Barrier Networks)**.
-The practical workflow requires no mathematics.
-:doc:`concepts/srbn-architecture` explains the gate, energy function, and relation to the stability papers.
+Use the Rust libraries
+----------------------
 
-Review, inspect, and recover
-----------------------------
+Perspt's libraries can be used from another Rust application.
+``perspt-agent`` runs coding sessions, ``perspt-core`` connects to model providers, and ``perspt-store`` saves session history.
+``perspt-sdk`` and ``perspt-coding`` provide the types and checks used by the agent.
+The research package is an early example of another domain, not a complete research assistant.
 
-- **Review before promotion.** Inspect the diff and verification results in the terminal. ``--yes`` approves promotion automatically for unattended runs.
-- **Watch a live run.** Add ``--dashboard`` and open ``http://127.0.0.1:3000`` while the agent runs.
-- **Inspect recorded decisions.** ``perspt replay <session-id>`` audits the ledger without model calls or rerunning the verifier tools.
-- **Continue interrupted work.** ``perspt resume --last`` rebuilds the recorded state and checks authority before continuing.
-- **Undo the latest promotion in a session.** ``perspt ledger --rollback <session-prefix>`` restores recorded pre-images unless the promoted files have since changed.
-
-Promotion copies files into the project; it does not create a Git commit.
-Candidate copies and OS process isolation serve different purposes.
-Linux uses Bubblewrap and macOS uses ``sandbox-exec`` for process isolation.
-Native Windows agent execution requires explicit reduced isolation or WSL.
-See :doc:`installation` for prerequisites and :doc:`user-guide/agent-mode` for the full workflow.
-
-Reuse the Rust libraries
-------------------------
-
-The workspace contains fourteen product crates and a development-only ``xtask`` crate.
-``perspt-sdk`` defines shared contracts; ``perspt-coding`` supplies coding residuals and adapters; ``perspt-agent`` runs governed sessions.
-``perspt-research`` is a second-domain skeleton rather than a complete research assistant.
-
-:doc:`api/index` contains an SDK example and a crate map.
-:doc:`reference/cli-reference` lists the commands and options.
+:doc:`api/index` contains a crate guide and a Rust example.
+The architecture and mathematical details are in :doc:`concepts/srbn-architecture`.

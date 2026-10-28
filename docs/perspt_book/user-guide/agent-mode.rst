@@ -25,44 +25,19 @@ escalating a fully verified run. Any outcome other than a hard pass exits
 with a nonzero process status, so scripts never read a stopped node as
 success.
 
-Core Workflow
--------------
+How a task runs
+---------------
 
-The agent runs a closed loop in which every model proposal is governed and
-every acceptance is measured:
+1. **Read the project.** Perspt explores the files and starts a task. The default run works on one task at a time; optional parallel execution can split larger work into several tasks.
+2. **Edit a separate copy.** The agent reads and changes files in a temporary project copy. Permission and command rules limit what it can do.
+3. **Build and test.** Perspt runs the detected language tools. The required checks run before each decision to keep an attempt; smaller syntax checks also run during editing.
+4. **Try corrections.** Build errors and failing tests tell the agent what went wrong. While checks still fail, an attempt must improve the recorded error score enough to be kept. Otherwise, Perspt restores its best saved version.
+5. **Review and apply.** When the required checks pass, an interactive run asks for approval before copying edits into the project. A run that cannot finish within its limits stops and reports the remaining errors.
 
-1. **Planning** - The default single-node run starts directly from a
-   deterministic one-node graph. When ``--max-parallel-nodes`` is above one,
-   one governed architect turn, restricted to ``update_graph``, may decompose
-   the task into a typed work graph; an empty or invalid proposal safely falls
-   back to the single node.
-2. **Proposal** - The actuator proposes typed tool calls (file writes,
-   edits, commands) against a disposable candidate overlay. The real
-   workspace is never touched by a proposal.
-3. **Admission** - Every proposal passes the deterministic five-clause
-   kernel — authority, contract, effect scope, barrier increment, and risk
-   budget — before it takes effect. A denied call is recorded in the ledger
-   and costs the model a correction, never the workspace a mutation.
-4. **Measurement** - Admitted mutations are measured on the realized
-   filesystem by the language plugins (compilers, tests, linters, LSP
-   diagnostics), which produce the scalar energy :math:`V(y)`. Tests evolve
-   with the implementation by default. The optional
-   ``backward-compatible`` policy adds a historical regression view, while
-   ``external-oracle`` adds separately protected acceptance evidence; see
-   :doc:`../configuration`.
-5. **Acceptance** - A candidate is accepted when it is a hard pass, or when
-   it achieves the required measured descent
-   :math:`V(y) \leq V(\text{best}) - \rho_{\text{gate}}` (``--rho-gate``,
-   default ``0.5``). A rejected candidate restores the best accepted
-   checkpoint.
-6. **Ledger** - Every proposal, denial, measurement, gate decision, and
-   checkpoint is appended to a hash-chained ledger *before* it is used.
-
-On a gate failure the runtime can open a bounded search forest: a small
-number of eager branches with exact-keyed no-goods, pre-action reservations
-that settle against observed actuals, and exactly one candidate committed
-through the ordinary gate. See :doc:`advanced-features` for the
-``[exploration]`` configuration.
+Applying edits does not create a Git commit.
+We review the code and tests before committing, because passing checks can miss bugs.
+The internal names for the temporary copy, progress decisions, and file copying are ``CandidateWorkspace``, the acceptance gate, and promotion.
+:doc:`../concepts/srbn-architecture` explains these implementation details.
 
 Test Evidence Policies
 ----------------------

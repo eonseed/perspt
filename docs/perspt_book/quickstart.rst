@@ -3,7 +3,7 @@
 Quick Start
 ===========
 
-**Start with a conversation, then try a small code change.** We need a model provider for chat and the project's own verification tools for agent mode.
+**Start with a conversation, then try a small code change.** For chat, we need access to an AI model. For coding tasks, we also need the project's compiler and test tools.
 
 1. Install the CLI
 ------------------
@@ -76,14 +76,13 @@ For a single piped question:
    perspt agent -w ./my-project \
      "Add tests for empty input in the parser. Preserve the public API."
 
-The agent edits a candidate copy and runs the detected checks.
-It uses measured errors to guide repairs and asks for review before copying the final result into the project.
-Promotion does not create a Git commit.
+The agent edits a separate copy of the project and runs its build and tests.
+It uses error messages to try corrections and asks for review before copying the result back.
+Applying edits does not create a Git commit.
 Agent mode is experimental; required tools and platform isolation are described in :doc:`installation`.
 
-**A hard pass means the required checks passed.** An improving intermediate checkpoint is not a completed task.
-If the run reaches a limit with errors remaining, it stops with a failure outcome instead of reporting success.
-We still review the diff and the adequacy of the tests.
+**Review the diff and the tests before accepting the result.** Passing tests can miss bugs or leave requirements untested.
+If the agent runs out of attempts, it stops and reports the remaining errors.
 
 5. Watch or automate a run
 --------------------------
@@ -97,8 +96,9 @@ We still review the diff and the adequacy of the tests.
    perspt agent --yes --output-summary summary.json \
      -w ./my-project "Add tests for empty parser input"
 
-``--yes`` approves promotion automatically and is required without a terminal.
-A non-hard-pass outcome exits with a nonzero status.
+``--yes`` automatically approves copying a successful result into the project.
+It is required for runs without an interactive terminal.
+An incomplete or failed run exits with a nonzero status.
 The embedded dashboard stops when the agent exits.
 
 Next steps
@@ -106,5 +106,5 @@ Next steps
 
 - :doc:`tutorials/agent-mode`: Follow a complete coding task and inspect the result.
 - :doc:`configuration`: Choose providers, test policies, and verification settings.
-- :doc:`user-guide/agent-mode`: Understand review, limits, resume, and replay.
+- :doc:`user-guide/agent-mode`: Review edits, continue interrupted work, and read session history.
 - :doc:`api/index`: Reuse the Rust SDK.

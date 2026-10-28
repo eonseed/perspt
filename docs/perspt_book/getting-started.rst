@@ -3,7 +3,7 @@
 Getting Started
 ===============
 
-**We can start with chat and add agent workflows when the project is ready.** Follow :doc:`quickstart` for installation and a first conversation.
+**Start with a conversation, then try the coding agent on a project.** Follow :doc:`quickstart` for installation and a first conversation.
 This page gives a short path through the next tasks.
 
 Choose a project task
@@ -17,21 +17,21 @@ A small task with an observable result is easiest to review:
    perspt agent -w ./my-project \
      "Add parser tests for empty input and malformed headers. Preserve the public API."
 
-Perspt explores the project, edits a candidate copy, and measures the detected checks.
-The default run uses one work node.
-A lower error score can keep an intermediate checkpoint, while delivery requires a hard pass and promotion approval.
-The run can stop with errors remaining when a limit is reached.
+Perspt reads the code, edits a separate project copy, and runs the required checks.
+Build errors and failing tests guide further corrections.
+The agent asks for review before applying a successful result.
+If it runs out of attempts, it stops and reports what remains to be fixed.
 
 Review the result
 -----------------
 
-Inspect the diff and required-check results in the review modal.
-Approve promotion to copy the result into the project, or send correction feedback.
-Promotion does not create a Git commit.
+Inspect the diff and the build and test results in the review window.
+Approve the edits to copy them into the project, or ask the agent for a correction.
+Perspt does not create a Git commit.
 
-**We still assess the tests and the intended behavior.** A passing suite establishes only what it covers.
+**We still assess the tests and the intended behavior.** Passing tests can miss bugs or leave requirements untested.
 The default test policy lets tests evolve with implementation.
-:doc:`configuration` explains additional historical and external acceptance evidence.
+:doc:`configuration` explains how to require existing tests or separately maintained acceptance tests.
 
 Watch a run
 -----------
@@ -54,9 +54,9 @@ Automate after a successful trial
      --output-summary summary.json \
      -w ./my-project "Add parser tests for empty input"
 
-``--yes`` approves promotion automatically within the run's granted authority.
+``--yes`` automatically approves applying a successful result.
 It is required without a terminal.
-Any outcome other than a hard pass exits with a nonzero status.
+An incomplete or failed run exits with a nonzero status.
 See :doc:`tutorials/headless-mode` for automation examples.
 
 Inspect or continue a session
@@ -69,9 +69,10 @@ Inspect or continue a session
    perspt replay <session-id>
    perspt resume --last
 
-Replay audits recorded events without calling the model or rerunning checks.
-Resume reconstructs recorded progress and checks authority before continuing.
-The command ``perspt ledger --rollback <session-prefix>`` undoes that session's newest completed promotion and refuses to overwrite files changed since promotion.
+Replay reads the saved session history without calling the model or rerunning tests.
+Resume restores saved progress and checks that the run is still authorized.
+``perspt ledger --rollback <session-prefix>`` undoes the latest set of edits applied by that session.
+It refuses to overwrite files changed afterward.
 
 Read further
 ------------
@@ -79,4 +80,4 @@ Read further
 - :doc:`tutorials/agent-mode`: A complete example with review and verification.
 - :doc:`user-guide/basic-usage`: Chat commands and keyboard controls.
 - :doc:`installation`: Project tools and platform isolation requirements.
-- :doc:`api/index`: Reuse scoring and gate contracts in Rust.
+- :doc:`api/index`: Use Perspt's libraries from a Rust application.

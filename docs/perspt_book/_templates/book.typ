@@ -77,13 +77,13 @@
       )
       #v(9mm)
       #text(font: sans, size: 21pt, weight: "bold", tracking: -.02em, hyphenate: false, fill: rgb("#f8fafc"))[
-        AI tools for developers. \
-        #text(fill: emerald-mint)[Chat. Explore. Make checked changes.]
+        AI chat and coding \
+        #text(fill: emerald-mint)[in the terminal.]
       ]
       #v(5mm)
       #text(font: sans, size: 10.5pt, fill: rgb("#cbd5e1"))[
         A practical guide to Perspt's plain terminal chat, full-screen UI, \
-        checked coding tasks, and reusable Rust SDK.
+        coding agent, and Rust libraries.
       ]
     ]
     // Spectrum Divider Bar (Emerald -> Cyan -> Gold)
@@ -108,7 +108,7 @@
         rect(width: 100%, fill: rgb("#fffbeb"), stroke: 0.5pt + rgb("#fde68a"), radius: 4pt, inset: 6pt)[
           #text(font: mono, size: 6.8pt, weight: "bold", fill: amber)[02 / CODING AGENT & RUST SDK]\
           #v(1.5mm)
-          #text(font: sans, size: 8pt, fill: quiet)[Candidate edits and project checks with `perspt agent`; reusable SDK contracts.]
+          #text(font: sans, size: 8pt, fill: quiet)[Ask `perspt agent` to edit code and run builds and tests. Use the libraries from Rust.]
         ],
       )
       #v(7mm)

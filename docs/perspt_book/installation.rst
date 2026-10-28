@@ -106,7 +106,7 @@ For resumed runs, the durable setting is:
    [verification]
    allow_unisolated = true
 
-Candidate copies, capability checks, verification gates, journaling, and promotion approval still apply.
+The agent still works on a project copy, limits permitted edits, runs required checks, and asks for approval.
 Child processes in reduced isolation have the host user's filesystem and network access.
 
 Build the documentation

@@ -4,7 +4,7 @@
 
 # Perspt
 
-**Chat, explore, and make checked code changes from the terminal.**
+**AI chat and coding in the terminal.**
 
 [![Build Status](https://github.com/eonseed/perspt/actions/workflows/ci.yml/badge.svg)](https://github.com/eonseed/perspt/actions/workflows/ci.yml)
 [![Documentation](https://github.com/eonseed/perspt/actions/workflows/docs.yml/badge.svg)](https://eonseed.github.io/perspt/)
@@ -19,18 +19,18 @@
 
 ---
 
-**Perspt** is a Rust CLI and reusable SDK for model conversations and coding tasks. It connects to nine provider adapters, including local Ollama and OpenAI-compatible servers.
+**Perspt** is an AI chat and coding assistant that runs in the terminal. Ask questions, discuss code, or give the coding agent a bug to fix. It works with cloud providers and local models through Ollama.
 
-| Goal | Command or library | What it provides |
+| Task | Command or library | What it does |
 |---|---|---|
-| **Talk through a problem** | `perspt chat` | Full-screen streaming chat with Markdown, code, multiline paste, and configured read-only MCP tools |
-| **Use plain terminal chat** | `perspt simple-chat` | Line-oriented chat and optional session logging |
-| **Change a project** | `perspt agent` | Experimental candidate edits, project checks, bounded repairs, and promotion review |
-| **Build a custom workflow** | `perspt-sdk`, `perspt-coding` | Residual scoring, acceptance gates, and domain contracts |
+| **Chat with AI** | `perspt chat` | A full-screen conversation with streamed answers, Markdown, and code |
+| **Use simple terminal chat** | `perspt simple-chat` | Read and write messages one line at a time, with optional conversation logging |
+| **Work on a codebase** | `perspt agent` | Edit a project copy, run builds and tests, and review changes before applying them |
+| **Use Perspt in a Rust app** | `perspt-sdk` and related crates | Add AI workflows, build and test checks, and session history |
 
-**The model proposes; the tools measure.** The coding agent edits a candidate copy and uses compiler, test, and other diagnostics to guide corrections. It can keep improving checkpoints, but delivery requires a hard pass of the required checks and promotion approval. A run can stop with errors remaining. The internal runtime is called SRBN (Stabilized Recursive Barrier Networks).
+**The coding agent works on a separate copy of the project.** It reads files, makes edits, and uses build errors and test failures to guide corrections. When the required checks pass, it asks for review before copying changes into the project. If it cannot finish within its attempt limits, it stops and reports the remaining problems.
 
-**A hard pass is evidence within the configured checks' coverage.** Tests can evolve with implementation by default; historical regression and external acceptance policies are available. Promotion copies files into the project and does not create a Git commit.
+Agent mode is experimental. Review the diff and tests before committing: a passing test suite can miss bugs. Applying edits does not create a Git commit.
 
 ## Quick Start
 
