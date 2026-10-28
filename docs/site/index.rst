@@ -1,5 +1,5 @@
 .. meta::
-   :description: Perspt is a fast Rust AI toolkit for developers featuring a pipe-friendly Simple CLI, an interactive Terminal UI, a compiler-verified SRBN Coding Agent, and an embeddable Rust SDK.
+   :description: Perspt is the AI workspace for your terminal in one fast Rust binary—featuring a pipe-ready Simple CLI, an interactive Terminal UI, a compiler-verified SRBN Coding Agent, and an embeddable Rust SDK.
 
 Perspt
 ======
@@ -10,15 +10,15 @@ Perspt
 
       .. rst-class:: eyebrow
 
-      $_ PERSPT // CLI · TUI · SRBN AGENT · RUST SDK
+      $_ PERSPT // THE AI WORKSPACE FOR YOUR TERMINAL
 
       .. raw:: html
 
-         <h1>Simple CLI. Terminal UI.<br><em>Code that actually runs.</em></h1>
+         <h1>Build with AI in your terminal.<br><em>Ship code verified by your compiler.</em></h1>
 
       .. rst-class:: lead
 
-      Perspt brings Large Language Models directly into your terminal workflow in one fast Rust binary: **1. a pipe-friendly Simple CLI**, **2. an interactive Terminal UI**, **3. an autonomous SRBN Coding Agent** that verifies its own code with your compiler and tests, and **4. a Rust SDK** to integrate into your own apps.
+      Perspt brings 9+ cloud and local LLMs straight into your command line in one fast Rust binary. Pipe quick prompts through Unix shell scripts, chat interactively in a full-screen terminal UI, or delegate multi-file tasks to an autonomous coding agent that compiles and tests every change before touching your repo.
 
       .. container:: actions
 
@@ -40,16 +40,16 @@ Perspt
 
       .. rst-class:: art-caption
 
-      HÓZHÓ TERMINAL PRECISION // CLI · TUI · SRBN · SDK
+      YOUR TERMINAL'S WINDOW TO THE AI WORLD // CLI · TUI · SRBN · SDK
 
 .. container:: pillars
 
    .. container:: pillar
 
-      .. rubric:: 01 // SIMPLE CLI (``perspt simple-chat``)
+      .. rubric:: SIMPLE CLI · ``perspt simple-chat``
 
-      **Plain terminal output with zero UI chrome.**
-      Ask a quick question in the terminal, pipe compiler errors or ``git diff`` straight from ``stdin``, and redirect clean text output into shell scripts and Unix pipelines.
+      **Plain terminal output for Unix pipes and scripts.**
+      Ask a quick question from your shell, pipe compiler logs or ``git diff`` into ``stdin``, and get clean text on ``stdout`` with zero UI chrome.
 
       .. code-block:: sh
 
@@ -57,10 +57,10 @@ Perspt
 
    .. container:: pillar
 
-      .. rubric:: 02 // TERMINAL UI (``perspt`` / ``perspt chat``)
+      .. rubric:: TERMINAL UI · ``perspt chat``
 
       **Interactive full-screen chat right in your terminal.**
-      Stream Markdown, syntax-highlighted code blocks, tables, and LaTeX math; switch models on the fly across 9+ cloud or local Ollama providers; and inspect read-only MCP tools with ``/mcp``.
+      Stream Markdown, syntax-highlighted code, tables, and LaTeX math; switch models live across 9+ cloud or local Ollama providers; and inspect MCP tools with ``/mcp``.
 
       .. code-block:: sh
 
@@ -68,10 +68,10 @@ Perspt
 
    .. container:: pillar
 
-      .. rubric:: 03 // SRBN CODING AGENT (``perspt agent``)
+      .. rubric:: SRBN CODING AGENT · ``perspt agent``
 
-      **Autonomous coding that compiles and tests its own work.**
-      Give Perspt a coding task and a project folder. It plans the work, edits files in a safe sandbox, runs your real compiler, LSP, and test suite, and fixes errors automatically before committing.
+      **Autonomous coding verified by your compiler and tests.**
+      Give Perspt a task and a project directory. It plans the changes, edits an isolated sandbox copy, runs your compiler, LSP, and test suite, and fixes its own errors before committing.
 
       .. code-block:: sh
 
@@ -79,10 +79,10 @@ Perspt
 
    .. container:: pillar
 
-      .. rubric:: 04 // EMBEDDABLE RUST SDK (``perspt-sdk``)
+      .. rubric:: EMBEDDABLE RUST SDK · ``perspt-sdk``
 
       **Integrate verified AI workflows into your own Rust apps.**
-      Embed ``perspt-sdk``, ``perspt-coding``, and ``perspt-agent`` as library crates to use Perspt's verification gate, capability sandbox, and DuckDB audit ledger in custom software.
+      Embed ``perspt-sdk``, ``perspt-coding``, and ``perspt-agent`` as library crates to reuse Perspt's verification gate, capability sandbox, and DuckDB audit ledger in custom software.
 
       .. code-block:: sh
 
@@ -92,13 +92,19 @@ Perspt
 
    .. rst-class:: eyebrow
 
-   UNDER THE HOOD: WHY THE CODING AGENT WORKS
+   HOW THE CODING AGENT WORKS
 
-   .. rubric:: SRBN keeps generated code running and aligned with your task.
+   .. rubric:: Edits happen in a sandbox. Only working code reaches your repo.
 
-Most AI coding agents generate code in an open loop: if the LLM makes a small mistake in one file, subsequent edits build on top of that mistake until the project no longer compiles. Internally, Perspt's coding agent is powered by **SRBN (Stabilized Recursive Barrier Networks)**, an engineering architecture based on the *Stability is All You Need* research paper series.
+Most AI coding tools generate code in an open loop: if the model makes a small mistake in one file, later edits build on top of that mistake until your project no longer compiles. Internally, ``perspt agent`` is powered by **SRBN (Stabilized Recursive Barrier Networks)**, an engineering architecture based on the *Stability is All You Need* research paper series.
 
-Instead of trusting the LLM's first guess, SRBN runs every candidate edit through your actual language toolchain (``cargo check``, ``rust-analyzer``, ``pytest``, ``pyright``, ``tsc``) and scores remaining compiler, contract, and test issues as a single error energy :math:`V(x) = \sum_{e \in E} w_e \|r_e(x)\|^2`. Changes are only accepted when all checks pass or measured errors strictly decrease (:math:`V(y) \le V_{\mathrm{best}} - \rho_{\mathrm{gate}}`). Bad edits are rolled back automatically, so the agent stays locked on working code that matches the task you gave it.
+.. figure:: ../shared/_static/agent-workflow-overview.svg
+   :alt: Four-step safe sandbox workflow showing how perspt agent turns a task prompt into compiler-verified code.
+   :width: 100%
+
+   The four-stage ``perspt agent`` workflow: your working tree stays untouched while Perspt edits a sandboxed copy and checks every step with your compiler, LSP, and test suite.
+
+Instead of trusting the LLM's first guess, SRBN runs every candidate edit through your actual language toolchain (``cargo check``, ``rust-analyzer``, ``pytest``, ``pyright``, ``tsc``) and scores remaining compiler, contract, and test issues as a single error energy :math:`V(x) = \sum_{e \in E} w_e \|r_e(x)\|^2`. Changes are accepted only when all checks pass or measured errors strictly decrease (:math:`V(y) \le V_{\mathrm{best}} - \rho_{\mathrm{gate}}`). Bad edits are discarded automatically, keeping the agent locked on working code that matches your task.
 
 .. figure:: ../shared/_static/front-page-abm.svg
    :alt: Agent-based simulation comparing unguided LLM drift against SRBN Lyapunov-guided trajectory convergence.
@@ -159,7 +165,7 @@ Perspt is engineered as a modular 14-crate Rust workspace around **``perspt-sdk`
 .. container:: book-section
 
    .. image:: ../shared/_static/book-cover.png
-      :alt: Cover of The Perspt Book: Simple CLI. Terminal UI. Code that actually runs.
+      :alt: Cover of The Perspt Book: Build with AI in your terminal. Ship code verified by your compiler.
 
    .. container:: book-copy
 
@@ -168,6 +174,17 @@ Perspt is engineered as a modular 14-crate Rust workspace around **``perspt-sdk`
       DEVELOPER HANDBOOK & PSP ARCHIVE
 
       .. rubric:: Clear developer guides, SDK references, and engineering specs.
+
+      .. epigraph::
+
+         | *The keyboard hums, the screen aglow,*
+         | *AI's wisdom, a steady flow.*
+         |
+         | *Will robots take over, it's quite the fright,*
+         | *Or just provide insights, day and night?*
+         |
+         | *We ponder and chat, with code as our guide,*
+         | *Is AI our helper or our human pride?*
 
       *The Perspt Book* walks you through installing Perspt, configuring cloud or local Ollama models, piping commands with ``simple-chat``, chatting in the TUI, running ``perspt agent`` on real projects, and embedding ``perspt-sdk`` in Rust.
 

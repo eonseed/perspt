@@ -30,6 +30,10 @@ const DIAGRAMS: &[(&str, &str)] = &[
         "docs/diagrams/workspace-architecture.typ",
         "docs/shared/_static/workspace-architecture.svg",
     ),
+    (
+        "docs/diagrams/agent-workflow-overview.typ",
+        "docs/shared/_static/agent-workflow-overview.svg",
+    ),
 ];
 
 /// Compile all Typst diagram sources and cover artwork into `docs/shared/_static/`.

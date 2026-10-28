@@ -3,7 +3,7 @@
 #show: diagram-page.with(width: 740pt, margin: 16pt)
 
 #section-banner(
-  "Figure 5 · Model Context Protocol (MCP 2026-07-28) Governance",
+  "Model Context Protocol (MCP 2026-07-28) Governance",
   "Capability-Bounded MCP Admission, Bracketed Effects, and Deterministic Replay",
   subtitle: [External MCP servers never self-grant authority. Every remote tool is admitted against the intersection of operator `ExternalToolPolicy` and session `Capability`, wrapped as an untrusted observation, and bracketed in `psp9_external_effects`.],
 )

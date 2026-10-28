@@ -13,55 +13,6 @@ Eight crates form the running executable program; three crates define the reusab
 
    Layered architecture of the fourteen-crate Perspt workspace across user surfaces, governed runtime & security, domain-neutral SRBN SDK, and evaluation harness.
 
-.. graphviz::
-   :align: center
-   :caption: Crate Dependencies
-
-   digraph deps {
-       rankdir=TB;
-       node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
-
-       cli [label="perspt-cli\n16 commands", fillcolor="#4ECDC4"];
-       tui [label="perspt-tui\nRatatui UI", fillcolor="#96CEB4"];
-       agent [label="perspt-agent\nPSP-9 Runtime", fillcolor="#FFEAA7"];
-       core [label="perspt-core\nLLM + Types", fillcolor="#45B7D1"];
-       store [label="perspt-store\nDuckDB", fillcolor="#87CEEB"];
-       policy [label="perspt-policy\nStarlark", fillcolor="#DDA0DD"];
-       sandbox [label="perspt-sandbox\nIsolation", fillcolor="#F8B739"];
-       dashboard [label="perspt-dashboard\nWeb UI", fillcolor="#FFB6C1"];
-       bench [label="perspt-benchmark\nEvaluation (optional)", fillcolor="#D3D3D3"];
-
-       subgraph cluster_sdk {
-           label="Reusable SDK Platform";
-           style=dashed;
-           sdk [label="perspt-sdk\nStability Contract", fillcolor="#AED9E0"];
-           coding [label="perspt-coding\nCoding Domain", fillcolor="#C7CEEA"];
-           research [label="perspt-research\nResearch Domain", fillcolor="#E2C2C6"];
-           macros [label="perspt-prompt-macros\nPrompt Codegen", fillcolor="#AED9E0"];
-       }
-
-       cli -> tui;
-       cli -> agent;
-       cli -> core;
-       cli -> store;
-       cli -> dashboard;
-       cli -> bench [style=dotted, label="benchmark feature"];
-       agent -> core;
-       agent -> store;
-       agent -> policy;
-       agent -> sandbox;
-       agent -> sdk;
-       core -> sdk;
-       core -> macros [style=dotted, label="build.rs"];
-       coding -> sdk;
-       coding -> macros [style=dotted, label="build.rs"];
-       macros -> sdk;
-       research -> sdk;
-       bench -> agent;
-       dashboard -> store;
-       dashboard -> sdk;
-   }
-
 Crate Summary
 -------------
 

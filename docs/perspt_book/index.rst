@@ -1,12 +1,12 @@
 .. Perspt documentation master file
 
-.. title:: Perspt: Simple CLI, Terminal UI, and Verified Coding Agent
+.. title:: Perspt: The AI Workspace for Your Terminal
 
 .. only:: html
 
    .. raw:: html
 
-      <div style="text-align: center; margin: 2em 0;">
+      <div style="text-align: center; margin: 2em 0 1.2em;">
       <pre style="font-family: monospace; font-size: 0.8em; line-height: 1.2; margin: 0 auto; display: inline-block; text-align: left;">
       ██████╗ ███████╗██████╗ ███████╗██████╗ ████████╗
       ██╔══██╗██╔════╝██╔══██╗██╔════╝██╔══██╗╚══██╔══╝
@@ -15,41 +15,45 @@
       ██║     ███████╗██║  ██║███████║██║        ██║
       ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝        ╚═╝
       </pre>
-      <p><em>Simple CLI · Interactive Terminal UI · Reliable Coding Agent · Rust SDK</em></p>
+      <p><em>Your Terminal's Window to the AI World</em></p>
       </div>
 
 .. only:: latex
 
-   Perspt: Simple CLI, Terminal UI, and Verified Coding Agent
-   ==========================================================
+   Perspt: The AI Workspace for Your Terminal
+   ==========================================
+
+.. epigraph::
+
+   | *The keyboard hums, the screen aglow,*
+   | *AI's wisdom, a steady flow.*
+   |
+   | *Will robots take over, it's quite the fright,*
+   | *Or just provide insights, day and night?*
+   |
+   | *We ponder and chat, with code as our guide,*
+   | *Is AI our helper or our human pride?*
+
+**Build with AI in Your Terminal — Ship Code Verified by Your Compiler**
+
+Perspt (*Personal Spectrum Pertaining Thoughts*) is a fast, single-binary Rust toolkit and embeddable SDK that brings 9+ cloud and local Large Language Models directly into your command-line workflow.
+
+Instead of forcing you into a single interaction style, Perspt gives you **three ways to work in your terminal** plus a **modular Rust SDK**:
+
+- **Simple CLI** (``perspt simple-chat``) — Stream plain text straight to ``stdout`` with zero UI chrome. Pipe files, compiler logs, or ``git diff`` from ``stdin`` into shell scripts and Unix pipelines.
+- **Interactive Terminal UI** (``perspt`` / ``perspt chat``) — Chat in a full-screen ``ratatui`` workspace with streaming Markdown, syntax highlighting, tables, LaTeX math, conversation history, read-only MCP tools (``/mcp``), and live model switching.
+- **SRBN Coding Agent** (``perspt agent``) — Delegate multi-file tasks to an autonomous coding agent that edits an isolated sandbox copy of your project and runs your real compiler, LSP, and test suite to fix its own mistakes before committing.
+- **Embeddable Rust SDK** (``perspt-sdk``, ``perspt-coding``, ``perspt-research``) — Integrate Perspt's verification gate, capability sandbox, multi-provider router, and DuckDB audit ledger directly into your own Rust applications.
 
 .. figure:: ../shared/_static/front-page-abm.svg
    :alt: Agent-based model trajectory toward consensus under SRBN verification
    :width: 100%
 
-   How Perspt's coding agent stays reliable: unguided LLM loops drift as errors compound across steps, while Perspt's internal SRBN verification loop checks every change against your compiler and test suite until errors reach zero (:math:`V(x) = 0`).
-
-.. epigraph::
-
-   The keyboard hums, the screen aglow,
-   AI's wisdom, a steady flow.
-   Will robots take over, it's quite the fright,
-   Or just provide insights, day and night?
-   We ponder and chat, with code as our guide,
-   Is AI our helper or our human pride?
-
-**AI in Your Terminal — Built for Everyday Developer Workflows**
-
-Perspt is a fast, single-binary Rust tool (and embeddable **Rust SDK**) designed to make working with Large Language Models effortless and reliable from your terminal. It gives developers **three practical ways to work with AI**, plus an SDK for custom integrations:
-
-1. **Simple CLI (``perspt simple-chat``)** — Plain terminal output with zero UI chrome. Pipe files, compiler logs, or ``git diff`` into ``stdin`` and get clean text back on ``stdout`` for shell scripts and one-liners.
-2. **Interactive Terminal UI (``perspt`` / ``perspt chat``)** — A full-screen terminal chat app with streaming Markdown, syntax highlighting, tables, LaTeX math, conversation saving, read-only MCP tool support, and instant switching across 9+ LLM providers.
-3. **SRBN Coding Agent (``perspt agent``)** — An autonomous coding agent that plans tasks, edits files in an isolated sandbox, and runs your real compiler, LSP, and test suite to fix its own mistakes before committing changes to your project.
-4. **Embeddable Rust SDK (``perspt-sdk``, ``perspt-coding``, ``perspt-research``)** — Library crates that let you integrate Perspt's verified agent loop, policy engine, and multi-provider runtime directly into your own Rust applications.
+   Why ``perspt agent`` stays reliable across multi-step tasks: unguided LLM loops drift as small mistakes compound, whereas Perspt's internal SRBN verification loop checks every step against your compiler and test suite until errors reach zero (:math:`V(x) = 0`).
 
 .. note:: What is SRBN?
 
-   **SRBN (Stabilized Recursive Barrier Networks)** is the internal reliability engine inside ``perspt agent``, based on the *Stability is All You Need* research paper series. As a developer, you don't need to configure or know the math to use ``perspt agent``—SRBN works automatically behind the scenes by running your compiler, language server, and tests after each edit, scoring remaining errors as :math:`V(x)`, and rolling back bad guesses so the code Perspt generates actually runs and stays close to the task you gave it.
+   **SRBN (Stabilized Recursive Barrier Networks)** is the internal reliability engine inside ``perspt agent``, based on the *Stability is All You Need* research paper series. You never need to configure or know the math to use ``perspt agent``—SRBN works automatically behind the scenes by running your compiler, language server, and tests after each edit, scoring remaining errors as :math:`V(x)`, and discarding bad guesses so the code Perspt generates actually compiles and matches your task.
 
 .. only:: html
 

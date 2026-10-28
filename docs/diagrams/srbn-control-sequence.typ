@@ -3,9 +3,9 @@
 #show: diagram-page.with(width: 740pt, margin: 16pt)
 
 #section-banner(
-  "Figure 4 · Closed-Loop Execution Sequence",
-  "SRBN Governed Tool Loop, Verifier Sensors, and Staged Workspace Promotion",
-  subtitle: [Every mutation proposed by the Actuator is filtered by the deterministic Admissibility Kernel, executed inside an isolated `CandidateWorkspace`, measured by orthogonal verifier sensors, and gated on Lyapunov descent before touching the user workspace.],
+  "Closed-Loop Execution Sequence",
+  "Governed Tool Loop, Verifier Sensors, and Staged Workspace Promotion",
+  subtitle: [Every mutation proposed by the Actuator is filtered by the Admissibility Kernel, executed inside an isolated `CandidateWorkspace`, measured by real language tools, and gated on error reduction before touching your repo.],
 )
 
 #v(8pt)

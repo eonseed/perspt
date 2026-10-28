@@ -245,3 +245,35 @@
   border: 1px solid var(--gd-border-strong);
   border-radius: 10px;
 }
+
+/* Poetic verse & epigraph formatting (never justified as prose) */
+.gd-article blockquote.epigraph {
+  max-width: 34rem;
+  margin: 1.5rem auto 2.2rem;
+  padding: 1.15rem 1.6rem;
+  background: var(--gd-bg-soft);
+  border: 1px solid var(--gd-border);
+  border-left: 4px solid var(--perspt-emerald);
+  border-radius: 10px;
+  color: var(--gd-text-soft);
+  text-align: left;
+  hyphens: none;
+}
+
+.gd-article .line-block {
+  margin: 0;
+  line-height: 1.72;
+  text-align: left;
+  hyphens: none;
+}
+
+.gd-article .line-block .line {
+  display: block;
+  text-align: left;
+  hyphens: none;
+}
+
+.gd-article .line-block .line:empty,
+.gd-article .line-block br {
+  min-height: 0.65rem;
+}

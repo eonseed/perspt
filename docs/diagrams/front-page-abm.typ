@@ -3,9 +3,9 @@
 #show: diagram-page.with(width: 720pt, margin: 16pt)
 
 #section-banner(
-  "Figure 1 · Stochastic Trajectory Stabilization",
-  "Agent-Based Model Dynamics: Uncontrolled Drift vs. SRBN Sheaf Consensus",
-  subtitle: [Ensemble of $M = 12$ autonomous coding trajectories over $T = 120$ steps under quadratic Lyapunov energy $V(x) = sum_e w_e norm(r_e (x))^2$.],
+  "Trajectory Stabilization",
+  "Why Closed-Loop Verification Matters: Unguided Drift vs. SRBN Consensus",
+  subtitle: [Unguided multi-step LLM chains drift as small errors compound, whereas Perspt's SRBN verification loop drives compiler and test errors to $V(x) = 0$.],
 )
 
 #v(8pt)

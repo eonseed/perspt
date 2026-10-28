@@ -3,9 +3,9 @@
 #show: diagram-page.with(width: 740pt, margin: 16pt)
 
 #section-banner(
-  "Figure 6 · Modular Rust Workspace Architecture",
-  "Fourteen-Crate Layered Architecture and Dependency Boundaries",
-  subtitle: [Strict acyclic crate stratification separating user surfaces (`cli`, `tui`, `dashboard`), closed-loop orchestration (`agent`, `benchmark`), domain & mathematical control (`sdk`, `coding`, `research`), and runtime governance (`core`, `policy`, `sandbox`, `store`, `prompt-macros`).],
+  "Modular Rust Workspace Architecture",
+  "Fourteen-Crate Layered Architecture and SDK Boundaries",
+  subtitle: [Strict acyclic crate layers separating user interfaces (`cli`, `tui`, `dashboard`), closed-loop orchestration (`agent`, `benchmark`), reusable SDK & domain crates (`sdk`, `coding`, `research`), and core runtime (`core`, `policy`, `sandbox`, `store`).],
 )
 
 #v(8pt)

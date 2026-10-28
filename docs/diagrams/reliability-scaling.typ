@@ -3,9 +3,9 @@
 #show: diagram-page.with(width: 720pt, margin: 16pt)
 
 #section-banner(
-  "Figure 2 · Compounding Error vs. Barrier Stabilization",
-  "Multi-Step Horizon Reliability: Open-Loop Autoregression vs. SRBN Control",
-  subtitle: [Comparison of open-loop LLM success probability $P_("open")(N) = (1 - epsilon)^N$ ($epsilon = 0.05$) against closed-loop SRBN verifier-gated execution across $N in [1, 50]$ steps.],
+  "Compounding Error vs. Closed-Loop Control",
+  "Multi-Step Task Reliability: Open-Loop Guessing vs. SRBN Verification",
+  subtitle: [Comparison of unverified multi-step LLM accuracy $P_("open")(N) = (1 - epsilon)^N$ ($epsilon = 0.05$) against Perspt's compiler- and test-gated SRBN loop across $N in [1, 50]$ steps.],
 )
 
 #v(8pt)

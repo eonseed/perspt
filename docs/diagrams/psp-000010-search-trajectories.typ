@@ -3,9 +3,9 @@
 #show: diagram-page.with(width: 720pt, margin: 16pt)
 
 #section-banner(
-  "Figure 3 · PSP-000010 Bounded Speculative Search",
-  "Lyapunov Energy Trajectories: Unguided Retries vs. Bounded Search Forest",
-  subtitle: [Comparison of (a) blind single-path prompt retries under persistent compiler/test failures vs. (b) PSP-10 System 21 isolated strategy branches ($B <= 3$) with exact no-good pruning and single gate commit.],
+  "PSP-000010 · Bounded Speculative Search",
+  "Error Energy Trajectories: Blind Single-Path Retries vs. Bounded Search Forest",
+  subtitle: [Comparison of (a) blind single-path prompt retries under persistent compiler/test failures vs. (b) up to 3 isolated strategy branches with no-good pruning and a single gate commit.],
 )
 
 #v(8pt)

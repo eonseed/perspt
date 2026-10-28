@@ -4,7 +4,16 @@
 
 # Perspt
 
-**Simple CLI · Interactive Terminal UI · Compiler-Verified Coding Agent · Rust SDK**
+**Your Terminal's Window to the AI World — Simple CLI · Terminal UI · Verified Coding Agent · Rust SDK**
+
+<p>
+<em>The keyboard hums, the screen aglow,</em><br>
+<em>AI's wisdom, a steady flow.</em><br><br>
+<em>Will robots take over, it's quite the fright,</em><br>
+<em>Or just provide insights, day and night?</em><br><br>
+<em>We ponder and chat, with code as our guide,</em><br>
+<em>Is AI our helper or our human pride?</em>
+</p>
 
 [![Build Status](https://github.com/eonseed/perspt/actions/workflows/ci.yml/badge.svg)](https://github.com/eonseed/perspt/actions/workflows/ci.yml)
 [![Documentation](https://github.com/eonseed/perspt/actions/workflows/docs.yml/badge.svg)](https://eonseed.github.io/perspt/)

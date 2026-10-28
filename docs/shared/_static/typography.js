@@ -19,9 +19,6 @@
     "li > p",
     "dd > p",
     ".admonition > p:not(.admonition-title)",
-    "p.lead",
-    ".lead > p",
-    ".pillar > p",
     ".split-copy > p",
     ".book-copy > p"
   ].join(", ");
@@ -29,6 +26,10 @@
     "table",
     ".toctree-wrapper",
     "figure",
+    "blockquote",
+    ".line-block",
+    ".lead",
+    ".pillar",
     ".actions",
     ".text-links",
     ".eyebrow",

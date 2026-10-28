@@ -463,6 +463,34 @@ figcaption p { margin: 0; }
   font-size: 15.5px;
 }
 
+.landing blockquote.epigraph {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--emerald);
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 14.5px;
+  line-height: 1.68;
+  text-align: left;
+}
+
+.landing .line-block {
+  margin: 0;
+  text-align: left;
+}
+
+.landing .line-block .line {
+  display: block;
+  text-align: left;
+}
+
+.landing .line-block .line:empty,
+.landing .line-block br {
+  min-height: 8px;
+}
+
 /* Quick Navigation Pill Bar */
 .text-links {
   display: flex;

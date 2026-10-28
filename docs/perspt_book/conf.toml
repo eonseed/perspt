@@ -1,4 +1,4 @@
-project = "Perspt: Generative Velocity, Deterministic Stability"
+project = "The Perspt Book"
 author = "Vikrant Rathore"
 copyright = "2026, Vikrant Rathore"
 version = "0.6.6"
@@ -30,7 +30,7 @@ pdf_logo = "../shared/_static/perspt-logo.svg"
 [[pdf_documents]]
 root = "index"
 file = "perspt-book.pdf"
-title = "Perspt: Generative Velocity, Deterministic Stability"
+title = "The Perspt Book: Build with AI in Your Terminal"
 author = "Vikrant Rathore"
 
 [html_theme_options]

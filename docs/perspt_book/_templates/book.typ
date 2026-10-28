@@ -76,9 +76,9 @@
         ),
       )
       #v(9mm)
-      #text(font: sans, size: 28pt, weight: "bold", tracking: -.025em, fill: rgb("#f8fafc"))[
-        Simple CLI. Terminal UI. \
-        #text(fill: emerald-mint)[Code that actually runs.]
+      #text(font: sans, size: 21pt, weight: "bold", tracking: -.02em, hyphenate: false, fill: rgb("#f8fafc"))[
+        Build with AI in your terminal. \
+        #text(fill: emerald-mint)[Ship code verified by your compiler.]
       ]
       #v(5mm)
       #text(font: sans, size: 10.5pt, fill: rgb("#cbd5e1"))[
