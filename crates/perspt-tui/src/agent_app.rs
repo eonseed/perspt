@@ -8,14 +8,14 @@ use crate::dashboard::Dashboard;
 use crate::diff_viewer::DiffViewer;
 use crate::review_modal::{ReviewDecision, ReviewModal};
 use crate::task_tree::{TaskStatus, TaskTree};
-use crossterm::event::{KeyCode, KeyEventKind};
+use crossterm::event::KeyCode;
 use perspt_core::AgentEvent;
 use ratatui::{
+    DefaultTerminal, Frame,
     crossterm::event::{self, Event},
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Tabs},
-    DefaultTerminal, Frame,
 };
 use std::io;
 
@@ -142,58 +142,10 @@ impl AgentApp {
 
     /// Handle input events
     fn handle_events(&mut self) -> io::Result<()> {
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    return Ok(());
-                }
-
-                // Handle modal first if visible
-                if self.review_modal.visible {
-                    match key.code {
-                        KeyCode::Left => self.review_modal.select_left(),
-                        KeyCode::Right => self.review_modal.select_right(),
-                        KeyCode::Char(c) => {
-                            if let Some(decision) = self.review_modal.handle_key(c) {
-                                self.handle_review_decision(decision);
-                                self.review_modal.hide();
-                            }
-                        }
-                        KeyCode::Enter => {
-                            let decision = self.review_modal.get_decision();
-                            self.handle_review_decision(decision);
-                            self.review_modal.hide();
-                        }
-                        KeyCode::Esc => self.review_modal.hide(),
-                        _ => {}
-                    }
-                    return Ok(());
-                }
-
-                match key.code {
-                    // Quit
-                    KeyCode::Char('q') => self.should_quit = true,
-                    // Pause/Resume
-                    KeyCode::Char('p') => self.paused = !self.paused,
-                    // Tab navigation
-                    KeyCode::Tab => self.next_tab(),
-                    KeyCode::BackTab => self.prev_tab(),
-                    KeyCode::Char('1') => self.active_tab = ActiveTab::Dashboard,
-                    KeyCode::Char('2') => self.active_tab = ActiveTab::Tasks,
-                    KeyCode::Char('3') => self.active_tab = ActiveTab::Diff,
-                    // Vertical navigation (vim-style)
-                    KeyCode::Up | KeyCode::Char('k') => self.handle_up(),
-                    KeyCode::Down | KeyCode::Char('j') => self.handle_down(),
-                    // Page navigation
-                    KeyCode::PageUp => self.handle_page_up(),
-                    KeyCode::PageDown => self.handle_page_down(),
-                    // Task tree specific
-                    KeyCode::Char(' ') | KeyCode::Enter => self.handle_select(),
-                    // Approve current
-                    KeyCode::Char('a') => self.show_approval_modal(),
-                    _ => {}
-                }
-            }
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            dispatch_key(self, key);
         }
         Ok(())
     }
@@ -620,8 +572,16 @@ impl AgentApp {
     }
 
     fn handle_review_decision(&mut self, decision: ReviewDecision) {
+        if decision == ReviewDecision::ViewDiff {
+            // Preserve `pending_request_id` and `review_state` so pressing `[a]`
+            // reopens the modal without deadlocking the waiting runtime.
+            self.active_tab = ActiveTab::Diff;
+            self.dashboard
+                .log("👁 Viewing diff — press [a] to reopen review".to_string());
+            return;
+        }
         let request_id = self.pending_request_id.take();
-        // PSP-5 Phase 7: Reset review state after decision
+        // PSP-5 Phase 7: Reset review state after terminal decision
         self.review_state = NodeReviewState::default();
 
         match decision {
@@ -640,12 +600,6 @@ impl AgentApp {
                     });
                 }
             }
-            ReviewDecision::Edit => {
-                self.dashboard.log("📝 Opening in editor...".to_string());
-            }
-            ReviewDecision::ViewDiff => {
-                self.active_tab = ActiveTab::Diff;
-            }
             ReviewDecision::RequestCorrection => {
                 self.dashboard.log("🔄 Correction requested".to_string());
                 if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
@@ -655,8 +609,32 @@ impl AgentApp {
                     });
                 }
             }
-            ReviewDecision::Skip => {
-                self.dashboard.log("⏭ Skipped review".to_string());
+            ReviewDecision::Skip | ReviewDecision::Edit => {
+                self.dashboard
+                    .log("⏭ Review skipped (rejected pending promotion)".to_string());
+                if let (Some(sender), Some(rid)) = (&self.action_sender, request_id) {
+                    let _ = sender.send(perspt_core::AgentAction::Reject {
+                        request_id: rid,
+                        reason: Some("User skipped review in TUI".to_string()),
+                    });
+                }
+            }
+            ReviewDecision::ViewDiff => unreachable!("handled above"),
+        }
+    }
+
+    /// Dismiss the review modal via Esc without hanging the waiting runtime.
+    fn dismiss_review_modal(&mut self) {
+        self.review_modal.hide();
+        if let Some(rid) = self.pending_request_id.take() {
+            self.review_state = NodeReviewState::default();
+            self.dashboard
+                .log("⏭ Review dismissed (rejected pending promotion)".to_string());
+            if let Some(sender) = &self.action_sender {
+                let _ = sender.send(perspt_core::AgentAction::Reject {
+                    request_id: rid,
+                    reason: Some("User dismissed review modal".to_string()),
+                });
             }
         }
     }
@@ -729,17 +707,22 @@ impl AgentApp {
     }
 
     fn handle_select(&mut self) {
-        if self.active_tab == ActiveTab::Tasks {
-            if let Some(node) = self.task_tree.selected_task() {
-                self.dashboard.log(format!("Selected: {}", node.id));
-            }
+        if self.active_tab == ActiveTab::Tasks
+            && let Some(node) = self.task_tree.selected_task()
+        {
+            self.dashboard.log(format!("Selected: {}", node.id));
         }
     }
 
     fn show_approval_modal(&mut self) {
-        // Placeholder for manual approval trigger if needed
-        self.dashboard
-            .log("Manual approval modal Not Implemented".to_string());
+        if self.pending_request_id.is_some() {
+            self.review_modal.visible = true;
+            self.dashboard
+                .log("📋 Reopened pending approval review".to_string());
+        } else {
+            self.dashboard
+                .log("No pending approval request".to_string());
+        }
     }
 
     pub fn render(&mut self, frame: &mut Frame) {
@@ -802,18 +785,23 @@ fn dispatch_key(app: &mut AgentApp, key: crossterm::event::KeyEvent) {
                 app.handle_review_decision(decision);
                 app.review_modal.hide();
             }
-            KeyCode::Esc => app.review_modal.hide(),
+            KeyCode::Esc => app.dismiss_review_modal(),
             _ => {}
         }
     } else {
         match key.code {
             KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Tab => app.next_tab(),
+            KeyCode::BackTab => app.prev_tab(),
             KeyCode::Char('1') => app.active_tab = ActiveTab::Dashboard,
             KeyCode::Char('2') => app.active_tab = ActiveTab::Tasks,
             KeyCode::Char('3') => app.active_tab = ActiveTab::Diff,
             KeyCode::Up | KeyCode::Char('k') => app.handle_up(),
             KeyCode::Down | KeyCode::Char('j') => app.handle_down(),
+            KeyCode::PageUp => app.handle_page_up(),
+            KeyCode::PageDown => app.handle_page_down(),
+            KeyCode::Enter | KeyCode::Char(' ') => app.handle_select(),
+            KeyCode::Char('a') => app.show_approval_modal(),
             _ => {}
         }
     }
@@ -831,11 +819,10 @@ async fn drive_event_loop(
         terminal.draw(|frame| app.render(frame))?;
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                if crossterm::event::poll(std::time::Duration::from_millis(0))? {
-                    if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                if crossterm::event::poll(std::time::Duration::from_millis(0))?
+                    && let crossterm::event::Event::Key(key) = crossterm::event::read()? {
                         dispatch_key(app, key);
                     }
-                }
             }
             Some(event) = event_receiver.recv() => {
                 app.handle_app_event(AppEvent::CoreEvent(event));
@@ -873,18 +860,90 @@ pub async fn run_agent_tui_with_runtime(
         // The killed task cannot close its own session row; revoke the
         // session's authority and mark it aborted so `perspt resume` never
         // finds a permanently RUNNING_PSP9 session it must refuse.
-        if let Ok(store) = perspt_store::SessionStore::new() {
-            if let Ok(sessions) = store.list_recent_sessions(5) {
-                if let Some(session) = sessions
-                    .into_iter()
-                    .find(|session| session.status == "RUNNING_PSP9")
-                {
-                    let _ = store.revoke_authority(&session.session_id);
-                    let _ = store.update_session_status(&session.session_id, "ABORTED_PSP9");
-                }
-            }
+        if let Ok(store) = perspt_store::SessionStore::new()
+            && let Ok(sessions) = store.list_recent_sessions(5)
+            && let Some(session) = sessions
+                .into_iter()
+                .find(|session| session.status == "RUNNING_PSP9")
+        {
+            let _ = store.revoke_authority(&session.session_id);
+            let _ = store.update_session_status(&session.session_id, "ABORTED_PSP9");
         }
         anyhow::bail!("agent run aborted from TUI; session authority revoked");
     }
     runtime_handle.await?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use perspt_core::events::channel::action_channel;
+    use perspt_core::{ActionType, AgentAction};
+
+    fn press(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn setup_pending_approval(
+        request_id: &str,
+    ) -> (AgentApp, perspt_core::events::channel::ActionReceiver) {
+        let (tx, rx) = action_channel();
+        let mut app = AgentApp::new();
+        app.set_action_sender(tx);
+        app.handle_app_event(AppEvent::CoreEvent(AgentEvent::ApprovalRequest {
+            request_id: request_id.to_string(),
+            node_id: "node-1".to_string(),
+            action_type: ActionType::FileWrite {
+                path: "src/lib.rs".to_string(),
+            },
+            description: "Promote verified changes".to_string(),
+            diff: Some("--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-a\n+b".to_string()),
+        }));
+        (app, rx)
+    }
+
+    #[test]
+    fn view_diff_reopens_with_a_and_approves_without_deadlock() {
+        let (mut app, mut rx) = setup_pending_approval("req-view");
+        assert!(app.review_modal.visible);
+
+        dispatch_key(&mut app, press(KeyCode::Char('d')));
+        assert!(!app.review_modal.visible);
+        assert_eq!(app.active_tab, ActiveTab::Diff);
+        assert_eq!(app.pending_request_id.as_deref(), Some("req-view"));
+        assert!(rx.try_recv().is_err());
+
+        dispatch_key(&mut app, press(KeyCode::Char('a')));
+        assert!(app.review_modal.visible);
+
+        dispatch_key(&mut app, press(KeyCode::Char('y')));
+        assert!(!app.review_modal.visible);
+        assert!(app.pending_request_id.is_none());
+        assert!(matches!(
+            rx.try_recv().ok(),
+            Some(AgentAction::Approve { request_id }) if request_id == "req-view"
+        ));
+    }
+
+    #[test]
+    fn esc_and_skip_emit_reject_and_clear_pending_request() {
+        let (mut app, mut rx) = setup_pending_approval("req-esc");
+        dispatch_key(&mut app, press(KeyCode::Esc));
+        assert!(!app.review_modal.visible);
+        assert!(app.pending_request_id.is_none());
+        assert!(matches!(
+            rx.try_recv().ok(),
+            Some(AgentAction::Reject { request_id, .. }) if request_id == "req-esc"
+        ));
+
+        let (mut app2, mut rx2) = setup_pending_approval("req-skip");
+        dispatch_key(&mut app2, press(KeyCode::Char('s')));
+        assert!(!app2.review_modal.visible);
+        assert!(app2.pending_request_id.is_none());
+        assert!(matches!(
+            rx2.try_recv().ok(),
+            Some(AgentAction::Reject { request_id, .. }) if request_id == "req-skip"
+        ));
+    }
 }

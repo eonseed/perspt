@@ -17,4 +17,3 @@ categories = ["command-line-utilities", "development-tools"]
 
 # Utilities
 anyhow = { workspace = true }
-log = { workspace = true }

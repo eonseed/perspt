@@ -271,7 +271,7 @@ An improvement can help the next attempt; the required checks still need to pass
 Install Perspt and start chatting
 ---------------------------------
 
-With Rust 1.97.1 or later installed:
+With Rust 1.100 or later installed:
 
 .. code-block:: sh
 

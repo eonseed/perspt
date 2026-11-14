@@ -3,20 +3,20 @@
 //! Extracted from `candidate.rs` so the reversible overlay and the
 //! measurement plane each stay within the file-size rules.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use perspt_coding::{CodingAdapterRegistry, CodingDomain, LanguageId};
 use perspt_sdk::{
-    score_candidate, AgentDomainPackage, CorrectionDirection, DomainScope, IndependenceRoute,
-    ResidualClass, ResidualEvent, ResidualSeverity, SensorRef,
+    AgentDomainPackage, CorrectionDirection, DomainScope, IndependenceRoute, ResidualClass,
+    ResidualEvent, ResidualSeverity, SensorRef, score_candidate,
 };
 
 use crate::candidate::{CandidateWorkspace, TestEvidenceWorkspace};
 use crate::toolloop::{CandidateMeasurer, Measured};
-use crate::verifier::{run_governed_verifier, VerifierExecution, VerifierJob};
+use crate::verifier::{VerifierExecution, VerifierJob, run_governed_verifier};
 
 /// Every verifier process of one candidate shares this target-dir suffix:
 /// gate stages, interactive `run_*` tools, and the incremental syntax pass
@@ -147,7 +147,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
         test_evidence: AdditionalTestEvidence<'_>,
         residuals: &mut Vec<ResidualEvent>,
         advisory: &mut Vec<ResidualEvent>,
-        satisfied_stages: &mut BTreeSet<&'static str>,
+        satisfied_stages: &mut BTreeSet<String>,
         all_passed: &mut bool,
         required: &BTreeSet<String>,
     ) -> Result<Vec<VerifierJob>> {
@@ -176,7 +176,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
                         && capability.command.is_none()
                         && capability.fallback_command.is_none()
                     {
-                        satisfied_stages.insert(capability.stage.policy_name());
+                        satisfied_stages.insert(capability.stage.policy_name().to_string());
                         continue;
                     }
                     fold_infra_failure(
@@ -389,7 +389,7 @@ impl<'a> CodingCandidateMeasurer<'a> {
     /// plugin-derived verdict.
     fn enforce_required_stages(
         &self,
-        ran_stages: &BTreeSet<&'static str>,
+        ran_stages: &BTreeSet<String>,
         residuals: &mut Vec<ResidualEvent>,
         all_passed: &mut bool,
     ) -> Result<()> {
@@ -408,6 +408,34 @@ impl<'a> CodingCandidateMeasurer<'a> {
             }
         }
         Ok(())
+    }
+
+    fn apply_domain_evaluation(
+        &self,
+        ran_stages: &mut BTreeSet<String>,
+        residuals: &mut Vec<ResidualEvent>,
+        advisory: &mut Vec<ResidualEvent>,
+        all_passed: &mut bool,
+        no_coding_jobs: bool,
+    ) -> bool {
+        let snapshot = snapshot_overlay_text_files(self.candidate.overlay_root());
+        let Some(eval) = self
+            .domain
+            .evaluate_workspace(&snapshot, &self.node_id, self.generation)
+        else {
+            return false;
+        };
+        let domain_ran = !eval.ran_stages.is_empty();
+        ran_stages.extend(eval.ran_stages);
+        let has_blocking = !eval.residuals.is_empty();
+        residuals.extend(eval.residuals);
+        advisory.extend(eval.advisory);
+        if has_blocking {
+            *all_passed = false;
+        } else if no_coding_jobs && domain_ran {
+            *all_passed = true;
+        }
+        domain_ran
     }
 
     #[allow(clippy::type_complexity)]
@@ -459,7 +487,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         let mut advisory = Vec::new();
         let required = self.required_stages();
         let mut all_passed = false;
-        let mut ran_stages: BTreeSet<&'static str> = BTreeSet::new();
+        let mut ran_stages: BTreeSet<String> = BTreeSet::new();
         let test_evidence = self.prepare_test_evidence()?;
         let jobs = self.collect_jobs(
             test_evidence.borrowed(),
@@ -471,7 +499,14 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         )?;
 
         let ran = jobs.len();
-        ran_stages.extend(jobs.iter().map(|job| job.stage.policy_name()));
+        ran_stages.extend(jobs.iter().map(|job| job.stage.policy_name().to_string()));
+        let domain_ran = self.apply_domain_evaluation(
+            &mut ran_stages,
+            &mut residuals,
+            &mut advisory,
+            &mut all_passed,
+            ran == 0,
+        );
         self.enforce_required_stages(&ran_stages, &mut residuals, &mut all_passed)?;
         let mut workers = self.spawn_verifier_groups(jobs);
 
@@ -500,7 +535,7 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
             }
         }
 
-        if ran == 0 {
+        if ran == 0 && !domain_ran {
             all_passed = false;
         }
         // Only required-stage residuals gate; advisory ones (lint outside
@@ -526,6 +561,15 @@ impl CandidateMeasurer for CodingCandidateMeasurer<'_> {
         let registry = perspt_core::PluginRegistry::new();
         let plugins = registry.detect_all(self.candidate.overlay_root());
         let mut residuals = Vec::new();
+        if plugins.is_empty() {
+            let snapshot = snapshot_overlay_text_files(self.candidate.overlay_root());
+            if let Some(eval) =
+                self.domain
+                    .evaluate_workspace(&snapshot, &self.node_id, self.generation)
+            {
+                residuals.extend(eval.residuals);
+            }
+        }
         for plugin in plugins {
             let Some(command) = plugin.syntax_check_command() else {
                 continue;
@@ -645,6 +689,67 @@ fn concise(output: &str) -> String {
         .take(8)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Snapshot bounded UTF-8 text files inside a candidate overlay for
+/// domain-native workspace verification.
+pub(crate) fn snapshot_overlay_text_files(root: &Path) -> perspt_sdk::WorkspaceSnapshot {
+    let mut files = Vec::new();
+    let mut contents = BTreeMap::new();
+    let mut total_bytes = 0usize;
+    collect_overlay_files(root, root, &mut files, &mut contents, &mut total_bytes);
+    files.sort();
+    perspt_sdk::WorkspaceSnapshot::new(root.display().to_string(), files).with_contents(contents)
+}
+
+fn collect_overlay_files(
+    base: &Path,
+    dir: &Path,
+    files: &mut Vec<String>,
+    contents: &mut BTreeMap<String, String>,
+    total_bytes: &mut usize,
+) {
+    const MAX_FILE_BYTES: usize = 256 * 1024;
+    const MAX_TOTAL_BYTES: usize = 4 * 1024 * 1024;
+
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if file_type.is_dir() {
+            if matches!(name.as_str(), ".git" | "target" | "node_modules")
+                || name.starts_with(".perspt")
+            {
+                continue;
+            }
+            collect_overlay_files(base, &entry.path(), files, contents, total_bytes);
+        } else if file_type.is_file() {
+            let path = entry.path();
+            let Ok(rel) = path.strip_prefix(base) else {
+                continue;
+            };
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            files.push(rel_str.clone());
+            let len = entry
+                .metadata()
+                .map(|m| m.len() as usize)
+                .unwrap_or(usize::MAX);
+            if len <= MAX_FILE_BYTES
+                && *total_bytes + len <= MAX_TOTAL_BYTES
+                && let Ok(text) = std::fs::read_to_string(&path)
+            {
+                *total_bytes += text.len();
+                contents.insert(rel_str, text);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

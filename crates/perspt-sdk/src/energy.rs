@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{check_positive_finite, Result, SdkError};
+use crate::error::{Result, SdkError, check_positive_finite};
 use crate::residual::{EnergyComponent, ResidualClass, ResidualEvent, ResidualEventRef, SensorRef};
 
 /// One residual weight entry in an [`EnergyModel`].
@@ -109,12 +109,12 @@ impl EnergyModel {
         }
         for w in &self.residual_weights {
             check_positive_finite(w.weight, "residual weight")?;
-            if let Some(t) = w.hard_threshold {
-                if !t.is_finite() || t < 0.0 {
-                    return Err(SdkError::InvalidWeight(format!(
-                        "hard_threshold must be finite and non-negative: {t}"
-                    )));
-                }
+            if let Some(t) = w.hard_threshold
+                && (!t.is_finite() || t < 0.0)
+            {
+                return Err(SdkError::InvalidWeight(format!(
+                    "hard_threshold must be finite and non-negative: {t}"
+                )));
             }
         }
         Ok(())
@@ -215,10 +215,10 @@ pub fn score_candidate(model: &EnergyModel, residuals: &[ResidualEvent]) -> Resu
             ))
         })?;
 
-        if let Some(threshold) = weight.hard_threshold {
-            if r.score > threshold {
-                hard_violations.push(r.class);
-            }
+        if let Some(threshold) = weight.hard_threshold
+            && r.score > threshold
+        {
+            hard_violations.push(r.class);
         }
 
         let weighted = weight.weight * r.score * r.score;

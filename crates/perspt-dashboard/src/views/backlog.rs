@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use super::psp9::{is_backlog_state, state_label, LedgerProjection};
+use super::psp9::{LedgerProjection, is_backlog_state, state_label};
 
 /// Fallback potential for a backlog node with no measurement yet.
 const UNMEASURED_POTENTIAL: f64 = 1.0;

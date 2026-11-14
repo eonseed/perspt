@@ -14,7 +14,7 @@ use crate::canon::CanonicalEncoder;
 
 use super::dialect::DialectRef;
 use super::route::PromptRoute;
-use super::section::{PromptMessageRole, PromptSectionId, SectionProvenance, PROMPT_DIGEST_TAG};
+use super::section::{PROMPT_DIGEST_TAG, PromptMessageRole, PromptSectionId, SectionProvenance};
 use super::stage::PromptStage;
 
 /// One transport-facing message compiled from sections.

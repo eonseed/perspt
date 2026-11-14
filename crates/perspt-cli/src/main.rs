@@ -38,104 +38,7 @@ enum Commands {
     },
 
     /// Run the SRBN agent on a task
-    Agent {
-        /// Task description or path to task file
-        task: String,
-
-        /// Working directory
-        #[arg(short, long)]
-        workdir: Option<PathBuf>,
-
-        /// Auto-approve changes without prompting
-        #[arg(short, long)]
-        yes: bool,
-
-        /// Primary actuator model (alias for --actuator-model)
-        #[arg(long)]
-        model: Option<String>,
-
-        /// Model that proposes governed coding tool calls
-        #[arg(long)]
-        actuator_model: Option<String>,
-
-        /// Optional cheaper read-only repository exploration model
-        #[arg(long)]
-        explorer_model: Option<String>,
-
-        /// Optional no-tool conjunctive diff adjudicator model
-        #[arg(long)]
-        adjudicator_model: Option<String>,
-
-        /// Required measured energy descent per accepted checkpoint
-        #[arg(long, default_value = "0.5")]
-        rho_gate: f64,
-
-        /// Maximum model turns per node
-        #[arg(long, default_value = "12")]
-        max_turns: u32,
-
-        /// Maximum model-issued and nested tool calls per turn
-        #[arg(long, default_value = "8")]
-        max_calls_per_turn: u32,
-
-        /// Shared non-descending and recovery budget
-        #[arg(long, default_value = "4")]
-        rejection_budget: u32,
-
-        /// Maximum compiler/test/lint sensors run concurrently
-        #[arg(long, default_value = "4")]
-        max_parallel: usize,
-
-        /// Persist signed grant intent for resume; fresh capabilities are still re-minted
-        #[arg(long)]
-        persistent_grants: bool,
-
-        /// Domain package to run (e.g. coding, research); default: detect
-        #[arg(long)]
-        domain: Option<String>,
-
-        /// Grant governed dependency mutation (cargo add, uv add, npm install)
-        #[arg(long)]
-        allow_dependency_mutation: bool,
-
-        /// Run coding processes without an OS sandbox (reduced isolation)
-        #[arg(long)]
-        allow_unisolated: bool,
-
-        /// Concurrent work-graph nodes (default 1; above 1 requires --yes)
-        #[arg(long, default_value = "1")]
-        max_parallel_nodes: usize,
-
-        /// Run only the read-only exploration phase: deterministic map plus
-        /// an interactive explorer tool loop; nothing is mutated or promoted
-        #[arg(long)]
-        exploration_only: bool,
-
-        /// Substitute validated [prompts] bundle sections live (Gate AE:
-        /// experimental until a change record passes paired evaluation)
-        #[arg(long)]
-        allow_experimental_prompts: bool,
-
-        /// Ordered sticky actuator fallback route; repeat to add routes
-        #[arg(long = "fallback-model")]
-        fallback_models: Vec<String>,
-
-        /// Write the terminal session summary as JSON
-        #[arg(long)]
-        output_summary: Option<PathBuf>,
-
-        /// Path to the PSP-9 ledger database (defaults to platform data dir)
-        #[arg(long)]
-        db_path: Option<PathBuf>,
-
-        /// Start the web monitoring dashboard alongside the agent
-        #[arg(long)]
-        dashboard: bool,
-
-        /// Port for the embedded dashboard server (default: 3000)
-        #[arg(long, default_value = "3000")]
-        dashboard_port: u16,
-    },
+    Agent(commands::agent::AgentArgs),
 
     /// Initialize project memory and policy rules
     Init {
@@ -394,7 +297,7 @@ async fn main() -> Result<()> {
         "debug"
     } else if matches!(
         cli.command,
-        None | Some(Commands::Chat { .. }) | Some(Commands::Agent { .. })
+        None | Some(Commands::Chat { .. }) | Some(Commands::Agent(..))
     ) {
         // Chat and Agent modes use TUI - suppress all logs
         "off"
@@ -409,61 +312,7 @@ async fn main() -> Result<()> {
     match cli.command {
         None => commands::chat::run(None, config_override).await,
         Some(Commands::Chat { model }) => commands::chat::run(model, config_override).await,
-        Some(Commands::Agent {
-            task,
-            workdir,
-            yes,
-            model,
-            actuator_model,
-            explorer_model,
-            adjudicator_model,
-            rho_gate,
-            max_turns,
-            max_calls_per_turn,
-            rejection_budget,
-            max_parallel,
-            persistent_grants,
-            domain,
-            allow_dependency_mutation,
-            allow_unisolated,
-            max_parallel_nodes,
-            exploration_only,
-            allow_experimental_prompts,
-            fallback_models,
-            output_summary,
-            db_path,
-            dashboard,
-            dashboard_port,
-        }) => {
-            commands::agent::run(
-                task,
-                workdir,
-                yes,
-                model,
-                actuator_model,
-                explorer_model,
-                adjudicator_model,
-                fallback_models,
-                output_summary,
-                db_path,
-                rho_gate,
-                max_turns,
-                max_calls_per_turn,
-                rejection_budget,
-                max_parallel,
-                persistent_grants,
-                domain,
-                allow_dependency_mutation,
-                allow_unisolated,
-                max_parallel_nodes,
-                exploration_only,
-                allow_experimental_prompts,
-                dashboard,
-                dashboard_port,
-                config_override,
-            )
-            .await
-        }
+        Some(Commands::Agent(args)) => commands::agent::run(args, config_override).await,
         Some(Commands::Init { memory, rules }) => commands::init::run(memory, rules).await,
         Some(Commands::Config { show, set, edit }) => {
             commands::config::run(show, set, edit, config_override).await

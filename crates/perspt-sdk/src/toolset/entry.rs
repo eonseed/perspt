@@ -212,12 +212,12 @@ fn validate_schema_profile(tool: &str, schema: &serde_json::Value) -> Result<()>
                 "tool {tool:?}: schema must declare object properties"
             ))
         })?;
-    if let Some(additional) = root.get("additionalProperties") {
-        if !additional.is_boolean() {
-            return Err(SdkError::Domain(format!(
-                "tool {tool:?}: additionalProperties must be boolean"
-            )));
-        }
+    if let Some(additional) = root.get("additionalProperties")
+        && !additional.is_boolean()
+    {
+        return Err(SdkError::Domain(format!(
+            "tool {tool:?}: additionalProperties must be boolean"
+        )));
     }
     if let Some(required) = root.get("required") {
         let required = required
@@ -427,12 +427,12 @@ fn validate_object_value(
             }
         }
     }
-    if schema.get("additionalProperties") == Some(&serde_json::Value::Bool(false)) {
-        if let Some(unknown) = object.keys().find(|name| !properties.contains_key(*name)) {
-            return Err(SdkError::Domain(format!(
-                "tool {tool:?}: unknown argument {field}.{unknown}"
-            )));
-        }
+    if schema.get("additionalProperties") == Some(&serde_json::Value::Bool(false))
+        && let Some(unknown) = object.keys().find(|name| !properties.contains_key(*name))
+    {
+        return Err(SdkError::Domain(format!(
+            "tool {tool:?}: unknown argument {field}.{unknown}"
+        )));
     }
     for (name, child) in object {
         if let Some(child_schema) = properties.get(name) {
@@ -457,12 +457,12 @@ fn validate_argument_value(
             "tool {tool:?}: argument {field:?} must be {kind}"
         )));
     }
-    if let Some(allowed) = schema.get("enum").and_then(serde_json::Value::as_array) {
-        if !allowed.contains(value) {
-            return Err(SdkError::Domain(format!(
-                "tool {tool:?}: argument {field:?} is outside its enum"
-            )));
-        }
+    if let Some(allowed) = schema.get("enum").and_then(serde_json::Value::as_array)
+        && !allowed.contains(value)
+    {
+        return Err(SdkError::Domain(format!(
+            "tool {tool:?}: argument {field:?} is outside its enum"
+        )));
     }
     match kind {
         "array" => {
@@ -594,15 +594,21 @@ mod tests {
     fn runtime_arguments_are_checked_against_the_admitted_profile() {
         let mut entry = entry();
         entry.schema["additionalProperties"] = serde_json::Value::Bool(false);
-        assert!(entry
-            .validate_arguments(&serde_json::json!({"path": "src/lib.rs"}))
-            .is_ok());
-        assert!(entry
-            .validate_arguments(&serde_json::json!({"path": 7}))
-            .is_err());
-        assert!(entry
-            .validate_arguments(&serde_json::json!({"path": "src/lib.rs", "extra": true}))
-            .is_err());
+        assert!(
+            entry
+                .validate_arguments(&serde_json::json!({"path": "src/lib.rs"}))
+                .is_ok()
+        );
+        assert!(
+            entry
+                .validate_arguments(&serde_json::json!({"path": 7}))
+                .is_err()
+        );
+        assert!(
+            entry
+                .validate_arguments(&serde_json::json!({"path": "src/lib.rs", "extra": true}))
+                .is_err()
+        );
     }
 
     #[test]
@@ -641,17 +647,21 @@ mod tests {
             "additionalProperties": false
         });
         assert!(composite.validate().is_ok());
-        assert!(composite
-            .validate_arguments(&serde_json::json!({
-                "names": ["one", "two"],
-                "options": {"enabled": true}
-            }))
-            .is_ok());
-        assert!(composite
-            .validate_arguments(&serde_json::json!({
-                "names": ["one", "two", "three"],
-                "options": {"enabled": true}
-            }))
-            .is_err());
+        assert!(
+            composite
+                .validate_arguments(&serde_json::json!({
+                    "names": ["one", "two"],
+                    "options": {"enabled": true}
+                }))
+                .is_ok()
+        );
+        assert!(
+            composite
+                .validate_arguments(&serde_json::json!({
+                    "names": ["one", "two", "three"],
+                    "options": {"enabled": true}
+                }))
+                .is_err()
+        );
     }
 }

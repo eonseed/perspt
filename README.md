@@ -8,7 +8,7 @@
 
 [![Build Status](https://github.com/eonseed/perspt/actions/workflows/ci.yml/badge.svg)](https://github.com/eonseed/perspt/actions/workflows/ci.yml)
 [![Documentation](https://github.com/eonseed/perspt/actions/workflows/docs.yml/badge.svg)](https://eonseed.github.io/perspt/)
-[![Version](https://img.shields.io/badge/version-0.6.6%20(H%C3%B3zh%C3%B3)-059669)](https://github.com/eonseed/perspt/releases)
+[![Version](https://img.shields.io/badge/version-0.6.7%20(Omni)-059669)](https://github.com/eonseed/perspt/releases)
 [![License: LGPL-3.0](https://img.shields.io/badge/license-LGPL--3.0-blue.svg)](LICENSE)
 
 [**Website & Docs**](https://eonseed.github.io/perspt/) · [**The Perspt Book**](https://eonseed.github.io/perspt/book/index.html) · [**PDF Handbook**](https://eonseed.github.io/perspt/books/perspt-book-en.pdf) · [**Rust SDK Docs**](https://eonseed.github.io/perspt/perspt/index.html) · [**PSP Archive**](https://eonseed.github.io/perspt/psps/index.html)
@@ -34,7 +34,7 @@ Agent mode is experimental. Review the diff and tests before committing: a passi
 
 ## Quick Start
 
-Build Perspt from source (requires Rust 1.97.1+):
+Build Perspt from source (requires Rust 1.100+):
 
 ```bash
 git clone https://github.com/eonseed/perspt.git
@@ -64,12 +64,13 @@ perspt agent --yes --dashboard -w ./my-project "Add input validation and unit te
 
 > **Note on Windows**: `chat` and `simple-chat` work natively on Linux, macOS, and Windows. `perspt agent` uses Bubblewrap on Linux and `sandbox-exec` on macOS for OS process isolation; on native Windows, pass `--allow-unisolated` or run inside WSL2.
 
-## Embed with the Perspt SDK
+## Embed with the Perspt Omni SDK
 
-You can integrate Perspt's verification engine and domain packages directly into your own Rust applications:
+You can integrate Perspt's governed agent runtime (`AgentBuilder`), coding verifiers (`CodingDomain`), research citation verification (`ResearchDomain` / `citation-check`), or custom non-coding domains directly into your own Rust applications:
 
 ```toml
 [dependencies]
+perspt = { git = "https://github.com/eonseed/perspt" }
 perspt-sdk = { git = "https://github.com/eonseed/perspt" }
 perspt-coding = { git = "https://github.com/eonseed/perspt" }
 ```
@@ -141,7 +142,7 @@ Run `perspt <COMMAND> --help` for full options.
 |---|---|
 | `perspt-sdk` | Domain-neutral SRBN control plane: residuals, energy, gates, capabilities, replay |
 | `perspt-coding` | Coding domain package: Rust/Python/TypeScript verifiers, diagnostics, and adapters |
-| `perspt-research` | Research domain package built on `perspt-sdk` |
+| `perspt-research` | Research domain package (`citation-check` workspace verifier and `correction_packet`) built on `perspt-sdk` |
 | `perspt-agent` | Governed candidate runtime, tool loop, LSP client, and work-graph scheduler |
 | `perspt-core` | Shared configuration, provider portfolio, events, and prompt libraries |
 | `perspt-tui` | Ratatui terminal UI for interactive chat and agent review |
@@ -152,7 +153,7 @@ Run `perspt <COMMAND> --help` for full options.
 | `perspt-dashboard` | Axum + HTMX real-time web observability dashboard |
 | `perspt-prompt-macros` | Compile-time code generator for typed prompt section libraries |
 | `perspt-benchmark` | Optional manual evaluation suite (`--features benchmark`) |
-| `perspt` | Top-level meta-crate |
+| `perspt` | Top-level `"Omni"` SDK facade crate (`AgentBuilder`, `prelude`, and subcrate re-exports) |
 
 ## Building & Testing
 

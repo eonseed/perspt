@@ -30,14 +30,16 @@ impl std::fmt::Display for DomainId {
     }
 }
 
-/// A minimal read-only snapshot of the workspace used for domain detection.
-/// Richer snapshots (state witnesses, ledger head, capability set) arrive with
-/// the scheduler and capability phases.
+/// A minimal read-only snapshot of the workspace used for domain detection and
+/// domain-native workspace verification.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceSnapshot {
     pub root: String,
     /// Workspace-relative paths discovered by a read-only scan.
     pub files: Vec<String>,
+    /// Optional UTF-8 file contents keyed by workspace-relative path.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub contents: std::collections::BTreeMap<String, String>,
 }
 
 impl WorkspaceSnapshot {
@@ -45,7 +47,32 @@ impl WorkspaceSnapshot {
         Self {
             root: root.into(),
             files,
+            contents: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Attach in-memory UTF-8 file contents keyed by workspace-relative path.
+    pub fn with_contents(mut self, contents: std::collections::BTreeMap<String, String>) -> Self {
+        self.contents = contents;
+        self
+    }
+
+    /// Read a workspace-relative UTF-8 text file from cached snapshot contents,
+    /// falling back to `root/rel_path` when present.
+    pub fn read_text(&self, rel_path: &str) -> Option<String> {
+        if let Some(text) = self.contents.get(rel_path) {
+            return Some(text.clone());
+        }
+        let rel = std::path::Path::new(rel_path);
+        if self.root.is_empty()
+            || rel.is_absolute()
+            || rel
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        std::fs::read_to_string(std::path::Path::new(&self.root).join(rel)).ok()
     }
 
     /// Whether any discovered file ends with the given suffix.
@@ -54,6 +81,15 @@ impl WorkspaceSnapshot {
             .iter()
             .any(|f| f == name || f.ends_with(&format!("/{name}")))
     }
+}
+
+/// Output of [`AgentDomainPackage::evaluate_workspace`] for domains that run
+/// checks outside coding language plugins.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DomainEvaluation {
+    pub ran_stages: Vec<String>,
+    pub residuals: Vec<ResidualEvent>,
+    pub advisory: Vec<ResidualEvent>,
 }
 
 /// Evidence that a domain package activates for a workspace.
@@ -253,6 +289,17 @@ pub trait AgentDomainPackage: Send + Sync {
         _candidates: &[crate::search::BranchMeasurement],
     ) -> crate::search::BranchSelection {
         crate::search::BranchSelection::NoneEligible
+    }
+
+    /// Run domain-native deterministic workspace verification when the domain
+    /// owns checks outside coding language plugins.
+    fn evaluate_workspace(
+        &self,
+        _snapshot: &WorkspaceSnapshot,
+        _node_id: &str,
+        _generation: u32,
+    ) -> Option<DomainEvaluation> {
+        None
     }
 }
 

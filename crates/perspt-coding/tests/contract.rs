@@ -4,9 +4,9 @@
 
 use perspt_coding::CodingDomain;
 use perspt_sdk::{
-    score_candidate, AcceptedTrajectory, AgentDomainPackage, DomainScope, GateDecision,
-    IndependenceRoute, ResidualCertificate, ResidualClass, ResidualEvent, ResidualSeverity,
-    SensorRef, SymbolRef, VerificationGraph,
+    AcceptedTrajectory, AgentDomainPackage, DomainScope, GateDecision, IndependenceRoute,
+    ResidualCertificate, ResidualClass, ResidualEvent, ResidualSeverity, SensorRef, SymbolRef,
+    VerificationGraph, score_candidate,
 };
 
 fn import_residual(node: &str, generation: u32, score: f64) -> ResidualEvent {

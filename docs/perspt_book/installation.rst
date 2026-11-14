@@ -9,7 +9,7 @@ The documentation publisher has no Python runtime dependency.
 Build and install from source
 -----------------------------
 
-We need Rust 1.97.1 or later and a native C/C++ build toolchain for the bundled DuckDB build.
+We need Rust 1.100 or later and a native C/C++ build toolchain for the bundled DuckDB build.
 From the repository root:
 
 .. code-block:: bash

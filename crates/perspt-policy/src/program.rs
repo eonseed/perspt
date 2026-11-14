@@ -4,7 +4,7 @@
 //! It returns JSON describing nested calls; the parent agent loop submits each
 //! call to the ordinary five-clause admissibility path.
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use starlark::environment::{Globals, Module};
 use starlark::eval::Evaluator;
@@ -118,21 +118,25 @@ main
 
     #[test]
     fn recursion_is_stopped_by_the_evaluator_budget() {
-        assert!(evaluate_tool_program(
-            "def main():\n    return main()\nmain",
-            ToolProgramLimits::default(),
-        )
-        .is_err());
+        assert!(
+            evaluate_tool_program(
+                "def main():\n    return main()\nmain",
+                ToolProgramLimits::default(),
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn nested_programs_are_rejected() {
-        assert!(evaluate_tool_program(
-            r#"def main():
+        assert!(
+            evaluate_tool_program(
+                r#"def main():
     return '[{"tool":"tool_program","arguments":{}}]'
 main"#,
-            ToolProgramLimits::default(),
-        )
-        .is_err());
+                ToolProgramLimits::default(),
+            )
+            .is_err()
+        );
     }
 }

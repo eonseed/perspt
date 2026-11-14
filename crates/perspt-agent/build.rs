@@ -22,10 +22,10 @@ fn main() {
     // HEAD itself (branch switches, detached checkouts) ...
     println!("cargo:rerun-if-changed={head}");
     // ... the loose ref file HEAD resolves to (ordinary commits) ...
-    if let Some(ref_name) = git(&["symbolic-ref", "-q", "HEAD"]) {
-        if let Some(ref_path) = git(&["rev-parse", "--git-path", &ref_name]) {
-            println!("cargo:rerun-if-changed={ref_path}");
-        }
+    if let Some(ref_name) = git(&["symbolic-ref", "-q", "HEAD"])
+        && let Some(ref_path) = git(&["rev-parse", "--git-path", &ref_name])
+    {
+        println!("cargo:rerun-if-changed={ref_path}");
     }
     // ... and packed-refs (gc packs the loose ref away).
     if let Some(packed) = git(&["rev-parse", "--git-path", "packed-refs"]) {

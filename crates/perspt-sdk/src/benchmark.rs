@@ -176,10 +176,12 @@ mod tests {
             BenchmarkOutcome::ResidualCertified,
         ));
         // The certified (non-success) run is retained in the report.
-        assert!(report
-            .results
-            .iter()
-            .any(|r| r.outcome == BenchmarkOutcome::ResidualCertified));
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|r| r.outcome == BenchmarkOutcome::ResidualCertified)
+        );
         assert!(report.preserves_failures());
     }
 

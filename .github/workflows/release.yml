@@ -9,7 +9,7 @@ on:
       tag:
         description: "Tag to release"
         required: true
-        default: "v0.6.6"
+        default: "v0.6.7"
 
 permissions:
   contents: write
@@ -110,7 +110,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
           targets: ${{ matrix.target }}
 
       - name: Setup Node.js
@@ -167,7 +167,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
 
       - name: Install pinned DuckDB
         uses: ./.github/actions/setup-duckdb
@@ -180,10 +180,10 @@ jobs:
             ~/.cargo/git
             target/debug/deps
             target/debug/build
-          key: ${{ runner.os }}-rust-1.97.1-reldocs-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ runner.os }}-rust-1.100.0-reldocs-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-rust-1.97.1-reldocs-
-            ${{ runner.os }}-rust-1.97.1-
+            ${{ runner.os }}-rust-1.100.0-reldocs-
+            ${{ runner.os }}-rust-1.100.0-
 
       - name: Build Guidedog site, Perspt Book PDF, and PSP PDFs
         run: |

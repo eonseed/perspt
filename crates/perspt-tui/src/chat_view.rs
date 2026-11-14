@@ -5,11 +5,11 @@
 use super::chat_app::{ChatApp, ChatMessage, ContentBlock};
 use crate::theme::icons;
 use ratatui::{
+    Frame,
     layout::{Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
-    Frame,
 };
 use throbber_widgets_tui::Throbber;
 use unicode_width::UnicodeWidthStr;
@@ -111,31 +111,30 @@ impl ChatApp {
         combined_thought: &Option<String>,
         viewport_width: usize,
     ) {
-        if let Some(ref thought) = combined_thought {
-            if !thought.is_empty() {
-                visual_lines.push(Line::from(Span::styled(
-                    "  ⚡ Thought Process".to_string(),
-                    Style::default()
-                        .fg(Color::Rgb(255, 183, 77))
-                        .add_modifier(Modifier::ITALIC | Modifier::BOLD),
-                )));
-                let reasoning_style = Style::default()
-                    .fg(Color::Rgb(120, 144, 156))
-                    .add_modifier(Modifier::ITALIC);
-                for line in thought.lines() {
-                    let text = format!("    {}", line);
-                    if text.width() <= viewport_width {
-                        visual_lines.push(Line::from(Span::styled(text, reasoning_style)));
-                    } else {
-                        let wrapped = Self::wrap_text_to_width(&text, viewport_width);
-                        for wrapped_line in wrapped {
-                            visual_lines
-                                .push(Line::from(Span::styled(wrapped_line, reasoning_style)));
-                        }
+        if let Some(thought) = combined_thought
+            && !thought.is_empty()
+        {
+            visual_lines.push(Line::from(Span::styled(
+                "  ⚡ Thought Process".to_string(),
+                Style::default()
+                    .fg(Color::Rgb(255, 183, 77))
+                    .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+            )));
+            let reasoning_style = Style::default()
+                .fg(Color::Rgb(120, 144, 156))
+                .add_modifier(Modifier::ITALIC);
+            for line in thought.lines() {
+                let text = format!("    {}", line);
+                if text.width() <= viewport_width {
+                    visual_lines.push(Line::from(Span::styled(text, reasoning_style)));
+                } else {
+                    let wrapped = Self::wrap_text_to_width(&text, viewport_width);
+                    for wrapped_line in wrapped {
+                        visual_lines.push(Line::from(Span::styled(wrapped_line, reasoning_style)));
                     }
                 }
-                visual_lines.push(Line::from(String::new()));
             }
+            visual_lines.push(Line::from(String::new()));
         }
     }
 

@@ -3,6 +3,27 @@
 Changelog
 =========
 
+Version 0.6.7 - "Omni"
+----------------------
+
+This release upgrades the workspace toolchain to Rust 1.100.0 (Edition 2024), modernizes the dependency stack, and delivers the ``"Omni"`` multi-domain agent SDK facade so coding, research, and custom non-coding domains run natively through the same SRBN control plane.
+
+Toolchain, Dependencies & Refactoring
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- **Rust 1.100.0 & Edition 2024** - Updated ``rust-toolchain.toml``, workspace ``rust-version = "1.100"``, ``edition = "2024"``, and CI/Docs/Release workflows; adopted Edition 2024 ``if let`` chains and pattern ergonomics.
+- **Scoped ``genai 0.7.4`` Provider Clients** - Eliminated all process-global ``std::env::set_var`` and ``remove_var`` mutations in ``perspt-core::llm_provider`` and tests in favor of explicit per-client ``ProviderClientOptions`` and custom ``base_url`` resolution.
+- **Major Crate Upgrades** - Upgraded ``duckdb 2.0`` (``1.20000.2`` + DuckDB ``v2.0.0``), ``rmcp 3.10.0``, ``toml 1.2.1``, ``uuid 1.29.2``, ``syn 3.0.10``, ``tui-markdown 0.3.13``, and updated integration harnesses for Cargo 1.100 target artifact paths while removing unused legacy dependencies.
+- **Modular CLI & Runtime Architecture** - Extracted ``#[derive(clap::Args)] pub struct AgentArgs`` and decomposed ``commands::agent::run`` into focused helpers; decomposed oversized helpers in ``perspt-agent`` within strict PSP-3 complexity bounds.
+
+Omni-Domain Agent SDK & Bug Fixes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- **``perspt`` "Omni" Facade** - Added ``AgentBuilder`` and ``perspt::prelude`` re-exporting core agentic types, domain packages (``CodingDomain``, ``ResearchDomain``), async/sync ``ask_user`` hooks, custom governed tool registration, delegated subagents, and TUI/channel streaming.
+- **Workspace Domain Evaluation Hook** - Added ``WorkspaceSnapshot`` text snapshots, ``DomainEvaluation``, and ``AgentDomainPackage::evaluate_workspace`` in ``perspt-sdk``, wired into ``CodingCandidateMeasurer`` (incremental and full gate passes when build/test plugins are absent).
+- **Executable ``ResearchDomain`` (``citation-check``)** - Implemented deterministic BibTeX syntax parsing, Markdown/RST/LaTeX citation verification against ``.bib`` and source indexes, ``evaluate_workspace``, and typed ``correction_packet`` self-healing in ``perspt-research``.
+- **Async Interactive Hooks & Correction Refinement** - Added ``AsyncFnInteractionHandler`` in ``perspt-agent``, and fixed human-in-the-loop ``RequestCorrection`` refinement (``ToolLoop::run_requiring_turn`` / ``CandidateSeed::require_model_turn``) so feedback turns always execute before re-gating.
+
 Version 0.6.6 - "沈黛君 (Shen DaiJun)"
 --------------------------------------
 

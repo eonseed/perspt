@@ -262,7 +262,6 @@ mod tests {
 
     #[tokio::test]
     async fn sys_env_reports_names_without_values() {
-        std::env::set_var("PERSPT_TEST_SECRET", "super-secret-value");
         let dir = tempfile::tempdir().unwrap();
         let workspace = CandidateWorkspace::create(dir.path(), "n1", 0, "r1").unwrap();
         let call = perspt_sdk::ProviderToolCall {
@@ -274,8 +273,8 @@ mod tests {
             .apply(&workspace, &call, &entries()[3])
             .await
             .unwrap();
-        assert!(outcome.output.contains("PERSPT_TEST_SECRET"));
-        assert!(!outcome.output.contains("super-secret-value"));
-        std::env::remove_var("PERSPT_TEST_SECRET");
+        let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+        assert!(outcome.output.contains("CARGO_MANIFEST_DIR"));
+        assert!(!outcome.output.contains(&manifest_dir));
     }
 }

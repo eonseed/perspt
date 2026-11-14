@@ -4,7 +4,7 @@
 //! not a code-density rule. A file that outgrows the limit is asking to be
 //! split along the seam it already has.
 
-use crate::rules::{RuleId, Violation, FILE_LINE_LIMIT};
+use crate::rules::{FILE_LINE_LIMIT, RuleId, Violation};
 use crate::scan::SourceFile;
 
 /// Check one file, returning at most one violation.

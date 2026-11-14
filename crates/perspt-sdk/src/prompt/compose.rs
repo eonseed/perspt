@@ -59,11 +59,7 @@ impl StageComposition {
 
     /// Typed inclusion predicate: append only when `include` holds.
     pub fn section_if(self, include: bool, section: impl PromptSection) -> Self {
-        if include {
-            self.section(section)
-        } else {
-            self
-        }
+        if include { self.section(section) } else { self }
     }
 
     /// Append an already-resolved section (the template-resolution path;
@@ -294,8 +290,10 @@ mod tests {
             rendered("branch_correct/role", PromptMessageRole::System, "too long"),
             OverrideOrigin::Base,
         );
-        assert!(composition
-            .compile(&route(), &dialect, "sha256:tools")
-            .is_err());
+        assert!(
+            composition
+                .compile(&route(), &dialect, "sha256:tools")
+                .is_err()
+        );
     }
 }

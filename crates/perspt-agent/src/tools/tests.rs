@@ -50,9 +50,11 @@ async fn read_file_pages_with_offset_limit_and_continuation_hint() {
     assert!(result.output.contains("     3\tline 3"));
     assert!(result.output.contains("     6\tline 6"));
     assert!(!result.output.contains("line 7"));
-    assert!(result
-        .output
-        .contains("[4 more lines; continue with offset=7]"));
+    assert!(
+        result
+            .output
+            .contains("[4 more lines; continue with offset=7]")
+    );
 
     let tail = tools.read_file(&read_call(&file, &[("offset", "7")]));
     assert!(tail.success);
@@ -323,9 +325,10 @@ async fn glob_paginates_with_continuation_hint() {
     });
     assert!(page.success);
     assert!(page.output.contains("of 5"));
-    assert!(page
-        .output
-        .contains("[2 more entries; continue with offset=3]"));
+    assert!(
+        page.output
+            .contains("[2 more entries; continue with offset=3]")
+    );
 
     let rest = tools.glob(&ToolCall {
         name: "glob".to_string(),
@@ -381,8 +384,7 @@ async fn test_apply_diff_tool() {
     let tools = AgentTools::new(temp_dir.clone());
 
     // Exact string with newlines
-    let diff =
-        "--- test_diff.txt\n+++ test_diff.txt\n@@ -1,2 +1,2 @@\n-Hello world\n+Hello diffy\n \
+    let diff = "--- test_diff.txt\n+++ test_diff.txt\n@@ -1,2 +1,2 @@\n-Hello world\n+Hello diffy\n \
         This is a test\n";
 
     let mut args = HashMap::new();

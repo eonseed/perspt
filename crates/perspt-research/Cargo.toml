@@ -14,3 +14,4 @@ categories = ["development-tools"]
 
 [dependencies]
 perspt-sdk = { workspace = true }
+serde_json = { workspace = true }

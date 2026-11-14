@@ -7,7 +7,7 @@ use anyhow::Result;
 use perspt_sdk::{ModelId, WorkGraphRevision};
 
 use super::node::{
-    loop_kernel_state, restore_seed, run_seeded, CandidateSeed, NodeAttempt, PreparedAttempt,
+    CandidateSeed, NodeAttempt, PreparedAttempt, loop_kernel_state, restore_seed, run_seeded,
 };
 use super::{Psp9AgentRuntime, Psp9Recorder};
 use crate::candidate::CodingCandidateMeasurer;

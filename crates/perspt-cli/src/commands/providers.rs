@@ -80,10 +80,10 @@ async fn probe_routes(config: &Config) -> Result<()> {
         ("actuator", models.actuator),
         ("adjudicator", models.adjudicator),
     ] {
-        if let Some(model) = model {
-            if !routes.iter().any(|(_, existing)| existing == &model) {
-                routes.push((role, model));
-            }
+        if let Some(model) = model
+            && !routes.iter().any(|(_, existing)| existing == &model)
+        {
+            routes.push((role, model));
         }
     }
     anyhow::ensure!(!routes.is_empty(), "no [models] routes configured to probe");
@@ -121,17 +121,9 @@ async fn probe_routes(config: &Config) -> Result<()> {
 }
 
 fn mark(supported: bool) -> &'static str {
-    if supported {
-        "yes"
-    } else {
-        "no"
-    }
+    if supported { "yes" } else { "no" }
 }
 
 fn source(caps: &ProviderCaps) -> &'static str {
-    if caps.probed {
-        "probed"
-    } else {
-        "declared"
-    }
+    if caps.probed { "probed" } else { "declared" }
 }

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 
 use super::nogood::NoGoodStore;
-use crate::toolloop::{decode_tool_loop, LoopEvent};
+use crate::toolloop::{LoopEvent, decode_tool_loop};
 
 /// A forest the ledger shows opened but never closed, with its last
 /// snapshot usage — the honest starting point for a deterministic re-run.

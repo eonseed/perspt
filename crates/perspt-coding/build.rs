@@ -2,7 +2,7 @@
 //! Same discipline as perspt-core: a malformed section fails this build,
 //! and the committed manifest is validated, never edited.
 
-use perspt_prompt_macros::{compile_prompt_dir, validate_manifest, StageDecl};
+use perspt_prompt_macros::{StageDecl, compile_prompt_dir, validate_manifest};
 
 fn main() {
     println!("cargo:rerun-if-changed=prompts");

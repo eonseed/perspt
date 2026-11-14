@@ -87,10 +87,10 @@ pub async fn auth_middleware(
     // Check for valid session cookie
     if let Some(cookie) = jar.get(COOKIE_NAME) {
         let stored = state.session_token.lock().await;
-        if let Some(ref token) = *stored {
-            if cookie.value() == token {
-                return next.run(request).await;
-            }
+        if let Some(ref token) = *stored
+            && cookie.value() == token
+        {
+            return next.run(request).await;
         }
     }
 

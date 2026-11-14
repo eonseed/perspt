@@ -3,10 +3,10 @@
 //! Main dashboard view for the Agent TUI showing task progress, energy, and status.
 
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Sparkline},
-    Frame,
 };
 
 /// Dashboard state

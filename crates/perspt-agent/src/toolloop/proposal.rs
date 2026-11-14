@@ -4,8 +4,8 @@
 
 use anyhow::{Context, Result};
 use perspt_sdk::{
-    promote, CandidateStateWitness, Capability, EffectProposal, FullAdmissibilityWitness,
-    ProviderToolCall, StateWitness, ToolEntry,
+    CandidateStateWitness, Capability, EffectProposal, FullAdmissibilityWitness, ProviderToolCall,
+    StateWitness, ToolEntry, promote,
 };
 
 pub(crate) fn proposal_scope(call: &ProviderToolCall, entry: &ToolEntry) -> Vec<String> {

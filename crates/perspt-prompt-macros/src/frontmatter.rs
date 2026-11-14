@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use perspt_sdk::prompt::ListStyle;
 
-use crate::types::VarType;
 use crate::PromptBuildError;
+use crate::types::VarType;
 
 /// One parsed variable declaration.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +50,7 @@ pub fn parse_section_file(
             return Err(err(
                 1,
                 "section must open with a `---` front-matter fence".into(),
-            ))
+            ));
         }
     }
     let mut matter_lines = Vec::new();

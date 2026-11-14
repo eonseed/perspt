@@ -70,63 +70,63 @@ pub use srbn_serde;
 
 // Convenience re-exports of the most-used SDK types.
 pub use admissibility::{
-    check_full_admissibility, promote, AdmissibilityProfile, BarrierEvaluator, BarrierWitness,
-    CandidateStateWitness, CandidateTransition, ClauseId, ContractEvaluator, ContractWitness,
-    FullAdmissibilityWitness,
+    AdmissibilityProfile, BarrierEvaluator, BarrierWitness, CandidateStateWitness,
+    CandidateTransition, ClauseId, ContractEvaluator, ContractWitness, FullAdmissibilityWitness,
+    check_full_admissibility, promote,
 };
 pub use benchmark::{BenchmarkCase, BenchmarkOutcome, BenchmarkReport, BenchmarkResult};
 pub use capability::{
-    check_admissibility, grant_public_key, hex_decode, hex_encode, ActorId, AdmissibilityDecision,
-    AdmissibilityWitness, ApprovalPolicy, Capability, CapabilityRole, DenyReason, EffectKind,
-    EffectProposal, GrantPolicy, KernelState, RecoveryClass, RiskBudget, RiskClass,
-    SignedGrantPolicy, StateWitness,
+    ActorId, AdmissibilityDecision, AdmissibilityWitness, ApprovalPolicy, Capability,
+    CapabilityRole, DenyReason, EffectKind, EffectProposal, GrantPolicy, KernelState,
+    RecoveryClass, RiskBudget, RiskClass, SignedGrantPolicy, StateWitness, check_admissibility,
+    grant_public_key, hex_decode, hex_encode,
 };
 pub use certificate::{BudgetRef, ResidualCertificate};
 pub use checkpoint::{ContextCheckpoint, ControlFrame};
-pub use command::{canonicalize, classify_tier, CommandInvocation, CommandTier};
+pub use command::{CommandInvocation, CommandTier, canonicalize, classify_tier};
 pub use conformal::{
-    accepted_unsafe_rate, conformal_threshold_checked, decide, decide as conformal_decide,
-    is_drifted, ks_statistic, readiness, sample_floor, AcceptOutcome, CalibrationReadiness,
-    CalibrationSample, CalibrationState, CalibrationStratum, ThresholdOutcome,
+    AcceptOutcome, CalibrationReadiness, CalibrationSample, CalibrationState, CalibrationStratum,
+    ThresholdOutcome, accepted_unsafe_rate, conformal_threshold_checked, decide,
+    decide as conformal_decide, is_drifted, ks_statistic, readiness, sample_floor,
 };
 pub use domain::{
-    AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainId,
+    AgentDomainPackage, BarrierChannel, BarrierSpec, DomainDetection, DomainEvaluation, DomainId,
     DomainPromptLibrary, DomainRegistry, DomainScope, EmptyDomainPromptLibrary, HardGatePolicy,
     ResidualSchema, SafetyBarrierDisposition, VerificationCadence, VerifierSuiteSpec,
     WorkspaceSnapshot,
 };
-pub use energy::{score_candidate, EnergyComponents, EnergyModel, EnergyScore, ResidualWeight};
+pub use energy::{EnergyComponents, EnergyModel, EnergyScore, ResidualWeight, score_candidate};
 pub use error::{Result, SdkError};
-pub use gate::evaluate_gate_with_floor;
 pub use gate::NodeTerminalOutcome;
+pub use gate::evaluate_gate_with_floor;
 pub use gate::{
-    evaluate_gate, finite_decision_bound, AcceptedTrajectory, GateDecision, GateDecisionRef,
+    AcceptedTrajectory, GateDecision, GateDecisionRef, evaluate_gate, finite_decision_bound,
 };
-pub use goal::{goal_presence_residual, goal_presence_sensor, missing_symbols, GoalSpec};
+pub use goal::{GoalSpec, goal_presence_residual, goal_presence_sensor, missing_symbols};
 pub use independence::{
-    compute as compute_independence, compute_with_floor, pairwise_joint_miss,
     EnsembleCertification, IndependenceStats, PairStats, VerdictRecord,
+    compute as compute_independence, compute_with_floor, pairwise_joint_miss,
 };
-pub use kernel::{policy_restore_best, stabilize_realized};
 pub use kernel::{AgentBarrierResult, AgentStabilizationStatus, CorrectionDirectionSet, Evidence};
-pub use ledger::{audit_replay, require_recorded, AuditReport};
+pub use kernel::{policy_restore_best, stabilize_realized};
+pub use ledger::{AuditReport, audit_replay, require_recorded};
 pub use ledger::{
-    content_hash, replay_accepted_trajectory, ExternalEffectLog, IdempotencyLog, Ledger,
-    LedgerEvent, LedgerRecord,
+    ExternalEffectLog, IdempotencyLog, Ledger, LedgerEvent, LedgerRecord, content_hash,
+    replay_accepted_trajectory,
 };
 pub use model::{
-    CapabilityDegradation, Conversation, ConversationDelta, ConversationDeltaRecord,
-    ConversationProjection, ConversationSeeded, GenerationOptions, Message, ModelFamily, ModelId,
-    ModelTransport, ProviderCapabilities, ProviderCapabilityMask, ProviderToolCall,
-    ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput, CONVERSATION_EVENT_SCHEMA_VERSION,
+    CONVERSATION_EVENT_SCHEMA_VERSION, CapabilityDegradation, Conversation, ConversationDelta,
+    ConversationDeltaRecord, ConversationProjection, ConversationSeeded, GenerationOptions,
+    Message, ModelFamily, ModelId, ModelTransport, ProviderCapabilities, ProviderCapabilityMask,
+    ProviderToolCall, ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,
 };
 pub use observability::arriving_potential_per_step;
 pub use observability::{
-    backlog_gauge, phi, residual_heatmap, CapabilityAudit, ResidualHeatmap, TrajectoryProjection,
-    WorkflowPotential,
+    CapabilityAudit, ResidualHeatmap, TrajectoryProjection, WorkflowPotential, backlog_gauge, phi,
+    residual_heatmap,
 };
 pub use recovery::{
-    classify_failure, CascadeClass, CascadeLevel, FailureKind, GrantedControl, RecoveryCascade,
+    CascadeClass, CascadeLevel, FailureKind, GrantedControl, RecoveryCascade, classify_failure,
 };
 pub use residual::{
     AffectedSet, CorrectionDirection, CorrectionOperator, CorrectionPacket, CorrectionPacketRef,
@@ -135,29 +135,29 @@ pub use residual::{
     SensorRef, StructuredDiagnosticRef, SymbolRef,
 };
 pub use routing::{
-    resolve_portfolio_route, resolve_route, AgentPhase, ModelBudget, ModelRoute, ModelTier,
-    ModelTierConfig, PortfolioModels, PortfolioRoute, RouteObjective,
+    AgentPhase, ModelBudget, ModelRoute, ModelTier, ModelTierConfig, PortfolioModels,
+    PortfolioRoute, RouteObjective, resolve_portfolio_route, resolve_route,
 };
 pub use scheduler::{
-    recovery_is_total, repair_to_effects, ExecutionLease, Footprint, LeaseKind, LeaseTable,
-    NodeOutcome, RepairAction, Resource, Scheduler, SchedulerEffect,
+    ExecutionLease, Footprint, LeaseKind, LeaseTable, NodeOutcome, RepairAction, Resource,
+    Scheduler, SchedulerEffect, recovery_is_total, repair_to_effects,
 };
 pub use search::{
-    exploration_capability, is_read_only_capability, BranchMeasurement, BranchSelection,
-    DomainMeasurement, PartialCheckpointRef, ProjectMap, SearchBranch, SearchBranchState,
-    SearchContext, SearchForest, SearchLimits, SearchStrategy, SearchUsage, WitnessRef,
+    BranchMeasurement, BranchSelection, DomainMeasurement, PartialCheckpointRef, ProjectMap,
+    SearchBranch, SearchBranchState, SearchContext, SearchForest, SearchLimits, SearchStrategy,
+    SearchUsage, WitnessRef, exploration_capability, is_read_only_capability,
 };
 pub use spectral::{VerificationEdge, VerificationGraph};
 pub use stability::{
-    admit_analytic_path, AnalyticPathVerdict, BoundMode, CertifiedBound, ProxyGeometry,
-    RealizabilityClaim, StabilityClaim, StabilityParameters,
+    AnalyticPathVerdict, BoundMode, CertifiedBound, ProxyGeometry, RealizabilityClaim,
+    StabilityClaim, StabilityParameters, admit_analytic_path,
 };
 pub use toolset::{
-    admit_external_tool, base_entries, AccessMode, ConcurrencyClass, ExternalToolDeclaration,
-    FootprintSpec, HandlerContext, HandlerServices, MultiValueTarget, NetworkService,
-    ObservationService, ProcessService, ProposalBinding, ResourceSelector, StaticCatalog,
-    ToolCatalog, ToolDescriptionLibrary, ToolDispatcher, ToolEntry, ToolExecution, ToolHandler,
-    ToolOrigin, WorkspaceService,
+    AccessMode, ConcurrencyClass, ExternalToolDeclaration, FootprintSpec, HandlerContext,
+    HandlerServices, MultiValueTarget, NetworkService, ObservationService, ProcessService,
+    ProposalBinding, ResourceSelector, StaticCatalog, ToolCatalog, ToolDescriptionLibrary,
+    ToolDispatcher, ToolEntry, ToolExecution, ToolHandler, ToolOrigin, WorkspaceService,
+    admit_external_tool, base_entries,
 };
 pub use workgraph::{
     EdgeKind, GraphEdit, GraphRevisionReason, GraphValidationReport, NodeClass, WorkEdge,

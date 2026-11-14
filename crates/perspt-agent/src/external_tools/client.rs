@@ -18,8 +18,8 @@ use rmcp::model::{
     GetTaskParams, Implementation, ListRootsResult, LoggingMessageNotificationParam,
     ProgressNotificationParam, ProtocolVersion, ReadResourceRequestParams, ReadResourceResult,
     ResourceUpdatedNotificationParam, Root, SamplingCapability, ServerNotification,
-    SubscriptionFilter, SubscriptionsAcknowledgedNotificationParams, TaskPayload,
-    UrlElicitationCapability, TASKS_EXTENSION_ID,
+    SubscriptionFilter, SubscriptionsAcknowledgedNotificationParams, TASKS_EXTENSION_ID,
+    TaskPayload, UrlElicitationCapability,
 };
 use rmcp::service::{NotificationContext, RequestContext, RoleClient, RunningService};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;

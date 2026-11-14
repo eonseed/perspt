@@ -168,25 +168,25 @@ impl LanguagePlugin for PythonPlugin {
         }
 
         // Check for [project.scripts] in pyproject.toml
-        if let Ok(content) = std::fs::read_to_string(path.join("pyproject.toml")) {
-            if content.contains("[project.scripts]") {
-                // Parse the first script name
-                let mut in_scripts = false;
-                for raw_line in content.lines() {
-                    let line = raw_line.trim();
-                    if line == "[project.scripts]" {
-                        in_scripts = true;
-                        continue;
+        if let Ok(content) = std::fs::read_to_string(path.join("pyproject.toml"))
+            && content.contains("[project.scripts]")
+        {
+            // Parse the first script name
+            let mut in_scripts = false;
+            for raw_line in content.lines() {
+                let line = raw_line.trim();
+                if line == "[project.scripts]" {
+                    in_scripts = true;
+                    continue;
+                }
+                if in_scripts {
+                    if line.starts_with('[') {
+                        break;
                     }
-                    if in_scripts {
-                        if line.starts_with('[') {
-                            break;
-                        }
-                        if let Some((name, _)) = line.split_once('=') {
-                            let script = name.trim().trim_matches('"');
-                            if !script.is_empty() {
-                                return format!("uv run {}", script);
-                            }
+                    if let Some((name, _)) = line.split_once('=') {
+                        let script = name.trim().trim_matches('"');
+                        if !script.is_empty() {
+                            return format!("uv run {}", script);
                         }
                     }
                 }

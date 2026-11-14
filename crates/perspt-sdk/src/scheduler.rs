@@ -533,9 +533,11 @@ mod tests {
         let scope = Resource::Toolchain("cargo".into());
         let l1 = table.acquire("w1", LeaseKind::Toolchain, scope.clone());
         assert!(l1.is_some());
-        assert!(table
-            .acquire("w2", LeaseKind::Toolchain, scope.clone())
-            .is_none());
+        assert!(
+            table
+                .acquire("w2", LeaseKind::Toolchain, scope.clone())
+                .is_none()
+        );
         table.release(&l1.unwrap());
         assert!(table.acquire("w2", LeaseKind::Toolchain, scope).is_some());
     }

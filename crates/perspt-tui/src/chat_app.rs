@@ -10,14 +10,14 @@ use anyhow::Result;
 use crossterm::event::{
     Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
 };
-use perspt_core::{GenAIProvider, EOT_SIGNAL};
+use perspt_core::{EOT_SIGNAL, GenAIProvider};
 use ratatui::{
+    DefaultTerminal, Frame,
     crossterm::event::{self, Event},
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    DefaultTerminal, Frame,
 };
 use std::sync::Arc;
 use throbber_widgets_tui::ThrobberState;
@@ -160,34 +160,33 @@ impl ChatMessage {
         };
 
         // Render thought block first if enabled
-        if show_reasoning {
-            if let Some(ref thought) = combined_thought {
-                if !thought.is_empty() {
-                    self.cached_visual_lines.push(Line::from(Span::styled(
-                        "  ⚡ Thought Process".to_string(),
-                        Style::default()
-                            .fg(Color::Rgb(255, 183, 77))
-                            .add_modifier(Modifier::ITALIC | Modifier::BOLD),
-                    )));
-                    let reasoning_style = Style::default()
-                        .fg(Color::Rgb(120, 144, 156))
-                        .add_modifier(Modifier::ITALIC);
-                    for line in thought.lines() {
-                        let text = format!("    {}", line);
-                        if text.width() <= viewport_width {
-                            self.cached_visual_lines
-                                .push(Line::from(Span::styled(text, reasoning_style)));
-                        } else {
-                            let wrapped = ChatApp::wrap_text_to_width(&text, viewport_width);
-                            for wrapped_line in wrapped {
-                                self.cached_visual_lines
-                                    .push(Line::from(Span::styled(wrapped_line, reasoning_style)));
-                            }
-                        }
+        if show_reasoning
+            && let Some(ref thought) = combined_thought
+            && !thought.is_empty()
+        {
+            self.cached_visual_lines.push(Line::from(Span::styled(
+                "  ⚡ Thought Process".to_string(),
+                Style::default()
+                    .fg(Color::Rgb(255, 183, 77))
+                    .add_modifier(Modifier::ITALIC | Modifier::BOLD),
+            )));
+            let reasoning_style = Style::default()
+                .fg(Color::Rgb(120, 144, 156))
+                .add_modifier(Modifier::ITALIC);
+            for line in thought.lines() {
+                let text = format!("    {}", line);
+                if text.width() <= viewport_width {
+                    self.cached_visual_lines
+                        .push(Line::from(Span::styled(text, reasoning_style)));
+                } else {
+                    let wrapped = ChatApp::wrap_text_to_width(&text, viewport_width);
+                    for wrapped_line in wrapped {
+                        self.cached_visual_lines
+                            .push(Line::from(Span::styled(wrapped_line, reasoning_style)));
                     }
-                    self.cached_visual_lines.push(Line::from(String::new()));
                 }
             }
+            self.cached_visual_lines.push(Line::from(String::new()));
         }
 
         // Pre-transpile math segments in the display content
@@ -310,12 +309,11 @@ impl ChatApp {
     pub fn new(provider: GenAIProvider, model: String) -> Self {
         // Load history from paths::history_file() if possible
         let mut history = Vec::new();
-        if let Some(history_path) = perspt_core::paths::history_file() {
-            if history_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&history_path) {
-                    history = content.lines().map(|s| s.to_string()).collect();
-                }
-            }
+        if let Some(history_path) = perspt_core::paths::history_file()
+            && history_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&history_path)
+        {
+            history = content.lines().map(|s| s.to_string()).collect();
         }
 
         Self {
@@ -1254,14 +1252,16 @@ mod tests {
             KeyModifiers::NONE,
         )));
         assert_eq!(app.input.text(), "");
-        assert!(app
-            .messages
-            .iter()
-            .any(|m| m.content.contains("Available Slash Commands:")));
-        assert!(app
-            .messages
-            .iter()
-            .any(|m| m.content.contains("/mcp") && m.content.contains("MCP is disabled")));
+        assert!(
+            app.messages
+                .iter()
+                .any(|m| m.content.contains("Available Slash Commands:"))
+        );
+        assert!(
+            app.messages
+                .iter()
+                .any(|m| m.content.contains("/mcp") && m.content.contains("MCP is disabled"))
+        );
 
         // `/mcp` is a local diagnostic and explains the default agent-only
         // mode when chat has no configured MCP lifecycle.
@@ -1284,10 +1284,11 @@ mod tests {
         )));
         assert_eq!(app.input.text(), "");
         assert_eq!(app.model, "custom-gemma");
-        assert!(app
-            .messages
-            .iter()
-            .any(|m| m.content.contains("Switched model to: custom-gemma")));
+        assert!(
+            app.messages
+                .iter()
+                .any(|m| m.content.contains("Switched model to: custom-gemma"))
+        );
 
         // Test /clear command
         app.input.set_text("/clear");
@@ -1297,9 +1298,11 @@ mod tests {
         )));
         assert_eq!(app.input.text(), "");
         assert_eq!(app.messages.len(), 1);
-        assert!(app.messages[0]
-            .content
-            .contains("Conversation history cleared."));
+        assert!(
+            app.messages[0]
+                .content
+                .contains("Conversation history cleared.")
+        );
 
         // Test /save command
         let temp_dir = std::env::temp_dir();

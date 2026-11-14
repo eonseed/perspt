@@ -3,18 +3,33 @@
 API & SDK Reference
 ===================
 
-Perspt is built as a modular 14-crate Rust workspace. In addition to the ``perspt`` CLI binary, you can embed **``perspt-sdk``**, **``perspt-coding``**, and **``perspt-agent``** directly into your own Rust applications to build verified AI workflows and custom domain agents.
+Perspt is built as a modular 14-crate Rust workspace (Edition 2024, Rust 1.100+). In addition to the ``perspt`` CLI binary, you can embed the **``perspt``** ``"Omni"`` facade crate (``AgentBuilder`` and ``perspt::prelude::*``) or compose **``perspt-sdk``**, **``perspt-coding``**, **``perspt-research``**, and **``perspt-agent``** directly for coding and non-coding agentic workflows.
 
-Integrating the Perspt SDK
---------------------------
+Integrating the Perspt Omni SDK
+-------------------------------
 
-Add ``perspt-sdk`` (and optionally ``perspt-coding`` for software engineering verifiers) to your project's ``Cargo.toml``:
+Add the root ``perspt`` facade crate (or individual crates such as ``perspt-sdk`` and ``perspt-coding``) to your ``Cargo.toml``:
 
 .. code-block:: toml
 
    [dependencies]
-   perspt-sdk = { git = "https://github.com/eonseed/perspt" }
-   perspt-coding = { git = "https://github.com/eonseed/perspt" }
+   perspt = { git = "https://github.com/eonseed/perspt" }
+
+Build and run a governed agent across coding, research (``ResearchDomain``), or custom domains with ``AgentBuilder``:
+
+.. code-block:: rust
+
+   use perspt::prelude::*;
+
+   # async fn run() -> anyhow::Result<()> {
+   let runtime = AgentBuilder::new(".")
+       .research_domain()
+       .approval_policy(ApprovalPolicy::Auto)
+       .on_ask_user_async(|q| async move { Ok(format!("answered: {q}")) })
+       .build()?;
+   let _summary = runtime.run("verify paper citations".into()).await?;
+   # Ok(())
+   # }
 
 You can then score verifier diagnostics with the canonical quadratic Lyapunov energy :math:`V(x) = \sum_{e \in E} w_e \lVert r_e(x) \rVert^2` and evaluate the acceptance gate in your own Rust code:
 
@@ -68,7 +83,7 @@ This example scores evidence and evaluates a gate; it does not run tools, author
    * - :doc:`perspt-coding`
      - Coding domain package: residuals, adapters, barriers.
    * - :doc:`perspt-research`
-     - Research domain package (second domain proof).
+     - Research domain package (executable ``citation-check`` & ``correction_packet``).
    * - :doc:`perspt-agent`
      - Governed candidate runtime, tool loop, verifier, work-graph dispatch.
    * - :doc:`perspt-tui`
@@ -88,7 +103,7 @@ This example scores evidence and evaluates a gate; it does not run tools, author
    * - :doc:`perspt-benchmark`
      - Optional, feature-gated manual evaluation tooling.
    * - ``perspt``
-     - Root workspace facade crate re-exporting the core libraries.
+     - Root ``"Omni"`` facade crate (``AgentBuilder``, ``prelude``, subcrate re-exports).
 
 .. toctree::
    :maxdepth: 2

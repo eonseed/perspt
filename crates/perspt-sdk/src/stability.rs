@@ -281,7 +281,7 @@ pub fn admit_analytic_path(
             _ => {
                 return AnalyticPathVerdict::Refused {
                     missing: format!("StabilityClaim.{name} is not a validated finite constant"),
-                }
+                };
             }
         }
     }

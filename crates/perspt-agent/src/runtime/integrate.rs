@@ -397,6 +397,7 @@ impl Psp9AgentRuntime {
             birth_deps: Vec::new(),
             activated_tools: Vec::new(),
             inherited: true,
+            require_model_turn: false,
         }))
     }
 }

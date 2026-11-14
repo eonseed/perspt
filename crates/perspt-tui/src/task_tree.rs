@@ -4,11 +4,11 @@
 
 use crate::theme::Theme;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState},
-    Frame,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -197,10 +197,10 @@ impl TaskTree {
         depth: usize,
     ) {
         // Mark parent as having children
-        if let Some(ref pid) = parent_id {
-            if let Some(parent) = self.nodes.get_mut(pid) {
-                parent.has_children = true;
-            }
+        if let Some(ref pid) = parent_id
+            && let Some(parent) = self.nodes.get_mut(pid)
+        {
+            parent.has_children = true;
         }
 
         let is_root = parent_id.is_none();

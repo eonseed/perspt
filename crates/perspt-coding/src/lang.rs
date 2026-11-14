@@ -14,8 +14,8 @@ use perspt_sdk::{
     SensorRef,
 };
 
-use crate::runtime::{default_classify_runtime, SmokeInvocation};
 use crate::LanguageId;
+use crate::runtime::{SmokeInvocation, default_classify_runtime};
 
 /// A coding language adapter: a verifier-suite provider for one language.
 pub trait LanguageAdapter: Send + Sync {
@@ -59,12 +59,11 @@ fn cargo_package_name(manifest: &Path) -> Option<String> {
             in_package = line == "[package]";
             continue;
         }
-        if in_package {
-            if let Some(rest) = line.strip_prefix("name") {
-                if let Some(eq) = rest.trim().strip_prefix('=') {
-                    return Some(eq.trim().trim_matches('"').trim_matches('\'').to_string());
-                }
-            }
+        if in_package
+            && let Some(rest) = line.strip_prefix("name")
+            && let Some(eq) = rest.trim().strip_prefix('=')
+        {
+            return Some(eq.trim().trim_matches('"').trim_matches('\'').to_string());
         }
     }
     None
@@ -196,19 +195,19 @@ impl LanguageAdapter for RustAdapter {
         for line in raw.lines() {
             let line = line.trim();
             // `error[E0432]: unresolved import `foo``
-            if let Some(rest) = line.strip_prefix("error[") {
-                if let Some(end) = rest.find(']') {
-                    let code = &rest[..end];
-                    let class = classify_rust_code(code);
-                    let summary = rest[end + 1..].trim_start_matches(':').trim();
-                    residuals.push(residual(
-                        node_id,
-                        generation,
-                        class,
-                        sensor.clone(),
-                        summary,
-                    ));
-                }
+            if let Some(rest) = line.strip_prefix("error[")
+                && let Some(end) = rest.find(']')
+            {
+                let code = &rest[..end];
+                let class = classify_rust_code(code);
+                let summary = rest[end + 1..].trim_start_matches(':').trim();
+                residuals.push(residual(
+                    node_id,
+                    generation,
+                    class,
+                    sensor.clone(),
+                    summary,
+                ));
             }
         }
         residuals.extend(rust_test_failures(node_id, generation, raw));
@@ -230,20 +229,28 @@ impl LanguageAdapter for RustAdapter {
             ),
             ResidualClass::SymbolMismatch => Some(CorrectionDirection::new(
                 ResidualClass::SymbolMismatch,
-                format!("define or correct the referenced name ({summary}); check spelling and path"),
+                format!(
+                    "define or correct the referenced name ({summary}); check spelling and path"
+                ),
             )),
             ResidualClass::Type => Some(CorrectionDirection::new(
                 ResidualClass::Type,
-                format!("reconcile the type/trait mismatch ({summary}); keep the public signature stable"),
+                format!(
+                    "reconcile the type/trait mismatch ({summary}); keep the public signature stable"
+                ),
             )),
             ResidualClass::OwnershipViolation => Some(CorrectionDirection::new(
                 ResidualClass::OwnershipViolation,
-                format!("fix the borrow/ownership error ({summary}); clone, borrow, or restructure \
-                    lifetimes"),
+                format!(
+                    "fix the borrow/ownership error ({summary}); clone, borrow, or restructure \
+                    lifetimes"
+                ),
             )),
             ResidualClass::InterfaceMismatch => Some(CorrectionDirection::new(
                 ResidualClass::InterfaceMismatch,
-                format!("adjust visibility ({summary}); make the item `pub` or use an accessible path"),
+                format!(
+                    "adjust visibility ({summary}); make the item `pub` or use an accessible path"
+                ),
             )),
             ResidualClass::TestFailure => Some(CorrectionDirection::new(
                 ResidualClass::TestFailure,
@@ -308,10 +315,10 @@ fn rust_test_failures(node_id: &str, generation: u32, raw: &str) -> Vec<Residual
 fn rust_binary_crates(workspace: &Path) -> Vec<(String, std::path::PathBuf)> {
     let mut out = Vec::new();
     let mut consider = |dir: std::path::PathBuf| {
-        if dir.join("src/main.rs").exists() {
-            if let Some(name) = cargo_package_name(&dir.join("Cargo.toml")) {
-                out.push((name, dir));
-            }
+        if dir.join("src/main.rs").exists()
+            && let Some(name) = cargo_package_name(&dir.join("Cargo.toml"))
+        {
+            out.push((name, dir));
         }
     };
     consider(workspace.to_path_buf());
@@ -333,10 +340,10 @@ fn rust_examples(workspace: &Path) -> Vec<(Option<String>, String)> {
         if let Ok(entries) = std::fs::read_dir(dir.join("examples")) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        out.push((pkg.clone(), stem.to_string()));
-                    }
+                if path.extension().and_then(|e| e.to_str()) == Some("rs")
+                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                {
+                    out.push((pkg.clone(), stem.to_string()));
                 }
             }
         }
@@ -516,12 +523,12 @@ fn python_packages(workspace: &Path) -> Vec<String> {
         if let Ok(entries) = std::fs::read_dir(&base) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_dir() && path.join("__init__.py").exists() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if !out.iter().any(|p| p == name) {
-                            out.push(name.to_string());
-                        }
-                    }
+                if path.is_dir()
+                    && path.join("__init__.py").exists()
+                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && !out.iter().any(|p| p == name)
+                {
+                    out.push(name.to_string());
                 }
             }
         }

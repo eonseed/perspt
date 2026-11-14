@@ -6,11 +6,11 @@
 use crate::telemetry::EnergyComponents;
 use crate::theme::Theme;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, Paragraph, Wrap},
-    Frame,
 };
 
 /// Review decision
@@ -102,8 +102,8 @@ impl Default for ReviewModal {
                 (ReviewDecision::Approve, "y", "✓ Approve"),
                 (ReviewDecision::Reject, "n", "✗ Reject"),
                 (ReviewDecision::RequestCorrection, "c", "🔄 Correct"),
-                (ReviewDecision::Edit, "e", "📝 Edit"),
                 (ReviewDecision::ViewDiff, "d", "👁 Diff"),
+                (ReviewDecision::Skip, "s", "⏭ Skip"),
             ],
         }
     }
@@ -258,10 +258,10 @@ impl ReviewModal {
             Span::raw(" reject  "),
             Span::styled("[c]", Style::default().fg(Color::Rgb(255, 152, 0))),
             Span::raw(" correct  "),
-            Span::styled("[e]", Style::default().fg(Color::Yellow)),
-            Span::raw(" edit  "),
             Span::styled("[d]", Style::default().fg(Color::Cyan)),
             Span::raw(" diff  "),
+            Span::styled("[s]", Style::default().fg(Color::Gray)),
+            Span::raw(" skip  "),
             Span::styled("[Esc]", Style::default().fg(Color::DarkGray)),
             Span::raw(" cancel"),
         ]))

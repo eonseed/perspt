@@ -145,9 +145,11 @@ mod tests {
     #[test]
     fn empty_spec_never_fires() {
         let spec = GoalSpec::new("n1", vec![]);
-        assert!(goal_presence_residual(&spec, 0, &observed(&[]))
-            .unwrap()
-            .is_none());
+        assert!(
+            goal_presence_residual(&spec, 0, &observed(&[]))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

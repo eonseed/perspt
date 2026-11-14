@@ -459,7 +459,7 @@ impl AgentTools {
         let query = match call.arguments.get("query") {
             Some(q) => q,
             None => {
-                return ToolResult::failure("search_code", "Missing 'query' argument".to_string())
+                return ToolResult::failure("search_code", "Missing 'query' argument".to_string());
             }
         };
         let target = call
@@ -481,7 +481,7 @@ impl AgentTools {
                     return ToolResult::failure(
                         "search_code",
                         format!("'context' must be a non-negative integer, got {raw:?}"),
-                    )
+                    );
                 }
             },
         };
@@ -548,14 +548,14 @@ impl AgentTools {
         let path = match call.arguments.get("path") {
             Some(p) => self.resolve_path(p),
             None => {
-                return ToolResult::failure("apply_diff", "Missing 'path' argument".to_string())
+                return ToolResult::failure("apply_diff", "Missing 'path' argument".to_string());
             }
         };
 
         let diff_content = match call.arguments.get("diff") {
             Some(c) => c,
             None => {
-                return ToolResult::failure("apply_diff", "Missing 'diff' argument".to_string())
+                return ToolResult::failure("apply_diff", "Missing 'diff' argument".to_string());
             }
         };
 
@@ -611,13 +611,13 @@ impl AgentTools {
                 return ToolResult::failure(
                     "edit_file",
                     "Missing required arguments: path, old_string, new_string".to_string(),
-                )
+                );
             }
         };
         let content = match fs::read_to_string(&path) {
             Ok(c) => c,
             Err(e) => {
-                return ToolResult::failure("edit_file", format!("Failed to read {path:?}: {e}"))
+                return ToolResult::failure("edit_file", format!("Failed to read {path:?}: {e}"));
             }
         };
         match content.matches(old.as_str()).count() {
@@ -774,22 +774,22 @@ impl AgentTools {
         let path = match call.arguments.get("path") {
             Some(p) => self.resolve_path(p),
             None => {
-                return ToolResult::failure("write_file", "Missing 'path' argument".to_string())
+                return ToolResult::failure("write_file", "Missing 'path' argument".to_string());
             }
         };
         let content = match call.arguments.get("content") {
             Some(c) => c,
             None => {
-                return ToolResult::failure("write_file", "Missing 'content' argument".to_string())
+                return ToolResult::failure("write_file", "Missing 'content' argument".to_string());
             }
         };
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                return ToolResult::failure(
-                    "write_file",
-                    format!("Failed to create directories: {}", e),
-                );
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return ToolResult::failure(
+                "write_file",
+                format!("Failed to create directories: {}", e),
+            );
         }
         match fs::write(&path, content) {
             Ok(_) => ToolResult::success("write_file", format!("Successfully wrote {:?}", path)),
@@ -804,7 +804,7 @@ impl AgentTools {
         let path = match call.arguments.get("path") {
             Some(p) => self.resolve_path(p),
             None => {
-                return ToolResult::failure("delete_file", "Missing 'path' argument".to_string())
+                return ToolResult::failure("delete_file", "Missing 'path' argument".to_string());
             }
         };
 
@@ -856,15 +856,14 @@ impl AgentTools {
         }
 
         // Ensure destination parent directory exists
-        if let Some(parent) = to.parent() {
-            if !parent.exists() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    return ToolResult::failure(
-                        "move_file",
-                        format!("Failed to create destination directory {:?}: {}", parent, e),
-                    );
-                }
-            }
+        if let Some(parent) = to.parent()
+            && !parent.exists()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            return ToolResult::failure(
+                "move_file",
+                format!("Failed to create destination directory {:?}: {}", parent, e),
+            );
         }
 
         match std::fs::rename(&from, &to) {

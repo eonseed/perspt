@@ -14,10 +14,10 @@ impl ToolLoop<'_> {
     ) -> Result<String> {
         let bracket_key = self.open_effect_bracket(call, entry)?;
         let outcome = self.apply_non_mutating(call, entry, recall).await?;
-        if outcome.completed {
-            if let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref()) {
-                recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
-            }
+        if outcome.completed
+            && let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref())
+        {
+            recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
         }
         let output = bounded_model_output(self.recorder, outcome.output)?;
         emit(

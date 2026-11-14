@@ -29,7 +29,7 @@ pub mod symbols;
 
 pub use barrier::OperationalSafetyBarrier;
 pub use registry::{CodingAdapterRegistry, LanguageId};
-pub use runtime::{crash_marker, SmokeInvocation};
+pub use runtime::{SmokeInvocation, crash_marker};
 pub use symbols::{defined_symbols, expected_symbols};
 
 use perspt_sdk::{
@@ -243,10 +243,10 @@ fn fold_evidence(
                         .spans
                         .push(format!("{path}:{line}:{}", item.column.unwrap_or(1)));
                 }
-                if residual.class == ResidualClass::TestFailure {
-                    if let Some(test) = &item.code {
-                        affected.tests.push(test.clone());
-                    }
+                if residual.class == ResidualClass::TestFailure
+                    && let Some(test) = &item.code
+                {
+                    affected.tests.push(test.clone());
                 }
             }
             diagnostics.extend(refs);
@@ -378,7 +378,7 @@ fn correction_for(residual: &ResidualEvent) -> Option<CorrectionDirection> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use perspt_sdk::{score_candidate, IndependenceRoute, ResidualSeverity, SensorRef, SymbolRef};
+    use perspt_sdk::{IndependenceRoute, ResidualSeverity, SensorRef, SymbolRef, score_candidate};
 
     fn lsp_import_residual() -> ResidualEvent {
         let mut r = ResidualEvent::new(

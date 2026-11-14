@@ -20,6 +20,9 @@ pub struct Psp9RunConfig {
     /// Explicit opt-in for governed dependency mutation (Gate J). Off by
     /// default: `MutateDependencies` stays withheld from every grant.
     pub allow_dependency_mutation: bool,
+    /// Explicit opt-in for delegated subagent spawning (`spawn_agent`).
+    /// Off by default: `SpawnAgent` stays withheld from every grant.
+    pub allow_subagents: bool,
     /// Concurrent work-graph nodes (Gate P). 1 keeps the single-node path
     /// verbatim; above 1 the multi-node dispatcher runs and a governed
     /// architect planning turn may decompose the task.
@@ -62,6 +65,7 @@ impl Default for Psp9RunConfig {
             max_parallel_verifiers: 4,
             persistent_grants: false,
             allow_dependency_mutation: false,
+            allow_subagents: false,
             max_parallel_nodes: 1,
             turn_deadline_secs: crate::turn::DEFAULT_TURN_DEADLINE_SECS,
             require_format: false,

@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Locate an executable on `PATH` (or as a direct path) and verify `--version` succeeds.
 pub(crate) fn require(program: &str, purpose: &str, hint: &str) -> Result<PathBuf> {

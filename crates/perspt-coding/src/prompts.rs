@@ -4,9 +4,9 @@
 //! paths, symbols, spans, and rationale all survive — the correction
 //! channel no longer flattens to one instruction string.
 
+use perspt_sdk::CorrectionPacket;
 use perspt_sdk::error::Result;
 use perspt_sdk::prompt::{BoundedList, BoundedText, PromptSection};
-use perspt_sdk::CorrectionPacket;
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/prompt_sections.rs"));

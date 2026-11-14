@@ -378,8 +378,8 @@ pub fn validate(nodes: &[WorkNode], edges: &[WorkEdge]) -> Result<GraphValidatio
 
     let mut queue: BTreeSet<&str> = indegree
         .iter()
-        .filter(|(_, &d)| d == 0)
-        .map(|(&n, _)| n)
+        .filter(|(_, d)| **d == 0)
+        .map(|(n, _)| *n)
         .collect();
     let mut topo_order = Vec::new();
     while let Some(&n) = queue.iter().next() {

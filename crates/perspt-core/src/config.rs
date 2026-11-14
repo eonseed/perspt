@@ -88,7 +88,7 @@ fn default_external_modes() -> Vec<ExternalToolMode> {
     vec![ExternalToolMode::Agent]
 }
 
-/// MCP transports supported by Perspt 0.6.6.
+/// MCP transports supported by Perspt 0.6.7.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExternalToolTransport {
@@ -982,35 +982,41 @@ mod tests {
 
     #[test]
     fn invalid_mcp_config_is_rejected() {
-        assert!(Config::from_toml_str(
-            r#"
+        assert!(
+            Config::from_toml_str(
+                r#"
             [[external_tools]]
             id = "legacy"
             transport = "http"
             url = "https://example.test/mcp"
             "#,
-        )
-        .is_err());
-        assert!(Config::from_toml_str(
-            r#"
+            )
+            .is_err()
+        );
+        assert!(
+            Config::from_toml_str(
+                r#"
             [[external_tools]]
             id = "bad-root"
             transport = "stdio"
             command = ["server"]
             roots = [{ uri = "https://example.test/not-a-root" }]
             "#,
-        )
-        .is_err());
-        assert!(Config::from_toml_str(
-            r#"
+            )
+            .is_err()
+        );
+        assert!(
+            Config::from_toml_str(
+                r#"
             [[external_tools]]
             id = "bad-task-bound"
             transport = "stdio"
             command = ["server"]
             max_task_wait_ms = 0
             "#,
-        )
-        .is_err());
+            )
+            .is_err()
+        );
     }
 
     #[test]

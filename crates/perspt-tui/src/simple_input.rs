@@ -4,11 +4,11 @@
 //! over key handling without fighting with tui-textarea's internal state.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 /// A simple multi-line text input with reliable key handling

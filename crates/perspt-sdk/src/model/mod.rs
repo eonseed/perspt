@@ -19,8 +19,8 @@ pub use conversation::{Conversation, Message};
 pub use family::ModelFamily;
 pub use id::ModelId;
 pub use projection::{
-    ConversationDelta, ConversationDeltaRecord, ConversationProjection, ConversationSeeded,
-    CONVERSATION_EVENT_SCHEMA_VERSION,
+    CONVERSATION_EVENT_SCHEMA_VERSION, ConversationDelta, ConversationDeltaRecord,
+    ConversationProjection, ConversationSeeded,
 };
 pub use tool::{ProviderToolCall, ToolChoicePolicy, ToolSpec, TurnOutput};
 pub use transport::{GenerationOptions, ModelTransport, TransportFuture};

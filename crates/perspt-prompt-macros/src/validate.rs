@@ -6,8 +6,8 @@ use std::collections::BTreeSet;
 
 use perspt_sdk::prompt::SectionSchema;
 
-use crate::types::VarType;
 use crate::PromptBuildError;
+use crate::types::VarType;
 
 /// Every `{{placeholder}}` occurrence in a body, with its line number and
 /// whether it stands alone on its line.

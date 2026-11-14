@@ -719,9 +719,11 @@ mod tests {
         )
         .unwrap();
         let prepared = sandbox.prepare_invocation().unwrap();
-        assert!(prepared
-            .args
-            .windows(2)
-            .any(|pair| pair == ["--dev", "/dev"]));
+        assert!(
+            prepared
+                .args
+                .windows(2)
+                .any(|pair| pair == ["--dev", "/dev"])
+        );
     }
 }

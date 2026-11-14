@@ -4,8 +4,8 @@
 //! scripted transport stands in for every provider, which is exactly what
 //! makes Gate S falsifiable: the loop cannot tell the difference.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use perspt_agent::toolloop::{
     CandidateCheckpoint, CandidateMeasurer, EffectExecutor, EffectOutcome, LoopBudgets, LoopEvent,
@@ -914,10 +914,12 @@ async fn rejected_candidate_restores_the_last_accepted_workspace_state() {
         NodeTerminalOutcome::Escalated { .. }
     ));
     assert_eq!(executor.state.load(Ordering::SeqCst), 0);
-    assert!(outcome
-        .events
-        .iter()
-        .any(|event| matches!(event, LoopEvent::CandidateRestored { .. })));
+    assert!(
+        outcome
+            .events
+            .iter()
+            .any(|event| matches!(event, LoopEvent::CandidateRestored { .. }))
+    );
 }
 
 #[tokio::test]
@@ -1028,10 +1030,12 @@ async fn disjoint_path_edits_both_apply_in_one_turn() {
         2,
         "commuting mutators run in arrival order in one turn"
     );
-    assert!(!outcome
-        .events
-        .iter()
-        .any(|event| matches!(event, LoopEvent::ToolBatchConflict { .. })));
+    assert!(
+        !outcome
+            .events
+            .iter()
+            .any(|event| matches!(event, LoopEvent::ToolBatchConflict { .. }))
+    );
     assert!(matches!(outcome.outcome, NodeTerminalOutcome::HardPass));
 }
 
@@ -1074,10 +1078,12 @@ async fn three_reads_apply_concurrently_with_a_deterministic_chain() {
 
     let outcome = toolloop.run("read three views").await.unwrap();
     assert_eq!(executor.applied.load(Ordering::SeqCst), 3);
-    assert!(!outcome
-        .events
-        .iter()
-        .any(|event| matches!(event, LoopEvent::ToolBatchConflict { .. })));
+    assert!(
+        !outcome
+            .events
+            .iter()
+            .any(|event| matches!(event, LoopEvent::ToolBatchConflict { .. }))
+    );
     // Responses (and their recorded EffectApplied events) stay in arrival
     // order even though execution was concurrent.
     let applied_order: Vec<String> = outcome
@@ -1185,7 +1191,9 @@ async fn an_infeasible_worker_context_makes_no_model_call() {
         "no scripted turn was consumed: zero transport calls"
     );
     let events = recording.events.lock().unwrap();
-    assert!(events
-        .iter()
-        .any(|event| matches!(event, LoopEvent::ContextInfeasible { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, LoopEvent::ContextInfeasible { .. }))
+    );
 }

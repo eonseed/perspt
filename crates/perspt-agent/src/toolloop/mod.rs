@@ -14,12 +14,12 @@
 
 use anyhow::{Context, Result};
 use perspt_sdk::{
-    check_full_admissibility, classify_failure, AcceptedTrajectory, BarrierEvaluator,
-    CandidateStateWitness, CandidateTransition, Capability, ContextCheckpoint, ContractEvaluator,
-    ControlFrame, Conversation, CorrectionDirection, EffectProposal, FailureKind,
-    FullAdmissibilityWitness, GateDecision, KernelState, ModelId, ModelTransport,
-    NodeTerminalOutcome, ProviderToolCall, RecoveryCascade, ResidualEvent, StaticCatalog,
-    ToolCatalog, ToolChoicePolicy, ToolEntry, TurnOutput, VerificationCadence,
+    AcceptedTrajectory, BarrierEvaluator, CandidateStateWitness, CandidateTransition, Capability,
+    ContextCheckpoint, ContractEvaluator, ControlFrame, Conversation, CorrectionDirection,
+    EffectProposal, FailureKind, FullAdmissibilityWitness, GateDecision, KernelState, ModelId,
+    ModelTransport, NodeTerminalOutcome, ProviderToolCall, RecoveryCascade, ResidualEvent,
+    StaticCatalog, ToolCatalog, ToolChoicePolicy, ToolEntry, TurnOutput, VerificationCadence,
+    check_full_admissibility, classify_failure,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -37,12 +37,12 @@ mod proposal;
 mod resident;
 use binding::PromptBinding;
 pub use contract::*;
-pub use envelope::{decode_tool_loop, DecodedLoopEvent};
+pub use envelope::{DecodedLoopEvent, decode_tool_loop};
 pub use proposal::candidate_mutating_effect;
 pub use resident::ResidentReserves;
 
-pub(crate) use context::refold_session_context;
 use context::LoopContext;
+pub(crate) use context::refold_session_context;
 use proposal::{promote_matching_capability, proposal_from, proposal_scope, uncertified_reason};
 
 /// The loop's finite budgets (PSP-9 system 6).
@@ -254,21 +254,38 @@ enum BoundaryStep {
 impl ToolLoop<'_> {
     /// Run the loop to a classified terminal state (Paper II Lemma 1).
     pub async fn run(self, goal: &str) -> Result<LoopOutcome> {
-        self.run_with_conversation(goal, None, Vec::new()).await
+        self.run_inner(goal, None, Vec::new(), false).await
+    }
+
+    /// Run at least one model turn before allowing `baseline_terminal`
+    /// short-circuit (used after human `RequestCorrection` feedback).
+    pub async fn run_requiring_turn(self, goal: &str) -> Result<LoopOutcome> {
+        self.run_inner(goal, None, Vec::new(), true).await
     }
 
     /// Re-enter from a durable provider-neutral conversation projection. The
     /// runtime restores candidate state and budgets; this method restores only
     /// model context and deferred tool activation.
     pub async fn run_with_conversation(
-        mut self,
+        self,
         goal: &str,
         resumed: Option<Conversation>,
         restored_activated_tools: Vec<String>,
     ) -> Result<LoopOutcome> {
+        self.run_inner(goal, resumed, restored_activated_tools, false)
+            .await
+    }
+
+    async fn run_inner(
+        mut self,
+        goal: &str,
+        resumed: Option<Conversation>,
+        restored_activated_tools: Vec<String>,
+        require_turn: bool,
+    ) -> Result<LoopOutcome> {
         self.budgets.validate(&self.cadence)?;
         let (baseline, mut state) = self.open_turn_state().await?;
-        if let Some(outcome) = self.baseline_terminal(&baseline) {
+        if !require_turn && let Some(outcome) = self.baseline_terminal(&baseline) {
             return Ok(state.finish(outcome));
         }
         // The first call carries the measured baseline diagnostics: the
@@ -906,10 +923,10 @@ impl ToolLoop<'_> {
         if baseline.hard_pass {
             return Some(NodeTerminalOutcome::HardPass);
         }
-        if let Some(floor) = self.budgets.declared_energy_floor {
-            if baseline.energy <= floor {
-                return Some(NodeTerminalOutcome::DeclaredFloor { floor });
-            }
+        if let Some(floor) = self.budgets.declared_energy_floor
+            && baseline.energy <= floor
+        {
+            return Some(NodeTerminalOutcome::DeclaredFloor { floor });
         }
         None
     }
@@ -1121,10 +1138,10 @@ impl ToolLoop<'_> {
     ) -> Result<String> {
         let bracket_key = self.open_effect_bracket(call, entry)?;
         let outcome = self.executor.apply(call, entry).await?;
-        if outcome.completed {
-            if let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref()) {
-                recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
-            }
+        if outcome.completed
+            && let (Some(recorder), Some(key)) = (self.recorder, bracket_key.as_deref())
+        {
+            recorder.external_result(key, &serde_json::json!({"mutated": outcome.mutated}))?;
         }
         let after = self.executor.state_witness().await?;
         let transition = CandidateTransition::new(proposal, before.witness.clone(), after);

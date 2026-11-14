@@ -4,8 +4,8 @@
 //! identical denial behavior — the loop cannot tell the difference, because
 //! nothing in it may read a vendor type.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use perspt_agent::toolloop::{
     CandidateCheckpoint, CandidateMeasurer, EffectExecutor, EffectOutcome, LoopBudgets, Measured,

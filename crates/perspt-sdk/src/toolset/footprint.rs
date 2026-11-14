@@ -235,9 +235,11 @@ mod tests {
         }]);
         let footprint = spec.resolve(&serde_json::json!({"path": "src/lib.rs"}), "p");
         assert!(footprint.writes.iter().all(|w| footprint.reads.contains(w)));
-        assert!(footprint
-            .writes
-            .contains(&Resource::File("src/lib.rs".into())));
+        assert!(
+            footprint
+                .writes
+                .contains(&Resource::File("src/lib.rs".into()))
+        );
     }
 
     #[test]
@@ -270,9 +272,11 @@ mod tests {
         let spec = FootprintSpec::new(vec![ResourceSelector::ProviderRateLimit]);
         let footprint = spec.resolve(&serde_json::json!({}), "anthropic");
         assert!(footprint.writes.is_empty());
-        assert!(footprint
-            .reads
-            .contains(&Resource::ProviderRateLimit("anthropic".into())));
+        assert!(
+            footprint
+                .reads
+                .contains(&Resource::ProviderRateLimit("anthropic".into()))
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 use std::sync::{Arc, Mutex};
 
 use perspt_agent::{Psp9AgentRuntime, Psp9RunConfig};
-use perspt_sdk::ledger::{tool_loop_body, LedgerEvent, ToolLoopBody};
+use perspt_sdk::ledger::{LedgerEvent, ToolLoopBody, tool_loop_body};
 use perspt_sdk::{
     ApprovalPolicy, Conversation, ModelFamily, ModelId, ModelTransport, ProviderCapabilities,
     SearchLimits, ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,

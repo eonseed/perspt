@@ -90,16 +90,20 @@ fn the_packet_folds_every_direction_with_affected_sets() {
     assert!(packet.operators.len() >= 2, "both directions participate");
     assert!(packet.affected.paths.contains(&"src/lib.rs".to_string()));
     assert!(packet.affected.paths.contains(&"src/parser.rs".to_string()));
-    assert!(packet
-        .affected
-        .symbols
-        .iter()
-        .any(|symbol| symbol.name == "parse_entry"));
-    assert!(packet
-        .affected
-        .spans
-        .iter()
-        .any(|span| span == "src/lib.rs:1:5"));
+    assert!(
+        packet
+            .affected
+            .symbols
+            .iter()
+            .any(|symbol| symbol.name == "parse_entry")
+    );
+    assert!(
+        packet
+            .affected
+            .spans
+            .iter()
+            .any(|span| span == "src/lib.rs:1:5")
+    );
     assert_eq!(packet.diagnostics.len(), 2);
     assert_eq!(packet.dominant_cluster.class, ResidualClass::ImportGraph);
 }
@@ -150,8 +154,52 @@ fn missing_sensors_become_declared_uncertainty() {
 /// legacy correction path is untouched.
 #[test]
 fn domains_without_packets_keep_the_legacy_path() {
-    let research = perspt_research::ResearchDomain::new();
-    assert!(research.correction_packet(&[import_residual()]).is_none());
+    use perspt_sdk::{
+        CorrectionDirection, DomainDetection, DomainId, DomainScope, EnergyModel, HardGatePolicy,
+        ResidualSchema, SafetyBarrierDisposition, ToolEntry, VerifierSuiteSpec, WorkspaceSnapshot,
+    };
+
+    struct DefaultPacketDomain;
+
+    impl AgentDomainPackage for DefaultPacketDomain {
+        fn domain_id(&self) -> DomainId {
+            DomainId::new("legacy-default")
+        }
+        fn detect(&self, _: &WorkspaceSnapshot) -> DomainDetection {
+            DomainDetection {
+                domain: self.domain_id(),
+                activated: false,
+                confidence: 0.0,
+                evidence: Vec::new(),
+            }
+        }
+        fn residual_schema(&self, _: &DomainScope) -> ResidualSchema {
+            ResidualSchema::new(Vec::new())
+        }
+        fn energy_model(&self, _: &DomainScope) -> EnergyModel {
+            EnergyModel::new("legacy-default", 0.5)
+        }
+        fn correction_directions(&self, _: &[ResidualEvent]) -> Vec<CorrectionDirection> {
+            Vec::new()
+        }
+        fn tool_entries(&self, _: &DomainScope) -> Vec<ToolEntry> {
+            Vec::new()
+        }
+        fn hard_gate_policy(&self, _: &DomainScope) -> HardGatePolicy {
+            HardGatePolicy::default()
+        }
+        fn verifier_suite(&self, _: &DomainScope) -> VerifierSuiteSpec {
+            VerifierSuiteSpec::default()
+        }
+        fn safety_barrier(&self, _: &DomainScope) -> SafetyBarrierDisposition {
+            SafetyBarrierDisposition::NotClaimed {
+                reason: "legacy test stub".into(),
+            }
+        }
+    }
+
+    let legacy = DefaultPacketDomain;
+    assert!(legacy.correction_packet(&[import_residual()]).is_none());
 }
 
 /// Residuals with no operators and no diagnostics yield no packet — an

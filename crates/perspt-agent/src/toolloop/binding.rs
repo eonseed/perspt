@@ -4,7 +4,7 @@
 use anyhow::Result;
 
 use super::{
-    emit, resident, EventLog, LoopContext, LoopEvent, PromptEnvelope, ToolLoop, TurnState,
+    EventLog, LoopContext, LoopEvent, PromptEnvelope, ToolLoop, TurnState, emit, resident,
 };
 
 /// The serialized token and byte cost of one composed request.

@@ -5,8 +5,8 @@
 //! `LoopEventEnvelopeV1`; unknown versions fail authoritative replay and
 //! resume closed while raw forensic display remains possible.
 
-use perspt_agent::toolloop::{decode_tool_loop, LoopEvent, LoopEventEnvelopeV1};
-use perspt_sdk::ledger::{tool_loop_body, Ledger, LedgerEvent, ToolLoopBody};
+use perspt_agent::toolloop::{LoopEvent, LoopEventEnvelopeV1, decode_tool_loop};
+use perspt_sdk::ledger::{Ledger, LedgerEvent, ToolLoopBody, tool_loop_body};
 
 fn legacy_payload() -> serde_json::Value {
     // A true pre-PSP-10 row: no candidate_id, no observed_energy.

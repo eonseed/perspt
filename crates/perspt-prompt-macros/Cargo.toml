@@ -3,8 +3,12 @@ name = "perspt-prompt-macros"
 description = "Build-time compiler for Perspt prompt section files (PSP-10 system 23)"
 version = { workspace = true }
 edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+homepage = { workspace = true }
+documentation = "https://docs.rs/perspt-prompt-macros"
 
 [dependencies]
 perspt-sdk = { workspace = true }

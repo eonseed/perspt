@@ -8,7 +8,7 @@
 //! inside this ceiling. What this rule actually catches is the long string
 //! literal or trailing comment rustfmt cannot break for you.
 
-use crate::rules::{RuleId, Violation, LINE_WIDTH_LIMIT};
+use crate::rules::{LINE_WIDTH_LIMIT, RuleId, Violation};
 use crate::scan::SourceFile;
 
 /// Check one file, returning one violation per offending line.

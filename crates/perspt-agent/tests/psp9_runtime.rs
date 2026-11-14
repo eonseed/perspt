@@ -97,9 +97,11 @@ async fn production_runtime_edits_verifies_promotes_and_records() {
     let summary = runtime.run("make answer return two".into()).await.unwrap();
     assert!(matches!(summary.outcome, NodeTerminalOutcome::HardPass));
     assert_eq!(summary.promoted_paths, ["src/lib.rs"]);
-    assert!(std::fs::read_to_string(project.path().join("src/lib.rs"))
-        .unwrap()
-        .contains("{ 2 }"));
+    assert!(
+        std::fs::read_to_string(project.path().join("src/lib.rs"))
+            .unwrap()
+            .contains("{ 2 }")
+    );
 
     let store = perspt_store::SessionStore::open(&database).unwrap();
     let rows = store.get_psp9_events(&summary.session_id).unwrap();
@@ -107,22 +109,26 @@ async fn production_runtime_edits_verifies_promotes_and_records() {
         rows.len() >= 10,
         "live run must emit a complete event trace"
     );
-    assert!(rows
-        .windows(2)
-        .all(|pair| pair[1].prev_hash == pair[0].hash));
-    assert!(rows
-        .iter()
-        .any(|row| row.event_json.contains("turn_observed")));
-    assert!(rows
-        .iter()
-        .any(|row| row.event_json.contains("provider_capability_evidence")));
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[1].prev_hash == pair[0].hash)
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.event_json.contains("turn_observed"))
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.event_json.contains("provider_capability_evidence"))
+    );
     assert!(rows.iter().any(|row| {
         row.event_json.contains("calibration_readiness")
             && row.event_json.contains("\"certified_for_promotion\":false")
     }));
-    assert!(rows
-        .iter()
-        .any(|row| row.event_json.contains("candidate_promoted")));
+    assert!(
+        rows.iter()
+            .any(|row| row.event_json.contains("candidate_promoted"))
+    );
     let mut ledger = perspt_sdk::Ledger::new();
     for row in rows {
         let event = serde_json::from_str(&row.event_json).unwrap();
@@ -309,11 +315,13 @@ async fn interrupted_session_resumes_from_its_durable_candidate_checkpoint() {
     let status = store.get_session(&session_id).unwrap().unwrap().status;
     assert!(promoted.contains("{ 2 }") && status == "COMPLETED_PSP9");
     assert_graph_lineage(&store, &session_id, graph_revisions_before_resume, &control);
-    assert!(store
-        .get_psp9_events(&session_id)
-        .unwrap()
-        .iter()
-        .any(|row| row.event_json.contains("graph_revision_resumed")));
+    assert!(
+        store
+            .get_psp9_events(&session_id)
+            .unwrap()
+            .iter()
+            .any(|row| row.event_json.contains("graph_revision_resumed"))
+    );
 }
 
 /// A transport that plays its script and then parks forever — the crash

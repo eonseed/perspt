@@ -421,10 +421,10 @@ fn verifier_read_roots(root: &Path, extra_env: &[(String, String)]) -> Vec<PathB
                 path.join("bin/python3"),
                 path.join("Scripts/python.exe"),
             ] {
-                if let Ok(target) = interpreter.canonicalize() {
-                    if let Some(installation) = target.parent().and_then(Path::parent) {
-                        roots.insert(installation.to_path_buf());
-                    }
+                if let Ok(target) = interpreter.canonicalize()
+                    && let Some(installation) = target.parent().and_then(Path::parent)
+                {
+                    roots.insert(installation.to_path_buf());
                 }
             }
         }
@@ -487,9 +487,11 @@ mod tests {
         assert!(profile.contains("(allow file-write* (literal \"/dev/null\"))"));
         assert!(profile.contains("(allow file-write* (subpath \"/private/tmp/candidate\"))"));
         assert_eq!(profile.matches("allow file-write*").count(), 2);
-        assert!(profile
-            .lines()
-            .any(|line| line.trim() == "(allow file-read*)"));
+        assert!(
+            profile
+                .lines()
+                .any(|line| line.trim() == "(allow file-read*)")
+        );
         assert!(profile.contains("(deny file-read-data (require-all (subpath \"/Users\")"));
         assert!(profile.contains("(deny file-read-data (require-all (subpath \"/private/tmp\")"));
         assert!(profile.contains("/Users/test/.rustup"));

@@ -138,7 +138,7 @@ fn event_names(rows: &[perspt_store::Psp9LedgerRow]) -> Vec<String> {
 
 /// Decode a tool-loop row's event name (the search/loop alphabet).
 fn tool_event_names(rows: &[perspt_store::Psp9LedgerRow]) -> Vec<String> {
-    use perspt_sdk::ledger::{tool_loop_body, LedgerEvent, ToolLoopBody};
+    use perspt_sdk::ledger::{LedgerEvent, ToolLoopBody, tool_loop_body};
     rows.iter()
         .filter_map(|row| {
             let LedgerEvent::Custom { kind, payload } =
@@ -424,9 +424,11 @@ async fn compatible_winners_promote_through_one_integration_root() {
     assert_eq!(count("staging_root_updated"), 2);
     assert_eq!(count("integration_promoted"), 1);
     assert_eq!(count("integration_failed"), 0);
-    assert!(std::fs::read_to_string(project.path().join("src/a.rs"))
-        .unwrap()
-        .contains("/// Alpha."));
+    assert!(
+        std::fs::read_to_string(project.path().join("src/a.rs"))
+            .unwrap()
+            .contains("/// Alpha.")
+    );
 }
 
 /// A transport that delegates to the dependent-graph script but hangs

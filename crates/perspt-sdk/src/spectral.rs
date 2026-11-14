@@ -14,7 +14,7 @@
 use nalgebra::DMatrix;
 use serde::{Deserialize, Serialize};
 
-use crate::error::{check_positive_finite, Result, SdkError};
+use crate::error::{Result, SdkError, check_positive_finite};
 
 /// One weighted edge of the verification graph. An edge `(i, j)` couples the
 /// local states of two nodes/verifiers; its weight is the residual weight
@@ -266,14 +266,18 @@ mod tests {
 
     #[test]
     fn rejects_self_loop_and_out_of_range() {
-        assert!(VerificationGraph::new(2)
-            .with_edge(0, 0, 1.0)
-            .mu(TOL)
-            .is_err());
-        assert!(VerificationGraph::new(2)
-            .with_edge(0, 5, 1.0)
-            .mu(TOL)
-            .is_err());
+        assert!(
+            VerificationGraph::new(2)
+                .with_edge(0, 0, 1.0)
+                .mu(TOL)
+                .is_err()
+        );
+        assert!(
+            VerificationGraph::new(2)
+                .with_edge(0, 5, 1.0)
+                .mu(TOL)
+                .is_err()
+        );
     }
 
     #[test]

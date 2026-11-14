@@ -216,9 +216,10 @@ async fn disjoint_nodes_run_concurrently_and_both_promote() {
         .unwrap();
     assert!(admissibility < planned, "kernel check precedes the plan");
     // Replay folds: the recorded chain verifies end to end.
-    assert!(rows
-        .windows(2)
-        .all(|pair| pair[1].prev_hash == pair[0].hash));
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[1].prev_hash == pair[0].hash)
+    );
 }
 
 /// PSP-10 Phase 1: an architect call whose arguments do not satisfy the real

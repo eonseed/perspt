@@ -46,7 +46,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
           components: rustfmt, clippy
 
       - name: Check formatting
@@ -83,10 +83,10 @@ jobs:
             ~/.cargo/git
             target/debug/deps
             target/debug/build
-          key: ${{ runner.os }}-rust-1.97.1-pr-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ runner.os }}-rust-1.100.0-pr-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-rust-1.97.1-pr-
-            ${{ runner.os }}-rust-1.97.1-
+            ${{ runner.os }}-rust-1.100.0-pr-
+            ${{ runner.os }}-rust-1.100.0-
 
       # The official pinned shared library keeps native compilation out of
       # routine CI. Clippy compiles the workspace, so cargo build is redundant.
@@ -118,7 +118,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
 
       - name: Cache xtask build
         uses: actions/cache@v6
@@ -129,9 +129,9 @@ jobs:
             target/debug/deps
             target/debug/build
             target/debug/xtask
-          key: ${{ runner.os }}-rust-1.97.1-rules-${{ hashFiles('Cargo.lock', 'xtask/**') }}
+          key: ${{ runner.os }}-rust-1.100.0-rules-${{ hashFiles('Cargo.lock', 'xtask/**') }}
           restore-keys: |
-            ${{ runner.os }}-rust-1.97.1-rules-
+            ${{ runner.os }}-rust-1.100.0-rules-
 
       - name: Enforce the PSP code-rule baseline
         run: cargo run --locked --quiet --package xtask -- check
@@ -166,7 +166,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
 
       - name: Cache Cargo registry and compiled dependencies
         uses: actions/cache@v6
@@ -176,10 +176,10 @@ jobs:
             ~/.cargo/git
             target/debug/deps
             target/debug/build
-          key: ${{ runner.os }}-rust-1.97.1-target-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ runner.os }}-rust-1.100.0-target-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-rust-1.97.1-target-
-            ${{ runner.os }}-rust-1.97.1-
+            ${{ runner.os }}-rust-1.100.0-target-
+            ${{ runner.os }}-rust-1.100.0-
 
       - name: Run target-OS tests
         run: cargo test --locked --workspace --all-targets --no-fail-fast -- --test-threads=1

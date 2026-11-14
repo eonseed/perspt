@@ -21,18 +21,21 @@ pub mod verifier;
 pub use candidate::CandidateWorkspace;
 pub use external_tools::{
     ExternalConnectionState, ExternalToolEvent, ExternalToolObserver, ExternalToolRejection,
-    ExternalToolResult, ExternalToolRuntime, McpClientServices, McpElicitationAction,
-    McpElicitationBroker, McpElicitationProvider, McpPendingElicitation, McpSamplingProvider,
-    McpServerEvent, ModelTransportSamplingProvider, MCP_PROTOCOL_VERSION,
+    ExternalToolResult, ExternalToolRuntime, MCP_PROTOCOL_VERSION, McpClientServices,
+    McpElicitationAction, McpElicitationBroker, McpElicitationProvider, McpPendingElicitation,
+    McpSamplingProvider, McpServerEvent, ModelTransportSamplingProvider,
 };
 pub use lsp::{DocumentSymbolInfo, LspClient};
 pub use measure::CodingCandidateMeasurer;
-pub use probe::{probe_route, ProbeReport};
-pub use realize::{snapshot_workspace, ProjectionMismatch, SnapshotRealizer, WorkspaceState};
+pub use probe::{ProbeReport, probe_route};
+pub use realize::{ProjectionMismatch, SnapshotRealizer, WorkspaceState, snapshot_workspace};
 pub use runtime::{Psp9AgentRuntime, Psp9ModelRoutes, Psp9Recorder, Psp9RunConfig, Psp9RunSummary};
 pub use toolloop::{
     CandidateMeasurer, EffectExecutor, LoopBudgets, LoopOutcome, LoopRecorder, ToolLoop,
 };
-pub use tools::handlers::{CandidateHandlerRegistry, CandidateToolHandler};
+pub use tools::handlers::{
+    AsyncFnInteractionHandler, CandidateHandlerRegistry, CandidateToolHandler,
+    FnInteractionHandler, InteractionHandler, NonInteractiveHandler,
+};
 pub use tools::{AgentTools, ToolCall, ToolResult};
 pub use transport::GenAiTransport;

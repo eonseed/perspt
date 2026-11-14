@@ -10,7 +10,7 @@
 use crate::app_event::{AppEvent, AppEventReceiver, AppEventSender};
 use crossterm::event::EventStream;
 use futures::StreamExt;
-use std::io::{self, stdout, Stdout};
+use std::io::{self, Stdout, stdout};
 use std::time::Duration;
 use tokio::time::interval;
 
@@ -20,9 +20,9 @@ use crossterm::{
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
 /// Terminal type alias
 pub type TuiTerminal = Terminal<CrosstermBackend<Stdout>>;

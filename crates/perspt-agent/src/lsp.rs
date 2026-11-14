@@ -6,15 +6,15 @@
 use anyhow::{Context, Result};
 use lsp_types::{Diagnostic, DiagnosticSeverity, InitializeParams, InitializeResult};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 
 use perspt_core::plugin::LspConfig;
 use perspt_sandbox::{ProcessPolicy, ProcessSandbox};
@@ -188,14 +188,13 @@ impl LspClient {
                             if line == "\r\n" {
                                 break;
                             }
-                            if line.starts_with("Content-Length:") {
-                                if let Ok(len) = line
+                            if line.starts_with("Content-Length:")
+                                && let Ok(len) = line
                                     .trim_start_matches("Content-Length:")
                                     .trim()
                                     .parse::<usize>()
-                                {
-                                    content_length = len;
-                                }
+                            {
+                                content_length = len;
                             }
                         }
                         Err(e) => {
@@ -255,32 +254,31 @@ impl LspClient {
             }
         } else if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
             // It's a notification
-            if method == "textDocument/publishDiagnostics" {
-                if let Some(params) = msg.get("params") {
-                    if let (Some(uri), Some(diags)) = (
-                        params.get("uri").and_then(|u| u.as_str()),
-                        params.get("diagnostics").and_then(|d| {
-                            serde_json::from_value::<Vec<Diagnostic>>(d.clone()).ok()
-                        }),
-                    ) {
-                        // Normalize URI to file path
-                        let path = uri.trim_start_matches("file://");
+            if method == "textDocument/publishDiagnostics"
+                && let Some(params) = msg.get("params")
+                && let (Some(uri), Some(diags)) = (
+                    params.get("uri").and_then(|u| u.as_str()),
+                    params
+                        .get("diagnostics")
+                        .and_then(|d| serde_json::from_value::<Vec<Diagnostic>>(d.clone()).ok()),
+                )
+            {
+                // Normalize URI to file path
+                let path = uri.trim_start_matches("file://");
 
-                        // For ty/lsp, path might be absolute or relative, ensure we match broadly
-                        // Store exactly what we got for now
-                        let mut diag_map = diagnostics.lock().await;
+                // For ty/lsp, path might be absolute or relative, ensure we match broadly
+                // Store exactly what we got for now
+                let mut diag_map = diagnostics.lock().await;
 
-                        // Also try to simplify the key to just filename for easier lookup
-                        // This assumes unique filenames which is a simplification but useful
-                        if let Some(filename) = Path::new(path).file_name() {
-                            let filename_str = filename.to_string_lossy().to_string();
-                            diag_map.insert(filename_str, diags.clone());
-                        }
-
-                        diag_map.insert(path.to_string(), diags);
-                        log::info!("Updated diagnostics for {}", path);
-                    }
+                // Also try to simplify the key to just filename for easier lookup
+                // This assumes unique filenames which is a simplification but useful
+                if let Some(filename) = Path::new(path).file_name() {
+                    let filename_str = filename.to_string_lossy().to_string();
+                    diag_map.insert(filename_str, diags.clone());
                 }
+
+                diag_map.insert(path.to_string(), diags);
+                log::info!("Updated diagnostics for {}", path);
             }
         }
     }
@@ -402,12 +400,12 @@ impl LspClient {
         }
 
         // 4. Filename fallback (only if still empty/not found)
-        if cached.is_empty() {
-            if let Some(filename) = Path::new(path).file_name() {
-                let filename_str = filename.to_string_lossy();
-                if let Some(diags) = map.get(filename_str.as_ref()) {
-                    cached = diags.clone();
-                }
+        if cached.is_empty()
+            && let Some(filename) = Path::new(path).file_name()
+        {
+            let filename_str = filename.to_string_lossy();
+            if let Some(diags) = map.get(filename_str.as_ref()) {
+                cached = diags.clone();
             }
         }
 

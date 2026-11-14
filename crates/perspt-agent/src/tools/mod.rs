@@ -4,7 +4,7 @@
 //! File and search operations plus the open handler registry the
 //! governed candidate dispatches through.
 
-use diffy::{apply, Patch};
+use diffy::{Patch, apply};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

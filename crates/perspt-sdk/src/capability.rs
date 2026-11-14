@@ -14,7 +14,7 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-use crate::command::{classify_tier, CommandInvocation, CommandTier};
+use crate::command::{CommandInvocation, CommandTier, classify_tier};
 use crate::error::SdkError;
 
 /// An actor that can hold capabilities and emit proposals.
@@ -526,19 +526,19 @@ impl Capability {
             }
         }
         // Call budget no greater.
-        if let (Some(child), Some(parent)) = (self.max_calls, source.max_calls) {
-            if child > parent {
-                return false;
-            }
+        if let (Some(child), Some(parent)) = (self.max_calls, source.max_calls)
+            && child > parent
+        {
+            return false;
         }
         if self.max_calls.is_none() && source.max_calls.is_some() {
             return false; // child unbounded but parent bounded
         }
         // Expiry no later.
-        if let (Some(child), Some(parent)) = (self.expires_at, source.expires_at) {
-            if child > parent {
-                return false;
-            }
+        if let (Some(child), Some(parent)) = (self.expires_at, source.expires_at)
+            && child > parent
+        {
+            return false;
         }
         if self.expires_at.is_none() && source.expires_at.is_some() {
             return false;
@@ -980,15 +980,15 @@ fn check_scope(proposal: &EffectProposal, cap: &Capability) -> Option<Admissibil
             ));
         }
     }
-    if let Some(target) = &proposal.network_target {
-        if !cap.network_scope.iter().any(|p| p.matches(target)) {
-            return Some(deny(
-                proposal,
-                Some(cap),
-                DenyReason::NetworkOutOfScope,
-                RecoveryClass::NeedsApproval,
-            ));
-        }
+    if let Some(target) = &proposal.network_target
+        && !cap.network_scope.iter().any(|p| p.matches(target))
+    {
+        return Some(deny(
+            proposal,
+            Some(cap),
+            DenyReason::NetworkOutOfScope,
+            RecoveryClass::NeedsApproval,
+        ));
     }
     None
 }
@@ -1037,7 +1037,7 @@ fn finalize_decision(proposal: &EffectProposal, cap: &Capability) -> Admissibili
                 Some(cap),
                 DenyReason::PolicyDenied,
                 RecoveryClass::Fatal,
-            )
+            );
         }
         ApprovalPolicy::Ask => AdmissibilityDecision::NeedsApproval,
         ApprovalPolicy::Auto | ApprovalPolicy::SessionApproved => AdmissibilityDecision::Allow,
@@ -1089,7 +1089,7 @@ mod tests {
     #[test]
     fn write_in_scope_is_allowed() {
         let caps = vec![
-            Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"])
+            Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"]),
         ];
         let proposal =
             EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("src/x.rs");
@@ -1100,7 +1100,7 @@ mod tests {
     #[test]
     fn write_out_of_path_scope_is_denied() {
         let caps = vec![
-            Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"])
+            Capability::new(actor(), vec![EffectKind::WriteArtifact]).with_paths(vec!["src/*"]),
         ];
         let proposal =
             EffectProposal::new(actor(), "n1", EffectKind::WriteArtifact).with_path("/etc/passwd");

@@ -21,8 +21,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::capability::{
-    check_admissibility, AdmissibilityDecision, AdmissibilityWitness, Capability, EffectProposal,
-    KernelState,
+    AdmissibilityDecision, AdmissibilityWitness, Capability, EffectProposal, KernelState,
+    check_admissibility,
 };
 use crate::error::{Result, SdkError};
 
@@ -302,13 +302,13 @@ pub fn promote(capability: &mut Capability, witness: &FullAdmissibilityWitness) 
         .map(|b| b.certified_increment)
         .unwrap_or(0.0);
 
-    if let Some(budget) = capability.risk_budget.as_ref() {
-        if !budget.admits(debit) {
-            return Err(SdkError::Domain(format!(
-                "risk budget exhausted: spent {} + c_t {debit} exceeds {}",
-                budget.spent, budget.limit
-            )));
-        }
+    if let Some(budget) = capability.risk_budget.as_ref()
+        && !budget.admits(debit)
+    {
+        return Err(SdkError::Domain(format!(
+            "risk budget exhausted: spent {} + c_t {debit} exceeds {}",
+            budget.spent, budget.limit
+        )));
     }
     if capability.max_calls == Some(0) {
         return Err(SdkError::Domain("call budget exhausted".into()));

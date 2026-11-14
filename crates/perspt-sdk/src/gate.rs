@@ -20,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{check_positive_finite, Result, SdkError};
+use crate::error::{Result, SdkError, check_positive_finite};
 
 /// Outcome of evaluating one candidate against the gate (PSP-8 `GateDecision`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -86,10 +86,10 @@ pub fn evaluate_gate_with_floor(
     if hard_pass {
         return Ok(GateDecision::HardPass);
     }
-    if let Some(floor) = declared_energy_floor {
-        if candidate_v <= floor {
-            return Ok(GateDecision::StoppedAtDeclaredFloor);
-        }
+    if let Some(floor) = declared_energy_floor
+        && candidate_v <= floor
+    {
+        return Ok(GateDecision::StoppedAtDeclaredFloor);
     }
     let delta_v = best_accepted_v - candidate_v;
     if candidate_v <= best_accepted_v - rho_gate {

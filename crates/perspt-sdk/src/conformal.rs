@@ -445,7 +445,7 @@ mod tests {
     fn mc_q_any_stratum_field_change_marks_stale() {
         let stratum = CalibrationStratum {
             domain_package: "coding".into(),
-            domain_version: "0.6.6".into(),
+            domain_version: "0.6.7".into(),
             effect_kind: "apply_patch".into(),
             risk_class: "medium".into(),
             model_route: "anthropic::claude-opus-5".into(),

@@ -2,18 +2,18 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use perspt_sdk::{CandidateStateWitness, ToolEntry};
 use tempfile::TempDir;
 
 use crate::realize::snapshot_workspace;
 use crate::toolloop::{CandidateCheckpoint, EffectExecutor, EffectOutcome};
 use crate::tools::AgentTools;
-use crate::verifier::{run_governed_verifier, VerifierExecution};
+use crate::verifier::{VerifierExecution, run_governed_verifier};
 
 pub use crate::measure::CodingCandidateMeasurer;
 
@@ -51,6 +51,10 @@ pub struct CandidateWorkspace {
     /// The open execution plane: exact-name handlers this candidate
     /// dispatches admitted calls through.
     handlers: Arc<crate::tools::handlers::CandidateHandlerRegistry>,
+    /// Interactive prompt callback backing `ask_user`.
+    interaction_handler: Arc<dyn crate::tools::handlers::InteractionHandler>,
+    /// Optional delegated subagent runner backing `spawn_agent`.
+    subagent_runner: Option<Arc<dyn crate::tools::handlers::SubagentRunner>>,
 }
 
 impl std::fmt::Debug for CandidateWorkspace {
@@ -130,6 +134,8 @@ impl CandidateWorkspace {
             allow_unisolated_verifiers,
             verifier_timeouts: crate::verifier::VerifierTimeouts::default(),
             handlers: Arc::new(crate::tools::handlers::CandidateHandlerRegistry::with_builtins()),
+            interaction_handler: Arc::new(crate::tools::handlers::NonInteractiveHandler),
+            subagent_runner: None,
         })
     }
 
@@ -140,6 +146,31 @@ impl CandidateWorkspace {
         handlers: Arc<crate::tools::handlers::CandidateHandlerRegistry>,
     ) {
         self.handlers = handlers;
+    }
+
+    /// Install an interactive callback backing `ask_user`.
+    pub fn set_interaction_handler(
+        &mut self,
+        handler: Arc<dyn crate::tools::handlers::InteractionHandler>,
+    ) {
+        self.interaction_handler = handler;
+    }
+
+    pub(crate) fn interaction_handler(
+        &self,
+    ) -> &Arc<dyn crate::tools::handlers::InteractionHandler> {
+        &self.interaction_handler
+    }
+
+    /// Install an attenuated subagent runner backing `spawn_agent`.
+    pub fn set_subagent_runner(&mut self, runner: Arc<dyn crate::tools::handlers::SubagentRunner>) {
+        self.subagent_runner = Some(runner);
+    }
+
+    pub(crate) fn subagent_runner(
+        &self,
+    ) -> Option<&Arc<dyn crate::tools::handlers::SubagentRunner>> {
+        self.subagent_runner.as_ref()
     }
 
     pub fn overlay_root(&self) -> &Path {
@@ -342,6 +373,39 @@ impl CandidateWorkspace {
             mutated.insert(validate_relative_path(rel)?);
         }
         Ok(())
+    }
+
+    /// Import accepted mutations from an isolated child worker candidate into
+    /// this parent overlay while preserving the parent's pre-images and
+    /// promotion journal.
+    pub(crate) async fn import_child_mutations(
+        &self,
+        child: &CandidateWorkspace,
+    ) -> Result<Vec<String>> {
+        let exported = child.export_accepted().await?;
+        if exported.is_empty() {
+            return Ok(Vec::new());
+        }
+        let paths: Vec<String> = exported.iter().map(|seed| seed.path.clone()).collect();
+        self.admit_external_paths(&paths)?;
+        for seed in &exported {
+            let rel = validate_relative_path(&seed.path)?;
+            reject_symlink_ancestor(&self.overlay_root, &rel)?;
+            let target = self.overlay_root.join(&rel);
+            match &seed.content {
+                Some(bytes) => {
+                    if let Some(parent) = target.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&target, bytes)?;
+                }
+                None if target.is_file() => std::fs::remove_file(&target)?,
+                None => {}
+            }
+            self.note_mutated_paths(std::slice::from_ref(&rel))?;
+            self.mutations.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(paths)
     }
 
     /// Read a path from the overlay; `None` when absent.
@@ -928,9 +992,11 @@ mod tests {
         let filtered = candidate
             .commands_for("run_test", &serde_json::json!({"filter": "my_test::case"}))
             .unwrap();
-        assert!(filtered
-            .iter()
-            .any(|(_, command, _)| command.contains("my_test::case")));
+        assert!(
+            filtered
+                .iter()
+                .any(|(_, command, _)| command.contains("my_test::case"))
+        );
 
         let injected =
             candidate.commands_for("run_test", &serde_json::json!({"filter": "x; rm -rf /"}));

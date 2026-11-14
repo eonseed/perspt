@@ -6,11 +6,11 @@
 //! chain serves every actor, not only the worker; and an infeasible
 //! context budget makes no model call at all.
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use perspt_agent::toolloop::{LoopEvent, LoopRecorder};
-use perspt_agent::turn::{transport_failure_kind, ActorKind, ActorTurnRunner};
+use perspt_agent::turn::{ActorKind, ActorTurnRunner, transport_failure_kind};
 use perspt_sdk::{
     Conversation, FailureKind, ModelFamily, ModelId, ModelTransport, ProviderCapabilities,
     ToolChoicePolicy, ToolSpec, TransportFuture, TurnOutput,

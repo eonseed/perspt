@@ -21,45 +21,43 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.6"
-edition = "2021"
-rust-version = "1.97"
+version = "0.6.7"
+edition = "2024"
+rust-version = "1.100"
 authors = ["Vikrant Rathore", "Ronak Rathore"]
 license = "LGPL-3.0-only"
 repository = "https://github.com/eonseed/perspt"
 homepage = "https://eonseed.github.io/perspt/"
 
 [workspace.dependencies]
-perspt-core = { version = "0.6.6", path = "crates/perspt-core" }
-perspt-sdk = { version = "0.6.6", path = "crates/perspt-sdk" }
-perspt-prompt-macros = { version = "0.6.6", path = "crates/perspt-prompt-macros" }
-perspt-coding = { version = "0.6.6", path = "crates/perspt-coding" }
-perspt-research = { version = "0.6.6", path = "crates/perspt-research" }
-perspt-agent = { version = "0.6.6", path = "crates/perspt-agent" }
-perspt-tui = { version = "0.6.6", path = "crates/perspt-tui" }
-perspt-policy = { version = "0.6.6", path = "crates/perspt-policy" }
-perspt-sandbox = { version = "0.6.6", path = "crates/perspt-sandbox" }
-perspt-store = { version = "0.6.6", path = "crates/perspt-store" }
-perspt-cli = { version = "0.6.6", path = "crates/perspt-cli" }
-perspt-dashboard = { version = "0.6.6", path = "crates/perspt-dashboard" }
-perspt-benchmark = { version = "0.6.6", path = "crates/perspt-benchmark" }
-perspt = { version = "0.6.6", path = "crates/perspt" }
+perspt-core = { version = "0.6.7", path = "crates/perspt-core" }
+perspt-sdk = { version = "0.6.7", path = "crates/perspt-sdk" }
+perspt-prompt-macros = { version = "0.6.7", path = "crates/perspt-prompt-macros" }
+perspt-coding = { version = "0.6.7", path = "crates/perspt-coding" }
+perspt-research = { version = "0.6.7", path = "crates/perspt-research" }
+perspt-agent = { version = "0.6.7", path = "crates/perspt-agent" }
+perspt-tui = { version = "0.6.7", path = "crates/perspt-tui" }
+perspt-policy = { version = "0.6.7", path = "crates/perspt-policy" }
+perspt-sandbox = { version = "0.6.7", path = "crates/perspt-sandbox" }
+perspt-store = { version = "0.6.7", path = "crates/perspt-store" }
+perspt-dashboard = { version = "0.6.7", path = "crates/perspt-dashboard" }
+perspt-benchmark = { version = "0.6.7", path = "crates/perspt-benchmark" }
 
 # Exact-pinned to avoid libduckdb-sys recompilation on `cargo update`.
 # Only changes when you explicitly bump the version here.
 # NOTE: `bundled` is NOT a default feature. Local development and CI link the
 # exact matching DuckDB shared library (fast). Release builds use
 # `--features bundled` for a fully self-contained binary.
-duckdb = { version = "=1.20000.0" }
+duckdb = { version = "=1.20000.2" }
 
 # Shared third-party dependencies. Keeping these here makes direct-version
 # drift visible in one review and prevents duplicate majors across crates.
 anyhow = "1.0.104"
 async-trait = "0.1.92"
 dirs = "7.0.0"
-log = "0.4.34"
+log = "0.4.35"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
-rmcp = { version = "3.8.0", default-features = false, features = [
+rmcp = { version = "3.10.0", default-features = false, features = [
     "client",
     "elicitation",
     "reqwest",
@@ -73,11 +71,11 @@ futures = "0.3.34"
 lsp-types = "0.97.0"
 shell-words = "1.1.1"
 similar = "3.2.1"
-toml = "1.1.8"
+toml = "1.2.1"
 clap = { version = "4.6.7", features = ["derive"] }
 tokio = { version = "1.54.1", features = ["full"] }
 tempfile = "3.27.0"
 rustix = { version = "1.1.6", features = ["fs"] }
-uuid = { version = "1.29.0", features = ["v4"] }
+uuid = { version = "1.29.2", features = ["v4"] }
 url = "2.5.8"
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

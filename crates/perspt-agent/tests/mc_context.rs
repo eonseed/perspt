@@ -11,8 +11,8 @@
 use std::collections::BTreeMap;
 
 use perspt_sdk::prompt::{
-    assemble_resident, mandatory_closure, select_working_set, ContextBudget, ContextPage,
-    DependencyEnv, ResidentOutcome, StateDependency,
+    ContextBudget, ContextPage, DependencyEnv, ResidentOutcome, StateDependency, assemble_resident,
+    mandatory_closure, select_working_set,
 };
 
 fn page(id: &str, tokens: u64, labels: &[&str], dependency: StateDependency) -> ContextPage {

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::canon::CanonicalEncoder;
 use crate::error::{Result, SdkError};
 
-use super::section::{PromptSectionId, PromptSectionVersion, PROMPT_DIGEST_TAG};
+use super::section::{PROMPT_DIGEST_TAG, PromptSectionId, PromptSectionVersion};
 
 /// Gate AE lifecycle state of an override.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,9 +250,11 @@ mod tests {
     fn a_passing_record_activates_and_is_content_addressed() {
         let record = record();
         let bounds = ActivationBounds::default();
-        assert!(record
-            .permits_activation("sha256:override", &bounds)
-            .is_ok());
+        assert!(
+            record
+                .permits_activation("sha256:override", &bounds)
+                .is_ok()
+        );
         assert_eq!(record.digest(), record.digest());
     }
 
@@ -260,9 +262,11 @@ mod tests {
     fn each_activation_condition_is_independently_falsifiable() {
         let bounds = ActivationBounds::default();
         // Digest binding.
-        assert!(record()
-            .permits_activation("sha256:other", &bounds)
-            .is_err());
+        assert!(
+            record()
+                .permits_activation("sha256:other", &bounds)
+                .is_err()
+        );
         // Sample floor.
         let mut r = record();
         r.paired_tasks = 29;
@@ -293,23 +297,29 @@ mod tests {
 
     #[test]
     fn configured_bounds_are_floor_and_range_checked() {
-        assert!(ActivationBounds {
-            min_tasks: 29,
-            noninferiority_margin: 0.05
-        }
-        .validate()
-        .is_err());
-        assert!(ActivationBounds {
-            min_tasks: 30,
-            noninferiority_margin: 0.06
-        }
-        .validate()
-        .is_err());
-        assert!(ActivationBounds {
-            min_tasks: 50,
-            noninferiority_margin: 0.0
-        }
-        .validate()
-        .is_ok());
+        assert!(
+            ActivationBounds {
+                min_tasks: 29,
+                noninferiority_margin: 0.05
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ActivationBounds {
+                min_tasks: 30,
+                noninferiority_margin: 0.06
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            ActivationBounds {
+                min_tasks: 50,
+                noninferiority_margin: 0.0
+            }
+            .validate()
+            .is_ok()
+        );
     }
 }

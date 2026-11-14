@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod events;
+pub mod llm_client;
 pub mod llm_provider;
 pub mod local_command;
 pub mod memory;
@@ -20,14 +21,15 @@ pub use config::{
     PromptsConfig, ProviderEntry, TestPolicy,
 };
 pub use events::{ActionType, AgentAction, AgentEvent, NodeStatus};
+pub use llm_client::ProviderClientOptions;
 pub use llm_provider::{
-    detect_provider_from_env, GenAIProvider, LlmResponse, ResolvedProvider, EOT_SIGNAL,
+    EOT_SIGNAL, GenAIProvider, LlmResponse, ResolvedProvider, detect_provider_from_env,
 };
 pub use memory::ProjectMemory;
 pub use plugin::{
     InitOptions, JsPlugin, LanguagePlugin, LspConfig, PluginRegistry, PythonPlugin, RustPlugin,
 };
-pub use portfolio::{declared_caps, ModelPortfolio, ProviderCaps, ProviderHandle};
+pub use portfolio::{ModelPortfolio, ProviderCaps, ProviderHandle, declared_caps};
 pub use tools_driver::{
     CoreMessage, CoreToolCall, CoreToolChoice, CoreToolSpec, CoreTurnOutput, CoreTurnStreamEvent,
 };

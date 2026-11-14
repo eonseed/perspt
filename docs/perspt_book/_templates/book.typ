@@ -118,7 +118,7 @@
         columns: (1fr, auto),
         align: horizon,
         text(font: sans, size: 10pt, weight: "bold", fill: obsidian, author),
-        text(font: mono, size: 7.5pt, tracking: .1em, fill: quiet)[EDITION #version · HÓZHÓ],
+        text(font: mono, size: 7.5pt, tracking: .1em, fill: quiet)[EDITION #version · OMNI],
       )
     ]
   ]

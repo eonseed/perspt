@@ -239,11 +239,12 @@ impl CandidateToolHandler for DbList {
         let mut files = Vec::new();
         for entry in ignore::WalkBuilder::new(&root).build().flatten() {
             let path = entry.path();
-            if path.is_file() && is_data_file(path) {
-                if let Ok(relative) = path.strip_prefix(&root) {
-                    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                    files.push(format!("{} ({size} bytes)", relative.display()));
-                }
+            if path.is_file()
+                && is_data_file(path)
+                && let Ok(relative) = path.strip_prefix(&root)
+            {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                files.push(format!("{} ({size} bytes)", relative.display()));
             }
         }
         files.sort();

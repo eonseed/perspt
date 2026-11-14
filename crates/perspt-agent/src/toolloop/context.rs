@@ -18,7 +18,7 @@ use perspt_sdk::{
     Message, ProviderToolCall,
 };
 
-use super::{emit, EventLog, LoopEvent, LoopRecorder};
+use super::{EventLog, LoopEvent, LoopRecorder, emit};
 
 /// The loop's sole owner of model context and deferred tool activation.
 pub(crate) struct LoopContext {

@@ -590,9 +590,11 @@ mod tests {
         store
             .record_external_effect_intent("s1", "promote:n1", "h1", "{\"a\":1}")
             .unwrap();
-        assert!(store
-            .record_external_effect_intent("s1", "promote:n1", "h2", "{\"a\":2}")
-            .is_err());
+        assert!(
+            store
+                .record_external_effect_intent("s1", "promote:n1", "h2", "{\"a\":2}")
+                .is_err()
+        );
         store
             .complete_external_effect("s1", "promote:n1", "{\"ok\":true}")
             .unwrap();
@@ -710,12 +712,14 @@ mod tests {
 
         store.revoke_authority("s1").unwrap();
         ran.store(false, std::sync::atomic::Ordering::SeqCst);
-        assert!(store
-            .with_authority_epoch("s1", 3, || {
-                ran.store(true, std::sync::atomic::Ordering::SeqCst);
-                Ok(())
-            })
-            .is_err());
+        assert!(
+            store
+                .with_authority_epoch("s1", 3, || {
+                    ran.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                })
+                .is_err()
+        );
         assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
     }
 }

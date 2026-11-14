@@ -2,8 +2,8 @@
 //! `OUT_DIR` and is included by the owning crate; it is never committed and
 //! never hand-edited.
 
-use crate::frontmatter::ParsedVar;
 use crate::CompiledSection;
+use crate::frontmatter::ParsedVar;
 
 /// PascalCase struct name for a section name like `tool_protocol`.
 pub fn struct_name(section_name: &str) -> String {

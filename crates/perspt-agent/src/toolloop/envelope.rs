@@ -7,7 +7,7 @@
 //! resume closed (a forensic display may still show raw bytes).
 
 use anyhow::Result;
-use perspt_sdk::ledger::{tool_loop_body, ToolLoopBody};
+use perspt_sdk::ledger::{ToolLoopBody, tool_loop_body};
 
 use super::contract::{LoopEvent, LoopEventEnvelopeV1};
 

@@ -44,24 +44,28 @@ fn energy_equation_is_weighted_sum_of_squares() {
 
 #[test]
 fn negative_or_nonfinite_residuals_are_rejected() {
-    assert!(ResidualEvent::new(
-        "n",
-        0,
-        ResidualClass::Type,
-        ResidualSeverity::Error,
-        -1.0,
-        SensorRef::new("c", IndependenceRoute::Compiler)
-    )
-    .is_err());
-    assert!(ResidualEvent::new(
-        "n",
-        0,
-        ResidualClass::Type,
-        ResidualSeverity::Error,
-        f64::INFINITY,
-        SensorRef::new("c", IndependenceRoute::Compiler)
-    )
-    .is_err());
+    assert!(
+        ResidualEvent::new(
+            "n",
+            0,
+            ResidualClass::Type,
+            ResidualSeverity::Error,
+            -1.0,
+            SensorRef::new("c", IndependenceRoute::Compiler)
+        )
+        .is_err()
+    );
+    assert!(
+        ResidualEvent::new(
+            "n",
+            0,
+            ResidualClass::Type,
+            ResidualSeverity::Error,
+            f64::INFINITY,
+            SensorRef::new("c", IndependenceRoute::Compiler)
+        )
+        .is_err()
+    );
 }
 
 // --- Acceptance gate + finite-decision bound + residual certificate ----------
@@ -171,10 +175,12 @@ fn static_graph_snapshot_bug_is_fixed() {
     .unwrap();
     let sched = Scheduler::new(4);
     let fp = |n: &WorkNode| Footprint::new().write(Resource::File(format!("{}.rs", n.node_id)));
-    assert!(sched
-        .ready_nodes(&rev2, fp)
-        .iter()
-        .any(|n| n.node_id == "b"));
+    assert!(
+        sched
+            .ready_nodes(&rev2, fp)
+            .iter()
+            .any(|n| n.node_id == "b")
+    );
 }
 
 #[test]
@@ -216,9 +222,11 @@ fn replay_reconstructs_accepted_trajectory_and_refuses_unrecorded() {
         proposal_id: "p".into(),
         idempotency_key: "k".into(),
     };
-    assert!(ledger
-        .commit_transition(commit.clone(), &["unrecorded".into()])
-        .is_err());
+    assert!(
+        ledger
+            .commit_transition(commit.clone(), &["unrecorded".into()])
+            .is_err()
+    );
     let handle = ledger.record_observation(b"data").unwrap();
     assert!(ledger.commit_transition(commit, &[handle]).is_ok());
 }

@@ -8,7 +8,7 @@ Quick Start
 1. Install the CLI
 ------------------
 
-From the repository root, Rust 1.97.1 or later can build and install the CLI:
+From the repository root, Rust 1.100 or later can build and install the CLI:
 
 .. code-block:: bash
 

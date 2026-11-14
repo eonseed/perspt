@@ -13,9 +13,10 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::config::{Config, ProviderEntry};
+use crate::llm_client::ProviderClientOptions;
 use crate::llm_provider::GenAIProvider;
 
 /// Core-native mirror of the SDK capability record.
@@ -101,36 +102,24 @@ impl ModelPortfolio {
     /// Build one handle from one `[providers.<id>]` entry.
     fn build_handle(id: &str, entry: &ProviderEntry, config: &Config) -> Result<ProviderHandle> {
         let adapter = entry.adapter_or(id).to_string();
-
-        // Resolve the credential without storing it: the env var the genai
-        // adapter reads is set process-wide, exactly as single-provider mode
-        // already does.
         let api_key = match &entry.api_key_env {
             Some(var) => std::env::var(var).ok(),
             None => entry.api_key.clone(),
         };
-
-        if let Some(base_url) = entry.base_url.as_deref() {
-            if let Some(env_var) = crate::llm_provider::provider_base_url_env_var(&adapter) {
-                if std::env::var(env_var).is_err() {
-                    std::env::set_var(env_var, base_url);
-                }
-            }
-        }
-        if adapter.eq_ignore_ascii_case("vertex") {
-            // Reuse the existing ADC resolver; entry fields override.
-            let vertex_config = Config {
-                vertex_project_id: entry
-                    .project_id
-                    .clone()
-                    .or(config.vertex_project_id.clone()),
-                vertex_location: entry.location.clone().or(config.vertex_location.clone()),
-                ..Config::default()
-            };
-            crate::llm_provider::configure_vertex_environment(&vertex_config);
-        }
-
-        let provider = GenAIProvider::new_with_config(Some(&adapter), api_key.as_deref())?;
+        let options = ProviderClientOptions {
+            api_key,
+            base_url: entry.base_url.clone(),
+            vertex_project_id: entry
+                .project_id
+                .clone()
+                .or_else(|| config.vertex_project_id.clone()),
+            vertex_location: entry
+                .location
+                .clone()
+                .or_else(|| config.vertex_location.clone()),
+            vertex_api_version: None,
+        };
+        let provider = GenAIProvider::new_with_options(Some(&adapter), &options)?;
         Ok(ProviderHandle {
             id: id.to_string(),
             caps: declared_caps(&adapter),
@@ -275,5 +264,44 @@ mod tests {
             assert!(!declared_caps(adapter).probed, "{adapter}");
             assert!(declared_caps(adapter).tool_calling, "{adapter}");
         }
+    }
+
+    #[tokio::test]
+    async fn portfolio_isolates_multiple_openai_compatible_entries() {
+        let config = table_config(
+            r#"
+            [providers.vllm]
+            adapter  = "openai"
+            api_key  = "k-vllm"
+            base_url = "https://vllm.local/v1"
+
+            [providers.openrouter]
+            adapter  = "openai"
+            api_key  = "k-openrouter"
+            base_url = "https://openrouter.example/api/v1"
+            "#,
+        );
+        let portfolio = ModelPortfolio::from_config(&config).unwrap();
+        let vllm_target = portfolio
+            .resolve("vllm")
+            .unwrap()
+            .provider
+            .client()
+            .resolve_service_target("qwen")
+            .await
+            .unwrap();
+        let or_target = portfolio
+            .resolve("openrouter")
+            .unwrap()
+            .provider
+            .client()
+            .resolve_service_target("qwen")
+            .await
+            .unwrap();
+        assert_eq!(vllm_target.endpoint.base_url(), "https://vllm.local/v1/");
+        assert_eq!(
+            or_target.endpoint.base_url(),
+            "https://openrouter.example/api/v1/"
+        );
     }
 }

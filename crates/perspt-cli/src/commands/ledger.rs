@@ -78,10 +78,10 @@ fn show_stats(store: &perspt_store::SessionStore) -> Result<()> {
     println!("  Sessions:              {}", sessions.len());
     println!("  PSP-9 ledger sessions: {psp9_sessions}");
     println!("  PSP-9 ledger events:   {total_events}");
-    if let Ok(path) = perspt_store::SessionStore::default_db_path() {
-        if let Ok(metadata) = std::fs::metadata(&path) {
-            println!("  Database size:         {} KiB", metadata.len() / 1024);
-        }
+    if let Ok(path) = perspt_store::SessionStore::default_db_path()
+        && let Ok(metadata) = std::fs::metadata(&path)
+    {
+        println!("  Database size:         {} KiB", metadata.len() / 1024);
     }
     Ok(())
 }

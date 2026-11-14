@@ -186,16 +186,17 @@ fn parse_workspace_members(content: &str) -> Vec<String> {
             in_workspace = line == "[workspace]";
             continue;
         }
-        if in_workspace && line.starts_with("members") {
-            if let Some((_, value)) = line.split_once('=') {
-                let raw = value.trim();
-                if raw.starts_with('[') {
-                    let inner = raw.trim_start_matches('[').trim_end_matches(']');
-                    for item in inner.split(',') {
-                        let member = item.trim().trim_matches('"').trim_matches('\'');
-                        if !member.is_empty() {
-                            members.push(member.to_string());
-                        }
+        if in_workspace
+            && line.starts_with("members")
+            && let Some((_, value)) = line.split_once('=')
+        {
+            let raw = value.trim();
+            if raw.starts_with('[') {
+                let inner = raw.trim_start_matches('[').trim_end_matches(']');
+                for item in inner.split(',') {
+                    let member = item.trim().trim_matches('"').trim_matches('\'');
+                    if !member.is_empty() {
+                        members.push(member.to_string());
                     }
                 }
             }
@@ -246,19 +247,19 @@ fn seed_python_sandbox(working_dir: &Path, sandbox_dir: &Path) {
     // Copy the src/<pkg>/ directory tree so imports resolve.  We walk one
     // level under src/ looking for Python packages (__init__.py present).
     let workspace_src = working_dir.join("src");
-    if workspace_src.is_dir() {
-        if let Ok(entries) = fs::read_dir(&workspace_src) {
-            for entry in entries.flatten() {
-                let pkg_dir = entry.path();
-                if pkg_dir.is_dir() && pkg_dir.join("__init__.py").exists() {
-                    // Recursively copy all .py files from this package
-                    if let Err(e) = copy_dir_to_sandbox(working_dir, sandbox_dir, &pkg_dir) {
-                        log::debug!(
-                            "Could not seed src/{} into sandbox: {}",
-                            entry.file_name().to_string_lossy(),
-                            e
-                        );
-                    }
+    if workspace_src.is_dir()
+        && let Ok(entries) = fs::read_dir(&workspace_src)
+    {
+        for entry in entries.flatten() {
+            let pkg_dir = entry.path();
+            if pkg_dir.is_dir() && pkg_dir.join("__init__.py").exists() {
+                // Recursively copy all .py files from this package
+                if let Err(e) = copy_dir_to_sandbox(working_dir, sandbox_dir, &pkg_dir) {
+                    log::debug!(
+                        "Could not seed src/{} into sandbox: {}",
+                        entry.file_name().to_string_lossy(),
+                        e
+                    );
                 }
             }
         }
@@ -295,11 +296,11 @@ fn copy_dir_to_sandbox(
                 continue;
             }
             copy_dir_to_sandbox(working_dir, sandbox_dir, &path)?;
-        } else if !name_str.ends_with(".pyc") {
-            if let Ok(rel) = path.strip_prefix(working_dir) {
-                let rel_str = rel.to_string_lossy().to_string();
-                copy_to_sandbox(working_dir, sandbox_dir, &rel_str)?;
-            }
+        } else if !name_str.ends_with(".pyc")
+            && let Ok(rel) = path.strip_prefix(working_dir)
+        {
+            let rel_str = rel.to_string_lossy().to_string();
+            copy_to_sandbox(working_dir, sandbox_dir, &rel_str)?;
         }
     }
     Ok(())

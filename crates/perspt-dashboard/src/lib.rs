@@ -12,9 +12,9 @@ pub mod sse;
 pub mod state;
 pub mod views;
 
+use axum::Router;
 use axum::middleware;
 use axum::routing::{get, post};
-use axum::Router;
 use tower_http::services::ServeDir;
 
 use state::AppState;

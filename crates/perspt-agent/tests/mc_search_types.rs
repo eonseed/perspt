@@ -77,15 +77,17 @@ fn budget_reservations_are_monotone_and_closure_is_terminal() {
         .unwrap();
     // A second fork over the cumulative workspace cap is refused whole.
     let before = usage.clone();
-    assert!(usage
-        .reserve(
-            &limits(),
-            ReservationRequest {
-                workspace_files: 30,
-                ..Default::default()
-            },
-        )
-        .is_err());
+    assert!(
+        usage
+            .reserve(
+                &limits(),
+                ReservationRequest {
+                    workspace_files: 30,
+                    ..Default::default()
+                },
+            )
+            .is_err()
+    );
     assert_eq!(usage, before);
     // Releasing returns only the unused part; the action unit stays.
     usage.release_unused(
@@ -100,9 +102,11 @@ fn budget_reservations_are_monotone_and_closure_is_terminal() {
     assert_eq!(usage.workspace_bytes, 8_000);
     assert_eq!(usage.actions, 1);
     usage.close();
-    assert!(usage
-        .reserve(&limits(), ReservationRequest::default())
-        .is_err());
+    assert!(
+        usage
+            .reserve(&limits(), ReservationRequest::default())
+            .is_err()
+    );
 }
 
 /// Witness chains: a root branch is trivially witnessed; a child inherits

@@ -25,7 +25,7 @@ use anyhow::{Context, Result};
 use proc_macro2::{Span, TokenStream, TokenTree};
 use syn::visit::{self, Visit};
 
-use crate::rules::{RuleId, Violation, FUNCTION_LINE_LIMIT};
+use crate::rules::{FUNCTION_LINE_LIMIT, RuleId, Violation};
 use crate::scan::SourceFile;
 
 /// One function's name and the line range it occupies, inclusive.

@@ -182,17 +182,16 @@ impl ChatApp {
                 }
                 MessageRole::Assistant => {
                     writeln!(file, "## Assistant\n")?;
-                    if self.show_reasoning {
-                        if let Some(ref thought) = msg.reasoning {
-                            if !thought.is_empty() {
-                                writeln!(file, "> [!NOTE]")?;
-                                writeln!(file, "> **Thought Process**")?;
-                                for line in thought.lines() {
-                                    writeln!(file, "> {}", line)?;
-                                }
-                                writeln!(file, "\n")?;
-                            }
+                    if self.show_reasoning
+                        && let Some(ref thought) = msg.reasoning
+                        && !thought.is_empty()
+                    {
+                        writeln!(file, "> [!NOTE]")?;
+                        writeln!(file, "> **Thought Process**")?;
+                        for line in thought.lines() {
+                            writeln!(file, "> {}", line)?;
                         }
+                        writeln!(file, "\n")?;
                     }
                     writeln!(file, "{}\n", msg.content)?;
                 }

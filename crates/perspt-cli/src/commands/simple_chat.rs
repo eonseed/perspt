@@ -4,9 +4,9 @@
 //! without the TUI overlay. Designed for scripting, piping, and accessibility.
 
 use anyhow::{Context, Result};
-use perspt_core::{Config, GenAIProvider, EOT_SIGNAL};
-use rustyline::error::ReadlineError;
+use perspt_core::{Config, EOT_SIGNAL, GenAIProvider};
 use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,13 +96,11 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
     // Setup rustyline for terminal editing
     let is_terminal = std::io::stdin().is_terminal();
     let mut rl = DefaultEditor::new()?;
-    if is_terminal {
-        if let Some(history_path) = perspt_core::paths::history_file() {
-            if let Some(parent) = history_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = rl.load_history(&history_path);
+    if is_terminal && let Some(history_path) = perspt_core::paths::history_file() {
+        if let Some(parent) = history_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
         }
+        let _ = rl.load_history(&history_path);
     }
 
     // Keep conversation history
@@ -299,10 +297,8 @@ pub async fn run(args: SimpleChatArgs) -> Result<()> {
         }
     }
 
-    if is_terminal {
-        if let Some(history_path) = perspt_core::paths::history_file() {
-            let _ = rl.save_history(&history_path);
-        }
+    if is_terminal && let Some(history_path) = perspt_core::paths::history_file() {
+        let _ = rl.save_history(&history_path);
     }
 
     println!("Goodbye!");

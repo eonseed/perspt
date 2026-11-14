@@ -3,8 +3,8 @@
 //! the latest one is the active graph.
 
 use super::psp9::{
-    class_label, edge_kind_label, reason_label, short, state_label, truncate_chars,
-    LedgerProjection,
+    LedgerProjection, class_label, edge_kind_label, reason_label, short, state_label,
+    truncate_chars,
 };
 
 /// One graph revision in the session lineage.

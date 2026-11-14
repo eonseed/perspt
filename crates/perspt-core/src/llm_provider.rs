@@ -5,20 +5,18 @@
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
-use genai::resolver::{AuthData, AuthResolver, Endpoint, ProviderConfig, ServiceTargetResolver};
 use genai::Client;
-use genai::ModelIden;
-use genai::ServiceTarget;
-use std::future::Future;
-use std::path::PathBuf;
-use std::pin::Pin;
+use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
+use genai::resolver::{Endpoint, ProviderConfig};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use crate::config::Config;
+use crate::llm_client::{
+    ProviderClientOptions, build_client_for_provider, normalize_base_url,
+    provider_base_url_from_env, str_to_adapter_kind, vertex_project_from_env,
+};
 
 /// End of transmission signal
 pub const EOT_SIGNAL: &str = "<|EOT|>";
@@ -85,6 +83,8 @@ struct SharedState {
 pub struct GenAIProvider {
     /// The underlying genai client
     client: Arc<Client>,
+    /// Resolved custom base URL for this client, if explicitly configured.
+    base_url: Option<String>,
     /// Shared state for rate limiting and metrics
     shared: Arc<RwLock<SharedState>>,
 }
@@ -98,47 +98,44 @@ impl GenAIProvider {
     /// Creates a new GenAI provider with automatic configuration.
     pub fn new() -> Result<Self> {
         let client = Client::new()?;
-        Ok(Self::from_client(client))
+        Ok(Self::from_client(client, None))
+    }
+
+    /// Creates a new GenAI provider with explicit per-client credentials and endpoints.
+    ///
+    /// Unlike [`Self::new_with_config`], this keeps credentials and endpoint overrides
+    /// scoped to this client instance without touching process environment variables.
+    pub fn new_with_options(
+        provider_type: Option<&str>,
+        options: &ProviderClientOptions,
+    ) -> Result<Self> {
+        let client = build_client_for_provider(provider_type, options)?;
+        let base_url = options
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(normalize_base_url)
+            .or_else(|| {
+                provider_type
+                    .and_then(provider_base_url_from_env)
+                    .map(|u| normalize_base_url(&u))
+            });
+        Ok(Self::from_client(client, base_url))
     }
 
     /// Creates a new GenAI provider with explicit configuration.
     pub fn new_with_config(provider_type: Option<&str>, api_key: Option<&str>) -> Result<Self> {
-        let adapter_kind = provider_type.and_then(|provider| match str_to_adapter_kind(provider) {
-            Ok(adapter_kind) => Some(adapter_kind),
-            Err(_) => {
-                log::warn!("Unknown provider type for genai client: {provider}");
-                None
-            }
-        });
-
-        // Set environment variable if API key is provided
-        if let (Some(provider), Some(key)) = (provider_type, api_key) {
-            if let Some(env_var) = provider_api_key_env_var(provider) {
-                log::info!("Setting {env_var} environment variable for genai client");
-                std::env::set_var(env_var, key);
-            } else if provider.eq_ignore_ascii_case("ollama") {
-                log::info!("Ollama provider detected - no API key required for local setup");
-            } else {
-                log::warn!("Unknown provider type for API key: {provider}");
-            }
+        if let Some(provider) = provider_type
+            && provider.eq_ignore_ascii_case("ollama")
+        {
+            log::info!("Ollama provider detected - no API key required for local setup");
         }
-
-        let is_vertex = provider_type
-            .map(|p| p.eq_ignore_ascii_case("vertex"))
-            .unwrap_or(false);
-
-        let client = if is_vertex {
-            // Vertex AI authenticates with an OAuth2 Bearer token from ADC; no
-            // static API key is required when ADC is configured.
-            build_vertex_client()?
-        } else {
-            match adapter_kind {
-                Some(adapter_kind) => build_bound_client(adapter_kind, provider_type)?,
-                None => Client::new()?,
-            }
+        let options = ProviderClientOptions {
+            api_key: api_key.map(str::to_string),
+            ..Default::default()
         };
-
-        Ok(Self::from_client(client))
+        Self::new_with_options(provider_type, &options)
     }
 
     /// Build a provider from a `Config`, merging in environment detection and an
@@ -148,7 +145,7 @@ impl GenAIProvider {
     ///   - provider: `config.provider` > environment detection
     ///   - model:    `cli_model` > `config.model` > provider default
     ///   - api_key:  `config.api_key` > ambient environment
-    ///   - base_url: `config.base_url` > ambient environment
+    ///   - base_url: ambient environment > `config.base_url`
     ///
     /// The returned client is bound to the resolved adapter, so custom/local
     /// OpenAI-compatible model names (e.g. `phi-4-npu-ov`) route correctly while
@@ -176,27 +173,22 @@ impl GenAIProvider {
             .or_else(|| provider_from_model_namespace(&model).map(str::to_string))
             .unwrap_or_else(|| env_provider.to_string());
 
-        // Propagate a configured base URL into the env var that build_bound_client
-        // reads, without clobbering an explicit ambient override.
-        if let Some(base_url) = config.base_url.as_deref() {
-            if let Some(env_var) = provider_base_url_env_var(&provider) {
-                if std::env::var(env_var).is_err() {
-                    std::env::set_var(env_var, base_url);
-                }
-            }
-        }
-
-        if provider.eq_ignore_ascii_case("vertex") {
-            configure_vertex_environment(config);
-        }
-
-        let provider_obj = Self::new_with_config(Some(&provider), config.api_key.as_deref())?;
+        let base_url = provider_base_url_from_env(&provider).or_else(|| config.base_url.clone());
+        let options = ProviderClientOptions {
+            api_key: config.api_key.clone(),
+            base_url,
+            vertex_project_id: config.vertex_project_id.clone(),
+            vertex_location: config.vertex_location.clone(),
+            vertex_api_version: None,
+        };
+        let provider_obj = Self::new_with_options(Some(&provider), &options)?;
         Ok((provider_obj, ResolvedProvider { provider, model }))
     }
 
-    fn from_client(client: Client) -> Self {
+    fn from_client(client: Client, base_url: Option<String>) -> Self {
         Self {
             client: Arc::new(client),
+            base_url,
             shared: Arc::new(RwLock::new(SharedState::default())),
         }
     }
@@ -226,7 +218,10 @@ impl GenAIProvider {
     /// Retrieves all available models for a specific provider.
     pub async fn get_available_models(&self, provider: &str) -> Result<Vec<String>> {
         let adapter_kind = str_to_adapter_kind(provider)?;
-        let provider_config = provider_base_url_from_env(provider)
+        let provider_config = self
+            .base_url
+            .clone()
+            .or_else(|| provider_base_url_from_env(provider))
             .map(|base_url| {
                 ProviderConfig::from_endpoint(Endpoint::from_owned(normalize_base_url(&base_url)))
             })
@@ -421,8 +416,10 @@ impl GenAIProvider {
                     }
                 }
                 Ok(ChatStreamEvent::End(_)) => {
-                    log::info!(">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, \
-                        {total_content_length} chars, {elapsed:?} elapsed");
+                    log::info!(
+                        ">>> STREAM ENDED EXPLICITLY for model: {model} after {chunk_count} chunks, \
+                        {total_content_length} chars, {elapsed:?} elapsed"
+                    );
                     stream_ended_explicitly = true;
                     break;
                 }
@@ -514,87 +511,17 @@ impl GenAIProvider {
             return Ok(model.to_string());
         }
 
-        if let Some(provider) = provider_type {
-            if let Ok(models) = self.get_available_models(provider).await {
-                if !models.is_empty() {
-                    log::info!("Model {} not available, using {} instead", model, models[0]);
-                    return Ok(models[0].clone());
-                }
-            }
+        if let Some(provider) = provider_type
+            && let Ok(models) = self.get_available_models(provider).await
+            && !models.is_empty()
+        {
+            log::info!("Model {} not available, using {} instead", model, models[0]);
+            return Ok(models[0].clone());
         }
 
         log::warn!("Could not validate model {model}, proceeding anyway");
         Ok(model.to_string())
     }
-}
-
-/// Build a genai client for Google Vertex AI authenticated via Application
-/// Default Credentials (ADC).
-///
-/// genai's Vertex adapter reads `VERTEX_PROJECT_ID` (required) and
-/// `VERTEX_LOCATION` to construct the request
-/// URL, and expects an OAuth2 Bearer token from an [`AuthResolver`]. This
-/// resolver fetches that token from ADC (gcloud login, a service account, or the
-/// metadata server) on each request, so no static API key is needed. If a
-/// `VERTEX_API_KEY` bearer token is explicitly set, it is used as an override.
-fn build_vertex_client() -> Result<Client> {
-    let resolver = AuthResolver::from_resolver_async_fn(
-        |_model: ModelIden| -> Pin<
-            Box<dyn Future<Output = genai::resolver::Result<Option<AuthData>>> + Send>,
-        > {
-            Box::pin(async move {
-                // Explicit bearer-token override wins when present.
-                if let Ok(token) = std::env::var("VERTEX_API_KEY") {
-                    if !token.trim().is_empty() {
-                        return Ok(Some(AuthData::from_single(token)));
-                    }
-                }
-                // Otherwise resolve an access token from ADC.
-                let provider = gcp_auth::provider().await.map_err(|e| {
-                    genai::resolver::Error::Custom(format!(
-                        "Vertex ADC provider init failed (run `gcloud auth application-default login`): {e}"
-                    ))
-                })?;
-                let scopes = ["https://www.googleapis.com/auth/cloud-platform"];
-                let token = provider.token(&scopes).await.map_err(|e| {
-                    genai::resolver::Error::Custom(format!("Vertex ADC token fetch failed: {e}"))
-                })?;
-                Ok(Some(AuthData::from_single(token.as_str())))
-            })
-        },
-    );
-
-    let mut builder = Client::builder()
-        .with_adapter_kind(AdapterKind::Vertex)
-        .with_auth_resolver(resolver);
-
-    if let Some(endpoint) = resolved_vertex_endpoint() {
-        builder = builder.with_service_target_resolver_fn(move |mut target: ServiceTarget| {
-            target.endpoint = Endpoint::from_owned(endpoint.clone());
-            Ok(target)
-        });
-    }
-
-    Ok(builder.build()?)
-}
-
-fn build_bound_client(adapter_kind: AdapterKind, provider_type: Option<&str>) -> Result<Client> {
-    let mut builder = Client::builder().with_adapter_kind(adapter_kind);
-
-    if let Some(base_url) = provider_type.and_then(provider_base_url_from_env) {
-        let endpoint = normalize_base_url(&base_url);
-        let target_resolver = ServiceTargetResolver::from_resolver_fn(
-            move |mut service_target: ServiceTarget| -> genai::resolver::Result<ServiceTarget> {
-                if service_target.model.adapter_kind == adapter_kind {
-                    service_target.endpoint = Endpoint::from_owned(endpoint.clone());
-                }
-                Ok(service_target)
-            },
-        );
-        builder = builder.with_service_target_resolver(target_resolver);
-    }
-
-    Ok(builder.build()?)
 }
 
 fn provider_from_model_namespace(model: &str) -> Option<&'static str> {
@@ -613,247 +540,14 @@ fn provider_from_model_namespace(model: &str) -> Option<&'static str> {
     })
 }
 
-pub(crate) fn configure_vertex_environment(config: &Config) {
-    if std::env::var("VERTEX_PROJECT_ID").is_err() {
-        if let Some(project) = config
-            .vertex_project_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(str::to_string)
-            .or_else(vertex_project_from_env)
-            .or_else(read_gcloud_project)
-        {
-            // Only propagate a syntactically valid project into the process env;
-            // genai reads VERTEX_PROJECT_ID to build the request URL, so an
-            // invalid value should not be planted there from config discovery.
-            match valid_vertex_segment(&project) {
-                Some(valid) => std::env::set_var("VERTEX_PROJECT_ID", valid),
-                None => log::warn!(
-                    "Ignoring discovered Vertex project ID (must contain only ASCII letters, \
-                     digits, and hyphens)"
-                ),
-            }
-        }
-    }
-
-    if std::env::var("VERTEX_LOCATION").is_err() {
-        if let Some(location) = config
-            .vertex_location
-            .as_deref()
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
-            // The location is interpolated into the endpoint host, so never
-            // plant an invalid value into the env from a config file.
-            match valid_vertex_segment(location) {
-                Some(valid) => std::env::set_var("VERTEX_LOCATION", valid),
-                None => log::warn!(
-                    "Ignoring invalid vertex_location from config (must contain only ASCII \
-                     letters, digits, and hyphens)"
-                ),
-            }
-        }
-    }
-}
-
-fn vertex_project_from_env() -> Option<String> {
-    [
-        "VERTEX_PROJECT_ID",
-        "GOOGLE_CLOUD_PROJECT",
-        "GCLOUD_PROJECT",
-        "CLOUDSDK_CORE_PROJECT",
-    ]
-    .into_iter()
-    .filter_map(|key| std::env::var(key).ok())
-    .map(|value| value.trim().to_string())
-    .find(|value| !value.is_empty())
-}
-
-fn gcloud_config_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("CLOUDSDK_CONFIG") {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed));
-        }
-    }
-    dirs::home_dir().map(|home| home.join(".config").join("gcloud"))
-}
-
-fn read_gcloud_project() -> Option<String> {
-    let config_dir = gcloud_config_dir()?;
-    let active_config = std::fs::read_to_string(config_dir.join("active_config"))
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "default".to_string());
-    let config_path = config_dir
-        .join("configurations")
-        .join(format!("config_{active_config}"));
-    let content = std::fs::read_to_string(config_path).ok()?;
-    parse_gcloud_project(&content)
-}
-
-fn parse_gcloud_project(content: &str) -> Option<String> {
-    let mut in_core = false;
-    for raw in content.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') && line.ends_with(']') {
-            in_core = line.eq_ignore_ascii_case("[core]");
-            continue;
-        }
-        if !in_core {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        if key.trim() == "project" {
-            let project = value.trim();
-            if !project.is_empty() {
-                return Some(project.to_string());
-            }
-        }
-    }
-    None
-}
-
-/// Validate a Vertex project/location segment before it is interpolated into the
-/// request endpoint URL.
-///
-/// GCP project IDs and Vertex locations are limited to ASCII letters, digits,
-/// and hyphens. Rejecting anything else prevents a crafted value (e.g. one
-/// containing `/`, `.`, `:`, or `@`) from altering the endpoint *host* — the
-/// location is interpolated into `{location}-aiplatform.googleapis.com`, so an
-/// unvalidated value could otherwise redirect the OAuth bearer token to an
-/// attacker-controlled host. Returns the trimmed value when valid.
-fn valid_vertex_segment(value: &str) -> Option<&str> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-')
-        .then_some(trimmed)
-}
-
-fn resolved_vertex_endpoint() -> Option<String> {
-    let project_raw = std::env::var("VERTEX_PROJECT_ID").ok()?;
-    let project = match valid_vertex_segment(&project_raw) {
-        Some(p) => p.to_string(),
-        None => {
-            log::warn!(
-                "Ignoring VERTEX_PROJECT_ID for endpoint construction: must be non-empty and \
-                 contain only ASCII letters, digits, and hyphens"
-            );
-            return None;
-        }
-    };
-    let location = match std::env::var("VERTEX_LOCATION") {
-        Ok(raw) if !raw.trim().is_empty() => match valid_vertex_segment(&raw) {
-            Some(l) => l.to_string(),
-            None => {
-                log::warn!(
-                    "Ignoring invalid VERTEX_LOCATION (must contain only ASCII letters, digits, \
-                     and hyphens); falling back to 'global'"
-                );
-                "global".to_string()
-            }
-        },
-        _ => "global".to_string(),
-    };
-    Some(vertex_endpoint_base(&project, &location))
-}
-
-fn vertex_endpoint_base(project: &str, location: &str) -> String {
-    let project = project.trim();
-    let location = location.trim();
-    // Default to v1beta1: current Gemini releases (e.g. gemini-3.7-flash,
-    // gemini-3.5-flash-lite) are served there, and it is a superset of v1.
-    // Override with VERTEX_API_VERSION when an older surface is required.
-    let version = std::env::var("VERTEX_API_VERSION")
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty() && valid_vertex_segment(v).is_some())
-        .unwrap_or_else(|| "v1beta1".to_string());
-    if location.eq_ignore_ascii_case("global") {
-        format!("https://aiplatform.googleapis.com/{version}/projects/{project}/locations/global/")
-    } else {
-        format!(
-            "https://{location}-aiplatform.googleapis.com/{version}/\
-             projects/{project}/locations/{location}/"
-        )
-    }
-}
-
-pub(crate) fn provider_base_url_env_var(provider: &str) -> Option<&'static str> {
-    match provider.to_lowercase().as_str() {
-        "openai" => Some("OPENAI_BASE_URL"),
-        "anthropic" => Some("ANTHROPIC_BASE_URL"),
-        "gemini" | "google" => Some("GEMINI_BASE_URL"),
-        "groq" => Some("GROQ_BASE_URL"),
-        "cohere" => Some("COHERE_BASE_URL"),
-        "ollama" => Some("OLLAMA_BASE_URL"),
-        "xai" => Some("XAI_BASE_URL"),
-        "deepseek" => Some("DEEPSEEK_BASE_URL"),
-        _ => None,
-    }
-}
-
-fn provider_base_url_from_env(provider: &str) -> Option<String> {
-    let env_var = provider_base_url_env_var(provider)?;
-
-    std::env::var(env_var)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-pub(crate) fn provider_api_key_env_var(provider: &str) -> Option<&'static str> {
-    match provider.to_lowercase().as_str() {
-        "openai" => Some("OPENAI_API_KEY"),
-        "anthropic" => Some("ANTHROPIC_API_KEY"),
-        "gemini" | "google" => Some("GEMINI_API_KEY"),
-        "vertex" => Some("VERTEX_API_KEY"),
-        "groq" => Some("GROQ_API_KEY"),
-        "cohere" => Some("COHERE_API_KEY"),
-        "xai" => Some("XAI_API_KEY"),
-        "deepseek" => Some("DEEPSEEK_API_KEY"),
-        _ => None,
-    }
-}
-
-fn normalize_base_url(base_url: &str) -> String {
-    if base_url.ends_with('/') {
-        base_url.to_string()
-    } else {
-        format!("{base_url}/")
-    }
-}
-
-/// Convert a provider string to genai AdapterKind
-pub(crate) fn str_to_adapter_kind(provider: &str) -> Result<AdapterKind> {
-    match provider.to_lowercase().as_str() {
-        "openai" => Ok(AdapterKind::OpenAI),
-        "anthropic" => Ok(AdapterKind::Anthropic),
-        "gemini" | "google" => Ok(AdapterKind::Gemini),
-        "vertex" => Ok(AdapterKind::Vertex),
-        "groq" => Ok(AdapterKind::Groq),
-        "cohere" => Ok(AdapterKind::Cohere),
-        "ollama" => Ok(AdapterKind::Ollama),
-        "xai" => Ok(AdapterKind::Xai),
-        "deepseek" => Ok(AdapterKind::DeepSeek),
-        _ => Err(anyhow::anyhow!("Unsupported provider: {}", provider)),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm_client::{
+        normalize_base_url, parse_gcloud_project, resolve_vertex_endpoint, str_to_adapter_kind,
+        valid_vertex_segment, vertex_endpoint_base,
+    };
+    use genai::adapter::AdapterKind;
 
     #[test]
     fn test_str_to_adapter_kind() {
@@ -943,32 +637,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_from_config_uses_namespaced_vertex_model_when_provider_absent() {
-        let previous_project = std::env::var("VERTEX_PROJECT_ID").ok();
-        let previous_location = std::env::var("VERTEX_LOCATION").ok();
-        std::env::set_var("VERTEX_PROJECT_ID", "unit-test-project");
-        std::env::remove_var("VERTEX_LOCATION");
-
-        let config = Config::default();
+        let config = Config {
+            vertex_project_id: Some("unit-test-project".to_string()),
+            ..Default::default()
+        };
         let (_provider, resolved) =
             GenAIProvider::from_config(&config, Some("vertex::gemini-2.5-flash")).unwrap();
         assert_eq!(resolved.provider, "vertex");
         assert_eq!(resolved.model, "vertex::gemini-2.5-flash");
-        assert!(std::env::var("VERTEX_LOCATION").is_err());
+
+        let opts = ProviderClientOptions {
+            vertex_project_id: Some("unit-test-project".to_string()),
+            vertex_location: Some("global".to_string()),
+            vertex_api_version: Some("v1beta1".to_string()),
+            ..Default::default()
+        };
         assert_eq!(
-            resolved_vertex_endpoint().as_deref(),
+            resolve_vertex_endpoint(&opts).as_deref(),
             Some(
                 "https://aiplatform.googleapis.com/v1beta1/projects/unit-test-project/locations/global/"
             )
         );
-
-        match previous_project {
-            Some(value) => std::env::set_var("VERTEX_PROJECT_ID", value),
-            None => std::env::remove_var("VERTEX_PROJECT_ID"),
-        }
-        match previous_location {
-            Some(value) => std::env::set_var("VERTEX_LOCATION", value),
-            None => std::env::remove_var("VERTEX_LOCATION"),
-        }
     }
 
     #[test]
@@ -995,42 +684,38 @@ mod tests {
 
     #[test]
     fn test_resolved_vertex_endpoint_rejects_malicious_location() {
-        let prev_project = std::env::var("VERTEX_PROJECT_ID").ok();
-        let prev_location = std::env::var("VERTEX_LOCATION").ok();
-
         // A crafted location must not be interpolated into the host; it falls
         // back to the safe global endpoint instead.
-        std::env::set_var("VERTEX_PROJECT_ID", "perspt");
-        std::env::set_var("VERTEX_LOCATION", "evil.com/");
+        let opts = ProviderClientOptions {
+            vertex_project_id: Some("perspt".to_string()),
+            vertex_location: Some("evil.com/".to_string()),
+            vertex_api_version: Some("v1beta1".to_string()),
+            ..Default::default()
+        };
         assert_eq!(
-            resolved_vertex_endpoint().as_deref(),
+            resolve_vertex_endpoint(&opts).as_deref(),
             Some("https://aiplatform.googleapis.com/v1beta1/projects/perspt/locations/global/"),
             "malicious location must fall back to global, never redirect the host"
         );
 
         // An invalid project yields no endpoint override at all.
-        std::env::set_var("VERTEX_PROJECT_ID", "bad/project");
-        std::env::set_var("VERTEX_LOCATION", "us-central1");
-        assert_eq!(resolved_vertex_endpoint(), None);
-
-        match prev_project {
-            Some(v) => std::env::set_var("VERTEX_PROJECT_ID", v),
-            None => std::env::remove_var("VERTEX_PROJECT_ID"),
-        }
-        match prev_location {
-            Some(v) => std::env::set_var("VERTEX_LOCATION", v),
-            None => std::env::remove_var("VERTEX_LOCATION"),
-        }
+        let bad_proj_opts = ProviderClientOptions {
+            vertex_project_id: Some("bad/project".to_string()),
+            vertex_location: Some("us-central1".to_string()),
+            vertex_api_version: Some("v1beta1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_vertex_endpoint(&bad_proj_opts), None);
     }
 
     #[test]
     fn test_vertex_endpoint_base_matches_genai_vertex_shape() {
         assert_eq!(
-            vertex_endpoint_base("test-project", "global"),
+            vertex_endpoint_base("test-project", "global", "v1beta1"),
             "https://aiplatform.googleapis.com/v1beta1/projects/test-project/locations/global/"
         );
         assert_eq!(
-            vertex_endpoint_base("test-project", "test-location"),
+            vertex_endpoint_base("test-project", "test-location", "v1beta1"),
             "https://test-location-aiplatform.googleapis.com/v1beta1/\
              projects/test-project/locations/test-location/"
         );
@@ -1054,10 +739,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_openai_base_url_overrides_bound_provider_endpoint() {
-        let previous = std::env::var("OPENAI_BASE_URL").ok();
-        std::env::set_var("OPENAI_BASE_URL", "https://custom.example/v1");
-
-        let provider = GenAIProvider::new_with_config(Some("openai"), None).unwrap();
+        let options = ProviderClientOptions {
+            base_url: Some("https://custom.example/v1".to_string()),
+            ..Default::default()
+        };
+        let provider = GenAIProvider::new_with_options(Some("openai"), &options).unwrap();
         let target = provider
             .client
             .resolve_service_target("gemma4-32b-it")
@@ -1065,11 +751,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(target.endpoint.base_url(), "https://custom.example/v1/");
-
-        match previous {
-            Some(value) => std::env::set_var("OPENAI_BASE_URL", value),
-            None => std::env::remove_var("OPENAI_BASE_URL"),
-        }
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://custom.example/v1/")
+        );
     }
 
     #[test]

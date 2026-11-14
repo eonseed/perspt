@@ -146,17 +146,17 @@ fn print_capacity(rows: &[perspt_store::Psp9LedgerRow]) {
                     .and_then(|p| p.get("event"))
                     .and_then(|e| e.as_str())
                     == Some("candidate_measured");
-                if is_measure {
-                    if let (Some(node), Some(energy)) = (
+                if is_measure
+                    && let (Some(node), Some(energy)) = (
                         payload
                             .and_then(|p| p.get("node_id"))
                             .and_then(|n| n.as_str()),
                         payload
                             .and_then(|p| p.get("energy"))
                             .and_then(|e| e.as_f64()),
-                    ) {
-                        last_energy.insert(node.to_string(), energy);
-                    }
+                    )
+                {
+                    last_energy.insert(node.to_string(), energy);
                 }
             }
             _ => {}

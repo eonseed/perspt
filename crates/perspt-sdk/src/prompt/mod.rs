@@ -21,27 +21,28 @@ pub mod stage;
 pub mod vars;
 
 pub use accountant::{AccountingMode, TokenAccountantRef};
-pub use budget::{fit_budget, BudgetFit};
+pub use budget::{BudgetFit, fit_budget};
 pub use compose::StageComposition;
 pub use context::{
-    assemble_resident, mandatory_closure, resident_page_digest, select_working_set, ContextBudget,
-    ContextPage, DependencyEnv, ResidentContext, ResidentOutcome, StateDependency,
+    ContextBudget, ContextPage, DependencyEnv, ResidentContext, ResidentOutcome, StateDependency,
+    assemble_resident, mandatory_closure, resident_page_digest, select_working_set,
 };
 pub use dialect::{
     DialectRef, ModelDialect, ReasoningTracePolicy, SystemSlotPolicy, ToolCallConvention,
 };
 pub use digest::{
-    tool_surface_hash, CompiledPromptInvocation, CompiledPromptMessage, CompiledPromptProgram,
+    CompiledPromptInvocation, CompiledPromptMessage, CompiledPromptProgram, tool_surface_hash,
 };
 pub use manifest::{
-    ActivationBounds, ActivationState, ManifestEntry, PromptChangeRecord, PromptManifest,
-    ACTIVATION_BOOTSTRAP_RESAMPLES,
+    ACTIVATION_BOOTSTRAP_RESAMPLES, ActivationBounds, ActivationState, ManifestEntry,
+    PromptChangeRecord, PromptManifest,
 };
 pub use plan::{ContextRequest, CounterexampleRef, IssuePromptPlan};
 pub use route::{PromptRoute, SectionOverride, SectionVariants};
 pub use section::{
-    OverrideOrigin, PromptMessageRole, PromptSection, PromptSectionId, PromptSectionVersion,
-    RenderedSection, SectionProvenance, SectionSchema, SectionTemplate, VarSpec, PROMPT_DIGEST_TAG,
+    OverrideOrigin, PROMPT_DIGEST_TAG, PromptMessageRole, PromptSection, PromptSectionId,
+    PromptSectionVersion, RenderedSection, SectionProvenance, SectionSchema, SectionTemplate,
+    VarSpec,
 };
 pub use stage::PromptStage;
 pub use vars::{BoundedList, BoundedText, ListStyle, ObservationText, VarValue};

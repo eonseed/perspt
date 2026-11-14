@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use perspt_prompt_macros::{compile_prompt_dir, StageDecl};
+use perspt_prompt_macros::{StageDecl, compile_prompt_dir};
 
 fn write_stage(root: &Path, stage: &str, files: &[(&str, &str)]) {
     let dir = root.join(stage);
@@ -46,12 +46,16 @@ fn a_valid_section_compiles_to_a_typed_struct() {
     assert_eq!(section.schema.id.0, "branch_correct/tool_protocol");
     assert!(section.content_hash.starts_with("sha256:"));
     assert!(generated.rust_source.contains("pub struct ToolProtocol"));
-    assert!(generated
-        .rust_source
-        .contains("const ID: &'static str = \"branch_correct/tool_protocol\""));
-    assert!(generated
-        .rust_source
-        .contains("pub const SEPARATOR: &str = \" \""));
+    assert!(
+        generated
+            .rust_source
+            .contains("const ID: &'static str = \"branch_correct/tool_protocol\"")
+    );
+    assert!(
+        generated
+            .rust_source
+            .contains("pub const SEPARATOR: &str = \" \"")
+    );
     // The compiled template renders through the SDK's single renderer.
     let template = perspt_sdk::prompt::SectionTemplate {
         schema: section.schema.clone(),
@@ -203,10 +207,12 @@ fn a_compatible_override_compiles_as_an_override() {
     );
     let generated = compile_prompt_dir(dir.path(), &stages()).unwrap();
     assert_eq!(generated.sections.len(), 2);
-    assert!(generated
-        .sections
-        .iter()
-        .any(|section| section.override_label.as_deref() == Some("family_a")));
+    assert!(
+        generated
+            .sections
+            .iter()
+            .any(|section| section.override_label.as_deref() == Some("family_a"))
+    );
     assert!(generated.rust_source.contains("pub fn overrides()"));
 }
 

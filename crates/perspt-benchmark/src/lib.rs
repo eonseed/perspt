@@ -40,13 +40,13 @@ use perspt_agent::{Psp9AgentRuntime, Psp9RunConfig};
 use perspt_sdk::{Conversation, ModelId, ToolChoicePolicy, ToolSpec, TurnOutput};
 
 mod config;
-use config::{configured_model_id, configured_topology, load_config, ModelTopology};
+use config::{ModelTopology, configured_model_id, configured_topology, load_config};
 mod corpus;
 use corpus::materialize_corpus;
 #[cfg(test)]
 use corpus::source_corpus_root;
 mod harness;
-use harness::{copy_tree, hidden_verdict, prepare_python_env, SKIP_DIRS};
+use harness::{SKIP_DIRS, copy_tree, hidden_verdict, prepare_python_env};
 
 const MAX_TURNS: u32 = 12;
 const DEADLINE_SECS: u64 = 120;

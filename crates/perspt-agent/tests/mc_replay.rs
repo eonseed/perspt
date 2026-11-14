@@ -6,7 +6,7 @@
 //! context checkpoint is rejected rather than patched.
 
 use perspt_sdk::ledger::{Ledger, LedgerEvent};
-use perspt_sdk::{audit_replay, require_recorded, ContextCheckpoint, ControlFrame};
+use perspt_sdk::{ContextCheckpoint, ControlFrame, audit_replay, require_recorded};
 
 fn seeded_ledger() -> Ledger {
     let mut ledger = Ledger::new();

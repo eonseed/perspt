@@ -449,15 +449,17 @@ mod tests {
             )
             .unwrap();
         let before = usage.clone();
-        assert!(usage
-            .reserve(
-                &limits(),
-                ReservationRequest {
-                    tokens: 200,
-                    ..Default::default()
-                },
-            )
-            .is_err());
+        assert!(
+            usage
+                .reserve(
+                    &limits(),
+                    ReservationRequest {
+                        tokens: 200,
+                        ..Default::default()
+                    },
+                )
+                .is_err()
+        );
         assert_eq!(usage, before, "a refused reservation reserves nothing");
     }
 
@@ -479,9 +481,11 @@ mod tests {
         // The next interval crosses elapsed_secs = 60: terminal.
         assert!(usage.charge_elapsed(&limits(), 2).is_err());
         assert!(usage.is_closed(), "crossing a limit closes the forest");
-        assert!(usage
-            .reserve(&limits(), ReservationRequest::default())
-            .is_err());
+        assert!(
+            usage
+                .reserve(&limits(), ReservationRequest::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -489,9 +493,11 @@ mod tests {
         let mut usage = SearchUsage::default();
         usage.close();
         assert!(usage.is_closed());
-        assert!(usage
-            .reserve(&limits(), ReservationRequest::default())
-            .is_err());
+        assert!(
+            usage
+                .reserve(&limits(), ReservationRequest::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -555,8 +561,10 @@ mod tests {
                 .reserve(&limits(), ReservationRequest::default())
                 .unwrap();
         }
-        assert!(usage
-            .reserve(&limits(), ReservationRequest::default())
-            .is_err());
+        assert!(
+            usage
+                .reserve(&limits(), ReservationRequest::default())
+                .is_err()
+        );
     }
 }

@@ -5,7 +5,7 @@
 //! Theorem 6 classes; failover neither replenishes nor bypasses the shared
 //! pool.
 
-use perspt_sdk::{classify_failure, CascadeClass, CascadeLevel, FailureKind, RecoveryCascade};
+use perspt_sdk::{CascadeClass, CascadeLevel, FailureKind, RecoveryCascade, classify_failure};
 
 /// Drive a cascade against an adversary that fails every control, entering
 /// at the classified level for `kind`. Returns (steps, terminal class).

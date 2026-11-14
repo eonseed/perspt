@@ -15,7 +15,7 @@ categories = ["command-line-utilities", "development-tools"]
 [dependencies]
 perspt-sdk = { workspace = true }
 # LLM unified interface
-genai = "0.7.2"
+genai = "0.7.4"
 futures = { workspace = true }
 
 # Google Cloud Application Default Credentials (ADC) for Vertex AI auth.
@@ -34,9 +34,6 @@ tokio = { workspace = true }
 # Configuration
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# LSP types for agent integration
-lsp-types = { workspace = true }
 
 # Logging
 log = { workspace = true }

@@ -1,24 +1,18 @@
-//! # Perspt Research Domain Package (skeleton)
+//! # Perspt Research Domain Package
 //!
-//! This crate is the PSP-8 Phase 10 *second-domain readiness check*: it proves
-//! the [`perspt_sdk`] contracts admit a second domain package **without forking**
-//! the scheduler, admissibility kernel, residual model, replay ledger, or
-//! dashboard event model. A research agent reuses the same SRBN control plane;
-//! only the residual classes, energy model, and correction directions differ.
-//!
-//! Research residuals cover unsupported claims, stale evidence, source
-//! mismatch, and citation gaps, mapped onto the same energy components the SDK
-//! defines. The verifier suites (source discovery, citation provenance, claim
-//! extraction) are out of scope for the skeleton; the point is contract
-//! conformance.
+//! Executable domain package implementing citation verification (`citation-check`)
+//! and typed correction packets on top of [`perspt_sdk`], sharing the SRBN
+//! control plane without forking the scheduler, kernel, or ledger.
 
 #![forbid(unsafe_code)]
 
+mod verify;
+
 use perspt_sdk::{
-    AgentDomainPackage, CorrectionDirection, DomainDetection, DomainId, DomainScope,
-    EnergyComponent, EnergyModel, HardGatePolicy, ResidualClass, ResidualEvent, ResidualSchema,
-    ResidualWeight, SafetyBarrierDisposition, StabilityClaim, VerificationCadence,
-    VerifierSuiteSpec, WorkspaceSnapshot,
+    AgentDomainPackage, CorrectionDirection, CorrectionPacket, DomainDetection, DomainEvaluation,
+    DomainId, DomainScope, EnergyComponent, EnergyModel, HardGatePolicy, ResidualClass,
+    ResidualEvent, ResidualSchema, ResidualWeight, SafetyBarrierDisposition, StabilityClaim,
+    VerificationCadence, VerifierSuiteSpec, WorkspaceSnapshot,
 };
 
 /// The research domain package.
@@ -43,6 +37,7 @@ impl AgentDomainPackage for ResearchDomain {
             "refs.bib",
             "bibliography.bib",
             "sources.md",
+            "references.md",
         ] {
             if workspace.has_file_named(marker) {
                 evidence.push(format!("found {marker}"));
@@ -58,16 +53,16 @@ impl AgentDomainPackage for ResearchDomain {
     }
 
     fn residual_schema(&self, _scope: &DomainScope) -> ResidualSchema {
-        // Research reuses SDK residual classes; an unsupported claim maps to a
-        // logic residual, a citation gap to a structural one, stale evidence to
-        // context drift, and a contradiction to a sheaf inconsistency.
         ResidualSchema::new(vec![
+            ResidualClass::Syntax,             // malformed BibTeX / bibliography syntax
             ResidualClass::TestFailure,        // unsupported / contradicted claim
             ResidualClass::InterfaceMismatch,  // source mismatch
             ResidualClass::ImportGraph,        // citation gap (missing source link)
+            ResidualClass::SymbolMismatch,     // mismatched citation label
             ResidualClass::ContextDrift,       // stale evidence
             ResidualClass::SheafInconsistency, // cross-source contradiction
             ResidualClass::SensorUnavailable,
+            ResidualClass::ToolFailure,
         ])
     }
 
@@ -76,12 +71,24 @@ impl AgentDomainPackage for ResearchDomain {
         use ResidualClass::*;
         let mut model = EnergyModel::new("research", 0.5).with_correction_budget(4);
         model.residual_weights = vec![
-            ResidualWeight::new(TestFailure, Log, 3.0), // unsupported claim is severe
+            ResidualWeight::new(Syntax, Syn, 3.0).with_hard_threshold(0.0),
+            ResidualWeight::new(TestFailure, Log, 3.0),
             ResidualWeight::new(InterfaceMismatch, Str, 2.0),
             ResidualWeight::new(ImportGraph, Str, 2.0),
+            ResidualWeight::new(SymbolMismatch, Str, 2.0),
             ResidualWeight::new(ContextDrift, Sheaf, 1.5),
             ResidualWeight::new(SheafInconsistency, Sheaf, 2.5),
             ResidualWeight::new(SensorUnavailable, Boot, 1.0),
+            ResidualWeight::new(ToolFailure, Boot, 1.0),
+            // Tool-loop harness progress & adjudication classes.
+            ResidualWeight::new(ToolArgumentInvalid, Str, 1.0),
+            ResidualWeight::new(WitnessStale, Str, 1.0),
+            ResidualWeight::new(ToolThrash, Str, 1.0),
+            ResidualWeight::new(ToolBatchConflict, Str, 1.0),
+            ResidualWeight::new(UnreadEdit, Str, 1.0),
+            ResidualWeight::new(BudgetPressure, Str, 1.0),
+            ResidualWeight::new(AdjudicatorObjection, Log, 2.0),
+            ResidualWeight::new(ProviderUnavailable, Boot, 1.0),
         ];
         model.energy_tolerance = 0.0;
         model.stability_claim = Some(StabilityClaim::not_claimed(format!(
@@ -94,28 +101,46 @@ impl AgentDomainPackage for ResearchDomain {
     fn correction_directions(&self, residuals: &[ResidualEvent]) -> Vec<CorrectionDirection> {
         residuals
             .iter()
-            .filter_map(|r| match r.class {
-                ResidualClass::TestFailure => Some(CorrectionDirection::new(
-                    ResidualClass::TestFailure,
-                    "support or retract the claim: cite a primary source or weaken the statement",
-                )),
-                ResidualClass::ImportGraph => Some(CorrectionDirection::new(
-                    ResidualClass::ImportGraph,
-                    "add the missing citation linking the claim to its source",
-                )),
-                ResidualClass::ContextDrift => Some(CorrectionDirection::new(
-                    ResidualClass::ContextDrift,
-                    "refresh the stale evidence: re-fetch the source and re-validate the quote bounds",
-                )),
-                _ => None,
+            .filter_map(|r| {
+                let mut dir = match r.class {
+                    ResidualClass::Syntax => Some(CorrectionDirection::new(
+                        ResidualClass::Syntax,
+                        "fix the malformed BibTeX entry or unbalanced braces in the bibliography",
+                    )),
+                    ResidualClass::TestFailure => Some(CorrectionDirection::new(
+                        ResidualClass::TestFailure,
+                        "support or retract the claim: cite a primary source or weaken the statement",
+                    )),
+                    ResidualClass::ImportGraph | ResidualClass::SymbolMismatch => {
+                        Some(CorrectionDirection::new(
+                            r.class,
+                            "define the missing citation key in the bibliography \
+                             (or cite an existing entry)",
+                        ))
+                    }
+                    ResidualClass::InterfaceMismatch => Some(CorrectionDirection::new(
+                        ResidualClass::InterfaceMismatch,
+                        "align source metadata and citation attributes with the bibliography entry",
+                    )),
+                    ResidualClass::ContextDrift => Some(CorrectionDirection::new(
+                        ResidualClass::ContextDrift,
+                        "refresh the stale evidence: re-fetch the source and re-validate quote bounds",
+                    )),
+                    _ => None,
+                }?;
+                dir.target_paths = r.affected_paths.clone();
+                dir.target_symbols = r.affected_symbols.clone();
+                dir.rationale = r.evidence.summary.clone();
+                Some(dir)
             })
             .collect()
     }
 
+    fn correction_packet(&self, residuals: &[ResidualEvent]) -> Option<CorrectionPacket> {
+        verify::build_correction_packet(self, residuals)
+    }
+
     fn tool_entries(&self, _scope: &DomainScope) -> Vec<perspt_sdk::ToolEntry> {
-        // Research-specific tools (source discovery, citation fetch) arrive
-        // with the research tool loop; the base catalog already covers
-        // reading, searching, and editing notes.
         Vec::new()
     }
 
@@ -139,13 +164,24 @@ impl AgentDomainPackage for ResearchDomain {
                 .into(),
         }
     }
+
+    fn evaluate_workspace(
+        &self,
+        snapshot: &WorkspaceSnapshot,
+        node_id: &str,
+        generation: u32,
+    ) -> Option<DomainEvaluation> {
+        verify::evaluate_research_workspace(snapshot, node_id, generation)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use perspt_sdk::{
-        score_candidate, DomainRegistry, IndependenceRoute, ResidualSeverity, SensorRef,
+        DomainRegistry, IndependenceRoute, ResidualSeverity, SensorRef, score_candidate,
     };
 
     #[test]
@@ -175,17 +211,80 @@ mod tests {
             SensorRef::new("claim-checker", IndependenceRoute::SeparateModel),
         )
         .unwrap();
-        // TestFailure weight 3.0 -> 3.0 * 1^2 = 3.0 in V_log.
         let score = score_candidate(&model, &[claim]).unwrap();
         assert_eq!(score.total, 3.0);
     }
 
     #[test]
     fn registry_admits_research_alongside_other_domains() {
-        // The SDK control plane admits a second domain without forking.
         let mut registry = DomainRegistry::new();
         registry.register(std::sync::Arc::new(ResearchDomain::new()));
         assert_eq!(registry.len(), 1);
         assert!(registry.by_id(&DomainId::new("research")).is_some());
+    }
+
+    #[test]
+    fn evaluate_workspace_passes_valid_bib_and_md_citations() {
+        let domain = ResearchDomain::new();
+        let mut contents = BTreeMap::new();
+        contents.insert(
+            "refs.bib".to_string(),
+            "@article{smith2024,\n  title={Stability}\n}\n".to_string(),
+        );
+        contents.insert(
+            "draft.md".to_string(),
+            "Prior work [@smith2024] proves convergence.\n".to_string(),
+        );
+        let ws = WorkspaceSnapshot::new("/paper", vec!["draft.md".into(), "refs.bib".into()])
+            .with_contents(contents);
+
+        let eval = domain.evaluate_workspace(&ws, "n1", 0).unwrap();
+        assert_eq!(eval.ran_stages, vec!["citation-check"]);
+        assert!(eval.residuals.is_empty(), "{:?}", eval.residuals);
+    }
+
+    #[test]
+    fn evaluate_workspace_flags_missing_citations_and_builds_packet() {
+        let domain = ResearchDomain::new();
+        let mut contents = BTreeMap::new();
+        contents.insert(
+            "refs.bib".to_string(),
+            "@article{known2023,\n}\n".to_string(),
+        );
+        contents.insert(
+            "draft.md".to_string(),
+            "See [@known2023; @missing2026] and \\cite{also_missing}.\n".to_string(),
+        );
+        let ws = WorkspaceSnapshot::new("/paper", vec!["draft.md".into(), "refs.bib".into()])
+            .with_contents(contents);
+
+        let eval = domain.evaluate_workspace(&ws, "n1", 0).unwrap();
+        assert_eq!(eval.residuals.len(), 1);
+        assert_eq!(eval.residuals[0].class, ResidualClass::ImportGraph);
+        let symbols: Vec<&str> = eval.residuals[0]
+            .affected_symbols
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(symbols, vec!["missing2026", "also_missing"]);
+
+        let packet = domain.correction_packet(&eval.residuals).unwrap();
+        assert_eq!(packet.affected.paths, vec!["draft.md"]);
+        assert!(!packet.is_empty());
+    }
+
+    #[test]
+    fn evaluate_workspace_flags_malformed_bibtex() {
+        let domain = ResearchDomain::new();
+        let mut contents = BTreeMap::new();
+        contents.insert(
+            "refs.bib".to_string(),
+            "@article{broken\n  title={Missing comma and brace}\n".to_string(),
+        );
+        let ws = WorkspaceSnapshot::new("/paper", vec!["refs.bib".into()]).with_contents(contents);
+
+        let eval = domain.evaluate_workspace(&ws, "n1", 0).unwrap();
+        assert_eq!(eval.residuals.len(), 1);
+        assert_eq!(eval.residuals[0].class, ResidualClass::Syntax);
     }
 }

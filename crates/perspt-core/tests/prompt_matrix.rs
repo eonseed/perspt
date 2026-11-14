@@ -110,10 +110,12 @@ fn composition_is_deterministic_with_full_provenance() {
     let second = PlatformPromptLibrary::session_bootstrap("coding", &Default::default()).unwrap();
     assert_eq!(digest(&first), digest(&second));
     assert_eq!(first.sections.len(), 2);
-    assert!(first
-        .sections
-        .iter()
-        .all(|section| section.content_hash.starts_with("sha256:")));
+    assert!(
+        first
+            .sections
+            .iter()
+            .all(|section| section.content_hash.starts_with("sha256:"))
+    );
     // A changed variable changes the digest.
     let other = PlatformPromptLibrary::session_bootstrap("research", &Default::default()).unwrap();
     assert_ne!(digest(&first), digest(&other));
@@ -191,9 +193,11 @@ fn a_bundle_override_substitutes_live_under_the_compiled_schema() {
         )
         .unwrap();
     let stage = PlatformPromptLibrary::session_bootstrap("coding", &overrides).unwrap();
-    assert!(stage.sections[0]
-        .content
-        .contains("experimental governed coding agent"));
+    assert!(
+        stage.sections[0]
+            .content
+            .contains("experimental governed coding agent")
+    );
     let base = PlatformPromptLibrary::session_bootstrap("coding", &Default::default()).unwrap();
     assert_ne!(
         stage.sections[0].content_hash, base.sections[0].content_hash,

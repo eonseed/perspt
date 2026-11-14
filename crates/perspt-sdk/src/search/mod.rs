@@ -14,7 +14,7 @@ pub mod select;
 pub use budget::{
     ReservationRequest, ReservationTicket, SearchLimits, SearchUsage, SharedSearchBudget,
 };
-pub use context::{exploration_capability, is_read_only_capability, ProjectMap};
+pub use context::{ProjectMap, exploration_capability, is_read_only_capability};
 pub use domain_types::{
     BranchMeasurement, BranchSelection, DomainMeasurement, SearchContext, SearchStrategy,
 };
@@ -22,4 +22,4 @@ pub use forest::{
     ObligationRef, PartialCheckpointRef, PromptProgramDigest, SearchBranch, SearchBranchState,
     SearchEvidenceDigest, SearchForest, WitnessRef,
 };
-pub use select::{frontier_order, select_branch, BranchCandidate, FrontierEntry};
+pub use select::{BranchCandidate, FrontierEntry, frontier_order, select_branch};

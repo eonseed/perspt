@@ -47,7 +47,7 @@ rustyline = "19.0.0"
 tokio = { workspace = true }
 
 # TLS crypto provider selection (Vertex ADC via gcp_auth uses rustls/ring).
-rustls = { version = "0.23.41", features = ["ring"] }
+rustls = { version = "0.23.46", features = ["ring"] }
 
 # Logging
 log = { workspace = true }

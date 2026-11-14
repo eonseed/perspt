@@ -2,8 +2,8 @@
 //! wire (in-place tombstones), the governed `context_recall` tool, and
 //! infrastructure-gap steering (PSP-10 Gate AF).
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use perspt_agent::toolloop::{
     CandidateCheckpoint, CandidateMeasurer, EffectExecutor, EffectOutcome, LoopBudgets, LoopEvent,

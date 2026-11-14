@@ -1,8 +1,8 @@
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use std::convert::Infallible;
-use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::IntervalStream;
 
 use crate::state::AppState;
 use crate::views::psp9::LedgerProjection;

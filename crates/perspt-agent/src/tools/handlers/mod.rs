@@ -12,7 +12,9 @@ mod deps;
 mod exec;
 pub mod external;
 mod fs;
+pub mod interact;
 mod lsp;
+pub mod subagent;
 mod verify;
 
 use std::collections::BTreeMap;
@@ -24,7 +26,11 @@ use perspt_sdk::ToolEntry;
 use crate::candidate::CandidateWorkspace;
 use crate::toolloop::EffectOutcome;
 
+pub use interact::{
+    AsyncFnInteractionHandler, FnInteractionHandler, InteractionHandler, NonInteractiveHandler,
+};
 pub(crate) use lsp::LspSessions;
+pub use subagent::SubagentRunner;
 
 /// One governed tool executor. Handlers never decide admission, budgets, or
 /// certification — the kernel already did; they only realize the effect
@@ -75,6 +81,8 @@ impl CandidateHandlerRegistry {
         exec::register(&mut registry);
         lsp::register(&mut registry);
         deps::register(&mut registry);
+        interact::register(&mut registry);
+        subagent::register(&mut registry);
         registry
     }
 

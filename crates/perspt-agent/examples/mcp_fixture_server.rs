@@ -6,7 +6,7 @@
 
 use std::io::{self, BufRead, Write};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const PROTOCOL_VERSION: &str = "2026-07-28";
 const LEGACY_VERSION: &str = "2025-11-25";
@@ -118,10 +118,10 @@ fn client_request(
         if trimmed.is_empty() {
             continue;
         }
-        if let Ok(resp) = serde_json::from_str::<Value>(trimmed) {
-            if resp.get("id").and_then(Value::as_str) == Some(request_id) {
-                return resp;
-            }
+        if let Ok(resp) = serde_json::from_str::<Value>(trimmed)
+            && resp.get("id").and_then(Value::as_str) == Some(request_id)
+        {
+            return resp;
         }
     }
     Value::Null

@@ -37,7 +37,7 @@ jobs:
       - name: Install the pinned Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
 
       - name: Cache cargo-audit
         id: cargo-audit-cache

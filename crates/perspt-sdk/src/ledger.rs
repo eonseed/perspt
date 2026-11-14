@@ -388,13 +388,12 @@ pub fn replay_accepted_trajectory(ledger: &Ledger) -> Result<Vec<(String, u32, f
     // longer overwrite one another.
     let mut latest = HashMap::<(String, u32, String), f64>::new();
     for record in ledger.records() {
-        if let LedgerEvent::Custom { kind, payload } = &record.event {
-            if kind == "tool_loop" {
-                // Unknown envelope versions fail the fold closed (Gate AD).
-                let (ToolLoopBody::Legacy(body) | ToolLoopBody::V1(body)) =
-                    tool_loop_body(payload)?;
-                fold_tool_loop_row(body, &mut latest, &mut accepted);
-            }
+        if let LedgerEvent::Custom { kind, payload } = &record.event
+            && kind == "tool_loop"
+        {
+            // Unknown envelope versions fail the fold closed (Gate AD).
+            let (ToolLoopBody::Legacy(body) | ToolLoopBody::V1(body)) = tool_loop_body(payload)?;
+            fold_tool_loop_row(body, &mut latest, &mut accepted);
         }
     }
     Ok(accepted)
@@ -507,7 +506,7 @@ pub fn require_recorded(ledger: &Ledger, handles: &[String]) -> Result<Vec<Strin
                 return Err(SdkError::Domain(format!(
                     "transition depends on unrecorded observation {handle:?}; \
                      record it before use (R2)"
-                )))
+                )));
             }
         }
     }

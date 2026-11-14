@@ -94,10 +94,10 @@ pub fn check_legacy_migration() {
 /// the platform path doesn't exist yet.
 pub fn resolve_config_file() -> Option<PathBuf> {
     // Prefer platform path if it exists
-    if let Some(path) = config_file() {
-        if path.exists() {
-            return Some(path);
-        }
+    if let Some(path) = config_file()
+        && path.exists()
+    {
+        return Some(path);
     }
     // Fall back to legacy
     legacy_dir()
@@ -109,10 +109,10 @@ pub fn resolve_config_file() -> Option<PathBuf> {
 /// the platform path doesn't exist yet.
 pub fn resolve_policy_dir() -> Option<PathBuf> {
     // Prefer platform path if it exists
-    if let Some(path) = policy_dir() {
-        if path.is_dir() {
-            return Some(path);
-        }
+    if let Some(path) = policy_dir()
+        && path.is_dir()
+    {
+        return Some(path);
     }
     // Fall back to legacy
     legacy_dir().map(|d| d.join("rules")).filter(|p| p.is_dir())

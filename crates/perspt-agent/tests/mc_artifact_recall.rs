@@ -315,10 +315,12 @@ async fn oversized_output_pages_back_in_full_through_read_artifact() {
     assert_pages_reassemble(&transport);
 
     // A miss is a plain message, not an error.
-    assert!(recorder
-        .fetch_artifact("0000000000000000000000000000000000000000000000000000000000000000")
-        .unwrap()
-        .is_none());
+    assert!(
+        recorder
+            .fetch_artifact("0000000000000000000000000000000000000000000000000000000000000000")
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Every model-facing effect output respected the preview bound and the

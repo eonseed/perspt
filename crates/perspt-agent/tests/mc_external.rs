@@ -30,29 +30,46 @@ fn fixture_server_path() -> String {
                 "mcp_fixture_server"
             };
             let current = std::env::current_exe().expect("current test executable path");
-            let examples_dir = current
-                .parent()
-                .and_then(|deps| deps.parent())
-                .expect("target profile directory")
-                .join("examples");
-            let candidate = examples_dir.join(exe_name);
-            if !candidate.is_file() {
-                let status = std::process::Command::new(
-                    std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()),
-                )
-                .args([
-                    "build",
-                    "--quiet",
-                    "-p",
-                    "perspt-agent",
-                    "--example",
-                    "mcp_fixture_server",
-                ])
-                .status()
-                .expect("build mcp_fixture_server example");
-                assert!(status.success(), "building mcp_fixture_server failed");
+            if let Some(existing) = current
+                .ancestors()
+                .map(|dir| dir.join("examples").join(exe_name))
+                .find(|path| path.is_file())
+            {
+                return existing.to_string_lossy().into_owned();
             }
-            candidate.to_string_lossy().into_owned()
+            let output = std::process::Command::new(
+                std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string()),
+            )
+            .args([
+                "build",
+                "--quiet",
+                "--message-format=json",
+                "-p",
+                "perspt-agent",
+                "--example",
+                "mcp_fixture_server",
+            ])
+            .output()
+            .expect("build mcp_fixture_server example");
+            assert!(
+                output.status.success(),
+                "building mcp_fixture_server failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .find(|msg| {
+                    msg.get("reason").and_then(|v| v.as_str()) == Some("compiler-artifact")
+                        && msg.pointer("/target/name").and_then(|v| v.as_str())
+                            == Some("mcp_fixture_server")
+                })
+                .and_then(|msg| {
+                    msg.get("executable")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
+                .expect("cargo build JSON output must include mcp_fixture_server executable")
         })
         .clone()
 }
@@ -168,12 +185,16 @@ async fn assert_admission_triple(runtime: &mut ExternalToolRuntime) {
     );
     let rejected = runtime.admission_rejections("fixture");
     assert_eq!(rejected.len(), 2);
-    assert!(rejected
-        .iter()
-        .any(|item| item.remote_tool == "shell" && item.reason.contains("RunShell")));
-    assert!(rejected
-        .iter()
-        .any(|item| item.remote_tool == "fetch" && item.reason.contains("NetworkFetch")));
+    assert!(
+        rejected
+            .iter()
+            .any(|item| item.remote_tool == "shell" && item.reason.contains("RunShell"))
+    );
+    assert!(
+        rejected
+            .iter()
+            .any(|item| item.remote_tool == "fetch" && item.reason.contains("NetworkFetch"))
+    );
     let entry = &admitted[0];
     assert!(
         entry.durable,
@@ -403,12 +424,16 @@ async fn chat_discovery_diagnostics() {
     .expect("chat-enabled server");
 
     assert_eq!(session.tool_names(), ["mcp.fixture.echo"]);
-    assert!(notices
-        .iter()
-        .any(|notice| notice.contains("1 tool(s) admitted, 2 rejected")));
-    assert!(notices
-        .iter()
-        .any(|notice| notice.contains("fixture.shell rejected")));
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains("1 tool(s) admitted, 2 rejected"))
+    );
+    assert!(
+        notices
+            .iter()
+            .any(|notice| notice.contains("fixture.shell rejected"))
+    );
 }
 
 /// A minimal loopback Streamable-HTTP wrapper over the same tool set:

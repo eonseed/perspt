@@ -27,7 +27,8 @@ mod dispatch;
 mod explore;
 mod external;
 mod integrate;
-mod node;
+mod interact;
+pub(crate) mod node;
 mod plan;
 mod prompt_bind;
 mod recorder;
@@ -80,6 +81,8 @@ pub struct Psp9AgentRuntime {
     /// `[prompts].bundles`, loaded by the composition root only under
     /// `--allow-experimental-prompts` (PSP-10 system 25, Gate AE).
     prompt_overrides: perspt_core::prompts::SectionOverrides,
+    /// Interactive prompt callback backing `ask_user`.
+    interaction_handler: Arc<dyn crate::tools::handlers::InteractionHandler>,
 }
 
 impl std::fmt::Debug for Psp9AgentRuntime {
@@ -149,6 +152,7 @@ impl Psp9AgentRuntime {
             search: search::SearchSettings::from_config(config.exploration.as_ref()),
             search_seed: Mutex::new(None),
             prompt_overrides: Default::default(),
+            interaction_handler: Arc::new(crate::tools::handlers::NonInteractiveHandler),
         })
     }
 
@@ -183,7 +187,17 @@ impl Psp9AgentRuntime {
             search: search::SearchSettings::default(),
             search_seed: Mutex::new(None),
             prompt_overrides: Default::default(),
+            interaction_handler: Arc::new(crate::tools::handlers::NonInteractiveHandler),
         }
+    }
+
+    /// Install an interactive callback for `ask_user` calls.
+    pub fn with_interaction_handler(
+        mut self,
+        handler: Arc<dyn crate::tools::handlers::InteractionHandler>,
+    ) -> Self {
+        self.interaction_handler = handler;
+        self
     }
 
     /// Extend or replace the execution plane with a registry assembled at
@@ -212,11 +226,14 @@ impl Psp9AgentRuntime {
 
     /// Effects the user explicitly opted into beyond the default grant.
     fn opted_in_effects(&self) -> Vec<EffectKind> {
+        let mut effects = Vec::new();
         if self.config.allow_dependency_mutation {
-            vec![EffectKind::MutateDependencies]
-        } else {
-            Vec::new()
+            effects.push(EffectKind::MutateDependencies);
         }
+        if self.config.allow_subagents {
+            effects.push(EffectKind::SpawnAgent);
+        }
+        effects
     }
 
     /// Select the domain package (from a `DomainRegistry` at the
@@ -416,7 +433,23 @@ impl Psp9AgentRuntime {
             &exclusions,
         )?;
         candidate.set_tool_handlers(self.tool_handlers.clone());
+        candidate.set_interaction_handler(self.interaction_handler.clone());
         candidate.set_verifier_timeouts(self.config.verifier_timeouts);
+        if self.config.allow_subagents {
+            candidate.set_subagent_runner(Arc::new(
+                crate::tools::handlers::subagent::RuntimeSubagentRunner {
+                    transport: self.transport.clone(),
+                    model: self.model.clone(),
+                    fallback_models: self.fallback_models.clone(),
+                    domain: self.domain.clone(),
+                    tool_handlers: self.tool_handlers.clone(),
+                    extra_tool_entries: self.extra_tool_entries.clone(),
+                    interaction_handler: self.interaction_handler.clone(),
+                    config: self.config.clone(),
+                    exclusions,
+                },
+            ));
+        }
         Ok(candidate)
     }
 
@@ -682,59 +715,102 @@ impl Psp9AgentRuntime {
                 .run_graph_session(&recorder, &session_id, running_graph)
                 .await;
         }
+        self.run_single_node_session(
+            &recorder,
+            &session_id,
+            &node_id,
+            &task,
+            &mut scheduler,
+            running_graph,
+            agent_goal,
+        )
+        .await
+    }
 
-        let first = match self
+    #[allow(clippy::too_many_arguments)]
+    async fn run_single_node_session(
+        &mut self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        node_id: &str,
+        task: &str,
+        scheduler: &mut Scheduler,
+        running_graph: WorkGraphRevision,
+        agent_goal: String,
+    ) -> Result<Psp9RunSummary> {
+        self.run_single_node_phases(
+            recorder,
+            session_id,
+            node_id,
+            task,
+            scheduler,
+            running_graph,
+            agent_goal,
+        )
+        .await
+        .map_err(|error| self.fail_session(recorder, error))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_single_node_phases(
+        &mut self,
+        recorder: &Psp9Recorder,
+        session_id: &str,
+        node_id: &str,
+        task: &str,
+        scheduler: &mut Scheduler,
+        running_graph: WorkGraphRevision,
+        agent_goal: String,
+    ) -> Result<Psp9RunSummary> {
+        let model = self.model.clone();
+        let first = self
             .attempt_node(
-                &recorder,
-                &session_id,
+                recorder,
+                session_id,
                 &agent_goal,
-                &node_id,
+                node_id,
                 0,
-                &self.model.clone(),
+                &model,
                 &running_graph,
                 None,
                 self.config.rejection_budget,
             )
-            .await
-        {
-            Ok(attempt) => attempt,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
+            .await?;
+        let ladder = LadderSession {
+            recorder,
+            session_id,
+            node_id,
+            scheduler,
         };
-        let (attempt, graph, final_generation) = match self
+        let (attempt, graph, final_generation) = self
             .recovery_ladder(
-                LadderSession {
-                    recorder: &recorder,
-                    session_id: &session_id,
-                    node_id: &node_id,
-                    scheduler: &mut scheduler,
-                },
+                ladder,
                 self.config.rejection_budget,
                 running_graph,
                 agent_goal,
                 first,
             )
-            .await
-        {
-            Ok(result) => result,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
-        };
+            .await?;
 
-        let verdict = match self
-            .conclude_attempt(&recorder, &attempt, &node_id, &task)
-            .await
-        {
-            Ok(verdict) => verdict,
-            Err(error) => return Err(self.fail_session(&recorder, error)),
-        };
-        let (final_outcome, status, promoted_paths) = verdict;
-        scheduler.finish(&node_id, final_generation);
-        if let Err(error) = self.finish_node(&recorder, &graph, &node_id, &final_outcome, status) {
-            return Err(self.fail_session(&recorder, error));
-        }
-
-        Ok(Psp9RunSummary {
+        let corr = interact::CorrectionSession {
+            recorder,
             session_id,
             node_id,
+            task,
+            scheduler,
+            graph,
+            attempt,
+            generation: final_generation,
+        };
+        let (attempt, graph, final_generation, verdict) =
+            self.conclude_with_correction_refinement(corr).await?;
+        let (final_outcome, status, promoted_paths) = verdict;
+        scheduler.finish(node_id, final_generation);
+        self.finish_node(recorder, &graph, node_id, &final_outcome, status)?;
+
+        Ok(Psp9RunSummary {
+            session_id: session_id.to_string(),
+            node_id: node_id.to_string(),
             outcome: final_outcome,
             turns_used: attempt.outcome.turns_used,
             ledger_head: recorder.head(),
@@ -876,132 +952,6 @@ impl Psp9AgentRuntime {
         })
     }
 
-    /// Decide the node's terminal fate after the loop: adjudication and
-    /// human approval first, then the kernel-certified promotion. Anything
-    /// short of a fully certified promotion escalates.
-    async fn conclude_run(
-        &self,
-        ctx: ConcludeContext<'_>,
-    ) -> Result<(NodeTerminalOutcome, &'static str, Vec<String>)> {
-        let hard_pass = matches!(ctx.loop_outcome, NodeTerminalOutcome::HardPass);
-        let promotion_approved = self.validate_and_approve(&ctx, hard_pass).await?;
-        let mut final_outcome = if hard_pass && !promotion_approved {
-            NodeTerminalOutcome::Escalated {
-                certificate_id: uuid::Uuid::new_v4().to_string(),
-            }
-        } else {
-            ctx.loop_outcome.clone()
-        };
-        let mut promoted_paths = Vec::new();
-        let status = if matches!(final_outcome, NodeTerminalOutcome::HardPass) {
-            let certified = self
-                .promote_certified(
-                    ctx.recorder,
-                    ctx.candidate,
-                    ctx.node_id,
-                    ctx.grant_policy,
-                    ctx.capability,
-                    ctx.contract,
-                    ctx.barrier,
-                    ctx.kernel_state,
-                    ctx.calibration,
-                )
-                .await?;
-            match certified {
-                Some(paths) => {
-                    promoted_paths = paths;
-                    self.emit(perspt_core::AgentEvent::NodeCompleted {
-                        node_id: ctx.node_id.to_string(),
-                        goal: ctx.task.to_string(),
-                    });
-                    "COMPLETED_PSP9"
-                }
-                None => {
-                    final_outcome = NodeTerminalOutcome::Escalated {
-                        certificate_id: uuid::Uuid::new_v4().to_string(),
-                    };
-                    self.emit(perspt_core::AgentEvent::TaskStatusChanged {
-                        node_id: ctx.node_id.to_string(),
-                        status: perspt_core::NodeStatus::Escalated,
-                    });
-                    "ESCALATED_PSP9"
-                }
-            }
-        } else {
-            self.emit(perspt_core::AgentEvent::TaskStatusChanged {
-                node_id: ctx.node_id.to_string(),
-                status: perspt_core::NodeStatus::Escalated,
-            });
-            "ESCALATED_PSP9"
-        };
-        Ok((final_outcome, status, promoted_paths))
-    }
-
-    /// Record the deterministic-suite verdict (system 8's second live
-    /// validator, joined to the adjudicator's row by candidate id and
-    /// stratum), then run adjudication and approval for a hard pass.
-    async fn validate_and_approve(
-        &self,
-        ctx: &ConcludeContext<'_>,
-        hard_pass: bool,
-    ) -> Result<bool> {
-        let candidate_id = ctx.candidate.checkpoint(&[]).await?.witness.state_root;
-        record_deterministic_verdict(
-            ctx.recorder,
-            &candidate_id,
-            &ctx.calibration.stratum,
-            hard_pass,
-        )?;
-        if !hard_pass {
-            return Ok(false);
-        }
-        let adjudicated = self
-            .adjudicate_candidate(
-                ctx.recorder,
-                ctx.candidate,
-                ctx.task,
-                &ctx.calibration.stratum,
-            )
-            .await?;
-        Ok(adjudicated && self.conformal_or_human_approval(ctx).await?)
-    }
-
-    /// Autonomous commitment (PSP-9 Gate Q): with an *activated* calibration
-    /// epoch for this exact stratum — reached only at the finite sample floor
-    /// through delayed audit labels — a hard-pass candidate above the
-    /// conformal threshold commits without a human prompt, and the certified
-    /// accept is ledgered. Any other state (shadow, insufficient samples,
-    /// stale) backs off to the configured approval policy.
-    async fn conformal_or_human_approval(&self, ctx: &ConcludeContext<'_>) -> Result<bool> {
-        // Score definition v1: hard pass ⇒ V = 0 ⇒ score 1/(1+V) = 1.0.
-        const HARD_PASS_SCORE: f64 = 1.0;
-        let certified = self.config.approval_policy == ApprovalPolicy::Ask
-            && ctx.calibration.state == "active"
-            && ctx
-                .calibration
-                .threshold
-                .is_some_and(|theta| HARD_PASS_SCORE > theta);
-        if certified {
-            ctx.recorder.record_custom(
-                "conformal_certified_accept",
-                serde_json::json!({
-                    "epoch_id": ctx.calibration.epoch_id,
-                    "threshold": ctx.calibration.threshold,
-                    "score": HARD_PASS_SCORE,
-                    "node_id": ctx.node_id,
-                }),
-            )?;
-            return Ok(true);
-        }
-        self.approve_promotion(
-            ctx.recorder,
-            ctx.node_id,
-            ctx.candidate.touched_paths(),
-            ctx.candidate.realized_diff().ok(),
-        )
-        .await
-    }
-
     /// Certify and perform the run's one durable effect. Promotion passes
     /// through the same five-clause kernel as every candidate mutation: a
     /// `WriteArtifact` proposal over the realized mutated paths, evaluated
@@ -1081,7 +1031,7 @@ impl Psp9AgentRuntime {
             &catalog.specs_for(std::slice::from_ref(capability), true),
         )?);
         Ok(perspt_sdk::CalibrationStratum {
-            domain_package: "perspt-coding".into(),
+            domain_package: format!("perspt-{}", self.domain.domain_id().0),
             domain_version: env!("CARGO_PKG_VERSION").into(),
             effect_kind: "candidate_promotion".into(),
             risk_class: "workspace_mutation".into(),
@@ -1147,65 +1097,5 @@ impl Psp9AgentRuntime {
             state: epoch.state,
             threshold: epoch.threshold,
         })
-    }
-
-    async fn approve_promotion(
-        &self,
-        recorder: &Psp9Recorder,
-        node_id: &str,
-        paths: Vec<String>,
-        diff: Option<String>,
-    ) -> Result<bool> {
-        match self.config.approval_policy {
-            ApprovalPolicy::Auto | ApprovalPolicy::SessionApproved => return Ok(true),
-            ApprovalPolicy::Deny => return Ok(false),
-            ApprovalPolicy::Ask => {}
-        }
-        let request_id = uuid::Uuid::new_v4().to_string();
-        recorder.record_custom(
-            "approval_requested",
-            serde_json::json!({"request_id": request_id, "node_id": node_id, "paths": paths}),
-        )?;
-        self.emit(perspt_core::AgentEvent::ApprovalRequest {
-            request_id: request_id.clone(),
-            node_id: node_id.into(),
-            action_type: perspt_core::ActionType::BundleWrite {
-                node_id: node_id.into(),
-                files: paths,
-            },
-            description: "Promote the verified PSP-9 candidate to the workspace".into(),
-            diff,
-        });
-        let mut receiver_slot = self.action_receiver.lock().await;
-        let Some(receiver) = receiver_slot.as_mut() else {
-            recorder.record_custom(
-                "approval_unavailable",
-                serde_json::json!({"request_id": request_id}),
-            )?;
-            return Ok(false);
-        };
-        while let Some(action) = receiver.recv().await {
-            let approved = match action {
-                perspt_core::AgentAction::Approve { request_id: id }
-                | perspt_core::AgentAction::ApproveWithEdit { request_id: id, .. }
-                    if id == request_id =>
-                {
-                    Some(true)
-                }
-                perspt_core::AgentAction::Reject { request_id: id, .. } if id == request_id => {
-                    Some(false)
-                }
-                perspt_core::AgentAction::Abort => Some(false),
-                _ => None,
-            };
-            if let Some(approved) = approved {
-                recorder.record_custom(
-                    "approval_resolved",
-                    serde_json::json!({"request_id": request_id, "approved": approved}),
-                )?;
-                return Ok(approved);
-            }
-        }
-        Ok(false)
     }
 }

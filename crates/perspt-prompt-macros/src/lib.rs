@@ -21,7 +21,7 @@ mod frontmatter;
 mod types;
 mod validate;
 
-pub use frontmatter::{parse_section_file, FrontMatter, ParsedVar};
+pub use frontmatter::{FrontMatter, ParsedVar, parse_section_file};
 pub use types::VarType;
 pub use validate::validate_section_body;
 

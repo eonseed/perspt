@@ -7,8 +7,10 @@ Perspt is a Rust workspace of fourteen crates plus a dev-only ``xtask``
 automation crate. Eight crates make up the running program, four crates form
 the reusable platform layer (SDK, prompt codegen, and two domain packages),
 one crate is the optional feature-gated benchmark harness, and one root crate
-ties them together. Version 0.6.6 implements the PSP-9 governed candidate
-runtime and the PSP-10 typed prompt, search, and integration layers.
+ties them together. Version 0.6.7 ("Omni") runs on Rust 1.100 (Edition 2024)
+with the PSP-9 governed candidate runtime, the PSP-10 typed prompt, search,
+and integration layers, the ``perspt`` ``AgentBuilder`` facade, and the
+executable ``ResearchDomain`` citation verifier.
 
 Workspace Layout
 ----------------

@@ -719,6 +719,9 @@ pub(crate) struct CandidateSeed {
     /// exports only its own work. A node's own checkpoint restores as
     /// promotable (false).
     pub(crate) inherited: bool,
+    /// When true, run at least one model turn before allowing a baseline
+    /// short-circuit (used for human `RequestCorrection` refinements).
+    pub(crate) require_model_turn: bool,
 }
 
 struct DurableCandidateState {
@@ -829,6 +832,7 @@ pub(crate) fn load_candidate_checkpoint(
     );
     let seed = CandidateSeed {
         inherited: false,
+        require_model_turn: false,
         expected_state_root: state_root,
         canonical_scope,
         files: load_seed_files(recorder, file_handles)?,
@@ -864,6 +868,7 @@ pub(crate) async fn seed_from_attempt(
     )?;
     Ok(Some(CandidateSeed {
         inherited: false,
+        require_model_turn: false,
         expected_state_root: checkpoint.witness.state_root,
         canonical_scope: checkpoint.witness.canonical_scope.clone(),
         files,
@@ -938,13 +943,13 @@ pub(crate) fn resumed_running_graph(
     let mut recovered = None;
     for row in recorder.store.get_psp9_events(&recorder.session_id)? {
         let event: LedgerEvent = serde_json::from_str(&row.event_json)?;
-        if let LedgerEvent::Custom { kind, payload } = event {
-            if kind == "graph_revision" {
-                let graph: WorkGraphRevision = serde_json::from_value(payload)?;
-                if graph.revision_id == revision_id {
-                    recovered = Some(graph);
-                    break;
-                }
+        if let LedgerEvent::Custom { kind, payload } = event
+            && kind == "graph_revision"
+        {
+            let graph: WorkGraphRevision = serde_json::from_value(payload)?;
+            if graph.revision_id == revision_id {
+                recovered = Some(graph);
+                break;
             }
         }
     }
@@ -1093,6 +1098,7 @@ pub(crate) async fn run_seeded(
                 )
                 .await
         }
+        Some(seed) if seed.require_model_turn => tool_loop.run_requiring_turn(goal).await,
         _ => tool_loop.run(goal).await,
     }
 }

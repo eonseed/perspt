@@ -18,8 +18,18 @@ default = []
 bundled = ["perspt-store/bundled", "perspt-agent/bundled"]
 
 [dependencies]
+anyhow = { workspace = true }
+perspt-sdk = { workspace = true }
+perspt-coding = { workspace = true }
+perspt-research = { workspace = true }
 perspt-core = { workspace = true }
 perspt-agent = { workspace = true }
 perspt-store = { workspace = true }
 perspt-policy = { workspace = true }
 perspt-sandbox = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }

@@ -176,8 +176,25 @@ async fn refine_rung_continues_from_the_best_accepted_state() {
 
     // The seeded attempt's baseline is strictly better than the original
     // baseline: measured continuity, not a fresh overlay.
-    let baselines: Vec<(u64, f64)> = rows
+    let baselines = measured_baselines(&rows);
+    let gen0_baseline = baselines
         .iter()
+        .find(|(generation, _)| *generation == 0)
+        .unwrap()
+        .1;
+    let gen1_baseline = baselines
+        .iter()
+        .find(|(generation, _)| *generation == 1)
+        .unwrap()
+        .1;
+    assert!(
+        gen1_baseline < gen0_baseline,
+        "seeded baseline {gen1_baseline} must improve on the original {gen0_baseline}"
+    );
+}
+
+fn measured_baselines(rows: &[perspt_store::Psp9LedgerRow]) -> Vec<(u64, f64)> {
+    rows.iter()
         .filter_map(|row| {
             let value: serde_json::Value = serde_json::from_str(&row.event_json).ok()?;
             let payload = value.get("payload")?;
@@ -191,13 +208,7 @@ async fn refine_rung_continues_from_the_best_accepted_state() {
                 payload.get("energy")?.as_f64()?,
             ))
         })
-        .collect();
-    let gen0_baseline = baselines.iter().find(|(gen, _)| *gen == 0).unwrap().1;
-    let gen1_baseline = baselines.iter().find(|(gen, _)| *gen == 1).unwrap().1;
-    assert!(
-        gen1_baseline < gen0_baseline,
-        "seeded baseline {gen1_baseline} must improve on the original {gen0_baseline}"
-    );
+        .collect()
 }
 
 #[tokio::test]
@@ -232,9 +243,10 @@ async fn transport_containment_preserves_authority_for_resume() {
             .any(|row| row.event_json.contains("authority_epoch_revoked")),
         "an infrastructure outage must not revoke the session's authority"
     );
-    assert!(rows
-        .iter()
-        .any(|row| row.event_json.contains("containment_preserved_authority")));
+    assert!(
+        rows.iter()
+            .any(|row| row.event_json.contains("containment_preserved_authority"))
+    );
     assert_eq!(
         store.authority_epoch(&summary.session_id).unwrap(),
         0,

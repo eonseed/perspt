@@ -183,15 +183,15 @@ pub fn validate_workspace_bound(command: &str, workspace_root: &std::path::Path)
             }
             // Second: filesystem-level check for paths that do exist.
             let resolved = workspace_root.join(candidate);
-            if let Ok(canonical) = resolved.canonicalize() {
-                if !canonical.starts_with(workspace_root) {
-                    anyhow::bail!(
-                        "command escapes workspace via '..': {} resolves to {} (workspace: {})",
-                        part,
-                        canonical.display(),
-                        workspace_root.display()
-                    );
-                }
+            if let Ok(canonical) = resolved.canonicalize()
+                && !canonical.starts_with(workspace_root)
+            {
+                anyhow::bail!(
+                    "command escapes workspace via '..': {} resolves to {} (workspace: {})",
+                    part,
+                    canonical.display(),
+                    workspace_root.display()
+                );
             }
         }
     }
@@ -324,10 +324,12 @@ mod tests {
 
         let result = validate_workspace_bound(command, &ws);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("outside workspace"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("outside workspace")
+        );
     }
 
     #[test]

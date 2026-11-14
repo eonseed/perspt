@@ -2,7 +2,7 @@
 //! the PSP-9 ledger (latest graph revision and measured-energy trajectory).
 
 use super::normalize_status;
-use super::psp9::{class_label, state_label, truncate_chars, LedgerProjection};
+use super::psp9::{LedgerProjection, class_label, state_label, truncate_chars};
 
 /// One node of the latest graph revision.
 pub struct NodeSummaryRow {

@@ -12,8 +12,8 @@
 use std::collections::BTreeMap;
 
 use perspt_sdk::prompt::{
-    assemble_resident, ContextBudget, ContextPage, DependencyEnv, ResidentOutcome, StateDependency,
-    TokenAccountantRef,
+    ContextBudget, ContextPage, DependencyEnv, ResidentOutcome, StateDependency,
+    TokenAccountantRef, assemble_resident,
 };
 use perspt_sdk::{Conversation, Message};
 

@@ -6,9 +6,9 @@
 //! path with reparse-point checks and write-through replacement, but does not
 //! claim the same descriptor-relative race guarantee (Gate L).
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 #[cfg(not(windows))]
-use rustix::fs::{fsync, mkdirat, openat, renameat, unlinkat, AtFlags, Mode, OFlags};
+use rustix::fs::{AtFlags, Mode, OFlags, fsync, mkdirat, openat, renameat, unlinkat};
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(not(windows))]
@@ -84,7 +84,7 @@ impl WorkspaceRoot {
                 match mkdirat(&current, part.as_str(), Mode::from_raw_mode(0o777)) {
                     Ok(()) | Err(rustix::io::Errno::EXIST) => {}
                     Err(error) => {
-                        return Err(error).with_context(|| format!("creating directory {part}"))
+                        return Err(error).with_context(|| format!("creating directory {part}"));
                     }
                 }
             }
@@ -278,7 +278,7 @@ impl WorkspaceRoot {
                 }
                 Err(error) => {
                     return Err(error)
-                        .with_context(|| format!("descending into {}", parent.display()))
+                        .with_context(|| format!("descending into {}", parent.display()));
                 }
             }
         }
@@ -321,7 +321,7 @@ impl TargetDir {
             }
             Err(error) if error.kind() == ErrorKind::NotFound => false,
             Err(error) => {
-                return Err(error).with_context(|| format!("opening {}", target.display()))
+                return Err(error).with_context(|| format!("opening {}", target.display()));
             }
         };
         let staged = self
@@ -350,7 +350,7 @@ impl TargetDir {
             Ok(metadata) => ensure_plain(&target, &metadata)?,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
             Err(error) => {
-                return Err(error).with_context(|| format!("opening {}", target.display()))
+                return Err(error).with_context(|| format!("opening {}", target.display()));
             }
         }
         std::fs::remove_file(&target).with_context(|| format!("removing {}", target.display()))
@@ -386,7 +386,7 @@ fn io_not_found(error: &anyhow::Error) -> bool {
 #[cfg(windows)]
 fn replace_file(staged: &Path, target: &Path, existed: bool) -> std::io::Result<()> {
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, ReplaceFileW, MOVEFILE_WRITE_THROUGH, REPLACEFILE_WRITE_THROUGH,
+        MOVEFILE_WRITE_THROUGH, MoveFileExW, REPLACEFILE_WRITE_THROUGH, ReplaceFileW,
     };
 
     let staged = staged

@@ -25,18 +25,18 @@ mod strategy;
 use anyhow::{Context, Result};
 use perspt_sdk::search::{BranchCandidate, ReservationTicket};
 use perspt_sdk::{
-    evaluate_gate_with_floor, AcceptedTrajectory, BranchMeasurement, GateDecision, ModelId,
-    ResidualClass, ResidualEvent, SearchLimits, WitnessRef,
+    AcceptedTrajectory, BranchMeasurement, GateDecision, ModelId, ResidualClass, ResidualEvent,
+    SearchLimits, WitnessRef, evaluate_gate_with_floor,
 };
 
-use super::node::{seed_from_attempt, CandidateSeed};
+use super::node::{CandidateSeed, seed_from_attempt};
 use super::{NodeAttempt, Psp9AgentRuntime, Psp9Recorder};
 use crate::candidate::CodingCandidateMeasurer;
 use crate::toolloop::{LoopEvent, LoopRecorder, Measured};
-use branch::{consumed_usage, measure_fork_cost, BranchRecorder};
+use branch::{BranchRecorder, consumed_usage, measure_fork_cost};
 use nogood::{NoGoodComponents, NoGoodStore, NoGoodSupport};
 pub(crate) use seed::SearchSeed;
-use strategy::{next_strategy, BranchStrategy, BranchSummary};
+use strategy::{BranchStrategy, BranchSummary, next_strategy};
 
 /// Runtime search settings, resolved from `[exploration]` at construction.
 #[derive(Debug, Clone)]
@@ -1109,14 +1109,14 @@ fn branch_goal(goal: &str, strategy: BranchStrategy, previous: Option<&PreviousB
     text.push_str(strategy.id());
     text.push_str("] ");
     text.push_str(strategy.goal_fragment());
-    if let Some(previous) = previous {
-        if !previous.residual_summaries.is_empty() {
-            text.push_str("\nRemaining diagnostics from the previous attempt:\n");
-            for summary in &previous.residual_summaries {
-                text.push_str("- ");
-                text.push_str(summary);
-                text.push('\n');
-            }
+    if let Some(previous) = previous
+        && !previous.residual_summaries.is_empty()
+    {
+        text.push_str("\nRemaining diagnostics from the previous attempt:\n");
+        for summary in &previous.residual_summaries {
+            text.push_str("- ");
+            text.push_str(summary);
+            text.push('\n');
         }
     }
     text
@@ -1234,10 +1234,10 @@ fn no_good_support(measured: &Measured, state_root: &str) -> Option<NoGoodSuppor
             // Environmental / budget / model-plane classes: no support.
             _ => None,
         };
-        if let Some((rank, support)) = ranked {
-            if best.as_ref().is_none_or(|(current, _)| rank < *current) {
-                best = Some((rank, support));
-            }
+        if let Some((rank, support)) = ranked
+            && best.as_ref().is_none_or(|(current, _)| rank < *current)
+        {
+            best = Some((rank, support));
         }
     }
     best.map(|(_, support)| support)

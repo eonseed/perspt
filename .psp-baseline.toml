@@ -13,11 +13,6 @@ rule = "PSP-2"
 count = 1
 
 [[allow]]
-file = "crates/perspt-cli/src/commands/agent.rs"
-rule = "PSP-2"
-count = 1
-
-[[allow]]
 file = "crates/perspt-cli/src/commands/resume.rs"
 rule = "PSP-2"
 count = 1

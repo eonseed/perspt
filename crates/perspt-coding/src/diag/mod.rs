@@ -15,5 +15,5 @@ pub mod tsc;
 pub mod ty;
 pub mod types;
 
-pub use cluster::{cluster, DiagnosticCluster, CLUSTER_PROFILE_V1};
-pub use types::{cluster_residual, StructuredDiagnostic};
+pub use cluster::{CLUSTER_PROFILE_V1, DiagnosticCluster, cluster};
+pub use types::{StructuredDiagnostic, cluster_residual};

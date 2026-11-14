@@ -7,7 +7,7 @@ mod repair;
 mod schema;
 mod store;
 
-pub use repair::{repair_database, RepairReport};
+pub use repair::{RepairReport, repair_database};
 pub use schema::init_schema;
 pub use store::{
     Psp9CalibrationEpochRow, Psp9ExternalEffectRow, Psp9LedgerRow, Psp9VerdictRow, SessionRecord,

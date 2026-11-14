@@ -53,12 +53,12 @@ impl SectionVariants {
     /// override never resolves; an unknown family gets the base, never an
     /// error.
     pub fn resolve(&self, route: &PromptRoute) -> (&SectionTemplate, OverrideOrigin) {
-        if let Some(exact) = route.exact_model.as_deref() {
-            if let Some(hit) = self.active_override(
+        if let Some(exact) = route.exact_model.as_deref()
+            && let Some(hit) = self.active_override(
                 |origin| matches!(origin, OverrideOrigin::ExactModel(model) if model == exact),
-            ) {
-                return (&hit.template, hit.origin.clone());
-            }
+            )
+        {
+            return (&hit.template, hit.origin.clone());
         }
         let family_label = self.family_label(&route.family);
         if let Some(hit) = self.active_override(

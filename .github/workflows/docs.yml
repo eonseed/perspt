@@ -90,7 +90,7 @@ jobs:
           (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.100.0
 
       - name: Install pinned DuckDB
         if: >-
@@ -109,10 +109,10 @@ jobs:
             ~/.cargo/git
             target/debug/deps
             target/debug/build
-          key: ${{ runner.os }}-rust-1.97.1-docs-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          key: ${{ runner.os }}-rust-1.100.0-docs-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
-            ${{ runner.os }}-rust-1.97.1-docs-
-            ${{ runner.os }}-rust-1.97.1-
+            ${{ runner.os }}-rust-1.100.0-docs-
+            ${{ runner.os }}-rust-1.100.0-
 
       - name: Build Rust API documentation
         if: >-

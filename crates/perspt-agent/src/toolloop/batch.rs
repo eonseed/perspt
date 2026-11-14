@@ -105,9 +105,9 @@ pub(crate) fn plan_batch(calls: &[ProviderToolCall], catalog: &StaticCatalog) ->
 use anyhow::{Context as _, Result};
 
 use super::{
-    bounded_model_output, candidate_mutating_effect, emit, promote_matching_capability,
-    proposal_from, proposal_scope, uncertified_reason, EventLog, LoopContext, LoopEvent, ToolLoop,
-    TurnBudget,
+    EventLog, LoopContext, LoopEvent, ToolLoop, TurnBudget, bounded_model_output,
+    candidate_mutating_effect, emit, promote_matching_capability, proposal_from, proposal_scope,
+    uncertified_reason,
 };
 use crate::realize::ProjectionMismatch;
 use perspt_sdk::{CandidateTransition, ToolEntry, TurnOutput};
@@ -408,13 +408,13 @@ impl ToolLoop<'_> {
         for (((call, _), bracket), outcome) in admitted.iter().zip(brackets).zip(outcomes) {
             match outcome {
                 Ok(outcome) => {
-                    if outcome.completed {
-                        if let (Some(recorder), Some(key)) = (self.recorder, bracket.as_deref()) {
-                            recorder.external_result(
-                                key,
-                                &serde_json::json!({"mutated": outcome.mutated}),
-                            )?;
-                        }
+                    if outcome.completed
+                        && let (Some(recorder), Some(key)) = (self.recorder, bracket.as_deref())
+                    {
+                        recorder.external_result(
+                            key,
+                            &serde_json::json!({"mutated": outcome.mutated}),
+                        )?;
                     }
                     let output = bounded_model_output(self.recorder, outcome.output)?;
                     emit(
@@ -665,9 +665,10 @@ mod tests {
             ],
             &catalog(),
         );
-        assert!(plan
-            .iter()
-            .all(|p| matches!(p.class, PlannedClass::ConcurrentRead)));
+        assert!(
+            plan.iter()
+                .all(|p| matches!(p.class, PlannedClass::ConcurrentRead))
+        );
     }
 
     #[test]

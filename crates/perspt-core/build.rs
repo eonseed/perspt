@@ -7,7 +7,7 @@
 //! `perspt prompts manifest`, is validated here; a normal build never
 //! edits the source tree.
 
-use perspt_prompt_macros::{compile_prompt_dir, validate_manifest, StageDecl};
+use perspt_prompt_macros::{StageDecl, compile_prompt_dir, validate_manifest};
 
 fn main() {
     println!("cargo:rerun-if-changed=prompts");

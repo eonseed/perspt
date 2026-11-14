@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{check_non_negative_finite, Result};
+use crate::error::{Result, check_non_negative_finite};
 
 /// The five SRBN energy components. These are *derived rollups* of the single
 /// quadratic residual energy, grouped for telemetry; they do not carry
@@ -441,24 +441,28 @@ mod tests {
 
     #[test]
     fn rejects_nan_and_inf_score() {
-        assert!(ResidualEvent::new(
-            "n1",
-            0,
-            ResidualClass::Type,
-            ResidualSeverity::Error,
-            f64::NAN,
-            sensor()
-        )
-        .is_err());
-        assert!(ResidualEvent::new(
-            "n1",
-            0,
-            ResidualClass::Type,
-            ResidualSeverity::Error,
-            f64::INFINITY,
-            sensor()
-        )
-        .is_err());
+        assert!(
+            ResidualEvent::new(
+                "n1",
+                0,
+                ResidualClass::Type,
+                ResidualSeverity::Error,
+                f64::NAN,
+                sensor()
+            )
+            .is_err()
+        );
+        assert!(
+            ResidualEvent::new(
+                "n1",
+                0,
+                ResidualClass::Type,
+                ResidualSeverity::Error,
+                f64::INFINITY,
+                sensor()
+            )
+            .is_err()
+        );
     }
 
     #[test]

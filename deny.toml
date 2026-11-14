@@ -5,7 +5,7 @@ all-features = true
 yanked = "deny"
 unmaintained = "workspace"
 ignore = [
-    { crate = "spin@0.9.8", reason = "All heapless-compatible spin 0.9 releases are yanked; transitive through starlark 0.14.2 and reviewed through 2026-11-17" },
+    { crate = "spin@0.9.8", reason = "All heapless-compatible spin 0.9 releases are yanked; transitive through starlark 0.14.2 and reviewed through 2027-02-15" },
 ]
 
 [licenses]

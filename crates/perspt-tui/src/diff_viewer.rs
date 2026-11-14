@@ -4,11 +4,11 @@
 
 use crate::theme::Theme;
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Tabs},
-    Frame,
 };
 use similar::{ChangeTag, TextDiff};
 
@@ -323,16 +323,20 @@ impl DiffViewer {
         self.scroll = self.scroll.saturating_add(lines);
     }
 
+    fn scroll_to_selected_hunk(&mut self) {
+        self.scroll = self
+            .hunks
+            .iter()
+            .take(self.selected_hunk)
+            .map(|hunk| hunk.lines.len())
+            .sum();
+    }
+
     /// Next hunk
     pub fn next_hunk(&mut self) {
         if self.selected_hunk < self.hunks.len().saturating_sub(1) {
             self.selected_hunk += 1;
-            // Scroll to show the hunk
-            let mut line_offset = 0;
-            for i in 0..self.selected_hunk {
-                line_offset += self.hunks[i].lines.len();
-            }
-            self.scroll = line_offset;
+            self.scroll_to_selected_hunk();
         }
     }
 
@@ -340,11 +344,7 @@ impl DiffViewer {
     pub fn prev_hunk(&mut self) {
         if self.selected_hunk > 0 {
             self.selected_hunk -= 1;
-            let mut line_offset = 0;
-            for i in 0..self.selected_hunk {
-                line_offset += self.hunks[i].lines.len();
-            }
-            self.scroll = line_offset;
+            self.scroll_to_selected_hunk();
         }
     }
 

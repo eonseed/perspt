@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use perspt_agent::{Psp9AgentRuntime, Psp9RunConfig};
-use perspt_sdk::ledger::{tool_loop_body, Ledger, LedgerEvent, ToolLoopBody};
+use perspt_sdk::ledger::{Ledger, LedgerEvent, ToolLoopBody, tool_loop_body};
 use perspt_sdk::{
     ApprovalPolicy, Conversation, ModelFamily, ModelId, ModelTransport, NodeTerminalOutcome,
     ProviderCapabilities, ProviderToolCall, ToolChoicePolicy, ToolSpec, TransportFuture,
@@ -129,12 +129,11 @@ fn ledger_from(rows: &[perspt_store::Psp9LedgerRow], keep_search: bool) -> Ledge
         let Ok(event) = serde_json::from_str::<LedgerEvent>(&row.event_json) else {
             continue;
         };
-        if !keep_search {
-            if let Some(name) = event_name(row) {
-                if SEARCH_ALPHABET.contains(&name.as_str()) {
-                    continue;
-                }
-            }
+        if !keep_search
+            && let Some(name) = event_name(row)
+            && SEARCH_ALPHABET.contains(&name.as_str())
+        {
+            continue;
         }
         ledger.append(event).unwrap();
     }

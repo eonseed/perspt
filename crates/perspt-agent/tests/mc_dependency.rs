@@ -147,9 +147,11 @@ async fn governed_dependency_mutation_promotes_manifest_and_lockfile() {
     let summary = runtime.run("add itertools".into()).await.unwrap();
     assert!(summary.promoted_paths.contains(&"Cargo.toml".to_string()));
     assert!(summary.promoted_paths.contains(&"Cargo.lock".to_string()));
-    assert!(std::fs::read_to_string(project.path().join("Cargo.toml"))
-        .unwrap()
-        .contains("itertools"));
+    assert!(
+        std::fs::read_to_string(project.path().join("Cargo.toml"))
+            .unwrap()
+            .contains("itertools")
+    );
 
     let store = perspt_store::SessionStore::open(&database).unwrap();
     let effects = store.pending_external_effects(&summary.session_id).unwrap();

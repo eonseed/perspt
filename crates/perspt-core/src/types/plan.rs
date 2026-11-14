@@ -103,13 +103,14 @@ impl TaskPlan {
         // task B produces (context_files ∩ output_files), A must depend on B.
         for task in &self.tasks {
             for ctx_file in &task.context_files {
-                if let Some(&owner) = file_owners.get(ctx_file.as_str()) {
-                    if owner != task.id && !task.dependencies.iter().any(|d| d == owner) {
-                        return Err(format!(
-                            "Task '{}' reads '{}' produced by '{}' but does not declare it as a dependency",
-                            task.id, ctx_file, owner
-                        ));
-                    }
+                if let Some(&owner) = file_owners.get(ctx_file.as_str())
+                    && owner != task.id
+                    && !task.dependencies.iter().any(|d| d == owner)
+                {
+                    return Err(format!(
+                        "Task '{}' reads '{}' produced by '{}' but does not declare it as a dependency",
+                        task.id, ctx_file, owner
+                    ));
                 }
             }
         }
@@ -287,10 +288,10 @@ fn glob_match_component(pattern: &str, component: &str) -> bool {
             return false;
         }
     }
-    if let Some(last) = parts.last() {
-        if !last.is_empty() {
-            return component.ends_with(last);
-        }
+    if let Some(last) = parts.last()
+        && !last.is_empty()
+    {
+        return component.ends_with(last);
     }
     true
 }

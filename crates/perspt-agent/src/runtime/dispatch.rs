@@ -267,7 +267,6 @@ impl Psp9AgentRuntime {
     /// Sequential completion arm: recovery (if escalated), conclusion,
     /// promotion, and the terminal graph fold under a `GraphWrite` lease.
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     async fn fold_completion(
         &self,
         recorder: &Psp9Recorder,

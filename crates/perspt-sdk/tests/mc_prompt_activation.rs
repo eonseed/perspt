@@ -6,8 +6,8 @@
 //! falsifier below fails one condition independently.
 
 use perspt_sdk::prompt::{
-    ActivationBounds, ActivationState, PromptChangeRecord, PromptSectionId, PromptSectionVersion,
-    SectionOverride, SectionTemplate, SectionVariants, ACTIVATION_BOOTSTRAP_RESAMPLES,
+    ACTIVATION_BOOTSTRAP_RESAMPLES, ActivationBounds, ActivationState, PromptChangeRecord,
+    PromptSectionId, PromptSectionVersion, SectionOverride, SectionTemplate, SectionVariants,
 };
 use perspt_sdk::prompt::{OverrideOrigin, PromptMessageRole, PromptRoute, SectionSchema};
 
@@ -79,13 +79,17 @@ fn an_experimental_override_never_resolves() {
 fn every_activation_condition_is_independently_falsifiable() {
     let bounds = ActivationBounds::default();
     let live_hash = "sha256:override";
-    assert!(passing_record(live_hash)
-        .permits_activation(live_hash, &bounds)
-        .is_ok());
+    assert!(
+        passing_record(live_hash)
+            .permits_activation(live_hash, &bounds)
+            .is_ok()
+    );
     // Digest binding: a record for other content cannot activate this one.
-    assert!(passing_record("sha256:other")
-        .permits_activation(live_hash, &bounds)
-        .is_err());
+    assert!(
+        passing_record("sha256:other")
+            .permits_activation(live_hash, &bounds)
+            .is_err()
+    );
     // Sample floor.
     let mut r = passing_record(live_hash);
     r.paired_tasks = 29;
@@ -117,24 +121,30 @@ fn every_activation_condition_is_independently_falsifiable() {
 /// Configuration may only tighten the bounds; loosening fails at startup.
 #[test]
 fn configured_bounds_may_only_tighten() {
-    assert!(ActivationBounds {
-        min_tasks: 29,
-        noninferiority_margin: 0.05
-    }
-    .validate()
-    .is_err());
-    assert!(ActivationBounds {
-        min_tasks: 30,
-        noninferiority_margin: 0.051
-    }
-    .validate()
-    .is_err());
-    assert!(ActivationBounds {
-        min_tasks: 100,
-        noninferiority_margin: 0.01
-    }
-    .validate()
-    .is_ok());
+    assert!(
+        ActivationBounds {
+            min_tasks: 29,
+            noninferiority_margin: 0.05
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        ActivationBounds {
+            min_tasks: 30,
+            noninferiority_margin: 0.051
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        ActivationBounds {
+            min_tasks: 100,
+            noninferiority_margin: 0.01
+        }
+        .validate()
+        .is_ok()
+    );
 }
 
 /// The record digest is content-addressed and stable.
